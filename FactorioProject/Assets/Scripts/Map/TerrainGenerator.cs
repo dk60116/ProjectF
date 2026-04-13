@@ -208,6 +208,12 @@ public class TerrainGenerator : MonoBehaviour
     private Vector2Int currentCenterChunk;
     private BlockStateStore resourceStateStore;
 
+    private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
+    private readonly List<Vector2Int> starterTreeCacheCandidates = new List<Vector2Int>();
+    private readonly Dictionary<Vector2Int, Resource> starterTreeCacheLookup = new Dictionary<Vector2Int, Resource>();
+    private int starterTreeCacheSeed = int.MinValue;
+    private bool starterTreeCacheValid;
+
     private void OnValidate()
     {
         MigrateLegacyResourcesIfNeeded();
@@ -217,6 +223,7 @@ public class TerrainGenerator : MonoBehaviour
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        InvalidateStarterTreeCache();
     }
 
     private void Start()
@@ -249,6 +256,7 @@ public class TerrainGenerator : MonoBehaviour
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         EnsureResourceStateStore();
         InitializeSeedForGeneration();
+        InvalidateStarterTreeCache();
         ClearLoadedChunks();
         resourceStateStore?.ClearStates();
 
@@ -472,6 +480,7 @@ public class TerrainGenerator : MonoBehaviour
         {
             if (centerBlock.Type == Block.BlockType.Ground && centerBlock.TryAddFloorObject(itemId, out targetPortableObject))
             {
+                MarkDroppedPickupGate(targetPortableObject);
                 return true;
             }
         }
@@ -499,13 +508,31 @@ public class TerrainGenerator : MonoBehaviour
 
         for (int i = 0; i < itemCount; i++)
         {
-            if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, i * Mathf.Max(0f, moveInterval), out _))
+            if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, i * Mathf.Max(0f, moveInterval), out PortableObject droppedObject))
             {
                 return false;
             }
+
+            MarkDroppedPickupGate(droppedObject);
         }
 
         return true;
+    }
+
+    public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
+    {
+        if (loadedBlocks.TryGetValue(coordinate, out block))
+        {
+            if (block == null)
+            {
+                loadedBlocks.Remove(coordinate);
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     public bool TryAddDroppedItemNear(Vector3 worldPosition, int itemId, out PortableObject targetPortableObject)
@@ -660,7 +687,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         if (loadedBlocks.TryGetValue(centerCoordinate, out Block centerBlock)
-            && IsValidDropBlock(centerBlock, itemCount))
+            && IsValidDropBlock(centerBlock, itemId, itemCount))
         {
             return centerBlock;
         }
@@ -683,7 +710,7 @@ public class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                if (!IsValidDropBlock(block, itemCount))
+                if (!IsValidDropBlock(block, itemId, itemCount))
                 {
                     continue;
                 }
@@ -705,11 +732,27 @@ public class TerrainGenerator : MonoBehaviour
         return bestBlock;
     }
 
-    private static bool IsValidDropBlock(Block block, int itemCount)
+    private static bool IsValidDropBlock(Block block, int itemId, int itemCount)
     {
         return block != null
                && block.Type == Block.BlockType.Ground
-               && block.CanAddFloorObjects(itemCount);
+               && block.CanAddFloorObjects(itemCount, itemId);
+    }
+
+    private static void MarkDroppedPickupGate(PortableObject droppedObject)
+    {
+        if (droppedObject == null)
+        {
+            return;
+        }
+
+        DroppedItemPickupGate gate = droppedObject.GetComponent<DroppedItemPickupGate>();
+        if (gate == null)
+        {
+            gate = droppedObject.gameObject.AddComponent<DroppedItemPickupGate>();
+        }
+
+        gate.MarkDropped();
     }
 
     private static Vector2Int GetWorldBlockCoordinate(Vector3 worldPosition)
@@ -724,6 +767,7 @@ public class TerrainGenerator : MonoBehaviour
         const int margin = 1;
         int mapLength = chunkLength + (margin * 2);
         bool[,] map = new bool[mapLength, mapLength];
+        bool[,] nextMap = new bool[mapLength, mapLength];
 
         for (int y = 0; y < mapLength; y++)
         {
@@ -740,7 +784,6 @@ public class TerrainGenerator : MonoBehaviour
         {
             changed = false;
             safetyIteration++;
-            bool[,] nextMap = (bool[,])map.Clone();
 
             for (int y = 0; y < mapLength; y++)
             {
@@ -748,6 +791,7 @@ public class TerrainGenerator : MonoBehaviour
                 {
                     if (!map[x, y])
                     {
+                        nextMap[x, y] = false;
                         continue;
                     }
 
@@ -763,17 +807,20 @@ public class TerrainGenerator : MonoBehaviour
                         || HasDisconnectedDiagonal(map, x, y)
                         || (orthogonalCount <= 2 && !HasWaterSquareSupport(map, x, y));
 
-                    if (!shouldRemove)
-                    {
+                     if (!shouldRemove)
+                     {
+                        nextMap[x, y] = true;
                         continue;
-                    }
+                     }
 
                     nextMap[x, y] = false;
                     changed = true;
                 }
             }
 
+            bool[,] swap = map;
             map = nextMap;
+            nextMap = swap;
         }
         while (changed && safetyIteration < 8);
 
@@ -1012,36 +1059,98 @@ public class TerrainGenerator : MonoBehaviour
     {
         prefab = null;
 
-        List<ResourceEntry> starterTrees = GetStarterTreeEntries();
-        if (starterTrees.Count == 0)
+        EnsureStarterTreeCache();
+        return starterTreeCacheLookup.TryGetValue(worldCoordinate, out prefab) && prefab != null;
+    }
+
+    private void InvalidateStarterTreeCache()
+    {
+        starterTreeCacheValid = false;
+    }
+
+    private void EnsureStarterTreeCache()
+    {
+        EnsureSeedInitialized();
+
+        if (starterTreeCacheValid && starterTreeCacheSeed == seed)
         {
-            return false;
+            return;
         }
 
-        List<Vector2Int> candidates = GetStarterTreeCandidateOffsets();
+        starterTreeCacheSeed = seed;
+        starterTreeCacheValid = true;
+        starterTreeCacheEntries.Clear();
+        starterTreeCacheLookup.Clear();
+
+        if (!generateStarterTrees || treeResources == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < treeResources.Count; i++)
+        {
+            if (treeResources[i].prefab != null)
+            {
+                starterTreeCacheEntries.Add(treeResources[i]);
+            }
+        }
+
+        if (starterTreeCacheEntries.Count == 0)
+        {
+            return;
+        }
+
+        BuildStarterTreeCandidateOffsets(starterTreeCacheCandidates);
+
+        if (starterTreeCacheCandidates.Count == 0)
+        {
+            return;
+        }
+
         int selectedCount = Mathf.Clamp(
             Mathf.RoundToInt(Mathf.Lerp(starterTreeMinCount, starterTreeMaxCount, Hash01(seed, 991, 1777))),
-            Mathf.Min(starterTreeMinCount, candidates.Count),
-            Mathf.Min(starterTreeMaxCount, candidates.Count));
+            Mathf.Min(starterTreeMinCount, starterTreeCacheCandidates.Count),
+            Mathf.Min(starterTreeMaxCount, starterTreeCacheCandidates.Count));
 
-        for (int candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
+        for (int candidateIndex = 0; candidateIndex < starterTreeCacheCandidates.Count; candidateIndex++)
         {
-            if (!IsStarterTreeCandidateSelected(candidates, candidateIndex, selectedCount))
+            if (!IsStarterTreeCandidateSelected(starterTreeCacheCandidates, candidateIndex, selectedCount))
             {
                 continue;
             }
 
-            if (worldCoordinate != candidates[candidateIndex])
+            int treeIndex = Mathf.Abs(seed + candidateIndex) % starterTreeCacheEntries.Count;
+            Resource prefab = starterTreeCacheEntries[treeIndex].prefab;
+            if (prefab != null)
             {
-                continue;
+                starterTreeCacheLookup[starterTreeCacheCandidates[candidateIndex]] = prefab;
             }
+        }
+    }
 
-            int treeIndex = Mathf.Abs(seed + candidateIndex) % starterTrees.Count;
-            prefab = starterTrees[treeIndex].prefab;
-            return prefab != null;
+    private void BuildStarterTreeCandidateOffsets(List<Vector2Int> candidates)
+    {
+        if (candidates == null)
+        {
+            return;
         }
 
-        return false;
+        candidates.Clear();
+        int primary = Mathf.Max(startSafeZoneRadius + 1, starterTreeDistanceFromCenter);
+        int secondary = Mathf.Max(2, primary - 1);
+
+        candidates.Add(new Vector2Int(primary, primary));
+        candidates.Add(new Vector2Int(-primary, primary));
+        candidates.Add(new Vector2Int(primary, -primary));
+        candidates.Add(new Vector2Int(-primary, -primary));
+        candidates.Add(new Vector2Int(primary, secondary));
+        candidates.Add(new Vector2Int(-primary, secondary));
+        candidates.Add(new Vector2Int(primary, -secondary));
+        candidates.Add(new Vector2Int(-primary, -secondary));
+        candidates.Add(new Vector2Int(secondary, primary));
+        candidates.Add(new Vector2Int(-secondary, primary));
+        candidates.Add(new Vector2Int(secondary, -primary));
+        candidates.Add(new Vector2Int(-secondary, -primary));
     }
 
     private bool IsInsideStarterPatch(Vector2Int worldCoordinate, Vector2Int center, int patchSize, int salt)

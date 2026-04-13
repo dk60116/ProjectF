@@ -13,12 +13,23 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private float harvestStartDelay = 0.5f;
 
+    [SerializeField, Min(0.1f)]
+    private float autoPickupRadius = 0.5f;
+
+    [SerializeField, Min(0.5f)]
+    private float autoPickupScanRadius = 3f;
+
+    [SerializeField, Min(0f)]
+    private float autoPickupInterval = 0.1f;
+
     private Player player;
     private Joystick joystick;
     private ResourceWrokGauge resourceWorkGauge;
     private Resource currentTargetResource;
     private Block currentFocusedBlock;
     private float stationaryHarvestTimer;
+    private float autoPickupTimer;
+    private TerrainGenerator cachedTerrainGenerator;
     private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
 
     private void Awake()
@@ -86,6 +97,8 @@ public class PlayerController : MonoBehaviour
 
         bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
         ResolveCompletedPick(finishedPickThisFrame);
+
+        UpdateAutoPickup();
     }
 
     private bool UpdateAutoHarvest(bool hasMovement)
@@ -311,5 +324,66 @@ public class PlayerController : MonoBehaviour
 
         Vector3 moveDirection = (right * input.x) + (forward * input.y);
         return moveDirection.sqrMagnitude > 1f ? moveDirection.normalized : moveDirection;
+    }
+
+    private void UpdateAutoPickup()
+    {
+        if (player == null || autoPickupRadius <= 0f)
+        {
+            return;
+        }
+
+        autoPickupTimer -= Time.deltaTime;
+        if (autoPickupTimer > 0f)
+        {
+            return;
+        }
+
+        autoPickupTimer = Mathf.Max(0f, autoPickupInterval);
+
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            return;
+        }
+
+        Vector3 playerPosition = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        Vector2Int center = new Vector2Int(Mathf.RoundToInt(playerPosition.x), Mathf.RoundToInt(playerPosition.z));
+        int radius = Mathf.Max(1, Mathf.CeilToInt(autoPickupScanRadius));
+        float scanRadiusSqr = autoPickupScanRadius * autoPickupScanRadius;
+
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                Vector3 blockCenter = new Vector3(coordinate.x, playerPosition.y, coordinate.y);
+                Vector3 offset = blockCenter - playerPosition;
+                offset.y = 0f;
+                if (offset.sqrMagnitude > scanRadiusSqr)
+                {
+                    continue;
+                }
+
+                if (!cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+                {
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground)
+                {
+                    continue;
+                }
+
+                if (block.TryAutoPickupFloorObjects(player, playerPosition, autoPickupRadius))
+                {
+                    return;
+                }
+            }
+        }
     }
 }
