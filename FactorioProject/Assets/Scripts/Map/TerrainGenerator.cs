@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class TerrainGenerator : MonoBehaviour
 {
@@ -45,7 +48,8 @@ public class TerrainGenerator : MonoBehaviour
     public struct ResourceEntry
     {
         public string name;
-        public Resource prefab;
+        [HideInInspector] public Resource prefab;
+        public ResourceDefinition definition;
         public ResourcePlacementMode placementMode;
         [Range(0f, 1f)] public float spawnChance;
         [Range(1f, 6f)] public float spacingMultiplier;
@@ -58,6 +62,8 @@ public class TerrainGenerator : MonoBehaviour
         public int salt;
         public bool useStarterPatch;
         public Vector2Int starterDirection;
+
+        public Resource Prefab => definition != null ? definition.prefab : prefab;
     }
 
     [SerializeField]
@@ -223,6 +229,7 @@ public class TerrainGenerator : MonoBehaviour
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        SyncResourceEntryDefinitions();
         InvalidateStarterTreeCache();
     }
 
@@ -231,6 +238,7 @@ public class TerrainGenerator : MonoBehaviour
         MigrateLegacyResourcesIfNeeded();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
 
         if (generateOnStart)
@@ -254,6 +262,7 @@ public class TerrainGenerator : MonoBehaviour
         MigrateLegacyResourcesIfNeeded();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
         InitializeSeedForGeneration();
         InvalidateStarterTreeCache();
@@ -891,7 +900,7 @@ public class TerrainGenerator : MonoBehaviour
             if (score > bestScore)
             {
                 bestScore = score;
-                prefab = oreResources[i].prefab;
+                prefab = oreResources[i].Prefab;
             }
         }
 
@@ -910,7 +919,7 @@ public class TerrainGenerator : MonoBehaviour
             if (score > bestScore)
             {
                 bestScore = score;
-                prefab = treeResources[i].prefab;
+                prefab = treeResources[i].Prefab;
             }
         }
 
@@ -920,7 +929,7 @@ public class TerrainGenerator : MonoBehaviour
     private bool TryEvaluateResourceEntry(Vector2Int worldCoordinate, ResourceEntry entry, out float score)
     {
         score = float.MinValue;
-        if (entry.prefab == null || entry.spawnChance <= 0f)
+        if (entry.Prefab == null || entry.spawnChance <= 0f)
         {
             return false;
         }
@@ -967,7 +976,7 @@ public class TerrainGenerator : MonoBehaviour
     {
         for (int i = 0; i < treeResources.Count; i++)
         {
-            if (treeResources[i].prefab == prefab)
+            if (treeResources[i].Prefab == prefab)
             {
                 return true;
             }
@@ -980,7 +989,7 @@ public class TerrainGenerator : MonoBehaviour
     {
         for (int i = 0; i < entries.Count; i++)
         {
-            if (entries[i].prefab == prefab)
+            if (entries[i].Prefab == prefab)
             {
                 entry = entries[i];
                 return true;
@@ -1038,7 +1047,7 @@ public class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < oreResources.Count; i++)
         {
             ResourceEntry entry = oreResources[i];
-            if (!entry.useStarterPatch || entry.prefab == null)
+            if (!entry.useStarterPatch || entry.Prefab == null)
             {
                 continue;
             }
@@ -1047,7 +1056,7 @@ public class TerrainGenerator : MonoBehaviour
             Vector2Int starterCenter = GetStarterPatchCenter(entry, distance);
             if (IsInsideStarterPatch(worldCoordinate, starterCenter, patchSize, entry.salt + 4000))
             {
-                prefab = entry.prefab;
+                prefab = entry.Prefab;
                 return true;
             }
         }
@@ -1089,7 +1098,7 @@ public class TerrainGenerator : MonoBehaviour
 
         for (int i = 0; i < treeResources.Count; i++)
         {
-            if (treeResources[i].prefab != null)
+            if (treeResources[i].Prefab != null)
             {
                 starterTreeCacheEntries.Add(treeResources[i]);
             }
@@ -1120,7 +1129,7 @@ public class TerrainGenerator : MonoBehaviour
             }
 
             int treeIndex = Mathf.Abs(seed + candidateIndex) % starterTreeCacheEntries.Count;
-            Resource prefab = starterTreeCacheEntries[treeIndex].prefab;
+            Resource prefab = starterTreeCacheEntries[treeIndex].Prefab;
             if (prefab != null)
             {
                 starterTreeCacheLookup[starterTreeCacheCandidates[candidateIndex]] = prefab;
@@ -1364,7 +1373,7 @@ public class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < oreResources.Count; i++)
         {
             ResourceEntry entry = oreResources[i];
-            if (!entry.useStarterPatch || entry.prefab == null)
+            if (!entry.useStarterPatch || entry.Prefab == null)
             {
                 continue;
             }
@@ -1384,7 +1393,7 @@ public class TerrainGenerator : MonoBehaviour
 
         for (int i = 0; i < treeResources.Count; i++)
         {
-            if (treeResources[i].prefab != null)
+            if (treeResources[i].Prefab != null)
             {
                 entries.Add(treeResources[i]);
             }
@@ -1589,8 +1598,67 @@ public class TerrainGenerator : MonoBehaviour
 
     private static ResourceRule ToResourceRule(ResourceEntry entry)
     {
-        return new ResourceRule(entry.prefab, entry.spawnChance, entry.patchOffset, entry.detailOffset, entry.salt);
+        return new ResourceRule(entry.Prefab, entry.spawnChance, entry.patchOffset, entry.detailOffset, entry.salt);
     }
+
+    [ContextMenu("Sync Resource Definitions")]
+    public void SyncResourceEntryDefinitions()
+    {
+#if UNITY_EDITOR
+        SyncResourceEntryDefinitions(oreResources);
+        SyncResourceEntryDefinitions(treeResources);
+#endif
+    }
+
+#if UNITY_EDITOR
+    private static void SyncResourceEntryDefinitions(List<ResourceEntry> entries)
+    {
+        if (entries == null || entries.Count == 0)
+        {
+            return;
+        }
+
+        string[] definitionGuids = AssetDatabase.FindAssets("t:ResourceDefinition", new[] { "Assets/Data/Resources" });
+        Dictionary<string, ResourceDefinition> definitionsByPrefabPath = new Dictionary<string, ResourceDefinition>();
+
+        for (int i = 0; i < definitionGuids.Length; i++)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(definitionGuids[i]);
+            ResourceDefinition definition = AssetDatabase.LoadAssetAtPath<ResourceDefinition>(path);
+            if (definition == null || definition.prefab == null)
+            {
+                continue;
+            }
+
+            string prefabPath = AssetDatabase.GetAssetPath(definition.prefab);
+            if (!string.IsNullOrWhiteSpace(prefabPath))
+            {
+                definitionsByPrefabPath[prefabPath] = definition;
+            }
+        }
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            ResourceEntry entry = entries[i];
+            if (entry.definition == null && entry.prefab != null)
+            {
+                string prefabPath = AssetDatabase.GetAssetPath(entry.prefab);
+                if (!string.IsNullOrWhiteSpace(prefabPath)
+                    && definitionsByPrefabPath.TryGetValue(prefabPath, out ResourceDefinition definition))
+                {
+                    entry.definition = definition;
+                }
+            }
+
+            if (entry.definition != null && entry.prefab == null)
+            {
+                entry.prefab = entry.definition.prefab;
+            }
+
+            entries[i] = entry;
+        }
+    }
+#endif
 
     private static Vector2Int GetStarterPatchCenter(ResourceEntry entry, int distance)
     {

@@ -4859,8 +4859,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 100730802}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 35
     getCount: 1
@@ -13291,8 +13293,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 855912875}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 100
     getCount: 1
@@ -15650,8 +15654,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1996279092}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 137
     getCount: 1
@@ -26326,8 +26332,10 @@ MonoBehaviour:
   id: 0
   objectName: Tree
   objId: 0
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 33571817}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 1
     getCount: 4
@@ -32229,8 +32237,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1663576186}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 114
     getCount: 1
@@ -51745,8 +51755,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 710116793}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 160
     getCount: 1
@@ -53707,8 +53719,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1041781296}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 30
     getCount: 1
@@ -57161,8 +57175,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1134039148}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 180
     getCount: 1
@@ -60251,8 +60267,10 @@ MonoBehaviour:
   id: 0
   objectName: Tree
   objId: 0
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1693213109}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 1
     getCount: 4
@@ -66899,41 +66917,56 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   items:
-  - name: Tree_NoneLeaf
-    id: 0
-    prefab: {fileID: 8031207384658059468, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
-    portableMesh: {fileID: 4300000, guid: f931e2d250afe8847a0230e25513af2f, type: 2}
-    portableMat: {fileID: 2100000, guid: 2cbb04f1f01402c42bf511527a7bd2ed, type: 2}
-    icon: {fileID: 21300000, guid: f4af5822352a54540ac028e707e6979a, type: 3}
-    size: 1
-  - name: Stone
-    id: 1
-    prefab: {fileID: 3118427074153073671, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
-    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
-    portableMat: {fileID: 2100000, guid: 885ae9d64f67da944a45c9ebcb8e21aa, type: 2}
-    icon: {fileID: 21300000, guid: 7a2374bfb3a01524ebd53c2d4d63d095, type: 3}
-    size: 1
-  - name: IronOre
-    id: 2
-    prefab: {fileID: 8031207384658059468, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
-    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
-    portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
-    icon: {fileID: 21300000, guid: d830ad6735f87f54499c4772be68650d, type: 3}
-    size: 1
-  - name: CooperOre
-    id: 3
-    prefab: {fileID: 5209627923074140771, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
-    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
-    portableMat: {fileID: 2100000, guid: 054b13814fa09424ba3aa24a6bf66f86, type: 2}
-    icon: {fileID: 21300000, guid: 5dc246db162925547952152ac9cc4f97, type: 3}
-    size: 1
   - name: Coar
-    id: 4
-    prefab: {fileID: 5209627923074140771, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
+    id: 0
+    prefab: {fileID: 0}
     portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
     portableMat: {fileID: 2100000, guid: c794b4c8f412a824999b84bf29af69ff, type: 2}
     icon: {fileID: 21300000, guid: 3848f0c230d2b994aad0acd59d1bd901, type: 3}
-    size: 1
+    size: 0
+  - name: Pickaxe
+    id: 1
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: b5c4177a92ceccc49ae55f60ecca939c, type: 2}
+    portableMat: {fileID: 2100000, guid: 1e76a268dbe24b2499b4edde6e1e26f8, type: 2}
+    icon: {fileID: 21300000, guid: afca9b1187a77004fa1f37020025714e, type: 3}
+    size: 0
+  - name: Cooper
+    id: 2
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: 054b13814fa09424ba3aa24a6bf66f86, type: 2}
+    icon: {fileID: 21300000, guid: 5dc246db162925547952152ac9cc4f97, type: 3}
+    size: 0
+  - name: Iron
+    id: 3
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
+    icon: {fileID: 21300000, guid: d830ad6735f87f54499c4772be68650d, type: 3}
+    size: 0
+  - name: Stone
+    id: 4
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: 885ae9d64f67da944a45c9ebcb8e21aa, type: 2}
+    icon: {fileID: 21300000, guid: 7a2374bfb3a01524ebd53c2d4d63d095, type: 3}
+    size: 0
+  - name: Log
+    id: 5
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: f931e2d250afe8847a0230e25513af2f, type: 2}
+    portableMat: {fileID: 2100000, guid: 2cbb04f1f01402c42bf511527a7bd2ed, type: 2}
+    icon: {fileID: 21300000, guid: f4af5822352a54540ac028e707e6979a, type: 3}
+    size: 0
+  itemDefinitions:
+  - {fileID: 11400000, guid: 61929019bb9a91c45a73164765420eb7, type: 2}
+  - {fileID: 11400000, guid: 27153b63464670a4da37741a35a41b74, type: 2}
+  - {fileID: 11400000, guid: 1f396a69cffe3964d8a866057e197935, type: 2}
+  - {fileID: 11400000, guid: 133b41430b566694abc0157857ee127a, type: 2}
+  - {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+  - {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+  autoMigrateDefinitions: 1
 --- !u!1 &234714941
 GameObject:
   m_ObjectHideFlags: 0
@@ -68166,8 +68199,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 460265023}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 178
     getCount: 1
@@ -78033,8 +78068,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1169496014}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 198
     getCount: 1
@@ -82111,8 +82148,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 814949934}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 118
     getCount: 1
@@ -87955,8 +87994,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1637964466}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 34
     getCount: 1
@@ -104920,8 +104961,10 @@ MonoBehaviour:
   id: 0
   objectName: Tree
   objId: 0
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 162261749}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 1
     getCount: 4
@@ -107850,8 +107893,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2005068175}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 37
     getCount: 1
@@ -108546,8 +108591,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 59489651}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 125
     getCount: 1
@@ -111895,6 +111942,89 @@ Transform:
   m_Children: []
   m_Father: {fileID: 791886240}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &381557394
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 381557397}
+  - component: {fileID: 381557396}
+  - component: {fileID: 381557395}
+  m_Layer: 0
+  m_Name: tripo_node_6d65d3f6
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!23 &381557395
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 381557394}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 0}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &381557396
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 381557394}
+  m_Mesh: {fileID: 4300000, guid: 0931e839d3e658648ad0ccf7ac7e4f41, type: 2}
+--- !u!4 &381557397
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 381557394}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.5, y: -0.5, z: -0.5, w: 0.5}
+  m_LocalPosition: {x: 0.669, y: 0.18, z: -0.862}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: -90}
 --- !u!1 &381588326
 GameObject:
   m_ObjectHideFlags: 0
@@ -118775,8 +118905,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2146265962}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 35
     getCount: 1
@@ -125938,8 +126070,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 408968683}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 166
     getCount: 1
@@ -126438,8 +126572,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 694493020}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -133661,6 +133797,89 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &446961254
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 446961257}
+  - component: {fileID: 446961256}
+  - component: {fileID: 446961255}
+  m_Layer: 0
+  m_Name: PortableMesh_Ore_P
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!23 &446961255
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 446961254}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 0}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &446961256
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 446961254}
+  m_Mesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+--- !u!4 &446961257
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 446961254}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 1.1546043, y: 0, z: -0.7347816}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &447499897
 GameObject:
   m_ObjectHideFlags: 0
@@ -134085,8 +134304,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1013932323}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 36
     getCount: 1
@@ -134165,89 +134386,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1034476997}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &448278267
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 448278270}
-  - component: {fileID: 448278269}
-  - component: {fileID: 448278268}
-  m_Layer: 0
-  m_Name: Tree_P
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!23 &448278268
-MeshRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 448278267}
-  m_Enabled: 1
-  m_CastShadows: 1
-  m_ReceiveShadows: 1
-  m_DynamicOccludee: 1
-  m_StaticShadowCaster: 0
-  m_MotionVectors: 1
-  m_LightProbeUsage: 1
-  m_ReflectionProbeUsage: 1
-  m_RayTracingMode: 2
-  m_RayTraceProcedural: 0
-  m_RenderingLayerMask: 1
-  m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 0}
-  m_StaticBatchInfo:
-    firstSubMesh: 0
-    subMeshCount: 0
-  m_StaticBatchRoot: {fileID: 0}
-  m_ProbeAnchor: {fileID: 0}
-  m_LightProbeVolumeOverride: {fileID: 0}
-  m_ScaleInLightmap: 1
-  m_ReceiveGI: 1
-  m_PreserveUVs: 0
-  m_IgnoreNormalsForChartDetection: 0
-  m_ImportantGI: 0
-  m_StitchLightmapSeams: 1
-  m_SelectedEditorRenderState: 3
-  m_MinimumChartSize: 4
-  m_AutoUVMaxDistance: 0.5
-  m_AutoUVMaxAngle: 89
-  m_LightmapParameters: {fileID: 0}
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 0
-  m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &448278269
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 448278267}
-  m_Mesh: {fileID: 4300000, guid: 660be6c6e72b64740a0b8b2363e4a76e, type: 2}
---- !u!4 &448278270
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 448278267}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.29935002, y: 0.805, z: -1.6321974}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &448586759
 GameObject:
@@ -135153,8 +135291,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1602946509}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 120
     getCount: 1
@@ -140347,8 +140487,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 882005946}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 179
     getCount: 1
@@ -141782,8 +141924,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2018171414}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 33
     getCount: 1
@@ -146197,8 +146341,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 193255699}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -149249,8 +149395,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 832132008}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 34
     getCount: 1
@@ -151173,8 +151321,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1962510600}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 145
     getCount: 1
@@ -157494,8 +157644,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 915458412}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 37
     getCount: 1
@@ -162926,8 +163078,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 541064375}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 36
     getCount: 1
@@ -173816,8 +173970,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1751427062}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -178755,8 +178911,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 721050041}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 35
     getCount: 1
@@ -179569,8 +179727,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1403463097}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 126
     getCount: 1
@@ -195625,8 +195785,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1751119971}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 170
     getCount: 1
@@ -197296,8 +197458,10 @@ MonoBehaviour:
   id: 0
   objectName: Tree
   objId: 0
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1385096760}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 1
     getCount: 4
@@ -200216,8 +200380,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 927260442}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 31
     getCount: 1
@@ -209237,8 +209403,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 272382955}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 35
     getCount: 1
@@ -211251,8 +211419,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1139974509}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 37
     getCount: 1
@@ -212602,8 +212772,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1873408473}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 142
     getCount: 1
@@ -218422,8 +218594,10 @@ MonoBehaviour:
   id: 0
   objectName: Tree
   objId: 0
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 34701775}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 1
     getCount: 4
@@ -219409,8 +219583,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1494884177}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -232902,8 +233078,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 253143573}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -245960,8 +246138,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2042223989}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -246362,8 +246542,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 198727131}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 105
     getCount: 1
@@ -248849,8 +249031,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1850256157}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 33
     getCount: 1
@@ -250565,8 +250749,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1407382908}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 179
     getCount: 1
@@ -254171,8 +254357,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 649819734}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 174
     getCount: 1
@@ -254988,8 +255176,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 744311281}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -256862,8 +257052,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 151333812}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -270840,8 +271032,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 938483925}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 39
     getCount: 1
@@ -275747,8 +275941,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2143574582}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 33
     getCount: 1
@@ -290959,8 +291155,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1012435608}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 39
     getCount: 1
@@ -291643,8 +291841,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2105952453}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -307973,6 +308173,89 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 769097384}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1024629519
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1024629522}
+  - component: {fileID: 1024629521}
+  - component: {fileID: 1024629520}
+  m_Layer: 0
+  m_Name: PickAxe_P
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!23 &1024629520
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1024629519}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 0}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &1024629521
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1024629519}
+  m_Mesh: {fileID: 4300000, guid: 748078c2657cb44499bf780e2075c648, type: 2}
+--- !u!4 &1024629522
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1024629519}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.12565732, y: 0.852, z: -2.151}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1025317789
 GameObject:
@@ -328514,8 +328797,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 414993603}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 33
     getCount: 1
@@ -337212,8 +337497,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1117829063}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 200
     getCount: 1
@@ -338493,8 +338780,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1140798806}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 197
     getCount: 1
@@ -342467,8 +342756,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 467862935}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 111
     getCount: 1
@@ -375127,8 +375418,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 38667110}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 37
     getCount: 1
@@ -384964,8 +385257,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1120572806}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 37
     getCount: 1
@@ -389329,8 +389624,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1732782402}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 179
     getCount: 1
@@ -389393,8 +389690,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1920530119}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -391399,8 +391698,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 562712431}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 35
     getCount: 1
@@ -418572,8 +418873,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1668293648}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 39
     getCount: 1
@@ -425751,6 +426054,7 @@ MonoBehaviour:
   oreResources:
   - name: Iron
     prefab: {fileID: 8031207384658059468, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
+    definition: {fileID: 11400000, guid: 6a0778f55af03994a8d8400ed270cda4, type: 2}
     placementMode: 0
     spawnChance: 0.04
     spacingMultiplier: 1
@@ -425765,6 +426069,7 @@ MonoBehaviour:
     starterDirection: {x: 1, y: 0}
   - name: Coal
     prefab: {fileID: 5209627923074140771, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
+    definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
     placementMode: 0
     spawnChance: 0.05
     spacingMultiplier: 1
@@ -425779,6 +426084,7 @@ MonoBehaviour:
     starterDirection: {x: 0, y: 1}
   - name: Stone
     prefab: {fileID: 3118427074153073671, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
+    definition: {fileID: 11400000, guid: 96e45d7fa97ca7e4aad0fb7b1ad1db16, type: 2}
     placementMode: 0
     spawnChance: 0.08
     spacingMultiplier: 1
@@ -425793,6 +426099,7 @@ MonoBehaviour:
     starterDirection: {x: -1, y: 0}
   - name: Cooper
     prefab: {fileID: 5209627923074140771, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
+    definition: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
     placementMode: 0
     spawnChance: 0.05
     spacingMultiplier: 1
@@ -425808,6 +426115,7 @@ MonoBehaviour:
   treeResources:
   - name: Tree_NoneLeaf
     prefab: {fileID: 8031207384658059468, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
+    definition: {fileID: 11400000, guid: 80276c4a24ae3374aba9f63d5130db06, type: 2}
     placementMode: 0
     spawnChance: 0.22
     spacingMultiplier: 2
@@ -425822,6 +426130,7 @@ MonoBehaviour:
     starterDirection: {x: 1, y: 0}
   - name: Forest_NoneLeaf
     prefab: {fileID: 8031207384658059468, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
+    definition: {fileID: 11400000, guid: 80276c4a24ae3374aba9f63d5130db06, type: 2}
     placementMode: 1
     spawnChance: 0.12
     spacingMultiplier: 1.4
@@ -439460,8 +439769,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 80535667}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 145
     getCount: 1
@@ -441997,8 +442308,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1621657577}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 32
     getCount: 1
@@ -444884,8 +445197,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1475225916}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 192
     getCount: 1
@@ -457613,8 +457928,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 108440942}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 30
     getCount: 1
@@ -463267,8 +463584,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 555529083}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -474209,8 +474528,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1955120596}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 139
     getCount: 1
@@ -474656,8 +474977,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 353861379}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 30
     getCount: 1
@@ -481002,8 +481325,10 @@ MonoBehaviour:
   id: 0
   objectName: IronOre
   objId: 2
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 2074729540}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 33
     getCount: 1
@@ -482716,8 +483041,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1809774819}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 160
     getCount: 1
@@ -483508,8 +483835,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1085255221}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 115
     getCount: 1
@@ -483743,8 +484072,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1137842486}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 155
     getCount: 1
@@ -483891,8 +484222,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1690943135}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -492336,8 +492669,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1274498099}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 38
     getCount: 1
@@ -514486,8 +514821,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 166931924}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 32
     getCount: 1
@@ -524487,8 +524824,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 318869045}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 128
     getCount: 1
@@ -544778,8 +545117,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 513815433}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -549264,8 +549605,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1144523043}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 110
     getCount: 1
@@ -550649,8 +550992,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 24645510}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 34
     getCount: 1
@@ -564053,8 +564398,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 426949717}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 40
     getCount: 1
@@ -575910,8 +576257,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1094928829}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 129
     getCount: 1
@@ -581642,8 +581991,10 @@ MonoBehaviour:
   id: 0
   objectName: Stone
   objId: 1
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 574035293}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 34
     getCount: 1
@@ -594282,8 +594633,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 3
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 412855447}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 37
     getCount: 1
@@ -618983,8 +619336,10 @@ MonoBehaviour:
   id: 0
   objectName: Coar
   objId: 4
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 21791042}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 157
     getCount: 1
@@ -623677,8 +624032,10 @@ MonoBehaviour:
   id: 0
   objectName: Tree
   objId: 0
+  itemDefinition: {fileID: 0}
   portableObj: {fileID: 1504813724}
   harvestMode: 0
+  definition: {fileID: 0}
   resourceStatus:
     resourceCount: 1
     getCount: 4
@@ -639597,4 +639954,6 @@ SceneRoots:
   - {fileID: 1411522176}
   - {fileID: 3574787649642628810}
   - {fileID: 755948324}
-  - {fileID: 448278270}
+  - {fileID: 1024629522}
+  - {fileID: 446961257}
+  - {fileID: 381557397}

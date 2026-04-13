@@ -15,6 +15,7 @@ public class Resource : MapObject
     [Serializable]
     public struct ResourceStatus
     {
+        public int outputId;
         public int resourceCount;
         public int getCount;
         public int maxGauge;
@@ -34,6 +35,9 @@ public class Resource : MapObject
 
     [SerializeField]
     private HarvestMode harvestMode = HarvestMode.Auto;
+
+    [SerializeField]
+    private ResourceDefinition definition;
 
     [SerializeField]
     private ResourceStatus resourceStatus;
@@ -118,6 +122,7 @@ public class Resource : MapObject
         cachedRenderer = GetComponentInChildren<Renderer>();
         CacheBodyTransform();
         CachePortableObjects();
+        ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
         CaptureInitialStateIfNeeded();
         EnsurePortableObjectPool(GetCount);
@@ -128,6 +133,7 @@ public class Resource : MapObject
     {
         CacheBodyTransform();
         CachePortableObjects();
+        ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
         CaptureInitialStateIfNeeded();
         EnsurePortableObjectPool(GetCount);
@@ -155,6 +161,7 @@ public class Resource : MapObject
     private void OnValidate()
     {
         CacheBodyTransform();
+        ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
         if (!Application.isPlaying)
         {
@@ -301,14 +308,14 @@ public class Resource : MapObject
         {
             resourceStatus.currentGague = 0;
             reservedHarvestSteps = 0;
-            PlayPickupSequence(0, objId, true);
+            PlayPickupSequence(0, ResolveItemId(), true);
             return;
         }
 
         resourceStatus.currentGague = MaxGauge;
         UpdateBodyScale();
 
-        PlayPickupSequence(0, objId, false);
+        PlayPickupSequence(0, ResolveItemId(), false);
     }
 
     private void PlayPickupSequence(int bagNum, int objectId, bool hideAfterSequence)
@@ -489,7 +496,7 @@ public class Resource : MapObject
             }
 
             candidate.transform.SetParent(transform, true);
-            candidate.SetItem(objId);
+            candidate.SetItem(ResolveItemId());
             candidate.gameObject.SetActive(false);
         }
     }
@@ -516,7 +523,7 @@ public class Resource : MapObject
             clone.transform.localPosition = template.transform.localPosition;
             clone.transform.localRotation = template.transform.localRotation;
             clone.transform.localScale = template.transform.localScale;
-            clone.SetItem(objId);
+            clone.SetItem(ResolveItemId());
             clone.gameObject.SetActive(false);
             portableObjects.Add(clone);
         }
@@ -535,7 +542,7 @@ public class Resource : MapObject
                 continue;
             }
 
-            candidate.SetItem(objId);
+            candidate.SetItem(ResolveItemId());
             reserved.Add(candidate);
         }
 
@@ -561,7 +568,7 @@ public class Resource : MapObject
         clone.transform.localPosition = Vector3.zero;
         clone.transform.localRotation = Quaternion.identity;
         clone.transform.localScale = Vector3.one;
-        clone.SetItem(objId);
+        clone.SetItem(ResolveItemId());
         clone.gameObject.SetActive(false);
         portableObjects.Add(clone);
         return clone;
@@ -610,6 +617,39 @@ public class Resource : MapObject
         }
 
         bodyTransform.localScale = initialBodyLocalScale * scaleRatio;
+    }
+
+    private void ApplyDefinitionIfNeeded()
+    {
+        if (definition == null)
+        {
+            return;
+        }
+
+        harvestMode = definition.harvestMode;
+
+        if (resourceStatus.resourceCount <= 0)
+        {
+            resourceStatus.resourceCount = Mathf.Max(1, definition.defaultResourceCount);
+        }
+
+        if (resourceStatus.getCount <= 0)
+        {
+            resourceStatus.getCount = Mathf.Max(1, definition.defaultGetCount);
+        }
+
+        if (resourceStatus.maxGauge <= 0)
+        {
+            resourceStatus.maxGauge = Mathf.Max(1, definition.defaultMaxGauge);
+        }
+
+        if (resourceStatus.currentGague <= 0)
+        {
+            resourceStatus.currentGague = Mathf.Clamp(
+                definition.defaultCurrentGauge,
+                0,
+                Mathf.Max(1, resourceStatus.maxGauge));
+        }
     }
 
     private void ApplyEditorBodyScale()

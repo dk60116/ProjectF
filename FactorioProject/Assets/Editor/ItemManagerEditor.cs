@@ -10,19 +10,18 @@ public class ItemManagerEditor : Editor
 
         EditorGUILayout.Space();
 
-        if (GUILayout.Button("Rebuild Items From Assets"))
+        if (GUILayout.Button("Rebuild"))
         {
             ItemManager itemManager = (ItemManager)target;
-            Undo.RecordObject(itemManager, "Rebuild Items From Assets");
-            itemManager.RebuildItemsFromAssets();
+            Undo.RecordObject(itemManager, "Rebuild Item Data");
+            itemManager.RebuildItemDefinitionsFromAssets();
+            itemManager.ApplyItemIdsToPrefabs();
             EditorUtility.SetDirty(itemManager);
         }
 
-        if (GUILayout.Button("Apply IDs To Prefabs"))
+        if (GUILayout.Button("Open Crafting Tree UI"))
         {
-            ItemManager itemManager = (ItemManager)target;
-            itemManager.ApplyItemIdsToPrefabs();
-            EditorUtility.SetDirty(itemManager);
+            CraftingTreeEditorWindow.ShowWindow();
         }
     }
 }

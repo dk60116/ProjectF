@@ -8,6 +8,9 @@ public class PropObj : BaseObject
     protected int objId;
 
     [SerializeField]
+    private ItemDefinition itemDefinition;
+
+    [SerializeField]
     protected PortableObject portableObj;
 
     protected void Awake()
@@ -16,9 +19,21 @@ public class PropObj : BaseObject
 
         if (portableObj != null)
         {
-            portableObj.SetItem(objId);
+            portableObj.SetItem(ResolveItemId());
         }
     }
 
-    public int ID => objId;
+    public int ID => ResolveItemId();
+
+    public int ResolvedItemId => ResolveItemId();
+
+    public int ResolveItemId()
+    {
+        if (itemDefinition != null)
+        {
+            return itemDefinition.id;
+        }
+
+        return objId;
+    }
 }

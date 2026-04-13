@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e171f0888b7f55a4e92abfc0e01088f1, type: 3}
+  m_Name: Resource_CooperOre
+  m_EditorClassIdentifier: 
+  resourceName: CooperOre
+  prefab: {fileID: 5209627923074140771, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
+  harvestMode: 1
+  defaultResourceCount: 1
+  defaultGetCount: 1
+  defaultMaxGauge: 10
+  defaultCurrentGauge: 10
