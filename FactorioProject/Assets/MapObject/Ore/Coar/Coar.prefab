@@ -12,6 +12,18 @@ PrefabInstance:
       propertyPath: m_Mesh
       value: 
       objectReference: {fileID: -4623667117242087733, guid: d7556c5bef46db341ac1a0ea152ce055, type: 3}
+    - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: objId
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: portableObj
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: itemDefinition
+      value: 
+      objectReference: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
@@ -95,11 +107,15 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects:
     - {fileID: -7227463404532877082, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+    - {fileID: 7732553549147059706, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
     m_AddedGameObjects: []
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
       addedObject: {fileID: 5209627923074140771}
+    - targetCorrespondingSourceObject: {fileID: 1126036018586424584, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 3922653029983246140}
   m_SourcePrefab: {fileID: 100100000, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
 --- !u!1 &282995202885880893 stripped
 GameObject:
@@ -126,6 +142,7 @@ MonoBehaviour:
   harvestMode: 1
   definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
   resourceStatus:
+    outputId: 1
     resourceCount: 1
     getCount: 1
     maxGauge: 10
@@ -137,3 +154,29 @@ MonoBehaviour:
   minimumBodyScaleRatio: 0.3
   maximumBodyScaleRatio: 1
   dynamicScaleMaxResourceCount: 1
+--- !u!1 &6673895352889615777 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 1126036018586424584, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+  m_PrefabInstance: {fileID: 5998244657081757865}
+  m_PrefabAsset: {fileID: 0}
+--- !u!135 &3922653029983246140
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6673895352889615777}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.2
+  m_Center: {x: -0.000000007945309, y: -0.000000011917961, z: 0.13330081}

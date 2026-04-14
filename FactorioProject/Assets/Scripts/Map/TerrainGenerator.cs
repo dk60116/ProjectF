@@ -489,7 +489,7 @@ public class TerrainGenerator : MonoBehaviour
         {
             if (centerBlock.Type == Block.BlockType.Ground && centerBlock.TryAddFloorObject(itemId, out targetPortableObject))
             {
-                MarkDroppedPickupGate(targetPortableObject);
+                MarkDroppedPickupGate(targetPortableObject, true, worldPosition);
                 return true;
             }
         }
@@ -504,6 +504,24 @@ public class TerrainGenerator : MonoBehaviour
         Vector3 startWorldPosition,
         float moveInterval = 0.1f)
     {
+        return TryAddDroppedItemStackAtPlayerBlock(
+            worldPosition,
+            itemId,
+            itemCount,
+            startWorldPosition,
+            moveInterval,
+            out _);
+    }
+
+    public bool TryAddDroppedItemStackAtPlayerBlock(
+        Vector3 worldPosition,
+        int itemId,
+        int itemCount,
+        Vector3 startWorldPosition,
+        float moveInterval,
+        out Vector2Int dropCoordinate)
+    {
+        dropCoordinate = GetWorldBlockCoordinate(worldPosition);
         if (itemCount <= 0)
         {
             return false;
@@ -515,6 +533,7 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        dropCoordinate = targetBlock.Coordinate;
         for (int i = 0; i < itemCount; i++)
         {
             if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, i * Mathf.Max(0f, moveInterval), out PortableObject droppedObject))
@@ -522,10 +541,59 @@ public class TerrainGenerator : MonoBehaviour
                 return false;
             }
 
-            MarkDroppedPickupGate(droppedObject);
+            MarkDroppedPickupGate(droppedObject, false, worldPosition);
         }
 
         return true;
+    }
+
+    public bool TryPickupOneItemToHandAtCoordinate(Player player, Vector2Int coordinate)
+    {
+        if (player == null)
+        {
+            return false;
+        }
+
+        if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+        {
+            loadedBlocks.Remove(coordinate);
+            return false;
+        }
+
+        if (block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
+        return block.TryPickupOneFloorObjectToHand(player, anchorPosition, 999f);
+    }
+
+    public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate)
+    {
+        return TryPickupOneItemToBagAtCoordinate(player, coordinate, -1);
+    }
+
+    public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate, int preferredSlotIndex)
+    {
+        if (player == null)
+        {
+            return false;
+        }
+
+        if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+        {
+            loadedBlocks.Remove(coordinate);
+            return false;
+        }
+
+        if (block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
+        return block.TryPickupOneFloorObjectToBag(player, anchorPosition, 999f, preferredSlotIndex);
     }
 
     public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
@@ -577,6 +645,214 @@ public class TerrainGenerator : MonoBehaviour
                     {
                         return true;
                     }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryAddDroppedItemToNearestStack(Vector3 worldPosition, int itemId, int searchRadius, out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        int radius = Mathf.Max(0, searchRadius);
+        if (radius <= 0)
+        {
+            return false;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+        Block targetBlock = FindNearestDropBlock(centerCoordinate, itemId, 1, radius, true);
+        if (targetBlock == null)
+        {
+            return false;
+        }
+
+        return targetBlock.TryAddFloorObject(itemId, out targetPortableObject);
+    }
+
+    public int GetDroppedItemCountAround(Vector3 worldPosition, int itemId, int radius)
+    {
+        if (itemId < 0 || radius < 0)
+        {
+            return 0;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+        int total = 0;
+
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                {
+                    loadedBlocks.Remove(coordinate);
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground)
+                {
+                    continue;
+                }
+
+                total += block.CountFloorObjects(itemId);
+            }
+        }
+
+        return total;
+    }
+
+    public int RemoveDroppedItemsAround(Vector3 worldPosition, int itemId, int radius, int count)
+    {
+        if (itemId < 0 || radius < 0 || count <= 0)
+        {
+            return 0;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+        int remaining = count;
+
+        for (int searchRadius = 0; searchRadius <= radius && remaining > 0; searchRadius++)
+        {
+            for (int offsetY = -searchRadius; offsetY <= searchRadius && remaining > 0; offsetY++)
+            {
+                for (int offsetX = -searchRadius; offsetX <= searchRadius && remaining > 0; offsetX++)
+                {
+                    if (searchRadius > 0 && Mathf.Abs(offsetX) != searchRadius && Mathf.Abs(offsetY) != searchRadius)
+                    {
+                        continue;
+                    }
+
+                    Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                    if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                    {
+                        loadedBlocks.Remove(coordinate);
+                        continue;
+                    }
+
+                    if (block.Type != Block.BlockType.Ground)
+                    {
+                        continue;
+                    }
+
+                    int removed = block.RemoveFloorObjects(itemId, remaining);
+                    remaining -= removed;
+                }
+            }
+        }
+
+        return count - remaining;
+    }
+
+    public int TransferDroppedItemsToHand(Player player, Vector3 worldPosition, int radius)
+    {
+        if (player == null || radius < 0)
+        {
+            return 0;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+        int total = 0;
+
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                {
+                    loadedBlocks.Remove(coordinate);
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground)
+                {
+                    continue;
+                }
+
+                total += block.TransferFloorObjectsToHand(player);
+            }
+        }
+
+        return total;
+    }
+
+    public bool TryPickupOneItemToHand(Player player, Vector3 pickupOrigin, int radius, float pickupRadius)
+    {
+        if (player == null || radius < 0 || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(pickupOrigin);
+
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                {
+                    loadedBlocks.Remove(coordinate);
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground)
+                {
+                    continue;
+                }
+
+                if (block.TryPickupOneFloorObjectToHand(player, pickupOrigin, pickupRadius))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryPickupOneItemToBag(Player player, Vector3 pickupOrigin, int radius, float pickupRadius)
+    {
+        return TryPickupOneItemToBag(player, pickupOrigin, radius, pickupRadius, -1);
+    }
+
+    public bool TryPickupOneItemToBag(Player player, Vector3 pickupOrigin, int radius, float pickupRadius, int preferredSlotIndex)
+    {
+        if (player == null || radius < 0 || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(pickupOrigin);
+
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                {
+                    loadedBlocks.Remove(coordinate);
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground)
+                {
+                    continue;
+                }
+
+                if (block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
+                {
+                    return true;
                 }
             }
         }
@@ -689,7 +965,7 @@ public class TerrainGenerator : MonoBehaviour
     {
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
-        Block sameItemBlock = FindNearestDropBlock(centerCoordinate, itemId, itemCount, 3, true);
+        Block sameItemBlock = FindNearestDropBlock(centerCoordinate, itemId, itemCount, 2, true);
         if (sameItemBlock != null)
         {
             return sameItemBlock;
@@ -748,7 +1024,7 @@ public class TerrainGenerator : MonoBehaviour
                && block.CanAddFloorObjects(itemCount, itemId);
     }
 
-    private static void MarkDroppedPickupGate(PortableObject droppedObject)
+    private static void MarkDroppedPickupGate(PortableObject droppedObject, bool settled, Vector3 origin)
     {
         if (droppedObject == null)
         {
@@ -761,7 +1037,7 @@ public class TerrainGenerator : MonoBehaviour
             gate = droppedObject.gameObject.AddComponent<DroppedItemPickupGate>();
         }
 
-        gate.MarkDropped();
+        gate.MarkDropped(0.5f, settled, origin);
     }
 
     private static Vector2Int GetWorldBlockCoordinate(Vector3 worldPosition)

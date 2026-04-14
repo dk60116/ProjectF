@@ -308,14 +308,14 @@ public class Resource : MapObject
         {
             resourceStatus.currentGague = 0;
             reservedHarvestSteps = 0;
-            PlayPickupSequence(0, ResolveItemId(), true);
+            PlayPickupSequence(0, ResolveOutputItemId(), true);
             return;
         }
 
         resourceStatus.currentGague = MaxGauge;
         UpdateBodyScale();
 
-        PlayPickupSequence(0, ResolveItemId(), false);
+        PlayPickupSequence(0, ResolveOutputItemId(), false);
     }
 
     private void PlayPickupSequence(int bagNum, int objectId, bool hideAfterSequence)
@@ -360,18 +360,8 @@ public class Resource : MapObject
         for (int i = 0; i < rewardCount; i++)
         {
             PortableObject sourcePortableObject = i < reservedPortableObjects.Count ? reservedPortableObjects[i] : null;
-            if (sourcePortableObject == null)
-            {
-                break;
-            }
-
             PortableObject targetPortableObject = null;
-            bool hasTarget = player.TryAddToBag(objectId, out targetPortableObject);
-
-            if (!hasTarget && owningBlock != null)
-            {
-                hasTarget = owningBlock.TryAddFloorObject(objectId, out targetPortableObject);
-            }
+            bool hasTarget = TryResolveHarvestTarget(player, objectId, out targetPortableObject);
 
             if (!hasTarget || targetPortableObject == null)
             {
@@ -380,6 +370,17 @@ public class Resource : MapObject
 
             spawnedCount++;
             bool shouldHideOnComplete = hideAfterSequence && i == rewardCount - 1;
+
+            if (sourcePortableObject == null)
+            {
+                if (shouldHideOnComplete)
+                {
+                    gameObject.SetActive(false);
+                }
+
+                continue;
+            }
+
             sourcePortableObject.transform.SetParent(transform, false);
             sourcePortableObject.gameObject.SetActive(true);
             sourcePortableObject.transform.localScale = Vector3.one;
@@ -392,6 +393,7 @@ public class Resource : MapObject
                 sourcePortableObject.transform.localPosition = Vector3.zero;
                 sourcePortableObject.transform.localRotation = Quaternion.identity;
                 sourcePortableObject.transform.localScale = Vector3.one;
+                sourcePortableObject.gameObject.SetActive(false);
 
                 if (shouldHideOnComplete)
                 {
@@ -410,6 +412,51 @@ public class Resource : MapObject
             gameObject.SetActive(false);
         }
 
+    }
+
+    private bool TryResolveHarvestTarget(Player player, int objectId, out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+        if (player != null && player.TryAddToBag(objectId, out targetPortableObject))
+        {
+            return targetPortableObject != null;
+        }
+
+        TerrainGenerator generator = FindTerrainGenerator();
+        if (generator != null)
+        {
+            Vector3 dropPosition = player != null ? player.transform.position : transform.position;
+            if (generator.TryAddDroppedItemToNearestStack(dropPosition, objectId, 2, out targetPortableObject))
+            {
+                return targetPortableObject != null;
+            }
+
+            if (owningBlock != null && owningBlock.TryAddFloorObject(objectId, out targetPortableObject))
+            {
+                return targetPortableObject != null;
+            }
+
+            if (generator.TryAddDroppedItemAtPlayerBlock(dropPosition, objectId, out targetPortableObject))
+            {
+                return targetPortableObject != null;
+            }
+
+            if (generator.TryAddDroppedItemNear(dropPosition, objectId, out targetPortableObject))
+            {
+                return targetPortableObject != null;
+            }
+        }
+        else if (owningBlock != null && owningBlock.TryAddFloorObject(objectId, out targetPortableObject))
+        {
+            return targetPortableObject != null;
+        }
+
+        return false;
+    }
+
+    private TerrainGenerator FindTerrainGenerator()
+    {
+        return FindObjectOfType<TerrainGenerator>();
     }
 
     private void EnsureStatusInitialized()
@@ -447,6 +494,16 @@ public class Resource : MapObject
     {
         int totalRemainingSteps = ((Mathf.Max(0, ResourceCount - 1)) * MaxGauge) + CurrentGauge;
         return Mathf.Max(0, totalRemainingSteps - reservedHarvestSteps);
+    }
+
+    private int ResolveOutputItemId()
+    {
+        if (resourceStatus.outputId >= 0)
+        {
+            return resourceStatus.outputId;
+        }
+
+        return ResolveItemId();
     }
 
     private void CacheBodyTransform()
@@ -496,7 +553,7 @@ public class Resource : MapObject
             }
 
             candidate.transform.SetParent(transform, true);
-            candidate.SetItem(ResolveItemId());
+            candidate.SetItem(ResolveOutputItemId());
             candidate.gameObject.SetActive(false);
         }
     }
@@ -523,7 +580,7 @@ public class Resource : MapObject
             clone.transform.localPosition = template.transform.localPosition;
             clone.transform.localRotation = template.transform.localRotation;
             clone.transform.localScale = template.transform.localScale;
-            clone.SetItem(ResolveItemId());
+            clone.SetItem(ResolveOutputItemId());
             clone.gameObject.SetActive(false);
             portableObjects.Add(clone);
         }
@@ -542,7 +599,7 @@ public class Resource : MapObject
                 continue;
             }
 
-            candidate.SetItem(ResolveItemId());
+            candidate.SetItem(ResolveOutputItemId());
             reserved.Add(candidate);
         }
 
@@ -568,7 +625,7 @@ public class Resource : MapObject
         clone.transform.localPosition = Vector3.zero;
         clone.transform.localRotation = Quaternion.identity;
         clone.transform.localScale = Vector3.one;
-        clone.SetItem(ResolveItemId());
+        clone.SetItem(ResolveOutputItemId());
         clone.gameObject.SetActive(false);
         portableObjects.Add(clone);
         return clone;

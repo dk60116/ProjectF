@@ -93,7 +93,17 @@ public class PlayerController : MonoBehaviour
                 player.Stat.rotateSpeed * Time.deltaTime);
         }
 
-        UpdateAutoHarvest(hasMovement);
+        player.UpdateCarryState();
+        if (player.IsCarrying)
+        {
+            CancelPendingHarvest();
+            SetFocusedBlock(null);
+            resourceWorkGauge?.HideIfNotFinishing();
+        }
+        else
+        {
+            UpdateAutoHarvest(hasMovement);
+        }
 
         bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
         ResolveCompletedPick(finishedPickThisFrame);
@@ -329,6 +339,12 @@ public class PlayerController : MonoBehaviour
     private void UpdateAutoPickup()
     {
         if (player == null || autoPickupRadius <= 0f)
+        {
+            return;
+        }
+
+        player.UpdateDropExitGate(player.transform.position);
+        if (player.IsDropExitPending)
         {
             return;
         }

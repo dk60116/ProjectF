@@ -1,10 +1,11 @@
+using ProjectF.Attributes;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class PropObj : BaseObject
 {
-    [SerializeField]
+    [SerializeField, ReadOnly]
     protected int objId;
 
     [SerializeField]

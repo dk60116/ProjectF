@@ -29,6 +29,10 @@ public class PortableObject : MonoBehaviour
         if (body == null)
         {
             body = GetComponent<MeshFilter>();
+            if (body == null)
+            {
+                body = GetComponentInChildren<MeshFilter>(true);
+            }
         }
 
         if (body == null || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
@@ -46,7 +50,18 @@ public class PortableObject : MonoBehaviour
         Material portableMat = itemSet.portableMat;
 
         body.mesh = portableMesh;
-        body.GetComponent<MeshRenderer>().material = portableMat;
+        MeshRenderer renderer = body.GetComponent<MeshRenderer>();
+        if (renderer == null)
+        {
+            renderer = GetComponentInChildren<MeshRenderer>(true);
+        }
+
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        renderer.material = portableMat;
         return true;
     }
 

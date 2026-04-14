@@ -181,6 +181,76 @@ public class Block : BaseObject
         return false;
     }
 
+    public int CountFloorObjects(int itemId)
+    {
+        EnsureFloorObjectsInitialized();
+        if (itemId < 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null || stack.Count == 0)
+            {
+                continue;
+            }
+
+            for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+            {
+                PortableObject portableObject = stack[objectIndex];
+                if (portableObject != null && portableObject.ItemId == itemId)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    public int RemoveFloorObjects(int itemId, int count)
+    {
+        EnsureFloorObjectsInitialized();
+        if (itemId < 0 || count <= 0)
+        {
+            return 0;
+        }
+
+        int remaining = count;
+        for (int stackIndex = 0; stackIndex < floorStacks.Count && remaining > 0; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null || stack.Count == 0)
+            {
+                continue;
+            }
+
+            for (int objectIndex = stack.Count - 1; objectIndex >= 0 && remaining > 0; objectIndex--)
+            {
+                PortableObject portableObject = stack[objectIndex];
+                if (portableObject == null)
+                {
+                    stack.RemoveAt(objectIndex);
+                    continue;
+                }
+
+                if (portableObject.ItemId != itemId)
+                {
+                    continue;
+                }
+
+                stack.RemoveAt(objectIndex);
+                ReleaseFloorObject(portableObject);
+                remaining--;
+            }
+        }
+
+        return count - remaining;
+    }
+
     public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject)
     {
         targetPortableObject = null;
@@ -241,6 +311,11 @@ public class Block : BaseObject
                 Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
                 Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
                 stack.Add(portableObject);
+                DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
+                if (gate == null)
+                {
+                    gate = portableObject.gameObject.AddComponent<DroppedItemPickupGate>();
+                }
 
                 portableObject.MoveTo(finalWorldPosition, delay, () =>
                 {
@@ -254,6 +329,7 @@ public class Block : BaseObject
                     portableObject.transform.localRotation = Quaternion.identity;
                     portableObject.transform.localScale = Vector3.one;
                     portableObject.gameObject.SetActive(true);
+                    gate?.MarkSettled();
                 }, false);
 
                 targetPortableObject = portableObject;
@@ -334,6 +410,7 @@ public class Block : BaseObject
         }
 
         float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
         bool pickedAny = false;
 
         for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
@@ -372,16 +449,7 @@ public class Block : BaseObject
                 DroppedItemPickupGate gate = gatedObject.GetComponent<DroppedItemPickupGate>();
                 if (gate != null)
                 {
-                    gate.UpdateExitState(distanceSqr);
-                }
-            }
-
-            DroppedItemPickupGate topGate = topObject.GetComponent<DroppedItemPickupGate>();
-            if (topGate != null)
-            {
-                if (!topGate.CanPickup(distanceSqr, pickupRadiusSqr))
-                {
-                    continue;
+                    gate.UpdateExitState(gateOriginPosition);
                 }
             }
 
@@ -407,6 +475,238 @@ public class Block : BaseObject
         }
 
         return pickedAny;
+    }
+
+    public bool TryPickupOneFloorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius)
+    {
+        return TryPickupOneFloorObjectToBag(player, playerPosition, pickupRadius, -1);
+    }
+
+    public bool TryPickupOneFloorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+
+        if (floorObjects == null || floorObjects.Count == 0)
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+
+        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        {
+            Transform anchor = floorObjects[stackIndex];
+            if (anchor == null)
+            {
+                continue;
+            }
+
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null || stack.Count == 0)
+            {
+                continue;
+            }
+
+            PortableObject topObject = stack[stack.Count - 1];
+            if (topObject == null)
+            {
+                stack.RemoveAt(stack.Count - 1);
+                continue;
+            }
+
+            Vector3 offset = anchor.position - playerPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+
+            for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+            {
+                PortableObject gatedObject = stack[objectIndex];
+                if (gatedObject == null)
+                {
+                    continue;
+                }
+
+                DroppedItemPickupGate gate = gatedObject.GetComponent<DroppedItemPickupGate>();
+                if (gate != null)
+                {
+                    gate.UpdateExitState(gateOriginPosition);
+                }
+            }
+
+            if (distanceSqr > pickupRadiusSqr)
+            {
+                continue;
+            }
+
+            int itemId = topObject.ItemId;
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            bool added;
+            PortableObject bagTarget;
+            if (preferredSlotIndex >= 0)
+            {
+                added = player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out bagTarget);
+            }
+            else
+            {
+                added = player.TryAddToBag(itemId, out bagTarget);
+            }
+
+            if (!added)
+            {
+                continue;
+            }
+
+            stack.RemoveAt(stack.Count - 1);
+            ReleaseFloorObjectToBag(topObject, bagTarget);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryPickupOneFloorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+
+        if (floorObjects == null || floorObjects.Count == 0)
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+
+        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        {
+            Transform anchor = floorObjects[stackIndex];
+            if (anchor == null)
+            {
+                continue;
+            }
+
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null || stack.Count == 0)
+            {
+                continue;
+            }
+
+            PortableObject topObject = stack[stack.Count - 1];
+            if (topObject == null)
+            {
+                stack.RemoveAt(stack.Count - 1);
+                continue;
+            }
+
+            Vector3 offset = anchor.position - playerPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+
+            for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+            {
+                PortableObject gatedObject = stack[objectIndex];
+                if (gatedObject == null)
+                {
+                    continue;
+                }
+
+                DroppedItemPickupGate gate = gatedObject.GetComponent<DroppedItemPickupGate>();
+                if (gate != null)
+                {
+                    gate.UpdateExitState(gateOriginPosition);
+                }
+            }
+
+            if (distanceSqr > pickupRadiusSqr)
+            {
+                continue;
+            }
+
+            int itemId = topObject.ItemId;
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+            {
+                continue;
+            }
+
+            stack.RemoveAt(stack.Count - 1);
+            ReleaseFloorObjectToHand(topObject, handTarget);
+            return true;
+        }
+
+        return false;
+    }
+
+    public int TransferFloorObjectsToHand(Player player)
+    {
+        if (player == null)
+        {
+            return 0;
+        }
+
+        EnsureFloorObjectsInitialized();
+        if (floorStacks == null || floorStacks.Count == 0)
+        {
+            return 0;
+        }
+
+        int transferred = 0;
+
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null || stack.Count == 0)
+            {
+                continue;
+            }
+
+            for (int objectIndex = stack.Count - 1; objectIndex >= 0; objectIndex--)
+            {
+                PortableObject floorObject = stack[objectIndex];
+                if (floorObject == null)
+                {
+                    stack.RemoveAt(objectIndex);
+                    continue;
+                }
+
+                int itemId = floorObject.ItemId;
+                if (itemId < 0)
+                {
+                    stack.RemoveAt(objectIndex);
+                    ReleaseFloorObjectToHand(floorObject, null);
+                    continue;
+                }
+
+                if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+                {
+                    return transferred;
+                }
+
+                stack.RemoveAt(objectIndex);
+                ReleaseFloorObjectToHand(floorObject, handTarget);
+                transferred++;
+            }
+        }
+
+        return transferred;
     }
 
     private void EnsureFloorObjectsInitialized()
@@ -526,6 +826,51 @@ public class Block : BaseObject
         if (bagTarget != null)
         {
             floorObject.MoveTo(bagTarget.transform, () => floorObjectPool.Release(floorObject));
+        }
+        else
+        {
+            floorObjectPool.Release(floorObject);
+        }
+    }
+
+    private void ReleaseFloorObject(PortableObject floorObject)
+    {
+        if (floorObject == null)
+        {
+            return;
+        }
+
+        if (!ResolveFloorObjectPool() || floorObjectPool == null)
+        {
+            floorObject.gameObject.SetActive(false);
+            return;
+        }
+
+        floorObject.transform.SetParent(null, true);
+        floorObjectPool.Release(floorObject);
+    }
+
+    private void ReleaseFloorObjectToHand(PortableObject floorObject, PortableObject handTarget)
+    {
+        if (floorObject == null)
+        {
+            return;
+        }
+
+        DroppedItemPickupGate gate = floorObject.GetComponent<DroppedItemPickupGate>();
+        gate?.ClearGate();
+
+        if (!ResolveFloorObjectPool() || floorObjectPool == null)
+        {
+            floorObject.gameObject.SetActive(false);
+            return;
+        }
+
+        floorObject.transform.SetParent(null, true);
+
+        if (handTarget != null)
+        {
+            floorObject.MoveTo(handTarget.transform, () => floorObjectPool.Release(floorObject));
         }
         else
         {

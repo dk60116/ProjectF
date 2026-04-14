@@ -1,0 +1,624 @@
+using DG.Tweening;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class CraftingSlot : ItemSlot
+{
+    private static CraftingSlot activeIngredientsSlot;
+    [SerializeField]
+    private float expandDuration = 0.2f;
+
+    [SerializeField]
+    private float collapseDuration = 0.12f;
+
+    [SerializeField]
+    private Ease expandEase = Ease.OutBack;
+
+    [SerializeField]
+    private Ease collapseEase = Ease.InBack;
+
+    [SerializeField]
+    private RectTransform ingredientsRoot;
+
+    [SerializeField, Min(0f)]
+    private float ingredientRevealDelay = 0.04f;
+
+    [SerializeField, Min(0.01f)]
+    private float ingredientRevealDuration = 0.12f;
+
+    [SerializeField]
+    private Ease ingredientRevealEase = Ease.OutBack;
+
+    [SerializeField, Range(0.1f, 1f)]
+    private float insufficientIngredientAlpha = 0.45f;
+
+    private RectTransform rectTransform;
+    private CanvasGroup canvasGroup;
+    private Button button;
+
+    [SerializeField]
+    private List<ItemSlot> IngrdientsSlots;
+    [SerializeField]
+    private Button createButton;
+
+    private bool ingredientsVisible;
+    private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
+
+    private void Awake()
+    {
+        CacheReferences();
+        HideImmediate();
+        HideIngredientsImmediate();
+        BindButton();
+        BindCreateButton();
+    }
+
+    private void OnDisable()
+    {
+        HideIngredientsImmediate();
+    }
+
+    public override void SetItem(int itemId, int itemCount, int maxItemCount = 0)
+    {
+        base.SetItem(itemId, itemCount, maxItemCount);
+        if (ingredientsVisible)
+        {
+            RefreshIngredients();
+        }
+    }
+
+    public void Show(Vector2 startAnchoredPosition, Vector2 targetAnchoredPosition, float delay = 0f)
+    {
+        CacheReferences();
+
+        rectTransform.DOKill();
+        canvasGroup.DOKill();
+
+        rectTransform.anchoredPosition = startAnchoredPosition;
+        rectTransform.localScale = Vector3.zero;
+        canvasGroup.alpha = 1f;
+        rectTransform.DOAnchorPos(targetAnchoredPosition, expandDuration).SetDelay(delay).SetEase(expandEase);
+        rectTransform.DOScale(Vector3.one, expandDuration).SetDelay(delay).SetEase(expandEase);
+        canvasGroup.DOFade(1f, expandDuration * 0.8f).SetDelay(delay).SetEase(Ease.OutQuad);
+        button.interactable = true;
+    }
+
+    public void Hide()
+    {
+        CacheReferences();
+
+        rectTransform.DOKill();
+        canvasGroup.DOKill();
+
+        HideIngredientsImmediate();
+        button.interactable = false;
+        canvasGroup.DOFade(0f, collapseDuration)
+            .SetEase(Ease.OutQuad);
+        rectTransform.DOScale(Vector3.zero, collapseDuration).SetEase(collapseEase);
+    }
+
+    public void HideImmediate()
+    {
+        CacheReferences();
+        rectTransform.DOKill();
+        canvasGroup.DOKill();
+        rectTransform.anchoredPosition = Vector2.zero;
+        rectTransform.localScale = Vector3.zero;
+        canvasGroup.alpha = 0f;
+        button.interactable = false;
+        HideIngredientsImmediate();
+    }
+
+    private void CacheReferences()
+    {
+        if (rectTransform == null)
+        {
+            rectTransform = transform as RectTransform;
+        }
+
+        if (canvasGroup == null)
+        {
+            canvasGroup = GetComponent<CanvasGroup>();
+            if (canvasGroup == null)
+            {
+                canvasGroup = gameObject.AddComponent<CanvasGroup>();
+            }
+        }
+
+        if (button == null)
+        {
+            button = GetComponent<Button>();
+        }
+
+        if (ingredientsRoot == null)
+        {
+            Transform target = transform.Find("Ingredients");
+            ingredientsRoot = target as RectTransform;
+        }
+
+        if (IngrdientsSlots == null || IngrdientsSlots.Count == 0)
+        {
+            if (ingredientsRoot != null)
+            {
+                IngrdientsSlots = new List<ItemSlot>(ingredientsRoot.GetComponentsInChildren<ItemSlot>(true));
+                IngrdientsSlots.Remove(this);
+            }
+        }
+
+        if (IngrdientsSlots != null && IngrdientsSlots.Count > 0)
+        {
+            for (int i = IngrdientsSlots.Count - 1; i >= 0; i--)
+            {
+                if (!IsIngredientSlotCandidate(IngrdientsSlots[i]))
+                {
+                    IngrdientsSlots.RemoveAt(i);
+                }
+            }
+        }
+
+        if (IngrdientsSlots != null && IngrdientsSlots.Count > 1)
+        {
+            IngrdientsSlots.Sort((left, right) =>
+            {
+                if (left == null && right == null)
+                {
+                    return 0;
+                }
+                if (left == null)
+                {
+                    return 1;
+                }
+                if (right == null)
+                {
+                    return -1;
+                }
+
+                return left.transform.GetSiblingIndex().CompareTo(right.transform.GetSiblingIndex());
+            });
+        }
+    }
+
+    private void BindButton()
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.onClick.RemoveListener(ToggleIngredients);
+        button.onClick.AddListener(ToggleIngredients);
+    }
+
+    private void BindCreateButton()
+    {
+        if (createButton == null)
+        {
+            return;
+        }
+
+        createButton.onClick.RemoveListener(HandleCreateClicked);
+        createButton.onClick.AddListener(HandleCreateClicked);
+    }
+
+    private void HandleCreateClicked()
+    {
+        if (!HasItem)
+        {
+            return;
+        }
+
+        if (!TryBuildIngredientBuffer())
+        {
+            return;
+        }
+
+        if (!HasAllIngredients())
+        {
+            RefreshIngredients();
+            return;
+        }
+
+        PlayerHUD hud = FindObjectOfType<PlayerHUD>();
+        if (hud == null || !hud.TryEnqueueCrafting(ItemId))
+        {
+            return;
+        }
+
+        ConsumeIngredients();
+        RefreshIngredients();
+    }
+
+    private void ToggleIngredients()
+    {
+        if (!HasItem)
+        {
+            HideIngredientsImmediate();
+            return;
+        }
+
+        if (ingredientsVisible)
+        {
+            HideIngredientsImmediate();
+            ShowSiblingCraftingSlots();
+        }
+        else
+        {
+            HideSiblingCraftingSlots();
+
+            ShowIngredients();
+            activeIngredientsSlot = this;
+        }
+    }
+
+    private void ShowIngredients()
+    {
+        CacheReferences();
+        if (ingredientsRoot == null)
+        {
+            return;
+        }
+
+        if (!ingredientsRoot.gameObject.activeSelf)
+        {
+            ingredientsRoot.gameObject.SetActive(true);
+        }
+
+        RefreshIngredients();
+        if (!ingredientsVisible)
+        {
+            ingredientsVisible = true;
+        }
+    }
+
+    private void RefreshIngredients()
+    {
+        CacheReferences();
+        if (ingredientsRoot == null)
+        {
+            return;
+        }
+
+        ingredientBuffer.Clear();
+        if (!CraftingTreeRuntime.TryGetIngredients(ItemId, ingredientBuffer))
+        {
+            HideIngredientsImmediate();
+            return;
+        }
+
+        if (IngrdientsSlots == null)
+        {
+            return;
+        }
+
+        bool hasAllIngredients = true;
+        for (int i = 0; i < IngrdientsSlots.Count; i++)
+        {
+            ItemSlot slot = IngrdientsSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            if (i < ingredientBuffer.Count)
+            {
+                CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+                int ownedCount = GetOwnedIngredientCount(entry.itemId);
+                bool hasEnough = ownedCount >= entry.count;
+                if (!hasEnough)
+                {
+                    hasAllIngredients = false;
+                }
+                slot.SetItemDisplay(entry.itemId, ownedCount, entry.count, true);
+                SetIngredientSlotAlpha(slot, hasEnough);
+                if (!slot.gameObject.activeSelf)
+                {
+                    slot.gameObject.SetActive(true);
+                }
+            }
+            else
+            {
+                slot.Clear();
+                SetIngredientSlotAlpha(slot, true);
+                if (slot.gameObject.activeSelf)
+                {
+                    slot.gameObject.SetActive(false);
+                }
+            }
+        }
+
+        if (!ingredientsRoot.gameObject.activeSelf)
+        {
+            ingredientsRoot.gameObject.SetActive(true);
+        }
+
+        SetCreateButtonVisible(hasAllIngredients);
+        AnimateIngredientSlots(ingredientBuffer.Count);
+        ingredientsVisible = true;
+    }
+
+    private bool TryBuildIngredientBuffer()
+    {
+        ingredientBuffer.Clear();
+        return CraftingTreeRuntime.TryGetIngredients(ItemId, ingredientBuffer);
+    }
+
+    private bool HasAllIngredients()
+    {
+        for (int i = 0; i < ingredientBuffer.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            if (GetOwnedIngredientCount(entry.itemId) < entry.count)
+            {
+                return false;
+            }
+        }
+
+        return ingredientBuffer.Count > 0;
+    }
+
+    private void ConsumeIngredients()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance.Player;
+        PlayerBag bag = player.GetBag();
+        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        Vector3 origin = player.transform.position;
+
+        for (int i = 0; i < ingredientBuffer.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            int remaining = Mathf.Max(0, entry.count);
+            if (remaining <= 0)
+            {
+                continue;
+            }
+
+            if (bag != null)
+            {
+                int removed = bag.RemoveItems(entry.itemId, remaining);
+                remaining -= removed;
+            }
+
+            if (remaining > 0 && terrain != null)
+            {
+                terrain.RemoveDroppedItemsAround(origin, entry.itemId, 2, remaining);
+            }
+        }
+    }
+
+    private void HideIngredientsImmediate()
+    {
+        ingredientsVisible = false;
+        if (activeIngredientsSlot == this)
+        {
+            activeIngredientsSlot = null;
+        }
+        if (ingredientsRoot != null)
+        {
+            ingredientsRoot.gameObject.SetActive(false);
+        }
+
+        SetCreateButtonVisible(false);
+
+        if (IngrdientsSlots != null)
+        {
+            for (int i = 0; i < IngrdientsSlots.Count; i++)
+            {
+                ItemSlot slot = IngrdientsSlots[i];
+                if (slot == null)
+                {
+                    continue;
+                }
+
+                RectTransform slotRect = slot.transform as RectTransform;
+                if (slotRect != null)
+                {
+                    slotRect.DOKill();
+                    slotRect.localScale = Vector3.zero;
+                }
+            }
+        }
+    }
+
+    private void AnimateIngredientSlots(int visibleCount)
+    {
+        if (IngrdientsSlots == null || IngrdientsSlots.Count == 0)
+        {
+            return;
+        }
+
+        int safeVisibleCount = Mathf.Max(0, visibleCount);
+        for (int i = 0; i < IngrdientsSlots.Count; i++)
+        {
+            ItemSlot slot = IngrdientsSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            RectTransform slotRect = slot.transform as RectTransform;
+            if (slotRect == null)
+            {
+                continue;
+            }
+
+            slotRect.DOKill();
+
+            if (i < safeVisibleCount)
+            {
+                if (!slot.gameObject.activeSelf)
+                {
+                    slot.gameObject.SetActive(true);
+                }
+
+                slotRect.localScale = Vector3.zero;
+                float delay = i * ingredientRevealDelay;
+                slotRect.DOScale(Vector3.one, ingredientRevealDuration).SetDelay(delay).SetEase(ingredientRevealEase);
+            }
+            else
+            {
+                slotRect.localScale = Vector3.zero;
+            }
+        }
+    }
+
+    private void SetIngredientSlotAlpha(ItemSlot slot, bool hasEnough)
+    {
+        if (slot == null)
+        {
+            return;
+        }
+
+        float targetAlpha = hasEnough ? 1f : Mathf.Clamp01(insufficientIngredientAlpha);
+        slot.SetIconAlpha(targetAlpha);
+    }
+
+    private void HideSiblingCraftingSlots()
+    {
+        if (activeIngredientsSlot != null && activeIngredientsSlot != this)
+        {
+            activeIngredientsSlot.HideIngredientsImmediate();
+        }
+
+        Transform parent = transform.parent;
+        if (parent == null)
+        {
+            return;
+        }
+
+        CraftingSlot[] siblings = parent.GetComponentsInChildren<CraftingSlot>(true);
+        for (int i = 0; i < siblings.Length; i++)
+        {
+            CraftingSlot sibling = siblings[i];
+            if (sibling == null || sibling == this)
+            {
+                continue;
+            }
+
+            sibling.HideIngredientsImmediate();
+            sibling.SetSlotVisual(false);
+        }
+    }
+
+    private void ShowSiblingCraftingSlots()
+    {
+        Transform parent = transform.parent;
+        if (parent == null)
+        {
+            return;
+        }
+
+        CraftingSlot[] siblings = parent.GetComponentsInChildren<CraftingSlot>(true);
+        for (int i = 0; i < siblings.Length; i++)
+        {
+            CraftingSlot sibling = siblings[i];
+            if (sibling == null || sibling == this)
+            {
+                continue;
+            }
+
+            if (sibling.HasItem)
+            {
+                sibling.SetSlotVisual(true);
+            }
+        }
+    }
+
+    private void SetSlotVisual(bool visible)
+    {
+        CacheReferences();
+        if (rectTransform == null || canvasGroup == null)
+        {
+            return;
+        }
+
+        rectTransform.DOKill();
+        canvasGroup.DOKill();
+
+        if (visible)
+        {
+            if (!gameObject.activeSelf)
+            {
+                gameObject.SetActive(true);
+            }
+
+            rectTransform.localScale = Vector3.one;
+            canvasGroup.alpha = 1f;
+            if (button != null)
+            {
+                button.interactable = true;
+            }
+        }
+        else
+        {
+            rectTransform.localScale = Vector3.zero;
+            canvasGroup.alpha = 0f;
+            if (button != null)
+            {
+                button.interactable = false;
+            }
+        }
+    }
+
+    private void SetCreateButtonVisible(bool visible)
+    {
+        if (createButton == null)
+        {
+            return;
+        }
+
+        if (createButton.gameObject.activeSelf != visible)
+        {
+            createButton.gameObject.SetActive(visible);
+        }
+    }
+
+    private int GetOwnedIngredientCount(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return 0;
+        }
+
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        PlayerBag bag = GameManager.Instance.Player.GetBag();
+        if (bag != null)
+        {
+            total += bag.GetTotalItemCount(itemId);
+        }
+
+        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        if (terrain != null)
+        {
+            total += terrain.GetDroppedItemCountAround(GameManager.Instance.Player.transform.position, itemId, 2);
+        }
+
+        return total;
+    }
+
+    private bool IsIngredientSlotCandidate(ItemSlot slot)
+    {
+        if (slot == null || slot == this)
+        {
+            return false;
+        }
+
+        string slotName = slot.gameObject != null ? slot.gameObject.name : string.Empty;
+        if (string.Equals(slotName, "Create", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+}
