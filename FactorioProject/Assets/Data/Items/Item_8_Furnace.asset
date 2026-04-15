@@ -21,5 +21,5 @@ MonoBehaviour:
   size: 0
   energyType: 0
   energyAmount: 0
-  useEnergyType: 0
-  useEnergyAmount: 0
+  useEnergyType: 1
+  useEnergyAmount: 2

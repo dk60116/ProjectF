@@ -21,6 +21,9 @@ public class DroppedItemPickupGate : MonoBehaviour
     [SerializeField, ReadOnly]
     private bool hasOrigin;
 
+    [SerializeField, ReadOnly]
+    private bool autoPickupBlocked;
+
     public void MarkDropped(float radius = 0.5f, bool settled = true, Vector3 origin = default)
     {
         exitRadius = Mathf.Max(0f, radius);
@@ -50,6 +53,11 @@ public class DroppedItemPickupGate : MonoBehaviour
 
     public bool CanPickup(float distanceSqr, float pickupRadiusSqr)
     {
+        if (autoPickupBlocked)
+        {
+            return false;
+        }
+
         if (!requiresExit)
         {
             return true;
@@ -65,6 +73,11 @@ public class DroppedItemPickupGate : MonoBehaviour
 
     public bool CanHandPickup(float distanceSqr, float pickupRadiusSqr)
     {
+        return CanManualPickup(distanceSqr, pickupRadiusSqr);
+    }
+
+    public bool CanManualPickup(float distanceSqr, float pickupRadiusSqr)
+    {
         if (!isSettled)
         {
             return false;
@@ -78,6 +91,11 @@ public class DroppedItemPickupGate : MonoBehaviour
         isSettled = true;
     }
 
+    public void SetAutoPickupBlocked(bool blocked)
+    {
+        autoPickupBlocked = blocked;
+    }
+
     public void ClearGate()
     {
         requiresExit = false;
@@ -85,6 +103,7 @@ public class DroppedItemPickupGate : MonoBehaviour
         isSettled = true;
         hasOrigin = false;
         dropOrigin = Vector3.zero;
+        autoPickupBlocked = false;
     }
 
     private void OnDisable()

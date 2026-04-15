@@ -55,6 +55,40 @@ MonoBehaviour:
     mapSizeX: 1
     mapSizeY: 1
   mapFilter: 1
+  inputList:
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    count: 1
+  outputList:
+  - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
+    count: 1
+  output:
+    itemDefinition: {fileID: 0}
+    count: 1
+  slotLayoutType: 1
+  rectGridWidth: 2
+  rectGridHeight: 2
+  rectGridCells:
+  - x: 0
+    y: 1
+  - x: 1
+    y: 1
+  - x: 0
+    y: 0
+  - x: 1
+    y: 0
+  rectGridPlacements:
+  - x: 0
+    y: 1
+    blockType: 1
+  - x: 1
+    y: 0
+    blockType: 3
+  - x: 1
+    y: 1
+    blockType: 2
+  - x: 0
+    y: 0
+    blockType: 4
 --- !u!65 &7808762303293523754
 BoxCollider:
   m_ObjectHideFlags: 0

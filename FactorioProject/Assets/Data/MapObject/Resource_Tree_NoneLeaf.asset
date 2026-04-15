@@ -16,6 +16,6 @@ MonoBehaviour:
   prefab: {fileID: 5596077993400562758, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
   harvestMode: 2
   defaultResourceCount: 1
-  defaultGetCount: 1
+  defaultGetCount: 4
   defaultMaxGauge: 10
   defaultCurrentGauge: 10

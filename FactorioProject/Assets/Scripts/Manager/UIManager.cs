@@ -7,7 +7,8 @@ public class UIManager : MonoBehaviour
     [SerializeField]
     private PlayerHUD playerHUD;
 
-    public PlayerHUD PlayerHUD => playerHUD;
+    [SerializeField]
+    private Sprite arrowImage;
 
     private void Awake()
     {
@@ -42,4 +43,7 @@ public class UIManager : MonoBehaviour
 
         playerHUD?.Bind(bag);
     }
+
+    public PlayerHUD PlayerHUD => playerHUD;
+    public Sprite ArrowImage => arrowImage;
 }

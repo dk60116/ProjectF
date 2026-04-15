@@ -7,11 +7,37 @@ using UnityEngine;
 public class ItemDataEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 260f;
+    private const float RectGridCellSize = 34f;
+    private const float RectGridCellSpacing = 5f;
+    private const float RectGridPaletteBlockWidth = 78f;
+    private static readonly RectGridPaletteEntry[] RectGridPaletteEntries =
+    {
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.Object, "Object", "Object", new Color(0.35f, 0.45f, 0.62f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.InputEnergy, "Input Energy", "Input\nEnergy", new Color(0.55f, 0.44f, 0.18f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.InputItem, "Input Item", "Input\nItem", new Color(0.23f, 0.48f, 0.32f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.Output, "Output", "Output", new Color(0.48f, 0.28f, 0.28f, 1f))
+    };
 
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedItemId = -1;
     private string itemSearchText = string.Empty;
+
+    private readonly struct RectGridPaletteEntry
+    {
+        public readonly InputOutputModule.RectGridBlockType blockType;
+        public readonly string label;
+        public readonly string displayLabel;
+        public readonly Color color;
+
+        public RectGridPaletteEntry(InputOutputModule.RectGridBlockType blockType, string label, string displayLabel, Color color)
+        {
+            this.blockType = blockType;
+            this.label = label;
+            this.displayLabel = displayLabel;
+            this.color = color;
+        }
+    }
 
     [Serializable]
     private class ItemDataJsonFile
@@ -38,6 +64,38 @@ public class ItemDataEditorWindow : EditorWindow
         public int mapSizeX = -1;
         public int mapSizeY = -1;
         public string mapFilter;
+        public string inputOutputLayoutType;
+        public int rectGridWidth;
+        public int rectGridHeight;
+        public List<RectGridBlockPlacementJsonEntry> rectGridBlocks = new List<RectGridBlockPlacementJsonEntry>();
+        public List<InputOutputPairJsonEntry> ioPairs = new List<InputOutputPairJsonEntry>();
+        public List<InputOutputJsonEntry> inputList = new List<InputOutputJsonEntry>();
+        public List<InputOutputJsonEntry> outputList = new List<InputOutputJsonEntry>();
+        public InputOutputJsonEntry output = null;
+    }
+
+    [Serializable]
+    private class InputOutputJsonEntry
+    {
+        public int id = -1;
+        public string itemName;
+        public string definitionAssetPath;
+        public int count = 1;
+    }
+
+    [Serializable]
+    private class InputOutputPairJsonEntry
+    {
+        public InputOutputJsonEntry input;
+        public InputOutputJsonEntry output;
+    }
+
+    [Serializable]
+    private class RectGridBlockPlacementJsonEntry
+    {
+        public int x;
+        public int y;
+        public string blockType;
     }
 
     [MenuItem("Window/ProjectF/Item Data")]
@@ -120,6 +178,7 @@ public class ItemDataEditorWindow : EditorWindow
             bool isSelected = definition.id == selectedItemId;
             Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
             GUIContent content = new GUIContent($"[{definition.id}] {displayName}", GetItemIcon(definition));
+            ItemDefinitionDragAndDropUtility.HandleListItemDrag(rowRect, definition, content.text, this);
             bool pressed = GUI.Toggle(rowRect, isSelected, content, "Button");
             if (pressed)
             {
@@ -222,7 +281,7 @@ public class ItemDataEditorWindow : EditorWindow
         GUILayout.Space(8f);
 
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
-        DrawSelectedItemFields(selectedDefinition);
+        DrawSelectedItemFields(selectedDefinition, definitions);
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
     }
@@ -259,7 +318,7 @@ public class ItemDataEditorWindow : EditorWindow
         GUILayout.EndHorizontal();
     }
 
-    private void DrawSelectedItemFields(ItemDefinition definition)
+    private void DrawSelectedItemFields(ItemDefinition definition, List<ItemDefinition> definitions)
     {
         SerializedObject serializedObject = new SerializedObject(definition);
         serializedObject.Update();
@@ -291,7 +350,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(portableMatProperty, new GUIContent("Portable Material"));
         EditorGUILayout.PropertyField(iconProperty, new GUIContent("Icon"));
         EditorGUI.EndDisabledGroup();
-        DrawMapObjectFields(mapObjectProperty.objectReferenceValue as MapObject);
+        DrawMapObjectFields(mapObjectProperty.objectReferenceValue as MapObject, definitions);
 
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
@@ -344,7 +403,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private void DrawMapObjectFields(MapObject mapObject)
+    private void DrawMapObjectFields(MapObject mapObject, List<ItemDefinition> definitions)
     {
         if (mapObject == null)
         {
@@ -403,6 +462,11 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
+        if (mapObject is InputOutputModule)
+        {
+            DrawInputOutputModuleFields(mapObjectSerializedObject, definitions);
+        }
+
         if (mapObjectSerializedObject.ApplyModifiedProperties())
         {
             EditorUtility.SetDirty(mapObject);
@@ -413,6 +477,657 @@ public class ItemDataEditorWindow : EditorWindow
             }
             Repaint();
         }
+    }
+
+    private void DrawInputOutputModuleFields(SerializedObject mapObjectSerializedObject, List<ItemDefinition> definitions)
+    {
+        if (mapObjectSerializedObject == null)
+        {
+            return;
+        }
+
+        SerializedProperty inputListProperty = mapObjectSerializedObject.FindProperty("inputList");
+        SerializedProperty outputListProperty = mapObjectSerializedObject.FindProperty("outputList");
+        SerializedProperty legacyOutputProperty = mapObjectSerializedObject.FindProperty("output");
+        if (inputListProperty == null || outputListProperty == null)
+        {
+            return;
+        }
+
+        EnsureInputOutputPairArraySizes(inputListProperty, outputListProperty, legacyOutputProperty);
+
+        EditorGUILayout.Space(6f);
+        EditorGUILayout.LabelField("Input Output Module", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Input / Output Pairs", EditorStyles.miniBoldLabel);
+
+        for (int i = 0; i < inputListProperty.arraySize; i++)
+        {
+            SerializedProperty inputEntryProperty = inputListProperty.GetArrayElementAtIndex(i);
+            SerializedProperty outputEntryProperty = outputListProperty.GetArrayElementAtIndex(i);
+            DrawInputOutputPairRow(inputEntryProperty, outputEntryProperty, definitions, i, () =>
+            {
+                inputListProperty.DeleteArrayElementAtIndex(i);
+                outputListProperty.DeleteArrayElementAtIndex(i);
+            });
+        }
+
+        if (GUILayout.Button("Add Pair", GUILayout.Width(96f)))
+        {
+            int insertIndex = inputListProperty.arraySize;
+            inputListProperty.InsertArrayElementAtIndex(insertIndex);
+            ResetInputOutputEntry(inputListProperty.GetArrayElementAtIndex(insertIndex));
+
+            outputListProperty.InsertArrayElementAtIndex(insertIndex);
+            ResetInputOutputEntry(outputListProperty.GetArrayElementAtIndex(insertIndex));
+        }
+
+        GUILayout.Space(8f);
+        DrawInputOutputRectGridFields(mapObjectSerializedObject);
+    }
+
+    private void DrawInputOutputRectGridFields(SerializedObject mapObjectSerializedObject)
+    {
+        if (mapObjectSerializedObject == null)
+        {
+            return;
+        }
+
+        InputOutputModule inputOutputModule = mapObjectSerializedObject.targetObject as InputOutputModule;
+        if (inputOutputModule == null)
+        {
+            return;
+        }
+
+        SerializedProperty slotLayoutTypeProperty = mapObjectSerializedObject.FindProperty("slotLayoutType");
+        SerializedProperty rectGridWidthProperty = mapObjectSerializedObject.FindProperty("rectGridWidth");
+        SerializedProperty rectGridHeightProperty = mapObjectSerializedObject.FindProperty("rectGridHeight");
+        SerializedProperty rectGridCellsProperty = mapObjectSerializedObject.FindProperty("rectGridCells");
+        if (slotLayoutTypeProperty == null || rectGridWidthProperty == null || rectGridHeightProperty == null || rectGridCellsProperty == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.LabelField("Slot Layout", EditorStyles.miniBoldLabel);
+        EditorGUILayout.PropertyField(slotLayoutTypeProperty, new GUIContent("Layout"));
+
+        InputOutputModule.SlotLayoutType layoutType = (InputOutputModule.SlotLayoutType)slotLayoutTypeProperty.enumValueIndex;
+        if (layoutType != InputOutputModule.SlotLayoutType.RectGrid)
+        {
+            return;
+        }
+
+        Rect rowRect = EditorGUILayout.GetControlRect();
+        Rect fieldRect = EditorGUI.PrefixLabel(rowRect, new GUIContent("RectGrid"));
+        float spacing = 4f;
+        float fieldWidth = 44f;
+        Rect widthRect = new Rect(fieldRect.x, fieldRect.y, fieldWidth, fieldRect.height);
+        Rect multiplyRect = new Rect(widthRect.xMax + spacing, fieldRect.y, 16f, fieldRect.height);
+        Rect heightRect = new Rect(multiplyRect.xMax + spacing, fieldRect.y, fieldWidth, fieldRect.height);
+        rectGridWidthProperty.intValue = Mathf.Max(1, EditorGUI.IntField(widthRect, rectGridWidthProperty.intValue));
+        EditorGUI.LabelField(multiplyRect, "x");
+        rectGridHeightProperty.intValue = Mathf.Max(1, EditorGUI.IntField(heightRect, rectGridHeightProperty.intValue));
+
+        if (GUILayout.Button("Rebuild RectGrid", GUILayout.Width(124f)))
+        {
+            mapObjectSerializedObject.ApplyModifiedProperties();
+            inputOutputModule.ConfigureRectGrid(rectGridWidthProperty.intValue, rectGridHeightProperty.intValue);
+            EditorUtility.SetDirty(inputOutputModule);
+            if (inputOutputModule.gameObject != null)
+            {
+                EditorUtility.SetDirty(inputOutputModule.gameObject);
+            }
+
+            mapObjectSerializedObject.Update();
+        }
+
+        if (mapObjectSerializedObject.ApplyModifiedProperties())
+        {
+            EditorUtility.SetDirty(inputOutputModule);
+            if (inputOutputModule.gameObject != null)
+            {
+                EditorUtility.SetDirty(inputOutputModule.gameObject);
+            }
+        }
+
+        mapObjectSerializedObject.Update();
+        rectGridCellsProperty = mapObjectSerializedObject.FindProperty("rectGridCells");
+        EditorGUILayout.LabelField($"Cells: {rectGridCellsProperty.arraySize}", EditorStyles.miniLabel);
+        DrawRectGridPreview(mapObjectSerializedObject, inputOutputModule, rectGridWidthProperty.intValue, rectGridHeightProperty.intValue);
+    }
+
+    private void DrawRectGridPreview(SerializedObject mapObjectSerializedObject, InputOutputModule inputOutputModule, int width, int height)
+    {
+        width = Mathf.Max(1, width);
+        height = Mathf.Max(1, height);
+
+        float cellSize = RectGridCellSize;
+        float spacing = RectGridCellSpacing;
+        float previewWidth = width * cellSize + Mathf.Max(0, width - 1) * spacing;
+        float previewHeight = height * cellSize + Mathf.Max(0, height - 1) * spacing;
+
+        EditorGUILayout.LabelField("Preview", EditorStyles.miniBoldLabel);
+        Rect previewRect = GUILayoutUtility.GetRect(previewWidth, previewHeight, GUILayout.ExpandWidth(false));
+        EditorGUI.DrawRect(previewRect, new Color(0.15f, 0.15f, 0.15f, 0.85f));
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                float cellX = previewRect.x + x * (cellSize + spacing);
+                float cellY = previewRect.y + y * (cellSize + spacing);
+                Rect cellRect = new Rect(cellX, cellY, cellSize, cellSize);
+                Vector2Int cell = new Vector2Int(x, height - 1 - y);
+                InputOutputModule.RectGridBlockType blockType = inputOutputModule != null
+                    ? inputOutputModule.GetRectGridBlockAt(cell.x, cell.y)
+                    : InputOutputModule.RectGridBlockType.None;
+                EditorGUI.DrawRect(cellRect, new Color(0.28f, 0.28f, 0.28f, 1f));
+                EditorGUI.DrawRect(new Rect(cellRect.x, cellRect.y, cellRect.width, 1f), new Color(0.55f, 0.55f, 0.55f, 1f));
+                EditorGUI.DrawRect(new Rect(cellRect.x, cellRect.yMax - 1f, cellRect.width, 1f), new Color(0.55f, 0.55f, 0.55f, 1f));
+                EditorGUI.DrawRect(new Rect(cellRect.x, cellRect.y, 1f, cellRect.height), new Color(0.55f, 0.55f, 0.55f, 1f));
+                EditorGUI.DrawRect(new Rect(cellRect.xMax - 1f, cellRect.y, 1f, cellRect.height), new Color(0.55f, 0.55f, 0.55f, 1f));
+
+                if (blockType != InputOutputModule.RectGridBlockType.None)
+                {
+                    DrawPlacedRectGridBlock(cellRect, inputOutputModule, blockType, cell);
+                    InputOutputRectGridBlockDragAndDropUtility.HandlePlacedBlockDrag(
+                        cellRect,
+                        blockType,
+                        cell,
+                        GetRectGridBlockLabel(blockType),
+                        this);
+                }
+
+                HandleRectGridCellDrop(mapObjectSerializedObject, inputOutputModule, cellRect, cell);
+            }
+        }
+
+        HandleRectGridRemoveDrop(mapObjectSerializedObject, inputOutputModule, previewRect);
+
+        GUILayout.Space(8f);
+        EditorGUILayout.LabelField("Blocks", EditorStyles.miniBoldLabel);
+        EditorGUILayout.BeginHorizontal();
+        for (int i = 0; i < RectGridPaletteEntries.Length; i++)
+        {
+            DrawRectGridPaletteBlock(RectGridPaletteEntries[i], RectGridPaletteBlockWidth, cellSize);
+            if (i < RectGridPaletteEntries.Length - 1)
+            {
+                GUILayout.Space(spacing);
+            }
+        }
+        GUILayout.FlexibleSpace();
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private void DrawRectGridPaletteBlock(RectGridPaletteEntry entry, float blockWidth, float blockHeight)
+    {
+        Rect blockRect = GUILayoutUtility.GetRect(blockWidth, blockHeight, GUILayout.Width(blockWidth), GUILayout.Height(blockHeight));
+        EditorGUI.DrawRect(blockRect, entry.color);
+        EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.y, blockRect.width, 1f), new Color(1f, 1f, 1f, 0.35f));
+        EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.yMax - 1f, blockRect.width, 1f), new Color(0f, 0f, 0f, 0.35f));
+        EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.y, 1f, blockRect.height), new Color(1f, 1f, 1f, 0.15f));
+        EditorGUI.DrawRect(new Rect(blockRect.xMax - 1f, blockRect.y, 1f, blockRect.height), new Color(0f, 0f, 0f, 0.35f));
+
+        GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            wordWrap = true,
+            fontSize = 9,
+            padding = new RectOffset(2, 2, 1, 1),
+            normal = { textColor = Color.white }
+        };
+        GUI.Label(blockRect, entry.displayLabel, labelStyle);
+        InputOutputRectGridBlockDragAndDropUtility.HandlePaletteBlockDrag(blockRect, entry.blockType, entry.label, this);
+    }
+
+    private void DrawPlacedRectGridBlock(
+        Rect rect,
+        InputOutputModule inputOutputModule,
+        InputOutputModule.RectGridBlockType blockType,
+        Vector2Int cell)
+    {
+        Color fillColor = GetRectGridBlockColor(blockType);
+        Rect insetRect = new Rect(rect.x + 2f, rect.y + 2f, rect.width - 4f, rect.height - 4f);
+        EditorGUI.DrawRect(insetRect, fillColor);
+        EditorGUI.DrawRect(new Rect(insetRect.x, insetRect.y, insetRect.width, 1f), new Color(1f, 1f, 1f, 0.35f));
+        EditorGUI.DrawRect(new Rect(insetRect.x, insetRect.yMax - 1f, insetRect.width, 1f), new Color(0f, 0f, 0f, 0.35f));
+        EditorGUI.DrawRect(new Rect(insetRect.x, insetRect.y, 1f, insetRect.height), new Color(1f, 1f, 1f, 0.15f));
+        EditorGUI.DrawRect(new Rect(insetRect.xMax - 1f, insetRect.y, 1f, insetRect.height), new Color(0f, 0f, 0f, 0.35f));
+
+        GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            wordWrap = true,
+            fontSize = 8,
+            padding = new RectOffset(1, 1, 1, 1),
+            normal = { textColor = Color.white }
+        };
+        GUI.Label(insetRect, GetRectGridBlockDisplayLabel(inputOutputModule, blockType, cell), labelStyle);
+    }
+
+    private void HandleRectGridCellDrop(
+        SerializedObject mapObjectSerializedObject,
+        InputOutputModule inputOutputModule,
+        Rect cellRect,
+        Vector2Int cell)
+    {
+        if (mapObjectSerializedObject == null || inputOutputModule == null
+            || !InputOutputRectGridBlockDragAndDropUtility.TryGetDraggedBlockPayload(out InputOutputRectGridBlockDragPayload payload)
+            || payload == null)
+        {
+            return;
+        }
+
+        Event current = Event.current;
+        if (current == null || !cellRect.Contains(current.mousePosition))
+        {
+            return;
+        }
+
+        switch (current.type)
+        {
+            case EventType.DragUpdated:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                current.Use();
+                break;
+
+            case EventType.DragPerform:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                DragAndDrop.AcceptDrag();
+                Undo.RecordObject(inputOutputModule, "Edit RectGrid Block");
+                if (payload.hasSourceCell)
+                {
+                    inputOutputModule.MoveOrSwapRectGridBlock(payload.SourceCell, cell);
+                }
+                else
+                {
+                    inputOutputModule.SetRectGridBlock(cell.x, cell.y, payload.blockType);
+                }
+
+                MarkRectGridObjectDirty(mapObjectSerializedObject, inputOutputModule);
+                current.Use();
+                break;
+
+            case EventType.Repaint:
+                DrawRectGridDropHighlight(cellRect);
+                break;
+        }
+    }
+
+    private void HandleRectGridRemoveDrop(SerializedObject mapObjectSerializedObject, InputOutputModule inputOutputModule, Rect previewRect)
+    {
+        if (mapObjectSerializedObject == null || inputOutputModule == null
+            || !InputOutputRectGridBlockDragAndDropUtility.TryGetDraggedBlockPayload(out InputOutputRectGridBlockDragPayload payload)
+            || payload == null
+            || !payload.hasSourceCell)
+        {
+            return;
+        }
+
+        Event current = Event.current;
+        if (current == null || previewRect.Contains(current.mousePosition))
+        {
+            return;
+        }
+
+        switch (current.type)
+        {
+            case EventType.DragUpdated:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                current.Use();
+                break;
+
+            case EventType.DragPerform:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                DragAndDrop.AcceptDrag();
+                Undo.RecordObject(inputOutputModule, "Remove RectGrid Block");
+                inputOutputModule.RemoveRectGridBlockAt(payload.SourceCell.x, payload.SourceCell.y);
+                MarkRectGridObjectDirty(mapObjectSerializedObject, inputOutputModule);
+                current.Use();
+                break;
+        }
+    }
+
+    private void MarkRectGridObjectDirty(SerializedObject mapObjectSerializedObject, InputOutputModule inputOutputModule)
+    {
+        if (inputOutputModule == null)
+        {
+            return;
+        }
+
+        EditorUtility.SetDirty(inputOutputModule);
+        if (inputOutputModule.gameObject != null)
+        {
+            EditorUtility.SetDirty(inputOutputModule.gameObject);
+        }
+
+        mapObjectSerializedObject?.Update();
+        Repaint();
+    }
+
+    private static string GetRectGridBlockLabel(InputOutputModule.RectGridBlockType blockType)
+    {
+        RectGridPaletteEntry entry = GetRectGridPaletteEntry(blockType);
+        return string.IsNullOrWhiteSpace(entry.label) ? blockType.ToString() : entry.label;
+    }
+
+    private static string GetRectGridBlockDisplayLabel(
+        InputOutputModule inputOutputModule,
+        InputOutputModule.RectGridBlockType blockType,
+        Vector2Int cell)
+    {
+        if (blockType == InputOutputModule.RectGridBlockType.InputItem)
+        {
+            int numberedIndex = GetInputItemBlockIndex(inputOutputModule, cell);
+            return numberedIndex > 0
+                ? $"Input\n{numberedIndex}"
+                : "Input";
+        }
+
+        RectGridPaletteEntry entry = GetRectGridPaletteEntry(blockType);
+        return string.IsNullOrWhiteSpace(entry.displayLabel) ? blockType.ToString() : entry.displayLabel;
+    }
+
+    private static int GetInputItemBlockIndex(InputOutputModule inputOutputModule, Vector2Int cell)
+    {
+        if (inputOutputModule == null)
+        {
+            return -1;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        int index = 1;
+        bool found = false;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.InputItem)
+            {
+                continue;
+            }
+
+            if (placement.x == cell.x && placement.y == cell.y)
+            {
+                found = true;
+                continue;
+            }
+
+            if (placement.y > cell.y || (placement.y == cell.y && placement.x < cell.x))
+            {
+                index++;
+            }
+        }
+
+        return found ? index : -1;
+    }
+
+    private static Color GetRectGridBlockColor(InputOutputModule.RectGridBlockType blockType)
+    {
+        RectGridPaletteEntry entry = GetRectGridPaletteEntry(blockType);
+        return entry.color.a > 0f ? entry.color : new Color(0.35f, 0.35f, 0.35f, 1f);
+    }
+
+    private static RectGridPaletteEntry GetRectGridPaletteEntry(InputOutputModule.RectGridBlockType blockType)
+    {
+        for (int i = 0; i < RectGridPaletteEntries.Length; i++)
+        {
+            if (RectGridPaletteEntries[i].blockType == blockType)
+            {
+                return RectGridPaletteEntries[i];
+            }
+        }
+
+        return default;
+    }
+
+    private static void DrawRectGridDropHighlight(Rect rect)
+    {
+        EditorGUI.DrawRect(rect, new Color(0.35f, 0.65f, 1f, 0.16f));
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, rect.width, 1f), new Color(0.35f, 0.65f, 1f, 0.95f));
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMax - 1f, rect.width, 1f), new Color(0.35f, 0.65f, 1f, 0.95f));
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, 1f, rect.height), new Color(0.35f, 0.65f, 1f, 0.95f));
+        EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.yMin, 1f, rect.height), new Color(0.35f, 0.65f, 1f, 0.95f));
+    }
+
+    private void DrawInputOutputPairRow(
+        SerializedProperty inputEntryProperty,
+        SerializedProperty outputEntryProperty,
+        List<ItemDefinition> definitions,
+        int pairIndex,
+        Action removeAction)
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField($"Pair {pairIndex + 1}", EditorStyles.miniBoldLabel);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("X", GUILayout.Width(24f)) && removeAction != null)
+        {
+            removeAction.Invoke();
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+            return;
+        }
+
+        EditorGUILayout.EndHorizontal();
+        DrawInputOutputEntryFields(inputEntryProperty, definitions, "Input");
+        GUILayout.Space(4f);
+        DrawInputOutputEntryFields(outputEntryProperty, definitions, "Output");
+        EditorGUILayout.EndVertical();
+    }
+
+    private void DrawInputOutputEntryFields(
+        SerializedProperty entryProperty,
+        List<ItemDefinition> definitions,
+        string label)
+    {
+        if (entryProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty itemDefinitionProperty = entryProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty countProperty = entryProperty.FindPropertyRelative("count");
+        if (itemDefinitionProperty == null || countProperty == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel(label);
+
+        ItemDefinition currentDefinition = itemDefinitionProperty.objectReferenceValue as ItemDefinition;
+        ItemDefinition[] dropdownDefinitions = BuildInputOutputDefinitionOptions(definitions);
+        GUIContent[] dropdownOptions = BuildInputOutputDefinitionOptionContents(dropdownDefinitions);
+        int currentIndex = GetInputOutputDefinitionOptionIndex(currentDefinition, dropdownDefinitions);
+        Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
+        int nextIndex = EditorGUI.Popup(popupRect, currentIndex, dropdownOptions);
+        ItemDefinition nextDefinition = nextIndex > 0 && nextIndex < dropdownDefinitions.Length
+            ? dropdownDefinitions[nextIndex]
+            : null;
+        if (ItemDefinitionDragAndDropUtility.HandleDropTarget(popupRect, this, out ItemDefinition droppedDefinition))
+        {
+            nextDefinition = droppedDefinition;
+        }
+
+        if (nextDefinition != currentDefinition)
+        {
+            itemDefinitionProperty.objectReferenceValue = nextDefinition;
+            currentDefinition = nextDefinition;
+        }
+
+        EditorGUILayout.EndHorizontal();
+
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Space(EditorGUIUtility.labelWidth);
+        int nextCount = EditorGUILayout.IntField("Count", Mathf.Max(1, countProperty.intValue));
+        countProperty.intValue = Mathf.Max(1, nextCount);
+        EditorGUILayout.EndHorizontal();
+
+        if (currentDefinition != null)
+        {
+            DrawReferencedItemPreview(currentDefinition);
+        }
+    }
+
+    private void DrawReferencedItemPreview(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Space(EditorGUIUtility.labelWidth);
+
+        Texture icon = GetItemIcon(definition);
+        Rect iconRect = GUILayoutUtility.GetRect(24f, 24f, GUILayout.Width(24f), GUILayout.Height(24f));
+        DrawIconBackground(iconRect);
+        if (icon != null)
+        {
+            GUI.DrawTexture(iconRect, icon, ScaleMode.ScaleToFit);
+        }
+
+        EditorGUILayout.LabelField($"[{definition.id}] {GetDefinitionDisplayName(definition)}", EditorStyles.miniLabel);
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private static void ResetInputOutputEntry(SerializedProperty entryProperty)
+    {
+        if (entryProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty itemDefinitionProperty = entryProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty countProperty = entryProperty.FindPropertyRelative("count");
+        if (itemDefinitionProperty != null)
+        {
+            itemDefinitionProperty.objectReferenceValue = null;
+        }
+
+        if (countProperty != null)
+        {
+            countProperty.intValue = 1;
+        }
+    }
+
+    private static void EnsureInputOutputPairArraySizes(
+        SerializedProperty inputListProperty,
+        SerializedProperty outputListProperty,
+        SerializedProperty legacyOutputProperty)
+    {
+        if (inputListProperty == null || outputListProperty == null)
+        {
+            return;
+        }
+
+        bool shouldMigrateLegacyOutput = outputListProperty.arraySize == 0
+            && inputListProperty.arraySize > 0
+            && legacyOutputProperty != null;
+
+        while (outputListProperty.arraySize < inputListProperty.arraySize)
+        {
+            int insertIndex = outputListProperty.arraySize;
+            outputListProperty.InsertArrayElementAtIndex(insertIndex);
+            SerializedProperty insertedProperty = outputListProperty.GetArrayElementAtIndex(insertIndex);
+
+            if (shouldMigrateLegacyOutput)
+            {
+                CopyInputOutputEntry(legacyOutputProperty, insertedProperty);
+            }
+            else
+            {
+                ResetInputOutputEntry(insertedProperty);
+            }
+        }
+
+        while (outputListProperty.arraySize > inputListProperty.arraySize)
+        {
+            outputListProperty.DeleteArrayElementAtIndex(outputListProperty.arraySize - 1);
+        }
+
+        if (shouldMigrateLegacyOutput)
+        {
+            ResetInputOutputEntry(legacyOutputProperty);
+        }
+    }
+
+    private static void CopyInputOutputEntry(SerializedProperty sourceProperty, SerializedProperty targetProperty)
+    {
+        if (sourceProperty == null || targetProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty sourceDefinitionProperty = sourceProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty sourceCountProperty = sourceProperty.FindPropertyRelative("count");
+        SerializedProperty targetDefinitionProperty = targetProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty targetCountProperty = targetProperty.FindPropertyRelative("count");
+        if (sourceDefinitionProperty == null || sourceCountProperty == null || targetDefinitionProperty == null || targetCountProperty == null)
+        {
+            return;
+        }
+
+        targetDefinitionProperty.objectReferenceValue = sourceDefinitionProperty.objectReferenceValue;
+        targetCountProperty.intValue = Mathf.Max(1, sourceCountProperty.intValue);
+    }
+
+    private static ItemDefinition[] BuildInputOutputDefinitionOptions(List<ItemDefinition> definitions)
+    {
+        int optionCount = definitions != null ? definitions.Count : 0;
+        ItemDefinition[] results = new ItemDefinition[optionCount + 1];
+        results[0] = null;
+
+        if (definitions == null)
+        {
+            return results;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            results[i + 1] = definitions[i];
+        }
+
+        return results;
+    }
+
+    private static GUIContent[] BuildInputOutputDefinitionOptionContents(ItemDefinition[] definitions)
+    {
+        if (definitions == null || definitions.Length == 0)
+        {
+            return new[] { new GUIContent("(None)") };
+        }
+
+        GUIContent[] contents = new GUIContent[definitions.Length];
+        contents[0] = new GUIContent("(None)");
+
+        for (int i = 1; i < definitions.Length; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            string label = definition != null
+                ? $"[{definition.id}] {GetDefinitionDisplayName(definition)}"
+                : "(None)";
+            contents[i] = new GUIContent(label, GetItemIcon(definition));
+        }
+
+        return contents;
+    }
+
+    private static int GetInputOutputDefinitionOptionIndex(ItemDefinition currentDefinition, ItemDefinition[] options)
+    {
+        if (currentDefinition == null || options == null)
+        {
+            return 0;
+        }
+
+        for (int i = 1; i < options.Length; i++)
+        {
+            if (options[i] == currentDefinition)
+            {
+                return i;
+            }
+        }
+
+        return 0;
     }
 
     private void SaveItemData()
@@ -526,7 +1241,7 @@ public class ItemDataEditorWindow : EditorWindow
                 continue;
             }
 
-            ApplyJsonEntry(definition, entries[i]);
+            ApplyJsonEntry(definition, entries[i], definitions);
             appliedCount++;
         }
 
@@ -584,9 +1299,55 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 entry.mapFilter = installationObject.MapFilter.ToString();
             }
+
+            if (definition.mapObject is InputOutputModule inputOutputModule)
+            {
+                entry.inputOutputLayoutType = inputOutputModule.LayoutType.ToString();
+                entry.rectGridWidth = inputOutputModule.RectGridWidth;
+                entry.rectGridHeight = inputOutputModule.RectGridHeight;
+                IReadOnlyList<InputOutputModule.RectGridBlockPlacement> rectGridPlacements = inputOutputModule.RectGridPlacements;
+                for (int i = 0; i < rectGridPlacements.Count; i++)
+                {
+                    entry.rectGridBlocks.Add(BuildRectGridBlockPlacementJsonEntry(rectGridPlacements[i]));
+                }
+
+                IReadOnlyList<InputOutputModule.ItemIoEntry> inputs = inputOutputModule.InputList;
+                IReadOnlyList<InputOutputModule.ItemIoEntry> outputs = inputOutputModule.OutputList;
+                int pairCount = Mathf.Min(inputs.Count, outputs.Count);
+                for (int i = 0; i < pairCount; i++)
+                {
+                    entry.ioPairs.Add(new InputOutputPairJsonEntry
+                    {
+                        input = BuildInputOutputJsonEntry(inputs[i]),
+                        output = BuildInputOutputJsonEntry(outputs[i])
+                    });
+                }
+            }
         }
 
         return entry;
+    }
+
+    private static RectGridBlockPlacementJsonEntry BuildRectGridBlockPlacementJsonEntry(InputOutputModule.RectGridBlockPlacement placement)
+    {
+        return new RectGridBlockPlacementJsonEntry
+        {
+            x = placement.x,
+            y = placement.y,
+            blockType = placement.blockType.ToString()
+        };
+    }
+
+    private static InputOutputJsonEntry BuildInputOutputJsonEntry(InputOutputModule.ItemIoEntry entry)
+    {
+        ItemDefinition definition = entry.itemDefinition;
+        return new InputOutputJsonEntry
+        {
+            id = definition != null ? definition.id : -1,
+            itemName = definition != null ? definition.itemName : string.Empty,
+            definitionAssetPath = definition != null ? AssetDatabase.GetAssetPath(definition) : string.Empty,
+            count = Mathf.Max(1, entry.count)
+        };
     }
 
     private static List<ItemDataJsonEntry> GetJsonEntries(ItemDataJsonFile file)
@@ -656,7 +1417,7 @@ public class ItemDataEditorWindow : EditorWindow
         return null;
     }
 
-    private static void ApplyJsonEntry(ItemDefinition definition, ItemDataJsonEntry entry)
+    private static void ApplyJsonEntry(ItemDefinition definition, ItemDataJsonEntry entry, List<ItemDefinition> definitions)
     {
         if (definition == null || entry == null)
         {
@@ -704,11 +1465,11 @@ public class ItemDataEditorWindow : EditorWindow
             definition.mapObject = mapObject;
         }
 
-        ApplyMapObjectJson(definition.mapObject, entry, definition);
+        ApplyMapObjectJson(definition.mapObject, entry, definition, definitions);
         EditorUtility.SetDirty(definition);
     }
 
-    private static void ApplyMapObjectJson(MapObject mapObject, ItemDataJsonEntry entry, ItemDefinition definition)
+    private static void ApplyMapObjectJson(MapObject mapObject, ItemDataJsonEntry entry, ItemDefinition definition, List<ItemDefinition> definitions)
     {
         if (mapObject == null || entry == null)
         {
@@ -758,6 +1519,11 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
+        if (mapObject is InputOutputModule)
+        {
+            ApplyInputOutputModuleJson(serializedMapObject, entry, definitions);
+        }
+
         if (serializedMapObject.ApplyModifiedPropertiesWithoutUndo())
         {
             EditorUtility.SetDirty(mapObject);
@@ -778,6 +1544,233 @@ public class ItemDataEditorWindow : EditorWindow
         return Enum.TryParse(rawValue, true, out ItemDefinition.EnergyType parsedType)
             ? parsedType
             : fallback;
+    }
+
+    private static void ApplyInputOutputModuleJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry, List<ItemDefinition> definitions)
+    {
+        if (serializedMapObject == null || entry == null)
+        {
+            return;
+        }
+
+        SerializedProperty slotLayoutTypeProperty = serializedMapObject.FindProperty("slotLayoutType");
+        SerializedProperty rectGridWidthProperty = serializedMapObject.FindProperty("rectGridWidth");
+        SerializedProperty rectGridHeightProperty = serializedMapObject.FindProperty("rectGridHeight");
+        if (slotLayoutTypeProperty != null && !string.IsNullOrWhiteSpace(entry.inputOutputLayoutType)
+            && Enum.TryParse(entry.inputOutputLayoutType, true, out InputOutputModule.SlotLayoutType parsedLayoutType))
+        {
+            slotLayoutTypeProperty.enumValueIndex = (int)parsedLayoutType;
+        }
+
+        if (rectGridWidthProperty != null && entry.rectGridWidth > 0)
+        {
+            rectGridWidthProperty.intValue = Mathf.Max(1, entry.rectGridWidth);
+        }
+
+        if (rectGridHeightProperty != null && entry.rectGridHeight > 0)
+        {
+            rectGridHeightProperty.intValue = Mathf.Max(1, entry.rectGridHeight);
+        }
+
+        SerializedProperty inputListProperty = serializedMapObject.FindProperty("inputList");
+        SerializedProperty outputListProperty = serializedMapObject.FindProperty("outputList");
+        SerializedProperty legacyOutputProperty = serializedMapObject.FindProperty("output");
+        SerializedProperty rectGridPlacementsProperty = serializedMapObject.FindProperty("rectGridPlacements");
+        if (inputListProperty != null)
+        {
+            inputListProperty.ClearArray();
+        }
+
+        if (outputListProperty != null)
+        {
+            outputListProperty.ClearArray();
+        }
+
+        if (entry.ioPairs != null && entry.ioPairs.Count > 0)
+        {
+            for (int i = 0; i < entry.ioPairs.Count; i++)
+            {
+                ApplyInputOutputPairJson(inputListProperty, outputListProperty, entry.ioPairs[i], definitions);
+            }
+        }
+        else if (entry.inputList != null)
+        {
+            for (int i = 0; i < entry.inputList.Count; i++)
+            {
+                InputOutputJsonEntry inputEntry = entry.inputList[i];
+                InputOutputJsonEntry outputEntry = GetLegacyOutputEntry(entry, i);
+
+                if (inputListProperty != null)
+                {
+                    int inputIndex = inputListProperty.arraySize;
+                    inputListProperty.InsertArrayElementAtIndex(inputIndex);
+                    ApplyInputOutputEntryJson(inputListProperty.GetArrayElementAtIndex(inputIndex), inputEntry, definitions);
+                }
+
+                if (outputListProperty != null)
+                {
+                    int outputIndex = outputListProperty.arraySize;
+                    outputListProperty.InsertArrayElementAtIndex(outputIndex);
+                    ApplyInputOutputEntryJson(outputListProperty.GetArrayElementAtIndex(outputIndex), outputEntry, definitions);
+                }
+            }
+        }
+
+        if (legacyOutputProperty != null)
+        {
+            ResetInputOutputEntry(legacyOutputProperty);
+        }
+
+        if (rectGridPlacementsProperty != null)
+        {
+            rectGridPlacementsProperty.ClearArray();
+            if (entry.rectGridBlocks != null)
+            {
+                for (int i = 0; i < entry.rectGridBlocks.Count; i++)
+                {
+                    ApplyRectGridBlockPlacementJson(rectGridPlacementsProperty, entry.rectGridBlocks[i]);
+                }
+            }
+        }
+    }
+
+    private static void ApplyRectGridBlockPlacementJson(SerializedProperty rectGridPlacementsProperty, RectGridBlockPlacementJsonEntry entry)
+    {
+        if (rectGridPlacementsProperty == null || entry == null || string.IsNullOrWhiteSpace(entry.blockType)
+            || !Enum.TryParse(entry.blockType, true, out InputOutputModule.RectGridBlockType parsedBlockType)
+            || parsedBlockType == InputOutputModule.RectGridBlockType.None)
+        {
+            return;
+        }
+
+        int insertIndex = rectGridPlacementsProperty.arraySize;
+        rectGridPlacementsProperty.InsertArrayElementAtIndex(insertIndex);
+        SerializedProperty placementProperty = rectGridPlacementsProperty.GetArrayElementAtIndex(insertIndex);
+        SerializedProperty xProperty = placementProperty.FindPropertyRelative("x");
+        SerializedProperty yProperty = placementProperty.FindPropertyRelative("y");
+        SerializedProperty blockTypeProperty = placementProperty.FindPropertyRelative("blockType");
+        if (xProperty != null)
+        {
+            xProperty.intValue = Mathf.Max(0, entry.x);
+        }
+
+        if (yProperty != null)
+        {
+            yProperty.intValue = Mathf.Max(0, entry.y);
+        }
+
+        if (blockTypeProperty != null)
+        {
+            blockTypeProperty.enumValueIndex = (int)parsedBlockType;
+        }
+    }
+
+    private static void ApplyInputOutputPairJson(
+        SerializedProperty inputListProperty,
+        SerializedProperty outputListProperty,
+        InputOutputPairJsonEntry pairEntry,
+        List<ItemDefinition> definitions)
+    {
+        if (pairEntry == null)
+        {
+            return;
+        }
+
+        if (inputListProperty != null)
+        {
+            int inputIndex = inputListProperty.arraySize;
+            inputListProperty.InsertArrayElementAtIndex(inputIndex);
+            ApplyInputOutputEntryJson(inputListProperty.GetArrayElementAtIndex(inputIndex), pairEntry.input, definitions);
+        }
+
+        if (outputListProperty != null)
+        {
+            int outputIndex = outputListProperty.arraySize;
+            outputListProperty.InsertArrayElementAtIndex(outputIndex);
+            ApplyInputOutputEntryJson(outputListProperty.GetArrayElementAtIndex(outputIndex), pairEntry.output, definitions);
+        }
+    }
+
+    private static InputOutputJsonEntry GetLegacyOutputEntry(ItemDataJsonEntry entry, int index)
+    {
+        if (entry == null)
+        {
+            return null;
+        }
+
+        if (entry.outputList != null && index >= 0 && index < entry.outputList.Count)
+        {
+            return entry.outputList[index];
+        }
+
+        return entry.output;
+    }
+
+    private static void ApplyInputOutputEntryJson(SerializedProperty entryProperty, InputOutputJsonEntry entry, List<ItemDefinition> definitions)
+    {
+        if (entryProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty itemDefinitionProperty = entryProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty countProperty = entryProperty.FindPropertyRelative("count");
+        if (itemDefinitionProperty == null || countProperty == null)
+        {
+            return;
+        }
+
+        if (entry == null)
+        {
+            itemDefinitionProperty.objectReferenceValue = null;
+            countProperty.intValue = 1;
+            return;
+        }
+
+        itemDefinitionProperty.objectReferenceValue = ResolveDefinitionReference(definitions, entry.definitionAssetPath, entry.id, entry.itemName);
+        countProperty.intValue = Mathf.Max(1, entry.count);
+    }
+
+    private static ItemDefinition ResolveDefinitionReference(List<ItemDefinition> definitions, string definitionAssetPath, int id, string itemName)
+    {
+        if (!string.IsNullOrWhiteSpace(definitionAssetPath))
+        {
+            ItemDefinition assetMatch = AssetDatabase.LoadAssetAtPath<ItemDefinition>(definitionAssetPath);
+            if (assetMatch != null)
+            {
+                return assetMatch;
+            }
+        }
+
+        if (definitions != null && id >= 0)
+        {
+            ItemDefinition idMatch = FindDefinitionById(definitions, id);
+            if (idMatch != null)
+            {
+                return idMatch;
+            }
+        }
+
+        if (definitions != null && !string.IsNullOrWhiteSpace(itemName))
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition candidate = definitions[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(candidate.itemName, itemName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.name, itemName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(GetDefinitionDisplayName(candidate), itemName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static T LoadAssetAtPath<T>(string assetPath) where T : UnityEngine.Object

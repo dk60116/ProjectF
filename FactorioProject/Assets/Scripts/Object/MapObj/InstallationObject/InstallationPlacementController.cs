@@ -37,6 +37,7 @@ public class InstallationPlacementController : MonoBehaviour
     private Quaternion activeInstallBaseRotation = Quaternion.identity;
     private Camera installPreviewCamera;
     private TerrainGenerator installPreviewTerrain;
+    private AreaMarkerPool areaMarkerPool;
     private MaterialPropertyBlock installPreviewPropertyBlock;
     private bool waitForPointerReleaseAfterPreviewSpawn;
     private bool isPreviewPointerTracking;
@@ -53,7 +54,6 @@ public class InstallationPlacementController : MonoBehaviour
     private float installGridRefreshTimer;
     private Vector2Int installGridMinCoordinate;
     private Vector2Int installGridMaxCoordinate;
-    private bool hasInstallGridBounds;
     private readonly List<MapObject> installPreviewInstances = new List<MapObject>();
     private readonly Dictionary<MapObject, int> installPreviewQuarterTurnsByPreview = new Dictionary<MapObject, int>();
     private readonly Dictionary<MapObject, Vector2Int> installPreviewAnchorCoordinates = new Dictionary<MapObject, Vector2Int>();
@@ -437,6 +437,9 @@ public class InstallationPlacementController : MonoBehaviour
                 footprintBlocks[blockIndex].SetMapObject(installedObject);
             }
 
+            ConfigureInstalledInputOutputMarkers(installedObject, anchorBlock.Coordinate, quarterTurns);
+            ConfigureInstalledInputOutputEnergyAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
+
             placedCount++;
         }
 
@@ -450,6 +453,336 @@ public class InstallationPlacementController : MonoBehaviour
         ClearInstallPreview();
     }
 
+    private void ConfigureInstalledInputOutputMarkers(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (!TryGetInputOutputModule(installedObject, out _))
+        {
+            return;
+        }
+
+        List<AreaMarkerSpawnRequest> markerRequests = new List<AreaMarkerSpawnRequest>();
+        List<Vector3> primaryObjectWorldPositions = GetRectGridBlockWorldPositions(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.Object);
+        Vector3 primaryObjectWorldPosition = primaryObjectWorldPositions.Count > 0
+            ? primaryObjectWorldPositions[0]
+            : installedObject.transform.position;
+        Sprite arrowIcon = ResolveArrowMarkerIcon();
+
+        List<Vector3> inputEnergyWorldPositions = GetRectGridBlockWorldPositions(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.InputEnergy);
+        AddAreaMarkerRequests(
+            markerRequests,
+            inputEnergyWorldPositions,
+            ResolveInputEnergyMarkerIcon(installedObject));
+
+        List<Vector3> inputItemWorldPositions = GetRectGridBlockWorldPositions(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.InputItem);
+        AddDirectionalAreaMarkerRequests(
+            markerRequests,
+            inputItemWorldPositions,
+            arrowIcon,
+            primaryObjectWorldPosition,
+            false);
+
+        List<Vector3> outputWorldPositions = GetRectGridBlockWorldPositions(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.Output);
+        AddDirectionalAreaMarkerRequests(
+            markerRequests,
+            outputWorldPositions,
+            arrowIcon,
+            primaryObjectWorldPosition,
+            true);
+
+        if (markerRequests.Count <= 0)
+        {
+            return;
+        }
+
+        AreaMarkerPool pool = ResolveAreaMarkerPool();
+        if (pool == null)
+        {
+            return;
+        }
+
+        InputOutputModuleAreaMarkerController markerController = installedObject.GetComponent<InputOutputModuleAreaMarkerController>();
+        if (markerController == null)
+        {
+            markerController = installedObject.gameObject.AddComponent<InputOutputModuleAreaMarkerController>();
+        }
+
+        markerController.Configure(pool, markerRequests);
+    }
+
+    private void ConfigureInstalledInputOutputEnergyAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (!TryGetInputOutputModule(installedObject, out _))
+        {
+            return;
+        }
+
+        ItemDefinition installationDefinition = ResolveItemDefinition(installedObject);
+        if (installationDefinition == null || installationDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        {
+            return;
+        }
+
+        if (!TryGetRectGridBlockCoordinates(
+                anchorCoordinate,
+                installedObject,
+                quarterTurns,
+                InputOutputModule.RectGridBlockType.InputEnergy,
+                out List<Vector2Int> inputEnergyCoordinates)
+            || inputEnergyCoordinates == null
+            || inputEnergyCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        InputOutputModuleEnergyAreaController energyAreaController = installedObject.GetComponent<InputOutputModuleEnergyAreaController>();
+        if (energyAreaController == null)
+        {
+            energyAreaController = installedObject.gameObject.AddComponent<InputOutputModuleEnergyAreaController>();
+        }
+
+        energyAreaController.Configure(installationDefinition.useEnergyType, inputEnergyCoordinates);
+    }
+
+    private static void AddAreaMarkerRequests(List<AreaMarkerSpawnRequest> markerRequests, IReadOnlyList<Vector3> worldPositions, Sprite icon)
+    {
+        if (markerRequests == null || worldPositions == null || worldPositions.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < worldPositions.Count; i++)
+        {
+            markerRequests.Add(new AreaMarkerSpawnRequest(worldPositions[i], icon));
+        }
+    }
+
+    private static void AddDirectionalAreaMarkerRequests(
+        List<AreaMarkerSpawnRequest> markerRequests,
+        IReadOnlyList<Vector3> worldPositions,
+        Sprite icon,
+        Vector3 referenceWorldPosition,
+        bool pointFromReferenceToMarker)
+    {
+        if (markerRequests == null || worldPositions == null || worldPositions.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < worldPositions.Count; i++)
+        {
+            Vector3 markerWorldPosition = worldPositions[i];
+            float iconRotationZ = pointFromReferenceToMarker
+                ? GetArrowMarkerRotationZ(referenceWorldPosition, markerWorldPosition)
+                : GetArrowMarkerRotationZ(markerWorldPosition, referenceWorldPosition);
+            markerRequests.Add(new AreaMarkerSpawnRequest(markerWorldPosition, icon, iconRotationZ));
+        }
+    }
+
+    private AreaMarkerPool ResolveAreaMarkerPool()
+    {
+        if (areaMarkerPool != null)
+        {
+            return areaMarkerPool;
+        }
+
+        areaMarkerPool = GetComponent<AreaMarkerPool>();
+        if (areaMarkerPool == null)
+        {
+            areaMarkerPool = gameObject.AddComponent<AreaMarkerPool>();
+        }
+
+        return areaMarkerPool;
+    }
+
+    private Sprite ResolveArrowMarkerIcon()
+    {
+        return UIManager.Instance != null ? UIManager.Instance.ArrowImage : null;
+    }
+
+    private Sprite ResolveInputEnergyMarkerIcon(MapObject installedObject)
+    {
+        ItemDefinition installationDefinition = ResolveItemDefinition(installedObject);
+        if (installationDefinition == null || installationDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        if (definitions == null || definitions.Count <= 0)
+        {
+            return null;
+        }
+
+        ItemDefinition bestDefinition = null;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition candidate = definitions[i];
+            if (candidate == null
+                || candidate.energyType != installationDefinition.useEnergyType
+                || candidate.energyAmount <= 0)
+            {
+                continue;
+            }
+
+            if (bestDefinition == null || candidate.id < bestDefinition.id)
+            {
+                bestDefinition = candidate;
+            }
+        }
+
+        return bestDefinition != null ? bestDefinition.icon : null;
+    }
+
+    private static float GetArrowMarkerRotationZ(Vector3 fromWorldPosition, Vector3 toWorldPosition)
+    {
+        Vector2 direction = new Vector2(
+            toWorldPosition.x - fromWorldPosition.x,
+            toWorldPosition.z - fromWorldPosition.z);
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        return -Mathf.Atan2(direction.x, direction.y) * Mathf.Rad2Deg;
+    }
+
+    private ItemDefinition ResolveItemDefinition(MapObject mapObject)
+    {
+        int itemId = mapObject != null ? mapObject.ResolveItemId() : -1;
+        if (itemId < 0)
+        {
+            return activeInstallDefinition;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        if (definitions != null)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition != null && definition.id == itemId)
+                {
+                    return definition;
+                }
+            }
+        }
+
+        return activeInstallDefinition != null && activeInstallDefinition.id == itemId
+            ? activeInstallDefinition
+            : null;
+    }
+
+    private bool TryGetInputOutputModule(MapObject footprintSource, out InputOutputModule inputOutputModule)
+    {
+        inputOutputModule = footprintSource as InputOutputModule;
+        if (inputOutputModule == null && footprintSource != null)
+        {
+            inputOutputModule = footprintSource.GetComponent<InputOutputModule>();
+        }
+
+        if (inputOutputModule == null && footprintSource != null)
+        {
+            inputOutputModule = footprintSource.GetComponentInChildren<InputOutputModule>(true);
+        }
+
+        return inputOutputModule != null;
+    }
+
+    private List<Vector3> GetRectGridBlockWorldPositions(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        InputOutputModule.RectGridBlockType blockType)
+    {
+        List<Vector3> worldPositions = new List<Vector3>();
+        if (!TryGetRectGridBlockCoordinates(anchorCoordinate, footprintSource, quarterTurns, blockType, out List<Vector2Int> coordinates))
+        {
+            return worldPositions;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        float fallbackY = terrain != null ? terrain.transform.position.y : 0f;
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (terrain != null && terrain.TryGetLoadedBlock(coordinates[i], out Block block) && block != null)
+            {
+                worldPositions.Add(block.transform.position);
+                continue;
+            }
+
+            worldPositions.Add(new Vector3(coordinates[i].x, fallbackY, coordinates[i].y));
+        }
+
+        return worldPositions;
+    }
+
+    private bool TryGetRectGridBlockCoordinates(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        InputOutputModule.RectGridBlockType blockType,
+        out List<Vector2Int> coordinates)
+    {
+        coordinates = new List<Vector2Int>();
+        if (!TryGetRectGridBlockLocalOffsets(footprintSource, quarterTurns, blockType, out List<Vector2Int> localOffsets))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < localOffsets.Count; i++)
+        {
+            coordinates.Add(anchorCoordinate + localOffsets[i]);
+        }
+
+        return coordinates.Count > 0;
+    }
+
+    private bool TryGetRectGridBlockLocalOffsets(
+        MapObject footprintSource,
+        int quarterTurns,
+        InputOutputModule.RectGridBlockType blockType,
+        out List<Vector2Int> localOffsets)
+    {
+        localOffsets = new List<Vector2Int>();
+        if (!TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != blockType)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
+            localOffsets.Add(RotateFootprintOffset(localOffset, quarterTurns));
+        }
+
+        return localOffsets.Count > 0;
+    }
+
     private void BeginInstallPreview(ItemDefinition definition)
     {
         ClearInstallPreview();
@@ -460,7 +793,6 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewQuarterTurns = 0;
         waitForPointerReleaseAfterPreviewSpawn = true;
         installGridRefreshTimer = 0f;
-        hasInstallGridBounds = false;
         GameManager.Instance?.SetInstallationPlacementActive(true);
     }
 
@@ -616,6 +948,7 @@ public class InstallationPlacementController : MonoBehaviour
         Vector3 targetPosition = GetPreviewWorldPosition(block, activeInstallPreview, installPreviewQuarterTurns, installPreviewVerticalOffset);
         activeInstallPreview.transform.position = targetPosition;
         activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        InvalidateInstallGrid();
         return true;
     }
 
@@ -807,20 +1140,10 @@ public class InstallationPlacementController : MonoBehaviour
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null || !terrain.TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate))
         {
-            hasInstallGridBounds = false;
             installGridMesh.Clear();
             return;
         }
 
-        if (hasInstallGridBounds
-            && installGridMinCoordinate == minCoordinate
-            && installGridMaxCoordinate == maxCoordinate
-            && installGridMesh.vertexCount > 0)
-        {
-            return;
-        }
-
-        hasInstallGridBounds = true;
         installGridMinCoordinate = minCoordinate;
         installGridMaxCoordinate = maxCoordinate;
 
@@ -863,6 +1186,8 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
+        AddInstallPreviewFootprintFill(vertices, triangles, colors, fillY);
+
         for (int x = minCoordinate.x; x <= maxCoordinate.x + 1; x++)
         {
             float lineX = x - 0.5f;
@@ -892,6 +1217,32 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMesh.SetTriangles(triangles, 0, true);
         installGridMesh.SetColors(colors);
         installGridMesh.RecalculateBounds();
+    }
+
+    private void AddInstallPreviewFootprintFill(List<Vector3> vertices, List<int> triangles, List<Color> colors, float fillY)
+    {
+        CleanupInstallPreviewReferences();
+
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            MapObject preview = installPreviewInstances[i];
+            if (preview == null || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
+            {
+                continue;
+            }
+
+            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, preview, GetPreviewQuarterTurns(preview));
+            for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
+            {
+                AddGridCellQuad(
+                    vertices,
+                    triangles,
+                    colors,
+                    occupiedCoordinates[coordinateIndex],
+                    fillY,
+                    installPreviewTint);
+            }
+        }
     }
 
     private void AddGridLineQuad(List<Vector3> vertices, List<int> triangles, List<Color> colors, Vector3 start, Vector3 end, Color color)
@@ -1027,7 +1378,6 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMeshRenderer = null;
         installGridMesh = null;
         installGridMaterial = null;
-        hasInstallGridBounds = false;
     }
 
     private bool TryGetBlockFromGroundPlane(Ray ray, out Block block)
@@ -1212,11 +1562,25 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        int nextQuarterTurns = (installPreviewQuarterTurns + 1) % 4;
-        if (TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate)
-            && ResolveInstallPreviewTerrain() != null
-            && ResolveInstallPreviewTerrain().TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock)
-            && !CanPlacePreviewOnBlock(anchorBlock, activeInstallPreview, nextQuarterTurns))
+        int nextQuarterTurns = -1;
+        Block anchorBlock = null;
+        bool hasAnchorBlock = TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate)
+                            && ResolveInstallPreviewTerrain() != null
+                            && ResolveInstallPreviewTerrain().TryGetLoadedBlock(anchorCoordinate, out anchorBlock);
+
+        for (int rotationStep = 1; rotationStep <= 3; rotationStep++)
+        {
+            int candidateQuarterTurns = (installPreviewQuarterTurns + rotationStep) % 4;
+            if (hasAnchorBlock && !CanPlacePreviewOnBlock(anchorBlock, activeInstallPreview, candidateQuarterTurns))
+            {
+                continue;
+            }
+
+            nextQuarterTurns = candidateQuarterTurns;
+            break;
+        }
+
+        if (nextQuarterTurns < 0)
         {
             return;
         }
@@ -1225,16 +1589,16 @@ public class InstallationPlacementController : MonoBehaviour
         activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
 
-        if (TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int storedAnchor)
-            && ResolveInstallPreviewTerrain() != null
-            && ResolveInstallPreviewTerrain().TryGetLoadedBlock(storedAnchor, out Block storedAnchorBlock))
+        if (hasAnchorBlock)
         {
             activeInstallPreview.transform.position = GetPreviewWorldPosition(
-                storedAnchorBlock,
+                anchorBlock,
                 activeInstallPreview,
                 installPreviewQuarterTurns,
                 installPreviewVerticalOffset);
         }
+
+        InvalidateInstallGrid();
     }
 
     private Quaternion GetInstallPreviewRotation()
@@ -1251,7 +1615,14 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (TryGetInstallPreviewAtBlock(clickedBlock, out MapObject clickedPreview) && clickedPreview != null)
         {
-            RemoveInstallPreview(clickedPreview);
+            SelectInstallPreview(clickedPreview);
+            if (IsPreviewObjectCell(clickedPreview, clickedBlock))
+            {
+                RemoveInstallPreview(clickedPreview);
+                return;
+            }
+
+            MoveInstallPreviewToBlock(clickedBlock);
             return;
         }
 
@@ -1452,6 +1823,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         EnsureValidActiveInstallPreview();
+        InvalidateInstallGrid();
     }
 
     private void EnsureValidActiveInstallPreview()
@@ -1476,6 +1848,11 @@ public class InstallationPlacementController : MonoBehaviour
         return GameManager.Instance != null
                && GameManager.Instance.InstallationPlacementActive
                && activeInstallDefinition != null;
+    }
+
+    private void InvalidateInstallGrid()
+    {
+        installGridRefreshTimer = 0f;
     }
 
     private bool TryGetInstallPreviewAtBlock(Block block, out MapObject preview)
@@ -1566,37 +1943,135 @@ public class InstallationPlacementController : MonoBehaviour
 
     private Vector2Int GetFootprintSize(MapObject footprintSource, int quarterTurns)
     {
+        List<Vector2Int> offsets = GetFootprintLocalOffsets(footprintSource, quarterTurns);
+        if (offsets.Count <= 0)
+        {
+            return Vector2Int.one;
+        }
+
+        int minX = offsets[0].x;
+        int maxX = offsets[0].x;
+        int minY = offsets[0].y;
+        int maxY = offsets[0].y;
+
+        for (int i = 1; i < offsets.Count; i++)
+        {
+            Vector2Int offset = offsets[i];
+            minX = Mathf.Min(minX, offset.x);
+            maxX = Mathf.Max(maxX, offset.x);
+            minY = Mathf.Min(minY, offset.y);
+            maxY = Mathf.Max(maxY, offset.y);
+        }
+
+        return new Vector2Int(maxX - minX + 1, maxY - minY + 1);
+    }
+
+    private List<Vector2Int> GetFootprintCoordinates(Vector2Int anchorCoordinate, MapObject footprintSource, int quarterTurns)
+    {
+        List<Vector2Int> offsets = GetFootprintLocalOffsets(footprintSource, quarterTurns);
+        List<Vector2Int> coordinates = new List<Vector2Int>(offsets.Count);
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            coordinates.Add(anchorCoordinate + offsets[i]);
+        }
+
+        return coordinates;
+    }
+
+    private List<Vector2Int> GetFootprintLocalOffsets(MapObject footprintSource, int quarterTurns)
+    {
+        if (TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell))
+        {
+            List<Vector2Int> rectGridOffsets = new List<Vector2Int>(rectGridWidth * rectGridHeight);
+            for (int y = 0; y < rectGridHeight; y++)
+            {
+                for (int x = 0; x < rectGridWidth; x++)
+                {
+                    Vector2Int localOffset = new Vector2Int(x - objectAnchorCell.x, y - objectAnchorCell.y);
+                    rectGridOffsets.Add(RotateFootprintOffset(localOffset, quarterTurns));
+                }
+            }
+
+            return rectGridOffsets;
+        }
+
         int sizeX = 1;
         int sizeY = 1;
-
         if (footprintSource != null)
         {
             sizeX = Mathf.Max(1, footprintSource.Status.mapSizeX);
             sizeY = Mathf.Max(1, footprintSource.Status.mapSizeY);
         }
 
-        if (Mathf.Abs(quarterTurns) % 2 == 1)
+        List<Vector2Int> offsets = new List<Vector2Int>(sizeX * sizeY);
+        for (int y = 0; y < sizeY; y++)
         {
-            (sizeX, sizeY) = (sizeY, sizeX);
-        }
-
-        return new Vector2Int(sizeX, sizeY);
-    }
-
-    private List<Vector2Int> GetFootprintCoordinates(Vector2Int anchorCoordinate, MapObject footprintSource, int quarterTurns)
-    {
-        Vector2Int footprintSize = GetFootprintSize(footprintSource, quarterTurns);
-        List<Vector2Int> coordinates = new List<Vector2Int>(footprintSize.x * footprintSize.y);
-
-        for (int y = 0; y < footprintSize.y; y++)
-        {
-            for (int x = 0; x < footprintSize.x; x++)
+            for (int x = 0; x < sizeX; x++)
             {
-                coordinates.Add(new Vector2Int(anchorCoordinate.x + x, anchorCoordinate.y + y));
+                offsets.Add(RotateFootprintOffset(new Vector2Int(x, y), quarterTurns));
             }
         }
 
-        return coordinates;
+        return offsets;
+    }
+
+    private bool TryGetRectGridFootprintSettings(
+        MapObject footprintSource,
+        out int rectGridWidth,
+        out int rectGridHeight,
+        out Vector2Int objectAnchorCell)
+    {
+        rectGridWidth = 0;
+        rectGridHeight = 0;
+        objectAnchorCell = Vector2Int.zero;
+
+        if (footprintSource == null)
+        {
+            return false;
+        }
+
+        InputOutputModule inputOutputModule = footprintSource as InputOutputModule;
+        if (inputOutputModule == null)
+        {
+            inputOutputModule = footprintSource.GetComponent<InputOutputModule>();
+        }
+
+        if (inputOutputModule == null)
+        {
+            inputOutputModule = footprintSource.GetComponentInChildren<InputOutputModule>(true);
+        }
+
+        if (inputOutputModule == null || inputOutputModule.LayoutType != InputOutputModule.SlotLayoutType.RectGrid)
+        {
+            return false;
+        }
+
+        rectGridWidth = Mathf.Max(1, inputOutputModule.RectGridWidth);
+        rectGridHeight = Mathf.Max(1, inputOutputModule.RectGridHeight);
+        return TryGetRectGridObjectAnchorCell(inputOutputModule, out objectAnchorCell);
+    }
+
+    private bool TryGetRectGridObjectAnchorCell(InputOutputModule inputOutputModule, out Vector2Int objectAnchorCell)
+    {
+        objectAnchorCell = Vector2Int.zero;
+        if (inputOutputModule == null)
+        {
+            return false;
+        }
+
+        return inputOutputModule.TryGetPrimaryObjectCell(out objectAnchorCell);
+    }
+
+    private static Vector2Int RotateFootprintOffset(Vector2Int offset, int quarterTurns)
+    {
+        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        return normalizedQuarterTurns switch
+        {
+            1 => new Vector2Int(offset.y, -offset.x),
+            2 => new Vector2Int(-offset.x, -offset.y),
+            3 => new Vector2Int(-offset.y, offset.x),
+            _ => offset
+        };
     }
 
     private bool TryGetFootprintBlocks(
@@ -1704,12 +2179,107 @@ public class InstallationPlacementController : MonoBehaviour
 
     private Vector3 GetPreviewWorldPosition(Block anchorBlock, MapObject footprintSource, int quarterTurns, float verticalOffset)
     {
-        Vector2Int footprintSize = GetFootprintSize(footprintSource, quarterTurns);
         Vector3 position = anchorBlock.transform.position;
-        position.x += (footprintSize.x - 1) * 0.5f;
-        position.z += (footprintSize.y - 1) * 0.5f;
+        List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
+        if (offsets.Count > 0)
+        {
+            Vector2 averageOffset = Vector2.zero;
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                averageOffset += offsets[i];
+            }
+
+            averageOffset /= offsets.Count;
+            position.x += averageOffset.x;
+            position.z += averageOffset.y;
+        }
+
         position.y += verticalOffset;
         return position;
+    }
+
+    private List<Vector2Int> GetPlacementVisualLocalOffsets(MapObject footprintSource, int quarterTurns)
+    {
+        if (TryGetRectGridObjectLocalOffsets(footprintSource, quarterTurns, out List<Vector2Int> objectOffsets)
+            && objectOffsets.Count > 0)
+        {
+            return objectOffsets;
+        }
+
+        return GetFootprintLocalOffsets(footprintSource, quarterTurns);
+    }
+
+    private bool TryGetRectGridObjectLocalOffsets(MapObject footprintSource, int quarterTurns, out List<Vector2Int> objectOffsets)
+    {
+        objectOffsets = null;
+        if (!TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        InputOutputModule inputOutputModule = footprintSource as InputOutputModule;
+        if (inputOutputModule == null)
+        {
+            inputOutputModule = footprintSource.GetComponent<InputOutputModule>();
+        }
+
+        if (inputOutputModule == null)
+        {
+            inputOutputModule = footprintSource.GetComponentInChildren<InputOutputModule>(true);
+        }
+
+        if (inputOutputModule == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        objectOffsets = new List<Vector2Int>();
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
+            objectOffsets.Add(RotateFootprintOffset(localOffset, quarterTurns));
+        }
+
+        return objectOffsets.Count > 0;
+    }
+
+    private bool IsPreviewObjectCell(MapObject preview, Block block)
+    {
+        if (preview == null || block == null || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
+        {
+            return false;
+        }
+
+        List<Vector2Int> visualCoordinates = GetPlacementVisualCoordinates(anchorCoordinate, preview, GetPreviewQuarterTurns(preview));
+        for (int i = 0; i < visualCoordinates.Count; i++)
+        {
+            if (visualCoordinates[i] == block.Coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private List<Vector2Int> GetPlacementVisualCoordinates(Vector2Int anchorCoordinate, MapObject footprintSource, int quarterTurns)
+    {
+        List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
+        List<Vector2Int> coordinates = new List<Vector2Int>(offsets.Count);
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            coordinates.Add(anchorCoordinate + offsets[i]);
+        }
+
+        return coordinates;
     }
 
     private bool TryGetPrimaryPointerPosition(out Vector2 pointerPosition)
@@ -1787,7 +2357,6 @@ public class InstallationPlacementController : MonoBehaviour
         ResetPreviewPointerTracking();
         GameManager.Instance?.SetInstallationPlacementActive(false);
         SetInstallGridVisible(false);
-        hasInstallGridBounds = false;
         installGridRefreshTimer = 0f;
 
         CleanupInstallPreviewReferences();

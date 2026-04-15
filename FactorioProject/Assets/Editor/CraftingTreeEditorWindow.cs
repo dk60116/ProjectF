@@ -141,6 +141,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             bool isSelected = definition.id == selectedItemId;
             Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
             GUIContent content = new GUIContent($"[{definition.id}] {displayName}", GetItemIcon(definition));
+            ItemDefinitionDragAndDropUtility.HandleListItemDrag(rowRect, definition, content.text, this);
             Color previousContentColor = GUI.contentColor;
             GUI.contentColor = Color.white;
             bool pressed = GUI.Toggle(rowRect, isSelected, content, "Button");
@@ -302,21 +303,18 @@ public class CraftingTreeEditorWindow : EditorWindow
         for (int i = recipe.Count - 1; i >= 0; i--)
         {
             IngredientEntry entry = recipe[i];
-            int currentIndex = FindDefinitionIndexById(definitions, entry.itemId);
-            if (currentIndex < 0)
+            ItemDefinition currentDefinition = FindDefinitionById(definitions, entry.itemId);
+            if (currentDefinition == null && definitions.Count > 0)
             {
-                currentIndex = 0;
+                currentDefinition = definitions[0];
             }
 
             GUILayout.BeginHorizontal();
             Rect iconRect = GUILayoutUtility.GetRect(22f, 22f, GUILayout.ExpandWidth(false));
             DrawIconBackground(iconRect);
-            ItemDefinition iconDefinition = definitions.Count > 0 ? definitions[currentIndex] : null;
-            DrawItemIcon(iconRect, iconDefinition);
-            int newIndex = DrawDefinitionPopup(currentIndex, definitions);
-            int newItemId = (definitions.Count > 0 && newIndex >= 0 && newIndex < definitions.Count)
-                ? definitions[newIndex].id
-                : entry.itemId;
+            DrawItemIcon(iconRect, currentDefinition);
+            ItemDefinition nextDefinition = DrawDefinitionSelector(iconRect, currentDefinition, definitions);
+            int newItemId = nextDefinition != null ? nextDefinition.id : entry.itemId;
             int newCount = Mathf.Max(1, EditorGUILayout.IntField(entry.count, GUILayout.Width(60f)));
 
             if (GUILayout.Button("X", GUILayout.Width(24f)))
@@ -1204,16 +1202,39 @@ public class CraftingTreeEditorWindow : EditorWindow
                definition.name.IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private int DrawDefinitionPopup(int currentIndex, List<ItemDefinition> definitions)
+    private ItemDefinition DrawDefinitionSelector(Rect iconRect, ItemDefinition currentDefinition, List<ItemDefinition> definitions)
     {
         if (definitions == null || definitions.Count == 0)
         {
-            return -1;
+            return currentDefinition;
         }
 
         List<GUIContent> options = BuildDefinitionContents(definitions);
+        int currentIndex = FindDefinitionIndexById(definitions, currentDefinition != null ? currentDefinition.id : -1);
+        if (currentIndex < 0)
+        {
+            currentIndex = 0;
+        }
+
         int safeIndex = Mathf.Clamp(currentIndex, 0, options.Count - 1);
-        return EditorGUILayout.Popup(safeIndex, options.ToArray());
+        Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
+        int nextIndex = EditorGUI.Popup(popupRect, safeIndex, options.ToArray());
+        ItemDefinition nextDefinition = nextIndex >= 0 && nextIndex < definitions.Count
+            ? definitions[nextIndex]
+            : currentDefinition;
+
+        Rect dropRect = Rect.MinMaxRect(
+            iconRect.xMin,
+            Mathf.Min(iconRect.yMin, popupRect.yMin),
+            popupRect.xMax,
+            Mathf.Max(iconRect.yMax, popupRect.yMax));
+
+        if (ItemDefinitionDragAndDropUtility.HandleDropTarget(dropRect, this, out ItemDefinition droppedDefinition))
+        {
+            nextDefinition = droppedDefinition;
+        }
+
+        return nextDefinition;
     }
 
     private static List<GUIContent> BuildDefinitionContents(List<ItemDefinition> definitions)
