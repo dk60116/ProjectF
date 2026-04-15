@@ -547,6 +547,34 @@ public class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    public bool TryAddDroppedItemAnimated(
+        Vector3 worldPosition,
+        int itemId,
+        Vector3 startWorldPosition,
+        out PortableObject targetPortableObject,
+        Action onComplete = null)
+    {
+        targetPortableObject = null;
+        Block targetBlock = FindPreferredDropBlock(worldPosition, itemId, 1);
+        if (targetBlock == null)
+        {
+            Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+            targetBlock = FindNearestDropBlock(centerCoordinate, itemId, 1, 2, false);
+            if (targetBlock == null)
+            {
+                return false;
+            }
+        }
+
+        if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
+        {
+            return false;
+        }
+
+        MarkDroppedPickupGate(targetPortableObject, false, worldPosition);
+        return true;
+    }
+
     public bool TryPickupOneItemToHandAtCoordinate(Player player, Vector2Int coordinate)
     {
         if (player == null)
@@ -610,6 +638,36 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return false;
+    }
+
+    public bool TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate)
+    {
+        minCoordinate = Vector2Int.zero;
+        maxCoordinate = Vector2Int.zero;
+
+        bool hasValidBlock = false;
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            if (pair.Value == null)
+            {
+                continue;
+            }
+
+            if (!hasValidBlock)
+            {
+                minCoordinate = pair.Key;
+                maxCoordinate = pair.Key;
+                hasValidBlock = true;
+                continue;
+            }
+
+            minCoordinate.x = Mathf.Min(minCoordinate.x, pair.Key.x);
+            minCoordinate.y = Mathf.Min(minCoordinate.y, pair.Key.y);
+            maxCoordinate.x = Mathf.Max(maxCoordinate.x, pair.Key.x);
+            maxCoordinate.y = Mathf.Max(maxCoordinate.y, pair.Key.y);
+        }
+
+        return hasValidBlock;
     }
 
     public bool TryAddDroppedItemNear(Vector3 worldPosition, int itemId, out PortableObject targetPortableObject)
@@ -1894,7 +1952,14 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        string[] definitionGuids = AssetDatabase.FindAssets("t:ResourceDefinition", new[] { "Assets/Data/Resources" });
+        List<string> definitionSearchRoots = new List<string>();
+        AddResourceDefinitionSearchFolder(definitionSearchRoots, "Assets/Data/Resources");
+        AddResourceDefinitionSearchFolder(definitionSearchRoots, "Assets/Data/MapObject");
+        AddResourceDefinitionSearchFolder(definitionSearchRoots, "Assets/Data/MapObjects");
+
+        string[] definitionGuids = definitionSearchRoots.Count > 0
+            ? AssetDatabase.FindAssets("t:ResourceDefinition", definitionSearchRoots.ToArray())
+            : new string[0];
         Dictionary<string, ResourceDefinition> definitionsByPrefabPath = new Dictionary<string, ResourceDefinition>();
 
         for (int i = 0; i < definitionGuids.Length; i++)
@@ -1933,6 +1998,21 @@ public class TerrainGenerator : MonoBehaviour
 
             entries[i] = entry;
         }
+    }
+
+    private static void AddResourceDefinitionSearchFolder(List<string> folders, string folderPath)
+    {
+        if (folders == null || string.IsNullOrWhiteSpace(folderPath))
+        {
+            return;
+        }
+
+        if (!AssetDatabase.IsValidFolder(folderPath) || folders.Contains(folderPath))
+        {
+            return;
+        }
+
+        folders.Add(folderPath);
     }
 #endif
 

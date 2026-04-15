@@ -64,7 +64,8 @@ public class Resource : MapObject
     private int dynamicScaleMaxResourceCount = 1;
 
     private float accumulatedWork;
-    private int reservedHarvestSteps;
+    private readonly Queue<int> reservedHarvestGaugeCosts = new Queue<int>();
+    private int reservedHarvestGaugeCount;
     private Renderer cachedRenderer;
     private Transform bodyTransform;
     private Vector3 initialBodyLocalScale = Vector3.one;
@@ -156,6 +157,13 @@ public class Resource : MapObject
     private void OnDisable()
     {
         ActiveResourcesInternal.Remove(this);
+
+        if (!Application.isPlaying || owningBlock == null || owningBlock.MapObject != this)
+        {
+            return;
+        }
+
+        owningBlock.SetMapObject(null);
     }
 
     private void OnValidate()
@@ -176,7 +184,7 @@ public class Resource : MapObject
         UpdateBodyScale();
     }
 
-    public int PrepareHarvestSteps(float workAmount)
+    public int PrepareHarvestSteps(float workAmount, int harvestPower = 1)
     {
         if (!CanHarvest || workAmount <= 0f)
         {
@@ -185,12 +193,20 @@ public class Resource : MapObject
 
         accumulatedWork += workAmount;
         float stepThreshold = Mathf.Max(0.01f, workPerGaugeDot);
+        int normalizedHarvestPower = Mathf.Max(1, harvestPower);
         int preparedStepCount = 0;
 
-        while (accumulatedWork >= stepThreshold && GetReservableHarvestStepCount() > 0)
+        while (accumulatedWork >= stepThreshold)
         {
+            int reservableGaugeCount = GetReservableHarvestGaugeCount(normalizedHarvestPower);
+            if (reservableGaugeCount <= 0)
+            {
+                break;
+            }
+
             accumulatedWork -= stepThreshold;
-            reservedHarvestSteps++;
+            reservedHarvestGaugeCosts.Enqueue(reservableGaugeCount);
+            reservedHarvestGaugeCount += reservableGaugeCount;
             preparedStepCount++;
         }
 
@@ -199,17 +215,18 @@ public class Resource : MapObject
 
     public bool CommitPreparedHarvestStep()
     {
-        if (reservedHarvestSteps <= 0 || !CanHarvest)
+        if (reservedHarvestGaugeCosts.Count <= 0 || !CanHarvest)
         {
             return false;
         }
 
-        reservedHarvestSteps = Mathf.Max(0, reservedHarvestSteps - 1);
-        ConsumeGaugeDot();
+        int reservedGaugeCost = reservedHarvestGaugeCosts.Dequeue();
+        reservedHarvestGaugeCount = Mathf.Max(0, reservedHarvestGaugeCount - reservedGaugeCost);
+        ConsumeGaugeDots(reservedGaugeCost);
 
         if (!CanHarvest)
         {
-            reservedHarvestSteps = 0;
+            ClearReservedHarvestSteps();
             accumulatedWork = 0f;
         }
 
@@ -218,12 +235,13 @@ public class Resource : MapObject
 
     public bool CancelPreparedHarvestStep()
     {
-        if (reservedHarvestSteps <= 0)
+        if (reservedHarvestGaugeCosts.Count <= 0)
         {
             return false;
         }
 
-        reservedHarvestSteps = Mathf.Max(0, reservedHarvestSteps - 1);
+        int reservedGaugeCost = reservedHarvestGaugeCosts.Dequeue();
+        reservedHarvestGaugeCount = Mathf.Max(0, reservedHarvestGaugeCount - reservedGaugeCost);
         accumulatedWork += Mathf.Max(0.01f, workPerGaugeDot);
         return true;
     }
@@ -231,6 +249,7 @@ public class Resource : MapObject
     public void ResetWork()
     {
         accumulatedWork = 0f;
+        ClearReservedHarvestSteps();
     }
 
     public ResourceSaveState CaptureState()
@@ -259,7 +278,7 @@ public class Resource : MapObject
         }
 
         accumulatedWork = 0f;
-        reservedHarvestSteps = 0;
+        ClearReservedHarvestSteps();
         initialResourceCount = Mathf.Max(resourceStatus.resourceCount, state.initialResourceCount);
         EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
@@ -272,7 +291,7 @@ public class Resource : MapObject
         resourceStatus.maxGauge = Mathf.Max(1, resourceStatus.maxGauge);
         resourceStatus.currentGague = resourceStatus.resourceCount > 0 ? resourceStatus.maxGauge : 0;
         accumulatedWork = 0f;
-        reservedHarvestSteps = 0;
+        ClearReservedHarvestSteps();
         initialResourceCount = Mathf.Max(1, resourceStatus.resourceCount);
         EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
@@ -287,35 +306,56 @@ public class Resource : MapObject
         UpdateBodyScale();
     }
 
-    private void ConsumeGaugeDot()
+    private void ConsumeGaugeDots(int gaugeAmount)
     {
-        if (!CanHarvest)
+        if (!CanHarvest || gaugeAmount <= 0)
         {
             return;
         }
 
-        resourceStatus.currentGague = Mathf.Max(0, resourceStatus.currentGague - 1);
+        int remainingGaugeAmount = gaugeAmount;
+        int depletedResourceCount = 0;
+        bool resourceFullyDepleted = false;
 
-        if (resourceStatus.currentGague > 0)
+        while (remainingGaugeAmount > 0 && CanHarvest)
+        {
+            int gaugeToConsume = Mathf.Min(CurrentGauge, remainingGaugeAmount);
+            resourceStatus.currentGague = Mathf.Max(0, resourceStatus.currentGague - gaugeToConsume);
+            remainingGaugeAmount -= gaugeToConsume;
+
+            if (resourceStatus.currentGague > 0)
+            {
+                continue;
+            }
+
+            resourceStatus.resourceCount = Mathf.Max(0, resourceStatus.resourceCount - 1);
+            depletedResourceCount++;
+            accumulatedWork = 0f;
+
+            if (resourceStatus.resourceCount <= 0)
+            {
+                resourceStatus.currentGague = 0;
+                ClearReservedHarvestSteps();
+                resourceFullyDepleted = true;
+                break;
+            }
+
+            resourceStatus.currentGague = MaxGauge;
+        }
+
+        if (depletedResourceCount <= 0)
         {
             return;
         }
 
-        resourceStatus.resourceCount = Mathf.Max(0, resourceStatus.resourceCount - 1);
-        accumulatedWork = 0f;
-
-        if (resourceStatus.resourceCount <= 0)
-        {
-            resourceStatus.currentGague = 0;
-            reservedHarvestSteps = 0;
-            PlayPickupSequence(0, ResolveOutputItemId(), true);
-            return;
-        }
-
-        resourceStatus.currentGague = MaxGauge;
         UpdateBodyScale();
 
-        PlayPickupSequence(0, ResolveOutputItemId(), false);
+        int outputItemId = ResolveOutputItemId();
+        for (int i = 0; i < depletedResourceCount; i++)
+        {
+            bool hideAfterSequence = resourceFullyDepleted && i == depletedResourceCount - 1;
+            PlayPickupSequence(0, outputItemId, hideAfterSequence);
+        }
     }
 
     private void PlayPickupSequence(int bagNum, int objectId, bool hideAfterSequence)
@@ -355,51 +395,43 @@ public class Resource : MapObject
 
         int spawnedCount = 0;
         float interval = Mathf.Max(0f, portableMoveInterval);
-        List<PortableObject> reservedPortableObjects = ReservePortableObjectInstances(rewardCount);
 
         for (int i = 0; i < rewardCount; i++)
         {
-            PortableObject sourcePortableObject = i < reservedPortableObjects.Count ? reservedPortableObjects[i] : null;
-            PortableObject targetPortableObject = null;
-            bool hasTarget = TryResolveHarvestTarget(player, objectId, out targetPortableObject);
+            bool shouldHideOnComplete = hideAfterSequence && i == rewardCount - 1;
+            Vector3 sourceWorldPosition = GetHarvestPortableStartWorldPosition();
 
-            if (!hasTarget || targetPortableObject == null)
+            if (TryResolveHarvestBagTarget(player, objectId, out PortableObject targetPortableObject) && targetPortableObject != null)
+            {
+                spawnedCount++;
+                PortableObject harvestPortableVisual = CreateHarvestPortableVisual(objectId, sourceWorldPosition);
+                if (harvestPortableVisual == null)
+                {
+                    if (shouldHideOnComplete)
+                    {
+                        gameObject.SetActive(false);
+                    }
+                }
+                else
+                {
+                    harvestPortableVisual.MoveTo(targetPortableObject.transform, () =>
+                    {
+                        ReleaseHarvestPortableVisual(harvestPortableVisual);
+                        if (shouldHideOnComplete)
+                        {
+                            gameObject.SetActive(false);
+                        }
+                    });
+                }
+            }
+            else if (TryDropHarvestRewardToGround(player, objectId, sourceWorldPosition, shouldHideOnComplete))
+            {
+                spawnedCount++;
+            }
+            else
             {
                 break;
             }
-
-            spawnedCount++;
-            bool shouldHideOnComplete = hideAfterSequence && i == rewardCount - 1;
-
-            if (sourcePortableObject == null)
-            {
-                if (shouldHideOnComplete)
-                {
-                    gameObject.SetActive(false);
-                }
-
-                continue;
-            }
-
-            sourcePortableObject.transform.SetParent(transform, false);
-            sourcePortableObject.gameObject.SetActive(true);
-            sourcePortableObject.transform.localScale = Vector3.one;
-            sourcePortableObject.transform.localPosition = Vector3.zero;
-            sourcePortableObject.transform.localRotation = Quaternion.identity;
-            sourcePortableObject.transform.SetParent(null, true);
-            sourcePortableObject.MoveTo(targetPortableObject.transform, () =>
-            {
-                sourcePortableObject.transform.SetParent(transform, false);
-                sourcePortableObject.transform.localPosition = Vector3.zero;
-                sourcePortableObject.transform.localRotation = Quaternion.identity;
-                sourcePortableObject.transform.localScale = Vector3.one;
-                sourcePortableObject.gameObject.SetActive(false);
-
-                if (shouldHideOnComplete)
-                {
-                    gameObject.SetActive(false);
-                }
-            });
 
             if (interval > 0f && i < rewardCount - 1)
             {
@@ -414,7 +446,106 @@ public class Resource : MapObject
 
     }
 
-    private bool TryResolveHarvestTarget(Player player, int objectId, out PortableObject targetPortableObject)
+    private Vector3 GetHarvestPortableStartWorldPosition()
+    {
+        CachePortableObjects();
+
+        if (portableObjects != null)
+        {
+            for (int i = 0; i < portableObjects.Count; i++)
+            {
+                PortableObject candidate = portableObjects[i];
+                if (candidate != null)
+                {
+                    return candidate.transform.position;
+                }
+            }
+        }
+
+        return FocusPoint;
+    }
+
+    private PortableObject CreateHarvestPortableVisual(int objectId, Vector3 worldPosition)
+    {
+        PortableObject template = ResolveHarvestPortableTemplate();
+        PortableObject visual;
+
+        if (template != null)
+        {
+            visual = Instantiate(template);
+            visual.name = $"{template.name}_HarvestTemp";
+        }
+        else
+        {
+            GameObject visualObject = new GameObject($"HarvestPortable_{objectId}");
+            visualObject.layer = gameObject.layer;
+            visualObject.AddComponent<MeshFilter>();
+            visualObject.AddComponent<MeshRenderer>();
+            visual = visualObject.AddComponent<PortableObject>();
+        }
+
+        if (visual == null)
+        {
+            return null;
+        }
+
+        visual.transform.SetParent(null, true);
+        visual.transform.position = worldPosition;
+        visual.transform.rotation = Quaternion.identity;
+        visual.transform.localScale = Vector3.one;
+        visual.gameObject.SetActive(true);
+
+        if (!visual.SetItem(objectId))
+        {
+            ReleaseHarvestPortableVisual(visual);
+            return null;
+        }
+
+        return visual;
+    }
+
+    private PortableObject ResolveHarvestPortableTemplate()
+    {
+        if (portableObj != null)
+        {
+            return portableObj;
+        }
+
+        CachePortableObjects();
+        if (portableObjects == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < portableObjects.Count; i++)
+        {
+            if (portableObjects[i] != null)
+            {
+                return portableObjects[i];
+            }
+        }
+
+        return null;
+    }
+
+    private void ReleaseHarvestPortableVisual(PortableObject portableObject)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(portableObject.gameObject);
+        }
+        else
+        {
+            DestroyImmediate(portableObject.gameObject);
+        }
+    }
+
+    private bool TryResolveHarvestBagTarget(Player player, int objectId, out PortableObject targetPortableObject)
     {
         targetPortableObject = null;
         if (player != null && player.TryAddToBag(objectId, out targetPortableObject))
@@ -422,33 +553,35 @@ public class Resource : MapObject
             return targetPortableObject != null;
         }
 
+        return false;
+    }
+
+    private bool TryDropHarvestRewardToGround(Player player, int objectId, Vector3 startWorldPosition, bool hideAfterSequence)
+    {
         TerrainGenerator generator = FindTerrainGenerator();
+        Action onComplete = hideAfterSequence ? () => gameObject.SetActive(false) : null;
+
         if (generator != null)
         {
             Vector3 dropPosition = player != null ? player.transform.position : transform.position;
-            if (generator.TryAddDroppedItemToNearestStack(dropPosition, objectId, 2, out targetPortableObject))
+            if (generator.TryAddDroppedItemAnimated(dropPosition, objectId, startWorldPosition, out _, onComplete))
             {
-                return targetPortableObject != null;
+                return true;
             }
 
-            if (owningBlock != null && owningBlock.TryAddFloorObject(objectId, out targetPortableObject))
+            if (owningBlock != null && owningBlock.TryAddFloorObjectAnimated(objectId, startWorldPosition, 0f, out _, onComplete))
             {
-                return targetPortableObject != null;
+                return true;
             }
 
-            if (generator.TryAddDroppedItemAtPlayerBlock(dropPosition, objectId, out targetPortableObject))
+            if (generator.TryAddDroppedItemAnimated(transform.position, objectId, startWorldPosition, out _, onComplete))
             {
-                return targetPortableObject != null;
-            }
-
-            if (generator.TryAddDroppedItemNear(dropPosition, objectId, out targetPortableObject))
-            {
-                return targetPortableObject != null;
+                return true;
             }
         }
-        else if (owningBlock != null && owningBlock.TryAddFloorObject(objectId, out targetPortableObject))
+        else if (owningBlock != null && owningBlock.TryAddFloorObjectAnimated(objectId, startWorldPosition, 0f, out _, onComplete))
         {
-            return targetPortableObject != null;
+            return true;
         }
 
         return false;
@@ -490,10 +623,22 @@ public class Resource : MapObject
         }
     }
 
-    private int GetReservableHarvestStepCount()
+    private int GetReservableHarvestGaugeCount(int harvestPower)
     {
         int totalRemainingSteps = ((Mathf.Max(0, ResourceCount - 1)) * MaxGauge) + CurrentGauge;
-        return Mathf.Max(0, totalRemainingSteps - reservedHarvestSteps);
+        int remainingReservableGaugeCount = Mathf.Max(0, totalRemainingSteps - reservedHarvestGaugeCount);
+        if (remainingReservableGaugeCount <= 0)
+        {
+            return 0;
+        }
+
+        return Mathf.Min(Mathf.Max(1, harvestPower), remainingReservableGaugeCount);
+    }
+
+    private void ClearReservedHarvestSteps()
+    {
+        reservedHarvestGaugeCosts.Clear();
+        reservedHarvestGaugeCount = 0;
     }
 
     private int ResolveOutputItemId()

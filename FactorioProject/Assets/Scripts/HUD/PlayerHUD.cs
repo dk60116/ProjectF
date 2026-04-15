@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public class PlayerHUD : BagSlot
 {
@@ -17,19 +19,42 @@ public class PlayerHUD : BagSlot
     [SerializeField]
     private List<CreatingQueueSlot> craftingWaitingQueue; 
 
+    [SerializeField, Min(0.05f)]
+    private float craftingIngredientRefreshInterval = 0.2f;
+
+    [SerializeField, Min(0f)]
+    private float craftedPortableMoveInterval = 0.1f;
+
     private const float CraftingDurationSeconds = 5f;
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
+    private float craftingIngredientRefreshTimer;
+    private Component installationPlacementController;
+    private static Type installationPlacementControllerType;
+    private bool wasInventoryEditLocked;
+
+    [SerializeField]
+    private Button installButton;
+    [SerializeField]
+    private Button installCancelButton;
+    [SerializeField]
+    private Button installRotationButton;
+    [SerializeField]
+    private Button installCompleteButton;
 
     private class CraftingQueueEntry
     {
         public int itemId;
+        public int outputCount;
+        public int remainingOutputCount;
         public float remainingTime;
         public float duration;
 
-        public CraftingQueueEntry(int itemId, float duration)
+        public CraftingQueueEntry(int itemId, int outputCount, float duration)
         {
             this.itemId = itemId;
+            this.outputCount = Mathf.Max(1, outputCount);
+            remainingOutputCount = this.outputCount;
             this.duration = Mathf.Max(0.01f, duration);
             remainingTime = this.duration;
         }
@@ -38,6 +63,9 @@ public class PlayerHUD : BagSlot
     private void Awake()
     {
         SubscribeSlotEvents();
+        ResolveInstallModeButtons();
+        EnsureInstallationPlacementController();
+        UpdateInstallModeButtons();
         RefreshBag(null);
         RefreshCraftingQueueSlots(true);
     }
@@ -49,6 +77,9 @@ public class PlayerHUD : BagSlot
 
     private void OnEnable()
     {
+        ResolveInstallModeButtons();
+        EnsureInstallationPlacementController();
+        UpdateInstallModeButtons();
         EnsureInitialBagBinding();
     }
 
@@ -61,9 +92,18 @@ public class PlayerHUD : BagSlot
     private void Update()
     {
         EnsureHandBagBinding();
+        ResolveInstallModeButtons();
+        UpdateInstallModeButtons();
+        UpdateInventoryEditLockState();
         UpdateCraftingQueue(Time.deltaTime);
+        UpdateCraftingIngredientRefresh(Time.deltaTime);
 
-        if (!Input.GetMouseButtonDown(0))
+        if (IsInventoryEditLocked())
+        {
+            return;
+        }
+
+        if (!TryGetPrimaryPointerDown(out Vector2 pointerPosition))
         {
             return;
         }
@@ -74,7 +114,7 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (IsPointerOverExpandedBagArea(expandedSlot))
+        if (IsPointerOverExpandedBagArea(expandedSlot, pointerPosition))
         {
             return;
         }
@@ -166,11 +206,13 @@ public class PlayerHUD : BagSlot
     private void HandleBagChanged()
     {
         RefreshBag(boundBag);
+        RefreshVisibleCraftingUi();
     }
 
     private void HandleHandBagChanged()
     {
         RefreshHandSlot(boundHandBag);
+        RefreshVisibleCraftingUi();
     }
 
     private void EnsureInitialBagBinding()
@@ -275,6 +317,114 @@ public class PlayerHUD : BagSlot
         }
     }
 
+    private void EnsureInstallationPlacementController()
+    {
+        Type controllerType = ResolveInstallationPlacementControllerType();
+        if (controllerType == null)
+        {
+            return;
+        }
+
+        if (installationPlacementController == null)
+        {
+            installationPlacementController = GetComponent(controllerType);
+            if (installationPlacementController == null)
+            {
+                installationPlacementController = gameObject.AddComponent(controllerType);
+            }
+        }
+
+        controllerType.GetMethod("SetInstallButtons")?.Invoke(
+            installationPlacementController,
+            new object[] { InstallButton, InstallCancelButton, InstallRotationButton, InstallCompleteButton });
+    }
+
+    private void ResolveInstallModeButtons()
+    {
+        installButton = ResolveButtonReference(installButton, "InstallButton");
+        installCancelButton = ResolveButtonReference(installCancelButton, "InstallCancelButton");
+        installRotationButton = ResolveButtonReference(installRotationButton, "RotationButton", "InstallRotationButton");
+        installCompleteButton = ResolveButtonReference(installCompleteButton, "CompleteButton", "InstallCompleteButton");
+    }
+
+    private Button ResolveButtonReference(Button currentButton, params string[] candidateNames)
+    {
+        if (currentButton != null)
+        {
+            return currentButton;
+        }
+
+        if (candidateNames == null || candidateNames.Length == 0)
+        {
+            return null;
+        }
+
+        Button[] buttons = GetComponentsInChildren<Button>(true);
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            Button candidate = buttons[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            for (int nameIndex = 0; nameIndex < candidateNames.Length; nameIndex++)
+            {
+                if (candidate.name == candidateNames[nameIndex])
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void UpdateInstallModeButtons()
+    {
+        bool isInstallModeActive = GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive;
+
+        SetInstallModeButtonVisible(installCancelButton, isInstallModeActive);
+        SetInstallModeButtonVisible(installRotationButton, isInstallModeActive);
+        SetInstallModeButtonVisible(installCompleteButton, isInstallModeActive);
+    }
+
+    private static void SetInstallModeButtonVisible(Button button, bool isVisible)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        if (button.gameObject.activeSelf != isVisible)
+        {
+            button.gameObject.SetActive(isVisible);
+        }
+
+        button.interactable = isVisible;
+    }
+
+    private static Type ResolveInstallationPlacementControllerType()
+    {
+        if (installationPlacementControllerType != null)
+        {
+            return installationPlacementControllerType;
+        }
+
+        System.Reflection.Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+        for (int i = 0; i < assemblies.Length; i++)
+        {
+            Type candidate = assemblies[i].GetType("InstallationPlacementController");
+            if (candidate != null)
+            {
+                installationPlacementControllerType = candidate;
+                return installationPlacementControllerType;
+            }
+        }
+
+        return null;
+    }
+
     private void SubscribeSlotEvents()
     {
         if (bagSlots == null)
@@ -327,7 +477,7 @@ public class PlayerHUD : BagSlot
         RefreshBag(boundBag);
     }
 
-    private bool IsPointerOverExpandedBagArea(BagSlot slot)
+    private bool IsPointerOverExpandedBagArea(BagSlot slot, Vector2 pointerPosition)
     {
         if (slot == null || EventSystem.current == null)
         {
@@ -336,7 +486,7 @@ public class PlayerHUD : BagSlot
 
         PointerEventData pointerData = new PointerEventData(EventSystem.current)
         {
-            position = Input.mousePosition
+            position = pointerPosition
         };
 
         List<RaycastResult> results = new List<RaycastResult>();
@@ -352,9 +502,27 @@ public class PlayerHUD : BagSlot
         return false;
     }
 
+    private void UpdateCraftingIngredientRefresh(float deltaTime)
+    {
+        if (IsInventoryEditLocked() || expandedBagSlot == null)
+        {
+            craftingIngredientRefreshTimer = 0f;
+            return;
+        }
+
+        craftingIngredientRefreshTimer -= Mathf.Max(0f, deltaTime);
+        if (craftingIngredientRefreshTimer > 0f)
+        {
+            return;
+        }
+
+        craftingIngredientRefreshTimer = Mathf.Max(0.05f, craftingIngredientRefreshInterval);
+        RefreshVisibleCraftingUi();
+    }
+
     public bool TryEnqueueCrafting(int itemId)
     {
-        if (itemId < 0)
+        if (itemId < 0 || IsInventoryEditLocked())
         {
             return false;
         }
@@ -369,7 +537,8 @@ public class PlayerHUD : BagSlot
             return false;
         }
 
-        craftingQueue.Add(new CraftingQueueEntry(itemId, CraftingDurationSeconds));
+        int outputCount = CraftingTreeRuntime.GetOutputCount(itemId);
+        craftingQueue.Add(new CraftingQueueEntry(itemId, outputCount, CraftingDurationSeconds));
         craftingQueueDirty = true;
         RefreshCraftingQueueSlots(true);
         return true;
@@ -385,13 +554,21 @@ public class PlayerHUD : BagSlot
         if (craftingQueue.Count > 0)
         {
             CraftingQueueEntry entry = craftingQueue[0];
-            if (!IsHandBlocked(entry.itemId))
+            if (entry.remainingTime > 0f && !IsHandBlocked(entry.itemId) && !IsCraftingStationBlocked(entry.itemId))
             {
                 entry.remainingTime = Mathf.Max(0f, entry.remainingTime - Mathf.Max(0f, deltaTime));
+            }
 
-                if (entry.remainingTime <= 0f && TryDeliverCraftedItem(entry.itemId))
+            if (entry.remainingTime <= 0f)
+            {
+                bool deliveredAny = TryDeliverCraftedItems(entry);
+                if (entry.remainingOutputCount <= 0)
                 {
                     craftingQueue.RemoveAt(0);
+                    craftingQueueDirty = true;
+                }
+                else if (deliveredAny)
+                {
                     craftingQueueDirty = true;
                 }
             }
@@ -401,6 +578,16 @@ public class PlayerHUD : BagSlot
         craftingQueueDirty = false;
     }
 
+    private bool IsCraftingStationBlocked(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return true;
+        }
+
+        return !CanCraftItem(itemId);
+    }
+
     private bool IsHandBlocked(int itemId)
     {
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
@@ -408,7 +595,8 @@ public class PlayerHUD : BagSlot
             return true;
         }
 
-        PlayerBag handBag = GameManager.Instance.Player.GetHandBag();
+        Player player = GameManager.Instance.Player;
+        PlayerBag handBag = player.GetHandBag();
         if (handBag == null)
         {
             return true;
@@ -422,22 +610,94 @@ public class PlayerHUD : BagSlot
         }
 
         int handItemId = handBag.GetSlotItemId(0);
-        return handItemId >= 0 && handItemId != itemId;
+        if (handItemId >= 0 && handItemId != itemId)
+        {
+            return true;
+        }
+
+        int reservedHandItemId = player.GetReservedHandItemId();
+        return reservedHandItemId >= 0 && reservedHandItemId != itemId;
     }
 
-    private bool TryDeliverCraftedItem(int itemId)
+    private bool TryDeliverCraftedItems(CraftingQueueEntry entry)
     {
+        if (entry == null || entry.itemId < 0 || entry.remainingOutputCount <= 0)
+        {
+            return false;
+        }
+
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
         {
             return false;
         }
 
-        if (GameManager.Instance.Player.GetHandItemCount() > 0)
+        if (IsHandBlocked(entry.itemId))
         {
             return false;
         }
 
-        return GameManager.Instance.Player.TryAddToHand(itemId, out _);
+        Player player = GameManager.Instance.Player;
+        Vector3 startPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
+        bool deliveredAny = false;
+        int deliveredIndex = 0;
+        while (entry.remainingOutputCount > 0)
+        {
+            if (!player.TryReserveHandObject(entry.itemId, out PortableObject handTarget))
+            {
+                break;
+            }
+
+            AnimateCraftedPortableMove(player, entry.itemId, handTarget, startPosition, deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval));
+            entry.remainingOutputCount--;
+            deliveredAny = true;
+            deliveredIndex++;
+        }
+
+        return deliveredAny;
+    }
+
+    private void AnimateCraftedPortableMove(Player player, int itemId, PortableObject targetPortableObject, Vector3 startPosition, float delay)
+    {
+        if (player == null || targetPortableObject == null)
+        {
+            return;
+        }
+
+        PortableObject movingPortableObject = Instantiate(targetPortableObject, startPosition, targetPortableObject.transform.rotation);
+        if (movingPortableObject == null)
+        {
+            player.ReleaseReservedHandObject(targetPortableObject);
+            return;
+        }
+
+        movingPortableObject.name = $"{targetPortableObject.name}_CraftMove";
+        movingPortableObject.transform.SetParent(null, true);
+        movingPortableObject.transform.localScale = targetPortableObject.transform.lossyScale;
+        if (!movingPortableObject.gameObject.activeSelf)
+        {
+            movingPortableObject.gameObject.SetActive(true);
+        }
+
+        if (!movingPortableObject.SetItem(itemId))
+        {
+            player.ReleaseReservedHandObject(targetPortableObject);
+            Destroy(movingPortableObject.gameObject);
+            return;
+        }
+
+        Vector3 targetPosition = targetPortableObject.transform.position;
+        movingPortableObject.MoveTo(targetPosition, delay, () =>
+        {
+            if (player != null)
+            {
+                player.CommitReservedHandObject(targetPortableObject);
+            }
+
+            if (movingPortableObject != null)
+            {
+                Destroy(movingPortableObject.gameObject);
+            }
+        }, false);
     }
 
     private void RefreshCraftingQueueSlots(bool forceIconRefresh)
@@ -471,7 +731,11 @@ public class PlayerHUD : BagSlot
                 }
                 if (forceIconRefresh || slot.ItemId != entry.itemId)
                 {
-                    slot.SetItem(entry.itemId, 1, 0);
+                    slot.SetItem(entry.itemId, entry.remainingOutputCount, 0);
+                }
+                else if (entry.remainingOutputCount > 0)
+                {
+                    slot.SetItemDisplay(entry.itemId, entry.remainingOutputCount, 0, false);
                 }
 
                 float fillValue = i == 0 ? currentFill : 1f;
@@ -492,4 +756,92 @@ public class PlayerHUD : BagSlot
             }
         }
     }
+
+    private void RefreshVisibleCraftingUi()
+    {
+        if (expandedBagSlot == null)
+        {
+            return;
+        }
+
+        expandedBagSlot.RefreshCraftingAvailability();
+
+        if (expandedBagSlot == null || !expandedBagSlot.IsCraftingExpanded)
+        {
+            return;
+        }
+
+        Transform craftingRoot = expandedBagSlot.transform.Find("CraftingRoot");
+        if (craftingRoot == null)
+        {
+            craftingRoot = expandedBagSlot.transform.Find("Open");
+        }
+
+        Transform parent = craftingRoot != null ? craftingRoot : expandedBagSlot.transform;
+        CraftingSlot[] craftingSlots = parent.GetComponentsInChildren<CraftingSlot>(true);
+        for (int i = 0; i < craftingSlots.Length; i++)
+        {
+            CraftingSlot slot = craftingSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            slot.RefreshIngredientsIfVisible();
+        }
+    }
+
+    private bool TryGetPrimaryPointerDown(out Vector2 pointerPosition)
+    {
+        pointerPosition = Vector2.zero;
+
+        if (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+            if (touch.phase == TouchPhase.Began)
+            {
+                pointerPosition = touch.position;
+                return true;
+            }
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            pointerPosition = Input.mousePosition;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdateInventoryEditLockState()
+    {
+        bool isLocked = IsInventoryEditLocked();
+        if (wasInventoryEditLocked == isLocked)
+        {
+            return;
+        }
+
+        wasInventoryEditLocked = isLocked;
+
+        if (isLocked)
+        {
+            if (expandedBagSlot != null)
+            {
+                CollapseExpandedBagSlot(true);
+            }
+            else
+            {
+                BagSlot.CloseAnyExpanded(true);
+            }
+        }
+
+        UpdateInstallModeButtons();
+        RefreshBag(boundBag);
+    }
+
+    public Button InstallButton => installButton;
+    public Button InstallCancelButton => installCancelButton;
+    public Button InstallRotationButton => installRotationButton;
+    public Button InstallCompleteButton => installCompleteButton;
 }

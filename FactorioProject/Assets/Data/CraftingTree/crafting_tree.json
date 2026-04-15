@@ -1,0 +1,105 @@
+{
+    "recipes": [
+        {
+            "itemId": 0,
+            "itemName": "Pickaxe",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 6,
+                    "itemName": "Woodplank",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 1,
+            "itemName": "Coar",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 2,
+            "itemName": "CooperOre",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 3,
+            "itemName": "IronOre",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 4,
+            "itemName": "Stone",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 5,
+            "itemName": "Log",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 6,
+            "itemName": "Woodplank",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 5,
+                    "itemName": "Log",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 7,
+            "itemName": "Workbench",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 5,
+                    "itemName": "Log",
+                    "count": 6
+                },
+                {
+                    "itemId": 4,
+                    "itemName": "Stone",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        }
+    ],
+    "items": [],
+    "entries": []
+}

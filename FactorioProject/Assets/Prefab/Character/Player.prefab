@@ -379,8 +379,8 @@ GameObject:
   m_Component:
   - component: {fileID: 5217696863108145734}
   - component: {fileID: 792665258119979708}
-  - component: {fileID: 5706796133951848043}
   - component: {fileID: 1920950466816154286}
+  - component: {fileID: 5706796133951848043}
   - component: {fileID: 5061212095987040735}
   - component: {fileID: 2662606366796805048}
   m_Layer: 0
@@ -427,6 +427,8 @@ MonoBehaviour:
     currentMoveSpeed: 0
     rotateSpeed: 720
   playerState:
+    miningPower: 0
+    loggingPower: 0
     miningSpeed: 1
     loggingSpeed: 1
     harvestRange: 1
@@ -445,6 +447,24 @@ MonoBehaviour:
   - {fileID: 4516525228415117845}
   - {fileID: 8927586742832156537}
   - {fileID: 5568698886960744301}
+--- !u!114 &1920950466816154286
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5510182674886720554}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1ac0524ca5102ce4a9df059629264861, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  movementReference: {fileID: 0}
+  autoHarvestFacingDot: 0.45
+  harvestStartDelay: 0.5
+  autoPickupRadius: 0.5
+  autoPickupScanRadius: 3
+  autoPickupInterval: 0.1
 --- !u!95 &5706796133951848043
 Animator:
   serializedVersion: 5
@@ -466,24 +486,6 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
---- !u!114 &1920950466816154286
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5510182674886720554}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ac0524ca5102ce4a9df059629264861, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  movementReference: {fileID: 0}
-  autoHarvestFacingDot: 0.45
-  harvestStartDelay: 0.5
-  autoPickupRadius: 0.5
-  autoPickupScanRadius: 3
-  autoPickupInterval: 0.1
 --- !u!136 &5061212095987040735
 CapsuleCollider:
   m_ObjectHideFlags: 0

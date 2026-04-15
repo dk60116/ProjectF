@@ -27,14 +27,23 @@ public class PlayerController : MonoBehaviour
     private ResourceWrokGauge resourceWorkGauge;
     private Resource currentTargetResource;
     private Block currentFocusedBlock;
+    private Rigidbody cachedRigidbody;
+    private Vector3 pendingMoveDirection;
+    private const float MoveSweepBuffer = 0.01f;
     private float stationaryHarvestTimer;
     private float autoPickupTimer;
     private TerrainGenerator cachedTerrainGenerator;
     private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
+    private bool wasInstallationPlacementActive;
 
     private void Awake()
     {
         player = GetComponent<Player>();
+        cachedRigidbody = GetComponent<Rigidbody>();
+        if (cachedRigidbody != null && cachedRigidbody.interpolation == RigidbodyInterpolation.None)
+        {
+            cachedRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+        }
     }
 
     private void Start()
@@ -52,6 +61,8 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        bool isInstallationPlacementActive = GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive;
+
         Vector2 input = Vector2.zero;
 
         if (joystick == null)
@@ -64,7 +75,7 @@ public class PlayerController : MonoBehaviour
             ResolveMovementReference();
         }
 
-        if (joystick != null)
+        if (joystick != null && !isInstallationPlacementActive)
         {
             input = joystick.InputDirection;
         }
@@ -81,9 +92,27 @@ public class PlayerController : MonoBehaviour
             stationaryHarvestTimer += Time.deltaTime;
         }
 
+        pendingMoveDirection = moveDirection;
+
+        if (isInstallationPlacementActive)
+        {
+            HandleInstallationPlacementLock();
+            wasInstallationPlacementActive = true;
+            return;
+        }
+
+        if (wasInstallationPlacementActive)
+        {
+            stationaryHarvestTimer = 0f;
+            wasInstallationPlacementActive = false;
+        }
+
         if (hasMovement)
         {
-            transform.position += moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime;
+            if (cachedRigidbody == null)
+            {
+                transform.position += moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime;
+            }
 
             Quaternion targetRotation = Quaternion.LookRotation(moveDirection.normalized, Vector3.up);
             Transform rotationTarget = player.BodyTransform != null ? player.BodyTransform : transform;
@@ -107,8 +136,97 @@ public class PlayerController : MonoBehaviour
 
         bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
         ResolveCompletedPick(finishedPickThisFrame);
+        RefreshInteractionFocus(hasMovement);
 
         UpdateAutoPickup();
+    }
+
+    private void FixedUpdate()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive)
+        {
+            pendingMoveDirection = Vector3.zero;
+            return;
+        }
+
+        if (cachedRigidbody == null)
+        {
+            return;
+        }
+
+        if (pendingMoveDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        Vector3 delta = pendingMoveDirection * player.Stat.currentMoveSpeed * Time.fixedDeltaTime;
+        MoveRigidbody(delta);
+    }
+
+    private void MoveRigidbody(Vector3 delta)
+    {
+        float distance = delta.magnitude;
+        if (distance <= 0.0001f)
+        {
+            return;
+        }
+
+        Vector3 direction = delta / distance;
+        Vector3 startPosition = cachedRigidbody.position;
+        Vector3 finalMove = Vector3.zero;
+
+        if (cachedRigidbody.SweepTest(direction, out RaycastHit hit, distance + MoveSweepBuffer, QueryTriggerInteraction.Ignore))
+        {
+            float allowedDistance = Mathf.Max(0f, hit.distance - MoveSweepBuffer);
+            if (allowedDistance > 0f)
+            {
+                finalMove += direction * allowedDistance;
+            }
+
+            float remainingDistance = distance - allowedDistance;
+            if (remainingDistance > 0.0001f)
+            {
+                Vector3 remaining = direction * remainingDistance;
+                Vector3 slide = Vector3.ProjectOnPlane(remaining, hit.normal);
+                if (slide.sqrMagnitude > 0.0001f)
+                {
+                    Vector3 slideDirection = slide.normalized;
+                    float slideDistance = slide.magnitude;
+                    if (!cachedRigidbody.SweepTest(slideDirection, out _, slideDistance + MoveSweepBuffer, QueryTriggerInteraction.Ignore))
+                    {
+                        finalMove += slide;
+                    }
+                }
+            }
+        }
+        else
+        {
+            finalMove = delta;
+        }
+
+        if (finalMove.sqrMagnitude > 0.0001f)
+        {
+            cachedRigidbody.MovePosition(startPosition + finalMove);
+        }
+    }
+
+    private void HandleInstallationPlacementLock()
+    {
+        pendingMoveDirection = Vector3.zero;
+        stationaryHarvestTimer = 0f;
+        autoPickupTimer = 0f;
+
+        if (joystick != null)
+        {
+            joystick.ResetInput();
+        }
+
+        CancelPendingHarvest();
+        currentTargetResource = null;
+        SetFocusedBlock(null);
+        resourceWorkGauge?.HideIfNotFinishing();
+        player.StopImmediateActions();
+        player.UpdateCarryState();
     }
 
     private bool UpdateAutoHarvest(bool hasMovement)
@@ -157,7 +275,8 @@ public class PlayerController : MonoBehaviour
         SetFocusedBlock(currentTargetResource.OwningBlock);
         resourceWorkGauge?.Bind(currentTargetResource);
 
-        int preparedStepCount = currentTargetResource.PrepareHarvestSteps(harvestSpeed * Time.deltaTime);
+        int harvestPower = GetHarvestPower(currentTargetResource);
+        int preparedStepCount = currentTargetResource.PrepareHarvestSteps(harvestSpeed * Time.deltaTime, harvestPower);
 
         for (int i = 0; i < preparedStepCount; i++)
         {
@@ -280,6 +399,99 @@ public class PlayerController : MonoBehaviour
         return resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
             ? player.State.LoggingSpeed
             : player.State.MiningSpeed;
+    }
+
+    private int GetHarvestPower(Resource resource)
+    {
+        if (resource == null)
+        {
+            return 1;
+        }
+
+        return resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
+            ? player.State.LoggingPower
+            : player.State.MiningPower;
+    }
+
+    private void RefreshInteractionFocus(bool hasMovement)
+    {
+        Block focusBlock = null;
+
+        if (!player.IsCarrying
+            && currentTargetResource != null
+            && currentTargetResource.CanHarvest
+            && !hasMovement
+            && stationaryHarvestTimer >= harvestStartDelay
+            && GetHarvestSpeed(currentTargetResource) > 0f)
+        {
+            focusBlock = currentTargetResource.OwningBlock;
+        }
+
+        if (focusBlock == null)
+        {
+            focusBlock = FindNearbyWorkableBlock();
+        }
+
+        SetFocusedBlock(focusBlock);
+    }
+
+    private Block FindNearbyWorkableBlock()
+    {
+        if (player == null)
+        {
+            return null;
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            return null;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float focusRadius = Mathf.Max(0.5f, player.State.HarvestRange);
+        float focusRadiusSqr = focusRadius * focusRadius;
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(focusRadius));
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(origin.x),
+            Mathf.RoundToInt(origin.z));
+
+        Block bestBlock = null;
+        float bestDistanceSqr = float.MaxValue;
+
+        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        {
+            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (!cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+                {
+                    continue;
+                }
+
+                if (!(block.MapObject is WorkableObject workableObject) || workableObject == null || !workableObject.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                Vector3 offset = block.transform.position - origin;
+                offset.y = 0f;
+                float distanceSqr = offset.sqrMagnitude;
+                if (distanceSqr > focusRadiusSqr || distanceSqr >= bestDistanceSqr)
+                {
+                    continue;
+                }
+
+                bestDistanceSqr = distanceSqr;
+                bestBlock = block;
+            }
+        }
+
+        return bestBlock;
     }
 
     private void SetFocusedBlock(Block nextBlock)

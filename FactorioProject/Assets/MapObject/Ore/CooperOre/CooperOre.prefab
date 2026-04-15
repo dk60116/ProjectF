@@ -19,7 +19,7 @@ PrefabInstance:
     - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: itemDefinition
       value: 
-      objectReference: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+      objectReference: {fileID: 0}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
@@ -100,6 +100,22 @@ PrefabInstance:
       propertyPath: m_Name
       value: CooperOre
       objectReference: {fileID: 0}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: objId
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: definition
+      value: 
+      objectReference: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: itemDefinition
+      value: 
+      objectReference: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: resourceStatus.outputId
+      value: 2
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects:
     - {fileID: -7227463404532877082, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -107,60 +123,20 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 5209627923074140771}
-    - targetCorrespondingSourceObject: {fileID: 1126036018586424584, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 4997017620438082245}
+      addedObject: {fileID: 92288361837513598}
   m_SourcePrefab: {fileID: 100100000, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
 --- !u!1 &282995202885880893 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
   m_PrefabInstance: {fileID: 5998244657081757865}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &5209627923074140771
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 282995202885880893}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f288871d692212e44adbd8d808c95fe4, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  id: 0
-  objectName: Coar
-  objId: 2
-  itemDefinition: {fileID: 11400000, guid: 5d9b123abdd14304db3eaff067d44b68, type: 2}
-  portableObj: {fileID: 0}
-  harvestMode: 1
-  definition: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
-  resourceStatus:
-    outputId: 2
-    resourceCount: 1
-    getCount: 1
-    maxGauge: 10
-    currentGague: 10
-  portableObjects: []
-  workPerGaugeDot: 1
-  portableMoveInterval: 0.1
-  focusOffset: {x: 0, y: 0.5, z: 0}
-  minimumBodyScaleRatio: 0.3
-  maximumBodyScaleRatio: 1
-  dynamicScaleMaxResourceCount: 1
---- !u!1 &6673895352889615777 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 1126036018586424584, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-  m_PrefabInstance: {fileID: 5998244657081757865}
-  m_PrefabAsset: {fileID: 0}
---- !u!135 &4997017620438082245
+--- !u!135 &92288361837513598
 SphereCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6673895352889615777}
+  m_GameObject: {fileID: 282995202885880893}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -174,4 +150,4 @@ SphereCollider:
   m_Enabled: 1
   serializedVersion: 3
   m_Radius: 0.2
-  m_Center: {x: -0.000000007945309, y: -0.000000011917961, z: 0.13330081}
+  m_Center: {x: 0, y: 0, z: 0}

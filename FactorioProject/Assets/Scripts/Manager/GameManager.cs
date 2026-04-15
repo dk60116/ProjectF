@@ -14,6 +14,8 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private Player player;
 
+    public bool InstallationPlacementActive { get; private set; }
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -84,4 +86,9 @@ public class GameManager : MonoBehaviour
     public ItemManager ItemManger => itemManager;
 
     public Player Player => player;
+
+    public void SetInstallationPlacementActive(bool isActive)
+    {
+        InstallationPlacementActive = isActive;
+    }
 }

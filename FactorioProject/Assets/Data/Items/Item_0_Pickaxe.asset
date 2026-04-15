@@ -19,3 +19,7 @@ MonoBehaviour:
   portableMat: {fileID: 2100000, guid: 1e76a268dbe24b2499b4edde6e1e26f8, type: 2}
   icon: {fileID: 21300000, guid: afca9b1187a77004fa1f37020025714e, type: 3}
   size: 0
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 0
+  useEnergyAmount: 0

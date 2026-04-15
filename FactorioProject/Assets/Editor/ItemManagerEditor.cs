@@ -19,6 +19,11 @@ public class ItemManagerEditor : Editor
             EditorUtility.SetDirty(itemManager);
         }
 
+        if (GUILayout.Button("Open Item Data UI"))
+        {
+            ItemDataEditorWindow.ShowWindow();
+        }
+
         if (GUILayout.Button("Open Crafting Tree UI"))
         {
             CraftingTreeEditorWindow.ShowWindow();

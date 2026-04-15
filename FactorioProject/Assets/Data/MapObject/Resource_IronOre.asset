@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Resource_IronOre
   m_EditorClassIdentifier: 
   resourceName: IronOre
-  prefab: {fileID: 8031207384658059468, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
+  prefab: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
   harvestMode: 1
   defaultResourceCount: 1
   defaultGetCount: 1

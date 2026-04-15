@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
@@ -6,12 +7,52 @@ using UnityEngine;
 public class CraftingTreeEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 260f;
-    private const int CraftingTreeFileVersion = 1;
+    private const int CurrentCraftingTreeFileVersion = 4;
+    private const int MultiCraftingMapObjectGuidFileVersion = 3;
+    private const int OutputCountCraftingTreeFileVersion = 2;
+    private const int LegacyCraftingTreeFileVersion = 1;
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedItemId = -1;
+    private string itemSearchText = string.Empty;
     private readonly Dictionary<int, List<IngredientEntry>> recipeByItemId = new Dictionary<int, List<IngredientEntry>>();
-    private readonly Dictionary<int, MapObject> craftingMapObjectByItemId = new Dictionary<int, MapObject>();
+    private readonly Dictionary<int, List<MapObject>> craftingMapObjectsByItemId = new Dictionary<int, List<MapObject>>();
+    private readonly Dictionary<int, int> outputCountByItemId = new Dictionary<int, int>();
+
+    [Serializable]
+    private class CraftingTreeJsonFile
+    {
+        public List<CraftingTreeJsonEntry> recipes = new List<CraftingTreeJsonEntry>();
+        public List<CraftingTreeJsonEntry> items = new List<CraftingTreeJsonEntry>();
+        public List<CraftingTreeJsonEntry> entries = new List<CraftingTreeJsonEntry>();
+    }
+
+    [Serializable]
+    private class CraftingTreeJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName;
+        public int outputCount = 1;
+        public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
+        public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
+        public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
+    }
+
+    [Serializable]
+    private class CraftingIngredientJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName;
+        public int count = 1;
+    }
+
+    [Serializable]
+    private class CraftingMapObjectJsonEntry
+    {
+        public int itemId = -1;
+        public string mapObjectName;
+        public string assetPath;
+    }
 
     private struct IngredientEntry
     {
@@ -58,6 +99,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         GUILayout.BeginArea(sidebarRect);
         GUILayout.Space(10f);
         DrawToolbar();
+        DrawSearchField();
         EditorGUILayout.LabelField("Items", EditorStyles.boldLabel);
 
         ItemManager itemManager = FindItemManager();
@@ -76,10 +118,20 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        listScroll = EditorGUILayout.BeginScrollView(listScroll);
-        for (int i = 0; i < definitions.Count; i++)
+        List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
+        EnsureVisibleSelection(definitions, visibleDefinitions);
+
+        if (visibleDefinitions.Count == 0)
         {
-            ItemDefinition definition = definitions[i];
+            EditorGUILayout.HelpBox("검색 결과가 없습니다.", MessageType.Info);
+            GUILayout.EndArea();
+            return;
+        }
+
+        listScroll = EditorGUILayout.BeginScrollView(listScroll);
+        for (int i = 0; i < visibleDefinitions.Count; i++)
+        {
+            ItemDefinition definition = visibleDefinitions[i];
             if (definition == null)
             {
                 continue;
@@ -117,7 +169,42 @@ public class CraftingTreeEditorWindow : EditorWindow
 
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Export JSON", GUILayout.Width(100f)))
+        {
+            ExportJson();
+        }
+
+        if (GUILayout.Button("Load JSON", GUILayout.Width(100f)))
+        {
+            LoadJson();
+        }
+
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
         GUILayout.Space(6f);
+    }
+
+    private void DrawSearchField()
+    {
+        EditorGUILayout.BeginHorizontal();
+        string nextSearchText = EditorGUILayout.TextField("Search", itemSearchText);
+        if (!string.Equals(nextSearchText, itemSearchText))
+        {
+            itemSearchText = nextSearchText;
+            listScroll = Vector2.zero;
+        }
+
+        EditorGUI.BeginDisabledGroup(string.IsNullOrWhiteSpace(itemSearchText));
+        if (GUILayout.Button("X", GUILayout.Width(24f)))
+        {
+            itemSearchText = string.Empty;
+            listScroll = Vector2.zero;
+            GUI.FocusControl(null);
+        }
+        EditorGUI.EndDisabledGroup();
+        EditorGUILayout.EndHorizontal();
+        GUILayout.Space(4f);
     }
 
     private void DrawDetailPanel()
@@ -157,6 +244,8 @@ public class CraftingTreeEditorWindow : EditorWindow
         GUILayout.Space(8f);
 
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
+        DrawOutputCount(selectedDefinition);
+        GUILayout.Space(12f);
         DrawCraftingMapObjectRequirement(selectedDefinition);
         GUILayout.Space(12f);
         DrawIngredientList(selectedDefinition, definitions);
@@ -180,6 +269,20 @@ public class CraftingTreeEditorWindow : EditorWindow
         EditorGUILayout.LabelField("필요 재료를 아래에서 추가/편집하세요.", EditorStyles.miniLabel);
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
+    }
+
+    private void DrawOutputCount(ItemDefinition targetDefinition)
+    {
+        EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Count", GUILayout.Width(80f));
+        int currentValue = GetOutputCount(targetDefinition.id);
+        int newValue = Mathf.Max(1, EditorGUILayout.IntField(currentValue, GUILayout.Width(60f)));
+        if (newValue != currentValue)
+        {
+            outputCountByItemId[targetDefinition.id] = newValue;
+        }
+        EditorGUILayout.EndHorizontal();
     }
 
     private void DrawIngredientList(ItemDefinition targetDefinition, List<ItemDefinition> definitions)
@@ -231,7 +334,15 @@ public class CraftingTreeEditorWindow : EditorWindow
     private void DrawCraftingMapObjectRequirement(ItemDefinition targetDefinition)
     {
         List<MapObject> mapObjects = CollectMapObjectCandidates();
+        GUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Crafting MapObject", EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("Add", GUILayout.Width(60f)))
+        {
+            List<MapObject> selectedMapObjects = GetOrCreateCraftingMapObjects(targetDefinition.id);
+            selectedMapObjects.Add(GetNextCraftingMapObjectCandidate(mapObjects, selectedMapObjects));
+        }
+        GUILayout.EndHorizontal();
 
         if (mapObjects.Count == 0)
         {
@@ -239,19 +350,36 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        MapObject currentSelection = GetCraftingMapObject(targetDefinition.id);
-        int currentIndex = FindMapObjectIndex(mapObjects, currentSelection);
-
-        EditorGUI.BeginChangeCheck();
-        int newIndex;
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("MapObject", GUILayout.Width(80f));
-        newIndex = DrawMapObjectPopup(currentIndex, mapObjects);
-        EditorGUILayout.EndHorizontal();
-        if (EditorGUI.EndChangeCheck())
+        List<MapObject> selectedObjects = GetOrCreateCraftingMapObjects(targetDefinition.id);
+        if (selectedObjects.Count <= 0)
         {
-            MapObject newSelection = newIndex > 0 ? mapObjects[newIndex - 1] : null;
-            craftingMapObjectByItemId[targetDefinition.id] = newSelection;
+            EditorGUILayout.HelpBox("필요한 Crafting MapObject를 추가하세요.", MessageType.None);
+            return;
+        }
+
+        for (int i = selectedObjects.Count - 1; i >= 0; i--)
+        {
+            MapObject currentSelection = selectedObjects[i];
+            int currentIndex = FindMapObjectIndex(mapObjects, currentSelection);
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.BeginHorizontal();
+            Rect iconRect = GUILayoutUtility.GetRect(22f, 22f, GUILayout.ExpandWidth(false));
+            DrawIconBackground(iconRect);
+            DrawMapObjectIcon(iconRect, currentSelection);
+            int newIndex = DrawMapObjectPopup(currentIndex, mapObjects);
+            if (GUILayout.Button("X", GUILayout.Width(24f)))
+            {
+                selectedObjects.RemoveAt(i);
+                EditorGUILayout.EndHorizontal();
+                continue;
+            }
+
+            EditorGUILayout.EndHorizontal();
+            if (EditorGUI.EndChangeCheck())
+            {
+                selectedObjects[i] = newIndex > 0 ? mapObjects[newIndex - 1] : null;
+            }
         }
     }
 
@@ -268,6 +396,121 @@ public class CraftingTreeEditorWindow : EditorWindow
         WriteCraftingTree(resourcePath, itemIds);
 
         AssetDatabase.Refresh();
+        CraftingTreeRuntime.ForceReload();
+    }
+
+    private void ExportJson()
+    {
+        ItemManager itemManager = FindItemManager();
+        if (itemManager == null)
+        {
+            EditorUtility.DisplayDialog("CraftingTree", "씬에서 ItemManager를 찾을 수 없습니다.", "OK");
+            return;
+        }
+
+        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        string defaultPath = Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
+        string exportPath = EditorUtility.SaveFilePanel("Export CraftingTree JSON", Path.GetDirectoryName(defaultPath), Path.GetFileNameWithoutExtension(defaultPath), "json");
+        if (string.IsNullOrWhiteSpace(exportPath))
+        {
+            return;
+        }
+
+        CraftingTreeJsonFile file = new CraftingTreeJsonFile();
+        List<int> itemIds = CollectRecipeItemIds();
+        for (int i = 0; i < itemIds.Count; i++)
+        {
+            file.recipes.Add(BuildJsonEntry(itemIds[i], definitions));
+        }
+
+        File.WriteAllText(exportPath, JsonUtility.ToJson(file, true));
+        AssetDatabase.Refresh();
+    }
+
+    private void LoadJson()
+    {
+        string importPath = EditorUtility.OpenFilePanel("Load CraftingTree JSON", Application.dataPath, "json");
+        if (string.IsNullOrWhiteSpace(importPath) || !File.Exists(importPath))
+        {
+            return;
+        }
+
+        string json = File.ReadAllText(importPath);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            EditorUtility.DisplayDialog("CraftingTree", "JSON 파일이 비어 있습니다.", "OK");
+            return;
+        }
+
+        CraftingTreeJsonFile file = JsonUtility.FromJson<CraftingTreeJsonFile>(json);
+        List<CraftingTreeJsonEntry> entries = GetJsonEntries(file);
+        if (entries.Count == 0)
+        {
+            EditorUtility.DisplayDialog("CraftingTree", "불러올 레시피가 없습니다.", "OK");
+            return;
+        }
+
+        ItemManager itemManager = FindItemManager();
+        if (itemManager == null)
+        {
+            EditorUtility.DisplayDialog("CraftingTree", "씬에서 ItemManager를 찾을 수 없습니다.", "OK");
+            return;
+        }
+
+        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        if (definitions == null || definitions.Count == 0)
+        {
+            EditorUtility.DisplayDialog("CraftingTree", "ItemDefinitions가 비어 있습니다.", "OK");
+            return;
+        }
+
+        List<MapObject> mapObjectCandidates = CollectMapObjectCandidates();
+        recipeByItemId.Clear();
+        craftingMapObjectsByItemId.Clear();
+        outputCountByItemId.Clear();
+
+        int appliedCount = 0;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            CraftingTreeJsonEntry entry = entries[i];
+            ItemDefinition targetDefinition = ResolveDefinition(definitions, entry.itemName, entry.itemId);
+            if (targetDefinition == null)
+            {
+                continue;
+            }
+
+            int targetItemId = targetDefinition.id;
+            outputCountByItemId[targetItemId] = Mathf.Max(1, entry.outputCount);
+
+            List<MapObject> resolvedMapObjects = ResolveCraftingMapObjects(entry, mapObjectCandidates);
+            if (resolvedMapObjects.Count > 0)
+            {
+                craftingMapObjectsByItemId[targetItemId] = resolvedMapObjects;
+            }
+
+            List<IngredientEntry> recipe = GetOrCreateRecipe(targetItemId);
+            recipe.Clear();
+            if (entry.ingredients != null)
+            {
+                for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
+                {
+                    CraftingIngredientJsonEntry ingredientEntry = entry.ingredients[ingredientIndex];
+                    ItemDefinition ingredientDefinition = ResolveDefinition(definitions, ingredientEntry.itemName, ingredientEntry.itemId);
+                    if (ingredientDefinition == null)
+                    {
+                        continue;
+                    }
+
+                    recipe.Add(new IngredientEntry(ingredientDefinition.id, Mathf.Max(1, ingredientEntry.count)));
+                }
+            }
+
+            appliedCount++;
+        }
+
+        SaveCraftingTree();
+        Repaint();
+        EditorUtility.DisplayDialog("CraftingTree", $"{appliedCount}개 레시피를 불러왔습니다.", "OK");
     }
 
     private void WriteCraftingTree(string path, List<int> itemIds)
@@ -275,7 +518,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write))
         using (BinaryWriter writer = new BinaryWriter(stream))
         {
-            writer.Write(CraftingTreeFileVersion);
+            writer.Write(CurrentCraftingTreeFileVersion);
             writer.Write(itemIds.Count);
 
             for (int i = 0; i < itemIds.Count; i++)
@@ -283,8 +526,14 @@ public class CraftingTreeEditorWindow : EditorWindow
                 int itemId = itemIds[i];
                 writer.Write(itemId);
 
-                string mapObjectGuid = GetMapObjectGuid(GetCraftingMapObject(itemId));
-                writer.Write(mapObjectGuid ?? string.Empty);
+                List<int> mapObjectIds = GetMapObjectRuntimeIds(GetCraftingMapObjects(itemId));
+                writer.Write(mapObjectIds.Count);
+                for (int mapObjectIndex = 0; mapObjectIndex < mapObjectIds.Count; mapObjectIndex++)
+                {
+                    writer.Write(mapObjectIds[mapObjectIndex]);
+                }
+
+                writer.Write(GetOutputCount(itemId));
 
                 List<IngredientEntry> recipe = GetOrCreateRecipe(itemId);
                 writer.Write(recipe.Count);
@@ -316,13 +565,14 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         recipeByItemId.Clear();
-        craftingMapObjectByItemId.Clear();
+        craftingMapObjectsByItemId.Clear();
+        outputCountByItemId.Clear();
 
         using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read))
         using (BinaryReader reader = new BinaryReader(stream))
         {
             int version = reader.ReadInt32();
-            if (version != CraftingTreeFileVersion)
+            if (version != LegacyCraftingTreeFileVersion && version != CurrentCraftingTreeFileVersion)
             {
                 EditorUtility.DisplayDialog("CraftingTree", $"버전이 맞지 않습니다. (파일: {version})", "OK");
                 return;
@@ -332,9 +582,15 @@ public class CraftingTreeEditorWindow : EditorWindow
             for (int i = 0; i < itemCount; i++)
             {
                 int itemId = reader.ReadInt32();
-                string mapGuid = reader.ReadString();
-                MapObject mapObject = ResolveMapObjectFromGuid(mapGuid);
-                craftingMapObjectByItemId[itemId] = mapObject;
+                List<MapObject> mapObjects = ReadCraftingMapObjects(reader, version);
+                if (mapObjects.Count > 0)
+                {
+                    craftingMapObjectsByItemId[itemId] = mapObjects;
+                }
+
+                outputCountByItemId[itemId] = version >= OutputCountCraftingTreeFileVersion
+                    ? Mathf.Max(1, reader.ReadInt32())
+                    : 1;
 
                 int ingredientCount = reader.ReadInt32();
                 List<IngredientEntry> recipe = new List<IngredientEntry>(ingredientCount);
@@ -362,6 +618,208 @@ public class CraftingTreeEditorWindow : EditorWindow
         return Path.Combine(Application.dataPath, "Resources", "Data", "CraftingTree", "crafting_tree.bytes");
     }
 
+    private CraftingTreeJsonEntry BuildJsonEntry(int itemId, List<ItemDefinition> definitions)
+    {
+        CraftingTreeJsonEntry entry = new CraftingTreeJsonEntry();
+        ItemDefinition targetDefinition = FindDefinitionById(definitions, itemId);
+        entry.itemId = itemId;
+        entry.itemName = targetDefinition != null ? GetDefinitionDisplayName(targetDefinition) : string.Empty;
+        entry.outputCount = GetOutputCount(itemId);
+
+        List<MapObject> mapObjects = GetCraftingMapObjects(itemId);
+        if (mapObjects != null)
+        {
+            for (int i = 0; i < mapObjects.Count; i++)
+            {
+                CraftingMapObjectJsonEntry mapObjectEntry = BuildMapObjectJsonEntry(mapObjects[i]);
+                if (mapObjectEntry != null)
+                {
+                    entry.craftingMapObjects.Add(mapObjectEntry);
+                }
+            }
+        }
+
+        List<IngredientEntry> recipe = GetOrCreateRecipe(itemId);
+        for (int i = 0; i < recipe.Count; i++)
+        {
+            IngredientEntry ingredient = recipe[i];
+            ItemDefinition ingredientDefinition = FindDefinitionById(definitions, ingredient.itemId);
+            entry.ingredients.Add(new CraftingIngredientJsonEntry
+            {
+                itemId = ingredient.itemId,
+                itemName = ingredientDefinition != null ? GetDefinitionDisplayName(ingredientDefinition) : string.Empty,
+                count = Mathf.Max(1, ingredient.count)
+            });
+        }
+
+        return entry;
+    }
+
+    private static CraftingMapObjectJsonEntry BuildMapObjectJsonEntry(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        GameObject prefabRoot = mapObject.transform.root != null ? mapObject.transform.root.gameObject : mapObject.gameObject;
+        return new CraftingMapObjectJsonEntry
+        {
+            itemId = mapObject.ResolveItemId(),
+            mapObjectName = prefabRoot != null ? prefabRoot.name : mapObject.gameObject.name,
+            assetPath = AssetDatabase.GetAssetPath(prefabRoot)
+        };
+    }
+
+    private static List<CraftingTreeJsonEntry> GetJsonEntries(CraftingTreeJsonFile file)
+    {
+        if (file == null)
+        {
+            return new List<CraftingTreeJsonEntry>();
+        }
+
+        if (file.recipes != null && file.recipes.Count > 0)
+        {
+            return file.recipes;
+        }
+
+        if (file.items != null && file.items.Count > 0)
+        {
+            return file.items;
+        }
+
+        if (file.entries != null && file.entries.Count > 0)
+        {
+            return file.entries;
+        }
+
+        return new List<CraftingTreeJsonEntry>();
+    }
+
+    private static ItemDefinition ResolveDefinition(List<ItemDefinition> definitions, string itemName, int itemId)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(itemName))
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition candidate = definitions[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(GetDefinitionDisplayName(candidate), itemName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.itemName, itemName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.name, itemName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return itemId >= 0 ? FindDefinitionById(definitions, itemId) : null;
+    }
+
+    private static List<MapObject> ResolveCraftingMapObjects(CraftingTreeJsonEntry entry, List<MapObject> candidates)
+    {
+        List<MapObject> results = new List<MapObject>();
+        if (entry == null || candidates == null)
+        {
+            return results;
+        }
+
+        List<CraftingMapObjectJsonEntry> sourceEntries = null;
+        if (entry.craftingMapObjects != null && entry.craftingMapObjects.Count > 0)
+        {
+            sourceEntries = entry.craftingMapObjects;
+        }
+        else if (entry.requiredMapObjects != null && entry.requiredMapObjects.Count > 0)
+        {
+            sourceEntries = entry.requiredMapObjects;
+        }
+
+        if (sourceEntries == null)
+        {
+            return results;
+        }
+
+        for (int i = 0; i < sourceEntries.Count; i++)
+        {
+            MapObject resolved = ResolveMapObject(sourceEntries[i], candidates);
+            if (resolved != null && !results.Contains(resolved))
+            {
+                results.Add(resolved);
+            }
+        }
+
+        return results;
+    }
+
+    private static MapObject ResolveMapObject(CraftingMapObjectJsonEntry entry, List<MapObject> candidates)
+    {
+        if (entry == null || candidates == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.assetPath))
+        {
+            GameObject prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(entry.assetPath);
+            if (prefabRoot != null)
+            {
+                MapObject directMatch = prefabRoot.GetComponent<MapObject>();
+                if (directMatch == null)
+                {
+                    directMatch = prefabRoot.GetComponentInChildren<MapObject>(true);
+                }
+
+                if (directMatch != null)
+                {
+                    return directMatch;
+                }
+            }
+        }
+
+        if (entry.itemId >= 0)
+        {
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                MapObject candidate = candidates[i];
+                if (candidate != null && candidate.ResolveItemId() == entry.itemId)
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.mapObjectName))
+        {
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                MapObject candidate = candidates[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                GameObject prefabRoot = candidate.transform.root != null ? candidate.transform.root.gameObject : candidate.gameObject;
+                string candidateName = prefabRoot != null ? prefabRoot.name : candidate.gameObject.name;
+                if (string.Equals(candidateName, entry.mapObjectName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate.gameObject.name, entry.mapObjectName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static void EnsureParentFolder(string path)
     {
         string folderPath = Path.GetDirectoryName(path);
@@ -385,13 +843,48 @@ public class CraftingTreeEditorWindow : EditorWindow
             ids.Add(key);
         }
 
-        foreach (int key in craftingMapObjectByItemId.Keys)
+        foreach (int key in craftingMapObjectsByItemId.Keys)
+        {
+            ids.Add(key);
+        }
+
+        foreach (int key in outputCountByItemId.Keys)
         {
             ids.Add(key);
         }
 
         List<int> results = new List<int>(ids);
         results.Sort();
+        return results;
+    }
+
+    private List<MapObject> ReadCraftingMapObjects(BinaryReader reader, int version)
+    {
+        List<MapObject> results = new List<MapObject>();
+
+        if (version >= CurrentCraftingTreeFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                AppendCraftingMapObject(results, ResolveMapObjectFromRuntimeId(reader.ReadInt32()));
+            }
+
+            return results;
+        }
+
+        if (version >= MultiCraftingMapObjectGuidFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                AppendCraftingMapObject(results, ResolveMapObjectFromGuid(reader.ReadString()));
+            }
+
+            return results;
+        }
+
+        AppendCraftingMapObject(results, ResolveMapObjectFromGuid(reader.ReadString()));
         return results;
     }
 
@@ -439,6 +932,26 @@ public class CraftingTreeEditorWindow : EditorWindow
         return mapObject;
     }
 
+    private static MapObject ResolveMapObjectFromRuntimeId(int runtimeId)
+    {
+        if (runtimeId < 0)
+        {
+            return null;
+        }
+
+        List<MapObject> candidates = CollectMapObjectCandidates();
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            MapObject candidate = candidates[i];
+            if (candidate != null && candidate.ResolveItemId() == runtimeId)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
     private List<IngredientEntry> GetOrCreateRecipe(int itemId)
     {
         if (!recipeByItemId.TryGetValue(itemId, out List<IngredientEntry> recipe))
@@ -450,14 +963,98 @@ public class CraftingTreeEditorWindow : EditorWindow
         return recipe;
     }
 
-    private MapObject GetCraftingMapObject(int itemId)
+    private List<MapObject> GetOrCreateCraftingMapObjects(int itemId)
     {
-        if (craftingMapObjectByItemId.TryGetValue(itemId, out MapObject value))
+        if (!craftingMapObjectsByItemId.TryGetValue(itemId, out List<MapObject> values) || values == null)
         {
-            return value;
+            values = new List<MapObject>();
+            craftingMapObjectsByItemId[itemId] = values;
+        }
+
+        return values;
+    }
+
+    private List<MapObject> GetCraftingMapObjects(int itemId)
+    {
+        if (craftingMapObjectsByItemId.TryGetValue(itemId, out List<MapObject> values) && values != null)
+        {
+            return values;
         }
 
         return null;
+    }
+
+    private int GetOutputCount(int itemId)
+    {
+        if (outputCountByItemId.TryGetValue(itemId, out int value))
+        {
+            return Mathf.Max(1, value);
+        }
+
+        return 1;
+    }
+
+    private static void AppendCraftingMapObject(List<MapObject> results, MapObject mapObject)
+    {
+        if (results == null || mapObject == null || results.Contains(mapObject))
+        {
+            return;
+        }
+
+        results.Add(mapObject);
+    }
+
+    private static List<int> GetMapObjectRuntimeIds(List<MapObject> mapObjects)
+    {
+        List<int> results = new List<int>();
+        if (mapObjects == null)
+        {
+            return results;
+        }
+
+        HashSet<int> seen = new HashSet<int>();
+        for (int i = 0; i < mapObjects.Count; i++)
+        {
+            MapObject mapObject = mapObjects[i];
+            if (mapObject == null)
+            {
+                continue;
+            }
+
+            int runtimeId = mapObject.ResolveItemId();
+            if (runtimeId < 0 || !seen.Add(runtimeId))
+            {
+                continue;
+            }
+
+            results.Add(runtimeId);
+        }
+
+        return results;
+    }
+
+    private static MapObject GetNextCraftingMapObjectCandidate(List<MapObject> availableMapObjects, List<MapObject> selectedMapObjects)
+    {
+        if (availableMapObjects == null || availableMapObjects.Count <= 0)
+        {
+            return null;
+        }
+
+        if (selectedMapObjects == null)
+        {
+            return availableMapObjects[0];
+        }
+
+        for (int i = 0; i < availableMapObjects.Count; i++)
+        {
+            MapObject candidate = availableMapObjects[i];
+            if (candidate != null && !selectedMapObjects.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return availableMapObjects[0];
     }
 
     private static List<MapObject> CollectMapObjectCandidates()
@@ -533,6 +1130,78 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         return names;
+    }
+
+    private void EnsureVisibleSelection(List<ItemDefinition> definitions, List<ItemDefinition> visibleDefinitions)
+    {
+        if (visibleDefinitions != null && visibleDefinitions.Count > 0)
+        {
+            if (FindDefinitionById(visibleDefinitions, selectedItemId) == null)
+            {
+                selectedItemId = visibleDefinitions[0].id;
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(itemSearchText))
+        {
+            return;
+        }
+
+        if (definitions == null || FindDefinitionById(definitions, selectedItemId) == null)
+        {
+            selectedItemId = -1;
+        }
+    }
+
+    private List<ItemDefinition> FilterDefinitions(List<ItemDefinition> definitions)
+    {
+        List<ItemDefinition> results = new List<ItemDefinition>();
+        if (definitions == null)
+        {
+            return results;
+        }
+
+        string searchText = string.IsNullOrWhiteSpace(itemSearchText) ? string.Empty : itemSearchText.Trim();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(searchText) || MatchesDefinitionSearch(definition, searchText))
+            {
+                results.Add(definition);
+            }
+        }
+
+        return results;
+    }
+
+    private static bool MatchesDefinitionSearch(ItemDefinition definition, string searchText)
+    {
+        if (definition == null || string.IsNullOrEmpty(searchText))
+        {
+            return false;
+        }
+
+        if (definition.id.ToString().IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        string displayName = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName;
+        if (!string.IsNullOrWhiteSpace(displayName) &&
+            displayName.IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(definition.name) &&
+               definition.name.IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private int DrawDefinitionPopup(int currentIndex, List<ItemDefinition> definitions)
@@ -626,6 +1295,20 @@ public class CraftingTreeEditorWindow : EditorWindow
         return AssetPreview.GetMiniThumbnail(target);
     }
 
+    private static void DrawMapObjectIcon(Rect rect, MapObject mapObject)
+    {
+        Texture icon = GetMapObjectIcon(mapObject);
+        if (icon == null)
+        {
+            return;
+        }
+
+        Color previousColor = GUI.color;
+        GUI.color = Color.white;
+        GUI.DrawTexture(rect, icon, ScaleMode.ScaleToFit);
+        GUI.color = previousColor;
+    }
+
     private static int FindMapObjectIndex(List<MapObject> mapObjects, MapObject selected)
     {
         if (selected == null)
@@ -694,6 +1377,16 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         return -1;
+    }
+
+    private static string GetDefinitionDisplayName(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return "(Missing)";
+        }
+
+        return string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName;
     }
 
     private static void DrawIconBackground(Rect rect)

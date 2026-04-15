@@ -79,6 +79,11 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
         ResetHandle();
     }
 
+    public void ResetInput()
+    {
+        ResetHandle();
+    }
+
     private void ResetHandle()
     {
         InputDirection = Vector2.zero;

@@ -19,7 +19,7 @@ PrefabInstance:
     - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: itemDefinition
       value: 
-      objectReference: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+      objectReference: {fileID: 0}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
@@ -100,6 +100,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: Stone
       objectReference: {fileID: 0}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: objId
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: definition
+      value: 
+      objectReference: {fileID: 11400000, guid: 96e45d7fa97ca7e4aad0fb7b1ad1db16, type: 2}
+    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      propertyPath: resourceStatus.outputId
+      value: 4
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects:
     - {fileID: -7227463404532877082, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -107,17 +119,17 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 3118427074153073671}
-    - targetCorrespondingSourceObject: {fileID: 1126036018586424584, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+      addedObject: {fileID: 5150821752848007095}
+    - targetCorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 1877998851241371251}
+      addedObject: {fileID: 7561634425664842413}
   m_SourcePrefab: {fileID: 100100000, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
 --- !u!1 &282995202885880893 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
   m_PrefabInstance: {fileID: 5998244657081757865}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &3118427074153073671
+--- !u!114 &5150821752848007095
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -130,10 +142,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: Stone
+  objectName: 
   objId: 4
-  itemDefinition: {fileID: 0}
+  itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
   portableObj: {fileID: 0}
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
   harvestMode: 1
   definition: {fileID: 11400000, guid: 96e45d7fa97ca7e4aad0fb7b1ad1db16, type: 2}
   resourceStatus:
@@ -149,18 +164,13 @@ MonoBehaviour:
   minimumBodyScaleRatio: 0.3
   maximumBodyScaleRatio: 1
   dynamicScaleMaxResourceCount: 1
---- !u!1 &6673895352889615777 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 1126036018586424584, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-  m_PrefabInstance: {fileID: 5998244657081757865}
-  m_PrefabAsset: {fileID: 0}
---- !u!135 &1877998851241371251
+--- !u!135 &7561634425664842413
 SphereCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6673895352889615777}
+  m_GameObject: {fileID: 282995202885880893}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -174,4 +184,4 @@ SphereCollider:
   m_Enabled: 1
   serializedVersion: 3
   m_Radius: 0.2
-  m_Center: {x: -0.000000007945309, y: -0.000000011917961, z: 0.13330081}
+  m_Center: {x: 0, y: 0, z: 0}

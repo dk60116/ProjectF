@@ -53,7 +53,7 @@ public class ItemManager : MonoBehaviour
                         portableMesh = definition.portableMesh,
                         portableMat = definition.portableMat,
                         icon = definition.icon,
-                        size = definition.size
+                        size = (int)definition.size
                     };
                     return true;
                 }
@@ -170,10 +170,14 @@ public class ItemManager : MonoBehaviour
             definition.id = itemSet.id;
             definition.itemName = itemSet.name;
             definition.mapObject = FindMapObjectForItem(itemSet.name, GetItemFolderForName(itemSet.name, itemFolderLookup));
-            definition.portableMesh = itemSet.portableMesh;
-            definition.portableMat = itemSet.portableMat;
+
+            Mesh definitionPortableMesh = itemSet.portableMesh;
+            Material definitionPortableMaterial = itemSet.portableMat;
+            TryOverrideInstallationPortableAssets(definition.mapObject, ref definitionPortableMesh, ref definitionPortableMaterial);
+            definition.portableMesh = definitionPortableMesh;
+            definition.portableMat = definitionPortableMaterial;
             definition.icon = itemSet.icon;
-            definition.size = itemSet.size;
+            definition.size = (uint)Mathf.Max(0, itemSet.size);
             BindMapObjectDefinition(definition);
 
             if (itemSet.prefab != null)
@@ -225,9 +229,10 @@ public class ItemManager : MonoBehaviour
         }
 
         List<string> itemFolders = CollectItemFolderPaths();
+        Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
+        HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
 
         List<ItemSet> rebuiltItems = new List<ItemSet>();
-        int nextSequentialId = 0;
 
         for (int i = 0; i < itemFolders.Count; i++)
         {
@@ -257,8 +262,10 @@ public class ItemManager : MonoBehaviour
 
             TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
 
-            int itemId = nextSequentialId;
-            nextSequentialId++;
+            int itemId = preservedIdsByItemName.TryGetValue(itemName, out int preservedId)
+                ? preservedId
+                : GetNextAvailableId(usedIds);
+            usedIds.Add(itemId);
 
             Sprite resolvedIcon = ResolveItemIcon(itemFolder, itemName, hasPreviousItem ? previousItem.icon : null);
 
@@ -321,9 +328,10 @@ public class ItemManager : MonoBehaviour
         }
 
         List<string> itemFolders = CollectItemFolderPaths();
+        Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
+        HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
 
         List<ItemSet> rebuiltItems = new List<ItemSet>();
-        int nextSequentialId = 0;
 
         for (int i = 0; i < itemFolders.Count; i++)
         {
@@ -353,8 +361,10 @@ public class ItemManager : MonoBehaviour
 
             TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
 
-            int itemId = nextSequentialId;
-            nextSequentialId++;
+            int itemId = preservedIdsByItemName.TryGetValue(itemName, out int preservedId)
+                ? preservedId
+                : GetNextAvailableId(usedIds);
+            usedIds.Add(itemId);
 
             Sprite resolvedIcon = ResolveItemIcon(itemFolder, itemName, hasPreviousItem ? previousItem.icon : null);
 
@@ -400,6 +410,41 @@ public class ItemManager : MonoBehaviour
         }
 
         return candidateId;
+    }
+
+    private static Dictionary<string, int> BuildPreservedItemIds(List<string> itemFolders, Dictionary<string, ItemSet> previousItemsByName)
+    {
+        Dictionary<string, int> results = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (itemFolders == null || previousItemsByName == null || previousItemsByName.Count == 0)
+        {
+            return results;
+        }
+
+        HashSet<int> usedIds = new HashSet<int>();
+        for (int i = 0; i < itemFolders.Count; i++)
+        {
+            string itemFolder = itemFolders[i];
+            string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
+            if (string.IsNullOrWhiteSpace(itemName))
+            {
+                continue;
+            }
+
+            if (!previousItemsByName.TryGetValue(itemName, out ItemSet previousItem))
+            {
+                continue;
+            }
+
+            if (previousItem.id < 0 || usedIds.Contains(previousItem.id))
+            {
+                continue;
+            }
+
+            usedIds.Add(previousItem.id);
+            results[itemName] = previousItem.id;
+        }
+
+        return results;
     }
 
     private static string ResolveItemName(string assetPath, string prefabName)
@@ -576,6 +621,61 @@ public class ItemManager : MonoBehaviour
         return normalized.Contains("/objects/generateditems/");
     }
 
+    private static string[] GetResourcePrefabSearchRoots()
+    {
+        List<string> folders = new List<string>();
+        AddSearchFolderIfExists(folders, "Assets/MapResource");
+        AddSearchFolderIfExists(folders, "Assets/MapResources");
+        AddSearchFolderIfExists(folders, "Assets/MapObject");
+        AddSearchFolderIfExists(folders, "Assets/MapObjects");
+        return folders.ToArray();
+    }
+
+    private static string[] GetResourceDefinitionSearchRoots()
+    {
+        List<string> folders = new List<string>();
+        AddSearchFolderIfExists(folders, "Assets/Data/Resources");
+        AddSearchFolderIfExists(folders, "Assets/Data/MapObject");
+        AddSearchFolderIfExists(folders, "Assets/Data/MapObjects");
+        return folders.ToArray();
+    }
+
+    private static bool HasResourceDefinitionAssets(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath) || !AssetDatabase.IsValidFolder(folderPath))
+        {
+            return false;
+        }
+
+        string[] guids = AssetDatabase.FindAssets("t:ResourceDefinition", new[] { folderPath });
+        return guids != null && guids.Length > 0;
+    }
+
+    private static string GetResourceDefinitionTargetDirectory()
+    {
+        if (HasResourceDefinitionAssets("Assets/Data/Resources"))
+        {
+            return "Assets/Data/Resources";
+        }
+
+        if (HasResourceDefinitionAssets("Assets/Data/MapObject"))
+        {
+            return "Assets/Data/MapObject";
+        }
+
+        if (HasResourceDefinitionAssets("Assets/Data/MapObjects"))
+        {
+            return "Assets/Data/MapObjects";
+        }
+
+        if (AssetDatabase.IsValidFolder("Assets/Data/MapObject"))
+        {
+            return "Assets/Data/MapObject";
+        }
+
+        return "Assets/Data/Resources";
+    }
+
     private static string GetItemCategoryName(string itemFolder)
     {
         if (string.IsNullOrWhiteSpace(itemFolder))
@@ -638,11 +738,7 @@ public class ItemManager : MonoBehaviour
                     continue;
                 }
 
-                MapObject mapObject = prefabRoot.GetComponent<MapObject>();
-                if (mapObject == null)
-                {
-                    mapObject = prefabRoot.GetComponentInChildren<MapObject>(true);
-                }
+                MapObject mapObject = FindPreferredMapObjectOnPrefab(prefabRoot);
 
                 if (mapObject == null)
                 {
@@ -699,6 +795,44 @@ public class ItemManager : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static MapObject FindPreferredMapObjectOnPrefab(GameObject prefabRoot)
+    {
+        if (prefabRoot == null)
+        {
+            return null;
+        }
+
+        Resource resource = prefabRoot.GetComponent<Resource>();
+        if (resource == null)
+        {
+            resource = prefabRoot.GetComponentInChildren<Resource>(true);
+        }
+
+        if (resource != null)
+        {
+            return resource;
+        }
+
+        InstallationObject installationObject = prefabRoot.GetComponent<InstallationObject>();
+        if (installationObject == null)
+        {
+            installationObject = prefabRoot.GetComponentInChildren<InstallationObject>(true);
+        }
+
+        if (installationObject != null)
+        {
+            return installationObject;
+        }
+
+        MapObject mapObject = prefabRoot.GetComponent<MapObject>();
+        if (mapObject == null)
+        {
+            mapObject = prefabRoot.GetComponentInChildren<MapObject>(true);
+        }
+
+        return mapObject;
     }
 
     private static string ResolveLookupPath(PropObj propObject, GameObject prefabRoot, string assetPath)
@@ -998,6 +1132,22 @@ public class ItemManager : MonoBehaviour
         return prefabRoot.GetComponentInChildren<InstallationObject>(true) != null;
     }
 
+    private static GameObject GetMapObjectPrefabRoot(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        Transform rootTransform = mapObject.transform != null ? mapObject.transform.root : null;
+        if (rootTransform != null)
+        {
+            return rootTransform.gameObject;
+        }
+
+        return mapObject.gameObject;
+    }
+
     private static void TryOverrideInstallationPortableAssets(
         string itemName,
         string itemFolder,
@@ -1023,30 +1173,38 @@ public class ItemManager : MonoBehaviour
         }
     }
 
+    private static void TryOverrideInstallationPortableAssets(
+        MapObject mapObject,
+        ref Mesh portableMesh,
+        ref Material portableMaterial)
+    {
+        if (!IsInstallationObjectPrefab(GetMapObjectPrefabRoot(mapObject)))
+        {
+            return;
+        }
+
+        Mesh packageMesh = LoadPackagePortableMesh();
+        if (packageMesh != null)
+        {
+            portableMesh = packageMesh;
+        }
+
+        Material packageMaterial = LoadPackagePortableMaterial();
+        if (packageMaterial != null)
+        {
+            portableMaterial = packageMaterial;
+        }
+    }
+
     private static bool IsInstallationItem(string itemName, string itemFolder, GameObject prefabRoot)
     {
-        if (prefabRoot != null && IsInstallationObjectPrefab(prefabRoot))
+        if (prefabRoot != null)
         {
-            if (prefabRoot.GetComponentInChildren<Resource>(true) != null)
-            {
-                return false;
-            }
-
-            return true;
+            return IsInstallationObjectPrefab(prefabRoot);
         }
 
         MapObject mapObject = FindMapObjectForItem(itemName, itemFolder);
-        if (mapObject == null)
-        {
-            return false;
-        }
-
-        if (mapObject.GetComponent<Resource>() != null)
-        {
-            return false;
-        }
-
-        return mapObject is InstallationObject;
+        return IsInstallationObjectPrefab(GetMapObjectPrefabRoot(mapObject));
     }
 
     private static Mesh LoadPackagePortableMesh()
@@ -1648,10 +1806,14 @@ public class ItemManager : MonoBehaviour
             definition.id = itemSet.id;
             definition.itemName = itemSet.name;
             definition.mapObject = FindMapObjectForItem(itemSet.name, GetItemFolderForName(itemSet.name, itemFolderLookup));
-            definition.portableMesh = itemSet.portableMesh;
-            definition.portableMat = itemSet.portableMat;
+
+            Mesh definitionPortableMesh = itemSet.portableMesh;
+            Material definitionPortableMaterial = itemSet.portableMat;
+            TryOverrideInstallationPortableAssets(definition.mapObject, ref definitionPortableMesh, ref definitionPortableMaterial);
+            definition.portableMesh = definitionPortableMesh;
+            definition.portableMat = definitionPortableMaterial;
             definition.icon = itemSet.icon;
-            definition.size = itemSet.size;
+            definition.size = (uint)Mathf.Max(0, itemSet.size);
 
             AssetDatabase.CreateAsset(definition, assetPath);
             itemDefinitions.Add(definition);
@@ -1683,22 +1845,41 @@ public class ItemManager : MonoBehaviour
     [ContextMenu("Migrate Resource Definitions From Resources")]
     public void MigrateResourceDefinitionsFromResources()
     {
-        string targetDirectory = "Assets/Data/Resources";
+        string targetDirectory = GetResourceDefinitionTargetDirectory();
         if (!EnsureAssetFolder(targetDirectory))
         {
             Debug.LogError($"ItemManager: Failed to create resource definition folder at '{targetDirectory}'.");
             return;
         }
 
-        string[] resourceGuids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/MapResource", "Assets/MapResources" });
+        string[] resourceSearchRoots = GetResourcePrefabSearchRoots();
+        string[] resourceGuids = resourceSearchRoots.Length > 0
+            ? AssetDatabase.FindAssets("t:Prefab", resourceSearchRoots)
+            : new string[0];
         Dictionary<string, ResourceDefinition> existingDefinitions = new Dictionary<string, ResourceDefinition>();
 
-        string[] existingDefGuids = AssetDatabase.FindAssets("t:ResourceDefinition", new[] { targetDirectory });
+        List<string> definitionSearchRoots = new List<string>();
+        AddSearchFolderIfExists(definitionSearchRoots, targetDirectory);
+        string[] allDefinitionRoots = GetResourceDefinitionSearchRoots();
+        for (int i = 0; i < allDefinitionRoots.Length; i++)
+        {
+            string root = allDefinitionRoots[i];
+            if (string.Equals(root, targetDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            definitionSearchRoots.Add(root);
+        }
+
+        string[] existingDefGuids = definitionSearchRoots.Count > 0
+            ? AssetDatabase.FindAssets("t:ResourceDefinition", definitionSearchRoots.ToArray())
+            : new string[0];
         for (int i = 0; i < existingDefGuids.Length; i++)
         {
             string defPath = AssetDatabase.GUIDToAssetPath(existingDefGuids[i]);
             ResourceDefinition existing = AssetDatabase.LoadAssetAtPath<ResourceDefinition>(defPath);
-            if (existing != null)
+            if (existing != null && !string.IsNullOrWhiteSpace(existing.resourceName) && !existingDefinitions.ContainsKey(existing.resourceName))
             {
                 existingDefinitions[existing.resourceName] = existing;
             }
@@ -1714,6 +1895,11 @@ public class ItemManager : MonoBehaviour
             }
 
             Resource resource = prefabRoot.GetComponent<Resource>();
+            if (resource == null)
+            {
+                resource = prefabRoot.GetComponentInChildren<Resource>(true);
+            }
+
             if (resource == null)
             {
                 continue;
@@ -1766,6 +1952,17 @@ public class ItemManager : MonoBehaviour
             return;
         }
 
+        GameObject prefabRoot = definition.mapObject.gameObject;
+        if (prefabRoot != null)
+        {
+            prefabRoot = prefabRoot.transform.root != null ? prefabRoot.transform.root.gameObject : prefabRoot;
+            MapObject preferredMapObject = FindPreferredMapObjectOnPrefab(prefabRoot);
+            if (preferredMapObject != null && preferredMapObject != definition.mapObject)
+            {
+                definition.mapObject = preferredMapObject;
+            }
+        }
+
         SerializedObject serializedMapObject = new SerializedObject(definition.mapObject);
         SerializedProperty objIdProperty = serializedMapObject.FindProperty("objId");
         if (objIdProperty != null)
@@ -1781,7 +1978,7 @@ public class ItemManager : MonoBehaviour
 
         serializedMapObject.ApplyModifiedPropertiesWithoutUndo();
 
-        GameObject prefabRoot = definition.mapObject.gameObject;
+        prefabRoot = definition.mapObject.gameObject;
         if (prefabRoot != null)
         {
             prefabRoot = prefabRoot.transform.root != null ? prefabRoot.transform.root.gameObject : prefabRoot;

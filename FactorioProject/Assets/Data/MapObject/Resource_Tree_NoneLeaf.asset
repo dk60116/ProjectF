@@ -13,9 +13,9 @@ MonoBehaviour:
   m_Name: Resource_Tree_NoneLeaf
   m_EditorClassIdentifier: 
   resourceName: Tree_NoneLeaf
-  prefab: {fileID: 8031207384658059468, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
+  prefab: {fileID: 5596077993400562758, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
   harvestMode: 2
   defaultResourceCount: 1
-  defaultGetCount: 4
+  defaultGetCount: 1
   defaultMaxGauge: 10
   defaultCurrentGauge: 10

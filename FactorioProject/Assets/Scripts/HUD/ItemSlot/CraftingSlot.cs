@@ -42,8 +42,17 @@ public class CraftingSlot : ItemSlot
     [SerializeField]
     private Button createButton;
 
+    [SerializeField]
+    private Image canNotImage;
+    [SerializeField]
+    private Image createIcon, mapObjectIcon;
+
     private bool ingredientsVisible;
+    private bool slotVisualHidden;
+    private bool blockedByCraftingMapObject;
+    private int requiredCraftingMapObjectId = -1;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
+    private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
 
     private void Awake()
     {
@@ -62,9 +71,10 @@ public class CraftingSlot : ItemSlot
     public override void SetItem(int itemId, int itemCount, int maxItemCount = 0)
     {
         base.SetItem(itemId, itemCount, maxItemCount);
+        RefreshCraftingMapObjectState();
         if (ingredientsVisible)
         {
-            RefreshIngredients();
+            RefreshIngredients(false);
         }
     }
 
@@ -82,6 +92,45 @@ public class CraftingSlot : ItemSlot
         rectTransform.DOScale(Vector3.one, expandDuration).SetDelay(delay).SetEase(expandEase);
         canvasGroup.DOFade(1f, expandDuration * 0.8f).SetDelay(delay).SetEase(Ease.OutQuad);
         button.interactable = true;
+        slotVisualHidden = false;
+    }
+
+    public void ShowImmediate(Vector2 anchoredPosition)
+    {
+        CacheReferences();
+        if (rectTransform == null || canvasGroup == null)
+        {
+            return;
+        }
+
+        rectTransform.DOKill();
+        canvasGroup.DOKill();
+
+        if (!gameObject.activeSelf)
+        {
+            gameObject.SetActive(true);
+        }
+
+        rectTransform.anchoredPosition = anchoredPosition;
+
+        if (slotVisualHidden)
+        {
+            rectTransform.localScale = Vector3.zero;
+            canvasGroup.alpha = 0f;
+            if (button != null)
+            {
+                button.interactable = false;
+            }
+
+            return;
+        }
+
+        rectTransform.localScale = Vector3.one;
+        canvasGroup.alpha = 1f;
+        if (button != null)
+        {
+            button.interactable = true;
+        }
     }
 
     public void Hide()
@@ -208,6 +257,13 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        BagSlot parentBagSlot = GetComponentInParent<BagSlot>();
+        if (parentBagSlot != null && !parentBagSlot.CanCraftItem(ItemId))
+        {
+            parentBagSlot.RefreshCraftingAvailability();
+            return;
+        }
+
         if (!TryBuildIngredientBuffer())
         {
             return;
@@ -215,7 +271,7 @@ public class CraftingSlot : ItemSlot
 
         if (!HasAllIngredients())
         {
-            RefreshIngredients();
+            RefreshIngredients(false);
             return;
         }
 
@@ -226,7 +282,7 @@ public class CraftingSlot : ItemSlot
         }
 
         ConsumeIngredients();
-        RefreshIngredients();
+        RefreshIngredients(false);
     }
 
     private void ToggleIngredients()
@@ -264,7 +320,7 @@ public class CraftingSlot : ItemSlot
             ingredientsRoot.gameObject.SetActive(true);
         }
 
-        RefreshIngredients();
+        RefreshIngredients(true);
         if (!ingredientsVisible)
         {
             ingredientsVisible = true;
@@ -272,6 +328,11 @@ public class CraftingSlot : ItemSlot
     }
 
     private void RefreshIngredients()
+    {
+        RefreshIngredients(true);
+    }
+
+    private void RefreshIngredients(bool animate)
     {
         CacheReferences();
         if (ingredientsRoot == null)
@@ -332,9 +393,22 @@ public class CraftingSlot : ItemSlot
             ingredientsRoot.gameObject.SetActive(true);
         }
 
-        SetCreateButtonVisible(hasAllIngredients);
-        AnimateIngredientSlots(ingredientBuffer.Count);
+        SetCreateButtonVisible(hasAllIngredients || blockedByCraftingMapObject);
+        if (animate)
+        {
+            AnimateIngredientSlots(ingredientBuffer.Count);
+        }
         ingredientsVisible = true;
+    }
+
+    public void RefreshIngredientsIfVisible()
+    {
+        if (!ingredientsVisible)
+        {
+            return;
+        }
+
+        RefreshIngredients(false);
     }
 
     private bool TryBuildIngredientBuffer()
@@ -553,6 +627,7 @@ public class CraftingSlot : ItemSlot
             {
                 button.interactable = true;
             }
+            slotVisualHidden = false;
         }
         else
         {
@@ -562,6 +637,7 @@ public class CraftingSlot : ItemSlot
             {
                 button.interactable = false;
             }
+            slotVisualHidden = true;
         }
     }
 
@@ -576,6 +652,93 @@ public class CraftingSlot : ItemSlot
         {
             createButton.gameObject.SetActive(visible);
         }
+
+        createButton.interactable = visible;
+        RefreshCraftingMapObjectVisuals();
+    }
+
+    private void RefreshCraftingMapObjectState()
+    {
+        requiredCraftingMapObjectIds.Clear();
+        blockedByCraftingMapObject = false;
+        requiredCraftingMapObjectId = -1;
+
+        if (!HasItem)
+        {
+            RefreshCraftingMapObjectVisuals();
+            return;
+        }
+
+        if (!CraftingTreeRuntime.TryGetRequiredCraftingMapObjectIds(ItemId, requiredCraftingMapObjectIds))
+        {
+            RefreshCraftingMapObjectVisuals();
+            return;
+        }
+
+        for (int i = 0; i < requiredCraftingMapObjectIds.Count; i++)
+        {
+            int candidateId = requiredCraftingMapObjectIds[i];
+            if (candidateId < 0)
+            {
+                continue;
+            }
+
+            if (requiredCraftingMapObjectId < 0 || candidateId < requiredCraftingMapObjectId)
+            {
+                requiredCraftingMapObjectId = candidateId;
+            }
+        }
+
+        BagSlot parentBagSlot = GetComponentInParent<BagSlot>();
+        if (parentBagSlot != null)
+        {
+            blockedByCraftingMapObject = !parentBagSlot.CanCraftItem(ItemId);
+        }
+
+        RefreshCraftingMapObjectVisuals();
+    }
+
+    private void RefreshCraftingMapObjectVisuals()
+    {
+        bool showBlockedState = HasItem && blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0;
+
+        if (canNotImage != null)
+        {
+            canNotImage.gameObject.SetActive(showBlockedState);
+        }
+
+        if (createIcon != null)
+        {
+            createIcon.gameObject.SetActive(!showBlockedState);
+        }
+
+        if (mapObjectIcon != null)
+        {
+            if (showBlockedState)
+            {
+                mapObjectIcon.sprite = ResolveRequiredCraftingMapObjectIcon(requiredCraftingMapObjectId);
+                mapObjectIcon.enabled = mapObjectIcon.sprite != null;
+                mapObjectIcon.gameObject.SetActive(true);
+            }
+            else
+            {
+                mapObjectIcon.sprite = null;
+                mapObjectIcon.enabled = false;
+                mapObjectIcon.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    private Sprite ResolveRequiredCraftingMapObjectIcon(int itemId)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        return GameManager.Instance.ItemManger.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet)
+            ? itemSet.icon
+            : null;
     }
 
     private int GetOwnedIngredientCount(int itemId)

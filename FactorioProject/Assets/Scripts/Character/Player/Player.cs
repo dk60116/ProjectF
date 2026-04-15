@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Net.NetworkInformation;
 using UnityEngine;
 using UnityEngine.Serialization;
+using UnityEngine.UI;
 
 public class Player : Character
 {
@@ -15,16 +17,22 @@ public class Player : Character
     public struct PlayerState
     {
         [SerializeField]
-        private float miningSpeed;
+        private int miningPower;
+        [SerializeField]
+        private int loggingPower;
 
+        [SerializeField]
+        private float miningSpeed;
         [SerializeField]
         private float loggingSpeed;
 
         [SerializeField]
-        private float harvestRange;
+        public float harvestRange;
 
         public float MiningSpeed => miningSpeed > 0f ? miningSpeed : 1f;
         public float LoggingSpeed => loggingSpeed > 0f ? loggingSpeed : 1f;
+        public int MiningPower => miningPower > 0 ? miningPower : 1;
+        public int LoggingPower => loggingPower > 0 ? loggingPower : 1;
         public float HarvestRange => harvestRange > 0f ? harvestRange : 2f;
     }
 
@@ -44,6 +52,7 @@ public class Player : Character
     private List<PortableObject> handStack;
     private bool handStackInitialized;
     private PlayerBag handBag;
+    private readonly HashSet<PortableObject> reservedHandStack = new HashSet<PortableObject>();
     private bool isCarrying;
     private bool dropExitPending;
     private Vector2Int dropExitOriginCoord;
@@ -161,6 +170,25 @@ public class Player : Character
     public void ClearQueuedPickAnimations()
     {
         pendingPickTriggerCount = 0;
+    }
+
+    public void StopImmediateActions()
+    {
+        ClearQueuedPickAnimations();
+
+        if (animator == null)
+        {
+            return;
+        }
+
+        animator.SetBool(MoveHash, false);
+
+        if (IsPickStateActive())
+        {
+            InterruptPickAnimation(false);
+        }
+
+        wasPickStateActiveLastFrame = false;
     }
 
     public bool UpdateAnimationState(bool shouldRun)
@@ -335,14 +363,14 @@ public class Player : Character
         }
 
         EnsureHandBag();
-        if (handBag != null && handBag.TryAddObject(objectId, out targetPortableObject))
-        {
-            handBag.RefreshExternalStackCounts();
-            return true;
-        }
-
         InitializeHandStack();
         if (handStack == null || handStack.Count == 0)
+        {
+            return false;
+        }
+
+        int occupiedItemId = ResolveHandStackItemId();
+        if (occupiedItemId >= 0 && occupiedItemId != objectId)
         {
             return false;
         }
@@ -356,6 +384,11 @@ public class Player : Character
             }
 
             if (portableObject.gameObject.activeSelf)
+            {
+                continue;
+            }
+
+            if (reservedHandStack.Contains(portableObject))
             {
                 continue;
             }
@@ -376,6 +409,101 @@ public class Player : Character
         }
 
         return false;
+    }
+
+    public bool TryReserveHandObject(int objectId, out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+        if (objectId < 0)
+        {
+            return false;
+        }
+
+        EnsureHandBag();
+        InitializeHandStack();
+        if (handStack == null || handStack.Count == 0)
+        {
+            return false;
+        }
+
+        int occupiedItemId = ResolveHandStackItemId();
+        if (occupiedItemId >= 0 && occupiedItemId != objectId)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            if (portableObject.gameObject.activeSelf || reservedHandStack.Contains(portableObject))
+            {
+                continue;
+            }
+
+            if (!portableObject.SetItem(objectId))
+            {
+                continue;
+            }
+
+            portableObject.gameObject.SetActive(false);
+            reservedHandStack.Add(portableObject);
+            targetPortableObject = portableObject;
+            return true;
+        }
+
+        return false;
+    }
+
+    public void CommitReservedHandObject(PortableObject targetPortableObject)
+    {
+        if (targetPortableObject == null)
+        {
+            return;
+        }
+
+        reservedHandStack.Remove(targetPortableObject);
+        if (!targetPortableObject.gameObject.activeSelf)
+        {
+            targetPortableObject.gameObject.SetActive(true);
+        }
+
+        if (handBag != null)
+        {
+            handBag.RefreshExternalStackCounts();
+        }
+
+        UpdateCarryState();
+    }
+
+    public void ReleaseReservedHandObject(PortableObject targetPortableObject)
+    {
+        if (targetPortableObject == null)
+        {
+            return;
+        }
+
+        reservedHandStack.Remove(targetPortableObject);
+        if (targetPortableObject.gameObject.activeSelf)
+        {
+            targetPortableObject.gameObject.SetActive(false);
+        }
+
+        if (handBag != null)
+        {
+            handBag.RefreshExternalStackCounts();
+        }
+
+        UpdateCarryState();
+    }
+
+    public int GetReservedHandItemId()
+    {
+        return ResolveHandStackItemId(includeActiveObjects: false, includeReservedObjects: true);
     }
 
     public PlayerBag GetHandBag()
@@ -411,6 +539,42 @@ public class Player : Character
         }
 
         return count;
+    }
+
+    private int ResolveHandStackItemId()
+    {
+        return ResolveHandStackItemId(includeActiveObjects: true, includeReservedObjects: true);
+    }
+
+    private int ResolveHandStackItemId(bool includeActiveObjects, bool includeReservedObjects)
+    {
+        InitializeHandStack();
+        if (handStack == null)
+        {
+            return -1;
+        }
+
+        reservedHandStack.RemoveWhere(portableObject => portableObject == null);
+
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            bool isActive = includeActiveObjects && portableObject.gameObject.activeSelf;
+            bool isReserved = includeReservedObjects && reservedHandStack.Contains(portableObject);
+            if (!isActive && !isReserved)
+            {
+                continue;
+            }
+
+            return portableObject.ItemId;
+        }
+
+        return -1;
     }
 
     private void ApplyBagLevelVisibility()

@@ -11,7 +11,7 @@ public class PropObj : BaseObject
     [SerializeField]
     private ItemDefinition itemDefinition;
 
-    [SerializeField]
+    [SerializeField, ReadOnly]
     protected PortableObject portableObj;
 
     protected void Awake()

@@ -28,6 +28,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     [SerializeField, Min(0f)]
     private float craftingExpandStepDelay = 0.04f;
 
+    [SerializeField, Min(0.5f)]
+    private float requiredCraftingMapObjectRange = 2f;
+
     [SerializeField]
     private bool enablePickupOnClick = true;
 
@@ -58,6 +61,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private Coroutine pickupRoutine;
 
     private readonly List<int> craftableItems = new List<int>();
+    private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
 
     [SerializeField]
     List<CraftingSlot> craftingSlots;
@@ -130,16 +134,23 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             gameObject.SetActive(true);
         }
 
+        bool canInteract = visible && !IsInventoryEditLocked();
         if (canvasGroup != null)
         {
             canvasGroup.alpha = visible ? 1f : 0f;
-            canvasGroup.blocksRaycasts = visible;
-            canvasGroup.interactable = visible;
+            canvasGroup.blocksRaycasts = canInteract;
+            canvasGroup.interactable = canInteract;
         }
 
         if (button != null)
         {
-            button.interactable = visible;
+            button.interactable = canInteract;
+        }
+
+        Button targetPickupButton = ResolvePickupButton();
+        if (targetPickupButton != null)
+        {
+            targetPickupButton.interactable = canInteract;
         }
     }
 
@@ -250,6 +261,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         EndDragVisual();
         BagSlot dropSlot = GetDropTargetSlot(eventData);
+        if (dropSlot == this)
+        {
+            return;
+        }
         if (dropSlot != null && dropSlot != this)
         {
             if (TryTransferToSlot(dropSlot))
@@ -271,7 +286,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool CanDragItem()
     {
-        return CanDragDrop
+        return !IsInventoryEditLocked()
+               && CanDragDrop
                && boundBag != null
                && slotIndex >= 0
                && id >= 0
@@ -280,7 +296,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool CanOpenCraftingSlots()
     {
-        return boundBag != null
+        return !IsInventoryEditLocked()
+               && boundBag != null
                && slotIndex >= 0
                && craftingRoot != null
                && craftingSlots != null
@@ -503,6 +520,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        if (IsInventoryEditLocked())
+        {
+            CollapseCraftingSlots(false);
+            return;
+        }
+
         RefreshCraftingItemsFromBag(true);
 
         if (!CanOpenCraftingSlots())
@@ -533,6 +556,16 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     public void CloseCraftingSlots(bool immediate = false)
     {
         CollapseCraftingSlots(immediate);
+    }
+
+    public void RefreshCraftingAvailability()
+    {
+        RefreshCraftingItemsFromBag(true);
+    }
+
+    public bool CanCraftItem(int itemId)
+    {
+        return CanShowCraftingItem(itemId);
     }
 
     public bool ContainsUiObject(GameObject targetObject)
@@ -701,7 +734,132 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (isCraftingExpanded)
         {
-            ExpandCraftingSlots(true);
+            RefreshExpandedCraftingSlotsImmediate();
+        }
+    }
+
+    private bool CanShowCraftingItem(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        requiredCraftingMapObjectIds.Clear();
+        if (!CraftingTreeRuntime.TryGetRequiredCraftingMapObjectIds(itemId, requiredCraftingMapObjectIds))
+        {
+            return true;
+        }
+
+        Player player = ResolvePlayer();
+        TerrainGenerator terrain = ResolveTerrain();
+        if (player == null || terrain == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
+        float radius = Mathf.Max(0.5f, requiredCraftingMapObjectRange);
+        float radiusSqr = radius * radius;
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(radius));
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(origin.x),
+            Mathf.RoundToInt(origin.z));
+
+        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        {
+            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+                {
+                    continue;
+                }
+
+                MapObject mapObject = block.MapObject;
+                if (mapObject == null || !mapObject.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                int mapObjectId = mapObject.ResolveItemId();
+                if (mapObjectId < 0 || !requiredCraftingMapObjectIds.Contains(mapObjectId))
+                {
+                    continue;
+                }
+
+                Vector3 offset = block.transform.position - origin;
+                offset.y = 0f;
+                if (offset.sqrMagnitude <= radiusSqr)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void RefreshExpandedCraftingSlotsImmediate()
+    {
+        CacheReferences();
+        if (craftingSlots == null || craftingSlots.Count == 0 || rectTransform == null || craftingRoot == null)
+        {
+            return;
+        }
+
+        craftingRoot.gameObject.SetActive(true);
+
+        List<CraftingSlot> visibleSlots = GetOrderedCraftingSlots(true);
+        List<CraftingSlot> allSlots = GetOrderedCraftingSlots(false);
+        int slotCount = visibleSlots.Count;
+        int spacingSlotCount = allSlots.Count;
+
+        if (slotCount == 0)
+        {
+            CollapseCraftingSlots(true);
+            return;
+        }
+
+        Vector2 center = Vector2.zero;
+        float startAngle = 90f;
+        float step = spacingSlotCount > 1 ? craftingArcAngle / (spacingSlotCount - 1) : 0f;
+        int directionSign = GetCraftingDirectionSign();
+
+        for (int i = 0; i < visibleSlots.Count; i++)
+        {
+            CraftingSlot craftingSlot = visibleSlots[i];
+            if (craftingSlot == null)
+            {
+                continue;
+            }
+
+            float angle = startAngle + (step * i * directionSign);
+            float radians = angle * Mathf.Deg2Rad;
+            Vector2 targetPosition = center + new Vector2(
+                Mathf.Cos(radians) * craftingRadius,
+                Mathf.Sin(radians) * craftingRadius);
+
+            if (!craftingSlot.gameObject.activeSelf)
+            {
+                craftingSlot.gameObject.SetActive(true);
+            }
+
+            RectTransform craftingRect = craftingSlot.transform as RectTransform;
+            if (craftingRect != null && craftingRect.parent != craftingRoot)
+            {
+                craftingRect.SetParent(craftingRoot, false);
+            }
+
+            if (craftingRect != null)
+            {
+                craftingRect.anchorMin = new Vector2(0.5f, 0.5f);
+                craftingRect.anchorMax = new Vector2(0.5f, 0.5f);
+                craftingRect.pivot = new Vector2(0.5f, 0.5f);
+                craftingRect.localRotation = Quaternion.identity;
+            }
+
+            craftingSlot.ShowImmediate(targetPosition);
         }
     }
 
@@ -909,7 +1067,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool TryTransferToSlot(BagSlot targetSlot)
     {
-        if (targetSlot == null || targetSlot == this)
+        if (IsInventoryEditLocked() || targetSlot == null || targetSlot == this)
         {
             return false;
         }
@@ -1287,7 +1445,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void HandlePickupClick()
     {
-        if (!AllowPickupOnClick)
+        if (!AllowPickupOnClick || IsInventoryEditLocked())
         {
             return;
         }
@@ -1327,6 +1485,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         while (player != null && terrain != null)
         {
+            if (IsInventoryEditLocked())
+            {
+                break;
+            }
+
             bool picked = TryPickupOneItem(terrain, player, pickupOrigin, radius, pickupRadius);
             if (!picked)
             {
@@ -1410,5 +1573,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private static TerrainGenerator ResolveTerrain()
     {
         return UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
+    }
+
+    protected bool IsInventoryEditLocked()
+    {
+        return GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive;
     }
 }

@@ -14,8 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   itemName: IronOre
   id: 3
-  mapObject: {fileID: 6307546676893521658, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
+  mapObject: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
   icon: {fileID: 21300000, guid: d830ad6735f87f54499c4772be68650d, type: 3}
   size: 0
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 0
+  useEnergyAmount: 0

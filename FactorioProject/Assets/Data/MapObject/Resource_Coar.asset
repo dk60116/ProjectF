@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Resource_Coar
   m_EditorClassIdentifier: 
   resourceName: Coar
-  prefab: {fileID: 5209627923074140771, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
+  prefab: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
   harvestMode: 1
   defaultResourceCount: 1
   defaultGetCount: 1

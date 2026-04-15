@@ -1,4 +1,5 @@
 using ProjectF.Attributes;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -251,7 +252,7 @@ public class Block : BaseObject
         return count - remaining;
     }
 
-    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject)
+    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -321,6 +322,7 @@ public class Block : BaseObject
                 {
                     if (portableObject == null || anchor == null)
                     {
+                        onComplete?.Invoke();
                         return;
                     }
 
@@ -330,6 +332,7 @@ public class Block : BaseObject
                     portableObject.transform.localScale = Vector3.one;
                     portableObject.gameObject.SetActive(true);
                     gate?.MarkSettled();
+                    onComplete?.Invoke();
                 }, false);
 
                 targetPortableObject = portableObject;

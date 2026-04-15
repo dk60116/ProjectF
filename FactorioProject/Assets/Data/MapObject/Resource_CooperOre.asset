@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Resource_CooperOre
   m_EditorClassIdentifier: 
   resourceName: CooperOre
-  prefab: {fileID: 5209627923074140771, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
+  prefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   harvestMode: 1
   defaultResourceCount: 1
   defaultGetCount: 1
