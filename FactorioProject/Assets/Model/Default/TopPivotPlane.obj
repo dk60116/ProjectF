@@ -1,0 +1,19 @@
+# Top-pivot plane for Unity
+# Size: 1x1
+# Pivot: top surface center at (0, 0, 0)
+o TopPivotPlane
+
+v -0.5 0.0 -0.5
+v 0.5 0.0 -0.5
+v 0.5 0.0 0.5
+v -0.5 0.0 0.5
+
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+
+vn 0.0 1.0 0.0
+
+f 1/1/1 4/4/1 3/3/1
+f 1/1/1 3/3/1 2/2/1

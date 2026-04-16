@@ -761,6 +761,7 @@ public class Block : BaseObject
     public BlockType Type => type;
     public MapObject MapObject => mapObject;
     public Resource Resource => mapObject as Resource;
+    public Transform Body => body;
 
     public bool TryGetInstalledItemAreaCapacity(out int capacity)
     {
