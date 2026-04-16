@@ -11,6 +11,7 @@ public class PlayerBag : MonoBehaviour
     [SerializeField]
     private List<int> currentStack;
 
+    private readonly HashSet<PortableObject> reservedObjects = new HashSet<PortableObject>();
     private bool initialized;
 
     private void Awake()
@@ -385,6 +386,112 @@ public class PlayerBag : MonoBehaviour
         return false;
     }
 
+    public bool HasExistingStackSpaceForItem(int objectId)
+    {
+        EnsureInitialized();
+
+        if (objectId < 0 || portableStack == null || currentStack == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < portableStack.Count; i++)
+        {
+            if (currentStack[i] <= 0)
+            {
+                continue;
+            }
+
+            if (!CanAddObject(i, objectId) || !CanStackObject(i, objectId))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryReserveObjectInExistingStack(int objectId, out PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        targetPortableObject = null;
+
+        if (objectId < 0 || portableStack == null || currentStack == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < portableStack.Count; i++)
+        {
+            if (currentStack[i] <= 0)
+            {
+                continue;
+            }
+
+            if (!CanAddObject(i, objectId) || !CanStackObject(i, objectId))
+            {
+                continue;
+            }
+
+            if (TryReserveObjectToSlot(i, objectId, out targetPortableObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void CommitReservedObject(PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        if (targetPortableObject == null)
+        {
+            return;
+        }
+
+        if (!reservedObjects.Remove(targetPortableObject))
+        {
+            return;
+        }
+
+        if (!TryFindPortableObjectIndex(targetPortableObject, out int stackIndex, out int objectIndex))
+        {
+            if (!targetPortableObject.gameObject.activeSelf)
+            {
+                targetPortableObject.gameObject.SetActive(true);
+            }
+
+            NotifyChanged();
+            return;
+        }
+
+        currentStack[stackIndex] = Mathf.Max(currentStack[stackIndex], objectIndex + 1);
+        if (!targetPortableObject.gameObject.activeSelf)
+        {
+            targetPortableObject.gameObject.SetActive(true);
+        }
+
+        NotifyChanged();
+    }
+
+    public void ReleaseReservedObject(PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        if (targetPortableObject == null)
+        {
+            return;
+        }
+
+        reservedObjects.Remove(targetPortableObject);
+        if (targetPortableObject.gameObject.activeSelf)
+        {
+            targetPortableObject.gameObject.SetActive(false);
+        }
+    }
+
     public bool TryRemoveOneAtSlot(int index, out int objectId)
     {
         EnsureInitialized();
@@ -641,7 +748,7 @@ public class PlayerBag : MonoBehaviour
         int startIndex = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
         for (int i = startIndex; i < stack.stack.Count; i++)
         {
-            if (stack.stack[i] != null)
+            if (stack.stack[i] != null && !reservedObjects.Contains(stack.stack[i]))
             {
                 return i;
             }
@@ -721,6 +828,84 @@ public class PlayerBag : MonoBehaviour
 
             if (TryAddObjectToSlot(i, objectId, out targetPortableObject))
             {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryReserveObjectToSlot(int index, int objectId, out PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        targetPortableObject = null;
+
+        if (index < 0 || index >= portableStack.Count || index >= currentStack.Count)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        if (stack == null || stack.stack == null)
+        {
+            return false;
+        }
+
+        int nextIndex = GetNextAvailableIndex(index);
+        if (nextIndex < 0 || nextIndex >= stack.stack.Count)
+        {
+            return false;
+        }
+
+        targetPortableObject = stack.stack[nextIndex];
+        if (targetPortableObject == null || reservedObjects.Contains(targetPortableObject))
+        {
+            targetPortableObject = null;
+            return false;
+        }
+
+        if (!targetPortableObject.SetItem(objectId))
+        {
+            targetPortableObject = null;
+            return false;
+        }
+
+        if (targetPortableObject.gameObject.activeSelf)
+        {
+            targetPortableObject.gameObject.SetActive(false);
+        }
+
+        reservedObjects.Add(targetPortableObject);
+        return true;
+    }
+
+    private bool TryFindPortableObjectIndex(PortableObject targetPortableObject, out int stackIndex, out int objectIndex)
+    {
+        stackIndex = -1;
+        objectIndex = -1;
+
+        if (targetPortableObject == null || portableStack == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < portableStack.Count; i++)
+        {
+            PortableStack stack = portableStack[i];
+            if (stack == null || stack.stack == null)
+            {
+                continue;
+            }
+
+            for (int j = 0; j < stack.stack.Count; j++)
+            {
+                if (stack.stack[j] != targetPortableObject)
+                {
+                    continue;
+                }
+
+                stackIndex = i;
+                objectIndex = j;
                 return true;
             }
         }

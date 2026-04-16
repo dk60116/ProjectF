@@ -221,7 +221,7 @@ MonoBehaviour:
   - {fileID: 7186704789992371161}
   floorObjectPrefab: {fileID: 1580217320859176750, guid: 1bc8dcd90da82634dbcccb9790e06cdf, type: 3}
   maxFloorObjectsPerStack: 10
-  floorObjectVerticalSpacing: 0.1
+  floorObjectVerticalSpacing: 0.05
   focus: {fileID: 9161530367491436444}
 --- !u!1 &5816831355732988483
 GameObject:

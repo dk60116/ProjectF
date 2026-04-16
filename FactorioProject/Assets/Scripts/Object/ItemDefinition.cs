@@ -12,6 +12,8 @@ public class ItemDefinition : ScriptableObject
     public Material portableMat;
     public Sprite icon;
     public uint size;
+    [Min(1)]
+    public int capacity = 10;
     public EnergyType energyType = EnergyType.None;
     [Min(0)]
     public int energyAmount = 0;

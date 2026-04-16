@@ -554,7 +554,7 @@ public class PlayerHUD : BagSlot
         if (craftingQueue.Count > 0)
         {
             CraftingQueueEntry entry = craftingQueue[0];
-            if (entry.remainingTime > 0f && !IsHandBlocked(entry.itemId) && !IsCraftingStationBlocked(entry.itemId))
+            if (entry.remainingTime > 0f && !IsCraftOutputBlocked(entry.itemId) && !IsCraftingStationBlocked(entry.itemId))
             {
                 entry.remainingTime = Mathf.Max(0f, entry.remainingTime - Mathf.Max(0f, deltaTime));
             }
@@ -619,6 +619,22 @@ public class PlayerHUD : BagSlot
         return reservedHandItemId >= 0 && reservedHandItemId != itemId;
     }
 
+    private bool IsCraftOutputBlocked(int itemId)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return true;
+        }
+
+        PlayerBag bag = GameManager.Instance.Player.GetBag();
+        if (bag != null && bag.HasExistingStackSpaceForItem(itemId))
+        {
+            return false;
+        }
+
+        return IsHandBlocked(itemId);
+    }
+
     private bool TryDeliverCraftedItems(CraftingQueueEntry entry)
     {
         if (entry == null || entry.itemId < 0 || entry.remainingOutputCount <= 0)
@@ -631,23 +647,45 @@ public class PlayerHUD : BagSlot
             return false;
         }
 
-        if (IsHandBlocked(entry.itemId))
-        {
-            return false;
-        }
-
         Player player = GameManager.Instance.Player;
+        PlayerBag bag = player.GetBag();
         Vector3 startPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
         bool deliveredAny = false;
         int deliveredIndex = 0;
         while (entry.remainingOutputCount > 0)
         {
+            if (bag != null && bag.TryReserveObjectInExistingStack(entry.itemId, out PortableObject bagTarget))
+            {
+                AnimateCraftedPortableMove(
+                    entry.itemId,
+                    bagTarget,
+                    startPosition,
+                    deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval),
+                    () => bag.CommitReservedObject(bagTarget),
+                    () => bag.ReleaseReservedObject(bagTarget));
+                entry.remainingOutputCount--;
+                deliveredAny = true;
+                deliveredIndex++;
+                continue;
+            }
+
+            if (IsHandBlocked(entry.itemId))
+            {
+                break;
+            }
+
             if (!player.TryReserveHandObject(entry.itemId, out PortableObject handTarget))
             {
                 break;
             }
 
-            AnimateCraftedPortableMove(player, entry.itemId, handTarget, startPosition, deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval));
+            AnimateCraftedPortableMove(
+                entry.itemId,
+                handTarget,
+                startPosition,
+                deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval),
+                () => player.CommitReservedHandObject(handTarget),
+                () => player.ReleaseReservedHandObject(handTarget));
             entry.remainingOutputCount--;
             deliveredAny = true;
             deliveredIndex++;
@@ -656,9 +694,9 @@ public class PlayerHUD : BagSlot
         return deliveredAny;
     }
 
-    private void AnimateCraftedPortableMove(Player player, int itemId, PortableObject targetPortableObject, Vector3 startPosition, float delay)
+    private void AnimateCraftedPortableMove(int itemId, PortableObject targetPortableObject, Vector3 startPosition, float delay, System.Action commitAction, System.Action releaseAction)
     {
-        if (player == null || targetPortableObject == null)
+        if (targetPortableObject == null)
         {
             return;
         }
@@ -666,7 +704,7 @@ public class PlayerHUD : BagSlot
         PortableObject movingPortableObject = Instantiate(targetPortableObject, startPosition, targetPortableObject.transform.rotation);
         if (movingPortableObject == null)
         {
-            player.ReleaseReservedHandObject(targetPortableObject);
+            releaseAction?.Invoke();
             return;
         }
 
@@ -680,7 +718,7 @@ public class PlayerHUD : BagSlot
 
         if (!movingPortableObject.SetItem(itemId))
         {
-            player.ReleaseReservedHandObject(targetPortableObject);
+            releaseAction?.Invoke();
             Destroy(movingPortableObject.gameObject);
             return;
         }
@@ -688,10 +726,7 @@ public class PlayerHUD : BagSlot
         Vector3 targetPosition = targetPortableObject.transform.position;
         movingPortableObject.MoveTo(targetPosition, delay, () =>
         {
-            if (player != null)
-            {
-                player.CommitReservedHandObject(targetPortableObject);
-            }
+            commitAction?.Invoke();
 
             if (movingPortableObject != null)
             {

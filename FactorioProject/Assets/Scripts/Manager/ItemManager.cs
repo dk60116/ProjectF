@@ -206,8 +206,6 @@ public class ItemManager : MonoBehaviour
     [ContextMenu("Rebuild Items From Assets (Definitions)")]
     public void RebuildItemDefinitionsFromAssets()
     {
-        ClearItemDefinitionAssets();
-
         if (itemDefinitions == null)
         {
             itemDefinitions = new List<ItemDefinition>();
@@ -230,6 +228,7 @@ public class ItemManager : MonoBehaviour
 
         List<string> itemFolders = CollectItemFolderPaths();
         Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
+        Dictionary<string, ItemDefinition> existingDefinitionsByName = BuildExistingItemDefinitionLookupByName();
         HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
 
         List<ItemSet> rebuiltItems = new List<ItemSet>();
@@ -247,18 +246,6 @@ public class ItemManager : MonoBehaviour
             PropObj propObject = FindPropObjInFolder(itemFolder, out GameObject prefabRoot);
 
             ResolvePortableAssets(itemFolder, prefabRoot, out Mesh portableMesh, out Material portableMaterial);
-            if (hasPreviousItem)
-            {
-                if (portableMesh == null)
-                {
-                    portableMesh = previousItem.portableMesh;
-                }
-
-                if (portableMaterial == null)
-                {
-                    portableMaterial = previousItem.portableMat;
-                }
-            }
 
             TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
 
@@ -277,7 +264,7 @@ public class ItemManager : MonoBehaviour
                 portableMesh = portableMesh,
                 portableMat = portableMaterial,
                 icon = resolvedIcon,
-                size = hasPreviousItem ? previousItem.size : 0
+                size = ResolvePreservedItemSize(itemName, hasPreviousItem ? previousItem.size : 0, existingDefinitionsByName)
             };
 
             rebuiltItems.Add(itemSet);
@@ -329,6 +316,7 @@ public class ItemManager : MonoBehaviour
 
         List<string> itemFolders = CollectItemFolderPaths();
         Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
+        Dictionary<string, ItemDefinition> existingDefinitionsByName = BuildExistingItemDefinitionLookupByName();
         HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
 
         List<ItemSet> rebuiltItems = new List<ItemSet>();
@@ -346,18 +334,6 @@ public class ItemManager : MonoBehaviour
             PropObj propObject = FindPropObjInFolder(itemFolder, out GameObject prefabRoot);
 
             ResolvePortableAssets(itemFolder, prefabRoot, out Mesh portableMesh, out Material portableMaterial);
-            if (hasPreviousItem)
-            {
-                if (portableMesh == null)
-                {
-                    portableMesh = previousItem.portableMesh;
-                }
-
-                if (portableMaterial == null)
-                {
-                    portableMaterial = previousItem.portableMat;
-                }
-            }
 
             TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
 
@@ -376,7 +352,7 @@ public class ItemManager : MonoBehaviour
                 portableMesh = portableMesh,
                 portableMat = portableMaterial,
                 icon = resolvedIcon,
-                size = hasPreviousItem ? previousItem.size : 0
+                size = ResolvePreservedItemSize(itemName, hasPreviousItem ? previousItem.size : 0, existingDefinitionsByName)
             };
 
             rebuiltItems.Add(itemSet);
@@ -733,22 +709,20 @@ public class ItemManager : MonoBehaviour
                 }
 
                 GameObject prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-                if (prefabRoot == null)
+                string prefabName = prefabRoot != null ? prefabRoot.name : Path.GetFileNameWithoutExtension(prefabPath);
+                if (!IsExactMapObjectMatch(itemName, itemKey, prefabName, prefabPath))
                 {
                     continue;
                 }
 
-                MapObject mapObject = FindPreferredMapObjectOnPrefab(prefabRoot);
+                MapObject mapObject = FindPreferredMapObjectOnPrefab(prefabRoot, prefabPath);
 
                 if (mapObject == null)
                 {
                     continue;
                 }
 
-                if (IsExactMapObjectMatch(itemName, itemKey, prefabRoot.name, prefabPath))
-                {
-                    return mapObject;
-                }
+                return mapObject;
             }
         }
 
@@ -797,7 +771,23 @@ public class ItemManager : MonoBehaviour
         return false;
     }
 
-    private static MapObject FindPreferredMapObjectOnPrefab(GameObject prefabRoot)
+    private static MapObject FindPreferredMapObjectOnPrefab(GameObject prefabRoot, string prefabPath = null)
+    {
+        MapObject directMatch = FindPreferredMapObjectOnGameObject(prefabRoot);
+        if (directMatch != null)
+        {
+            return directMatch;
+        }
+
+        if (string.IsNullOrWhiteSpace(prefabPath) && prefabRoot != null)
+        {
+            prefabPath = AssetDatabase.GetAssetPath(prefabRoot);
+        }
+
+        return FindPreferredMapObjectInAsset(prefabPath);
+    }
+
+    private static MapObject FindPreferredMapObjectOnGameObject(GameObject prefabRoot)
     {
         if (prefabRoot == null)
         {
@@ -833,6 +823,121 @@ public class ItemManager : MonoBehaviour
         }
 
         return mapObject;
+    }
+
+    private static MapObject FindPreferredMapObjectInAsset(string prefabPath)
+    {
+        if (string.IsNullOrWhiteSpace(prefabPath))
+        {
+            return null;
+        }
+
+        Resource directResource = AssetDatabase.LoadAssetAtPath<Resource>(prefabPath);
+        if (directResource != null)
+        {
+            return directResource;
+        }
+
+        InstallationObject directInstallationObject = AssetDatabase.LoadAssetAtPath<InstallationObject>(prefabPath);
+        if (directInstallationObject != null)
+        {
+            return directInstallationObject;
+        }
+
+        MapObject directMapObject = AssetDatabase.LoadAssetAtPath<MapObject>(prefabPath);
+        if (directMapObject != null)
+        {
+            return directMapObject;
+        }
+
+        UnityEngine.Object[] assetObjects = AssetDatabase.LoadAllAssetsAtPath(prefabPath);
+        if (assetObjects == null || assetObjects.Length == 0)
+        {
+            return null;
+        }
+
+        Resource resource = null;
+        InstallationObject installationObject = null;
+        MapObject mapObject = null;
+
+        for (int i = 0; i < assetObjects.Length; i++)
+        {
+            switch (assetObjects[i])
+            {
+                case Resource foundResource:
+                    resource ??= foundResource;
+                    break;
+                case InstallationObject foundInstallationObject:
+                    installationObject ??= foundInstallationObject;
+                    break;
+                case MapObject foundMapObject:
+                    mapObject ??= foundMapObject;
+                    break;
+            }
+        }
+
+        if (resource != null)
+        {
+            return resource;
+        }
+
+        if (installationObject != null)
+        {
+            return installationObject;
+        }
+
+        if (mapObject != null)
+        {
+            return mapObject;
+        }
+
+        for (int i = 0; i < assetObjects.Length; i++)
+        {
+            if (assetObjects[i] is GameObject assetGameObject)
+            {
+                MapObject nestedMatch = FindPreferredMapObjectOnGameObject(assetGameObject);
+                if (nestedMatch != null)
+                {
+                    return nestedMatch;
+                }
+            }
+        }
+
+        return FindPreferredMapObjectInPrefabContents(prefabPath);
+    }
+
+    private static MapObject FindPreferredMapObjectInPrefabContents(string prefabPath)
+    {
+        if (string.IsNullOrWhiteSpace(prefabPath))
+        {
+            return null;
+        }
+
+        GameObject prefabContentsRoot = null;
+        try
+        {
+            prefabContentsRoot = PrefabUtility.LoadPrefabContents(prefabPath);
+            MapObject instanceMatch = FindPreferredMapObjectOnGameObject(prefabContentsRoot);
+            if (instanceMatch == null)
+            {
+                return null;
+            }
+
+            MapObject sourceMatch = PrefabUtility.GetCorrespondingObjectFromSource(instanceMatch);
+            return sourceMatch != null ? sourceMatch : instanceMatch;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"ItemManager: Failed to inspect prefab contents for '{prefabPath}'. {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (prefabContentsRoot != null)
+            {
+                PrefabUtility.UnloadPrefabContents(prefabContentsRoot);
+            }
+        }
     }
 
     private static string ResolveLookupPath(PropObj propObject, GameObject prefabRoot, string assetPath)
@@ -1102,24 +1207,58 @@ public class ItemManager : MonoBehaviour
     {
         portableMesh = FindPortableMesh(assetPath, prefabRoot);
         portableMaterial = FindPortableMaterial(assetPath, prefabRoot);
+    }
 
-        if (portableMesh == null && prefabRoot != null)
+    private static void TryResolveMapObjectPortableAssetFallback(
+        string itemName,
+        string itemFolder,
+        ref Mesh portableMesh,
+        ref Material portableMaterial)
+    {
+        if (portableMesh != null && portableMaterial != null)
         {
-            MeshFilter meshFilter = prefabRoot.GetComponentInChildren<MeshFilter>(true);
-            if (meshFilter != null)
-            {
-                portableMesh = meshFilter.sharedMesh;
-            }
+            return;
         }
 
-        if (portableMaterial == null && prefabRoot != null)
+        MapObject mapObject = FindMapObjectForItem(itemName, itemFolder);
+        GameObject mapObjectRoot = GetMapObjectPrefabRoot(mapObject);
+        if (mapObjectRoot == null)
         {
-            MeshRenderer meshRenderer = prefabRoot.GetComponentInChildren<MeshRenderer>(true);
-            if (meshRenderer != null && meshRenderer.sharedMaterials != null && meshRenderer.sharedMaterials.Length > 0)
-            {
-                portableMaterial = meshRenderer.sharedMaterials[0];
-            }
+            return;
         }
+
+        TryResolveFallbackPortableAssets(mapObjectRoot, ref portableMesh, ref portableMaterial);
+    }
+
+    private static bool CanReusePreviousPortableMaterial(Material previousMaterial, string itemName, string itemFolder)
+    {
+        if (previousMaterial == null)
+        {
+            return false;
+        }
+
+        string itemKey = NormalizePortableLookupName(itemName);
+        if (string.IsNullOrWhiteSpace(itemKey))
+        {
+            return false;
+        }
+
+        string materialKey = NormalizePortableLookupName(previousMaterial.name);
+        if (!string.IsNullOrWhiteSpace(materialKey)
+            && (materialKey == itemKey || materialKey.Contains(itemKey)))
+        {
+            return true;
+        }
+
+        string materialPath = AssetDatabase.GetAssetPath(previousMaterial);
+        if (string.IsNullOrWhiteSpace(materialPath) || string.IsNullOrWhiteSpace(itemFolder))
+        {
+            return false;
+        }
+
+        string normalizedMaterialPath = materialPath.Replace("\\", "/").ToLowerInvariant();
+        string normalizedItemFolder = itemFolder.Replace("\\", "/").ToLowerInvariant();
+        return normalizedMaterialPath.StartsWith(normalizedItemFolder, StringComparison.Ordinal);
     }
 
     private static bool IsInstallationObjectPrefab(GameObject prefabRoot)
@@ -1221,129 +1360,305 @@ public class ItemManager : MonoBehaviour
 
     private static Mesh FindPortableMesh(string assetPath, GameObject prefabRoot)
     {
-        List<string> searchDirectories = BuildSearchDirectories(assetPath);
         string prefabName = prefabRoot != null ? prefabRoot.name : Path.GetFileNameWithoutExtension(assetPath);
         string itemKey = NormalizePortableLookupName(prefabName);
-        string prefabDirectory = ResolveAssetDirectory(assetPath);
-        string parentDirectory = Path.GetDirectoryName(prefabDirectory)?.Replace("\\", "/") ?? string.Empty;
-        string categoryToken = GetCategoryToken(assetPath, prefabName);
-
-        Mesh bestMesh = null;
-        int bestScore = int.MinValue;
-
-        for (int i = 0; i < searchDirectories.Count; i++)
+        string itemDirectory = ResolveAssetDirectory(assetPath);
+        Mesh portableMesh = FindPortableMeshInItemDirectory(itemDirectory, itemKey);
+        if (portableMesh != null)
         {
-            string[] guids = AssetDatabase.FindAssets("t:Mesh", new[] { searchDirectories[i] });
-            for (int j = 0; j < guids.Length; j++)
-            {
-                string candidatePath = AssetDatabase.GUIDToAssetPath(guids[j]);
-                Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(candidatePath);
-                if (mesh == null)
-                {
-                    continue;
-                }
-
-                if (!IsCandidateInCategory(candidatePath, categoryToken, prefabDirectory, parentDirectory))
-                {
-                    continue;
-                }
-
-                int score = ScorePortableCandidate(mesh.name, itemKey);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestMesh = mesh;
-                }
-            }
+            return portableMesh;
         }
 
-        if (bestMesh != null)
-        {
-            return bestMesh;
-        }
-
-        if (prefabRoot != null)
-        {
-            MeshFilter[] meshFilters = prefabRoot.GetComponentsInChildren<MeshFilter>(true);
-            for (int i = 0; i < meshFilters.Length; i++)
-            {
-                MeshFilter meshFilter = meshFilters[i];
-                if (meshFilter != null && meshFilter.sharedMesh != null)
-                {
-                    return meshFilter.sharedMesh;
-                }
-            }
-        }
-
-        return null;
+        string parentDirectory = Path.GetDirectoryName(itemDirectory)?.Replace("\\", "/") ?? string.Empty;
+        return FindPortableMeshInParentDirectory(parentDirectory, itemKey);
     }
 
     private static Material FindPortableMaterial(string assetPath, GameObject prefabRoot)
     {
-        List<string> searchDirectories = BuildSearchDirectories(assetPath);
         string prefabName = prefabRoot != null ? prefabRoot.name : Path.GetFileNameWithoutExtension(assetPath);
         string itemKey = NormalizePortableLookupName(prefabName);
-        string prefabDirectory = ResolveAssetDirectory(assetPath);
-        string parentDirectory = Path.GetDirectoryName(prefabDirectory)?.Replace("\\", "/") ?? string.Empty;
-        string categoryToken = GetCategoryToken(assetPath, prefabName);
+        string itemDirectory = ResolveAssetDirectory(assetPath);
+        Material portableMaterial = FindPortableMaterialInItemDirectory(itemDirectory, itemKey);
+        if (portableMaterial != null)
+        {
+            return portableMaterial;
+        }
 
+        string parentDirectory = Path.GetDirectoryName(itemDirectory)?.Replace("\\", "/") ?? string.Empty;
+        return FindPortableMaterialInParentDirectory(parentDirectory, itemKey);
+    }
+
+    private static Mesh FindPortableMeshInItemDirectory(string itemDirectory, string itemKey)
+    {
+        if (string.IsNullOrWhiteSpace(itemDirectory) || !AssetDatabase.IsValidFolder(itemDirectory))
+        {
+            return null;
+        }
+
+        return FindBestPortableMeshByGuidSearch(new[] { itemDirectory }, itemKey);
+    }
+
+    private static Material FindPortableMaterialInItemDirectory(string itemDirectory, string itemKey)
+    {
+        if (string.IsNullOrWhiteSpace(itemDirectory) || !AssetDatabase.IsValidFolder(itemDirectory))
+        {
+            return null;
+        }
+
+        return FindBestPortableMaterialByGuidSearch(new[] { itemDirectory }, itemKey);
+    }
+
+    private static Mesh FindPortableMeshInParentDirectory(string parentDirectory, string itemKey)
+    {
+        if (string.IsNullOrWhiteSpace(parentDirectory) || !AssetDatabase.IsValidFolder(parentDirectory))
+        {
+            return null;
+        }
+
+        Mesh directMesh = FindBestPortableMeshFromTopLevelDirectory(parentDirectory, itemKey);
+        if (directMesh != null)
+        {
+            return directMesh;
+        }
+
+        List<string> supportFolders = GetPortableSupportSubfolders(parentDirectory);
+        return supportFolders.Count > 0
+            ? FindBestPortableMeshByGuidSearch(supportFolders.ToArray(), itemKey)
+            : null;
+    }
+
+    private static Material FindPortableMaterialInParentDirectory(string parentDirectory, string itemKey)
+    {
+        if (string.IsNullOrWhiteSpace(parentDirectory) || !AssetDatabase.IsValidFolder(parentDirectory))
+        {
+            return null;
+        }
+
+        Material directMaterial = FindBestPortableMaterialFromTopLevelDirectory(parentDirectory, itemKey);
+        if (directMaterial != null)
+        {
+            return directMaterial;
+        }
+
+        List<string> supportFolders = GetPortableSupportSubfolders(parentDirectory);
+        return supportFolders.Count > 0
+            ? FindBestPortableMaterialByGuidSearch(supportFolders.ToArray(), itemKey)
+            : null;
+    }
+
+    private static Mesh FindBestPortableMeshByGuidSearch(string[] searchDirectories, string itemKey)
+    {
+        if (searchDirectories == null || searchDirectories.Length == 0)
+        {
+            return null;
+        }
+
+        HashSet<string> seenAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Mesh bestMesh = null;
+        int bestScore = int.MinValue;
+
+        for (int i = 0; i < searchDirectories.Length; i++)
+        {
+            string searchDirectory = searchDirectories[i];
+            if (string.IsNullOrWhiteSpace(searchDirectory) || !AssetDatabase.IsValidFolder(searchDirectory))
+            {
+                continue;
+            }
+
+            string[] guids = AssetDatabase.FindAssets("t:Mesh", new[] { searchDirectory });
+            for (int j = 0; j < guids.Length; j++)
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(guids[j]);
+                if (string.IsNullOrWhiteSpace(assetPath) || !seenAssetPaths.Add(assetPath))
+                {
+                    continue;
+                }
+
+                ScorePortableMeshAssetsAtPath(assetPath, itemKey, ref bestMesh, ref bestScore);
+            }
+        }
+
+        return bestMesh;
+    }
+
+    private static Material FindBestPortableMaterialByGuidSearch(string[] searchDirectories, string itemKey)
+    {
+        if (searchDirectories == null || searchDirectories.Length == 0)
+        {
+            return null;
+        }
+
+        HashSet<string> seenAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Material bestMaterial = null;
         int bestScore = int.MinValue;
 
-        for (int i = 0; i < searchDirectories.Count; i++)
+        for (int i = 0; i < searchDirectories.Length; i++)
         {
-            string[] guids = AssetDatabase.FindAssets("t:Material", new[] { searchDirectories[i] });
+            string searchDirectory = searchDirectories[i];
+            if (string.IsNullOrWhiteSpace(searchDirectory) || !AssetDatabase.IsValidFolder(searchDirectory))
+            {
+                continue;
+            }
+
+            string[] guids = AssetDatabase.FindAssets("t:Material", new[] { searchDirectory });
             for (int j = 0; j < guids.Length; j++)
             {
-                string candidatePath = AssetDatabase.GUIDToAssetPath(guids[j]);
-                Material material = AssetDatabase.LoadAssetAtPath<Material>(candidatePath);
-                if (material == null)
+                string assetPath = AssetDatabase.GUIDToAssetPath(guids[j]);
+                if (string.IsNullOrWhiteSpace(assetPath) || !seenAssetPaths.Add(assetPath))
                 {
                     continue;
                 }
 
-                if (!IsCandidateInCategory(candidatePath, categoryToken, prefabDirectory, parentDirectory))
-                {
-                    continue;
-                }
-
-                int score = ScorePortableCandidate(material.name, itemKey);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestMaterial = material;
-                }
+                ScorePortableMaterialAssetAtPath(assetPath, itemKey, ref bestMaterial, ref bestScore);
             }
         }
 
-        if (bestMaterial != null)
+        return bestMaterial;
+    }
+
+    private static Mesh FindBestPortableMeshFromTopLevelDirectory(string directoryPath, string itemKey)
+    {
+        Mesh bestMesh = null;
+        int bestScore = int.MinValue;
+        string[] assetPaths = GetTopLevelAssetPaths(directoryPath);
+        for (int i = 0; i < assetPaths.Length; i++)
         {
-            return bestMaterial;
+            ScorePortableMeshAssetsAtPath(assetPaths[i], itemKey, ref bestMesh, ref bestScore);
         }
 
-        if (prefabRoot != null)
+        return bestMesh;
+    }
+
+    private static Material FindBestPortableMaterialFromTopLevelDirectory(string directoryPath, string itemKey)
+    {
+        Material bestMaterial = null;
+        int bestScore = int.MinValue;
+        string[] assetPaths = GetTopLevelAssetPaths(directoryPath);
+        for (int i = 0; i < assetPaths.Length; i++)
         {
-            MeshRenderer[] meshRenderers = prefabRoot.GetComponentsInChildren<MeshRenderer>(true);
-            for (int i = 0; i < meshRenderers.Length; i++)
+            ScorePortableMaterialAssetAtPath(assetPaths[i], itemKey, ref bestMaterial, ref bestScore);
+        }
+
+        return bestMaterial;
+    }
+
+    private static void ScorePortableMeshAssetsAtPath(string assetPath, string itemKey, ref Mesh bestMesh, ref int bestScore)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return;
+        }
+
+        UnityEngine.Object[] assetsAtPath = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        for (int i = 0; i < assetsAtPath.Length; i++)
+        {
+            Mesh mesh = assetsAtPath[i] as Mesh;
+            if (mesh == null || !IsPortableMeshName(mesh.name))
             {
-                MeshRenderer meshRenderer = meshRenderers[i];
-                if (meshRenderer == null || meshRenderer.sharedMaterials == null)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                for (int materialIndex = 0; materialIndex < meshRenderer.sharedMaterials.Length; materialIndex++)
-                {
-                    Material material = meshRenderer.sharedMaterials[materialIndex];
-                    if (material != null)
-                    {
-                        return material;
-                    }
-                }
+            int score = ScorePortableCandidate(mesh.name, itemKey);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestMesh = mesh;
+            }
+        }
+    }
+
+    private static void ScorePortableMaterialAssetAtPath(string assetPath, string itemKey, ref Material bestMaterial, ref int bestScore)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return;
+        }
+
+        Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+        if (material == null || !IsPortableName(material.name))
+        {
+            return;
+        }
+
+        int score = ScorePortableCandidate(material.name, itemKey);
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestMaterial = material;
+        }
+    }
+
+    private static string[] GetTopLevelAssetPaths(string directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath) || !AssetDatabase.IsValidFolder(directoryPath))
+        {
+            return Array.Empty<string>();
+        }
+
+        string absoluteDirectoryPath = Path.GetFullPath(directoryPath);
+        if (!Directory.Exists(absoluteDirectoryPath))
+        {
+            return Array.Empty<string>();
+        }
+
+        string[] filePaths = Directory.GetFiles(absoluteDirectoryPath, "*", SearchOption.TopDirectoryOnly);
+        List<string> assetPaths = new List<string>();
+        for (int i = 0; i < filePaths.Length; i++)
+        {
+            string filePath = filePaths[i];
+            if (string.IsNullOrWhiteSpace(filePath) || filePath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string normalizedPath = filePath.Replace("\\", "/");
+            int assetsIndex = normalizedPath.IndexOf("/Assets/", StringComparison.OrdinalIgnoreCase);
+            if (assetsIndex >= 0)
+            {
+                normalizedPath = normalizedPath.Substring(assetsIndex + 1);
+            }
+            else if (normalizedPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                // already normalized
+            }
+            else
+            {
+                continue;
+            }
+
+            assetPaths.Add(normalizedPath);
+        }
+
+        return assetPaths.ToArray();
+    }
+
+    private static List<string> GetPortableSupportSubfolders(string parentDirectory)
+    {
+        List<string> results = new List<string>();
+        if (string.IsNullOrWhiteSpace(parentDirectory) || !AssetDatabase.IsValidFolder(parentDirectory))
+        {
+            return results;
+        }
+
+        string[] subFolders = AssetDatabase.GetSubFolders(parentDirectory);
+        for (int i = 0; i < subFolders.Length; i++)
+        {
+            string subFolder = subFolders[i];
+            string folderName = Path.GetFileName(subFolder)?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (folderName == "meshes"
+                || folderName == "mesh"
+                || folderName == "materials"
+                || folderName == "material"
+                || folderName == "portable"
+                || folderName == "portables"
+                || folderName == "shared"
+                || folderName == "common")
+            {
+                results.Add(subFolder.Replace("\\", "/"));
             }
         }
 
-        return null;
+        return results;
     }
 
     private static int ScorePortableCandidate(string name, string itemKey)
@@ -1778,12 +2093,33 @@ public class ItemManager : MonoBehaviour
         {
             itemDefinitions = new List<ItemDefinition>();
         }
-        else
-        {
-            itemDefinitions.Clear();
-        }
 
         Dictionary<string, string> itemFolderLookup = BuildItemFolderLookup();
+        List<ItemDefinition> existingDefinitions = CollectExistingItemDefinitions(targetDirectory);
+        Dictionary<int, ItemDefinition> existingDefinitionsById = new Dictionary<int, ItemDefinition>();
+        Dictionary<string, ItemDefinition> existingDefinitionsByName = new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < existingDefinitions.Count; i++)
+        {
+            ItemDefinition existingDefinition = existingDefinitions[i];
+            if (existingDefinition == null)
+            {
+                continue;
+            }
+
+            if (existingDefinition.id >= 0 && !existingDefinitionsById.ContainsKey(existingDefinition.id))
+            {
+                existingDefinitionsById[existingDefinition.id] = existingDefinition;
+            }
+
+            string lookupName = GetItemDefinitionLookupName(existingDefinition);
+            if (!string.IsNullOrWhiteSpace(lookupName) && !existingDefinitionsByName.ContainsKey(lookupName))
+            {
+                existingDefinitionsByName[lookupName] = existingDefinition;
+            }
+        }
+
+        List<ItemDefinition> rebuiltDefinitions = new List<ItemDefinition>();
+        HashSet<ItemDefinition> usedDefinitions = new HashSet<ItemDefinition>();
 
         for (int i = 0; i < sourceItems.Count; i++)
         {
@@ -1793,14 +2129,24 @@ public class ItemManager : MonoBehaviour
                 continue;
             }
 
-            ItemDefinition definition = ScriptableObject.CreateInstance<ItemDefinition>();
-            string safeName = string.IsNullOrWhiteSpace(itemSet.name) ? $"Item_{itemSet.id}" : itemSet.name;
-            safeName = SanitizeAssetFileName(safeName);
-            string assetPath = AssetDatabase.GenerateUniqueAssetPath($"{targetDirectory}/Item_{itemSet.id}_{safeName}.asset");
-            if (string.IsNullOrWhiteSpace(assetPath))
+            ItemDefinition definition = ResolveExistingItemDefinitionForRebuild(
+                itemSet,
+                existingDefinitionsById,
+                existingDefinitionsByName,
+                usedDefinitions);
+            if (definition == null)
             {
-                Debug.LogError($"ItemManager: Failed to generate asset path for item '{itemSet.name}' (id {itemSet.id}).");
-                continue;
+                definition = ScriptableObject.CreateInstance<ItemDefinition>();
+                string safeName = string.IsNullOrWhiteSpace(itemSet.name) ? $"Item_{itemSet.id}" : itemSet.name;
+                safeName = SanitizeAssetFileName(safeName);
+                string assetPath = AssetDatabase.GenerateUniqueAssetPath($"{targetDirectory}/Item_{itemSet.id}_{safeName}.asset");
+                if (string.IsNullOrWhiteSpace(assetPath))
+                {
+                    Debug.LogError($"ItemManager: Failed to generate asset path for item '{itemSet.name}' (id {itemSet.id}).");
+                    continue;
+                }
+
+                AssetDatabase.CreateAsset(definition, assetPath);
             }
 
             definition.id = itemSet.id;
@@ -1813,33 +2159,178 @@ public class ItemManager : MonoBehaviour
             definition.portableMesh = definitionPortableMesh;
             definition.portableMat = definitionPortableMaterial;
             definition.icon = itemSet.icon;
-            definition.size = (uint)Mathf.Max(0, itemSet.size);
-
-            AssetDatabase.CreateAsset(definition, assetPath);
-            itemDefinitions.Add(definition);
-            BindMapObjectDefinition(definition);
-
-            if (itemSet.prefab != null)
+            rebuiltDefinitions.Add(definition);
+            usedDefinitions.Add(definition);
+            existingDefinitionsById[itemSet.id] = definition;
+            string definitionLookupName = GetItemDefinitionLookupName(definition);
+            if (!string.IsNullOrWhiteSpace(definitionLookupName))
             {
-                SerializedObject prefabObject = new SerializedObject(itemSet.prefab);
-                SerializedProperty definitionProperty = prefabObject.FindProperty("itemDefinition");
-                if (definitionProperty != null)
-                {
-                    definitionProperty.objectReferenceValue = definition;
-                    prefabObject.ApplyModifiedPropertiesWithoutUndo();
-                }
-
-                PrefabUtility.SavePrefabAsset(itemSet.prefab.gameObject);
-                EditorUtility.SetDirty(itemSet.prefab.gameObject);
+                existingDefinitionsByName[definitionLookupName] = definition;
             }
+
+            BindMapObjectDefinition(definition);
+            TryBindItemDefinitionToPrefab(itemSet.prefab, definition);
 
             EditorUtility.SetDirty(definition);
         }
 
+        itemDefinitions.Clear();
+        itemDefinitions.AddRange(rebuiltDefinitions);
         SortItemDefinitionsById(itemDefinitions);
         EditorUtility.SetDirty(this);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+    }
+
+    private List<ItemDefinition> CollectExistingItemDefinitions(string targetDirectory)
+    {
+        List<ItemDefinition> results = new List<ItemDefinition>();
+        HashSet<string> seenAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddDefinition(ItemDefinition definition)
+        {
+            if (definition == null)
+            {
+                return;
+            }
+
+            string assetPath = AssetDatabase.GetAssetPath(definition);
+            if (!string.IsNullOrWhiteSpace(assetPath))
+            {
+                if (!seenAssetPaths.Add(assetPath))
+                {
+                    return;
+                }
+            }
+            else if (results.Contains(definition))
+            {
+                return;
+            }
+
+            results.Add(definition);
+        }
+
+        if (itemDefinitions != null)
+        {
+            for (int i = 0; i < itemDefinitions.Count; i++)
+            {
+                AddDefinition(itemDefinitions[i]);
+            }
+        }
+
+        string[] definitionGuids = AssetDatabase.FindAssets("t:ItemDefinition", new[] { targetDirectory });
+        for (int i = 0; i < definitionGuids.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(definitionGuids[i]);
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                continue;
+            }
+
+            AddDefinition(AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath));
+        }
+
+        return results;
+    }
+
+    private static ItemDefinition ResolveExistingItemDefinitionForRebuild(
+        ItemSet itemSet,
+        Dictionary<int, ItemDefinition> existingDefinitionsById,
+        Dictionary<string, ItemDefinition> existingDefinitionsByName,
+        HashSet<ItemDefinition> usedDefinitions)
+    {
+        if (existingDefinitionsById != null
+            && existingDefinitionsById.TryGetValue(itemSet.id, out ItemDefinition byIdDefinition)
+            && byIdDefinition != null
+            && !usedDefinitions.Contains(byIdDefinition))
+        {
+            return byIdDefinition;
+        }
+
+        string lookupName = itemSet.name?.Trim();
+        if (!string.IsNullOrWhiteSpace(lookupName)
+            && existingDefinitionsByName != null
+            && existingDefinitionsByName.TryGetValue(lookupName, out ItemDefinition byNameDefinition)
+            && byNameDefinition != null
+            && !usedDefinitions.Contains(byNameDefinition))
+        {
+            return byNameDefinition;
+        }
+
+        return null;
+    }
+
+    private static Dictionary<string, ItemDefinition> BuildExistingItemDefinitionLookupByName()
+    {
+        Dictionary<string, ItemDefinition> results = new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
+        ItemManager[] managers = FindObjectsOfType<ItemManager>(true);
+        for (int managerIndex = 0; managerIndex < managers.Length; managerIndex++)
+        {
+            ItemManager manager = managers[managerIndex];
+            if (manager == null || manager.itemDefinitions == null)
+            {
+                continue;
+            }
+
+            for (int definitionIndex = 0; definitionIndex < manager.itemDefinitions.Count; definitionIndex++)
+            {
+                ItemDefinition definition = manager.itemDefinitions[definitionIndex];
+                string lookupName = GetItemDefinitionLookupName(definition);
+                if (definition != null && !string.IsNullOrWhiteSpace(lookupName) && !results.ContainsKey(lookupName))
+                {
+                    results[lookupName] = definition;
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private static int ResolvePreservedItemSize(string itemName, int fallbackSize, Dictionary<string, ItemDefinition> existingDefinitionsByName)
+    {
+        if (!string.IsNullOrWhiteSpace(itemName)
+            && existingDefinitionsByName != null
+            && existingDefinitionsByName.TryGetValue(itemName.Trim(), out ItemDefinition definition)
+            && definition != null)
+        {
+            return Mathf.Max(0, (int)definition.size);
+        }
+
+        return Mathf.Max(0, fallbackSize);
+    }
+
+    private static string GetItemDefinitionLookupName(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(definition.itemName))
+        {
+            return definition.itemName.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(definition.name) ? string.Empty : definition.name.Trim();
+    }
+
+    private static void TryBindItemDefinitionToPrefab(PropObj prefab, ItemDefinition definition)
+    {
+        if (prefab == null || definition == null)
+        {
+            return;
+        }
+
+        SerializedObject prefabObject = new SerializedObject(prefab);
+        SerializedProperty definitionProperty = prefabObject.FindProperty("itemDefinition");
+        if (definitionProperty != null)
+        {
+            definitionProperty.objectReferenceValue = definition;
+            prefabObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        PrefabUtility.SavePrefabAsset(prefab.gameObject);
+        EditorUtility.SetDirty(prefab.gameObject);
     }
 
     [ContextMenu("Migrate Resource Definitions From Resources")]
@@ -1956,7 +2447,8 @@ public class ItemManager : MonoBehaviour
         if (prefabRoot != null)
         {
             prefabRoot = prefabRoot.transform.root != null ? prefabRoot.transform.root.gameObject : prefabRoot;
-            MapObject preferredMapObject = FindPreferredMapObjectOnPrefab(prefabRoot);
+            string prefabPath = AssetDatabase.GetAssetPath(prefabRoot);
+            MapObject preferredMapObject = FindPreferredMapObjectOnPrefab(prefabRoot, prefabPath);
             if (preferredMapObject != null && preferredMapObject != definition.mapObject)
             {
                 definition.mapObject = preferredMapObject;

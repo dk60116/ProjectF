@@ -34,6 +34,14 @@ public class GameManager : MonoBehaviour
         itemManager = GetComponentInChildren<ItemManager>();
     }
 
+    private void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1))
+            Time.timeScale = 1f;
+        else if (Input.GetKeyDown(KeyCode.Alpha2))
+            Time.timeScale = 2f;
+    }
+
     private void OnDestroy()
     {
         if (Instance == this)

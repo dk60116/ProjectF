@@ -6,7 +6,7 @@ Mesh:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: PortableMesh_Ore_P
+  m_Name: Ore_P
   serializedVersion: 11
   m_SubMeshes:
   - serializedVersion: 2

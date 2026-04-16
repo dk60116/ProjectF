@@ -164,7 +164,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 120, y: 120}
+  m_SizeDelta: {x: 100, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &409703075400772275
 CanvasRenderer:
@@ -190,11 +190,18 @@ MonoBehaviour:
   frame: {fileID: 2219057241935588821}
   icon: {fileID: 6788234451944972997}
   count: {fileID: 1749900732423600208}
+  keepIconWhenEmpty: 0
   draggingSlotAlpha: 0.6
   dragGhostScale: 0.95
+  transferMoveInterval: 0.1
   craftingRadius: 210
   craftingArcAngle: 180
   craftingExpandStepDelay: 0.04
+  requiredCraftingMapObjectRange: 2
+  enablePickupOnClick: 1
+  pickupRadius: 2
+  pickupInterval: 0.1
+  pickupButton: {fileID: 0}
   craftingSlots:
   - {fileID: 5884791126089050560}
   - {fileID: 264218747284238156}
@@ -367,8 +374,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 30
-  m_fontSizeBase: 30
+  m_fontSize: 25
+  m_fontSizeBase: 25
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 18

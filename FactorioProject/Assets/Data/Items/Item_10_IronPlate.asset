@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_10_IronPlate
+  m_EditorClassIdentifier: 
+  itemName: IronPlate
+  id: 10
+  mapObject: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: 9a8bb8e5ff0031f4f8cc2bc49d230edc, type: 2}
+  portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
+  icon: {fileID: 21300000, guid: f03f9c3cb97d43241ad3e1ac5fdac2c0, type: 3}
+  size: 0
+  energyType: 1
+  energyAmount: 10
+  useEnergyType: 0
+  useEnergyAmount: 0

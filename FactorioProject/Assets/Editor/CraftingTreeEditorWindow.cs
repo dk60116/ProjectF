@@ -22,6 +22,8 @@ public class CraftingTreeEditorWindow : EditorWindow
     [Serializable]
     private class CraftingTreeJsonFile
     {
+        public string format = "ProjectF.CraftingTree";
+        public int version = 2;
         public List<CraftingTreeJsonEntry> recipes = new List<CraftingTreeJsonEntry>();
         public List<CraftingTreeJsonEntry> items = new List<CraftingTreeJsonEntry>();
         public List<CraftingTreeJsonEntry> entries = new List<CraftingTreeJsonEntry>();
@@ -32,6 +34,7 @@ public class CraftingTreeEditorWindow : EditorWindow
     {
         public int itemId = -1;
         public string itemName;
+        public string definitionAssetPath;
         public int outputCount = 1;
         public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
         public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
@@ -43,6 +46,7 @@ public class CraftingTreeEditorWindow : EditorWindow
     {
         public int itemId = -1;
         public string itemName;
+        public string definitionAssetPath;
         public int count = 1;
     }
 
@@ -418,7 +422,10 @@ public class CraftingTreeEditorWindow : EditorWindow
         List<int> itemIds = CollectRecipeItemIds();
         for (int i = 0; i < itemIds.Count; i++)
         {
-            file.recipes.Add(BuildJsonEntry(itemIds[i], definitions));
+            CraftingTreeJsonEntry entry = BuildJsonEntry(itemIds[i], definitions);
+            file.recipes.Add(entry);
+            file.items.Add(entry);
+            file.entries.Add(entry);
         }
 
         File.WriteAllText(exportPath, JsonUtility.ToJson(file, true));
@@ -471,7 +478,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         for (int i = 0; i < entries.Count; i++)
         {
             CraftingTreeJsonEntry entry = entries[i];
-            ItemDefinition targetDefinition = ResolveDefinition(definitions, entry.itemName, entry.itemId);
+            ItemDefinition targetDefinition = ResolveDefinition(definitions, entry.definitionAssetPath, entry.itemName, entry.itemId);
             if (targetDefinition == null)
             {
                 continue;
@@ -493,7 +500,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
                 {
                     CraftingIngredientJsonEntry ingredientEntry = entry.ingredients[ingredientIndex];
-                    ItemDefinition ingredientDefinition = ResolveDefinition(definitions, ingredientEntry.itemName, ingredientEntry.itemId);
+                    ItemDefinition ingredientDefinition = ResolveDefinition(definitions, ingredientEntry.definitionAssetPath, ingredientEntry.itemName, ingredientEntry.itemId);
                     if (ingredientDefinition == null)
                     {
                         continue;
@@ -622,6 +629,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         ItemDefinition targetDefinition = FindDefinitionById(definitions, itemId);
         entry.itemId = itemId;
         entry.itemName = targetDefinition != null ? GetDefinitionDisplayName(targetDefinition) : string.Empty;
+        entry.definitionAssetPath = targetDefinition != null ? AssetDatabase.GetAssetPath(targetDefinition) : string.Empty;
         entry.outputCount = GetOutputCount(itemId);
 
         List<MapObject> mapObjects = GetCraftingMapObjects(itemId);
@@ -633,6 +641,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 if (mapObjectEntry != null)
                 {
                     entry.craftingMapObjects.Add(mapObjectEntry);
+                    entry.requiredMapObjects.Add(mapObjectEntry);
                 }
             }
         }
@@ -646,6 +655,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             {
                 itemId = ingredient.itemId,
                 itemName = ingredientDefinition != null ? GetDefinitionDisplayName(ingredientDefinition) : string.Empty,
+                definitionAssetPath = ingredientDefinition != null ? AssetDatabase.GetAssetPath(ingredientDefinition) : string.Empty,
                 count = Mathf.Max(1, ingredient.count)
             });
         }
@@ -694,11 +704,20 @@ public class CraftingTreeEditorWindow : EditorWindow
         return new List<CraftingTreeJsonEntry>();
     }
 
-    private static ItemDefinition ResolveDefinition(List<ItemDefinition> definitions, string itemName, int itemId)
+    private static ItemDefinition ResolveDefinition(List<ItemDefinition> definitions, string definitionAssetPath, string itemName, int itemId)
     {
         if (definitions == null)
         {
             return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(definitionAssetPath))
+        {
+            ItemDefinition assetMatch = AssetDatabase.LoadAssetAtPath<ItemDefinition>(definitionAssetPath);
+            if (assetMatch != null)
+            {
+                return assetMatch;
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(itemName))

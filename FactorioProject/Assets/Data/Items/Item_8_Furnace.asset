@@ -22,4 +22,4 @@ MonoBehaviour:
   energyType: 0
   energyAmount: 0
   useEnergyType: 1
-  useEnergyAmount: 2
+  useEnergyAmount: 1

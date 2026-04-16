@@ -20,6 +20,6 @@ MonoBehaviour:
   icon: {fileID: 21300000, guid: be417b1028b535648827167f9df9cb1e, type: 3}
   size: 0
   energyType: 1
-  energyAmount: 5
+  energyAmount: 8
   useEnergyType: 0
   useEnergyAmount: 0

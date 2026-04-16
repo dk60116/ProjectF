@@ -439,6 +439,9 @@ public class InstallationPlacementController : MonoBehaviour
 
             ConfigureInstalledInputOutputMarkers(installedObject, anchorBlock.Coordinate, quarterTurns);
             ConfigureInstalledInputOutputEnergyAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
+            ConfigureInstalledInputOutputItemAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
+            ConfigureInstalledInputOutputOutputAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
+            ConfigureInstalledInputOutputRuntimeAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
 
             placedCount++;
         }
@@ -559,6 +562,172 @@ public class InstallationPlacementController : MonoBehaviour
         energyAreaController.Configure(installationDefinition.useEnergyType, inputEnergyCoordinates);
     }
 
+    private void ConfigureInstalledInputOutputItemAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (!TryGetInputOutputModule(installedObject, out InputOutputModule inputOutputModule))
+        {
+            return;
+        }
+
+        InputOutputModuleItemAreaController itemAreaController = installedObject.GetComponent<InputOutputModuleItemAreaController>();
+        if (!TryGetOrderedInputItemAreaBindings(
+                anchorCoordinate,
+                installedObject,
+                quarterTurns,
+                inputOutputModule,
+                out List<InputOutputModuleItemAreaBinding> itemAreaBindings)
+            || itemAreaBindings == null
+            || itemAreaBindings.Count <= 0)
+        {
+            itemAreaController?.Configure(null);
+            return;
+        }
+
+        if (itemAreaController == null)
+        {
+            itemAreaController = installedObject.gameObject.AddComponent<InputOutputModuleItemAreaController>();
+        }
+
+        itemAreaController.Configure(itemAreaBindings);
+    }
+
+    private void ConfigureInstalledInputOutputOutputAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (!TryGetInputOutputModule(installedObject, out _))
+        {
+            return;
+        }
+
+        InputOutputModuleOutputAreaController outputAreaController = installedObject.GetComponent<InputOutputModuleOutputAreaController>();
+        if (!TryGetRectGridBlockCoordinates(
+                anchorCoordinate,
+                installedObject,
+                quarterTurns,
+                InputOutputModule.RectGridBlockType.Output,
+                out List<Vector2Int> outputCoordinates)
+            || outputCoordinates == null
+            || outputCoordinates.Count <= 0)
+        {
+            outputAreaController?.Configure(null);
+            return;
+        }
+
+        if (outputAreaController == null)
+        {
+            outputAreaController = installedObject.gameObject.AddComponent<InputOutputModuleOutputAreaController>();
+        }
+
+        outputAreaController.Configure(outputCoordinates);
+    }
+
+    private void ConfigureInstalledInputOutputRuntimeAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (!TryGetInputOutputModule(installedObject, out InputOutputModule inputOutputModule))
+        {
+            return;
+        }
+
+        List<Vector2Int> inputEnergyCoordinates = new List<Vector2Int>();
+        TryGetRectGridBlockCoordinates(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.InputEnergy,
+            out inputEnergyCoordinates);
+
+        List<InputOutputModuleItemAreaBinding> itemAreaBindings = new List<InputOutputModuleItemAreaBinding>();
+        TryGetOrderedInputItemAreaBindings(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            inputOutputModule,
+            out itemAreaBindings);
+
+        List<Vector2Int> outputCoordinates = new List<Vector2Int>();
+        TryGetRectGridBlockCoordinates(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.Output,
+            out outputCoordinates);
+
+        inputOutputModule.ConfigureRuntimeAreas(inputEnergyCoordinates, itemAreaBindings, outputCoordinates);
+    }
+
+    private bool TryGetOrderedInputItemAreaBindings(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        InputOutputModule inputOutputModule,
+        out List<InputOutputModuleItemAreaBinding> bindings)
+    {
+        bindings = new List<InputOutputModuleItemAreaBinding>();
+        if (footprintSource == null
+            || inputOutputModule == null
+            || !TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        List<InputOutputModule.RectGridBlockPlacement> inputItemPlacements = new List<InputOutputModule.RectGridBlockPlacement>();
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType == InputOutputModule.RectGridBlockType.InputItem)
+            {
+                inputItemPlacements.Add(placement);
+            }
+        }
+
+        if (inputItemPlacements.Count <= 0)
+        {
+            return false;
+        }
+
+        inputItemPlacements.Sort(CompareInputItemPlacements);
+
+        IReadOnlyList<InputOutputModule.ItemIoEntry> inputList = inputOutputModule.InputList;
+        int recipeCount = inputList != null ? inputList.Count : 0;
+        if (recipeCount <= 0)
+        {
+            return false;
+        }
+
+        bool useSharedSingleInputArea = inputItemPlacements.Count == 1 && recipeCount > 1;
+        int bindingCount = useSharedSingleInputArea
+            ? recipeCount
+            : Mathf.Min(inputItemPlacements.Count, recipeCount);
+
+        for (int i = 0; i < bindingCount; i++)
+        {
+            ItemDefinition itemDefinition = inputList[i].itemDefinition;
+            if (itemDefinition == null || itemDefinition.id < 0)
+            {
+                continue;
+            }
+
+            InputOutputModule.RectGridBlockPlacement placement = inputItemPlacements[useSharedSingleInputArea ? 0 : i];
+            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
+            Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+            bindings.Add(new InputOutputModuleItemAreaBinding(coordinate, itemDefinition.id));
+        }
+
+        return bindings.Count > 0;
+    }
+
+    private static int CompareInputItemPlacements(
+        InputOutputModule.RectGridBlockPlacement left,
+        InputOutputModule.RectGridBlockPlacement right)
+    {
+        if (left.y != right.y)
+        {
+            return right.y.CompareTo(left.y);
+        }
+
+        return left.x.CompareTo(right.x);
+    }
+
     private static void AddAreaMarkerRequests(List<AreaMarkerSpawnRequest> markerRequests, IReadOnlyList<Vector3> worldPositions, Sprite icon)
     {
         if (markerRequests == null || worldPositions == null || worldPositions.Count <= 0)
@@ -629,6 +798,17 @@ public class InstallationPlacementController : MonoBehaviour
             return null;
         }
 
+        ItemDefinition fixedCoalDefinition = FindItemDefinitionByName(definitions, "Coar");
+        if (fixedCoalDefinition == null)
+        {
+            fixedCoalDefinition = FindItemDefinitionByName(definitions, "Coal");
+        }
+
+        if (fixedCoalDefinition != null && fixedCoalDefinition.icon != null)
+        {
+            return fixedCoalDefinition.icon;
+        }
+
         ItemDefinition bestDefinition = null;
         for (int i = 0; i < definitions.Count; i++)
         {
@@ -647,6 +827,31 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return bestDefinition != null ? bestDefinition.icon : null;
+    }
+
+    private static ItemDefinition FindItemDefinitionByName(List<ItemDefinition> definitions, string itemName)
+    {
+        if (definitions == null || definitions.Count <= 0 || string.IsNullOrWhiteSpace(itemName))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition candidate = definitions[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            if (string.Equals(candidate.itemName, itemName, System.StringComparison.OrdinalIgnoreCase)
+                || string.Equals(candidate.name, itemName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static float GetArrowMarkerRotationZ(Vector3 fromWorldPosition, Vector3 toWorldPosition)
@@ -2131,9 +2336,20 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InstallationMapFilter allowedFilter = installationObject.MapFilter;
+        bool isInputOutputAreaBlock
+            = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
+            || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
+            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate);
+
         if (occupyingObject is Resource resource)
         {
             return resource.CanHarvest && (allowedFilter & InstallationMapFilter.Resource) != 0;
+        }
+
+        if (isInputOutputAreaBlock && (allowedFilter & InstallationMapFilter.ItemArea) != 0)
+        {
+            return block.Type == Block.BlockType.Ground
+                && (occupyingObject == null || occupyingObject is InputOutputModule);
         }
 
         if (occupyingObject != null)

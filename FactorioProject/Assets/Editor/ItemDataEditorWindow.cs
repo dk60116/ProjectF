@@ -42,8 +42,11 @@ public class ItemDataEditorWindow : EditorWindow
     [Serializable]
     private class ItemDataJsonFile
     {
+        public string format = "ProjectF.ItemData";
+        public int version = 2;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
         public List<ItemDataJsonEntry> definitions = new List<ItemDataJsonEntry>();
+        public List<ItemDataJsonEntry> entries = new List<ItemDataJsonEntry>();
     }
 
     [Serializable]
@@ -57,21 +60,35 @@ public class ItemDataEditorWindow : EditorWindow
         public string portableMaterialAssetPath;
         public string iconAssetPath;
         public int size;
+        public int capacity = -1;
         public string energyType;
+        public int energyTypeValue = -1;
         public int energyAmount;
         public string useEnergyType;
+        public int useEnergyTypeValue = -1;
         public int useEnergyAmount;
         public int mapSizeX = -1;
         public int mapSizeY = -1;
         public string mapFilter;
+        public int mapFilterValue = -1;
+        public string mapObjectName;
+        public string mapObjectType;
         public string inputOutputLayoutType;
         public int rectGridWidth;
         public int rectGridHeight;
+        public List<RectGridCellJsonEntry> rectGridCells = new List<RectGridCellJsonEntry>();
         public List<RectGridBlockPlacementJsonEntry> rectGridBlocks = new List<RectGridBlockPlacementJsonEntry>();
         public List<InputOutputPairJsonEntry> ioPairs = new List<InputOutputPairJsonEntry>();
         public List<InputOutputJsonEntry> inputList = new List<InputOutputJsonEntry>();
         public List<InputOutputJsonEntry> outputList = new List<InputOutputJsonEntry>();
         public InputOutputJsonEntry output = null;
+    }
+
+    [Serializable]
+    private class RectGridCellJsonEntry
+    {
+        public int x;
+        public int y;
     }
 
     [Serializable]
@@ -330,6 +347,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty portableMatProperty = serializedObject.FindProperty("portableMat");
         SerializedProperty iconProperty = serializedObject.FindProperty("icon");
         SerializedProperty sizeProperty = serializedObject.FindProperty("size");
+        SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
         SerializedProperty energyTypeProperty = serializedObject.FindProperty("energyType");
         SerializedProperty energyAmountProperty = serializedObject.FindProperty("energyAmount");
         SerializedProperty useEnergyTypeProperty = serializedObject.FindProperty("useEnergyType");
@@ -355,6 +373,15 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
         EditorGUILayout.PropertyField(sizeProperty, new GUIContent("Size"));
+        if (ShouldShowCapacity(definition) && capacityProperty != null)
+        {
+            if (capacityProperty.intValue <= 0)
+            {
+                capacityProperty.intValue = 10;
+            }
+
+            EditorGUILayout.PropertyField(capacityProperty, new GUIContent("Capacity"));
+        }
 
         if (energyTypeProperty != null)
         {
@@ -401,6 +428,16 @@ public class ItemDataEditorWindow : EditorWindow
             EditorUtility.SetDirty(definition);
             Repaint();
         }
+    }
+
+    private static bool ShouldShowCapacity(ItemDefinition definition)
+    {
+        if (definition == null || !(definition.mapObject is InstallationObject installationObject))
+        {
+            return false;
+        }
+
+        return (installationObject.MapFilter & InstallationMapFilter.ItemArea) != 0;
     }
 
     private void DrawMapObjectFields(MapObject mapObject, List<ItemDefinition> definitions)
@@ -1194,7 +1231,10 @@ public class ItemDataEditorWindow : EditorWindow
                 continue;
             }
 
-            file.items.Add(BuildJsonEntry(definition));
+            ItemDataJsonEntry entry = BuildJsonEntry(definition);
+            file.items.Add(entry);
+            file.definitions.Add(entry);
+            file.entries.Add(entry);
         }
 
         File.WriteAllText(exportPath, JsonUtility.ToJson(file, true));
@@ -1280,9 +1320,12 @@ public class ItemDataEditorWindow : EditorWindow
             portableMaterialAssetPath = AssetDatabase.GetAssetPath(definition.portableMat),
             iconAssetPath = AssetDatabase.GetAssetPath(definition.icon),
             size = Mathf.Max(0, (int)definition.size),
+            capacity = definition.capacity > 0 ? definition.capacity : 10,
             energyType = definition.energyType.ToString(),
+            energyTypeValue = (int)definition.energyType,
             energyAmount = Mathf.Max(0, definition.energyAmount),
             useEnergyType = definition.useEnergyType.ToString(),
+            useEnergyTypeValue = (int)definition.useEnergyType,
             useEnergyAmount = Mathf.Max(0, definition.useEnergyAmount)
         };
 
@@ -1292,12 +1335,15 @@ public class ItemDataEditorWindow : EditorWindow
                 ? definition.mapObject.transform.root.gameObject
                 : definition.mapObject.gameObject;
             entry.mapObjectAssetPath = AssetDatabase.GetAssetPath(prefabRoot);
+            entry.mapObjectName = prefabRoot != null ? prefabRoot.name : definition.mapObject.name;
+            entry.mapObjectType = definition.mapObject.GetType().FullName;
             entry.mapSizeX = definition.mapObject.Status.mapSizeX;
             entry.mapSizeY = definition.mapObject.Status.mapSizeY;
 
             if (definition.mapObject is InstallationObject installationObject)
             {
                 entry.mapFilter = installationObject.MapFilter.ToString();
+                entry.mapFilterValue = (int)installationObject.MapFilter;
             }
 
             if (definition.mapObject is InputOutputModule inputOutputModule)
@@ -1305,6 +1351,16 @@ public class ItemDataEditorWindow : EditorWindow
                 entry.inputOutputLayoutType = inputOutputModule.LayoutType.ToString();
                 entry.rectGridWidth = inputOutputModule.RectGridWidth;
                 entry.rectGridHeight = inputOutputModule.RectGridHeight;
+                IReadOnlyList<InputOutputModule.RectGridCell> rectGridCells = inputOutputModule.RectGridCells;
+                for (int i = 0; i < rectGridCells.Count; i++)
+                {
+                    entry.rectGridCells.Add(new RectGridCellJsonEntry
+                    {
+                        x = rectGridCells[i].x,
+                        y = rectGridCells[i].y
+                    });
+                }
+
                 IReadOnlyList<InputOutputModule.RectGridBlockPlacement> rectGridPlacements = inputOutputModule.RectGridPlacements;
                 for (int i = 0; i < rectGridPlacements.Count; i++)
                 {
@@ -1316,11 +1372,20 @@ public class ItemDataEditorWindow : EditorWindow
                 int pairCount = Mathf.Min(inputs.Count, outputs.Count);
                 for (int i = 0; i < pairCount; i++)
                 {
+                    InputOutputJsonEntry inputJsonEntry = BuildInputOutputJsonEntry(inputs[i]);
+                    InputOutputJsonEntry outputJsonEntry = BuildInputOutputJsonEntry(outputs[i]);
+                    entry.inputList.Add(inputJsonEntry);
+                    entry.outputList.Add(outputJsonEntry);
                     entry.ioPairs.Add(new InputOutputPairJsonEntry
                     {
-                        input = BuildInputOutputJsonEntry(inputs[i]),
-                        output = BuildInputOutputJsonEntry(outputs[i])
+                        input = inputJsonEntry,
+                        output = outputJsonEntry
                     });
+                }
+
+                if (entry.outputList.Count > 0)
+                {
+                    entry.output = entry.outputList[0];
                 }
             }
         }
@@ -1365,6 +1430,11 @@ public class ItemDataEditorWindow : EditorWindow
         if (file.definitions != null && file.definitions.Count > 0)
         {
             return file.definitions;
+        }
+
+        if (file.entries != null && file.entries.Count > 0)
+        {
+            return file.entries;
         }
 
         return new List<ItemDataJsonEntry>();
@@ -1436,9 +1506,13 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         definition.size = (uint)Mathf.Max(0, entry.size);
-        definition.energyType = ParseEnergyType(entry.energyType, definition.energyType);
+        if (entry.capacity > 0)
+        {
+            definition.capacity = Mathf.Max(1, entry.capacity);
+        }
+        definition.energyType = ParseEnergyType(entry.energyType, entry.energyTypeValue, definition.energyType);
         definition.energyAmount = definition.energyType == ItemDefinition.EnergyType.None ? 0 : Mathf.Max(0, entry.energyAmount);
-        definition.useEnergyType = ParseEnergyType(entry.useEnergyType, definition.useEnergyType);
+        definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
         definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0 : Mathf.Max(0, entry.useEnergyAmount);
 
         Mesh portableMesh = LoadAssetAtPath<Mesh>(entry.portableMeshAssetPath);
@@ -1510,11 +1584,17 @@ public class ItemDataEditorWindow : EditorWindow
         if (mapObject is InstallationObject)
         {
             SerializedProperty mapFilterProperty = serializedMapObject.FindProperty("mapFilter");
-            if (mapFilterProperty != null && !string.IsNullOrWhiteSpace(entry.mapFilter))
+            if (mapFilterProperty != null)
             {
-                if (Enum.TryParse(entry.mapFilter, true, out InstallationMapFilter parsedFilter))
+                if (!string.IsNullOrWhiteSpace(entry.mapFilter)
+                    && Enum.TryParse(entry.mapFilter, true, out InstallationMapFilter parsedFilter))
                 {
                     mapFilterProperty.intValue = (int)(parsedFilter == InstallationMapFilter.None ? InstallationMapFilter.Ground : parsedFilter);
+                }
+                else if (entry.mapFilterValue >= 0)
+                {
+                    InstallationMapFilter parsedFilterValue = (InstallationMapFilter)entry.mapFilterValue;
+                    mapFilterProperty.intValue = (int)(parsedFilterValue == InstallationMapFilter.None ? InstallationMapFilter.Ground : parsedFilterValue);
                 }
             }
         }
@@ -1534,16 +1614,23 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private static ItemDefinition.EnergyType ParseEnergyType(string rawValue, ItemDefinition.EnergyType fallback)
+    private static ItemDefinition.EnergyType ParseEnergyType(string rawValue, int rawEnumValue, ItemDefinition.EnergyType fallback)
     {
         if (string.IsNullOrWhiteSpace(rawValue))
         {
+            if (rawEnumValue >= 0 && Enum.IsDefined(typeof(ItemDefinition.EnergyType), rawEnumValue))
+            {
+                return (ItemDefinition.EnergyType)rawEnumValue;
+            }
+
             return fallback;
         }
 
         return Enum.TryParse(rawValue, true, out ItemDefinition.EnergyType parsedType)
             ? parsedType
-            : fallback;
+            : (rawEnumValue >= 0 && Enum.IsDefined(typeof(ItemDefinition.EnergyType), rawEnumValue)
+                ? (ItemDefinition.EnergyType)rawEnumValue
+                : fallback);
     }
 
     private static void ApplyInputOutputModuleJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry, List<ItemDefinition> definitions)
@@ -1790,10 +1877,22 @@ public class ItemDataEditorWindow : EditorWindow
             return null;
         }
 
+        MapObject directMapObject = AssetDatabase.LoadAssetAtPath<MapObject>(assetPath);
+        if (directMapObject != null)
+        {
+            return directMapObject;
+        }
+
+        InstallationObject directInstallationObject = AssetDatabase.LoadAssetAtPath<InstallationObject>(assetPath);
+        if (directInstallationObject != null)
+        {
+            return directInstallationObject;
+        }
+
         GameObject prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
         if (prefabRoot == null)
         {
-            return null;
+            return LoadMapObjectFromAllAssets(assetPath);
         }
 
         MapObject mapObject = prefabRoot.GetComponent<MapObject>();
@@ -1802,7 +1901,60 @@ public class ItemDataEditorWindow : EditorWindow
             mapObject = prefabRoot.GetComponentInChildren<MapObject>(true);
         }
 
-        return mapObject;
+        return mapObject != null ? mapObject : LoadMapObjectFromAllAssets(assetPath);
+    }
+
+    private static MapObject LoadMapObjectFromAllAssets(string assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return null;
+        }
+
+        UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        if (assets != null)
+        {
+            for (int i = 0; i < assets.Length; i++)
+            {
+                switch (assets[i])
+                {
+                    case InstallationObject installationObject:
+                        return installationObject;
+                    case MapObject mapObject:
+                        return mapObject;
+                }
+            }
+        }
+
+        GameObject prefabContentsRoot = null;
+        try
+        {
+            prefabContentsRoot = PrefabUtility.LoadPrefabContents(assetPath);
+            if (prefabContentsRoot == null)
+            {
+                return null;
+            }
+
+            MapObject instanceMatch = prefabContentsRoot.GetComponent<MapObject>();
+            if (instanceMatch == null)
+            {
+                instanceMatch = prefabContentsRoot.GetComponentInChildren<MapObject>(true);
+            }
+
+            MapObject sourceMatch = instanceMatch != null ? PrefabUtility.GetCorrespondingObjectFromSource(instanceMatch) : null;
+            return sourceMatch != null ? sourceMatch : instanceMatch;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (prefabContentsRoot != null)
+            {
+                PrefabUtility.UnloadPrefabContents(prefabContentsRoot);
+            }
+        }
     }
 
     private void EnsureSelection()

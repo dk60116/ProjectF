@@ -67,6 +67,19 @@ public class InputOutputModule : InstallationObject
         }
     }
 
+    [System.Serializable]
+    private struct RuntimeInputItemArea
+    {
+        public Vector2Int coordinate;
+        public int itemId;
+
+        public RuntimeInputItemArea(Vector2Int coordinate, int itemId)
+        {
+            this.coordinate = coordinate;
+            this.itemId = itemId;
+        }
+    }
+
     [SerializeField]
     private List<ItemIoEntry> inputList = new List<ItemIoEntry>();
     [SerializeField]
@@ -83,6 +96,45 @@ public class InputOutputModule : InstallationObject
     private List<RectGridCell> rectGridCells = new List<RectGridCell>();
     [SerializeField]
     private List<RectGridBlockPlacement> rectGridPlacements = new List<RectGridBlockPlacement>();
+    [SerializeField, Min(0.1f)]
+    private float craftDuration = 5f;
+    [SerializeField, Min(0f)]
+    private float inputConsumeMoveInterval = 0.1f;
+    [SerializeField, Min(0f)]
+    private float outputMoveInterval = 0.1f;
+    [SerializeField, Min(0f)]
+    private float energyGaugeVerticalOffset = 0.25f;
+    [SerializeField, Min(1)]
+    private int runtimeAreaMaxObjects = 10;
+    [SerializeField]
+    private List<Vector2Int> runtimeInputEnergyCoordinates = new List<Vector2Int>();
+    [SerializeField]
+    private List<RuntimeInputItemArea> runtimeInputItemAreas = new List<RuntimeInputItemArea>();
+    [SerializeField]
+    private List<Vector2Int> runtimeOutputCoordinates = new List<Vector2Int>();
+    [SerializeField]
+    private float storedEnergy;
+    [SerializeField]
+    private float energyGaugeCapacity;
+    [SerializeField]
+    private bool hasActiveCraft;
+    [SerializeField]
+    private bool waitingForOutput;
+    [SerializeField]
+    private float remainingCraftTime;
+    [SerializeField]
+    private int activeRecipeIndex = -1;
+    [SerializeField]
+    private int activeOutputItemId = -1;
+    [SerializeField]
+    private int activeOutputCount;
+
+    private TerrainGenerator cachedTerrain;
+    private ItemDefinition cachedInstalledDefinition;
+    private int cachedInstalledDefinitionId = int.MinValue;
+    private DefaultGauge activeEnergyGauge;
+    private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
+    private bool energyGaugeRenderersResolved;
 
     public IReadOnlyList<ItemIoEntry> InputList
     {
@@ -154,6 +206,65 @@ public class InputOutputModule : InstallationObject
             EnsureRectGridPlacementData();
             return rectGridPlacements;
         }
+    }
+
+    public void ConfigureRuntimeAreas(
+        IReadOnlyList<Vector2Int> inputEnergyCoordinates,
+        IReadOnlyList<InputOutputModuleItemAreaBinding> inputItemBindings,
+        IReadOnlyList<Vector2Int> outputCoordinates)
+    {
+        runtimeInputEnergyCoordinates.Clear();
+        runtimeInputItemAreas.Clear();
+        runtimeOutputCoordinates.Clear();
+
+        AddUniqueCoordinates(inputEnergyCoordinates, runtimeInputEnergyCoordinates);
+        AddUniqueCoordinates(outputCoordinates, runtimeOutputCoordinates);
+
+        if (inputItemBindings != null)
+        {
+            for (int i = 0; i < inputItemBindings.Count; i++)
+            {
+                InputOutputModuleItemAreaBinding binding = inputItemBindings[i];
+                if (binding.ItemId < 0 || ContainsRuntimeInputItemArea(binding.Coordinate, binding.ItemId))
+                {
+                    continue;
+                }
+
+                runtimeInputItemAreas.Add(new RuntimeInputItemArea(binding.Coordinate, binding.ItemId));
+            }
+        }
+
+        cachedTerrain = null;
+    }
+
+    private void Update()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        EnsurePairData();
+        if (hasActiveCraft)
+        {
+            UpdateActiveCraft();
+        }
+        else
+        {
+            TryStartNextCraft();
+        }
+
+        UpdateEnergyGaugeVisual();
+    }
+
+    private void OnDisable()
+    {
+        ReleaseEnergyGaugeVisual();
+    }
+
+    private void OnDestroy()
+    {
+        ReleaseEnergyGaugeVisual();
     }
 
     private void EnsurePairData()
@@ -302,6 +413,102 @@ public class InputOutputModule : InstallationObject
         Vector2Int delta = outputCell - objectCell;
         delta = RotateCellOffset(delta, quarterTurns);
         return TryConvertOffsetToDirection(delta, out direction);
+    }
+
+    public bool HasStoredOperationalEnergy()
+    {
+        return storedEnergy > 0f;
+    }
+
+    public bool HasActiveOrPendingCraft()
+    {
+        return hasActiveCraft || waitingForOutput;
+    }
+
+    public int RuntimeAreaMaxObjects => Mathf.Max(1, runtimeAreaMaxObjects);
+
+    public int ResolveRuntimeAreaCapacity(IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return RuntimeAreaMaxObjects;
+        }
+
+        int installedCapacityTotal = 0;
+        bool hasInstalledCapacity = false;
+        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            if (!visitedCoordinates.Add(coordinate))
+            {
+                continue;
+            }
+
+            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            if (!block.TryGetInstalledItemAreaCapacity(out int blockCapacity))
+            {
+                continue;
+            }
+
+            installedCapacityTotal += Mathf.Max(1, blockCapacity);
+            hasInstalledCapacity = true;
+        }
+
+        return hasInstalledCapacity
+            ? Mathf.Max(1, installedCapacityTotal)
+            : RuntimeAreaMaxObjects;
+    }
+
+    public bool HasAvailableOutputItem(int itemId)
+    {
+        return TryFindOutputSourceBlock(itemId, out _, out _);
+    }
+
+    public bool TryMoveOneOutputItemToInput(int itemId, Vector2Int targetCoordinate)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (!TryGetLoadedBlock(targetCoordinate, out Block targetBlock) || targetBlock == null)
+        {
+            return false;
+        }
+
+        if (targetBlock.Type != Block.BlockType.Ground || !targetBlock.CanAddInputAreaCenterObjects(1, itemId))
+        {
+            return false;
+        }
+
+        if (!TryFindOutputSourceBlock(itemId, out Block sourceBlock, out Vector3 startWorldPosition)
+            || sourceBlock == null
+            || sourceBlock == targetBlock)
+        {
+            return false;
+        }
+
+        if (!sourceBlock.TryConsumeOneInputAreaCenterObject(itemId, out int consumedItemId) || consumedItemId != itemId)
+        {
+            return false;
+        }
+
+        if (targetBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out PortableObject droppedObject))
+        {
+            DroppedItemPickupGate gate = droppedObject != null ? droppedObject.GetComponent<DroppedItemPickupGate>() : null;
+            gate?.SetAutoPickupBlocked(true);
+            return true;
+        }
+
+        sourceBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out PortableObject restoredObject);
+        DroppedItemPickupGate restoreGate = restoredObject != null ? restoredObject.GetComponent<DroppedItemPickupGate>() : null;
+        restoreGate?.SetAutoPickupBlocked(true);
+        return false;
     }
 
     private static bool TryConvertOffsetToDirection(Vector2Int delta, out RectGridDirection direction)
@@ -617,6 +824,648 @@ public class InputOutputModule : InstallationObject
         int mapSizeX = Mathf.Max(1, Status.mapSizeX);
         int mapSizeY = Mathf.Max(1, Status.mapSizeY);
         return mapSizeX * mapSizeY;
+    }
+
+    private void UpdateActiveCraft()
+    {
+        if (!hasActiveCraft)
+        {
+            return;
+        }
+
+        if (waitingForOutput)
+        {
+            TryCompleteActiveCraft();
+            return;
+        }
+
+        if (!TryConsumeOperatingEnergy(Time.deltaTime))
+        {
+            return;
+        }
+
+        remainingCraftTime = Mathf.Max(0f, remainingCraftTime - Time.deltaTime);
+        if (remainingCraftTime > 0f)
+        {
+            return;
+        }
+
+        waitingForOutput = true;
+        TryCompleteActiveCraft();
+    }
+
+    private void TryStartNextCraft()
+    {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null || runtimeInputItemAreas.Count <= 0 || runtimeOutputCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+        {
+            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
+            {
+                continue;
+            }
+
+            if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea))
+            {
+                continue;
+            }
+
+            if (!TryGetLoadedBlock(inputArea.coordinate, out Block inputBlock) || inputBlock == null)
+            {
+                continue;
+            }
+
+            if (inputBlock.GetInputAreaCenterItemCount(inputItemId) < inputCount)
+            {
+                continue;
+            }
+
+            if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+            {
+                continue;
+            }
+
+            if (!TryEnsureCraftStartEnergy(installedDefinition))
+            {
+                continue;
+            }
+
+            if (inputBlock.ConsumeInputAreaCenterObjectsAnimated(
+                    inputItemId,
+                    inputCount,
+                    ResolveConsumeTargetWorldPosition(),
+                    inputConsumeMoveInterval) != inputCount)
+            {
+                continue;
+            }
+
+            hasActiveCraft = true;
+            waitingForOutput = false;
+            remainingCraftTime = Mathf.Max(0.1f, craftDuration);
+            activeRecipeIndex = recipeIndex;
+            activeOutputItemId = outputItemId;
+            activeOutputCount = outputCount;
+            return;
+        }
+    }
+
+    private bool TryResolveRuntimeInputItemArea(int recipeIndex, int inputItemId, out RuntimeInputItemArea inputArea)
+    {
+        inputArea = default;
+        if (inputItemId < 0 || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        if (recipeIndex >= 0 && recipeIndex < runtimeInputItemAreas.Count)
+        {
+            RuntimeInputItemArea indexedArea = runtimeInputItemAreas[recipeIndex];
+            if (indexedArea.itemId == inputItemId)
+            {
+                inputArea = indexedArea;
+                return true;
+            }
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea candidateArea = runtimeInputItemAreas[i];
+            if (candidateArea.itemId != inputItemId)
+            {
+                continue;
+            }
+
+            inputArea = candidateArea;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryCompleteActiveCraft()
+    {
+        if (!hasActiveCraft || activeOutputItemId < 0 || activeOutputCount <= 0)
+        {
+            ClearActiveCraft();
+            return false;
+        }
+
+        if (!TryResolveOutputBlock(activeOutputItemId, activeOutputCount, out Block outputBlock) || outputBlock == null)
+        {
+            return false;
+        }
+
+        Vector3 startWorldPosition = ResolveConsumeTargetWorldPosition();
+        for (int outputIndex = 0; outputIndex < activeOutputCount; outputIndex++)
+        {
+            if (!outputBlock.TryAddInputAreaCenterObjectAnimated(
+                    activeOutputItemId,
+                    startWorldPosition,
+                    outputIndex * Mathf.Max(0f, outputMoveInterval),
+                    out PortableObject droppedObject))
+            {
+                return false;
+            }
+
+            DroppedItemPickupGate gate = droppedObject != null ? droppedObject.GetComponent<DroppedItemPickupGate>() : null;
+            gate?.SetAutoPickupBlocked(true);
+        }
+
+        ClearActiveCraft();
+        return true;
+    }
+
+    private bool TryConsumeOperatingEnergy(float deltaTime)
+    {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return true;
+        }
+
+        if (storedEnergy <= 0f && !TryRefillEnergyStore(installedDefinition))
+        {
+            return false;
+        }
+
+        float energyCost = Mathf.Max(0f, installedDefinition.useEnergyAmount) * Mathf.Max(0f, deltaTime);
+        storedEnergy = Mathf.Max(0f, storedEnergy - energyCost);
+        if (storedEnergy <= 0f)
+        {
+            energyGaugeCapacity = 0f;
+        }
+        return true;
+    }
+
+    private bool TryEnsureCraftStartEnergy(ItemDefinition installedDefinition)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return true;
+        }
+
+        if (storedEnergy > 0f)
+        {
+            return true;
+        }
+
+        return TryRefillEnergyStore(installedDefinition);
+    }
+
+    private bool TryRefillEnergyStore(ItemDefinition installedDefinition)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return true;
+        }
+
+        float minimumOperationalEnergy = Mathf.Max(1, installedDefinition.useEnergyAmount);
+        bool consumedAnyEnergyItem = false;
+        while (storedEnergy < minimumOperationalEnergy)
+        {
+            if (!TryConsumeOneEnergyItem(installedDefinition.useEnergyType, out int gainedEnergy))
+            {
+                break;
+            }
+
+            storedEnergy += gainedEnergy;
+            consumedAnyEnergyItem = true;
+        }
+
+        if (consumedAnyEnergyItem)
+        {
+            energyGaugeCapacity = Mathf.Max(storedEnergy, 1f);
+        }
+
+        return storedEnergy >= minimumOperationalEnergy;
+    }
+
+    private bool TryConsumeOneEnergyItem(ItemDefinition.EnergyType requiredEnergyType, out int gainedEnergy)
+    {
+        gainedEnergy = 0;
+        if (requiredEnergyType == ItemDefinition.EnergyType.None || runtimeInputEnergyCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeInputEnergyCoordinates.Count; i++)
+        {
+            if (!TryGetLoadedBlock(runtimeInputEnergyCoordinates[i], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            int energyItemId = block.GetInputAreaCenterItemId();
+            if (energyItemId < 0)
+            {
+                continue;
+            }
+
+            ItemDefinition energyDefinition = ResolveItemDefinition(energyItemId);
+            if (energyDefinition == null
+                || energyDefinition.energyType != requiredEnergyType
+                || energyDefinition.energyAmount <= 0)
+            {
+                continue;
+            }
+
+            if (!block.TryConsumeOneInputAreaCenterObjectAnimated(
+                    energyItemId,
+                    ResolveConsumeTargetWorldPosition(),
+                    out int consumedItemId) || consumedItemId != energyItemId)
+            {
+                continue;
+            }
+
+            gainedEnergy = energyDefinition.energyAmount;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveOutputBlock(int outputItemId, int outputCount, out Block targetBlock)
+    {
+        targetBlock = null;
+        if (outputItemId < 0 || outputCount <= 0 || runtimeOutputCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        if (GetRuntimeAreaObjectCount(runtimeOutputCoordinates) + outputCount > ResolveRuntimeAreaCapacity(runtimeOutputCoordinates))
+        {
+            return false;
+        }
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool requireExistingCenterStack = pass == 0;
+            for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+            {
+                if (!TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block) || block == null)
+                {
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground || !block.CanAddInputAreaCenterObjects(outputCount, outputItemId))
+                {
+                    continue;
+                }
+
+                if (requireExistingCenterStack && !block.HasInputAreaCenterItem(outputItemId))
+                {
+                    continue;
+                }
+
+                targetBlock = block;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int GetRuntimeAreaObjectCount(IReadOnlyList<Vector2Int> coordinates, int itemId = -1)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            if (!visitedCoordinates.Add(coordinate))
+            {
+                continue;
+            }
+
+            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
+            {
+                continue;
+            }
+
+            count += block.GetInputAreaCenterItemCount(itemId);
+        }
+
+        return count;
+    }
+
+    private bool TryFindOutputSourceBlock(int itemId, out Block sourceBlock, out Vector3 startWorldPosition)
+    {
+        sourceBlock = null;
+        startWorldPosition = transform.position;
+        if (itemId < 0 || runtimeOutputCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        {
+            if (!TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            if (block.Type != Block.BlockType.Ground || !block.HasInputAreaCenterItem(itemId))
+            {
+                continue;
+            }
+
+            if (!block.TryGetInputAreaCenterTopWorldPosition(itemId, out startWorldPosition))
+            {
+                startWorldPosition = block.transform.position;
+            }
+
+            sourceBlock = block;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetRecipePair(int recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount)
+    {
+        inputItemId = -1;
+        inputCount = 0;
+        outputItemId = -1;
+        outputCount = 0;
+
+        if (recipeIndex < 0 || recipeIndex >= inputList.Count || recipeIndex >= outputList.Count)
+        {
+            return false;
+        }
+
+        ItemIoEntry inputEntry = inputList[recipeIndex];
+        ItemIoEntry outputEntry = outputList[recipeIndex];
+        inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
+        outputItemId = outputEntry.itemDefinition != null ? outputEntry.itemDefinition.id : -1;
+        inputCount = Mathf.Max(1, inputEntry.count);
+        outputCount = Mathf.Max(1, outputEntry.count);
+        return inputItemId >= 0 && outputItemId >= 0;
+    }
+
+    private bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
+    {
+        block = null;
+        TerrainGenerator terrain = ResolveTerrain();
+        return terrain != null && terrain.TryGetLoadedBlock(coordinate, out block);
+    }
+
+    private TerrainGenerator ResolveTerrain()
+    {
+        if (cachedTerrain != null)
+        {
+            return cachedTerrain;
+        }
+
+        cachedTerrain = GetComponentInParent<TerrainGenerator>();
+        if (cachedTerrain == null)
+        {
+            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+        }
+
+        return cachedTerrain;
+    }
+
+    private ItemDefinition ResolveInstalledDefinition()
+    {
+        int itemId = ResolveItemId();
+        if (cachedInstalledDefinition != null && cachedInstalledDefinitionId == itemId)
+        {
+            return cachedInstalledDefinition;
+        }
+
+        cachedInstalledDefinition = ResolveItemDefinition(itemId);
+        cachedInstalledDefinitionId = itemId;
+        return cachedInstalledDefinition;
+    }
+
+    private static ItemDefinition ResolveItemDefinition(int itemId)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
+    {
+        return installedDefinition != null
+               && installedDefinition.useEnergyType != ItemDefinition.EnergyType.None
+               && installedDefinition.useEnergyAmount > 0;
+    }
+
+    private Vector3 ResolveConsumeTargetWorldPosition()
+    {
+        if (portableObj != null)
+        {
+            return portableObj.transform.position;
+        }
+
+        return transform.position;
+    }
+
+    private void UpdateEnergyGaugeVisual()
+    {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (!RequiresOperationalEnergy(installedDefinition) || !hasActiveCraft)
+        {
+            ReleaseEnergyGaugeVisual();
+            return;
+        }
+
+        UIManager uiManager = UIManager.Instance;
+        if (uiManager == null)
+        {
+            return;
+        }
+
+        if (activeEnergyGauge == null)
+        {
+            activeEnergyGauge = uiManager.AcquireEnergyGauge();
+            if (activeEnergyGauge == null)
+            {
+                return;
+            }
+        }
+
+        uiManager.UpdateEnergyGauge(
+            activeEnergyGauge,
+            ResolveEnergyGaugeWorldPosition(),
+            ResolveEnergyGaugeFillAmount(installedDefinition));
+    }
+
+    private void ReleaseEnergyGaugeVisual()
+    {
+        if (activeEnergyGauge == null)
+        {
+            return;
+        }
+
+        UIManager uiManager = UIManager.Instance;
+        if (uiManager != null)
+        {
+            uiManager.ReleaseEnergyGauge(activeEnergyGauge);
+        }
+        else
+        {
+            Destroy(activeEnergyGauge.gameObject);
+        }
+
+        activeEnergyGauge = null;
+    }
+
+    private float ResolveEnergyGaugeFillAmount(ItemDefinition installedDefinition)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return 0f;
+        }
+
+        if (storedEnergy > energyGaugeCapacity)
+        {
+            energyGaugeCapacity = storedEnergy;
+        }
+
+        float gaugeCapacity = Mathf.Max(energyGaugeCapacity, 1f);
+        return Mathf.Clamp01(storedEnergy / gaugeCapacity);
+    }
+
+    private Vector3 ResolveEnergyGaugeWorldPosition()
+    {
+        Bounds bounds = default;
+        bool hasBounds = false;
+        IReadOnlyList<Renderer> renderers = ResolveEnergyGaugeRenderers();
+        for (int i = 0; i < renderers.Count; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (!hasBounds)
+        {
+            return transform.position + Vector3.up * (1f + energyGaugeVerticalOffset);
+        }
+
+        return new Vector3(bounds.center.x, bounds.max.y + energyGaugeVerticalOffset, bounds.center.z);
+    }
+
+    private IReadOnlyList<Renderer> ResolveEnergyGaugeRenderers()
+    {
+        bool requiresRefresh = !energyGaugeRenderersResolved || cachedEnergyGaugeRenderers.Count == 0;
+        if (!requiresRefresh)
+        {
+            for (int i = 0; i < cachedEnergyGaugeRenderers.Count; i++)
+            {
+                if (cachedEnergyGaugeRenderers[i] == null)
+                {
+                    requiresRefresh = true;
+                    break;
+                }
+            }
+        }
+
+        if (!requiresRefresh)
+        {
+            return cachedEnergyGaugeRenderers;
+        }
+
+        energyGaugeRenderersResolved = true;
+        cachedEnergyGaugeRenderers.Clear();
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer != null)
+            {
+                cachedEnergyGaugeRenderers.Add(renderer);
+            }
+        }
+
+        return cachedEnergyGaugeRenderers;
+    }
+
+    private void ClearActiveCraft()
+    {
+        hasActiveCraft = false;
+        waitingForOutput = false;
+        remainingCraftTime = 0f;
+        activeRecipeIndex = -1;
+        activeOutputItemId = -1;
+        activeOutputCount = 0;
+        if (storedEnergy <= 0f)
+        {
+            energyGaugeCapacity = 0f;
+        }
+    }
+
+    private bool ContainsRuntimeInputItemArea(Vector2Int coordinate, int itemId)
+    {
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea area = runtimeInputItemAreas[i];
+            if (area.coordinate == coordinate && area.itemId == itemId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AddUniqueCoordinates(IReadOnlyList<Vector2Int> source, List<Vector2Int> target)
+    {
+        if (source == null || target == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            Vector2Int coordinate = source[i];
+            if (!target.Contains(coordinate))
+            {
+                target.Add(coordinate);
+            }
+        }
     }
 
 #if UNITY_EDITOR

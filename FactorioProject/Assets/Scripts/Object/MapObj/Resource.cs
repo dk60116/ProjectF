@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class Resource : MapObject
 {
@@ -71,6 +72,13 @@ public class Resource : MapObject
     private Vector3 initialBodyLocalScale = Vector3.one;
     private int initialResourceCount;
     private Block owningBlock;
+    private ResourceBatchRenderer batchRenderer;
+    private MeshFilter batchedMeshFilter;
+    private MeshRenderer batchedMeshRenderer;
+    private bool batchComponentsResolved;
+    private bool supportsBatchedRendering;
+    private bool useBatchedRendering;
+    private bool bodyPresentationVisible = true;
 
     public static IReadOnlyList<Resource> ActiveResources => ActiveResourcesInternal;
 
@@ -147,6 +155,7 @@ public class Resource : MapObject
         }
 
         UpdateBodyScale();
+        SetBatchedRendering(true);
 
         if (!ActiveResourcesInternal.Contains(this))
         {
@@ -156,6 +165,7 @@ public class Resource : MapObject
 
     private void OnDisable()
     {
+        SetBatchedRendering(false);
         ActiveResourcesInternal.Remove(this);
 
         if (!Application.isPlaying || owningBlock == null || owningBlock.MapObject != this)
@@ -171,6 +181,10 @@ public class Resource : MapObject
         CacheBodyTransform();
         ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
+        batchComponentsResolved = false;
+        supportsBatchedRendering = false;
+        batchedMeshFilter = null;
+        batchedMeshRenderer = null;
         if (!Application.isPlaying)
         {
             initialResourceCount = Mathf.Max(1, resourceStatus.resourceCount);
@@ -877,6 +891,7 @@ public class Resource : MapObject
 
     private void ToggleBodyPresentation(bool isVisible)
     {
+        bodyPresentationVisible = isVisible;
         CacheBodyTransform();
         if (bodyTransform == null)
         {
@@ -892,7 +907,11 @@ public class Resource : MapObject
                 continue;
             }
 
-            targetRenderer.enabled = isVisible;
+            targetRenderer.enabled = bodyPresentationVisible;
+            if (targetRenderer is MeshRenderer meshRenderer)
+            {
+                meshRenderer.forceRenderingOff = bodyPresentationVisible && useBatchedRendering && supportsBatchedRendering;
+            }
         }
 
         Collider[] colliders = bodyTransform.GetComponentsInChildren<Collider>(true);
@@ -904,7 +923,7 @@ public class Resource : MapObject
                 continue;
             }
 
-            targetCollider.enabled = isVisible;
+            targetCollider.enabled = bodyPresentationVisible;
         }
     }
 
@@ -930,5 +949,352 @@ public class Resource : MapObject
     public void SetOwningBlock(Block block)
     {
         owningBlock = block;
+    }
+
+    public void SetBatchedRendering(bool shouldUseBatchedRendering)
+    {
+        ResolveBatchComponents();
+        bool canUseBatching = Application.isPlaying && supportsBatchedRendering && shouldUseBatchedRendering;
+        if (useBatchedRendering == canUseBatching && (!useBatchedRendering || batchRenderer != null))
+        {
+            ToggleBodyPresentation(bodyPresentationVisible);
+            return;
+        }
+
+        useBatchedRendering = canUseBatching;
+        if (!useBatchedRendering)
+        {
+            UnregisterFromBatchRenderer();
+            ToggleBodyPresentation(bodyPresentationVisible);
+            return;
+        }
+
+        batchRenderer = ResolveBatchRenderer();
+        if (batchRenderer == null)
+        {
+            useBatchedRendering = false;
+            ToggleBodyPresentation(bodyPresentationVisible);
+            return;
+        }
+
+        batchRenderer.Register(this);
+        ToggleBodyPresentation(bodyPresentationVisible);
+    }
+
+    public bool TryGetBatchRenderData(
+        out Mesh mesh,
+        out Material material,
+        out Matrix4x4 localToWorldMatrix,
+        out Vector3 worldPosition,
+        out int layer,
+        out ShadowCastingMode shadowCastingMode,
+        out bool receiveShadows)
+    {
+        ResolveBatchComponents();
+
+        mesh = batchedMeshFilter != null ? batchedMeshFilter.sharedMesh : null;
+        material = batchedMeshRenderer != null ? batchedMeshRenderer.sharedMaterial : null;
+        localToWorldMatrix = batchedMeshFilter != null ? batchedMeshFilter.transform.localToWorldMatrix : Matrix4x4.identity;
+        worldPosition = batchedMeshFilter != null ? batchedMeshFilter.transform.position : transform.position;
+        layer = batchedMeshRenderer != null ? batchedMeshRenderer.gameObject.layer : gameObject.layer;
+        shadowCastingMode = batchedMeshRenderer != null ? batchedMeshRenderer.shadowCastingMode : ShadowCastingMode.Off;
+        receiveShadows = batchedMeshRenderer != null && batchedMeshRenderer.receiveShadows;
+
+        return useBatchedRendering
+               && bodyPresentationVisible
+               && gameObject.activeInHierarchy
+               && supportsBatchedRendering
+               && mesh != null
+               && material != null;
+    }
+
+    private void ResolveBatchComponents()
+    {
+        if (batchComponentsResolved)
+        {
+            return;
+        }
+
+        batchComponentsResolved = true;
+        supportsBatchedRendering = false;
+        batchedMeshFilter = null;
+        batchedMeshRenderer = null;
+
+        CacheBodyTransform();
+        CachePortableObjects();
+        if (bodyTransform == null)
+        {
+            return;
+        }
+
+        List<MeshFilter> candidates = new List<MeshFilter>();
+        MeshFilter[] meshFilters = bodyTransform.GetComponentsInChildren<MeshFilter>(true);
+        for (int i = 0; i < meshFilters.Length; i++)
+        {
+            MeshFilter candidate = meshFilters[i];
+            if (candidate == null || IsPortableHierarchy(candidate.transform))
+            {
+                continue;
+            }
+
+            MeshRenderer candidateRenderer = candidate.GetComponent<MeshRenderer>();
+            if (candidateRenderer == null || IsPortableHierarchy(candidateRenderer.transform))
+            {
+                continue;
+            }
+
+            candidates.Add(candidate);
+        }
+
+        if (candidates.Count != 1)
+        {
+            return;
+        }
+
+        batchedMeshFilter = candidates[0];
+        batchedMeshRenderer = batchedMeshFilter != null ? batchedMeshFilter.GetComponent<MeshRenderer>() : null;
+        if (batchedMeshFilter == null || batchedMeshRenderer == null)
+        {
+            batchedMeshFilter = null;
+            batchedMeshRenderer = null;
+            return;
+        }
+
+        if (batchedMeshRenderer.sharedMaterial != null && !batchedMeshRenderer.sharedMaterial.enableInstancing)
+        {
+            batchedMeshRenderer.sharedMaterial.enableInstancing = true;
+        }
+
+        cachedRenderer ??= batchedMeshRenderer;
+        supportsBatchedRendering = true;
+    }
+
+    private ResourceBatchRenderer ResolveBatchRenderer()
+    {
+        if (batchRenderer != null)
+        {
+            return batchRenderer;
+        }
+
+        TerrainGenerator generator = GetComponentInParent<TerrainGenerator>();
+        GameObject host = generator != null ? generator.gameObject : null;
+        if (host == null)
+        {
+            return null;
+        }
+
+        batchRenderer = host.GetComponent<ResourceBatchRenderer>();
+        if (batchRenderer == null)
+        {
+            batchRenderer = host.AddComponent<ResourceBatchRenderer>();
+        }
+
+        return batchRenderer;
+    }
+
+    private void UnregisterFromBatchRenderer()
+    {
+        if (batchRenderer == null)
+        {
+            return;
+        }
+
+        batchRenderer.Unregister(this);
+        if (!useBatchedRendering)
+        {
+            batchRenderer = null;
+        }
+    }
+}
+
+public class ResourceBatchRenderer : MonoBehaviour
+{
+    private const int MaxInstancesPerDraw = 1023;
+
+    [SerializeField, Min(1f)]
+    private float batchCellSize = 8f;
+
+    private readonly HashSet<Resource> registeredResources = new HashSet<Resource>();
+    private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
+    private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
+    private readonly List<Resource> cleanupBuffer = new List<Resource>();
+
+    public void Register(Resource resource)
+    {
+        if (resource == null)
+        {
+            return;
+        }
+
+        registeredResources.Add(resource);
+    }
+
+    public void Unregister(Resource resource)
+    {
+        if (resource == null)
+        {
+            return;
+        }
+
+        registeredResources.Remove(resource);
+    }
+
+    private void LateUpdate()
+    {
+        if (registeredResources.Count <= 0)
+        {
+            return;
+        }
+
+        RebuildBatches();
+        RenderBatches();
+    }
+
+    private void RebuildBatches()
+    {
+        for (int i = 0; i < activeBatchKeys.Count; i++)
+        {
+            BatchKey key = activeBatchKeys[i];
+            if (matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
+            {
+                matrices.Clear();
+            }
+        }
+
+        activeBatchKeys.Clear();
+        cleanupBuffer.Clear();
+
+        foreach (Resource resource in registeredResources)
+        {
+            if (resource == null)
+            {
+                cleanupBuffer.Add(resource);
+                continue;
+            }
+
+            if (!resource.TryGetBatchRenderData(
+                    out Mesh mesh,
+                    out Material material,
+                    out Matrix4x4 localToWorldMatrix,
+                    out Vector3 worldPosition,
+                    out int layer,
+                    out ShadowCastingMode shadowCastingMode,
+                    out bool receiveShadows))
+            {
+                continue;
+            }
+
+            if (material != null && !material.enableInstancing)
+            {
+                material.enableInstancing = true;
+            }
+
+            int cellX = Mathf.FloorToInt(worldPosition.x / batchCellSize);
+            int cellZ = Mathf.FloorToInt(worldPosition.z / batchCellSize);
+            BatchKey key = new BatchKey(mesh, material, layer, shadowCastingMode, receiveShadows, cellX, cellZ);
+            if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
+            {
+                matrices = new List<Matrix4x4>(16);
+                matricesByBatch.Add(key, matrices);
+            }
+
+            if (matrices.Count == 0)
+            {
+                activeBatchKeys.Add(key);
+            }
+
+            matrices.Add(localToWorldMatrix);
+        }
+
+        for (int i = 0; i < cleanupBuffer.Count; i++)
+        {
+            registeredResources.Remove(cleanupBuffer[i]);
+        }
+    }
+
+    private void RenderBatches()
+    {
+        for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
+        {
+            BatchKey key = activeBatchKeys[batchIndex];
+            if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices) || matrices.Count <= 0)
+            {
+                continue;
+            }
+
+            RenderParams renderParams = new RenderParams(key.Material)
+            {
+                layer = key.Layer,
+                shadowCastingMode = key.ShadowCastingMode,
+                receiveShadows = key.ReceiveShadows
+            };
+
+            int remaining = matrices.Count;
+            int startIndex = 0;
+            while (remaining > 0)
+            {
+                int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
+                Graphics.RenderMeshInstanced(renderParams, key.Mesh, 0, matrices, drawCount, startIndex);
+                startIndex += drawCount;
+                remaining -= drawCount;
+            }
+        }
+    }
+
+    private readonly struct BatchKey
+    {
+        public readonly Mesh Mesh;
+        public readonly Material Material;
+        public readonly int Layer;
+        public readonly ShadowCastingMode ShadowCastingMode;
+        public readonly bool ReceiveShadows;
+        public readonly int CellX;
+        public readonly int CellZ;
+
+        public BatchKey(
+            Mesh mesh,
+            Material material,
+            int layer,
+            ShadowCastingMode shadowCastingMode,
+            bool receiveShadows,
+            int cellX,
+            int cellZ)
+        {
+            Mesh = mesh;
+            Material = material;
+            Layer = layer;
+            ShadowCastingMode = shadowCastingMode;
+            ReceiveShadows = receiveShadows;
+            CellX = cellX;
+            CellZ = cellZ;
+        }
+
+        public override int GetHashCode()
+        {
+            int hash = Mesh != null ? Mesh.GetInstanceID() : 0;
+            hash = (hash * 397) ^ (Material != null ? Material.GetInstanceID() : 0);
+            hash = (hash * 397) ^ Layer;
+            hash = (hash * 397) ^ (int)ShadowCastingMode;
+            hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
+            hash = (hash * 397) ^ CellX;
+            hash = (hash * 397) ^ CellZ;
+            return hash;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is BatchKey other && Equals(other);
+        }
+
+        private bool Equals(BatchKey other)
+        {
+            return Mesh == other.Mesh
+                   && Material == other.Material
+                   && Layer == other.Layer
+                   && ShadowCastingMode == other.ShadowCastingMode
+                   && ReceiveShadows == other.ReceiveShadows
+                   && CellX == other.CellX
+                   && CellZ == other.CellZ;
+        }
     }
 }

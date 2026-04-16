@@ -58,8 +58,20 @@ MonoBehaviour:
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+    count: 1
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
+    count: 2
+  - itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: c386ddb4f7fc1904fbb047de3bff6a99, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}
@@ -81,14 +93,30 @@ MonoBehaviour:
     y: 1
     blockType: 1
   - x: 1
-    y: 0
-    blockType: 3
-  - x: 1
     y: 1
     blockType: 2
+  - x: 1
+    y: 0
+    blockType: 3
   - x: 0
     y: 0
     blockType: 4
+  craftDuration: 5
+  inputConsumeMoveInterval: 0.1
+  outputMoveInterval: 0.1
+  energyGaugeVerticalOffset: 0.25
+  runtimeAreaMaxObjects: 10
+  runtimeInputEnergyCoordinates: []
+  runtimeInputItemAreas: []
+  runtimeOutputCoordinates: []
+  storedEnergy: 0
+  energyGaugeCapacity: 0
+  hasActiveCraft: 0
+  waitingForOutput: 0
+  remainingCraftTime: 0
+  activeRecipeIndex: -1
+  activeOutputItemId: -1
+  activeOutputCount: 0
 --- !u!65 &7808762303293523754
 BoxCollider:
   m_ObjectHideFlags: 0

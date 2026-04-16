@@ -177,10 +177,10 @@ public class TerrainGenerator : MonoBehaviour
     private bool generateStarterTrees = true;
 
     [SerializeField, Min(4)]
-    private int starterTreeMinCount = 4;
+    private int starterTreeMinCount = 8;
 
     [SerializeField, Min(4)]
-    private int starterTreeMaxCount = 6;
+    private int starterTreeMaxCount = 12;
 
     [SerializeField, Min(2)]
     private int starterTreeDistanceFromCenter = 4;
@@ -485,20 +485,18 @@ public class TerrainGenerator : MonoBehaviour
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
-        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
+        if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
             && inputAreaBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject))
         {
             MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
             return true;
         }
 
-        if (loadedBlocks.TryGetValue(centerCoordinate, out Block centerBlock) && centerBlock != null)
+        Block targetBlock = FindPreferredDropBlock(worldPosition, itemId, 1);
+        if (targetBlock != null && targetBlock.TryAddFloorObject(itemId, out targetPortableObject))
         {
-            if (centerBlock.Type == Block.BlockType.Ground && centerBlock.TryAddFloorObject(itemId, out targetPortableObject))
-            {
-                MarkDroppedPickupGate(targetPortableObject, true, worldPosition);
-                return true;
-            }
+            MarkDroppedPickupGate(targetPortableObject, true, worldPosition);
+            return true;
         }
 
         return false;
@@ -534,7 +532,7 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (TryResolveInputEnergyAreaDropBlock(dropCoordinate, itemId, itemCount, out Block inputAreaBlock))
+        if (TryResolveInputAreaDropBlock(dropCoordinate, itemId, itemCount, out Block inputAreaBlock))
         {
             dropCoordinate = inputAreaBlock.Coordinate;
             for (int i = 0; i < itemCount; i++)
@@ -583,7 +581,7 @@ public class TerrainGenerator : MonoBehaviour
     {
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
-        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock))
+        if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock))
         {
             if (!inputAreaBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
             {
@@ -632,6 +630,12 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
+        if (block.TryPickupOneInputAreaCenterObjectToHand(player, anchorPosition, 999f))
+        {
+            NotifyAreaManualPickup(coordinate);
+            return true;
+        }
+
         return block.TryPickupOneFloorObjectToHand(player, anchorPosition, 999f);
     }
 
@@ -659,6 +663,12 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
+        if (block.TryPickupOneInputAreaCenterObjectToBag(player, anchorPosition, 999f, preferredSlotIndex))
+        {
+            NotifyAreaManualPickup(coordinate);
+            return true;
+        }
+
         return block.TryPickupOneFloorObjectToBag(player, anchorPosition, 999f, preferredSlotIndex);
     }
 
@@ -676,6 +686,12 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static void NotifyAreaManualPickup(Vector2Int coordinate)
+    {
+        InputOutputModuleEnergyAreaController.NotifyManualPickupAtCoordinate(coordinate);
+        InputOutputModuleItemAreaController.NotifyManualPickupAtCoordinate(coordinate);
     }
 
     public bool TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate)
@@ -713,7 +729,7 @@ public class TerrainGenerator : MonoBehaviour
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
-        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
+        if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
             && inputAreaBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject))
         {
             MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
@@ -771,7 +787,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
-        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
+        if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
             && inputAreaBlock.HasInputAreaCenterItem(itemId)
             && inputAreaBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject))
         {
@@ -1088,7 +1104,7 @@ public class TerrainGenerator : MonoBehaviour
             return centerBlock;
         }
 
-        return null;
+        return FindNearestDropBlock(centerCoordinate, itemId, itemCount, 2, false);
     }
 
     private Block FindNearestDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, int radius, bool requireSameItem)
@@ -1135,6 +1151,23 @@ public class TerrainGenerator : MonoBehaviour
                && block.CanAddFloorObjects(itemCount, itemId);
     }
 
+    private bool TryResolveInputAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
+    {
+        targetBlock = null;
+        if (!loadedBlocks.TryGetValue(centerCoordinate, out Block block) || block == null)
+        {
+            return false;
+        }
+
+        if (IsValidInputItemAreaDropBlock(block, itemId, itemCount))
+        {
+            targetBlock = block;
+            return true;
+        }
+
+        return TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, itemCount, out targetBlock);
+    }
+
     private bool TryResolveInputEnergyAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
     {
         targetBlock = null;
@@ -1156,6 +1189,15 @@ public class TerrainGenerator : MonoBehaviour
 
         targetBlock = block;
         return true;
+    }
+
+    private static bool IsValidInputItemAreaDropBlock(Block block, int itemId, int itemCount)
+    {
+        return block != null
+               && itemId >= 0
+               && block.Type == Block.BlockType.Ground
+               && InputOutputModuleItemAreaController.CoordinateAcceptsItemId(block.Coordinate, itemId)
+               && block.CanAddInputAreaCenterObjects(itemCount, itemId);
     }
 
     private static bool IsValidInputEnergyAreaDropBlock(

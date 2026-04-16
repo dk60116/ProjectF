@@ -15,6 +15,18 @@ public readonly struct AreaMarkerSpawnRequest
     }
 }
 
+public readonly struct InputOutputModuleItemAreaBinding
+{
+    public readonly Vector2Int Coordinate;
+    public readonly int ItemId;
+
+    public InputOutputModuleItemAreaBinding(Vector2Int coordinate, int itemId)
+    {
+        Coordinate = coordinate;
+        ItemId = itemId;
+    }
+}
+
 public class AreaMarker : MonoBehaviour
 {
     [SerializeField]
@@ -196,7 +208,11 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 {
     private readonly List<AreaMarker> activeMarkers = new List<AreaMarker>();
 
+    [SerializeField, Min(0f)]
+    private float visibleRange = 5f;
+
     private AreaMarkerPool areaMarkerPool;
+    private bool areMarkersVisible = true;
 
     public void Configure(AreaMarkerPool pool, IReadOnlyList<AreaMarkerSpawnRequest> markerRequests)
     {
@@ -224,6 +240,13 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
             marker.SetIcon(request.Icon, request.IconRotationZ);
             activeMarkers.Add(marker);
         }
+
+        RefreshMarkerVisibility(true);
+    }
+
+    private void Update()
+    {
+        RefreshMarkerVisibility(false);
     }
 
     private void OnDisable()
@@ -269,12 +292,65 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 
         activeMarkers.Clear();
     }
+
+    private void RefreshMarkerVisibility(bool forceRefresh)
+    {
+        bool shouldBeVisible = ShouldMarkersBeVisible();
+        if (!forceRefresh && areMarkersVisible == shouldBeVisible)
+        {
+            return;
+        }
+
+        areMarkersVisible = shouldBeVisible;
+        for (int i = 0; i < activeMarkers.Count; i++)
+        {
+            AreaMarker marker = activeMarkers[i];
+            if (marker == null)
+            {
+                continue;
+            }
+
+            if (marker.gameObject.activeSelf != shouldBeVisible)
+            {
+                marker.gameObject.SetActive(shouldBeVisible);
+            }
+        }
+    }
+
+    private bool ShouldMarkersBeVisible()
+    {
+        if (activeMarkers.Count <= 0)
+        {
+            return false;
+        }
+
+        if (visibleRange <= 0f)
+        {
+            return true;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        Vector3 playerPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
+        Vector3 mapObjectPosition = transform.position;
+        Vector2 playerXZ = new Vector2(playerPosition.x, playerPosition.z);
+        Vector2 mapObjectXZ = new Vector2(mapObjectPosition.x, mapObjectPosition.z);
+        float visibleRangeSqr = visibleRange * visibleRange;
+        return (playerXZ - mapObjectXZ).sqrMagnitude <= visibleRangeSqr;
+    }
 }
 
 public class InputOutputModuleEnergyAreaController : MonoBehaviour
 {
     private static readonly Dictionary<Vector2Int, Dictionary<ItemDefinition.EnergyType, int>> registeredEnergyAreas
         = new Dictionary<Vector2Int, Dictionary<ItemDefinition.EnergyType, int>>();
+    private static readonly HashSet<InputOutputModuleEnergyAreaController> activeControllers
+        = new HashSet<InputOutputModuleEnergyAreaController>();
+    private const int DefaultAreaMaxObjects = 10;
 
     [SerializeField]
     private ItemDefinition.EnergyType acceptedEnergyType = ItemDefinition.EnergyType.None;
@@ -288,6 +364,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
     private float depositTimer;
     private TerrainGenerator cachedTerrain;
     private bool requiresExitBeforeNextDeposit;
+    private bool manualPickupRequiresExit;
     private bool wasPlayerInsideArea;
     private bool isRegistered;
 
@@ -297,6 +374,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         acceptedEnergyType = energyType;
         inputEnergyCoordinates.Clear();
         requiresExitBeforeNextDeposit = false;
+        manualPickupRequiresExit = false;
         depositTimer = 0f;
         wasPlayerInsideArea = false;
 
@@ -318,16 +396,19 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     private void OnEnable()
     {
+        activeControllers.Add(this);
         RegisterCoordinates();
     }
 
     private void OnDisable()
     {
+        activeControllers.Remove(this);
         UnregisterCoordinates();
     }
 
     private void OnDestroy()
     {
+        activeControllers.Remove(this);
         UnregisterCoordinates();
     }
 
@@ -345,6 +426,39 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         }
 
         return energyCounts.TryGetValue(energyType, out int count) && count > 0;
+    }
+
+    public static bool CoordinateIsEnergyArea(Vector2Int coordinate)
+    {
+        if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
+            || energyCounts == null
+            || energyCounts.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<ItemDefinition.EnergyType, int> pair in energyCounts)
+        {
+            if (pair.Value > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static void NotifyManualPickupAtCoordinate(Vector2Int coordinate)
+    {
+        foreach (InputOutputModuleEnergyAreaController controller in activeControllers)
+        {
+            if (controller == null)
+            {
+                continue;
+            }
+
+            controller.HandleManualPickupAtCoordinate(coordinate);
+        }
     }
 
     private void Update()
@@ -365,6 +479,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         {
             depositTimer = 0f;
             requiresExitBeforeNextDeposit = false;
+            manualPickupRequiresExit = false;
             wasPlayerInsideArea = false;
             return;
         }
@@ -372,12 +487,24 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         if (!wasPlayerInsideArea)
         {
             depositTimer = Mathf.Max(0.01f, depositInterval);
+            manualPickupRequiresExit = false;
             wasPlayerInsideArea = true;
+        }
+
+        if (manualPickupRequiresExit)
+        {
+            return;
         }
 
         if (requiresExitBeforeNextDeposit)
         {
-            return;
+            if (!CanResumeDepositWithoutAreaExit(player))
+            {
+                return;
+            }
+
+            requiresExitBeforeNextDeposit = false;
+            depositTimer = Mathf.Max(0.01f, depositInterval);
         }
 
         depositTimer -= Time.deltaTime;
@@ -390,6 +517,22 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         if (!TryDepositOneEnergyItem(player))
         {
             requiresExitBeforeNextDeposit = true;
+        }
+    }
+
+    private void HandleManualPickupAtCoordinate(Vector2Int coordinate)
+    {
+        for (int i = 0; i < inputEnergyCoordinates.Count; i++)
+        {
+            if (inputEnergyCoordinates[i] != coordinate)
+            {
+                continue;
+            }
+
+            manualPickupRequiresExit = true;
+            requiresExitBeforeNextDeposit = true;
+            depositTimer = Mathf.Max(0.01f, depositInterval);
+            return;
         }
     }
 
@@ -423,17 +566,18 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             return false;
         }
 
-        if (!TryFindMatchingEnergyItemSource(
-                player,
-                out PlayerBag sourceBag,
-                out int slotIndex,
-                out int itemId,
-                out Vector3 startWorldPosition))
+        if (GetInputEnergyAreaObjectCount() >= ResolveAreaMaxObjects())
         {
             return false;
         }
 
-        if (!TryResolveDepositBlock(itemId, out Block targetBlock) || targetBlock == null)
+        if (!TryFindMatchingEnergyDeposit(
+                player,
+                out PlayerBag sourceBag,
+                out int slotIndex,
+                out int itemId,
+                out Vector3 startWorldPosition,
+                out Block targetBlock))
         {
             return false;
         }
@@ -454,17 +598,38 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         return true;
     }
 
-    private bool TryFindMatchingEnergyItemSource(
+    private bool CanResumeDepositWithoutAreaExit(Player player)
+    {
+        if (player == null
+            || GetInputEnergyAreaObjectCount() >= ResolveAreaMaxObjects()
+            || !HasEmptyInputEnergyBlock()
+            || !OwnerModuleHasStoredOperationalEnergy())
+        {
+            return false;
+        }
+
+        return TryFindMatchingEnergyDeposit(
+            player,
+            out _,
+            out _,
+            out _,
+            out _,
+            out _);
+    }
+
+    private bool TryFindMatchingEnergyDeposit(
         Player player,
         out PlayerBag sourceBag,
         out int slotIndex,
         out int itemId,
-        out Vector3 startWorldPosition)
+        out Vector3 startWorldPosition,
+        out Block targetBlock)
     {
         sourceBag = null;
         slotIndex = -1;
         itemId = -1;
         startWorldPosition = transform.position;
+        targetBlock = null;
 
         if (player == null)
         {
@@ -472,14 +637,14 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         }
 
         PlayerBag handBag = player.GetHandBag();
-        if (TryFindMatchingEnergyItemInBag(handBag, out slotIndex, out itemId, out startWorldPosition))
+        if (TryFindMatchingEnergyItemInBag(handBag, out slotIndex, out itemId, out startWorldPosition, out targetBlock))
         {
             sourceBag = handBag;
             return true;
         }
 
         PlayerBag bag = player.GetBag();
-        if (TryFindMatchingEnergyItemInBag(bag, out slotIndex, out itemId, out startWorldPosition))
+        if (TryFindMatchingEnergyItemInBag(bag, out slotIndex, out itemId, out startWorldPosition, out targetBlock))
         {
             sourceBag = bag;
             return true;
@@ -488,17 +653,24 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         return false;
     }
 
-    private bool TryFindMatchingEnergyItemInBag(PlayerBag bag, out int slotIndex, out int itemId, out Vector3 startWorldPosition)
+    private bool TryFindMatchingEnergyItemInBag(
+        PlayerBag bag,
+        out int slotIndex,
+        out int itemId,
+        out Vector3 startWorldPosition,
+        out Block targetBlock)
     {
         slotIndex = -1;
         itemId = -1;
         startWorldPosition = transform.position;
+        targetBlock = null;
 
         if (bag == null)
         {
             return false;
         }
 
+        bag.RefreshExternalStackCounts(false);
         int slotCount = bag.SlotCount;
         for (int i = 0; i < slotCount; i++)
         {
@@ -516,6 +688,11 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
                 continue;
             }
 
+            if (!TryResolveDepositBlock(candidateItemId, out Block candidateTargetBlock) || candidateTargetBlock == null)
+            {
+                continue;
+            }
+
             PortableObject topObject = bag.GetTopObject(i);
             if (topObject != null)
             {
@@ -528,10 +705,78 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
             slotIndex = i;
             itemId = candidateItemId;
+            targetBlock = candidateTargetBlock;
             return true;
         }
 
         return false;
+    }
+
+    private int ResolveAreaMaxObjects()
+    {
+        InputOutputModule inputOutputModule = GetComponent<InputOutputModule>();
+        return inputOutputModule != null
+            ? inputOutputModule.ResolveRuntimeAreaCapacity(inputEnergyCoordinates)
+            : DefaultAreaMaxObjects;
+    }
+
+    private int GetInputEnergyAreaObjectCount()
+    {
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null)
+        {
+            return 0;
+        }
+
+        int totalCount = 0;
+        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < inputEnergyCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = inputEnergyCoordinates[i];
+            if (!visitedCoordinates.Add(coordinate))
+            {
+                continue;
+            }
+
+            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            totalCount += block.GetInputAreaCenterItemCount();
+        }
+
+        return totalCount;
+    }
+
+    private bool HasEmptyInputEnergyBlock()
+    {
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < inputEnergyCoordinates.Count; i++)
+        {
+            if (!terrain.TryGetLoadedBlock(inputEnergyCoordinates[i], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            if (block.Type == Block.BlockType.Ground && !block.HasInputAreaCenterObjects())
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool OwnerModuleHasStoredOperationalEnergy()
+    {
+        InputOutputModule inputOutputModule = GetComponent<InputOutputModule>();
+        return inputOutputModule != null && inputOutputModule.HasStoredOperationalEnergy();
     }
 
     private bool TryResolveDepositBlock(int itemId, out Block targetBlock)
@@ -545,6 +790,11 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
         TerrainGenerator terrain = ResolveTerrain();
         if (terrain == null)
+        {
+            return false;
+        }
+
+        if (GetInputEnergyAreaObjectCount() >= ResolveAreaMaxObjects())
         {
             return false;
         }
@@ -674,6 +924,865 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             if (energyCounts.Count <= 0)
             {
                 registeredEnergyAreas.Remove(coordinate);
+            }
+        }
+
+        isRegistered = false;
+    }
+}
+
+public class InputOutputModuleItemAreaController : MonoBehaviour
+{
+    [System.Serializable]
+    private struct InputItemAreaEntry
+    {
+        public Vector2Int coordinate;
+        public int itemId;
+
+        public InputItemAreaEntry(Vector2Int coordinate, int itemId)
+        {
+            this.coordinate = coordinate;
+            this.itemId = itemId;
+        }
+    }
+
+    private static readonly Dictionary<Vector2Int, Dictionary<int, int>> registeredItemAreas
+        = new Dictionary<Vector2Int, Dictionary<int, int>>();
+    private static readonly HashSet<InputOutputModuleItemAreaController> activeControllers
+        = new HashSet<InputOutputModuleItemAreaController>();
+
+    private static readonly Vector2Int InvalidCoordinate = new Vector2Int(int.MinValue, int.MinValue);
+    private const int DefaultAreaMaxObjects = 10;
+
+    [SerializeField]
+    private List<InputItemAreaEntry> inputItemAreas = new List<InputItemAreaEntry>();
+
+    [SerializeField, Min(0.01f)]
+    private float depositInterval = 0.1f;
+
+    private float depositTimer;
+    private TerrainGenerator cachedTerrain;
+    private bool requiresExitBeforeNextDeposit;
+    private bool manualPickupRequiresExit;
+    private bool wasPlayerInsideArea;
+    private bool isRegistered;
+    private Vector2Int activeAreaCoordinate = InvalidCoordinate;
+
+    public void Configure(IReadOnlyList<InputOutputModuleItemAreaBinding> bindings)
+    {
+        UnregisterCoordinates();
+        inputItemAreas.Clear();
+        requiresExitBeforeNextDeposit = false;
+        manualPickupRequiresExit = false;
+        depositTimer = 0f;
+        wasPlayerInsideArea = false;
+        activeAreaCoordinate = InvalidCoordinate;
+
+        if (bindings == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < bindings.Count; i++)
+        {
+            InputOutputModuleItemAreaBinding binding = bindings[i];
+            if (binding.ItemId < 0)
+            {
+                continue;
+            }
+
+            bool alreadyAdded = false;
+            for (int existingIndex = 0; existingIndex < inputItemAreas.Count; existingIndex++)
+            {
+                InputItemAreaEntry existingEntry = inputItemAreas[existingIndex];
+                if (existingEntry.coordinate == binding.Coordinate && existingEntry.itemId == binding.ItemId)
+                {
+                    alreadyAdded = true;
+                    break;
+                }
+            }
+
+            if (alreadyAdded)
+            {
+                continue;
+            }
+
+            inputItemAreas.Add(new InputItemAreaEntry(binding.Coordinate, binding.ItemId));
+        }
+
+        RegisterCoordinates();
+    }
+
+    private void OnEnable()
+    {
+        activeControllers.Add(this);
+        RegisterCoordinates();
+    }
+
+    private void OnDisable()
+    {
+        activeControllers.Remove(this);
+        UnregisterCoordinates();
+    }
+
+    private void OnDestroy()
+    {
+        activeControllers.Remove(this);
+        UnregisterCoordinates();
+    }
+
+    public static bool CoordinateAcceptsItemId(Vector2Int coordinate, int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (!registeredItemAreas.TryGetValue(coordinate, out Dictionary<int, int> itemCounts)
+            || itemCounts == null)
+        {
+            return false;
+        }
+
+        return itemCounts.TryGetValue(itemId, out int count) && count > 0;
+    }
+
+    public static bool CoordinateIsItemArea(Vector2Int coordinate)
+    {
+        if (!registeredItemAreas.TryGetValue(coordinate, out Dictionary<int, int> itemCounts)
+            || itemCounts == null
+            || itemCounts.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<int, int> pair in itemCounts)
+        {
+            if (pair.Value > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static void NotifyManualPickupAtCoordinate(Vector2Int coordinate)
+    {
+        foreach (InputOutputModuleItemAreaController controller in activeControllers)
+        {
+            if (controller == null)
+            {
+                continue;
+            }
+
+            controller.HandleManualPickupAtCoordinate(coordinate);
+        }
+    }
+
+    private void Update()
+    {
+        if (inputItemAreas.Count <= 0)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player == null)
+        {
+            return;
+        }
+
+        if (!TryGetPlayerInputItemAreaEntry(player, out InputItemAreaEntry activeEntry))
+        {
+            depositTimer = 0f;
+            requiresExitBeforeNextDeposit = false;
+            manualPickupRequiresExit = false;
+            wasPlayerInsideArea = false;
+            activeAreaCoordinate = InvalidCoordinate;
+            return;
+        }
+
+        if (!wasPlayerInsideArea || activeEntry.coordinate != activeAreaCoordinate)
+        {
+            depositTimer = Mathf.Max(0.01f, depositInterval);
+            requiresExitBeforeNextDeposit = false;
+            manualPickupRequiresExit = false;
+            wasPlayerInsideArea = true;
+            activeAreaCoordinate = activeEntry.coordinate;
+        }
+
+        if (manualPickupRequiresExit)
+        {
+            return;
+        }
+
+        if (requiresExitBeforeNextDeposit)
+        {
+            if (!CanResumeInputItemDepositWithoutAreaExit(player, activeEntry))
+            {
+                return;
+            }
+
+            requiresExitBeforeNextDeposit = false;
+            depositTimer = Mathf.Max(0.01f, depositInterval);
+        }
+
+        depositTimer -= Time.deltaTime;
+        if (depositTimer > 0f)
+        {
+            return;
+        }
+
+        depositTimer = Mathf.Max(0.01f, depositInterval);
+        if (!TryDepositOneInputItem(player, activeEntry.itemId, activeEntry.coordinate))
+        {
+            requiresExitBeforeNextDeposit = true;
+        }
+    }
+
+    private void HandleManualPickupAtCoordinate(Vector2Int coordinate)
+    {
+        for (int i = 0; i < inputItemAreas.Count; i++)
+        {
+            if (inputItemAreas[i].coordinate != coordinate)
+            {
+                continue;
+            }
+
+            manualPickupRequiresExit = true;
+            requiresExitBeforeNextDeposit = true;
+            depositTimer = Mathf.Max(0.01f, depositInterval);
+            return;
+        }
+    }
+
+    private bool TryGetPlayerInputItemAreaEntry(Player player, out InputItemAreaEntry activeEntry)
+    {
+        activeEntry = default;
+        if (player == null)
+        {
+            return false;
+        }
+
+        Vector3 playerPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
+        Vector2Int playerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(playerPosition.x),
+            Mathf.RoundToInt(playerPosition.z));
+
+        bool foundCoordinateEntry = false;
+        InputItemAreaEntry firstCoordinateEntry = default;
+        for (int i = 0; i < inputItemAreas.Count; i++)
+        {
+            InputItemAreaEntry entry = inputItemAreas[i];
+            if (entry.coordinate != playerCoordinate)
+            {
+                continue;
+            }
+
+            if (!foundCoordinateEntry)
+            {
+                firstCoordinateEntry = entry;
+                foundCoordinateEntry = true;
+            }
+
+            if (CanUseInputItemAreaEntry(player, entry))
+            {
+                activeEntry = entry;
+                return true;
+            }
+        }
+
+        if (foundCoordinateEntry)
+        {
+            activeEntry = firstCoordinateEntry;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool CanUseInputItemAreaEntry(Player player, InputItemAreaEntry entry)
+    {
+        if (player == null || entry.itemId < 0 || entry.coordinate == InvalidCoordinate)
+        {
+            return false;
+        }
+
+        if (GetInputItemAreaObjectCount() >= ResolveAreaMaxObjects())
+        {
+            return false;
+        }
+
+        if (HasMatchingOutputItem(entry.itemId))
+        {
+            return TryResolveDepositBlock(entry.coordinate, entry.itemId, out _);
+        }
+
+        if (!TryFindMatchingItemSource(
+                player,
+                entry.itemId,
+                out _,
+                out _,
+                out int itemId,
+                out _))
+        {
+            return false;
+        }
+
+        return TryResolveDepositBlock(entry.coordinate, itemId, out _);
+    }
+
+    private bool TryDepositOneInputItem(Player player, int acceptedItemId, Vector2Int targetCoordinate)
+    {
+        if (player == null || acceptedItemId < 0)
+        {
+            return false;
+        }
+
+        if (GetInputItemAreaObjectCount() >= ResolveAreaMaxObjects())
+        {
+            return false;
+        }
+
+        if (TryDepositMatchingOutputItem(acceptedItemId, targetCoordinate))
+        {
+            return true;
+        }
+
+        if (!TryFindMatchingItemSource(
+                player,
+                acceptedItemId,
+                out PlayerBag sourceBag,
+                out int slotIndex,
+                out int itemId,
+                out Vector3 startWorldPosition))
+        {
+            return false;
+        }
+
+        if (!TryResolveDepositBlock(targetCoordinate, itemId, out Block targetBlock) || targetBlock == null)
+        {
+            return false;
+        }
+
+        if (sourceBag == null || !sourceBag.TryRemoveOneAtSlot(slotIndex, out int removedItemId) || removedItemId != itemId)
+        {
+            return false;
+        }
+
+        if (!targetBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out PortableObject droppedObject))
+        {
+            sourceBag.TryAddObject(slotIndex, itemId, out _);
+            return false;
+        }
+
+        DroppedItemPickupGate gate = droppedObject != null ? droppedObject.GetComponent<DroppedItemPickupGate>() : null;
+        gate?.SetAutoPickupBlocked(true);
+        return true;
+    }
+
+    private bool CanResumeInputItemDepositWithoutAreaExit(Player player, InputItemAreaEntry activeEntry)
+    {
+        if (player == null
+            || activeEntry.itemId < 0
+            || activeEntry.coordinate == InvalidCoordinate
+            || GetInputItemAreaObjectCount() >= ResolveAreaMaxObjects()
+            || !IsInputItemAreaBlockEmpty(activeEntry.coordinate)
+            || !OwnerModuleHasActiveOrPendingCraft())
+        {
+            return false;
+        }
+
+        if (HasMatchingOutputItem(activeEntry.itemId))
+        {
+            return TryResolveDepositBlock(activeEntry.coordinate, activeEntry.itemId, out _);
+        }
+
+        return TryFindMatchingItemSource(
+            player,
+            activeEntry.itemId,
+            out _,
+            out _,
+            out _,
+            out _);
+    }
+
+    private bool HasMatchingOutputItem(int acceptedItemId)
+    {
+        InputOutputModule inputOutputModule = GetComponent<InputOutputModule>();
+        return inputOutputModule != null && inputOutputModule.HasAvailableOutputItem(acceptedItemId);
+    }
+
+    private bool TryDepositMatchingOutputItem(int acceptedItemId, Vector2Int targetCoordinate)
+    {
+        InputOutputModule inputOutputModule = GetComponent<InputOutputModule>();
+        return inputOutputModule != null && inputOutputModule.TryMoveOneOutputItemToInput(acceptedItemId, targetCoordinate);
+    }
+
+    private int ResolveAreaMaxObjects()
+    {
+        InputOutputModule inputOutputModule = GetComponent<InputOutputModule>();
+        if (inputOutputModule == null)
+        {
+            return DefaultAreaMaxObjects;
+        }
+
+        List<Vector2Int> coordinates = new List<Vector2Int>(inputItemAreas.Count);
+        for (int i = 0; i < inputItemAreas.Count; i++)
+        {
+            Vector2Int coordinate = inputItemAreas[i].coordinate;
+            if (!coordinates.Contains(coordinate))
+            {
+                coordinates.Add(coordinate);
+            }
+        }
+
+        return inputOutputModule.ResolveRuntimeAreaCapacity(coordinates);
+    }
+
+    private int GetInputItemAreaObjectCount()
+    {
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null)
+        {
+            return 0;
+        }
+
+        int totalCount = 0;
+        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < inputItemAreas.Count; i++)
+        {
+            Vector2Int coordinate = inputItemAreas[i].coordinate;
+            if (!visitedCoordinates.Add(coordinate))
+            {
+                continue;
+            }
+
+            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            totalCount += block.GetInputAreaCenterItemCount();
+        }
+
+        return totalCount;
+    }
+
+    private bool TryFindMatchingItemSource(
+        Player player,
+        int acceptedItemId,
+        out PlayerBag sourceBag,
+        out int slotIndex,
+        out int itemId,
+        out Vector3 startWorldPosition)
+    {
+        sourceBag = null;
+        slotIndex = -1;
+        itemId = -1;
+        startWorldPosition = transform.position;
+
+        if (player == null || acceptedItemId < 0)
+        {
+            return false;
+        }
+
+        PlayerBag handBag = player.GetHandBag();
+        if (TryFindMatchingItemInBag(handBag, acceptedItemId, out slotIndex, out itemId, out startWorldPosition))
+        {
+            sourceBag = handBag;
+            return true;
+        }
+
+        PlayerBag bag = player.GetBag();
+        if (TryFindMatchingItemInBag(bag, acceptedItemId, out slotIndex, out itemId, out startWorldPosition))
+        {
+            sourceBag = bag;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryFindMatchingItemInBag(
+        PlayerBag bag,
+        int acceptedItemId,
+        out int slotIndex,
+        out int itemId,
+        out Vector3 startWorldPosition)
+    {
+        slotIndex = -1;
+        itemId = -1;
+        startWorldPosition = transform.position;
+
+        if (bag == null || acceptedItemId < 0)
+        {
+            return false;
+        }
+
+        bag.RefreshExternalStackCounts(false);
+        int slotCount = bag.SlotCount;
+        for (int i = 0; i < slotCount; i++)
+        {
+            int candidateItemId = bag.GetSlotItemId(i);
+            if (candidateItemId != acceptedItemId || bag.GetSlotCount(i) <= 0)
+            {
+                continue;
+            }
+
+            PortableObject topObject = bag.GetTopObject(i);
+            if (topObject != null)
+            {
+                startWorldPosition = topObject.transform.position;
+            }
+            else if (GameManager.Instance != null && GameManager.Instance.Player != null)
+            {
+                startWorldPosition = GameManager.Instance.Player.transform.position;
+            }
+
+            slotIndex = i;
+            itemId = candidateItemId;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveDepositBlock(Vector2Int targetCoordinate, int itemId, out Block targetBlock)
+    {
+        targetBlock = null;
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        if (GetInputItemAreaObjectCount() >= ResolveAreaMaxObjects())
+        {
+            return false;
+        }
+
+        if (!terrain.TryGetLoadedBlock(targetCoordinate, out Block block) || block == null)
+        {
+            return false;
+        }
+
+        if (block.Type != Block.BlockType.Ground || !block.CanAddInputAreaCenterObjects(1, itemId))
+        {
+            return false;
+        }
+
+        targetBlock = block;
+        return true;
+    }
+
+    private bool IsInputItemAreaBlockEmpty(Vector2Int targetCoordinate)
+    {
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        if (!terrain.TryGetLoadedBlock(targetCoordinate, out Block block) || block == null)
+        {
+            return false;
+        }
+
+        return block.Type == Block.BlockType.Ground && !block.HasInputAreaCenterObjects();
+    }
+
+    private bool OwnerModuleHasActiveOrPendingCraft()
+    {
+        InputOutputModule inputOutputModule = GetComponent<InputOutputModule>();
+        return inputOutputModule != null && inputOutputModule.HasActiveOrPendingCraft();
+    }
+
+    private TerrainGenerator ResolveTerrain()
+    {
+        if (cachedTerrain != null)
+        {
+            return cachedTerrain;
+        }
+
+        cachedTerrain = GetComponentInParent<TerrainGenerator>();
+        if (cachedTerrain == null)
+        {
+            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+        }
+
+        return cachedTerrain;
+    }
+
+    private void RegisterCoordinates()
+    {
+        if (isRegistered || inputItemAreas.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < inputItemAreas.Count; i++)
+        {
+            InputItemAreaEntry entry = inputItemAreas[i];
+            if (entry.itemId < 0)
+            {
+                continue;
+            }
+
+            if (!registeredItemAreas.TryGetValue(entry.coordinate, out Dictionary<int, int> itemCounts)
+                || itemCounts == null)
+            {
+                itemCounts = new Dictionary<int, int>();
+                registeredItemAreas[entry.coordinate] = itemCounts;
+            }
+
+            itemCounts.TryGetValue(entry.itemId, out int existingCount);
+            itemCounts[entry.itemId] = existingCount + 1;
+        }
+
+        isRegistered = true;
+    }
+
+    private void UnregisterCoordinates()
+    {
+        if (!isRegistered)
+        {
+            return;
+        }
+
+        for (int i = 0; i < inputItemAreas.Count; i++)
+        {
+            InputItemAreaEntry entry = inputItemAreas[i];
+            if (entry.itemId < 0)
+            {
+                continue;
+            }
+
+            if (!registeredItemAreas.TryGetValue(entry.coordinate, out Dictionary<int, int> itemCounts)
+                || itemCounts == null)
+            {
+                continue;
+            }
+
+            if (itemCounts.TryGetValue(entry.itemId, out int existingCount))
+            {
+                if (existingCount <= 1)
+                {
+                    itemCounts.Remove(entry.itemId);
+                }
+                else
+                {
+                    itemCounts[entry.itemId] = existingCount - 1;
+                }
+            }
+
+            if (itemCounts.Count <= 0)
+            {
+                registeredItemAreas.Remove(entry.coordinate);
+            }
+        }
+
+        isRegistered = false;
+    }
+}
+
+public class InputOutputModuleOutputAreaController : MonoBehaviour
+{
+    private static readonly Dictionary<Vector2Int, int> registeredOutputAreas
+        = new Dictionary<Vector2Int, int>();
+
+    [SerializeField]
+    private List<Vector2Int> outputCoordinates = new List<Vector2Int>();
+
+    [SerializeField, Min(0.01f)]
+    private float pickupInterval = 0.1f;
+
+    private float pickupTimer;
+    private TerrainGenerator cachedTerrain;
+    private bool isRegistered;
+
+    public void Configure(IReadOnlyList<Vector2Int> coordinates)
+    {
+        UnregisterCoordinates();
+        outputCoordinates.Clear();
+        pickupTimer = 0f;
+
+        if (coordinates == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            if (!outputCoordinates.Contains(coordinate))
+            {
+                outputCoordinates.Add(coordinate);
+            }
+        }
+
+        RegisterCoordinates();
+    }
+
+    private void OnEnable()
+    {
+        RegisterCoordinates();
+    }
+
+    private void OnDisable()
+    {
+        UnregisterCoordinates();
+    }
+
+    private void OnDestroy()
+    {
+        UnregisterCoordinates();
+    }
+
+    public static bool CoordinateIsOutputArea(Vector2Int coordinate)
+    {
+        return registeredOutputAreas.TryGetValue(coordinate, out int count) && count > 0;
+    }
+
+    private void Update()
+    {
+        if (outputCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player == null)
+        {
+            return;
+        }
+
+        if (!TryGetPlayerOutputCoordinate(player, out Vector2Int outputCoordinate))
+        {
+            pickupTimer = 0f;
+            return;
+        }
+
+        pickupTimer -= Time.deltaTime;
+        if (pickupTimer > 0f)
+        {
+            return;
+        }
+
+        pickupTimer = Mathf.Max(0.01f, pickupInterval);
+        TryPickupOneOutputItem(player, outputCoordinate);
+    }
+
+    private bool TryGetPlayerOutputCoordinate(Player player, out Vector2Int outputCoordinate)
+    {
+        outputCoordinate = default;
+        if (player == null)
+        {
+            return false;
+        }
+
+        Vector3 playerPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
+        Vector2Int playerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(playerPosition.x),
+            Mathf.RoundToInt(playerPosition.z));
+
+        for (int i = 0; i < outputCoordinates.Count; i++)
+        {
+            if (outputCoordinates[i] != playerCoordinate)
+            {
+                continue;
+            }
+
+            outputCoordinate = playerCoordinate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryPickupOneOutputItem(Player player, Vector2Int outputCoordinate)
+    {
+        if (player == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null || !terrain.TryGetLoadedBlock(outputCoordinate, out Block block) || block == null)
+        {
+            return false;
+        }
+
+        if (block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        Vector3 anchorPosition = new Vector3(outputCoordinate.x, player.transform.position.y, outputCoordinate.y);
+        return block.TryPickupOneInputAreaCenterObjectToBag(player, anchorPosition, 999f, -1);
+    }
+
+    private TerrainGenerator ResolveTerrain()
+    {
+        if (cachedTerrain != null)
+        {
+            return cachedTerrain;
+        }
+
+        cachedTerrain = GetComponentInParent<TerrainGenerator>();
+        if (cachedTerrain == null)
+        {
+            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+        }
+
+        return cachedTerrain;
+    }
+
+    private void RegisterCoordinates()
+    {
+        if (isRegistered || outputCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < outputCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = outputCoordinates[i];
+            registeredOutputAreas.TryGetValue(coordinate, out int existingCount);
+            registeredOutputAreas[coordinate] = existingCount + 1;
+        }
+
+        isRegistered = true;
+    }
+
+    private void UnregisterCoordinates()
+    {
+        if (!isRegistered)
+        {
+            return;
+        }
+
+        for (int i = 0; i < outputCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = outputCoordinates[i];
+            if (!registeredOutputAreas.TryGetValue(coordinate, out int existingCount))
+            {
+                continue;
+            }
+
+            if (existingCount <= 1)
+            {
+                registeredOutputAreas.Remove(coordinate);
+            }
+            else
+            {
+                registeredOutputAreas[coordinate] = existingCount - 1;
             }
         }
 

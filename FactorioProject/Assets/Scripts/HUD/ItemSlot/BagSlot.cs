@@ -777,12 +777,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 }
 
                 MapObject mapObject = block.MapObject;
-                if (mapObject == null || !mapObject.gameObject.activeInHierarchy)
+                if (!(mapObject is WorkableObject workableObject) || workableObject == null || !workableObject.gameObject.activeInHierarchy)
                 {
                     continue;
                 }
 
-                int mapObjectId = mapObject.ResolveItemId();
+                int mapObjectId = workableObject.ResolveItemId();
                 if (mapObjectId < 0 || !requiredCraftingMapObjectIds.Contains(mapObjectId))
                 {
                     continue;
@@ -1479,7 +1479,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private IEnumerator PickupRoutine(Player player, TerrainGenerator terrain)
     {
-        Vector3 pickupOrigin = player != null ? player.transform.position : Vector3.zero;
         int radius = Mathf.Max(0, pickupRadius);
         float interval = Mathf.Max(0.01f, pickupInterval);
 
@@ -1490,7 +1489,15 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 break;
             }
 
-            bool picked = TryPickupOneItem(terrain, player, pickupOrigin, radius, pickupRadius);
+            Vector3 pickupOrigin = ResolvePickupOrigin(player);
+            Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
+
+            bool picked = TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate);
+            if (!picked)
+            {
+                picked = TryPickupOneItem(terrain, player, pickupOrigin, radius, pickupRadius);
+            }
+
             if (!picked)
             {
                 if (AllowDropTargetFallback && player.IsDropExitPending && player.TryGetLastDropTarget(out Vector2Int dropTarget))
@@ -1568,6 +1575,27 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         return UnityEngine.Object.FindObjectOfType<Player>();
+    }
+
+    private static Vector3 ResolvePickupOrigin(Player player)
+    {
+        if (player == null)
+        {
+            return Vector3.zero;
+        }
+
+        Transform referenceTransform = player.BodyTransform != null
+            ? player.BodyTransform
+            : player.transform;
+
+        return referenceTransform != null ? referenceTransform.position : Vector3.zero;
+    }
+
+    private static Vector2Int ResolvePickupCoordinate(Vector3 worldPosition)
+    {
+        return new Vector2Int(
+            Mathf.RoundToInt(worldPosition.x),
+            Mathf.RoundToInt(worldPosition.z));
     }
 
     private static TerrainGenerator ResolveTerrain()
