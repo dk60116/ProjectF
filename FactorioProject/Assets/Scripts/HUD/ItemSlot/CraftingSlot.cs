@@ -252,19 +252,26 @@ public class CraftingSlot : ItemSlot
 
     private void HandleCreateClicked()
     {
-        if (!HasItem)
+        int craftItemId = ItemId;
+        if (craftItemId < 0 || !HasItem)
         {
             return;
         }
 
+        if (!TryPrepareHandForCrafting())
+        {
+            RefreshIngredients(false);
+            return;
+        }
+
         BagSlot parentBagSlot = GetComponentInParent<BagSlot>();
-        if (parentBagSlot != null && !parentBagSlot.CanCraftItem(ItemId))
+        if (parentBagSlot != null && !parentBagSlot.CanCraftItem(craftItemId))
         {
             parentBagSlot.RefreshCraftingAvailability();
             return;
         }
 
-        if (!TryBuildIngredientBuffer())
+        if (!TryBuildIngredientBuffer(craftItemId))
         {
             return;
         }
@@ -276,7 +283,7 @@ public class CraftingSlot : ItemSlot
         }
 
         PlayerHUD hud = FindObjectOfType<PlayerHUD>();
-        if (hud == null || !hud.TryEnqueueCrafting(ItemId))
+        if (hud == null || !hud.TryEnqueueCrafting(craftItemId))
         {
             return;
         }
@@ -393,7 +400,8 @@ public class CraftingSlot : ItemSlot
             ingredientsRoot.gameObject.SetActive(true);
         }
 
-        SetCreateButtonVisible(hasAllIngredients || blockedByCraftingMapObject);
+        bool handReady = CanPrepareHandForCrafting();
+        SetCreateButtonVisible((hasAllIngredients && handReady) || blockedByCraftingMapObject);
         if (animate)
         {
             AnimateIngredientSlots(ingredientBuffer.Count);
@@ -411,10 +419,10 @@ public class CraftingSlot : ItemSlot
         RefreshIngredients(false);
     }
 
-    private bool TryBuildIngredientBuffer()
+    private bool TryBuildIngredientBuffer(int itemId)
     {
         ingredientBuffer.Clear();
-        return CraftingTreeRuntime.TryGetIngredients(ItemId, ingredientBuffer);
+        return CraftingTreeRuntime.TryGetIngredients(itemId, ingredientBuffer);
     }
 
     private bool HasAllIngredients()
@@ -431,6 +439,26 @@ public class CraftingSlot : ItemSlot
         return ingredientBuffer.Count > 0;
     }
 
+    private bool CanPrepareHandForCrafting()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        return GameManager.Instance.Player.CanClearHandIntoBag();
+    }
+
+    private bool TryPrepareHandForCrafting()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        return GameManager.Instance.Player.TryStoreHandItemsInBag();
+    }
+
     private void ConsumeIngredients()
     {
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
@@ -440,6 +468,7 @@ public class CraftingSlot : ItemSlot
 
         Player player = GameManager.Instance.Player;
         PlayerBag bag = player.GetBag();
+        PlayerBag handBag = player.GetHandBag();
         TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
         Vector3 origin = player.transform.position;
 
@@ -455,6 +484,13 @@ public class CraftingSlot : ItemSlot
             if (bag != null)
             {
                 int removed = bag.RemoveItems(entry.itemId, remaining);
+                remaining -= removed;
+            }
+
+            if (remaining > 0 && handBag != null)
+            {
+                handBag.RefreshExternalStackCounts(false);
+                int removed = handBag.RemoveItems(entry.itemId, remaining);
                 remaining -= removed;
             }
 
@@ -758,6 +794,13 @@ public class CraftingSlot : ItemSlot
         if (bag != null)
         {
             total += bag.GetTotalItemCount(itemId);
+        }
+
+        PlayerBag handBag = GameManager.Instance.Player.GetHandBag();
+        if (handBag != null)
+        {
+            handBag.RefreshExternalStackCounts(false);
+            total += handBag.GetTotalItemCount(itemId);
         }
 
         TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();

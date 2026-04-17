@@ -428,20 +428,19 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            MapObject installedObject = Instantiate(activeInstallDefinition.mapObject, anchorBlock.transform);
-            installedObject.transform.rotation = preview.transform.rotation;
-            installedObject.transform.position = GetPreviewWorldPosition(anchorBlock, installedObject, quarterTurns, 0f);
+            TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+            Transform installParent = terrain != null ? terrain.transform : anchorBlock.transform;
+            MapObject installedObject = Instantiate(activeInstallDefinition.mapObject, installParent);
+            installedObject.transform.rotation = GetInstalledObjectRotation(activeInstallDefinition, quarterTurns);
+            installedObject.transform.position = GetInstalledObjectWorldPosition(anchorBlock.Coordinate, activeInstallDefinition, quarterTurns, 0f);
 
             for (int blockIndex = 0; blockIndex < footprintBlocks.Count; blockIndex++)
             {
                 footprintBlocks[blockIndex].SetMapObject(installedObject);
             }
 
-            ConfigureInstalledInputOutputMarkers(installedObject, anchorBlock.Coordinate, quarterTurns);
-            ConfigureInstalledInputOutputEnergyAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
-            ConfigureInstalledInputOutputItemAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
-            ConfigureInstalledInputOutputOutputAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
-            ConfigureInstalledInputOutputRuntimeAreas(installedObject, anchorBlock.Coordinate, quarterTurns);
+            ConfigureInstalledObjectRuntime(installedObject, anchorBlock.Coordinate, quarterTurns);
+            RegisterInstalledObjectPersistence(installedObject);
 
             placedCount++;
         }
@@ -652,6 +651,85 @@ public class InstallationPlacementController : MonoBehaviour
             out outputCoordinates);
 
         inputOutputModule.ConfigureRuntimeAreas(inputEnergyCoordinates, itemAreaBindings, outputCoordinates);
+    }
+
+    private void ConfigureInstalledInputOutputRuntimeGrid(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (!TryGetInputOutputModule(installedObject, out InputOutputModule inputOutputModule))
+        {
+            return;
+        }
+
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorCoordinate, installedObject, quarterTurns);
+        List<Vector2Int> focusCoordinates = GetPlacementVisualCoordinates(anchorCoordinate, installedObject, quarterTurns);
+        inputOutputModule.ConfigureRuntimeGridCoordinates(footprintCoordinates);
+        inputOutputModule.ConfigureRuntimeFocusCoordinates(focusCoordinates);
+    }
+
+    public void ConfigureInstalledObjectRuntime(
+        MapObject installedObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        InputOutputModule.PersistentState persistentState = null)
+    {
+        if (installedObject == null)
+        {
+            return;
+        }
+
+        if (installedObject is InstallationObject installationObject)
+        {
+            installationObject.ConfigurePlacementRuntime(
+                anchorCoordinate,
+                quarterTurns,
+                GetFootprintCoordinates(anchorCoordinate, installedObject, quarterTurns));
+        }
+
+        ConfigureInstalledInputOutputMarkers(installedObject, anchorCoordinate, quarterTurns);
+        ConfigureInstalledInputOutputEnergyAreas(installedObject, anchorCoordinate, quarterTurns);
+        ConfigureInstalledInputOutputItemAreas(installedObject, anchorCoordinate, quarterTurns);
+        ConfigureInstalledInputOutputOutputAreas(installedObject, anchorCoordinate, quarterTurns);
+        ConfigureInstalledInputOutputRuntimeAreas(installedObject, anchorCoordinate, quarterTurns);
+        ConfigureInstalledInputOutputRuntimeGrid(installedObject, anchorCoordinate, quarterTurns);
+
+        if (persistentState != null && TryGetInputOutputModule(installedObject, out InputOutputModule inputOutputModule))
+        {
+            inputOutputModule.ApplyPersistentState(persistentState);
+        }
+    }
+
+    public Quaternion GetInstalledObjectRotation(ItemDefinition definition, int quarterTurns)
+    {
+        if (definition == null || definition.mapObject == null)
+        {
+            return Quaternion.identity;
+        }
+
+        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        return definition.mapObject.transform.rotation * Quaternion.Euler(0f, normalizedQuarterTurns * 90f, 0f);
+    }
+
+    public Vector3 GetInstalledObjectWorldPosition(
+        Vector2Int anchorCoordinate,
+        ItemDefinition definition,
+        int quarterTurns,
+        float verticalOffset = 0f)
+    {
+        return GetPlacementWorldPositionFromAnchorCoordinate(
+            anchorCoordinate,
+            definition != null ? definition.mapObject : null,
+            quarterTurns,
+            verticalOffset);
+    }
+
+    public List<Vector2Int> GetInstalledObjectFootprintCoordinates(Vector2Int anchorCoordinate, ItemDefinition definition, int quarterTurns)
+    {
+        return GetFootprintCoordinates(anchorCoordinate, definition != null ? definition.mapObject : null, quarterTurns);
+    }
+
+    public List<Vector2Int> GetInstalledObjectFocusCoordinates(Vector2Int anchorCoordinate, ItemDefinition definition, int quarterTurns)
+    {
+        return GetPlacementVisualCoordinates(anchorCoordinate, definition != null ? definition.mapObject : null, quarterTurns);
     }
 
     private bool TryGetOrderedInputItemAreaBindings(
@@ -2414,6 +2492,38 @@ public class InstallationPlacementController : MonoBehaviour
         return position;
     }
 
+    private Vector3 GetPlacementWorldPositionFromAnchorCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        float verticalOffset)
+    {
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        float baseHeight = terrain != null ? terrain.transform.position.y : 0f;
+        Vector3 position = new Vector3(anchorCoordinate.x, baseHeight, anchorCoordinate.y);
+        if (terrain != null && terrain.TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock) && anchorBlock != null)
+        {
+            position = anchorBlock.transform.position;
+        }
+
+        List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
+        if (offsets.Count > 0)
+        {
+            Vector2 averageOffset = Vector2.zero;
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                averageOffset += offsets[i];
+            }
+
+            averageOffset /= offsets.Count;
+            position.x += averageOffset.x;
+            position.z += averageOffset.y;
+        }
+
+        position.y += verticalOffset;
+        return position;
+    }
+
     private List<Vector2Int> GetPlacementVisualLocalOffsets(MapObject footprintSource, int quarterTurns)
     {
         if (TryGetRectGridObjectLocalOffsets(footprintSource, quarterTurns, out List<Vector2Int> objectOffsets)
@@ -2496,6 +2606,17 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return coordinates;
+    }
+
+    private void RegisterInstalledObjectPersistence(MapObject installedObject)
+    {
+        if (!(installedObject is InstallationObject installationObject))
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        terrain?.RegisterLiveInstallationObject(installationObject);
     }
 
     private bool TryGetPrimaryPointerPosition(out Vector2 pointerPosition)

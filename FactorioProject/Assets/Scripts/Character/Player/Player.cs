@@ -50,6 +50,8 @@ public class Player : Character
 
     [SerializeField]
     private List<PortableObject> handStack;
+    [SerializeField, Min(0f)]
+    private float handToBagPortableMoveInterval = 0.1f;
     private bool handStackInitialized;
     private PlayerBag handBag;
     private readonly HashSet<PortableObject> reservedHandStack = new HashSet<PortableObject>();
@@ -539,6 +541,199 @@ public class Player : Character
         }
 
         return count;
+    }
+
+    public bool CanAcceptHandObject(int objectId)
+    {
+        if (objectId < 0)
+        {
+            return false;
+        }
+
+        EnsureHandBag();
+        InitializeHandStack();
+        if (handStack == null || handStack.Count == 0)
+        {
+            return false;
+        }
+
+        int occupiedItemId = ResolveHandStackItemId();
+        if (occupiedItemId >= 0 && occupiedItemId != objectId)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            if (portableObject.gameObject.activeSelf || reservedHandStack.Contains(portableObject))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool CanClearHandIntoBag()
+    {
+        EnsureHandBag();
+        if (handBag == null)
+        {
+            return true;
+        }
+
+        handBag.RefreshExternalStackCounts(false);
+        int handCount = handBag.GetSlotCount(0);
+        if (handCount <= 0)
+        {
+            return true;
+        }
+
+        int handItemId = handBag.GetSlotItemId(0);
+        if (handItemId < 0)
+        {
+            return false;
+        }
+
+        PlayerBag activeBag = GetBag();
+        if (activeBag == null)
+        {
+            return false;
+        }
+
+        return activeBag.GetAvailableCapacityForItem(handItemId) >= handCount;
+    }
+
+    public bool TryStoreHandItemsInBag()
+    {
+        EnsureHandBag();
+        if (handBag == null)
+        {
+            return true;
+        }
+
+        handBag.RefreshExternalStackCounts(false);
+        int handCount = handBag.GetSlotCount(0);
+        if (handCount <= 0)
+        {
+            return true;
+        }
+
+        int handItemId = handBag.GetSlotItemId(0);
+        if (handItemId < 0)
+        {
+            return false;
+        }
+
+        PlayerBag activeBag = GetBag();
+        if (activeBag == null || !CanClearHandIntoBag())
+        {
+            return false;
+        }
+
+        List<PortableObject> sourcePortableObjects = new List<PortableObject>();
+        handBag.TryGetOccupiedSlotObjects(0, sourcePortableObjects);
+        List<PortableMoveData> pendingMoves = new List<PortableMoveData>(handCount);
+
+        for (int i = 0; i < handCount; i++)
+        {
+            if (!activeBag.TryAddObject(handItemId, out PortableObject bagTargetPortableObject))
+            {
+                return false;
+            }
+
+            PortableObject sourcePortableObject = sourcePortableObjects.Count > 0
+                ? sourcePortableObjects[Mathf.Clamp(sourcePortableObjects.Count - 1 - i, 0, sourcePortableObjects.Count - 1)]
+                : null;
+            Vector3 startPosition = sourcePortableObject != null
+                ? sourcePortableObject.transform.position
+                : (BodyTransform != null ? BodyTransform.position : transform.position);
+            Vector3 targetPosition = bagTargetPortableObject != null
+                ? bagTargetPortableObject.transform.position
+                : startPosition;
+
+            pendingMoves.Add(new PortableMoveData(
+                sourcePortableObject,
+                handItemId,
+                startPosition,
+                targetPosition,
+                i * Mathf.Max(0f, handToBagPortableMoveInterval)));
+        }
+
+        handBag.RemoveItems(handItemId, handCount);
+        handBag.RefreshExternalStackCounts();
+        UpdateCarryState();
+
+        for (int i = 0; i < pendingMoves.Count; i++)
+        {
+            PlayPortableMoveToBag(pendingMoves[i]);
+        }
+
+        return true;
+    }
+
+    private void PlayPortableMoveToBag(PortableMoveData moveData)
+    {
+        PortableObject template = moveData.template;
+        if (template == null)
+        {
+            return;
+        }
+
+        PortableObject movingPortableObject = Instantiate(template, moveData.startPosition, template.transform.rotation);
+        if (movingPortableObject == null)
+        {
+            return;
+        }
+
+        movingPortableObject.name = $"{template.name}_HandToBagMove";
+        movingPortableObject.transform.SetParent(null, true);
+        movingPortableObject.transform.position = moveData.startPosition;
+        movingPortableObject.transform.localScale = template.transform.lossyScale;
+        if (!movingPortableObject.gameObject.activeSelf)
+        {
+            movingPortableObject.gameObject.SetActive(true);
+        }
+
+        if (!movingPortableObject.SetItem(moveData.itemId))
+        {
+            Destroy(movingPortableObject.gameObject);
+            return;
+        }
+
+        movingPortableObject.MoveTo(moveData.targetPosition, moveData.delay, () =>
+        {
+            if (movingPortableObject != null)
+            {
+                Destroy(movingPortableObject.gameObject);
+            }
+        }, false);
+    }
+
+    private readonly struct PortableMoveData
+    {
+        public readonly PortableObject template;
+        public readonly int itemId;
+        public readonly Vector3 startPosition;
+        public readonly Vector3 targetPosition;
+        public readonly float delay;
+
+        public PortableMoveData(PortableObject template, int itemId, Vector3 startPosition, Vector3 targetPosition, float delay)
+        {
+            this.template = template;
+            this.itemId = itemId;
+            this.startPosition = startPosition;
+            this.targetPosition = targetPosition;
+            this.delay = delay;
+        }
     }
 
     private int ResolveHandStackItemId()

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "ProjectF/Item Definition", fileName = "ItemDef_")]
@@ -11,6 +12,7 @@ public class ItemDefinition : ScriptableObject
     public Mesh portableMesh;
     public Material portableMat;
     public Sprite icon;
+    public List<Sprite> interactionButtonList = new List<Sprite>();
     public uint size;
     [Min(1)]
     public int capacity = 10;

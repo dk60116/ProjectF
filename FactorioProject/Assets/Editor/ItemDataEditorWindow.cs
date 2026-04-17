@@ -59,6 +59,7 @@ public class ItemDataEditorWindow : EditorWindow
         public string portableMeshAssetPath;
         public string portableMaterialAssetPath;
         public string iconAssetPath;
+        public List<string> interactionButtonAssetPaths;
         public int size;
         public int capacity = -1;
         public string energyType;
@@ -69,6 +70,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int useEnergyAmount;
         public int mapSizeX = -1;
         public int mapSizeY = -1;
+        public float focusRadius = -1f;
+        public float workableFocusRadius = -1f;
         public string mapFilter;
         public int mapFilterValue = -1;
         public string mapObjectName;
@@ -346,6 +349,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty portableMeshProperty = serializedObject.FindProperty("portableMesh");
         SerializedProperty portableMatProperty = serializedObject.FindProperty("portableMat");
         SerializedProperty iconProperty = serializedObject.FindProperty("icon");
+        SerializedProperty interactionButtonListProperty = serializedObject.FindProperty("interactionButtonList");
         SerializedProperty sizeProperty = serializedObject.FindProperty("size");
         SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
         SerializedProperty energyTypeProperty = serializedObject.FindProperty("energyType");
@@ -369,6 +373,15 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(iconProperty, new GUIContent("Icon"));
         EditorGUI.EndDisabledGroup();
         DrawMapObjectFields(mapObjectProperty.objectReferenceValue as MapObject, definitions);
+
+        if (mapObjectProperty.objectReferenceValue is InstallationObject && interactionButtonListProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Interaction", EditorStyles.boldLabel);
+            EditorGUI.BeginDisabledGroup(true);
+            EditorGUILayout.PropertyField(interactionButtonListProperty, new GUIContent("Interaction Button List"), true);
+            EditorGUI.EndDisabledGroup();
+        }
 
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
@@ -473,6 +486,16 @@ public class ItemDataEditorWindow : EditorWindow
         Rect yRect = new Rect(labelRect.x + fieldWidth + spacing, labelRect.y, fieldWidth, labelRect.height);
         EditorGUI.PropertyField(xRect, mapSizeXProperty, GUIContent.none);
         EditorGUI.PropertyField(yRect, mapSizeYProperty, GUIContent.none);
+
+        if (mapObject is WorkableObject || mapObject is BoxObject)
+        {
+            SerializedProperty focusActivationRadiusProperty = mapObjectSerializedObject.FindProperty("focusActivationRadius");
+            if (focusActivationRadiusProperty != null)
+            {
+                focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
+                EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
+            }
+        }
 
         if (mapObject is InstallationObject)
         {
@@ -1324,10 +1347,19 @@ public class ItemDataEditorWindow : EditorWindow
             energyType = definition.energyType.ToString(),
             energyTypeValue = (int)definition.energyType,
             energyAmount = Mathf.Max(0, definition.energyAmount),
-            useEnergyType = definition.useEnergyType.ToString(),
-            useEnergyTypeValue = (int)definition.useEnergyType,
-            useEnergyAmount = Mathf.Max(0, definition.useEnergyAmount)
-        };
+              useEnergyType = definition.useEnergyType.ToString(),
+              useEnergyTypeValue = (int)definition.useEnergyType,
+              useEnergyAmount = Mathf.Max(0, definition.useEnergyAmount)
+          };
+
+        if (definition.interactionButtonList != null && definition.interactionButtonList.Count > 0)
+        {
+            entry.interactionButtonAssetPaths = new List<string>(definition.interactionButtonList.Count);
+            for (int i = 0; i < definition.interactionButtonList.Count; i++)
+            {
+                entry.interactionButtonAssetPaths.Add(AssetDatabase.GetAssetPath(definition.interactionButtonList[i]));
+            }
+        }
 
         if (definition.mapObject != null)
         {
@@ -1339,6 +1371,15 @@ public class ItemDataEditorWindow : EditorWindow
             entry.mapObjectType = definition.mapObject.GetType().FullName;
             entry.mapSizeX = definition.mapObject.Status.mapSizeX;
             entry.mapSizeY = definition.mapObject.Status.mapSizeY;
+            if (definition.mapObject is WorkableObject workableObject)
+            {
+                entry.focusRadius = workableObject.FocusActivationRadius;
+                entry.workableFocusRadius = workableObject.FocusActivationRadius;
+            }
+            else if (definition.mapObject is BoxObject boxObject)
+            {
+                entry.focusRadius = boxObject.FocusActivationRadius;
+            }
 
             if (definition.mapObject is InstallationObject installationObject)
             {
@@ -1533,6 +1574,20 @@ public class ItemDataEditorWindow : EditorWindow
             definition.icon = icon;
         }
 
+        if (entry.interactionButtonAssetPaths != null)
+        {
+            if (definition.interactionButtonList == null)
+            {
+                definition.interactionButtonList = new List<Sprite>();
+            }
+
+            definition.interactionButtonList.Clear();
+            for (int i = 0; i < entry.interactionButtonAssetPaths.Count; i++)
+            {
+                definition.interactionButtonList.Add(LoadAssetAtPath<Sprite>(entry.interactionButtonAssetPaths[i]));
+            }
+        }
+
         MapObject mapObject = LoadMapObject(entry.mapObjectAssetPath);
         if (mapObject != null)
         {
@@ -1596,6 +1651,16 @@ public class ItemDataEditorWindow : EditorWindow
                     InstallationMapFilter parsedFilterValue = (InstallationMapFilter)entry.mapFilterValue;
                     mapFilterProperty.intValue = (int)(parsedFilterValue == InstallationMapFilter.None ? InstallationMapFilter.Ground : parsedFilterValue);
                 }
+            }
+        }
+
+        float savedFocusRadius = entry.focusRadius >= 0f ? entry.focusRadius : entry.workableFocusRadius;
+        if ((mapObject is WorkableObject || mapObject is BoxObject) && savedFocusRadius >= 0f)
+        {
+            SerializedProperty focusActivationRadiusProperty = serializedMapObject.FindProperty("focusActivationRadius");
+            if (focusActivationRadiusProperty != null)
+            {
+                focusActivationRadiusProperty.floatValue = Mathf.Max(0f, savedFocusRadius);
             }
         }
 

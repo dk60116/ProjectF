@@ -211,6 +211,9 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
     [SerializeField, Min(0f)]
     private float visibleRange = 5f;
 
+    [SerializeField, Min(0f)]
+    private float verticalOffset = 0.03f;
+
     private AreaMarkerPool areaMarkerPool;
     private bool areMarkersVisible = true;
 
@@ -234,7 +237,7 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 
             AreaMarkerSpawnRequest request = markerRequests[i];
             marker.transform.SetParent(null, true);
-            marker.transform.position = request.WorldPosition + Vector3.up * 0.001f;
+            marker.transform.position = request.WorldPosition + Vector3.up * verticalOffset;
             marker.transform.rotation = Quaternion.identity;
             marker.transform.localScale = Vector3.one;
             marker.SetIcon(request.Icon, request.IconRotationZ);

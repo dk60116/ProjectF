@@ -752,8 +752,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Player player = ResolvePlayer();
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController != null && playerController.HasFocusedWorkableObject(requiredCraftingMapObjectIds))
+        {
+            return true;
+        }
+
         TerrainGenerator terrain = ResolveTerrain();
-        if (player == null || terrain == null)
+        if (terrain == null)
         {
             return false;
         }

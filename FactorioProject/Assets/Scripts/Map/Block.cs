@@ -230,6 +230,44 @@ public class Block : BaseObject
         return topObject != null ? topObject.ItemId : -1;
     }
 
+    public void SetInputAreaCenterObjectsVisible(bool visible)
+    {
+        CleanupPortableStack(inputAreaCenterStack);
+        EnsureInputAreaCenterAnchorInitialized();
+
+        for (int i = 0; i < inputAreaCenterStack.Count; i++)
+        {
+            PortableObject portableObject = inputAreaCenterStack[i];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            if (!visible)
+            {
+                portableObject.SetBatchedRendering(false);
+                if (portableObject.gameObject.activeSelf)
+                {
+                    portableObject.gameObject.SetActive(false);
+                }
+                continue;
+            }
+
+            if (portableObject.IsMovingToTarget)
+            {
+                if (!portableObject.gameObject.activeSelf)
+                {
+                    portableObject.gameObject.SetActive(true);
+                }
+
+                continue;
+            }
+
+            ConfigureInputAreaCenterObjectTransform(portableObject, i);
+            portableObject.SetBatchedRendering(true);
+        }
+    }
+
     public bool TryGetInputAreaCenterTopWorldPosition(int expectedItemId, out Vector3 worldPosition)
     {
         CleanupPortableStack(inputAreaCenterStack);
@@ -767,8 +805,14 @@ public class Block : BaseObject
     {
         capacity = 0;
 
-        if (!(mapObject is InstallationObject installationObject)
-            || (installationObject.MapFilter & InstallationMapFilter.ItemArea) == 0)
+        if (!(mapObject is InstallationObject installationObject))
+        {
+            return false;
+        }
+
+        bool supportsCenterStack = installationObject is BoxObject
+                                   || (installationObject.MapFilter & InstallationMapFilter.ItemArea) != 0;
+        if (!supportsCenterStack)
         {
             return false;
         }
@@ -1429,7 +1473,7 @@ public class Block : BaseObject
 
     public bool TryPickupOneInputAreaCenterObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex)
     {
-        if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0)
+        if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
         {
             return false;
         }
@@ -1495,7 +1539,7 @@ public class Block : BaseObject
 
     public bool TryPickupOneInputAreaCenterObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
     {
-        if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0)
+        if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
         {
             return false;
         }
@@ -1546,6 +1590,11 @@ public class Block : BaseObject
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleaseFloorObjectToHand(topObject, handTarget);
         return true;
+    }
+
+    private bool IsClosedBoxContentPickupBlocked()
+    {
+        return mapObject is BoxObject boxObject && !boxObject.IsOpen;
     }
 
     private void EnsureInputAreaCenterAnchorInitialized()

@@ -55,6 +55,9 @@ MonoBehaviour:
     mapSizeX: 1
     mapSizeY: 1
   mapFilter: 1
+  runtimeAnchorCoordinate: {x: 0, y: 0}
+  runtimeQuarterTurns: 0
+  runtimeOccupiedCoordinates: []
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
@@ -109,6 +112,8 @@ MonoBehaviour:
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []
   runtimeOutputCoordinates: []
+  runtimeGridCoordinates: []
+  runtimeFocusCoordinates: []
   storedEnergy: 0
   energyGaugeCapacity: 0
   hasActiveCraft: 0

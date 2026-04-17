@@ -46,8 +46,11 @@ public class TerrainGenerator : MonoBehaviour
 
     private sealed class ChunkSurfaceBuildData
     {
+        public Vector2Int origin;
         public readonly List<Vector3> vertices = new List<Vector3>();
         public readonly List<Vector2> uvs = new List<Vector2>();
+        public readonly List<Color> colors = new List<Color>();
+        public readonly float[] blendWeightBuffer = new float[6];
         public readonly List<int>[] trianglesByBiome;
 
         public ChunkSurfaceBuildData(int biomeCount)
@@ -159,9 +162,6 @@ public class TerrainGenerator : MonoBehaviour
     private bool generateOnStart = true;
 
     [SerializeField]
-    private bool useRandomSeed = true;
-
-    [SerializeField]
     private int seed = 12345;
 
     [SerializeField, Range(0f, 1f)]
@@ -179,6 +179,40 @@ public class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Range(0f, 0.35f)]
     private float terrainSurfaceVertexJitter = 0.14f;
+
+    [Header("Surface Texture Blend")]
+    [SerializeField]
+    private bool enableGeneratedSurfaceTextureBlend = true;
+
+    [SerializeField, Min(0.01f)]
+    private float generatedSurfaceBlendTextureTiling = 1.12f;
+
+    [SerializeField, Min(0.01f)]
+    private float generatedSurfaceBlendNoiseScale = 0.11f;
+
+    [SerializeField, Range(0f, 0.5f)]
+    private float generatedSurfaceBlendNoiseStrength = 0.18f;
+
+    [SerializeField, HideInInspector]
+    private Shader generatedSurfaceBlendShader;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendWaterTexture;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendSandTexture;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendDirtTexture;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendGrassTexture;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendForestTexture;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendNoiseTexture;
 
     [SerializeField, Min(0.001f)]
     private float largeLakeCellSize = 72f;
@@ -273,6 +307,9 @@ public class TerrainGenerator : MonoBehaviour
     [SerializeField]
     private bool keepStartSafeZoneClearOfResources = true;
 
+    [SerializeField, Min(0)]
+    private int starterWaterExclusionRadius = 2;
+
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
     private float stoneSpawnChance = 0.08f;
@@ -365,6 +402,8 @@ public class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
     private readonly Dictionary<Vector2Int, TerrainBiome> tileBiomeCache = new Dictionary<Vector2Int, TerrainBiome>();
     private readonly Dictionary<Vector2Int, bool> rawWaterCache = new Dictionary<Vector2Int, bool>();
+    private readonly Dictionary<Vector2Int, bool> directWaterBlockCache = new Dictionary<Vector2Int, bool>();
+    private readonly Dictionary<Vector2Int, bool> bufferedWaterBlockCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<TerrainBiome, Material> biomeMaterialCache = new Dictionary<TerrainBiome, Material>();
     private readonly Queue<ChunkGenerationRequest> pendingChunkGenerations = new Queue<ChunkGenerationRequest>();
     private readonly HashSet<Vector2Int> pendingChunkGenerationCoordinates = new HashSet<Vector2Int>();
@@ -374,6 +413,8 @@ public class TerrainGenerator : MonoBehaviour
     private bool hasSeedInitialized;
     private Vector2Int currentCenterChunk;
     private BlockStateStore resourceStateStore;
+    private InstallationPlacementController installationRestoreController;
+    private InstallationBackgroundSimulator installationBackgroundSimulator;
     private Coroutine chunkGenerationCoroutine;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
@@ -381,10 +422,12 @@ public class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, Resource> starterTreeCacheLookup = new Dictionary<Vector2Int, Resource>();
     private int starterTreeCacheSeed = int.MinValue;
     private bool starterTreeCacheValid;
+    private Material generatedSurfaceBlendMaterial;
 
     private void OnValidate()
     {
         MigrateLegacyResourcesIfNeeded();
+        UpgradeLegacyGeneratedSurfaceBlendSettings();
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         oreMaximumBodyScaleRatio = Mathf.Max(oreMinimumBodyScaleRatio, oreMaximumBodyScaleRatio);
@@ -393,11 +436,16 @@ public class TerrainGenerator : MonoBehaviour
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         InvalidateStarterTreeCache();
+#if UNITY_EDITOR
+        PopulateGeneratedSurfaceBlendEditorDefaults();
+#endif
+        ApplyGeneratedSurfaceBlendSettingsToRuntimeMaterial();
     }
 
     private void Start()
     {
         MigrateLegacyResourcesIfNeeded();
+        UpgradeLegacyGeneratedSurfaceBlendSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
@@ -433,7 +481,8 @@ public class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         InitializeSeedForGeneration();
         InvalidateStarterTreeCache();
-        InvalidateTerrainBiomeCaches();
+        InvalidateTerrainBiomeDataCaches();
+        InvalidateTerrainBiomeMaterialCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
         resourceStateStore?.ClearStates();
@@ -441,6 +490,38 @@ public class TerrainGenerator : MonoBehaviour
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
         RefreshChunks(currentCenterChunk, true);
+    }
+
+    public void ResetChunks()
+    {
+        if (!hasGeneratedChunks)
+        {
+            Generate();
+            return;
+        }
+
+        MigrateLegacyResourcesIfNeeded();
+        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
+        NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        SyncResourceEntryDefinitions();
+        EnsureResourceStateStore();
+        InvalidateStarterTreeCache();
+        InvalidateTerrainBiomeDataCaches();
+        InvalidateTerrainBiomeMaterialCaches();
+        ClearPendingChunkGenerations();
+        ClearLoadedChunks();
+
+        currentCenterChunk = GetCenterChunkCoordinate();
+        hasGeneratedChunks = true;
+        RefreshChunks(currentCenterChunk, true);
+    }
+
+    public void RandomizeSeed()
+    {
+        seed = UnityEngine.Random.Range(int.MinValue, int.MaxValue);
+        hasSeedInitialized = true;
+        InvalidateStarterTreeCache();
+        InvalidateTerrainBiomeDataCaches();
     }
 
     private void RefreshTrackedChunks()
@@ -559,6 +640,7 @@ public class TerrainGenerator : MonoBehaviour
 
                 ApplyBlockBiomeVisuals(block, visualData);
                 if (blockType == Block.BlockType.Ground
+                    && !HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
                     && CanSpawnResourceOnBiome(visualData.primaryBiome)
                     && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab))
                 {
@@ -578,7 +660,13 @@ public class TerrainGenerator : MonoBehaviour
             yield return null;
         }
 
-        ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(6);
+        RestoreChunkInstallations(chunkObject.transform);
+        RestoreChunkBlockStates(chunkObject.transform);
+
+        ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(6)
+        {
+            origin = origin
+        };
         IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
         while (surfaceRoutine.MoveNext())
         {
@@ -612,6 +700,7 @@ public class TerrainGenerator : MonoBehaviour
         SaveChunkResourceStates(chunkTransform);
         RemoveChunkBlocksFromLookup(chunkTransform);
         loadedChunks.Remove(chunkCoordinate);
+        CleanupOrphanedLiveInstallations();
         DestroyChunkObject(chunkTransform.gameObject);
     }
 
@@ -634,12 +723,14 @@ public class TerrainGenerator : MonoBehaviour
             {
                 SaveChunkResourceStates(chunkObjects[i]);
                 RemoveChunkBlocksFromLookup(chunkObjects[i]);
+                CleanupOrphanedLiveInstallations();
                 DestroyChunkObject(chunkObjects[i].gameObject);
             }
         }
 
         loadedChunks.Clear();
         loadedBlocks.Clear();
+        CleanupOrphanedLiveInstallations();
     }
 
     private void DestroyChunkObject(GameObject chunkObject)
@@ -705,7 +796,6 @@ public class TerrainGenerator : MonoBehaviour
 
         block.Initialize(coordinate, blockType);
         loadedBlocks[coordinate] = block;
-        RestoreBlockState(block);
         return block;
     }
 
@@ -789,6 +879,10 @@ public class TerrainGenerator : MonoBehaviour
 
         mesh.SetVertices(chunkSurface.vertices);
         mesh.SetUVs(0, chunkSurface.uvs);
+        if (chunkSurface.colors.Count == chunkSurface.vertices.Count)
+        {
+            mesh.SetColors(chunkSurface.colors);
+        }
         mesh.subMeshCount = chunkSurface.trianglesByBiome.Length;
         for (int i = 0; i < chunkSurface.trianglesByBiome.Length; i++)
         {
@@ -1099,6 +1193,7 @@ public class TerrainGenerator : MonoBehaviour
             Vector2 point = polygon[i];
             chunkSurface.vertices.Add(new Vector3(point.x, y, point.y));
             chunkSurface.uvs.Add(point);
+            chunkSurface.colors.Add(GetGeneratedSurfaceBlendWeights(chunkSurface.origin, point, chunkSurface.blendWeightBuffer));
         }
 
         List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(biome)];
@@ -1295,6 +1390,7 @@ public class TerrainGenerator : MonoBehaviour
 
         Array.Clear(weights, 0, weights.Length);
         Vector2Int centerCoordinate = new Vector2Int(Mathf.RoundToInt(sampleWorldPosition.x), Mathf.RoundToInt(sampleWorldPosition.y));
+        bool suppressWaterWeights = IsBlockedForWater(centerCoordinate);
         const int sampleRadius = 2;
         for (int offsetY = -sampleRadius; offsetY <= sampleRadius; offsetY++)
         {
@@ -1302,6 +1398,11 @@ public class TerrainGenerator : MonoBehaviour
             {
                 Vector2Int tileCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
                 TerrainBiome biome = GetTileBiome(tileCoordinate);
+                if (suppressWaterWeights && biome == TerrainBiome.Water)
+                {
+                    continue;
+                }
+
                 Vector2 jitter = GetBiomeBlendJitter(tileCoordinate) * (0.35f + terrainSurfaceVertexJitter);
                 Vector2 tileCenter = new Vector2(tileCoordinate.x, tileCoordinate.y) + jitter;
                 float distanceSqr = (sampleWorldPosition - tileCenter).sqrMagnitude;
@@ -1325,15 +1426,140 @@ public class TerrainGenerator : MonoBehaviour
 
     private Material[] GetGeneratedSurfaceMaterials()
     {
+        Material blendMaterial = GetGeneratedSurfaceBlendMaterial();
         return new[]
         {
             GetBiomeMaterial(TerrainBiome.Water),
-            GetBiomeMaterial(TerrainBiome.Sand),
-            GetBiomeMaterial(TerrainBiome.Dirt),
-            GetBiomeMaterial(TerrainBiome.Grass),
-            GetBiomeMaterial(TerrainBiome.Forest),
+            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Sand),
+            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Dirt),
+            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Grass),
+            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Forest),
             GetBiomeMaterial(TerrainBiome.Rock)
         };
+    }
+
+    private Material GetGeneratedSurfaceBlendMaterial()
+    {
+        if (!enableGeneratedSurfaceTextureBlend)
+        {
+            return null;
+        }
+
+        if (generatedSurfaceBlendMaterial != null)
+        {
+            return generatedSurfaceBlendMaterial;
+        }
+
+        Shader blendShader = generatedSurfaceBlendShader != null
+            ? generatedSurfaceBlendShader
+            : Shader.Find("ProjectF/Terrain/BiomeBlend");
+        if (blendShader == null)
+        {
+            return null;
+        }
+
+        generatedSurfaceBlendMaterial = new Material(blendShader)
+        {
+            name = "Runtime_TerrainBiomeBlend",
+            enableInstancing = true
+        };
+
+        generatedSurfaceBlendMaterial.SetColor("_SandColor", GetBiomeColor(TerrainBiome.Sand));
+        generatedSurfaceBlendMaterial.SetColor("_DirtColor", GetBiomeColor(TerrainBiome.Dirt));
+        generatedSurfaceBlendMaterial.SetColor("_GrassColor", GetBiomeColor(TerrainBiome.Grass));
+        generatedSurfaceBlendMaterial.SetColor("_ForestColor", GetBiomeColor(TerrainBiome.Forest));
+        generatedSurfaceBlendMaterial.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
+        generatedSurfaceBlendMaterial.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
+        generatedSurfaceBlendMaterial.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
+
+        Material groundMaterial = ResolveSourceMaterialForBiome(TerrainBiome.Grass);
+        if (groundMaterial != null && groundMaterial.HasProperty("_ShadowColor"))
+        {
+            generatedSurfaceBlendMaterial.SetColor("_ShadowColor", groundMaterial.GetColor("_ShadowColor"));
+        }
+
+        if (groundMaterial != null && groundMaterial.HasProperty("_ShadeThreshold"))
+        {
+            generatedSurfaceBlendMaterial.SetFloat("_ShadeThreshold", groundMaterial.GetFloat("_ShadeThreshold"));
+        }
+
+        if (groundMaterial != null && groundMaterial.HasProperty("_ShadeSmoothness"))
+        {
+            generatedSurfaceBlendMaterial.SetFloat("_ShadeSmoothness", groundMaterial.GetFloat("_ShadeSmoothness"));
+        }
+
+        Texture2D grassTexture = ResolveGeneratedSurfaceBlendTexture(
+            generatedSurfaceBlendGrassTexture,
+            groundMaterial,
+            "_BaseMap",
+            "_MainTex");
+        Texture2D forestTexture = ResolveGeneratedSurfaceBlendTexture(
+            generatedSurfaceBlendForestTexture,
+            ResolveSourceMaterialForBiome(TerrainBiome.Forest),
+            "_BaseMap",
+            "_MainTex");
+        Texture2D dirtTexture = generatedSurfaceBlendDirtTexture != null
+            ? generatedSurfaceBlendDirtTexture
+            : grassTexture;
+        Texture2D sandTexture = generatedSurfaceBlendSandTexture != null
+            ? generatedSurfaceBlendSandTexture
+            : grassTexture;
+        if (forestTexture == null)
+        {
+            forestTexture = grassTexture;
+        }
+
+        Texture2D noiseTexture = generatedSurfaceBlendNoiseTexture != null
+            ? generatedSurfaceBlendNoiseTexture
+            : grassTexture;
+
+        if (sandTexture != null)
+        {
+            generatedSurfaceBlendMaterial.SetTexture("_SandMap", sandTexture);
+        }
+
+        if (dirtTexture != null)
+        {
+            generatedSurfaceBlendMaterial.SetTexture("_DirtMap", dirtTexture);
+        }
+
+        if (grassTexture != null)
+        {
+            generatedSurfaceBlendMaterial.SetTexture("_GrassMap", grassTexture);
+        }
+
+        if (forestTexture != null)
+        {
+            generatedSurfaceBlendMaterial.SetTexture("_ForestMap", forestTexture);
+        }
+
+        if (noiseTexture != null)
+        {
+            generatedSurfaceBlendMaterial.SetTexture("_BlendNoise", noiseTexture);
+        }
+
+        return generatedSurfaceBlendMaterial;
+    }
+
+    private void UpgradeLegacyGeneratedSurfaceBlendSettings()
+    {
+        if (Mathf.Approximately(generatedSurfaceBlendTextureTiling, 0.28f)
+            || Mathf.Approximately(generatedSurfaceBlendTextureTiling, 0.56f))
+        {
+            generatedSurfaceBlendTextureTiling = 1.12f;
+        }
+    }
+
+    private void ApplyGeneratedSurfaceBlendSettingsToRuntimeMaterial()
+    {
+        if (generatedSurfaceBlendMaterial == null)
+        {
+            return;
+        }
+
+        generatedSurfaceBlendMaterial.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
+        generatedSurfaceBlendMaterial.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
+        generatedSurfaceBlendMaterial.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
     }
 
     private Material GetBiomeMaterial(TerrainBiome biome)
@@ -1394,6 +1620,36 @@ public class TerrainGenerator : MonoBehaviour
         return renderer != null ? renderer.sharedMaterial : null;
     }
 
+    private static Texture2D ResolveGeneratedSurfaceBlendTexture(Texture2D preferredTexture, Material material, params string[] candidatePropertyNames)
+    {
+        if (preferredTexture != null)
+        {
+            return preferredTexture;
+        }
+
+        if (material == null || candidatePropertyNames == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < candidatePropertyNames.Length; i++)
+        {
+            string propertyName = candidatePropertyNames[i];
+            if (!material.HasProperty(propertyName))
+            {
+                continue;
+            }
+
+            Texture texture = material.GetTexture(propertyName);
+            if (texture is Texture2D texture2D)
+            {
+                return texture2D;
+            }
+        }
+
+        return null;
+    }
+
     private Color GetBiomeColor(TerrainBiome biome)
     {
         switch (biome)
@@ -1411,6 +1667,55 @@ public class TerrainGenerator : MonoBehaviour
             default:
                 return grassBiomeColor;
         }
+    }
+
+    public Color GetMapBiomeColorAt(Vector2Int worldCoordinate)
+    {
+        return GetBiomeColor(GetTileBiome(worldCoordinate));
+    }
+
+    public Color32 GetMapBiomeColor32At(Vector2Int worldCoordinate)
+    {
+        return (Color32)GetMapBiomeColorAt(worldCoordinate);
+    }
+
+    private Color GetGeneratedSurfaceBlendWeights(Vector2Int origin, Vector2 localPoint, float[] weights)
+    {
+        Vector2 worldPoint = new Vector2(origin.x + localPoint.x, origin.y + localPoint.y);
+        SampleBiomeWeights(worldPoint, weights);
+
+        float sandWeight = weights[GetBiomeMaterialIndex(TerrainBiome.Sand)];
+        float dirtWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Dirt)];
+        float grassWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Grass)];
+        float forestWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Forest)];
+        float totalWeight = sandWeight + dirtWeightValue + grassWeightValue + forestWeightValue;
+
+        if (totalWeight <= 0.0001f)
+        {
+            if (sandWeight >= dirtWeightValue && sandWeight >= grassWeightValue && sandWeight >= forestWeightValue)
+            {
+                return new Color(1f, 0f, 0f, 0f);
+            }
+
+            if (dirtWeightValue >= grassWeightValue && dirtWeightValue >= forestWeightValue)
+            {
+                return new Color(0f, 1f, 0f, 0f);
+            }
+
+            if (grassWeightValue >= forestWeightValue)
+            {
+                return new Color(0f, 0f, 1f, 0f);
+            }
+
+            return new Color(0f, 0f, 0f, 1f);
+        }
+
+        float inverseTotal = 1f / totalWeight;
+        return new Color(
+            sandWeight * inverseTotal,
+            dirtWeightValue * inverseTotal,
+            grassWeightValue * inverseTotal,
+            forestWeightValue * inverseTotal);
     }
 
     private static int GetBiomeMaterialIndex(TerrainBiome biome)
@@ -1761,9 +2066,20 @@ public class TerrainGenerator : MonoBehaviour
 
     private void InvalidateTerrainBiomeCaches()
     {
+        InvalidateTerrainBiomeDataCaches();
+        InvalidateTerrainBiomeMaterialCaches();
+    }
+
+    private void InvalidateTerrainBiomeDataCaches()
+    {
         tileBiomeCache.Clear();
         rawWaterCache.Clear();
+        directWaterBlockCache.Clear();
+        bufferedWaterBlockCache.Clear();
+    }
 
+    private void InvalidateTerrainBiomeMaterialCaches()
+    {
         foreach (KeyValuePair<TerrainBiome, Material> entry in biomeMaterialCache)
         {
             if (entry.Value == null)
@@ -1782,7 +2098,81 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         biomeMaterialCache.Clear();
+
+        if (generatedSurfaceBlendMaterial != null)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(generatedSurfaceBlendMaterial);
+            }
+            else
+            {
+                DestroyImmediate(generatedSurfaceBlendMaterial);
+            }
+
+            generatedSurfaceBlendMaterial = null;
+        }
     }
+
+#if UNITY_EDITOR
+    private void PopulateGeneratedSurfaceBlendEditorDefaults()
+    {
+        if (generatedSurfaceBlendShader == null)
+        {
+            generatedSurfaceBlendShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainBiomeBlend.shader");
+        }
+
+        if (generatedSurfaceBlendWaterTexture == null)
+        {
+            generatedSurfaceBlendWaterTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Procedural/waterTex2.png");
+        }
+
+        if (generatedSurfaceBlendSandTexture == null)
+        {
+            generatedSurfaceBlendSandTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Sand/Sand.png");
+        }
+
+        if (generatedSurfaceBlendDirtTexture == null)
+        {
+            generatedSurfaceBlendDirtTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Materials/Ground_TD_00.png");
+        }
+
+        if (generatedSurfaceBlendNoiseTexture == null)
+        {
+            generatedSurfaceBlendNoiseTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Procedural/perlinNoise.png");
+        }
+
+        if (generatedSurfaceBlendGrassTexture == null)
+        {
+            generatedSurfaceBlendGrassTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Materials/Ground_TD_00.png");
+            if (generatedSurfaceBlendGrassTexture == null)
+            {
+                generatedSurfaceBlendGrassTexture = ResolveGeneratedSurfaceBlendTexture(
+                    null,
+                    ResolveSourceMaterialForBiome(TerrainBiome.Grass),
+                    "_BaseMap",
+                    "_MainTex");
+            }
+        }
+
+        if (generatedSurfaceBlendForestTexture == null)
+        {
+            generatedSurfaceBlendForestTexture = ResolveGeneratedSurfaceBlendTexture(
+                null,
+                ResolveSourceMaterialForBiome(TerrainBiome.Forest),
+                "_BaseMap",
+                "_MainTex");
+
+            if (generatedSurfaceBlendForestTexture == null)
+            {
+                generatedSurfaceBlendForestTexture = generatedSurfaceBlendGrassTexture;
+            }
+        }
+    }
+#endif
 
     private void QueueChunkGeneration(Vector2Int chunkCoordinate, int normalizedChunkSize)
     {
@@ -1918,8 +2308,15 @@ public class TerrainGenerator : MonoBehaviour
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
+        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock)
+            && focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
+        {
+            MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
+            return true;
+        }
+
         if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
-            && inputAreaBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject))
+            && inputAreaBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
         {
             MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
             return true;
@@ -1963,6 +2360,26 @@ public class TerrainGenerator : MonoBehaviour
         if (itemCount <= 0)
         {
             return false;
+        }
+
+        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, itemCount, out Block focusedBoxBlock))
+        {
+            dropCoordinate = focusedBoxBlock.Coordinate;
+            for (int i = 0; i < itemCount; i++)
+            {
+                if (!focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(
+                        itemId,
+                        startWorldPosition,
+                        i * Mathf.Max(0f, moveInterval),
+                        out PortableObject droppedObject))
+                {
+                    return false;
+                }
+
+                MarkInputAreaDroppedPickupGate(droppedObject, false, worldPosition);
+            }
+
+            return true;
         }
 
         if (TryResolveInputAreaDropBlock(dropCoordinate, itemId, itemCount, out Block inputAreaBlock))
@@ -2014,6 +2431,17 @@ public class TerrainGenerator : MonoBehaviour
     {
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock))
+        {
+            if (!focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
+            {
+                return false;
+            }
+
+            MarkInputAreaDroppedPickupGate(targetPortableObject, false, worldPosition);
+            return true;
+        }
+
         if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock))
         {
             if (!inputAreaBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
@@ -2051,6 +2479,14 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        Vector3 playerPosition = player.transform.position;
+        if (BoxObject.TryFindNearest(playerPosition, out BoxObject focusedBoxObject)
+            && focusedBoxObject != null
+            && focusedBoxObject.TryPickupContainedObjectToHand(player, playerPosition, 999f))
+        {
+            return true;
+        }
+
         if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
         {
             loadedBlocks.Remove(coordinate);
@@ -2082,6 +2518,14 @@ public class TerrainGenerator : MonoBehaviour
         if (player == null)
         {
             return false;
+        }
+
+        Vector3 playerPosition = player.transform.position;
+        if (BoxObject.TryFindNearest(playerPosition, out BoxObject focusedBoxObject)
+            && focusedBoxObject != null
+            && focusedBoxObject.TryPickupContainedObjectToBag(player, playerPosition, 999f, preferredSlotIndex))
+        {
+            return true;
         }
 
         if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
@@ -2119,6 +2563,18 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return false;
+    }
+
+    public void RegisterLiveInstallationObject(InstallationObject installationObject)
+    {
+        EnsureResourceStateStore();
+        resourceStateStore?.RegisterLiveInstallation(installationObject);
+    }
+
+    public void RegisterInstallationRuntimeState(InstallationObject installationObject)
+    {
+        EnsureResourceStateStore();
+        resourceStateStore?.RegisterLiveInstallation(installationObject);
     }
 
     private static void NotifyAreaManualPickup(Vector2Int coordinate)
@@ -2162,8 +2618,15 @@ public class TerrainGenerator : MonoBehaviour
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
+        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock)
+            && focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
+        {
+            MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
+            return true;
+        }
+
         if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
-            && inputAreaBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject))
+            && inputAreaBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
         {
             MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
             return true;
@@ -2222,7 +2685,7 @@ public class TerrainGenerator : MonoBehaviour
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
         if (TryResolveInputAreaDropBlock(centerCoordinate, itemId, 1, out Block inputAreaBlock)
             && inputAreaBlock.HasInputAreaCenterItem(itemId)
-            && inputAreaBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject))
+            && inputAreaBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
         {
             MarkInputAreaDroppedPickupGate(targetPortableObject, true, worldPosition);
             return true;
@@ -2352,6 +2815,13 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (BoxObject.TryFindNearest(pickupOrigin, out BoxObject focusedBoxObject)
+            && focusedBoxObject != null
+            && focusedBoxObject.TryPickupContainedObjectToHand(player, pickupOrigin, pickupRadius))
+        {
+            return true;
+        }
+
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(pickupOrigin);
 
         for (int offsetY = -radius; offsetY <= radius; offsetY++)
@@ -2390,6 +2860,13 @@ public class TerrainGenerator : MonoBehaviour
         if (player == null || radius < 0 || pickupRadius <= 0f)
         {
             return false;
+        }
+
+        if (BoxObject.TryFindNearest(pickupOrigin, out BoxObject focusedBoxObject)
+            && focusedBoxObject != null
+            && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
+        {
+            return true;
         }
 
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(pickupOrigin);
@@ -2484,9 +2961,16 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
+        HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
             resourceStateStore.SaveFloorObjects(chunkBlocks[i].Coordinate, chunkBlocks[i]);
+
+            if (chunkBlocks[i].MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
+            {
+                resourceStateStore.SaveInstallation(installationObject);
+                resourceStateStore.RegisterLiveInstallation(installationObject);
+            }
 
             Resource resource = chunkBlocks[i].Resource;
             if (resource == null)
@@ -2582,6 +3066,43 @@ public class TerrainGenerator : MonoBehaviour
         return block != null
                && block.Type == Block.BlockType.Ground
                && block.CanAddFloorObjects(itemCount, itemId);
+    }
+
+    private bool TryResolveFocusedGroundBoxDropBlock(
+        Vector3 worldPosition,
+        int itemId,
+        int itemCount,
+        out Block targetBlock)
+    {
+        targetBlock = null;
+        if (itemId < 0 || itemCount <= 0)
+        {
+            return false;
+        }
+
+        if (!BoxObject.TryFindNearest(worldPosition, out BoxObject focusedBox)
+            || focusedBox == null
+            || !focusedBox.IsOpen
+            || !focusedBox.TryGetGroundDropCoordinate(out Vector2Int targetCoordinate))
+        {
+            return false;
+        }
+
+        if (!loadedBlocks.TryGetValue(targetCoordinate, out Block block) || block == null)
+        {
+            loadedBlocks.Remove(targetCoordinate);
+            return false;
+        }
+
+        if (block.Type != Block.BlockType.Ground
+            || block.MapObject != focusedBox
+            || !block.CanAddInputAreaCenterObjects(itemCount, itemId))
+        {
+            return false;
+        }
+
+        targetBlock = block;
+        return true;
     }
 
     private bool TryResolveInputAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
@@ -2770,6 +3291,171 @@ public class TerrainGenerator : MonoBehaviour
         return map;
     }
 
+    private void RestoreChunkInstallations(Transform chunkTransform)
+    {
+        if (chunkTransform == null)
+        {
+            return;
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
+        HashSet<Vector2Int> installationAnchors = new HashSet<Vector2Int>();
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            if (chunkBlocks[i] != null
+                && resourceStateStore.TryGetInstallationAnchorAtCoordinate(chunkBlocks[i].Coordinate, out Vector2Int anchorCoordinate))
+            {
+                installationAnchors.Add(anchorCoordinate);
+            }
+        }
+
+        foreach (Vector2Int anchorCoordinate in installationAnchors)
+        {
+            RestoreOrBindSavedInstallation(anchorCoordinate);
+        }
+    }
+
+    private void RestoreOrBindSavedInstallation(Vector2Int anchorCoordinate)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        if (resourceStateStore.TryGetLiveInstallation(anchorCoordinate, out InstallationObject liveInstallation, out BlockStateStore.InstallationSaveState liveState))
+        {
+            IReadOnlyList<Vector2Int> occupiedCoordinates = liveState != null && liveState.occupiedCoordinates != null && liveState.occupiedCoordinates.Count > 0
+                ? liveState.occupiedCoordinates
+                : liveInstallation.RuntimeOccupiedCoordinates;
+            BindLoadedBlocksToInstallation(liveInstallation, occupiedCoordinates);
+            return;
+        }
+
+        ResolveInstallationBackgroundSimulator()?.SimulateSavedInstallation(anchorCoordinate);
+
+        if (!resourceStateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState savedState))
+        {
+            return;
+        }
+
+        if (TryInstantiateSavedInstallation(savedState, out InstallationObject restoredInstallation))
+        {
+            resourceStateStore.RegisterLiveInstallation(restoredInstallation, savedState);
+        }
+    }
+
+    private bool TryInstantiateSavedInstallation(
+        BlockStateStore.InstallationSaveState savedState,
+        out InstallationObject installationObject)
+    {
+        installationObject = null;
+        if (savedState == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(savedState.itemId);
+        if (definition == null || definition.mapObject == null)
+        {
+            return false;
+        }
+
+        InstallationPlacementController placementController = ResolveInstallationPlacementController();
+        Quaternion rotation = placementController != null
+            ? placementController.GetInstalledObjectRotation(definition, savedState.quarterTurns)
+            : definition.mapObject.transform.rotation * Quaternion.Euler(0f, (((savedState.quarterTurns % 4) + 4) % 4) * 90f, 0f);
+        Vector3 position = placementController != null
+            ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, definition, savedState.quarterTurns, 0f)
+            : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
+
+        MapObject restoredObject = Instantiate(definition.mapObject, transform);
+        restoredObject.transform.SetPositionAndRotation(position, rotation);
+
+        if (!(restoredObject is InstallationObject restoredInstallation))
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(restoredObject.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(restoredObject.gameObject);
+            }
+
+            return false;
+        }
+
+        List<Vector2Int> occupiedCoordinates = savedState.occupiedCoordinates != null && savedState.occupiedCoordinates.Count > 0
+            ? new List<Vector2Int>(savedState.occupiedCoordinates)
+            : placementController != null
+                ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, definition, savedState.quarterTurns)
+                : new List<Vector2Int> { savedState.anchorCoordinate };
+        savedState.occupiedCoordinates = occupiedCoordinates;
+
+        if (placementController != null)
+        {
+            placementController.ConfigureInstalledObjectRuntime(
+                restoredInstallation,
+                savedState.anchorCoordinate,
+                savedState.quarterTurns,
+                savedState.inputOutputState);
+        }
+        else
+        {
+            restoredInstallation.ConfigurePlacementRuntime(savedState.anchorCoordinate, savedState.quarterTurns, occupiedCoordinates);
+            if (savedState.inputOutputState != null && restoredInstallation is InputOutputModule inputOutputModule)
+            {
+                inputOutputModule.ApplyPersistentState(savedState.inputOutputState);
+            }
+        }
+
+        if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
+        {
+            restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
+        }
+
+        BindLoadedBlocksToInstallation(restoredInstallation, occupiedCoordinates);
+        installationObject = restoredInstallation;
+        return true;
+    }
+
+    private void BindLoadedBlocksToInstallation(MapObject installedObject, IReadOnlyList<Vector2Int> occupiedCoordinates)
+    {
+        if (installedObject == null || occupiedCoordinates == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (loadedBlocks.TryGetValue(occupiedCoordinates[i], out Block block) && block != null)
+            {
+                block.SetMapObject(installedObject);
+            }
+        }
+    }
+
+    private void RestoreChunkBlockStates(Transform chunkTransform)
+    {
+        if (chunkTransform == null)
+        {
+            return;
+        }
+
+        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            RestoreBlockState(chunkBlocks[i]);
+        }
+    }
+
     private void RestoreBlockState(Block block)
     {
         if (block == null)
@@ -2789,6 +3475,63 @@ public class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private bool HasSavedOrLiveInstallationAtCoordinate(Vector2Int worldCoordinate)
+    {
+        EnsureResourceStateStore();
+        return resourceStateStore != null
+               && resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out _);
+    }
+
+    private void CleanupOrphanedLiveInstallations()
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        List<Vector2Int> liveAnchors = resourceStateStore.GetLiveInstallationAnchors();
+        for (int i = 0; i < liveAnchors.Count; i++)
+        {
+            Vector2Int anchorCoordinate = liveAnchors[i];
+            if (!resourceStateStore.TryGetLiveInstallation(anchorCoordinate, out InstallationObject installationObject, out BlockStateStore.InstallationSaveState state))
+            {
+                continue;
+            }
+
+            IReadOnlyList<Vector2Int> occupiedCoordinates = state != null && state.occupiedCoordinates != null && state.occupiedCoordinates.Count > 0
+                ? state.occupiedCoordinates
+                : installationObject.RuntimeOccupiedCoordinates;
+            bool hasAnyLoadedBlock = false;
+            for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
+            {
+                if (loadedBlocks.TryGetValue(occupiedCoordinates[coordinateIndex], out Block loadedBlock) && loadedBlock != null)
+                {
+                    hasAnyLoadedBlock = true;
+                    break;
+                }
+            }
+
+            if (hasAnyLoadedBlock)
+            {
+                continue;
+            }
+
+            resourceStateStore.UnregisterLiveInstallation(anchorCoordinate);
+            if (installationObject != null)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(installationObject.gameObject);
+                }
+                else
+                {
+                    DestroyImmediate(installationObject.gameObject);
+                }
+            }
+        }
+    }
+
     private void EnsureResourceStateStore()
     {
         if (resourceStateStore != null)
@@ -2801,6 +3544,68 @@ public class TerrainGenerator : MonoBehaviour
         {
             resourceStateStore = gameObject.AddComponent<BlockStateStore>();
         }
+    }
+
+    private InstallationPlacementController ResolveInstallationPlacementController()
+    {
+        if (installationRestoreController != null)
+        {
+            return installationRestoreController;
+        }
+
+        InstallationPlacementController[] controllers = Resources.FindObjectsOfTypeAll<InstallationPlacementController>();
+        for (int i = 0; i < controllers.Length; i++)
+        {
+            InstallationPlacementController controller = controllers[i];
+            if (controller != null && controller.gameObject.scene.IsValid())
+            {
+                installationRestoreController = controller;
+                return installationRestoreController;
+            }
+        }
+
+        return null;
+    }
+
+    private InstallationBackgroundSimulator ResolveInstallationBackgroundSimulator()
+    {
+        if (installationBackgroundSimulator != null)
+        {
+            return installationBackgroundSimulator;
+        }
+
+        installationBackgroundSimulator = GetComponent<InstallationBackgroundSimulator>();
+        if (installationBackgroundSimulator == null)
+        {
+            installationBackgroundSimulator = gameObject.AddComponent<InstallationBackgroundSimulator>();
+        }
+
+        return installationBackgroundSimulator;
+    }
+
+    private static ItemDefinition ResolveInstallationDefinition(int itemId)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
     }
 
     private bool TryGetResourcePrefab(Vector2Int worldCoordinate, out Resource prefab)
@@ -3459,9 +4264,58 @@ public class TerrainGenerator : MonoBehaviour
 
     private bool IsBlockedForWater(Vector2Int worldCoordinate)
     {
-        return IsStartSafeZoneCoordinate(worldCoordinate)
-               || (generateStarterResourcePatches && IsInsideAnyStarterPatch(worldCoordinate))
-               || (generateStarterTrees && TryGetStarterTreePrefab(worldCoordinate, out _));
+        if (bufferedWaterBlockCache.TryGetValue(worldCoordinate, out bool cachedBlocked))
+        {
+            return cachedBlocked;
+        }
+
+        if (IsDirectlyBlockedForWater(worldCoordinate))
+        {
+            bufferedWaterBlockCache[worldCoordinate] = true;
+            return true;
+        }
+
+        int exclusionRadius = Mathf.Max(0, starterWaterExclusionRadius);
+        if (exclusionRadius <= 0)
+        {
+            bufferedWaterBlockCache[worldCoordinate] = false;
+            return false;
+        }
+
+        for (int offsetY = -exclusionRadius; offsetY <= exclusionRadius; offsetY++)
+        {
+            for (int offsetX = -exclusionRadius; offsetX <= exclusionRadius; offsetX++)
+            {
+                if (offsetX == 0 && offsetY == 0)
+                {
+                    continue;
+                }
+
+                Vector2Int nearbyCoordinate = worldCoordinate + new Vector2Int(offsetX, offsetY);
+                if (IsDirectlyBlockedForWater(nearbyCoordinate))
+                {
+                    bufferedWaterBlockCache[worldCoordinate] = true;
+                    return true;
+                }
+            }
+        }
+
+        bufferedWaterBlockCache[worldCoordinate] = false;
+        return false;
+    }
+
+    private bool IsDirectlyBlockedForWater(Vector2Int worldCoordinate)
+    {
+        if (directWaterBlockCache.TryGetValue(worldCoordinate, out bool cachedBlocked))
+        {
+            return cachedBlocked;
+        }
+
+        bool blocked = IsStartSafeZoneCoordinate(worldCoordinate)
+                       || (generateStarterResourcePatches && IsInsideAnyStarterPatch(worldCoordinate))
+                       || (generateStarterTrees && TryGetStarterTreePrefab(worldCoordinate, out _));
+        directWaterBlockCache[worldCoordinate] = blocked;
+        return blocked;
     }
 
     private void MigrateLegacyResourcesIfNeeded()
@@ -3834,11 +4688,6 @@ public class TerrainGenerator : MonoBehaviour
         if (hasSeedInitialized)
         {
             return;
-        }
-
-        if (useRandomSeed)
-        {
-            seed = UnityEngine.Random.Range(int.MinValue, int.MaxValue);
         }
 
         hasSeedInitialized = true;

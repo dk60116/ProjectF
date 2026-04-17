@@ -22,8 +22,10 @@ public class PortableObject : MonoBehaviour
     private MeshRenderer bodyRenderer;
     private PortableObjectBatchRenderer batchRenderer;
     private bool useBatchedRendering;
+    private bool isMovingToTarget;
 
     public int ItemId => id;
+    public bool IsMovingToTarget => isMovingToTarget;
     
     public bool SetItem(int id)
     {
@@ -139,16 +141,26 @@ public class PortableObject : MonoBehaviour
     {
         SetBatchedRendering(false);
         transform.DOKill();
+        ResolveBodyRenderer();
+        isMovingToTarget = true;
 
         Sequence sequence = DOTween.Sequence();
         if (delay > 0f)
         {
+            SetBodyRendererVisible(false);
             sequence.AppendInterval(delay);
+            sequence.AppendCallback(() => SetBodyRendererVisible(true));
+        }
+        else
+        {
+            SetBodyRendererVisible(true);
         }
 
         sequence.Append(transform.DOJump(targetPosition, 1f, 1, 0.3f));
         sequence.OnComplete(() =>
         {
+            isMovingToTarget = false;
+            SetBodyRendererVisible(true);
             if (deactivateOnComplete)
             {
                 gameObject.SetActive(false);
@@ -156,6 +168,17 @@ public class PortableObject : MonoBehaviour
 
             onComplete?.Invoke();
         });
+    }
+
+    private void SetBodyRendererVisible(bool isVisible)
+    {
+        ResolveBodyRenderer();
+        if (bodyRenderer == null)
+        {
+            return;
+        }
+
+        bodyRenderer.enabled = isVisible;
     }
 
     private void OnEnable()
@@ -171,6 +194,7 @@ public class PortableObject : MonoBehaviour
 
     private void OnDisable()
     {
+        isMovingToTarget = false;
         UnregisterFromBatchRenderer();
     }
 

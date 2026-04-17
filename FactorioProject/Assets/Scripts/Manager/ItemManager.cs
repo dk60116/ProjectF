@@ -29,6 +29,10 @@ public class ItemManager : MonoBehaviour
     private List<ItemDefinition> itemDefinitions;
 
 #if UNITY_EDITOR
+    private const int ItemIconTargetTextureSize = 256;
+#endif
+
+#if UNITY_EDITOR
     [SerializeField]
     private bool autoMigrateDefinitions = true;
 #endif
@@ -1178,29 +1182,254 @@ public class ItemManager : MonoBehaviour
 
     private static Sprite LoadOrConvertSprite(string assetPath)
     {
-        Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
-        if (sprite != null)
+        TextureImporter textureImporter = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+        if (textureImporter != null)
         {
-            return sprite;
+            bool importerChanged = false;
+            if (textureImporter.textureType != TextureImporterType.Sprite
+                || textureImporter.spriteImportMode != SpriteImportMode.Single)
+            {
+                textureImporter.textureType = TextureImporterType.Sprite;
+                textureImporter.spriteImportMode = SpriteImportMode.Single;
+                textureImporter.alphaIsTransparency = true;
+                textureImporter.mipmapEnabled = false;
+                importerChanged = true;
+            }
+
+            if (importerChanged)
+            {
+                textureImporter.SaveAndReimport();
+            }
+
+            TryNormalizeIconPngTexture(assetPath);
         }
 
-        TextureImporter textureImporter = AssetImporter.GetAtPath(assetPath) as TextureImporter;
-        if (textureImporter == null)
+        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+    }
+
+    private static void TryNormalizeIconPngTexture(string assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath)
+            || !assetPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Texture2D sourceTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+        if (sourceTexture == null)
+        {
+            return;
+        }
+
+        if (sourceTexture.width == ItemIconTargetTextureSize
+            && sourceTexture.height == ItemIconTargetTextureSize)
+        {
+            return;
+        }
+
+        Texture2D resizedTexture = ResizeTextureToIconTarget(sourceTexture, ItemIconTargetTextureSize, ItemIconTargetTextureSize);
+        if (resizedTexture == null)
+        {
+            return;
+        }
+
+        try
+        {
+            byte[] pngBytes = resizedTexture.EncodeToPNG();
+            if (pngBytes == null || pngBytes.Length == 0)
+            {
+                return;
+            }
+
+            string fullPath = Path.GetFullPath(assetPath);
+            File.WriteAllBytes(fullPath, pngBytes);
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(resizedTexture);
+        }
+    }
+
+    private static Texture2D ResizeTextureToIconTarget(Texture sourceTexture, int width, int height)
+    {
+        if (sourceTexture == null || width <= 0 || height <= 0)
         {
             return null;
         }
 
-        if (textureImporter.textureType != TextureImporterType.Sprite
-            || textureImporter.spriteImportMode != SpriteImportMode.Single)
+        RenderTexture temporaryRenderTexture = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+        RenderTexture previousActive = RenderTexture.active;
+
+        try
         {
-            textureImporter.textureType = TextureImporterType.Sprite;
-            textureImporter.spriteImportMode = SpriteImportMode.Single;
-            textureImporter.alphaIsTransparency = true;
-            textureImporter.mipmapEnabled = false;
-            textureImporter.SaveAndReimport();
+            Graphics.Blit(sourceTexture, temporaryRenderTexture);
+            RenderTexture.active = temporaryRenderTexture;
+
+            Texture2D resizedTexture = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
+            resizedTexture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
+            resizedTexture.Apply(false, false);
+            return resizedTexture;
+        }
+        finally
+        {
+            RenderTexture.active = previousActive;
+            RenderTexture.ReleaseTemporary(temporaryRenderTexture);
+        }
+    }
+
+    private static void TryAutoAssignInteractionButtons(ItemDefinition definition)
+    {
+        if (definition == null || !(definition.mapObject is InstallationObject))
+        {
+            return;
         }
 
-        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        if (!ShouldAutoAssignInteractionButtons(definition.interactionButtonList))
+        {
+            return;
+        }
+
+        string interactionFolderPath = GetMapObjectFolderPath(definition.mapObject);
+        if (string.IsNullOrWhiteSpace(interactionFolderPath))
+        {
+            return;
+        }
+
+        List<Sprite> resolvedInteractionSprites = FindInteractionButtonSprites(interactionFolderPath);
+        if (resolvedInteractionSprites.Count == 0)
+        {
+            return;
+        }
+
+        if (definition.interactionButtonList == null)
+        {
+            definition.interactionButtonList = new List<Sprite>();
+        }
+
+        definition.interactionButtonList.Clear();
+        definition.interactionButtonList.AddRange(resolvedInteractionSprites);
+        EditorUtility.SetDirty(definition);
+    }
+
+    private static bool ShouldAutoAssignInteractionButtons(List<Sprite> interactionButtonList)
+    {
+        if (interactionButtonList == null || interactionButtonList.Count == 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < interactionButtonList.Count; i++)
+        {
+            if (interactionButtonList[i] != null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string GetMapObjectFolderPath(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return string.Empty;
+        }
+
+        GameObject prefabRoot = mapObject.transform.root != null
+            ? mapObject.transform.root.gameObject
+            : mapObject.gameObject;
+
+        string prefabAssetPath = AssetDatabase.GetAssetPath(prefabRoot);
+        if (string.IsNullOrWhiteSpace(prefabAssetPath))
+        {
+            return string.Empty;
+        }
+
+        string folderPath = Path.GetDirectoryName(prefabAssetPath);
+        return string.IsNullOrWhiteSpace(folderPath)
+            ? string.Empty
+            : folderPath.Replace("\\", "/");
+    }
+
+    private static List<Sprite> FindInteractionButtonSprites(string folderPath)
+    {
+        List<string> spriteCandidatePaths = new List<string>();
+        string[] textureGuids = AssetDatabase.FindAssets("t:Texture2D", new[] { folderPath });
+        for (int i = 0; i < textureGuids.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(textureGuids[i]);
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                continue;
+            }
+
+            string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(assetPath);
+            if (string.IsNullOrWhiteSpace(fileNameWithoutExtension)
+                || fileNameWithoutExtension.IndexOf("_Interaction_", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+
+            spriteCandidatePaths.Add(assetPath);
+        }
+
+        spriteCandidatePaths.Sort((left, right) =>
+        {
+            int compareResult = ParseInteractionButtonIndex(Path.GetFileNameWithoutExtension(left))
+                .CompareTo(ParseInteractionButtonIndex(Path.GetFileNameWithoutExtension(right)));
+            if (compareResult != 0)
+            {
+                return compareResult;
+            }
+
+            return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
+        });
+
+        List<Sprite> interactionSprites = new List<Sprite>();
+        for (int i = 0; i < spriteCandidatePaths.Count; i++)
+        {
+            Sprite sprite = LoadOrConvertSprite(spriteCandidatePaths[i]);
+            if (sprite != null)
+            {
+                interactionSprites.Add(sprite);
+            }
+        }
+
+        return interactionSprites;
+    }
+
+    private static int ParseInteractionButtonIndex(string fileNameWithoutExtension)
+    {
+        if (string.IsNullOrWhiteSpace(fileNameWithoutExtension))
+        {
+            return int.MaxValue;
+        }
+
+        const string marker = "_interaction_";
+        string normalizedName = fileNameWithoutExtension.ToLowerInvariant();
+        int markerIndex = normalizedName.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return int.MaxValue;
+        }
+
+        int numberStartIndex = markerIndex + marker.Length;
+        int numberEndIndex = numberStartIndex;
+        while (numberEndIndex < normalizedName.Length && char.IsDigit(normalizedName[numberEndIndex]))
+        {
+            numberEndIndex++;
+        }
+
+        if (numberEndIndex <= numberStartIndex)
+        {
+            return int.MaxValue;
+        }
+
+        return int.TryParse(normalizedName.Substring(numberStartIndex, numberEndIndex - numberStartIndex), out int parsedIndex)
+            ? parsedIndex
+            : int.MaxValue;
     }
 
     private static void ResolvePortableAssets(string assetPath, GameObject prefabRoot, out Mesh portableMesh, out Material portableMaterial)
@@ -2482,6 +2711,7 @@ public class ItemManager : MonoBehaviour
             EditorUtility.SetDirty(prefabRoot);
         }
 
+        TryAutoAssignInteractionButtons(definition);
         EditorUtility.SetDirty(definition.mapObject);
     }
 

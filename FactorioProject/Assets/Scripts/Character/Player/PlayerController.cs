@@ -26,7 +26,13 @@ public class PlayerController : MonoBehaviour
     private Joystick joystick;
     private ResourceWrokGauge resourceWorkGauge;
     private Resource currentTargetResource;
-    private Block currentFocusedBlock;
+    private readonly HashSet<Block> currentFocusedBlocks = new HashSet<Block>();
+    private readonly List<Block> combinedInteractionFocusBlocks = new List<Block>();
+    private readonly List<Block> nearbyInputOutputModuleFocusBlocks = new List<Block>();
+    private readonly List<Block> nearbyWorkableFocusBlocks = new List<Block>();
+    private readonly List<Block> nearbyBoxFocusBlocks = new List<Block>();
+    private readonly List<Block> singleFocusedBlockBuffer = new List<Block>(1);
+    private readonly List<Block> focusRemovalBuffer = new List<Block>();
     private Rigidbody cachedRigidbody;
     private Vector3 pendingMoveDirection;
     private const float MoveSweepBuffer = 0.01f;
@@ -415,8 +421,6 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshInteractionFocus(bool hasMovement)
     {
-        Block focusBlock = null;
-
         if (!player.IsCarrying
             && currentTargetResource != null
             && currentTargetResource.CanHarvest
@@ -424,22 +428,71 @@ public class PlayerController : MonoBehaviour
             && stationaryHarvestTimer >= harvestStartDelay
             && GetHarvestSpeed(currentTargetResource) > 0f)
         {
-            focusBlock = currentTargetResource.OwningBlock;
+            SetFocusedBlock(currentTargetResource.OwningBlock);
+            return;
         }
 
-        if (focusBlock == null)
+        combinedInteractionFocusBlocks.Clear();
+        if (FindCurrentInputOutputModuleFocusBlocks(nearbyInputOutputModuleFocusBlocks))
         {
-            focusBlock = FindNearbyWorkableBlock();
+            AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInputOutputModuleFocusBlocks);
         }
 
-        SetFocusedBlock(focusBlock);
+        FindNearbyWorkableBlocks(nearbyWorkableFocusBlocks);
+        AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyWorkableFocusBlocks);
+
+        FindNearbyBoxBlocks(nearbyBoxFocusBlocks);
+        AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyBoxFocusBlocks);
+        SetFocusedBlocks(combinedInteractionFocusBlocks);
     }
 
-    private Block FindNearbyWorkableBlock()
+    public bool HasFocusedWorkableObject(IReadOnlyList<int> requiredItemIds)
     {
+        if (requiredItemIds == null || requiredItemIds.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (Block block in currentFocusedBlocks)
+        {
+            if (block == null
+                || !(block.MapObject is WorkableObject workableObject)
+                || workableObject == null
+                || !workableObject.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int itemId = workableObject.ResolveItemId();
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < requiredItemIds.Count; i++)
+            {
+                if (requiredItemIds[i] == itemId)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool FindCurrentInputOutputModuleFocusBlocks(List<Block> results)
+    {
+        if (results == null)
+        {
+            return false;
+        }
+
+        results.Clear();
+
         if (player == null)
         {
-            return null;
+            return false;
         }
 
         if (cachedTerrainGenerator == null)
@@ -449,19 +502,74 @@ public class PlayerController : MonoBehaviour
 
         if (cachedTerrainGenerator == null)
         {
-            return null;
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        Vector2Int playerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(origin.x),
+            Mathf.RoundToInt(origin.z));
+
+        if (!InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(playerCoordinate, out InputOutputModule inputOutputModule)
+            || inputOutputModule == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> focusCoordinates = inputOutputModule.RuntimeFocusCoordinates;
+        if (focusCoordinates == null || focusCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < focusCoordinates.Count; i++)
+        {
+            if (!cachedTerrainGenerator.TryGetLoadedBlock(focusCoordinates[i], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            if (!results.Contains(block))
+            {
+                results.Add(block);
+            }
+        }
+
+        return results.Count > 0;
+    }
+
+    private void FindNearbyWorkableBlocks(List<Block> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+
+        if (player == null)
+        {
+            return;
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            return;
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
         float focusRadius = Mathf.Max(0.5f, player.State.HarvestRange);
         float focusRadiusSqr = focusRadius * focusRadius;
-        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(focusRadius));
+        float globalWorkablePadding = Mathf.Max(0f, WorkableObject.GlobalMaxFocusActivationRadius);
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(focusRadius + globalWorkablePadding + 1f));
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
-
-        Block bestBlock = null;
-        float bestDistanceSqr = float.MaxValue;
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -478,32 +586,238 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                Vector3 offset = block.transform.position - origin;
-                offset.y = 0f;
-                float distanceSqr = offset.sqrMagnitude;
-                if (distanceSqr > focusRadiusSqr || distanceSqr >= bestDistanceSqr)
+                float distanceSqr = GetWorkableFocusDistanceSqr(workableObject, block, origin);
+                if (distanceSqr > focusRadiusSqr)
                 {
                     continue;
                 }
 
-                bestDistanceSqr = distanceSqr;
-                bestBlock = block;
+                results.Add(block);
             }
         }
-
-        return bestBlock;
     }
 
-    private void SetFocusedBlock(Block nextBlock)
+    private void FindNearbyBoxBlocks(List<Block> results)
     {
-        if (currentFocusedBlock == nextBlock)
+        if (results == null)
         {
             return;
         }
 
-        currentFocusedBlock?.SetFocusVisible(false);
-        currentFocusedBlock = nextBlock;
-        currentFocusedBlock?.SetFocusVisible(true);
+        results.Clear();
+
+        if (player == null)
+        {
+            return;
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            return;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float globalBoxPadding = Mathf.Max(0f, BoxObject.GlobalMaxFocusActivationRadius);
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(globalBoxPadding + 2f));
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(origin.x),
+            Mathf.RoundToInt(origin.z));
+
+        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        {
+            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (!cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+                {
+                    continue;
+                }
+
+                if (!(block.MapObject is BoxObject boxObject) || boxObject == null || !boxObject.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                if (!boxObject.IsWithinFocusRange(origin))
+                {
+                    continue;
+                }
+
+                results.Add(block);
+            }
+        }
+    }
+
+    private float GetWorkableFocusDistanceSqr(WorkableObject workableObject, Block block, Vector3 origin)
+    {
+        Bounds bounds = GetWorkableFocusBounds(workableObject, block);
+        Vector3 closestPoint = bounds.ClosestPoint(origin);
+        closestPoint.y = origin.y;
+
+        Vector3 offset = closestPoint - origin;
+        offset.y = 0f;
+        return offset.sqrMagnitude;
+    }
+
+    private Bounds GetWorkableFocusBounds(WorkableObject workableObject, Block block)
+    {
+        Renderer[] renderers = workableObject != null
+            ? workableObject.GetComponentsInChildren<Renderer>(true)
+            : null;
+        if (renderers != null)
+        {
+            Bounds combinedBounds = default;
+            bool hasBounds = false;
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer rendererComponent = renderers[i];
+                if (rendererComponent == null || !rendererComponent.enabled)
+                {
+                    continue;
+                }
+
+                if (!hasBounds)
+                {
+                    combinedBounds = rendererComponent.bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    combinedBounds.Encapsulate(rendererComponent.bounds);
+                }
+            }
+
+            if (hasBounds)
+            {
+                if (workableObject != null && workableObject.FocusActivationRadius > 0f)
+                {
+                    combinedBounds.Expand(new Vector3(
+                        workableObject.FocusActivationRadius * 2f,
+                        0f,
+                        workableObject.FocusActivationRadius * 2f));
+                }
+
+                return combinedBounds;
+            }
+        }
+
+        Vector3 center = block != null ? block.transform.position : workableObject.transform.position;
+        Vector3 size = Vector3.one;
+        if (workableObject != null)
+        {
+            MapObject.MapObjectStatus status = workableObject.Status;
+            size = new Vector3(
+                Mathf.Max(1f, status.mapSizeX),
+                1f,
+                Mathf.Max(1f, status.mapSizeY));
+        }
+
+        Bounds fallbackBounds = new Bounds(center, size);
+        if (workableObject != null && workableObject.FocusActivationRadius > 0f)
+        {
+            fallbackBounds.Expand(new Vector3(
+                workableObject.FocusActivationRadius * 2f,
+                0f,
+                workableObject.FocusActivationRadius * 2f));
+        }
+
+        return fallbackBounds;
+    }
+
+    private void SetFocusedBlock(Block nextBlock)
+    {
+        if (nextBlock == null)
+        {
+            SetFocusedBlocks(null);
+            return;
+        }
+
+        singleFocusedBlockBuffer.Clear();
+        singleFocusedBlockBuffer.Add(nextBlock);
+        SetFocusedBlocks(singleFocusedBlockBuffer);
+    }
+
+    private void SetFocusedBlocks(List<Block> nextBlocks)
+    {
+        focusRemovalBuffer.Clear();
+
+        foreach (Block currentBlock in currentFocusedBlocks)
+        {
+            if (ContainsFocusedBlock(nextBlocks, currentBlock))
+            {
+                continue;
+            }
+
+            focusRemovalBuffer.Add(currentBlock);
+        }
+
+        for (int i = 0; i < focusRemovalBuffer.Count; i++)
+        {
+            Block block = focusRemovalBuffer[i];
+            currentFocusedBlocks.Remove(block);
+            block?.SetFocusVisible(false);
+        }
+
+        if (nextBlocks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < nextBlocks.Count; i++)
+        {
+            Block block = nextBlocks[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            if (currentFocusedBlocks.Add(block))
+            {
+                block.SetFocusVisible(true);
+            }
+        }
+    }
+
+    private static bool ContainsFocusedBlock(List<Block> blocks, Block target)
+    {
+        if (blocks == null || target == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < blocks.Count; i++)
+        {
+            if (blocks[i] == target)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AppendUniqueBlocks(List<Block> target, List<Block> source)
+    {
+        if (target == null || source == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            Block block = source[i];
+            if (block == null || target.Contains(block))
+            {
+                continue;
+            }
+
+            target.Add(block);
+        }
     }
 
     private void ResolveMovementReference()

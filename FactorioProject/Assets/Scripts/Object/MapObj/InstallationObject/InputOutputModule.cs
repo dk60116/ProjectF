@@ -3,6 +3,9 @@ using UnityEngine;
 
 public class InputOutputModule : InstallationObject
 {
+    private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeGridCoordinates
+        = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
+
     public enum SlotLayoutType
     {
         None = 0,
@@ -80,6 +83,57 @@ public class InputOutputModule : InstallationObject
         }
     }
 
+    [System.Serializable]
+    public struct PersistentInputItemAreaState
+    {
+        public Vector2Int coordinate;
+        public int itemId;
+
+        public PersistentInputItemAreaState(Vector2Int coordinate, int itemId)
+        {
+            this.coordinate = coordinate;
+            this.itemId = itemId;
+        }
+    }
+
+    [System.Serializable]
+    public sealed class PersistentState
+    {
+        public List<Vector2Int> inputEnergyCoordinates = new List<Vector2Int>();
+        public List<PersistentInputItemAreaState> inputItemAreas = new List<PersistentInputItemAreaState>();
+        public List<Vector2Int> outputCoordinates = new List<Vector2Int>();
+        public List<Vector2Int> gridCoordinates = new List<Vector2Int>();
+        public List<Vector2Int> focusCoordinates = new List<Vector2Int>();
+        public float storedEnergy;
+        public float energyGaugeCapacity;
+        public bool hasActiveCraft;
+        public bool waitingForOutput;
+        public float remainingCraftTime;
+        public int activeRecipeIndex = -1;
+        public int activeOutputItemId = -1;
+        public int activeOutputCount;
+
+        public PersistentState Clone()
+        {
+            return new PersistentState
+            {
+                inputEnergyCoordinates = new List<Vector2Int>(inputEnergyCoordinates ?? new List<Vector2Int>()),
+                inputItemAreas = new List<PersistentInputItemAreaState>(inputItemAreas ?? new List<PersistentInputItemAreaState>()),
+                outputCoordinates = new List<Vector2Int>(outputCoordinates ?? new List<Vector2Int>()),
+                gridCoordinates = new List<Vector2Int>(gridCoordinates ?? new List<Vector2Int>()),
+                focusCoordinates = new List<Vector2Int>(focusCoordinates ?? new List<Vector2Int>()),
+                storedEnergy = storedEnergy,
+                energyGaugeCapacity = energyGaugeCapacity,
+                hasActiveCraft = hasActiveCraft,
+                waitingForOutput = waitingForOutput,
+                remainingCraftTime = remainingCraftTime,
+                activeRecipeIndex = activeRecipeIndex,
+                activeOutputItemId = activeOutputItemId,
+                activeOutputCount = activeOutputCount
+            };
+        }
+    }
+
     [SerializeField]
     private List<ItemIoEntry> inputList = new List<ItemIoEntry>();
     [SerializeField]
@@ -112,6 +166,10 @@ public class InputOutputModule : InstallationObject
     private List<RuntimeInputItemArea> runtimeInputItemAreas = new List<RuntimeInputItemArea>();
     [SerializeField]
     private List<Vector2Int> runtimeOutputCoordinates = new List<Vector2Int>();
+    [SerializeField]
+    private List<Vector2Int> runtimeGridCoordinates = new List<Vector2Int>();
+    [SerializeField]
+    private List<Vector2Int> runtimeFocusCoordinates = new List<Vector2Int>();
     [SerializeField]
     private float storedEnergy;
     [SerializeField]
@@ -208,6 +266,9 @@ public class InputOutputModule : InstallationObject
         }
     }
 
+    public IReadOnlyList<Vector2Int> RuntimeGridCoordinates => runtimeGridCoordinates;
+    public IReadOnlyList<Vector2Int> RuntimeFocusCoordinates => runtimeFocusCoordinates;
+
     public void ConfigureRuntimeAreas(
         IReadOnlyList<Vector2Int> inputEnergyCoordinates,
         IReadOnlyList<InputOutputModuleItemAreaBinding> inputItemBindings,
@@ -237,6 +298,116 @@ public class InputOutputModule : InstallationObject
         cachedTerrain = null;
     }
 
+    public void ConfigureRuntimeGridCoordinates(IReadOnlyList<Vector2Int> coordinates)
+    {
+        UnregisterRuntimeGridCoordinates();
+        runtimeGridCoordinates.Clear();
+
+        AddUniqueCoordinates(coordinates, runtimeGridCoordinates);
+        RegisterRuntimeGridCoordinates();
+    }
+
+    public void ConfigureRuntimeFocusCoordinates(IReadOnlyList<Vector2Int> coordinates)
+    {
+        runtimeFocusCoordinates.Clear();
+        AddUniqueCoordinates(coordinates, runtimeFocusCoordinates);
+    }
+
+    public PersistentState CapturePersistentState()
+    {
+        PersistentState state = new PersistentState
+        {
+            storedEnergy = storedEnergy,
+            energyGaugeCapacity = energyGaugeCapacity,
+            hasActiveCraft = hasActiveCraft,
+            waitingForOutput = waitingForOutput,
+            remainingCraftTime = remainingCraftTime,
+            activeRecipeIndex = activeRecipeIndex,
+            activeOutputItemId = activeOutputItemId,
+            activeOutputCount = activeOutputCount
+        };
+
+        AddUniqueCoordinates(runtimeInputEnergyCoordinates, state.inputEnergyCoordinates);
+        AddUniqueCoordinates(runtimeOutputCoordinates, state.outputCoordinates);
+        AddUniqueCoordinates(runtimeGridCoordinates, state.gridCoordinates);
+        AddUniqueCoordinates(runtimeFocusCoordinates, state.focusCoordinates);
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea area = runtimeInputItemAreas[i];
+            state.inputItemAreas.Add(new PersistentInputItemAreaState(area.coordinate, area.itemId));
+        }
+
+        return state;
+    }
+
+    public void ApplyPersistentState(PersistentState state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        runtimeInputEnergyCoordinates.Clear();
+        runtimeInputItemAreas.Clear();
+        runtimeOutputCoordinates.Clear();
+        runtimeFocusCoordinates.Clear();
+
+        AddUniqueCoordinates(state.inputEnergyCoordinates, runtimeInputEnergyCoordinates);
+        AddUniqueCoordinates(state.outputCoordinates, runtimeOutputCoordinates);
+        AddUniqueCoordinates(state.focusCoordinates, runtimeFocusCoordinates);
+
+        if (state.inputItemAreas != null)
+        {
+            for (int i = 0; i < state.inputItemAreas.Count; i++)
+            {
+                PersistentInputItemAreaState area = state.inputItemAreas[i];
+                if (area.itemId < 0 || ContainsRuntimeInputItemArea(area.coordinate, area.itemId))
+                {
+                    continue;
+                }
+
+                runtimeInputItemAreas.Add(new RuntimeInputItemArea(area.coordinate, area.itemId));
+            }
+        }
+
+        ConfigureRuntimeGridCoordinates(state.gridCoordinates);
+
+        storedEnergy = Mathf.Max(0f, state.storedEnergy);
+        energyGaugeCapacity = Mathf.Max(0f, state.energyGaugeCapacity);
+        hasActiveCraft = state.hasActiveCraft;
+        waitingForOutput = state.waitingForOutput;
+        remainingCraftTime = Mathf.Max(0f, state.remainingCraftTime);
+        activeRecipeIndex = state.activeRecipeIndex;
+        activeOutputItemId = state.activeOutputItemId;
+        activeOutputCount = Mathf.Max(0, state.activeOutputCount);
+        cachedTerrain = null;
+    }
+
+    public static bool TryGetModuleAtRuntimeGridCoordinate(Vector2Int coordinate, out InputOutputModule module)
+    {
+        module = null;
+        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            module = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
     private void Update()
     {
         if (!Application.isPlaying)
@@ -257,13 +428,20 @@ public class InputOutputModule : InstallationObject
         UpdateEnergyGaugeVisual();
     }
 
+    private void OnEnable()
+    {
+        RegisterRuntimeGridCoordinates();
+    }
+
     private void OnDisable()
     {
+        UnregisterRuntimeGridCoordinates();
         ReleaseEnergyGaugeVisual();
     }
 
     private void OnDestroy()
     {
+        UnregisterRuntimeGridCoordinates();
         ReleaseEnergyGaugeVisual();
     }
 
@@ -426,6 +604,7 @@ public class InputOutputModule : InstallationObject
     }
 
     public int RuntimeAreaMaxObjects => Mathf.Max(1, runtimeAreaMaxObjects);
+    public float CraftDurationSeconds => Mathf.Max(0.1f, craftDuration);
 
     public int ResolveRuntimeAreaCapacity(IReadOnlyList<Vector2Int> coordinates)
     {
@@ -1468,6 +1647,50 @@ public class InputOutputModule : InstallationObject
         }
     }
 
+    private void RegisterRuntimeGridCoordinates()
+    {
+        if (runtimeGridCoordinates == null || runtimeGridCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < runtimeGridCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = runtimeGridCoordinates[i];
+            if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+                || modules == null)
+            {
+                modules = new HashSet<InputOutputModule>();
+                registeredRuntimeGridCoordinates[coordinate] = modules;
+            }
+
+            modules.Add(this);
+        }
+    }
+
+    private void UnregisterRuntimeGridCoordinates()
+    {
+        if (runtimeGridCoordinates == null || runtimeGridCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < runtimeGridCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = runtimeGridCoordinates[i];
+            if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+                || modules == null)
+            {
+                continue;
+            }
+
+            modules.Remove(this);
+            if (modules.Count <= 0)
+            {
+                registeredRuntimeGridCoordinates.Remove(coordinate);
+            }
+        }
+    }
 #if UNITY_EDITOR
     private void OnValidate()
     {

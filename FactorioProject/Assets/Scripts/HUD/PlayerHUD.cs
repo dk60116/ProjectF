@@ -42,6 +42,19 @@ public class PlayerHUD : BagSlot
     [SerializeField]
     private Button installCompleteButton;
 
+    [SerializeField]
+    private InteractionButton InteractionButton;
+
+    [SerializeField]
+    private MapPaper mapPaper;
+
+    private TerrainGenerator cachedTerrainGenerator;
+    private BoxObject currentInteractionBoxObject;
+    private int lastObservedHandItemId = -2;
+    private int lastObservedHandItemCount = -1;
+    private int lastObservedHandMaxCount = -1;
+
+
     private class CraftingQueueEntry
     {
         public int itemId;
@@ -64,10 +77,14 @@ public class PlayerHUD : BagSlot
     {
         SubscribeSlotEvents();
         ResolveInstallModeButtons();
+        ResolveInteractionButton();
+        ResolveMapPaper();
         EnsureInstallationPlacementController();
         UpdateInstallModeButtons();
+        UpdateInteractionButtonState();
         RefreshBag(null);
         RefreshCraftingQueueSlots(true);
+        EnsureMapPaperBinding();
     }
 
     private void Start()
@@ -78,9 +95,13 @@ public class PlayerHUD : BagSlot
     private void OnEnable()
     {
         ResolveInstallModeButtons();
+        ResolveInteractionButton();
+        ResolveMapPaper();
         EnsureInstallationPlacementController();
         UpdateInstallModeButtons();
+        UpdateInteractionButtonState();
         EnsureInitialBagBinding();
+        EnsureMapPaperBinding();
     }
 
     private void OnDisable()
@@ -92,11 +113,16 @@ public class PlayerHUD : BagSlot
     private void Update()
     {
         EnsureHandBagBinding();
+        PollHandBagChanges();
         ResolveInstallModeButtons();
+        ResolveInteractionButton();
+        ResolveMapPaper();
         UpdateInstallModeButtons();
+        UpdateInteractionButtonState();
         UpdateInventoryEditLockState();
         UpdateCraftingQueue(Time.deltaTime);
         UpdateCraftingIngredientRefresh(Time.deltaTime);
+        EnsureMapPaperBinding();
 
         if (IsInventoryEditLocked())
         {
@@ -273,6 +299,7 @@ public class PlayerHUD : BagSlot
             boundHandBag.Changed += HandleHandBagChanged;
         }
 
+        ResetObservedHandState();
         RefreshHandSlot(boundHandBag);
     }
 
@@ -290,7 +317,11 @@ public class PlayerHUD : BagSlot
         }
 
         handBag.RefreshExternalStackCounts(false);
-        handSlot.Bind(handBag, 0, handBag.GetSlotItemId(0), handBag.GetSlotCount(0), handBag.GetSlotMaxCount(0));
+        int handItemId = handBag.GetSlotItemId(0);
+        int handItemCount = handBag.GetSlotCount(0);
+        int handMaxCount = handBag.GetSlotMaxCount(0);
+        handSlot.Bind(handBag, 0, handItemId, handItemCount, handMaxCount);
+        UpdateObservedHandState(handItemId, handItemCount, handMaxCount);
     }
 
     private PlayerBag GetPlayerHandBag()
@@ -315,6 +346,43 @@ public class PlayerHUD : BagSlot
         {
             BindHandBag(currentHandBag);
         }
+    }
+
+    private void PollHandBagChanges()
+    {
+        if (boundHandBag == null)
+        {
+            return;
+        }
+
+        boundHandBag.RefreshExternalStackCounts(false);
+        int handItemId = boundHandBag.GetSlotItemId(0);
+        int handItemCount = boundHandBag.GetSlotCount(0);
+        int handMaxCount = boundHandBag.GetSlotMaxCount(0);
+
+        if (handItemId == lastObservedHandItemId
+            && handItemCount == lastObservedHandItemCount
+            && handMaxCount == lastObservedHandMaxCount)
+        {
+            return;
+        }
+
+        RefreshHandSlot(boundHandBag);
+        RefreshVisibleCraftingUi();
+    }
+
+    private void ResetObservedHandState()
+    {
+        lastObservedHandItemId = -2;
+        lastObservedHandItemCount = -1;
+        lastObservedHandMaxCount = -1;
+    }
+
+    private void UpdateObservedHandState(int itemId, int itemCount, int maxItemCount)
+    {
+        lastObservedHandItemId = itemId;
+        lastObservedHandItemCount = itemCount;
+        lastObservedHandMaxCount = maxItemCount;
     }
 
     private void EnsureInstallationPlacementController()
@@ -345,6 +413,52 @@ public class PlayerHUD : BagSlot
         installCancelButton = ResolveButtonReference(installCancelButton, "InstallCancelButton");
         installRotationButton = ResolveButtonReference(installRotationButton, "RotationButton", "InstallRotationButton");
         installCompleteButton = ResolveButtonReference(installCompleteButton, "CompleteButton", "InstallCompleteButton");
+    }
+
+    private void ResolveMapPaper()
+    {
+        if (mapPaper != null)
+        {
+            return;
+        }
+
+        Transform paperTransform = transform.Find("Map/Paper");
+        if (paperTransform == null)
+        {
+            paperTransform = FindDescendantByName(transform, "Paper");
+        }
+
+        if (paperTransform == null)
+        {
+            return;
+        }
+
+        mapPaper = paperTransform.GetComponent<MapPaper>();
+        if (mapPaper == null)
+        {
+            mapPaper = paperTransform.gameObject.AddComponent<MapPaper>();
+        }
+    }
+
+    private void ResolveInteractionButton()
+    {
+        if (InteractionButton != null)
+        {
+            BindInteractionButton();
+            return;
+        }
+
+        InteractionButton = GetComponentInChildren<InteractionButton>(true);
+        if (InteractionButton == null)
+        {
+            Transform buttonTransform = FindDescendantByName(transform, "InteractionButton");
+            if (buttonTransform != null)
+            {
+                InteractionButton = buttonTransform.GetComponent<InteractionButton>();
+            }
+        }
+
+        BindInteractionButton();
     }
 
     private Button ResolveButtonReference(Button currentButton, params string[] candidateNames)
@@ -380,6 +494,49 @@ public class PlayerHUD : BagSlot
         return null;
     }
 
+    private void EnsureMapPaperBinding()
+    {
+        if (mapPaper == null)
+        {
+            return;
+        }
+
+        Transform targetTransform = GameManager.Instance != null && GameManager.Instance.Player != null
+            ? GameManager.Instance.Player.transform
+            : null;
+        mapPaper.Bind(ResolveTerrainGenerator(), targetTransform);
+    }
+
+    private TerrainGenerator ResolveTerrainGenerator()
+    {
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
+        }
+
+        return cachedTerrainGenerator;
+    }
+
+    private static Transform FindDescendantByName(Transform root, string targetName)
+    {
+        if (root == null || string.IsNullOrEmpty(targetName))
+        {
+            return null;
+        }
+
+        Transform[] descendants = root.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < descendants.Length; i++)
+        {
+            Transform candidate = descendants[i];
+            if (candidate != null && candidate.name == targetName)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
     private void UpdateInstallModeButtons()
     {
         bool isInstallModeActive = GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive;
@@ -402,6 +559,136 @@ public class PlayerHUD : BagSlot
         }
 
         button.interactable = isVisible;
+    }
+
+    private void UpdateInteractionButtonState()
+    {
+        if (InteractionButton == null)
+        {
+            return;
+        }
+
+        if (GameManager.Instance == null
+            || GameManager.Instance.Player == null
+            || GameManager.Instance.InstallationPlacementActive)
+        {
+            ClearInteractionButtonState();
+            return;
+        }
+
+        Player currentPlayer = GameManager.Instance.Player;
+        Transform bodyTransform = currentPlayer.BodyTransform != null ? currentPlayer.BodyTransform : currentPlayer.transform;
+        if (bodyTransform == null)
+        {
+            ClearInteractionButtonState();
+            return;
+        }
+
+        if (!BoxObject.TryFindNearest(bodyTransform.position, out BoxObject nearestBoxObject))
+        {
+            ClearInteractionButtonState();
+            return;
+        }
+
+        currentInteractionBoxObject = nearestBoxObject;
+        InteractionButton.SetIcon(ResolveInteractionIcon(nearestBoxObject));
+        InteractionButton.SetVisible(true);
+    }
+
+    private void ClearInteractionButtonState()
+    {
+        currentInteractionBoxObject = null;
+        if (InteractionButton == null)
+        {
+            return;
+        }
+
+        InteractionButton.SetIcon(null);
+        InteractionButton.SetVisible(false);
+    }
+
+    private static Sprite ResolveInteractionIcon(BoxObject boxObject)
+    {
+        if (boxObject == null || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        int itemId = boxObject.ResolveItemId();
+        if (itemId < 0)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null || definition.id != itemId)
+            {
+                continue;
+            }
+
+            if (definition.interactionButtonList == null || definition.interactionButtonList.Count <= 0)
+            {
+                return null;
+            }
+
+            int preferredIconIndex = boxObject.IsOpen ? 1 : 0;
+            if (preferredIconIndex >= 0 && preferredIconIndex < definition.interactionButtonList.Count)
+            {
+                Sprite preferredIcon = definition.interactionButtonList[preferredIconIndex];
+                if (preferredIcon != null)
+                {
+                    return preferredIcon;
+                }
+            }
+
+            Sprite closedIcon = definition.interactionButtonList[0];
+            if (closedIcon != null)
+            {
+                return closedIcon;
+            }
+
+            for (int iconIndex = 0; iconIndex < definition.interactionButtonList.Count; iconIndex++)
+            {
+                Sprite fallbackIcon = definition.interactionButtonList[iconIndex];
+                if (fallbackIcon != null)
+                {
+                    return fallbackIcon;
+                }
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    private void BindInteractionButton()
+    {
+        if (InteractionButton == null)
+        {
+            return;
+        }
+
+        InteractionButton.SetClickAction(HandleInteractionButtonClicked);
+    }
+
+    private void HandleInteractionButtonClicked()
+    {
+        if (currentInteractionBoxObject == null)
+        {
+            return;
+        }
+
+        currentInteractionBoxObject.ToggleOpenState();
+        UpdateInteractionButtonState();
     }
 
     private static Type ResolveInstallationPlacementControllerType()
@@ -427,21 +714,25 @@ public class PlayerHUD : BagSlot
 
     private void SubscribeSlotEvents()
     {
-        if (bagSlots == null)
+        if (bagSlots != null)
         {
-            return;
+            for (int i = 0; i < bagSlots.Count; i++)
+            {
+                BagSlot slot = bagSlots[i];
+                if (slot == null)
+                {
+                    continue;
+                }
+
+                slot.CraftingVisibilityChanged -= HandleCraftingVisibilityChanged;
+                slot.CraftingVisibilityChanged += HandleCraftingVisibilityChanged;
+            }
         }
 
-        for (int i = 0; i < bagSlots.Count; i++)
+        if (handSlot != null)
         {
-            BagSlot slot = bagSlots[i];
-            if (slot == null)
-            {
-                continue;
-            }
-
-            slot.CraftingVisibilityChanged -= HandleCraftingVisibilityChanged;
-            slot.CraftingVisibilityChanged += HandleCraftingVisibilityChanged;
+            handSlot.CraftingVisibilityChanged -= HandleCraftingVisibilityChanged;
+            handSlot.CraftingVisibilityChanged += HandleCraftingVisibilityChanged;
         }
     }
 
@@ -626,13 +917,13 @@ public class PlayerHUD : BagSlot
             return true;
         }
 
-        PlayerBag bag = GameManager.Instance.Player.GetBag();
-        if (bag != null && bag.HasExistingStackSpaceForItem(itemId))
+        Player player = GameManager.Instance.Player;
+        if (player.CanAcceptHandObject(itemId))
         {
             return false;
         }
 
-        return IsHandBlocked(itemId);
+        return !player.CanClearHandIntoBag();
     }
 
     private bool TryDeliverCraftedItems(CraftingQueueEntry entry)
@@ -648,28 +939,12 @@ public class PlayerHUD : BagSlot
         }
 
         Player player = GameManager.Instance.Player;
-        PlayerBag bag = player.GetBag();
         Vector3 startPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
         bool deliveredAny = false;
         int deliveredIndex = 0;
         while (entry.remainingOutputCount > 0)
         {
-            if (bag != null && bag.TryReserveObjectInExistingStack(entry.itemId, out PortableObject bagTarget))
-            {
-                AnimateCraftedPortableMove(
-                    entry.itemId,
-                    bagTarget,
-                    startPosition,
-                    deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval),
-                    () => bag.CommitReservedObject(bagTarget),
-                    () => bag.ReleaseReservedObject(bagTarget));
-                entry.remainingOutputCount--;
-                deliveredAny = true;
-                deliveredIndex++;
-                continue;
-            }
-
-            if (IsHandBlocked(entry.itemId))
+            if (!player.CanAcceptHandObject(entry.itemId) && !player.TryStoreHandItemsInBag())
             {
                 break;
             }

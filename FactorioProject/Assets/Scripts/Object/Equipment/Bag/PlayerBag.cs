@@ -362,6 +362,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = clamped;
+        TryMergeDuplicateItemStacks();
         if (notify)
         {
             NotifyChanged();
@@ -413,6 +414,49 @@ public class PlayerBag : MonoBehaviour
         return false;
     }
 
+    public bool HasSpaceForItem(int objectId)
+    {
+        EnsureInitialized();
+
+        if (objectId < 0 || portableStack == null || currentStack == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < portableStack.Count; i++)
+        {
+            if (CanAddObject(i, objectId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public int GetAvailableCapacityForItem(int objectId)
+    {
+        EnsureInitialized();
+
+        if (objectId < 0 || portableStack == null || currentStack == null)
+        {
+            return 0;
+        }
+
+        int totalCapacity = 0;
+        for (int i = 0; i < portableStack.Count; i++)
+        {
+            if (!CanAddObject(i, objectId))
+            {
+                continue;
+            }
+
+            totalCapacity += Mathf.Max(0, GetSlotMaxCount(i) - GetSlotCount(i));
+        }
+
+        return totalCapacity;
+    }
+
     public bool TryReserveObjectInExistingStack(int objectId, out PortableObject targetPortableObject)
     {
         EnsureInitialized();
@@ -442,6 +486,24 @@ public class PlayerBag : MonoBehaviour
         }
 
         return false;
+    }
+
+    public bool TryReserveObject(int objectId, out PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        targetPortableObject = null;
+
+        if (objectId < 0 || portableStack == null || currentStack == null)
+        {
+            return false;
+        }
+
+        if (TryReserveObjectToFirstValidStack(objectId, true, out targetPortableObject))
+        {
+            return true;
+        }
+
+        return TryReserveObjectToFirstValidStack(objectId, false, out targetPortableObject);
     }
 
     public void CommitReservedObject(PortableObject targetPortableObject)
@@ -474,6 +536,7 @@ public class PlayerBag : MonoBehaviour
             targetPortableObject.gameObject.SetActive(true);
         }
 
+        TryMergeDuplicateItemStacks();
         NotifyChanged();
     }
 
@@ -489,6 +552,11 @@ public class PlayerBag : MonoBehaviour
         if (targetPortableObject.gameObject.activeSelf)
         {
             targetPortableObject.gameObject.SetActive(false);
+        }
+
+        if (TryMergeDuplicateItemStacks())
+        {
+            NotifyChanged();
         }
     }
 
@@ -529,6 +597,7 @@ public class PlayerBag : MonoBehaviour
             topObject.gameObject.SetActive(false);
         }
 
+        TryMergeDuplicateItemStacks();
         NotifyChanged();
         return objectId >= 0;
     }
@@ -581,6 +650,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = 0;
+        TryMergeDuplicateItemStacks();
         NotifyChanged();
         return objectId >= 0 && removedCount > 0;
     }
@@ -615,6 +685,7 @@ public class PlayerBag : MonoBehaviour
         int totalRemoved = count - remaining;
         if (totalRemoved > 0)
         {
+            TryMergeDuplicateItemStacks();
             NotifyChanged();
         }
 
@@ -663,6 +734,134 @@ public class PlayerBag : MonoBehaviour
 
         currentStack[index] = occupiedCount - removeCount;
         return removeCount;
+    }
+
+    private bool TryMergeDuplicateItemStacks()
+    {
+        EnsureInitialized();
+
+        if (portableStack == null || currentStack == null || reservedObjects.Count > 0)
+        {
+            return false;
+        }
+
+        bool mergedAny = false;
+        int slotCount = Mathf.Min(portableStack.Count, currentStack.Count);
+        for (int targetIndex = 0; targetIndex < slotCount; targetIndex++)
+        {
+            int itemId = GetSlotItemId(targetIndex);
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            int targetCount = GetSlotCount(targetIndex);
+            int targetMaxCount = GetSlotMaxCount(targetIndex);
+            if (targetCount <= 0 || targetMaxCount <= targetCount)
+            {
+                continue;
+            }
+
+            for (int sourceIndex = targetIndex + 1; sourceIndex < slotCount && targetCount < targetMaxCount; sourceIndex++)
+            {
+                if (GetSlotItemId(sourceIndex) != itemId)
+                {
+                    continue;
+                }
+
+                int sourceCount = GetSlotCount(sourceIndex);
+                if (sourceCount <= 0)
+                {
+                    continue;
+                }
+
+                int moveCount = Mathf.Min(targetMaxCount - targetCount, sourceCount);
+                if (moveCount <= 0)
+                {
+                    continue;
+                }
+
+                if (!TryMoveItemsBetweenSlots(sourceIndex, targetIndex, itemId, moveCount))
+                {
+                    continue;
+                }
+
+                mergedAny = true;
+                targetCount += moveCount;
+            }
+        }
+
+        return mergedAny;
+    }
+
+    private bool TryMoveItemsBetweenSlots(int sourceIndex, int targetIndex, int itemId, int moveCount)
+    {
+        if (moveCount <= 0
+            || sourceIndex == targetIndex
+            || sourceIndex < 0
+            || targetIndex < 0
+            || sourceIndex >= portableStack.Count
+            || targetIndex >= portableStack.Count
+            || sourceIndex >= currentStack.Count
+            || targetIndex >= currentStack.Count)
+        {
+            return false;
+        }
+
+        PortableStack sourceStack = portableStack[sourceIndex];
+        PortableStack targetStack = portableStack[targetIndex];
+        if (sourceStack == null
+            || targetStack == null
+            || sourceStack.stack == null
+            || targetStack.stack == null)
+        {
+            return false;
+        }
+
+        int sourceCount = Mathf.Clamp(currentStack[sourceIndex], 0, sourceStack.stack.Count);
+        int targetCount = Mathf.Clamp(currentStack[targetIndex], 0, targetStack.stack.Count);
+        if (sourceCount < moveCount || targetCount + moveCount > targetStack.stack.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < moveCount; i++)
+        {
+            PortableObject targetPortableObject = targetStack.stack[targetCount + i];
+            PortableObject sourcePortableObject = sourceStack.stack[sourceCount - 1 - i];
+            if (targetPortableObject == null
+                || sourcePortableObject == null
+                || reservedObjects.Contains(targetPortableObject)
+                || reservedObjects.Contains(sourcePortableObject))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < moveCount; i++)
+        {
+            PortableObject targetPortableObject = targetStack.stack[targetCount + i];
+            PortableObject sourcePortableObject = sourceStack.stack[sourceCount - 1 - i];
+
+            if (!targetPortableObject.SetItem(itemId))
+            {
+                return false;
+            }
+
+            if (!targetPortableObject.gameObject.activeSelf)
+            {
+                targetPortableObject.gameObject.SetActive(true);
+            }
+
+            if (sourcePortableObject.gameObject.activeSelf)
+            {
+                sourcePortableObject.gameObject.SetActive(false);
+            }
+        }
+
+        currentStack[targetIndex] = targetCount + moveCount;
+        currentStack[sourceIndex] = sourceCount - moveCount;
+        return true;
     }
 
     public PortableObject GetTopObject(int index)
@@ -877,6 +1076,42 @@ public class PlayerBag : MonoBehaviour
 
         reservedObjects.Add(targetPortableObject);
         return true;
+    }
+
+    private bool TryReserveObjectToFirstValidStack(int objectId, bool requireExistingItems, out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+
+        if (portableStack == null || currentStack == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < portableStack.Count; i++)
+        {
+            if (!CanAddObject(i, objectId))
+            {
+                continue;
+            }
+
+            bool hasItems = currentStack[i] > 0;
+            if (hasItems != requireExistingItems)
+            {
+                continue;
+            }
+
+            if (!CanStackObject(i, objectId))
+            {
+                continue;
+            }
+
+            if (TryReserveObjectToSlot(i, objectId, out targetPortableObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryFindPortableObjectIndex(PortableObject targetPortableObject, out int stackIndex, out int objectIndex)
