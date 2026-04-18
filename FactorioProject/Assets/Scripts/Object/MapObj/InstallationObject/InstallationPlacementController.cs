@@ -16,6 +16,18 @@ public class InstallationPlacementController : MonoBehaviour
     [SerializeField]
     private Button installCompleteButton;
     [SerializeField]
+    private Button mapEditButton;
+    [SerializeField]
+    private Button mapEditCancelButton;
+    [SerializeField]
+    private Button mapEditRotationButton;
+    [SerializeField]
+    private Button mapEditCompleteButton;
+    [SerializeField]
+    private Button mapEditPackButton;
+    [SerializeField]
+    private Button mapEditUndoButton;
+    [SerializeField]
     private Color installPreviewTint = new Color(0.45f, 0.95f, 1f, 0.85f);
     [SerializeField, Min(0f)]
     private float installPreviewVerticalOffset = 0.05f;
@@ -57,32 +69,69 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly List<MapObject> installPreviewInstances = new List<MapObject>();
     private readonly Dictionary<MapObject, int> installPreviewQuarterTurnsByPreview = new Dictionary<MapObject, int>();
     private readonly Dictionary<MapObject, Vector2Int> installPreviewAnchorCoordinates = new Dictionary<MapObject, Vector2Int>();
+    private InstallationObject selectedEditableInstallation;
+    private Vector2Int selectedEditableAnchorCoordinate;
+    private InstallationEditSession activeInstallationEditSession;
+    private readonly Stack<PackedInstallationSession> packedInstallationHistory = new Stack<PackedInstallationSession>();
+    private bool mapEditModeActive;
 
     private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
     private static readonly int EmissionColorPropertyId = Shader.PropertyToID("_EmissionColor");
+
+    private sealed class InstallationEditSession
+    {
+        public InstallationObject originalInstallation;
+        public ItemDefinition definition;
+        public Vector2Int originalAnchorCoordinate;
+        public int originalQuarterTurns;
+        public List<Vector2Int> originalOccupiedCoordinates = new List<Vector2Int>();
+        public Dictionary<Vector2Int, List<int>> blockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
+        public InputOutputModule.PersistentState inputOutputState;
+        public bool? boxIsOpen;
+        public bool itemFilterMaskInitialized;
+        public List<ulong> itemFilterMaskWords = new List<ulong>();
+    }
+
+    private sealed class PackedInstallationSession
+    {
+        public InstallationEditSession editSession;
+        public Vector2Int anchorCoordinate;
+        public int quarterTurns;
+        public int itemId;
+        public Vector2Int dropCoordinate;
+        public PortableObject portableObject;
+    }
 
     private void Awake()
     {
         ResolveInstallButtons();
         BindInstallButtons();
         SetInstallButtonVisible(false);
+        RefreshMapEditButtonState();
     }
 
     private void OnEnable()
     {
         ResolveInstallButtons();
+        BindInstallButtons();
         RefreshInstallButton();
+        RefreshMapEditButtonState();
     }
 
     private void Update()
     {
         ResolveInstallButtons();
         RefreshInstallButton();
+        RefreshMapEditButtonState();
         UpdateInstallGrid(Time.deltaTime);
 
         if (!IsInstallationModeActive())
         {
+            if (mapEditModeActive)
+            {
+                UpdateMapEditSelectionInput();
+            }
             return;
         }
 
@@ -101,14 +150,36 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void OnDisable()
     {
-        ClearInstallPreview();
+        ClearEditableInstallationSelection();
+        mapEditModeActive = false;
+        GameManager.Instance?.SetMapEditActive(false);
+        FinalizePackedInstallationHistory();
+        if (IsEditingInstallation())
+        {
+            CancelInstallationEdit();
+        }
+        else
+        {
+            ClearInstallPreview();
+        }
         SetInstallButtonVisible(false);
+        RefreshMapEditButtonState();
     }
 
     private void OnDestroy()
     {
         UnbindInstallButtons();
-        ClearInstallPreview();
+        mapEditModeActive = false;
+        GameManager.Instance?.SetMapEditActive(false);
+        FinalizePackedInstallationHistory();
+        if (IsEditingInstallation())
+        {
+            CancelInstallationEdit();
+        }
+        else
+        {
+            ClearInstallPreview();
+        }
         ReleaseInstallGridResources();
     }
 
@@ -137,6 +208,42 @@ public class InstallationPlacementController : MonoBehaviour
     public void SetInstallButton(Button button)
     {
         SetInstallButtons(button, installCancelButton, installRotationButton, installCompleteButton);
+    }
+
+    public void SetMapEditButtons(Button button, Button cancelButton, Button rotationButton, Button completeButton, Button packButton, Button undoButton)
+    {
+        bool isSameBinding = mapEditButton == button
+                             && mapEditCancelButton == cancelButton
+                             && mapEditRotationButton == rotationButton
+                             && mapEditCompleteButton == completeButton
+                             && mapEditPackButton == packButton
+                             && mapEditUndoButton == undoButton
+                             && mapEditButton != null;
+        if (isSameBinding)
+        {
+            return;
+        }
+
+        UnbindButton(mapEditButton, HandleMapEditButtonClicked);
+        UnbindButton(mapEditCancelButton, HandleInstallCancelClicked);
+        UnbindButton(mapEditRotationButton, HandleInstallRotationClicked);
+        UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        UnbindButton(mapEditPackButton, HandleMapEditPackClicked);
+        UnbindButton(mapEditUndoButton, HandleMapEditUndoClicked);
+        mapEditButton = button;
+        mapEditCancelButton = cancelButton;
+        mapEditRotationButton = rotationButton;
+        mapEditCompleteButton = completeButton;
+        mapEditPackButton = packButton;
+        mapEditUndoButton = undoButton;
+        ResolveInstallButtons();
+        BindButton(mapEditButton, HandleMapEditButtonClicked);
+        BindButton(mapEditCancelButton, HandleInstallCancelClicked);
+        BindButton(mapEditRotationButton, HandleInstallRotationClicked);
+        BindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        BindButton(mapEditPackButton, HandleMapEditPackClicked);
+        BindButton(mapEditUndoButton, HandleMapEditUndoClicked);
+        RefreshMapEditButtonState();
     }
 
     private void ResolveInstallButtons()
@@ -189,13 +296,62 @@ public class InstallationPlacementController : MonoBehaviour
                     || candidate.name == "InstallCompleteButton")
                 {
                     installCompleteButton = candidate;
+                    continue;
                 }
+            }
+
+            if (mapEditButton == null)
+            {
+                if ((playerHud != null && playerHud.MapEditButton == candidate) || candidate.name == "MapEditButton")
+                {
+                    mapEditButton = candidate;
+                }
+            }
+
+            if (mapEditPackButton == null && (candidate.name == "PackButton" || candidate.name == "Pack"))
+            {
+                mapEditPackButton = candidate;
+            }
+
+            if (mapEditUndoButton == null && (candidate.name == "UnDoButton" || candidate.name == "UndoButton"))
+            {
+                mapEditUndoButton = candidate;
+            }
+        }
+
+        if (playerHud != null)
+        {
+            if (mapEditCancelButton == null)
+            {
+                mapEditCancelButton = playerHud.MapEditCancelButton;
+            }
+
+            if (mapEditRotationButton == null)
+            {
+                mapEditRotationButton = playerHud.MapEditRotationButton;
+            }
+
+            if (mapEditCompleteButton == null)
+            {
+                mapEditCompleteButton = playerHud.MapEditCompleteButton;
             }
         }
     }
 
     private void UpdateInstallButtonVisibility(PlayerBag handBag)
     {
+        if (mapEditModeActive)
+        {
+            SetInstallButtonVisible(false);
+            return;
+        }
+
+        if (IsEditingInstallation())
+        {
+            SetInstallButtonVisible(false);
+            return;
+        }
+
         int handItemId = handBag != null ? handBag.GetSlotItemId(0) : -1;
         SetInstallButtonVisible(IsInstallationItem(handItemId));
     }
@@ -209,6 +365,13 @@ public class InstallationPlacementController : MonoBehaviour
         {
             activeInstallDefinition = null;
             activeInstallPreview = null;
+            return;
+        }
+
+        if (IsEditingInstallation())
+        {
+            CleanupInstallPreviewReferences();
+            EnsureValidActiveInstallPreview();
             return;
         }
 
@@ -226,6 +389,11 @@ public class InstallationPlacementController : MonoBehaviour
 
         CleanupInstallPreviewReferences();
         EnsureValidActiveInstallPreview();
+    }
+
+    private bool IsEditingInstallation()
+    {
+        return activeInstallationEditSession != null;
     }
 
     private bool IsInstallationItem(int itemId)
@@ -327,6 +495,12 @@ public class InstallationPlacementController : MonoBehaviour
         BindButton(installCancelButton, HandleInstallCancelClicked);
         BindButton(installRotationButton, HandleInstallRotationClicked);
         BindButton(installCompleteButton, HandleInstallCompleteClicked);
+        BindButton(mapEditButton, HandleMapEditButtonClicked);
+        BindButton(mapEditCancelButton, HandleInstallCancelClicked);
+        BindButton(mapEditRotationButton, HandleInstallRotationClicked);
+        BindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        BindButton(mapEditPackButton, HandleMapEditPackClicked);
+        BindButton(mapEditUndoButton, HandleMapEditUndoClicked);
     }
 
     private void UnbindInstallButtons()
@@ -335,6 +509,12 @@ public class InstallationPlacementController : MonoBehaviour
         UnbindButton(installCancelButton, HandleInstallCancelClicked);
         UnbindButton(installRotationButton, HandleInstallRotationClicked);
         UnbindButton(installCompleteButton, HandleInstallCompleteClicked);
+        UnbindButton(mapEditButton, HandleMapEditButtonClicked);
+        UnbindButton(mapEditCancelButton, HandleInstallCancelClicked);
+        UnbindButton(mapEditRotationButton, HandleInstallRotationClicked);
+        UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        UnbindButton(mapEditPackButton, HandleMapEditPackClicked);
+        UnbindButton(mapEditUndoButton, HandleMapEditUndoClicked);
     }
 
     private static void BindButton(Button button, UnityEngine.Events.UnityAction action)
@@ -358,8 +538,409 @@ public class InstallationPlacementController : MonoBehaviour
         button.onClick.RemoveListener(action);
     }
 
+    private void RefreshMapEditButtonState()
+    {
+        if (mapEditButton == null)
+        {
+            return;
+        }
+
+        CleanupSelectedEditableInstallation();
+        mapEditButton.gameObject.SetActive(true);
+        mapEditButton.interactable = !IsInstallationModeActive();
+
+        bool canPack = mapEditModeActive && CanPackSelectedInstallation();
+        if (mapEditPackButton != null)
+        {
+            mapEditPackButton.interactable = canPack;
+        }
+
+        bool canUndo = mapEditModeActive && !IsEditingInstallation() && packedInstallationHistory.Count > 0;
+        if (mapEditUndoButton != null)
+        {
+            mapEditUndoButton.interactable = canUndo;
+        }
+    }
+
+    private bool CanPackSelectedInstallation()
+    {
+        if (!mapEditModeActive)
+        {
+            return false;
+        }
+
+        if (IsEditingInstallation())
+        {
+            CleanupInstallPreviewReferences();
+            return activeInstallationEditSession != null
+                   && activeInstallPreview != null
+                   && TryGetPreviewAnchorCoordinate(activeInstallPreview, out _);
+        }
+
+        CleanupSelectedEditableInstallation();
+        return selectedEditableInstallation != null
+               && selectedEditableInstallation.TryGetPlacementRuntime(out _, out _);
+    }
+
+    private void UpdateMapEditSelectionInput()
+    {
+        if (!TryGetPrimaryPointerDown(out Vector2 pointerPosition) || IsPointerOverBlockingUi(pointerPosition))
+        {
+            return;
+        }
+
+        if (TryGetEditableInstallationAtPointer(pointerPosition, out InstallationObject installationObject, out Vector2Int anchorCoordinate))
+        {
+            SelectEditableInstallation(installationObject, anchorCoordinate);
+            if (!IsInstallationModeActive())
+            {
+                BeginInstallationEdit(installationObject);
+            }
+            return;
+        }
+
+        ClearEditableInstallationSelection();
+    }
+
+    private bool TryGetEditableInstallationAtPointer(Vector2 pointerPosition, out InstallationObject installationObject, out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+
+        Camera targetCamera = ResolveInstallPreviewCamera();
+        if (targetCamera == null)
+        {
+            return false;
+        }
+
+        Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
+        RaycastHit[] hits = Physics.RaycastAll(ray, 512f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        if (hits != null && hits.Length > 0)
+        {
+            System.Array.Sort(hits, CompareRaycastHits);
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit hit = hits[i];
+                if (TryResolveEditableInstallation(hit.collider, out installationObject, out anchorCoordinate))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveEditableInstallation(Collider hitCollider, out InstallationObject installationObject, out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+
+        if (hitCollider == null)
+        {
+            return false;
+        }
+
+        installationObject = hitCollider.GetComponentInParent<InstallationObject>();
+        if (installationObject == null)
+        {
+            Block hitBlock = hitCollider.GetComponentInParent<Block>();
+            if (hitBlock != null)
+            {
+                installationObject = hitBlock.MapObject as InstallationObject;
+            }
+        }
+
+        if (installationObject == null || !installationObject.TryGetPlacementRuntime(out anchorCoordinate, out _))
+        {
+            installationObject = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    private void SelectEditableInstallation(InstallationObject installationObject, Vector2Int anchorCoordinate)
+    {
+        selectedEditableInstallation = installationObject;
+        selectedEditableAnchorCoordinate = anchorCoordinate;
+        RefreshMapEditButtonState();
+    }
+
+    private void ClearEditableInstallationSelection()
+    {
+        selectedEditableInstallation = null;
+        selectedEditableAnchorCoordinate = Vector2Int.zero;
+        RefreshMapEditButtonState();
+    }
+
+    private void CleanupSelectedEditableInstallation()
+    {
+        if (selectedEditableInstallation == null)
+        {
+            return;
+        }
+
+        if (!selectedEditableInstallation.gameObject.activeInHierarchy
+            || !selectedEditableInstallation.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+        {
+            selectedEditableInstallation = null;
+            selectedEditableAnchorCoordinate = Vector2Int.zero;
+            return;
+        }
+
+        selectedEditableAnchorCoordinate = anchorCoordinate;
+    }
+
+    private void HandleMapEditButtonClicked()
+    {
+        if (IsInstallationModeActive())
+        {
+            RefreshMapEditButtonState();
+            return;
+        }
+
+        if (mapEditModeActive)
+        {
+            SetMapEditModeActive(false);
+            RefreshMapEditButtonState();
+            return;
+        }
+
+        SetMapEditModeActive(true);
+        RefreshMapEditButtonState();
+    }
+
+    private void HandleMapEditPackClicked()
+    {
+        if (!TryPackSelectedInstallation())
+        {
+            RefreshMapEditButtonState();
+            return;
+        }
+
+        RefreshMapEditButtonState();
+    }
+
+    private void HandleMapEditUndoClicked()
+    {
+        if (!TryUndoPackedInstallation())
+        {
+            RefreshMapEditButtonState();
+            return;
+        }
+
+        RefreshMapEditButtonState();
+    }
+
+    private bool TryPackSelectedInstallation()
+    {
+        if (!mapEditModeActive)
+        {
+            return false;
+        }
+
+        bool wasEditingInstallation = IsEditingInstallation();
+        InstallationEditSession editSession;
+        Vector2Int targetAnchorCoordinate;
+        int targetQuarterTurns;
+
+        if (wasEditingInstallation)
+        {
+            CleanupInstallPreviewReferences();
+            if (activeInstallationEditSession == null
+                || activeInstallPreview == null
+                || !TryGetPreviewAnchorCoordinate(activeInstallPreview, out targetAnchorCoordinate))
+            {
+                return false;
+            }
+
+            editSession = activeInstallationEditSession;
+            targetQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+            activeInstallationEditSession = null;
+        }
+        else
+        {
+            CleanupSelectedEditableInstallation();
+            if (selectedEditableInstallation == null
+                || !selectedEditableInstallation.TryGetPlacementRuntime(out targetAnchorCoordinate, out targetQuarterTurns)
+                || !TryCreateInstallationEditSession(selectedEditableInstallation, out editSession))
+            {
+                return false;
+            }
+
+            DetachInstallationForEditing(editSession);
+        }
+
+        int itemId = editSession?.definition != null
+            ? editSession.definition.id
+            : editSession?.originalInstallation != null ? editSession.originalInstallation.ResolveItemId() : -1;
+        if (itemId < 0)
+        {
+            RestoreEditedInstallation(editSession, targetAnchorCoordinate, targetQuarterTurns);
+            ClearInstallPreview();
+            return false;
+        }
+
+        if (!TryDropPackedPortable(itemId, targetAnchorCoordinate, out PortableObject portableObject, out Vector2Int dropCoordinate))
+        {
+            RestoreEditedInstallation(editSession, targetAnchorCoordinate, targetQuarterTurns);
+            ClearInstallPreview();
+            return false;
+        }
+
+        packedInstallationHistory.Push(new PackedInstallationSession
+        {
+            editSession = editSession,
+            anchorCoordinate = targetAnchorCoordinate,
+            quarterTurns = ((targetQuarterTurns % 4) + 4) % 4,
+            itemId = itemId,
+            dropCoordinate = dropCoordinate,
+            portableObject = portableObject
+        });
+
+        ClearEditableInstallationSelection();
+        ClearInstallPreview();
+        return true;
+    }
+
+    private bool TryUndoPackedInstallation()
+    {
+        if (!mapEditModeActive || IsEditingInstallation() || packedInstallationHistory.Count <= 0)
+        {
+            return false;
+        }
+
+        PackedInstallationSession packedSession = packedInstallationHistory.Peek();
+        if (packedSession == null || packedSession.editSession == null)
+        {
+            packedInstallationHistory.Pop();
+            return false;
+        }
+
+        if (!TryRemovePackedPortable(packedSession))
+        {
+            return false;
+        }
+
+        packedInstallationHistory.Pop();
+        RestoreEditedInstallation(
+            packedSession.editSession,
+            packedSession.anchorCoordinate,
+            packedSession.quarterTurns);
+        return true;
+    }
+
+    private bool TryDropPackedPortable(int itemId, Vector2Int preferredCoordinate, out PortableObject portableObject, out Vector2Int dropCoordinate)
+    {
+        portableObject = null;
+        dropCoordinate = preferredCoordinate;
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || itemId < 0)
+        {
+            return false;
+        }
+
+        const int maxSearchRadius = 2;
+        for (int radius = 0; radius <= maxSearchRadius; radius++)
+        {
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (radius > 0 && Mathf.Abs(offsetX) != radius && Mathf.Abs(offsetY) != radius)
+                    {
+                        continue;
+                    }
+
+                    Vector2Int coordinate = preferredCoordinate + new Vector2Int(offsetX, offsetY);
+                    if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
+                    {
+                        continue;
+                    }
+
+                    if (!block.TryAddFloorObject(itemId, out portableObject))
+                    {
+                        continue;
+                    }
+
+                    dropCoordinate = coordinate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryRemovePackedPortable(PackedInstallationSession packedSession)
+    {
+        if (packedSession == null || packedSession.portableObject == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        if (terrain.TryGetLoadedBlock(packedSession.dropCoordinate, out Block dropBlock)
+            && dropBlock != null
+            && dropBlock.TryRemoveFloorObject(packedSession.portableObject))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void FinalizePackedInstallationHistory()
+    {
+        while (packedInstallationHistory.Count > 0)
+        {
+            PackedInstallationSession packedSession = packedInstallationHistory.Pop();
+            InstallationObject originalInstallation = packedSession?.editSession?.originalInstallation;
+            if (originalInstallation == null)
+            {
+                continue;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(originalInstallation.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(originalInstallation.gameObject);
+            }
+        }
+    }
+
+    private void RestorePackedInstallationHistory()
+    {
+        while (packedInstallationHistory.Count > 0)
+        {
+            PackedInstallationSession packedSession = packedInstallationHistory.Pop();
+            if (packedSession?.editSession == null)
+            {
+                continue;
+            }
+
+            TryRemovePackedPortable(packedSession);
+            RestoreEditedInstallation(
+                packedSession.editSession,
+                packedSession.anchorCoordinate,
+                packedSession.quarterTurns);
+        }
+    }
+
     private void HandleInstallButtonClicked()
     {
+        SetMapEditModeActive(false);
+
         if (!TryGetHandInstallationDefinition(out ItemDefinition definition) || definition == null || definition.mapObject == null)
         {
             ClearInstallPreview();
@@ -377,7 +958,326 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void HandleInstallCancelClicked()
     {
+        if (IsEditingInstallation())
+        {
+            CancelInstallationEdit();
+            RestorePackedInstallationHistory();
+            SetMapEditModeActive(false);
+            return;
+        }
+
+        if (mapEditModeActive)
+        {
+            RestorePackedInstallationHistory();
+            SetMapEditModeActive(false);
+            return;
+        }
+
         ClearInstallPreview();
+    }
+
+    private void BeginInstallationEdit(InstallationObject installationObject)
+    {
+        if (installationObject == null || !TryCreateInstallationEditSession(installationObject, out InstallationEditSession editSession))
+        {
+            return;
+        }
+
+        ClearInstallPreview();
+        activeInstallationEditSession = editSession;
+        ClearEditableInstallationSelection();
+        DetachInstallationForEditing(editSession);
+        BeginInstallationEditPreview(editSession);
+    }
+
+    private bool TryCreateInstallationEditSession(InstallationObject installationObject, out InstallationEditSession editSession)
+    {
+        editSession = null;
+        if (installationObject == null || !installationObject.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return false;
+        }
+
+        int itemId = installationObject.ResolveItemId();
+        if (!TryGetInstallationDefinition(itemId, out ItemDefinition definition) || definition == null || definition.mapObject == null)
+        {
+            return false;
+        }
+
+        editSession = new InstallationEditSession
+        {
+            originalInstallation = installationObject,
+            definition = definition,
+            originalAnchorCoordinate = anchorCoordinate,
+            originalQuarterTurns = ((quarterTurns % 4) + 4) % 4,
+            originalOccupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
+        };
+
+        if (installationObject is InputOutputModule inputOutputModule)
+        {
+            editSession.inputOutputState = inputOutputModule.CapturePersistentState();
+        }
+
+        if (installationObject is BoxObject boxObject)
+        {
+            editSession.boxIsOpen = boxObject.IsOpen;
+        }
+
+        editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
+        editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
+
+        CaptureInstallationBlockStates(editSession);
+        return true;
+    }
+
+    private void CaptureInstallationBlockStates(InstallationEditSession editSession)
+    {
+        editSession.blockStatesByCanonicalOffset.Clear();
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || editSession.originalOccupiedCoordinates == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < editSession.originalOccupiedCoordinates.Count; i++)
+        {
+            Vector2Int occupiedCoordinate = editSession.originalOccupiedCoordinates[i];
+            if (!terrain.TryGetLoadedBlock(occupiedCoordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            List<int> blockState = block.CaptureFloorObjectState();
+            if (blockState == null || blockState.Count <= 0)
+            {
+                continue;
+            }
+
+            Vector2Int worldOffset = occupiedCoordinate - editSession.originalAnchorCoordinate;
+            Vector2Int canonicalOffset = RotateFootprintOffset(worldOffset, -editSession.originalQuarterTurns);
+            editSession.blockStatesByCanonicalOffset[canonicalOffset] = new List<int>(blockState);
+        }
+    }
+
+    private void DetachInstallationForEditing(InstallationEditSession editSession)
+    {
+        if (editSession == null || editSession.originalInstallation == null)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        terrain?.RemoveInstallationPersistence(editSession.originalAnchorCoordinate);
+
+        for (int i = 0; i < editSession.originalOccupiedCoordinates.Count; i++)
+        {
+            if (terrain == null || !terrain.TryGetLoadedBlock(editSession.originalOccupiedCoordinates[i], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            if (block.MapObject == editSession.originalInstallation)
+            {
+                block.SetMapObject(null);
+            }
+
+            block.ApplyFloorObjectState(null);
+        }
+
+        editSession.originalInstallation.gameObject.SetActive(false);
+    }
+
+    private void BeginInstallationEditPreview(InstallationEditSession editSession)
+    {
+        activeInstallDefinition = editSession.definition;
+        activeInstallPreview = null;
+        activeInstallBaseRotation = editSession.definition.mapObject != null
+            ? editSession.definition.mapObject.transform.rotation
+            : Quaternion.identity;
+        installPreviewQuarterTurns = editSession.originalQuarterTurns;
+        waitForPointerReleaseAfterPreviewSpawn = true;
+        installGridRefreshTimer = 0f;
+        GameManager.Instance?.SetInstallationPlacementActive(true);
+
+        MapObject preview = CreateInstallPreviewInstance(editSession.definition);
+        if (preview == null)
+        {
+            CancelInstallationEdit();
+            return;
+        }
+
+        RegisterInstallPreview(preview, editSession.originalQuarterTurns);
+        installPreviewAnchorCoordinates[preview] = editSession.originalAnchorCoordinate;
+        SelectInstallPreview(preview);
+
+        if (ResolveInstallPreviewTerrain() != null
+            && ResolveInstallPreviewTerrain().TryGetLoadedBlock(editSession.originalAnchorCoordinate, out Block anchorBlock)
+            && anchorBlock != null)
+        {
+            activeInstallPreview.transform.position = GetPreviewWorldPosition(
+                anchorBlock,
+                activeInstallPreview,
+                editSession.originalQuarterTurns,
+                installPreviewVerticalOffset);
+        }
+        else
+        {
+            activeInstallPreview.transform.position = GetPlacementWorldPositionFromAnchorCoordinate(
+                editSession.originalAnchorCoordinate,
+                activeInstallPreview,
+                editSession.originalQuarterTurns,
+                installPreviewVerticalOffset);
+        }
+
+        activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        InvalidateInstallGrid();
+    }
+
+    private void CancelInstallationEdit()
+    {
+        InstallationEditSession editSession = activeInstallationEditSession;
+        activeInstallationEditSession = null;
+
+        if (editSession != null)
+        {
+            RestoreEditedInstallation(editSession, editSession.originalAnchorCoordinate, editSession.originalQuarterTurns);
+        }
+
+        ClearInstallPreview();
+    }
+
+    private void CompleteInstallationEdit()
+    {
+        InstallationEditSession editSession = activeInstallationEditSession;
+        if (editSession == null)
+        {
+            ClearInstallPreview();
+            SetMapEditModeActive(false);
+            return;
+        }
+
+        CleanupInstallPreviewReferences();
+        if (activeInstallPreview == null || !TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate))
+        {
+            CancelInstallationEdit();
+            return;
+        }
+
+        int quarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        activeInstallationEditSession = null;
+        RestoreEditedInstallation(editSession, anchorCoordinate, quarterTurns);
+        ClearInstallPreview();
+        SetMapEditModeActive(false);
+    }
+
+    public bool MapEditModeActive => mapEditModeActive;
+
+    private void SetMapEditModeActive(bool isActive)
+    {
+        if (mapEditModeActive == isActive)
+        {
+            RefreshMapEditButtonState();
+            return;
+        }
+
+        mapEditModeActive = isActive;
+        GameManager.Instance?.SetMapEditActive(mapEditModeActive);
+        if (!mapEditModeActive)
+        {
+            selectedEditableInstallation = null;
+            selectedEditableAnchorCoordinate = Vector2Int.zero;
+            FinalizePackedInstallationHistory();
+        }
+
+        if (IsInstallGridModeActive())
+        {
+            InvalidateInstallGrid();
+        }
+        else
+        {
+            SetInstallGridVisible(false);
+            installGridRefreshTimer = 0f;
+        }
+
+        RefreshMapEditButtonState();
+    }
+
+    private void RestoreEditedInstallation(InstallationEditSession editSession, Vector2Int anchorCoordinate, int quarterTurns)
+    {
+        if (editSession == null || editSession.originalInstallation == null || editSession.definition == null)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        MapObject restoredObject = editSession.originalInstallation;
+        Transform installParent = terrain != null ? terrain.transform : transform;
+        restoredObject.transform.SetParent(installParent, true);
+        restoredObject.transform.SetPositionAndRotation(
+            GetInstalledObjectWorldPosition(anchorCoordinate, editSession.definition, quarterTurns, 0f),
+            GetInstalledObjectRotation(editSession.definition, quarterTurns));
+        restoredObject.gameObject.SetActive(true);
+
+        List<Vector2Int> occupiedCoordinates = GetInstalledObjectFootprintCoordinates(anchorCoordinate, editSession.definition, quarterTurns);
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (terrain != null && terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block) && block != null)
+            {
+                block.SetMapObject(restoredObject);
+                block.ApplyFloorObjectState(null);
+            }
+        }
+
+        ConfigureInstalledObjectRuntime(restoredObject, anchorCoordinate, quarterTurns, editSession.inputOutputState);
+        restoredObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
+        if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
+        {
+            restoredBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
+        }
+
+        ApplyEditedInstallationBlockStates(editSession, anchorCoordinate, quarterTurns);
+        RegisterInstalledObjectPersistence(restoredObject);
+
+        if (restoredObject is InstallationObject restoredInstallation)
+        {
+            SelectEditableInstallation(restoredInstallation, anchorCoordinate);
+        }
+    }
+
+    private void ApplyEditedInstallationBlockStates(InstallationEditSession editSession, Vector2Int newAnchorCoordinate, int newQuarterTurns)
+    {
+        if (editSession == null || editSession.originalInstallation == null)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return;
+        }
+
+        List<Vector2Int> newOccupiedCoordinates = GetInstalledObjectFootprintCoordinates(newAnchorCoordinate, editSession.definition, newQuarterTurns);
+        for (int i = 0; i < newOccupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = newOccupiedCoordinates[i];
+            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            Vector2Int worldOffset = coordinate - newAnchorCoordinate;
+            Vector2Int canonicalOffset = RotateFootprintOffset(worldOffset, -newQuarterTurns);
+            if (editSession.blockStatesByCanonicalOffset.TryGetValue(canonicalOffset, out List<int> blockState))
+            {
+                block.ApplyFloorObjectState(blockState);
+            }
+            else
+            {
+                block.ApplyFloorObjectState(null);
+            }
+        }
     }
 
     private void HandleInstallRotationClicked()
@@ -393,6 +1293,18 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void HandleInstallCompleteClicked()
     {
+        if (IsEditingInstallation())
+        {
+            CompleteInstallationEdit();
+            return;
+        }
+
+        if (mapEditModeActive)
+        {
+            SetMapEditModeActive(false);
+            return;
+        }
+
         if (!IsInstallationModeActive())
         {
             return;
@@ -1328,7 +2240,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void UpdateInstallGrid(float deltaTime)
     {
-        if (!IsInstallationModeActive())
+        if (!IsInstallGridModeActive())
         {
             SetInstallGridVisible(false);
             installGridRefreshTimer = 0f;
@@ -1808,6 +2720,11 @@ public class InstallationPlacementController : MonoBehaviour
             float threshold = Mathf.Max(1f, installRotateTapThreshold);
             previewPointerDragged = Vector2.Distance(previewPointerStartPosition, pointerPosition) >= threshold;
         }
+
+        if (IsEditingInstallation() && previewPointerDragged)
+        {
+            TryMoveInstallPreview(pointerPosition);
+        }
     }
 
     private void EndPreviewPointerTracking(Vector2 pointerPosition, bool wasCanceled)
@@ -1819,6 +2736,21 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!wasCanceled && !previewPointerStartedOverUi)
         {
+            if (IsEditingInstallation())
+            {
+                if (previewPointerDragged)
+                {
+                    TryMoveInstallPreview(pointerPosition);
+                }
+                else
+                {
+                    HandleInstallationEditClick(pointerPosition);
+                }
+
+                ResetPreviewPointerTracking();
+                return;
+            }
+
             bool handledByDuplicate = previewPointerDragged && TryDuplicateInstallPreview(pointerPosition);
             if (!handledByDuplicate && !previewPointerDragged)
             {
@@ -1827,6 +2759,25 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ResetPreviewPointerTracking();
+    }
+
+    private void HandleInstallationEditClick(Vector2 pointerPosition)
+    {
+        if (!TryGetEditableInstallationAtPointer(pointerPosition, out InstallationObject installationObject, out Vector2Int anchorCoordinate)
+            || installationObject == null)
+        {
+            return;
+        }
+
+        if (activeInstallationEditSession != null
+            && installationObject == activeInstallationEditSession.originalInstallation)
+        {
+            return;
+        }
+
+        CancelInstallationEdit();
+        SelectEditableInstallation(installationObject, anchorCoordinate);
+        BeginInstallationEdit(installationObject);
     }
 
     private void ResetPreviewPointerTracking()
@@ -1899,7 +2850,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (TryGetInstallPreviewAtBlock(clickedBlock, out MapObject clickedPreview) && clickedPreview != null)
         {
             SelectInstallPreview(clickedPreview);
-            if (IsPreviewObjectCell(clickedPreview, clickedBlock))
+            if (!IsEditingInstallation() && IsPreviewObjectCell(clickedPreview, clickedBlock))
             {
                 RemoveInstallPreview(clickedPreview);
                 return;
@@ -1976,11 +2927,21 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CanCreateAdditionalPreview()
     {
+        if (IsEditingInstallation())
+        {
+            return false;
+        }
+
         return GetInstallPreviewCount() < GetCurrentInstallItemCount();
     }
 
     private int GetCurrentInstallItemCount()
     {
+        if (IsEditingInstallation())
+        {
+            return 1;
+        }
+
         PlayerBag handBag = GetPlayerHandBag();
         if (handBag == null)
         {
@@ -2131,6 +3092,11 @@ public class InstallationPlacementController : MonoBehaviour
         return GameManager.Instance != null
                && GameManager.Instance.InstallationPlacementActive
                && activeInstallDefinition != null;
+    }
+
+    private bool IsInstallGridModeActive()
+    {
+        return IsInstallationModeActive() || mapEditModeActive;
     }
 
     private void InvalidateInstallGrid()
@@ -2633,6 +3599,29 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryGetPrimaryPointerDown(out Vector2 pointerPosition)
+    {
+        pointerPosition = Vector2.zero;
+
+        if (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+            if (touch.phase == TouchPhase.Began)
+            {
+                pointerPosition = touch.position;
+                return true;
+            }
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            pointerPosition = Input.mousePosition;
+            return true;
+        }
+
+        return false;
+    }
+
     private bool IsPrimaryPointerHeld()
     {
         if (Input.touchCount > 0)
@@ -2693,8 +3682,16 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewQuarterTurns = 0;
         ResetPreviewPointerTracking();
         GameManager.Instance?.SetInstallationPlacementActive(false);
-        SetInstallGridVisible(false);
-        installGridRefreshTimer = 0f;
+        if (IsInstallGridModeActive())
+        {
+            InvalidateInstallGrid();
+            SetInstallGridVisible(true);
+        }
+        else
+        {
+            SetInstallGridVisible(false);
+            installGridRefreshTimer = 0f;
+        }
 
         CleanupInstallPreviewReferences();
         for (int i = 0; i < installPreviewInstances.Count; i++)

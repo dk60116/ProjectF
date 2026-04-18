@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System;
 using System.Collections;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -9,6 +10,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 {
     private static BagSlot expandedSlot;
     private const float DragCancelDistance = 8f;
+    private const float CraftingRootHideDelay = 0.12f;
 
     [SerializeField, Range(0.1f, 1f)]
     private float draggingSlotAlpha = 0.6f;
@@ -59,6 +61,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private int lastBoundItemId = -1;
     private int lastBoundItemCount;
     private Coroutine pickupRoutine;
+    private Tween craftingRootHideTween;
 
     private readonly List<int> craftableItems = new List<int>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
@@ -115,7 +118,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         {
             Clear();
             RefreshCraftingItems(itemId, itemCount);
-            if (!isCraftingExpanded)
+            if (isCraftingExpanded)
             {
                 CollapseCraftingSlots(true);
             }
@@ -430,7 +433,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        craftingRoot.gameObject.SetActive(true);
+        ShowCraftingRoot();
 
         List<CraftingSlot> visibleSlots = GetOrderedCraftingSlots(true);
         List<CraftingSlot> allSlots = GetOrderedCraftingSlots(false);
@@ -606,11 +609,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        if (!isCraftingExpanded && !craftingRoot.gameObject.activeSelf)
-        {
-            craftingRoot.gameObject.SetActive(true);
-        }
-
         if (suppressCraftingEvents)
         {
             return;
@@ -636,12 +634,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             }
         }
 
-        // Keep the root active and only hide visuals so it can reopen reliably.
-        if (!craftingRoot.gameObject.activeSelf)
-        {
-            craftingRoot.gameObject.SetActive(true);
-        }
-
         isCraftingExpanded = false;
 
         if (expandedSlot == this)
@@ -651,6 +643,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         suppressCraftingEvents = false;
         NotifyCraftingVisibilityChanged(false);
+        HideCraftingRoot(immediate);
     }
 
     private void RefreshCraftingItemsFromBag(bool force)
@@ -675,12 +668,20 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void RefreshCraftingItems(int itemId, int itemCount, bool force = false)
     {
+        bool selectedItemChangedWhileExpanded = isCraftingExpanded
+                                               && lastBoundItemId >= 0
+                                               && (itemId < 0 || itemCount <= 0 || itemId != lastBoundItemId);
         bool wasEmpty = lastBoundItemId < 0 || lastBoundItemCount <= 0;
         bool isEmpty = itemId < 0 || itemCount <= 0;
         bool shouldRefresh = force || wasEmpty != isEmpty || (!isEmpty && itemId != lastBoundItemId);
 
         lastBoundItemId = itemId;
         lastBoundItemCount = itemCount;
+
+        if (selectedItemChangedWhileExpanded)
+        {
+            CollapseCraftingSlots(true);
+        }
 
         if (!shouldRefresh)
         {
@@ -819,7 +820,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        craftingRoot.gameObject.SetActive(true);
+        ShowCraftingRoot();
 
         List<CraftingSlot> visibleSlots = GetOrderedCraftingSlots(true);
         List<CraftingSlot> allSlots = GetOrderedCraftingSlots(false);
@@ -892,6 +893,55 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             craftingSlot.Clear();
             craftingSlot.HideImmediate();
         }
+    }
+
+    private void ShowCraftingRoot()
+    {
+        if (craftingRoot == null)
+        {
+            return;
+        }
+
+        craftingRootHideTween?.Kill();
+        craftingRootHideTween = null;
+        if (!craftingRoot.gameObject.activeSelf)
+        {
+            craftingRoot.gameObject.SetActive(true);
+        }
+    }
+
+    private void HideCraftingRoot(bool immediate)
+    {
+        if (craftingRoot == null)
+        {
+            return;
+        }
+
+        craftingRootHideTween?.Kill();
+        craftingRootHideTween = null;
+
+        if (immediate || !gameObject.activeInHierarchy)
+        {
+            if (craftingRoot.gameObject.activeSelf)
+            {
+                craftingRoot.gameObject.SetActive(false);
+            }
+            return;
+        }
+
+        craftingRootHideTween = DOVirtual.DelayedCall(CraftingRootHideDelay, () =>
+        {
+            craftingRootHideTween = null;
+            if (craftingRoot == null || isCraftingExpanded)
+            {
+                return;
+            }
+
+            if (craftingRoot.gameObject.activeSelf)
+            {
+                craftingRoot.gameObject.SetActive(false);
+            }
+        }).SetUpdate(true);
     }
 
     private bool HasAnyCraftingItems()
@@ -1616,6 +1666,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     protected bool IsInventoryEditLocked()
     {
-        return GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive;
+        return GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
     }
 }

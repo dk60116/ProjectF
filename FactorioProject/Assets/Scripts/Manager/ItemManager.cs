@@ -29,10 +29,6 @@ public class ItemManager : MonoBehaviour
     private List<ItemDefinition> itemDefinitions;
 
 #if UNITY_EDITOR
-    private const int ItemIconTargetTextureSize = 256;
-#endif
-
-#if UNITY_EDITOR
     [SerializeField]
     private bool autoMigrateDefinitions = true;
 #endif
@@ -1182,100 +1178,29 @@ public class ItemManager : MonoBehaviour
 
     private static Sprite LoadOrConvertSprite(string assetPath)
     {
+        Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        if (sprite != null)
+        {
+            return sprite;
+        }
+
         TextureImporter textureImporter = AssetImporter.GetAtPath(assetPath) as TextureImporter;
-        if (textureImporter != null)
-        {
-            bool importerChanged = false;
-            if (textureImporter.textureType != TextureImporterType.Sprite
-                || textureImporter.spriteImportMode != SpriteImportMode.Single)
-            {
-                textureImporter.textureType = TextureImporterType.Sprite;
-                textureImporter.spriteImportMode = SpriteImportMode.Single;
-                textureImporter.alphaIsTransparency = true;
-                textureImporter.mipmapEnabled = false;
-                importerChanged = true;
-            }
-
-            if (importerChanged)
-            {
-                textureImporter.SaveAndReimport();
-            }
-
-            TryNormalizeIconPngTexture(assetPath);
-        }
-
-        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
-    }
-
-    private static void TryNormalizeIconPngTexture(string assetPath)
-    {
-        if (string.IsNullOrWhiteSpace(assetPath)
-            || !assetPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        Texture2D sourceTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-        if (sourceTexture == null)
-        {
-            return;
-        }
-
-        if (sourceTexture.width == ItemIconTargetTextureSize
-            && sourceTexture.height == ItemIconTargetTextureSize)
-        {
-            return;
-        }
-
-        Texture2D resizedTexture = ResizeTextureToIconTarget(sourceTexture, ItemIconTargetTextureSize, ItemIconTargetTextureSize);
-        if (resizedTexture == null)
-        {
-            return;
-        }
-
-        try
-        {
-            byte[] pngBytes = resizedTexture.EncodeToPNG();
-            if (pngBytes == null || pngBytes.Length == 0)
-            {
-                return;
-            }
-
-            string fullPath = Path.GetFullPath(assetPath);
-            File.WriteAllBytes(fullPath, pngBytes);
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
-        }
-        finally
-        {
-            UnityEngine.Object.DestroyImmediate(resizedTexture);
-        }
-    }
-
-    private static Texture2D ResizeTextureToIconTarget(Texture sourceTexture, int width, int height)
-    {
-        if (sourceTexture == null || width <= 0 || height <= 0)
+        if (textureImporter == null)
         {
             return null;
         }
 
-        RenderTexture temporaryRenderTexture = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
-        RenderTexture previousActive = RenderTexture.active;
-
-        try
+        if (textureImporter.textureType != TextureImporterType.Sprite
+            || textureImporter.spriteImportMode != SpriteImportMode.Single)
         {
-            Graphics.Blit(sourceTexture, temporaryRenderTexture);
-            RenderTexture.active = temporaryRenderTexture;
+            textureImporter.textureType = TextureImporterType.Sprite;
+            textureImporter.spriteImportMode = SpriteImportMode.Single;
+            textureImporter.alphaIsTransparency = true;
+            textureImporter.mipmapEnabled = false;
+            textureImporter.SaveAndReimport();
+        }
 
-            Texture2D resizedTexture = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
-            resizedTexture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
-            resizedTexture.Apply(false, false);
-            return resizedTexture;
-        }
-        finally
-        {
-            RenderTexture.active = previousActive;
-            RenderTexture.ReleaseTemporary(temporaryRenderTexture);
-        }
+        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
     }
 
     private static void TryAutoAssignInteractionButtons(ItemDefinition definition)

@@ -61,6 +61,7 @@ public class ItemDataEditorWindow : EditorWindow
         public string iconAssetPath;
         public List<string> interactionButtonAssetPaths;
         public int size;
+        public bool itemFilter;
         public int capacity = -1;
         public string energyType;
         public int energyTypeValue = -1;
@@ -72,6 +73,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int mapSizeY = -1;
         public float focusRadius = -1f;
         public float workableFocusRadius = -1f;
+        public string multiFocusMode;
+        public int multiFocusModeValue = -1;
         public string mapFilter;
         public int mapFilterValue = -1;
         public string mapObjectName;
@@ -351,6 +354,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty iconProperty = serializedObject.FindProperty("icon");
         SerializedProperty interactionButtonListProperty = serializedObject.FindProperty("interactionButtonList");
         SerializedProperty sizeProperty = serializedObject.FindProperty("size");
+        SerializedProperty itemFilterProperty = serializedObject.FindProperty("itemFilter");
         SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
         SerializedProperty energyTypeProperty = serializedObject.FindProperty("energyType");
         SerializedProperty energyAmountProperty = serializedObject.FindProperty("energyAmount");
@@ -386,6 +390,10 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
         EditorGUILayout.PropertyField(sizeProperty, new GUIContent("Size"));
+        if (itemFilterProperty != null)
+        {
+            EditorGUILayout.PropertyField(itemFilterProperty, new GUIContent("Item Filter"));
+        }
         if (ShouldShowCapacity(definition) && capacityProperty != null)
         {
             if (capacityProperty.intValue <= 0)
@@ -486,6 +494,12 @@ public class ItemDataEditorWindow : EditorWindow
         Rect yRect = new Rect(labelRect.x + fieldWidth + spacing, labelRect.y, fieldWidth, labelRect.height);
         EditorGUI.PropertyField(xRect, mapSizeXProperty, GUIContent.none);
         EditorGUI.PropertyField(yRect, mapSizeYProperty, GUIContent.none);
+
+        SerializedProperty multiFocusModeProperty = mapObjectSerializedObject.FindProperty("multiFocusMode");
+        if (multiFocusModeProperty != null)
+        {
+            DrawMultiFocusModeField(multiFocusModeProperty);
+        }
 
         if (mapObject is WorkableObject || mapObject is BoxObject)
         {
@@ -1343,6 +1357,7 @@ public class ItemDataEditorWindow : EditorWindow
             portableMaterialAssetPath = AssetDatabase.GetAssetPath(definition.portableMat),
             iconAssetPath = AssetDatabase.GetAssetPath(definition.icon),
             size = Mathf.Max(0, (int)definition.size),
+            itemFilter = definition.itemFilter,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             energyType = definition.energyType.ToString(),
             energyTypeValue = (int)definition.energyType,
@@ -1371,6 +1386,8 @@ public class ItemDataEditorWindow : EditorWindow
             entry.mapObjectType = definition.mapObject.GetType().FullName;
             entry.mapSizeX = definition.mapObject.Status.mapSizeX;
             entry.mapSizeY = definition.mapObject.Status.mapSizeY;
+            entry.multiFocusMode = definition.mapObject.FocusMode.ToString();
+            entry.multiFocusModeValue = (int)definition.mapObject.FocusMode;
             if (definition.mapObject is WorkableObject workableObject)
             {
                 entry.focusRadius = workableObject.FocusActivationRadius;
@@ -1547,6 +1564,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         definition.size = (uint)Mathf.Max(0, entry.size);
+        definition.itemFilter = entry.itemFilter;
         if (entry.capacity > 0)
         {
             definition.capacity = Mathf.Max(1, entry.capacity);
@@ -1633,6 +1651,20 @@ public class ItemDataEditorWindow : EditorWindow
             if (mapSizeYProperty != null && entry.mapSizeY > 0)
             {
                 mapSizeYProperty.intValue = Mathf.Clamp(entry.mapSizeY, 1, byte.MaxValue);
+            }
+        }
+
+        SerializedProperty multiFocusModeProperty = serializedMapObject.FindProperty("multiFocusMode");
+        if (multiFocusModeProperty != null)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.multiFocusMode)
+                && Enum.TryParse(entry.multiFocusMode, true, out MapObject.MultiFocusMode parsedMultiFocusMode))
+            {
+                multiFocusModeProperty.intValue = (int)parsedMultiFocusMode;
+            }
+            else if (entry.multiFocusModeValue >= 0)
+            {
+                multiFocusModeProperty.intValue = entry.multiFocusModeValue;
             }
         }
 
@@ -1784,6 +1816,28 @@ public class ItemDataEditorWindow : EditorWindow
                 }
             }
         }
+    }
+
+    private static void DrawMultiFocusModeField(SerializedProperty multiFocusModeProperty)
+    {
+        if (multiFocusModeProperty == null)
+        {
+            return;
+        }
+
+        MapObject.MultiFocusMode currentMode = (MapObject.MultiFocusMode)multiFocusModeProperty.intValue;
+        int selectedIndex = currentMode == MapObject.MultiFocusMode.All ? 1 : 0;
+
+        EditorGUI.BeginChangeCheck();
+        selectedIndex = EditorGUILayout.Popup("Multi Focus", selectedIndex, new[] { "NearOne", "All" });
+        if (!EditorGUI.EndChangeCheck())
+        {
+            return;
+        }
+
+        multiFocusModeProperty.intValue = selectedIndex == 0
+            ? (int)MapObject.MultiFocusMode.NearOne
+            : (int)MapObject.MultiFocusMode.All;
     }
 
     private static void ApplyRectGridBlockPlacementJson(SerializedProperty rectGridPlacementsProperty, RectGridBlockPlacementJsonEntry entry)

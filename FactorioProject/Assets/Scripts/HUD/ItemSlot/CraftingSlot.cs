@@ -50,6 +50,9 @@ public class CraftingSlot : ItemSlot
     private bool ingredientsVisible;
     private bool slotVisualHidden;
     private bool blockedByCraftingMapObject;
+    private bool isCachingReferences;
+    private bool isRefreshingCraftingMapObjectVisuals;
+    private bool isHidingIngredientsImmediate;
     private int requiredCraftingMapObjectId = -1;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
@@ -161,70 +164,98 @@ public class CraftingSlot : ItemSlot
 
     private void CacheReferences()
     {
-        if (rectTransform == null)
+        if (isCachingReferences)
         {
-            rectTransform = transform as RectTransform;
+            return;
         }
 
-        if (canvasGroup == null)
+        isCachingReferences = true;
+        try
         {
-            canvasGroup = GetComponent<CanvasGroup>();
+            if (rectTransform == null)
+            {
+                rectTransform = transform as RectTransform;
+            }
+
             if (canvasGroup == null)
             {
-                canvasGroup = gameObject.AddComponent<CanvasGroup>();
-            }
-        }
-
-        if (button == null)
-        {
-            button = GetComponent<Button>();
-        }
-
-        if (ingredientsRoot == null)
-        {
-            Transform target = transform.Find("Ingredients");
-            ingredientsRoot = target as RectTransform;
-        }
-
-        if (IngrdientsSlots == null || IngrdientsSlots.Count == 0)
-        {
-            if (ingredientsRoot != null)
-            {
-                IngrdientsSlots = new List<ItemSlot>(ingredientsRoot.GetComponentsInChildren<ItemSlot>(true));
-                IngrdientsSlots.Remove(this);
-            }
-        }
-
-        if (IngrdientsSlots != null && IngrdientsSlots.Count > 0)
-        {
-            for (int i = IngrdientsSlots.Count - 1; i >= 0; i--)
-            {
-                if (!IsIngredientSlotCandidate(IngrdientsSlots[i]))
+                canvasGroup = GetComponent<CanvasGroup>();
+                if (canvasGroup == null)
                 {
-                    IngrdientsSlots.RemoveAt(i);
+                    canvasGroup = gameObject.AddComponent<CanvasGroup>();
                 }
             }
-        }
 
-        if (IngrdientsSlots != null && IngrdientsSlots.Count > 1)
-        {
-            IngrdientsSlots.Sort((left, right) =>
+            if (button == null)
             {
-                if (left == null && right == null)
-                {
-                    return 0;
-                }
-                if (left == null)
-                {
-                    return 1;
-                }
-                if (right == null)
-                {
-                    return -1;
-                }
+                button = GetComponent<Button>();
+            }
 
-                return left.transform.GetSiblingIndex().CompareTo(right.transform.GetSiblingIndex());
-            });
+            if (ingredientsRoot == null)
+            {
+                Transform target = transform.Find("Ingredients");
+                ingredientsRoot = target as RectTransform;
+            }
+
+            if (IngrdientsSlots == null || IngrdientsSlots.Count == 0)
+            {
+                if (ingredientsRoot != null)
+                {
+                    IngrdientsSlots = new List<ItemSlot>();
+                    for (int i = 0; i < ingredientsRoot.childCount; i++)
+                    {
+                        Transform child = ingredientsRoot.GetChild(i);
+                        if (child == null)
+                        {
+                            continue;
+                        }
+
+                        ItemSlot itemSlot = child.GetComponent<ItemSlot>();
+                        if (!IsIngredientSlotCandidate(itemSlot, ingredientsRoot))
+                        {
+                            continue;
+                        }
+
+                        IngrdientsSlots.Add(itemSlot);
+                    }
+                }
+            }
+
+            if (IngrdientsSlots != null && IngrdientsSlots.Count > 0)
+            {
+                for (int i = IngrdientsSlots.Count - 1; i >= 0; i--)
+                {
+                    if (!IsIngredientSlotCandidate(IngrdientsSlots[i], ingredientsRoot))
+                    {
+                        IngrdientsSlots.RemoveAt(i);
+                    }
+                }
+            }
+
+            if (IngrdientsSlots != null && IngrdientsSlots.Count > 1)
+            {
+                IngrdientsSlots.Sort((left, right) =>
+                {
+                    if (left == null && right == null)
+                    {
+                        return 0;
+                    }
+                    if (left == null)
+                    {
+                        return 1;
+                    }
+                    if (right == null)
+                    {
+                        return -1;
+                    }
+
+                    return left.transform.GetSiblingIndex().CompareTo(right.transform.GetSiblingIndex());
+                });
+            }
+        }
+        finally
+        {
+            isCachingReferences = false;
         }
     }
 
@@ -503,6 +534,14 @@ public class CraftingSlot : ItemSlot
 
     private void HideIngredientsImmediate()
     {
+        if (isHidingIngredientsImmediate)
+        {
+            return;
+        }
+
+        isHidingIngredientsImmediate = true;
+        try
+        {
         ingredientsVisible = false;
         if (activeIngredientsSlot == this)
         {
@@ -513,7 +552,14 @@ public class CraftingSlot : ItemSlot
             ingredientsRoot.gameObject.SetActive(false);
         }
 
-        SetCreateButtonVisible(false);
+        if (createButton != null)
+        {
+            createButton.interactable = false;
+            if (createButton.gameObject.activeSelf)
+            {
+                createButton.gameObject.SetActive(false);
+            }
+        }
 
         if (IngrdientsSlots != null)
         {
@@ -532,6 +578,11 @@ public class CraftingSlot : ItemSlot
                     slotRect.localScale = Vector3.zero;
                 }
             }
+        }
+        }
+        finally
+        {
+            isHidingIngredientsImmediate = false;
         }
     }
 
@@ -684,13 +735,25 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        if (createButton.gameObject.activeSelf != visible)
+        if (visible && !createButton.gameObject.activeSelf)
         {
-            createButton.gameObject.SetActive(visible);
+            createButton.gameObject.SetActive(true);
         }
 
         createButton.interactable = visible;
+
+        Graphic targetGraphic = createButton.targetGraphic;
+        if (targetGraphic != null)
+        {
+            targetGraphic.enabled = visible;
+        }
+
         RefreshCraftingMapObjectVisuals();
+
+        if (!visible && createButton.gameObject.activeSelf)
+        {
+            createButton.gameObject.SetActive(false);
+        }
     }
 
     private void RefreshCraftingMapObjectState()
@@ -736,32 +799,43 @@ public class CraftingSlot : ItemSlot
 
     private void RefreshCraftingMapObjectVisuals()
     {
+        if (isRefreshingCraftingMapObjectVisuals)
+        {
+            return;
+        }
+
+        isRefreshingCraftingMapObjectVisuals = true;
+
         bool showBlockedState = HasItem && blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0;
-
-        if (canNotImage != null)
+        try
         {
-            canNotImage.gameObject.SetActive(showBlockedState);
-        }
-
-        if (createIcon != null)
-        {
-            createIcon.gameObject.SetActive(!showBlockedState);
-        }
-
-        if (mapObjectIcon != null)
-        {
-            if (showBlockedState)
+            if (canNotImage != null)
             {
-                mapObjectIcon.sprite = ResolveRequiredCraftingMapObjectIcon(requiredCraftingMapObjectId);
-                mapObjectIcon.enabled = mapObjectIcon.sprite != null;
-                mapObjectIcon.gameObject.SetActive(true);
+                canNotImage.enabled = showBlockedState;
             }
-            else
+
+            if (createIcon != null)
             {
-                mapObjectIcon.sprite = null;
-                mapObjectIcon.enabled = false;
-                mapObjectIcon.gameObject.SetActive(false);
+                createIcon.enabled = HasItem && !showBlockedState;
             }
+
+            if (mapObjectIcon != null)
+            {
+                if (showBlockedState)
+                {
+                    mapObjectIcon.sprite = ResolveRequiredCraftingMapObjectIcon(requiredCraftingMapObjectId);
+                    mapObjectIcon.enabled = mapObjectIcon.sprite != null;
+                }
+                else
+                {
+                    mapObjectIcon.sprite = null;
+                    mapObjectIcon.enabled = false;
+                }
+            }
+        }
+        finally
+        {
+            isRefreshingCraftingMapObjectVisuals = false;
         }
     }
 
@@ -812,15 +886,25 @@ public class CraftingSlot : ItemSlot
         return total;
     }
 
-    private bool IsIngredientSlotCandidate(ItemSlot slot)
+    private bool IsIngredientSlotCandidate(ItemSlot slot, RectTransform expectedRoot)
     {
         if (slot == null || slot == this)
         {
             return false;
         }
 
-        string slotName = slot.gameObject != null ? slot.gameObject.name : string.Empty;
-        if (string.Equals(slotName, "Create", System.StringComparison.OrdinalIgnoreCase))
+        if (slot is CraftingSlot)
+        {
+            return false;
+        }
+
+        if (expectedRoot == null)
+        {
+            return false;
+        }
+
+        Transform slotTransform = slot.transform;
+        if (slotTransform == null || slotTransform.parent != expectedRoot)
         {
             return false;
         }

@@ -431,6 +431,35 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         return energyCounts.TryGetValue(energyType, out int count) && count > 0;
     }
 
+    public static bool TryGetAcceptedEnergyTypes(Vector2Int coordinate, ISet<ItemDefinition.EnergyType> acceptedEnergyTypes)
+    {
+        if (acceptedEnergyTypes == null)
+        {
+            return false;
+        }
+
+        if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
+            || energyCounts == null
+            || energyCounts.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        foreach (KeyValuePair<ItemDefinition.EnergyType, int> pair in energyCounts)
+        {
+            if (pair.Key == ItemDefinition.EnergyType.None || pair.Value <= 0)
+            {
+                continue;
+            }
+
+            acceptedEnergyTypes.Add(pair.Key);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
     public static bool CoordinateIsEnergyArea(Vector2Int coordinate)
     {
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
@@ -1048,6 +1077,35 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
         }
 
         return itemCounts.TryGetValue(itemId, out int count) && count > 0;
+    }
+
+    public static bool TryGetAcceptedItemIds(Vector2Int coordinate, ISet<int> acceptedItemIds)
+    {
+        if (acceptedItemIds == null)
+        {
+            return false;
+        }
+
+        if (!registeredItemAreas.TryGetValue(coordinate, out Dictionary<int, int> itemCounts)
+            || itemCounts == null
+            || itemCounts.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        foreach (KeyValuePair<int, int> pair in itemCounts)
+        {
+            if (pair.Key < 0 || pair.Value <= 0)
+            {
+                continue;
+            }
+
+            acceptedItemIds.Add(pair.Key);
+            foundAny = true;
+        }
+
+        return foundAny;
     }
 
     public static bool CoordinateIsItemArea(Vector2Int coordinate)

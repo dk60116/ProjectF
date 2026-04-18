@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -41,9 +43,30 @@ public class PlayerHUD : BagSlot
     private Button installRotationButton;
     [SerializeField]
     private Button installCompleteButton;
+    [SerializeField]
+    private Button mapEditButton;
+    [SerializeField]
+    private Button mapEditCancelButton;
+    [SerializeField]
+    private Button mapEditRotationButton;
+    [SerializeField]
+    private Button mapEditCompleteButton;
+    [SerializeField]
+    private Button mapEditPackButton;
+    [SerializeField]
+    private Button mapEditUndoButton;
+    [SerializeField, Min(0.05f)]
+    private float mapEditButtonExpandDuration = 0.18f;
+    [SerializeField, Min(0f)]
+    private float mapEditButtonExpandStagger = 0.045f;
 
     [SerializeField]
     private InteractionButton InteractionButton;
+    [SerializeField]
+    private Button ItemFilterButton;
+
+    [SerializeField]
+    private FilterSelectUI itemFilterUI;
 
     [SerializeField]
     private MapPaper mapPaper;
@@ -53,6 +76,12 @@ public class PlayerHUD : BagSlot
     private int lastObservedHandItemId = -2;
     private int lastObservedHandItemCount = -1;
     private int lastObservedHandMaxCount = -1;
+    private bool mapEditButtonsInitialized;
+    private bool lastInstallActionButtonsVisible;
+    private bool lastMapEditExtraButtonsVisible;
+    private bool pendingBagRefreshAfterCraftingVisibilityChange;
+    private bool isBagRefreshQueued;
+    private readonly Dictionary<Button, Vector2> cachedAnimatedButtonPositions = new Dictionary<Button, Vector2>();
 
 
     private class CraftingQueueEntry
@@ -78,10 +107,15 @@ public class PlayerHUD : BagSlot
         SubscribeSlotEvents();
         ResolveInstallModeButtons();
         ResolveInteractionButton();
+        ResolveItemFilterButton();
+        ResolveItemFilterUI();
         ResolveMapPaper();
         EnsureInstallationPlacementController();
+        BindItemFilterButton();
+        HideItemFilterUIImmediate();
         UpdateInstallModeButtons();
         UpdateInteractionButtonState();
+        UpdateItemFilterButtonState();
         RefreshBag(null);
         RefreshCraftingQueueSlots(true);
         EnsureMapPaperBinding();
@@ -96,10 +130,15 @@ public class PlayerHUD : BagSlot
     {
         ResolveInstallModeButtons();
         ResolveInteractionButton();
+        ResolveItemFilterButton();
+        ResolveItemFilterUI();
         ResolveMapPaper();
         EnsureInstallationPlacementController();
+        BindItemFilterButton();
+        HideItemFilterUIImmediate();
         UpdateInstallModeButtons();
         UpdateInteractionButtonState();
+        UpdateItemFilterButtonState();
         EnsureInitialBagBinding();
         EnsureMapPaperBinding();
     }
@@ -116,9 +155,12 @@ public class PlayerHUD : BagSlot
         PollHandBagChanges();
         ResolveInstallModeButtons();
         ResolveInteractionButton();
+        ResolveItemFilterButton();
+        ResolveItemFilterUI();
         ResolveMapPaper();
         UpdateInstallModeButtons();
         UpdateInteractionButtonState();
+        UpdateItemFilterButtonState();
         UpdateInventoryEditLockState();
         UpdateCraftingQueue(Time.deltaTime);
         UpdateCraftingIngredientRefresh(Time.deltaTime);
@@ -132,6 +174,19 @@ public class PlayerHUD : BagSlot
         if (!TryGetPrimaryPointerDown(out Vector2 pointerPosition))
         {
             return;
+        }
+
+        if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        {
+            bool isPointerOverFilterUi = IsPointerOverItemFilterUiArea(pointerPosition);
+            if (!isPointerOverFilterUi)
+            {
+                itemFilterUI.gameObject.SetActive(false);
+            }
+            else
+            {
+                return;
+            }
         }
 
         BagSlot expandedSlot = BagSlot.ExpandedSlot;
@@ -194,6 +249,7 @@ public class PlayerHUD : BagSlot
             expandedBagSlot = null;
         }
 
+        BagSlot visibleExpandedSlot = GetVisibleExpandedBagSlot();
         int visibleSlotCount = bag != null ? bag.SlotCount : 0;
         for (int i = 0; i < bagSlots.Count; i++)
         {
@@ -220,13 +276,24 @@ public class PlayerHUD : BagSlot
                 slot.gameObject.SetActive(true);
             }
 
-            bool shouldShowSlot = expandedBagSlot == null || slot == expandedBagSlot;
+            bool shouldShowSlot = visibleExpandedSlot == null || slot == visibleExpandedSlot;
             slot.SetSlotVisible(shouldShowSlot);
             slot.Bind(bag, i, bag.GetSlotItemId(i), bag.GetSlotCount(i), bag.GetSlotMaxCount(i));
         }
 
+        if (visibleExpandedSlot == null)
+        {
+            RestoreAllBagSlotVisibility(visibleSlotCount);
+        }
+
         RefreshHandSlot(boundHandBag);
         isRefreshing = false;
+
+        if (pendingBagRefreshAfterCraftingVisibilityChange)
+        {
+            pendingBagRefreshAfterCraftingVisibilityChange = false;
+            QueueBagRefresh();
+        }
     }
 
     private void HandleBagChanged()
@@ -405,14 +472,37 @@ public class PlayerHUD : BagSlot
         controllerType.GetMethod("SetInstallButtons")?.Invoke(
             installationPlacementController,
             new object[] { InstallButton, InstallCancelButton, InstallRotationButton, InstallCompleteButton });
+        controllerType.GetMethod("SetMapEditButtons")?.Invoke(
+            installationPlacementController,
+            new object[] { MapEditButton, MapEditCancelButton, MapEditRotationButton, MapEditCompleteButton, mapEditPackButton, mapEditUndoButton });
     }
 
     private void ResolveInstallModeButtons()
     {
         installButton = ResolveButtonReference(installButton, "InstallButton");
-        installCancelButton = ResolveButtonReference(installCancelButton, "InstallCancelButton");
-        installRotationButton = ResolveButtonReference(installRotationButton, "RotationButton", "InstallRotationButton");
-        installCompleteButton = ResolveButtonReference(installCompleteButton, "CompleteButton", "InstallCompleteButton");
+        Transform installRoot = installButton != null ? installButton.transform.parent : null;
+        installCancelButton = ResolveButtonReferenceInRoot(installCancelButton, installRoot, "InstallCancelButton", "CancelButton");
+        installRotationButton = ResolveButtonReferenceInRoot(installRotationButton, installRoot, "InstallRotationButton", "RotationButton");
+        installCompleteButton = ResolveButtonReferenceInRoot(installCompleteButton, installRoot, "InstallCompleteButton", "CompleteButton");
+
+        Transform mapEditRoot = FindDescendantByName(transform, "MapEdit");
+        mapEditButton = ResolveButtonReferenceInRoot(mapEditButton, mapEditRoot, "MapEditButton");
+        mapEditCancelButton = ResolveButtonReferenceInRoot(mapEditCancelButton, mapEditRoot, "CancelButton");
+        mapEditRotationButton = ResolveButtonReferenceInRoot(mapEditRotationButton, mapEditRoot, "RotationButton");
+        mapEditCompleteButton = ResolveButtonReferenceInRoot(mapEditCompleteButton, mapEditRoot, "CompleteButton");
+        mapEditPackButton = ResolveButtonReferenceInRoot(mapEditPackButton, mapEditRoot, "PackButton", "Pack");
+        mapEditUndoButton = ResolveButtonReferenceInRoot(mapEditUndoButton, mapEditRoot, "UnDoButton", "UndoButton");
+        CacheAnimatedButtonPositions(
+            installButton,
+            installCancelButton,
+            installRotationButton,
+            installCompleteButton,
+            mapEditButton,
+            mapEditCancelButton,
+            mapEditRotationButton,
+            mapEditCompleteButton,
+            mapEditPackButton,
+            mapEditUndoButton);
     }
 
     private void ResolveMapPaper()
@@ -459,6 +549,29 @@ public class PlayerHUD : BagSlot
         }
 
         BindInteractionButton();
+    }
+
+    private void ResolveItemFilterButton()
+    {
+        ItemFilterButton = ResolveButtonReference(ItemFilterButton, "ItemFilterButton", "FilterButton");
+    }
+
+    private void ResolveItemFilterUI()
+    {
+        if (itemFilterUI != null)
+        {
+            return;
+        }
+
+        itemFilterUI = GetComponentInChildren<FilterSelectUI>(true);
+        if (itemFilterUI == null)
+        {
+            Transform filterUiTransform = FindDescendantByName(transform, "FilterSelectUI");
+            if (filterUiTransform != null)
+            {
+                itemFilterUI = filterUiTransform.GetComponent<FilterSelectUI>();
+            }
+        }
     }
 
     private Button ResolveButtonReference(Button currentButton, params string[] candidateNames)
@@ -540,25 +653,535 @@ public class PlayerHUD : BagSlot
     private void UpdateInstallModeButtons()
     {
         bool isInstallModeActive = GameManager.Instance != null && GameManager.Instance.InstallationPlacementActive;
+        bool isMapEditModeActive = IsMapEditModeActive();
+        bool showInstallActionButtons = isInstallModeActive && !isMapEditModeActive;
+        bool showMapEditActionButtons = isMapEditModeActive;
 
-        SetInstallModeButtonVisible(installCancelButton, isInstallModeActive);
-        SetInstallModeButtonVisible(installRotationButton, isInstallModeActive);
-        SetInstallModeButtonVisible(installCompleteButton, isInstallModeActive);
+        if (!mapEditButtonsInitialized)
+        {
+            SetAnimatedButtonVisibleImmediate(installCancelButton, showInstallActionButtons);
+            SetAnimatedButtonVisibleImmediate(installRotationButton, showInstallActionButtons);
+            SetAnimatedButtonVisibleImmediate(installCompleteButton, showInstallActionButtons);
+            SetAnimatedButtonVisibleImmediate(mapEditCancelButton, showMapEditActionButtons);
+            SetAnimatedButtonVisibleImmediate(mapEditRotationButton, showMapEditActionButtons);
+            SetAnimatedButtonVisibleImmediate(mapEditCompleteButton, showMapEditActionButtons);
+            SetAnimatedButtonVisibleImmediate(mapEditPackButton, showMapEditActionButtons);
+            SetAnimatedButtonVisibleImmediate(mapEditUndoButton, showMapEditActionButtons);
+            lastInstallActionButtonsVisible = showInstallActionButtons;
+            lastMapEditExtraButtonsVisible = showMapEditActionButtons;
+            mapEditButtonsInitialized = true;
+            return;
+        }
+
+        if (lastInstallActionButtonsVisible != showInstallActionButtons
+            || lastMapEditExtraButtonsVisible != showMapEditActionButtons)
+        {
+            AnimateMapEditButtons(showInstallActionButtons, showMapEditActionButtons);
+            lastInstallActionButtonsVisible = showInstallActionButtons;
+            lastMapEditExtraButtonsVisible = showMapEditActionButtons;
+        }
     }
 
-    private static void SetInstallModeButtonVisible(Button button, bool isVisible)
+    private bool IsMapEditModeActive()
+    {
+        Type controllerType = ResolveInstallationPlacementControllerType();
+        if (controllerType == null || installationPlacementController == null)
+        {
+            return false;
+        }
+
+        object value = controllerType.GetProperty("MapEditModeActive")?.GetValue(installationPlacementController);
+        return value is bool isActive && isActive;
+    }
+
+    private void AnimateMapEditButtons(bool showInstallActionButtons, bool showMapEditActionButtons)
+    {
+        AnimateButtonGroupSlide(installButton != null ? installButton : mapEditButton, showInstallActionButtons,
+            installCancelButton, installRotationButton, installCompleteButton);
+        AnimateButtonGroupSlide(mapEditButton, showMapEditActionButtons,
+            mapEditCancelButton, mapEditRotationButton, mapEditCompleteButton, mapEditPackButton, mapEditUndoButton);
+    }
+
+    private void SetAnimatedButtonVisibleImmediate(Button button, bool isVisible)
     {
         if (button == null)
         {
             return;
         }
 
-        if (button.gameObject.activeSelf != isVisible)
+        LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+        RectTransform rectTransform = button.transform as RectTransform;
+        if (rectTransform != null)
         {
-            button.gameObject.SetActive(isVisible);
+            DOTween.Kill(rectTransform);
+            rectTransform.localScale = Vector3.one;
         }
 
-        button.interactable = isVisible;
+        if (layoutElement != null)
+        {
+            layoutElement.ignoreLayout = false;
+        }
+
+        NormalizeButtonCanvasGroup(button);
+        SetButtonRaycastTargetsEnabled(button, isVisible);
+        button.interactable = true;
+        button.gameObject.SetActive(isVisible);
+    }
+
+    private void AnimateButtonGroupSlide(Button sourceButton, bool shouldBeVisible, params Button[] buttons)
+    {
+        if (buttons == null || buttons.Length == 0)
+        {
+            return;
+        }
+
+        List<Button> orderedButtons = GetButtonsInSiblingOrder(buttons);
+        if (orderedButtons.Count == 0)
+        {
+            return;
+        }
+
+        Vector2 sourcePosition = GetButtonAnchorPosition(sourceButton);
+        if (shouldBeVisible)
+        {
+            Dictionary<Button, Vector2> resolvedTargetPositions = ResolveAnimatedButtonTargetPositions(orderedButtons);
+            List<Button> animatedButtons = new List<Button>();
+
+            for (int i = 0; i < orderedButtons.Count; i++)
+            {
+                Button button = orderedButtons[i];
+                LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+                RectTransform rectTransform = button.transform as RectTransform;
+                if (rectTransform == null)
+                {
+                    button.gameObject.SetActive(true);
+                    continue;
+                }
+
+                DOTween.Kill(rectTransform);
+                button.gameObject.SetActive(true);
+                rectTransform.localScale = Vector3.one;
+                NormalizeButtonCanvasGroup(button);
+                SetButtonRaycastTargetsEnabled(button, false);
+                button.interactable = true;
+                if (layoutElement != null)
+                {
+                    layoutElement.ignoreLayout = true;
+                }
+
+                rectTransform.anchoredPosition = sourcePosition;
+                animatedButtons.Add(button);
+            }
+
+            if (animatedButtons.Count == 0)
+            {
+                return;
+            }
+
+            int completedCount = 0;
+            for (int i = 0; i < animatedButtons.Count; i++)
+            {
+                Button button = animatedButtons[i];
+                RectTransform rectTransform = button.transform as RectTransform;
+                if (rectTransform == null)
+                {
+                    continue;
+                }
+
+                float delay = i * mapEditButtonExpandStagger;
+                Vector2 targetPosition = resolvedTargetPositions.TryGetValue(button, out Vector2 resolvedTargetPosition)
+                    ? resolvedTargetPosition
+                    : GetCachedAnimatedButtonPosition(button);
+                Button animatedButton = button;
+                rectTransform.DOAnchorPos(targetPosition, mapEditButtonExpandDuration)
+                    .SetDelay(delay)
+                    .SetEase(Ease.OutCubic)
+                    .OnComplete(() =>
+                    {
+                        if (animatedButton == null)
+                        {
+                            return;
+                        }
+
+                        RectTransform completedRectTransform = animatedButton.transform as RectTransform;
+                        if (completedRectTransform != null)
+                        {
+                            completedRectTransform.anchoredPosition = targetPosition;
+                        }
+
+                        NormalizeButtonCanvasGroup(animatedButton);
+                        SetButtonRaycastTargetsEnabled(animatedButton, true);
+                        animatedButton.interactable = true;
+
+                        completedCount++;
+                        if (completedCount >= animatedButtons.Count)
+                        {
+                            RestoreAnimatedButtonGroupLayout(sourceButton, animatedButtons);
+                        }
+                    });
+            }
+
+            return;
+        }
+
+        List<Button> activeButtons = new List<Button>();
+        for (int i = 0; i < orderedButtons.Count; i++)
+        {
+            Button button = orderedButtons[i];
+            if (button.gameObject.activeSelf)
+            {
+                activeButtons.Add(button);
+            }
+        }
+
+        for (int i = 0; i < activeButtons.Count; i++)
+        {
+            Button button = activeButtons[i];
+            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+            RectTransform rectTransform = button.transform as RectTransform;
+            if (rectTransform == null)
+            {
+                button.gameObject.SetActive(false);
+                continue;
+            }
+
+            DOTween.Kill(rectTransform);
+            rectTransform.localScale = Vector3.one;
+            NormalizeButtonCanvasGroup(button);
+            SetButtonRaycastTargetsEnabled(button, false);
+            button.interactable = true;
+            if (layoutElement != null)
+            {
+                layoutElement.ignoreLayout = true;
+            }
+        }
+
+        if (activeButtons.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = activeButtons.Count - 1; i >= 0; i--)
+        {
+            Button button = activeButtons[i];
+            RectTransform rectTransform = button.transform as RectTransform;
+            if (rectTransform == null)
+            {
+                continue;
+            }
+
+            float delay = (activeButtons.Count - 1 - i) * mapEditButtonExpandStagger;
+            Button animatedButton = button;
+            rectTransform.DOAnchorPos(sourcePosition, mapEditButtonExpandDuration * 0.85f)
+                .SetDelay(delay)
+                .SetEase(Ease.InCubic)
+                .OnComplete(() =>
+                {
+                    if (animatedButton == null)
+                    {
+                        return;
+                    }
+
+                    RectTransform completedRectTransform = animatedButton.transform as RectTransform;
+                    if (completedRectTransform != null)
+                    {
+                        completedRectTransform.anchoredPosition = GetCachedAnimatedButtonPosition(animatedButton);
+                    }
+
+                    animatedButton.gameObject.SetActive(false);
+                });
+        }
+
+        DOVirtual.DelayedCall(
+            (activeButtons.Count - 1) * mapEditButtonExpandStagger + (mapEditButtonExpandDuration * 0.85f),
+            () => RestoreAnimatedButtonGroupLayout(sourceButton, activeButtons))
+            .SetUpdate(true);
+    }
+
+    private void NormalizeButtonCanvasGroup(Button button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        CanvasGroup canvasGroup = button.GetComponent<CanvasGroup>();
+        if (canvasGroup != null)
+        {
+            canvasGroup.alpha = 1f;
+            canvasGroup.interactable = true;
+            canvasGroup.blocksRaycasts = true;
+        }
+    }
+
+    private static void SetButtonRaycastTargetsEnabled(Button button, bool isEnabled)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        Graphic[] graphics = button.GetComponentsInChildren<Graphic>(true);
+        for (int i = 0; i < graphics.Length; i++)
+        {
+            Graphic graphic = graphics[i];
+            if (graphic == null)
+            {
+                continue;
+            }
+
+            graphic.raycastTarget = isEnabled;
+        }
+    }
+
+    private static List<Button> GetButtonsInSiblingOrder(params Button[] buttons)
+    {
+        List<Button> orderedButtons = new List<Button>();
+        if (buttons == null)
+        {
+            return orderedButtons;
+        }
+
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            Button button = buttons[i];
+            if (button != null)
+            {
+                orderedButtons.Add(button);
+            }
+        }
+
+        orderedButtons.Sort((left, right) =>
+        {
+            if (left == null && right == null)
+            {
+                return 0;
+            }
+
+            if (left == null)
+            {
+                return 1;
+            }
+
+            if (right == null)
+            {
+                return -1;
+            }
+
+            return left.transform.GetSiblingIndex().CompareTo(right.transform.GetSiblingIndex());
+        });
+
+        return orderedButtons;
+    }
+
+    private void RestoreAnimatedButtonGroupLayout(Button sourceButton, List<Button> buttons)
+    {
+        if (buttons == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < buttons.Count; i++)
+        {
+            Button button = buttons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+            if (layoutElement != null)
+            {
+                layoutElement.ignoreLayout = false;
+            }
+
+            RectTransform rectTransform = button.transform as RectTransform;
+            if (rectTransform != null)
+            {
+                rectTransform.anchoredPosition = GetCachedAnimatedButtonPosition(button);
+            }
+        }
+
+        ForceButtonGroupLayoutRebuild(sourceButton, buttons);
+    }
+
+    private Dictionary<Button, Vector2> ResolveAnimatedButtonTargetPositions(IEnumerable<Button> buttons)
+    {
+        Dictionary<Button, Vector2> resolvedPositions = new Dictionary<Button, Vector2>();
+        if (buttons == null)
+        {
+            return resolvedPositions;
+        }
+
+        List<Button> buttonList = new List<Button>();
+        HashSet<RectTransform> dynamicLayoutRoots = new HashSet<RectTransform>();
+
+        foreach (Button button in buttons)
+        {
+            if (button == null)
+            {
+                continue;
+            }
+
+            buttonList.Add(button);
+            RectTransform root = button.transform.parent as RectTransform;
+            if (root != null && root.GetComponent<LayoutGroup>() != null)
+            {
+                dynamicLayoutRoots.Add(root);
+            }
+        }
+
+        if (buttonList.Count == 0)
+        {
+            return resolvedPositions;
+        }
+
+        if (dynamicLayoutRoots.Count == 0)
+        {
+            for (int i = 0; i < buttonList.Count; i++)
+            {
+                Button button = buttonList[i];
+                resolvedPositions[button] = GetCachedAnimatedButtonPosition(button);
+            }
+
+            return resolvedPositions;
+        }
+
+        for (int i = 0; i < buttonList.Count; i++)
+        {
+            Button button = buttonList[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            if (!button.gameObject.activeSelf)
+            {
+                button.gameObject.SetActive(true);
+            }
+
+            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+            if (layoutElement != null)
+            {
+                layoutElement.ignoreLayout = false;
+            }
+        }
+
+        foreach (RectTransform root in dynamicLayoutRoots)
+        {
+            LayoutRebuilder.ForceRebuildLayoutImmediate(root);
+        }
+
+        Canvas.ForceUpdateCanvases();
+
+        for (int i = 0; i < buttonList.Count; i++)
+        {
+            Button button = buttonList[i];
+            RectTransform rectTransform = button != null ? button.transform as RectTransform : null;
+            Vector2 resolvedPosition = rectTransform != null
+                ? rectTransform.anchoredPosition
+                : GetCachedAnimatedButtonPosition(button);
+            resolvedPositions[button] = resolvedPosition;
+            cachedAnimatedButtonPositions[button] = resolvedPosition;
+        }
+
+        return resolvedPositions;
+    }
+
+    private LayoutElement EnsureButtonLayoutElement(Button button)
+    {
+        if (button == null)
+        {
+            return null;
+        }
+
+        LayoutElement layoutElement = button.GetComponent<LayoutElement>();
+        if (layoutElement == null)
+        {
+            layoutElement = button.gameObject.AddComponent<LayoutElement>();
+        }
+
+        return layoutElement;
+    }
+
+    private static Vector2 GetButtonAnchorPosition(Button button)
+    {
+        RectTransform rectTransform = button != null ? button.transform as RectTransform : null;
+        return rectTransform != null ? rectTransform.anchoredPosition : Vector2.zero;
+    }
+
+    private void ForceButtonGroupLayoutRebuild(Button sourceButton, IEnumerable<Button> buttons)
+    {
+        HashSet<RectTransform> rebuiltRoots = new HashSet<RectTransform>();
+        TryRebuildButtonLayoutRoot(sourceButton, rebuiltRoots);
+
+        if (buttons == null)
+        {
+            return;
+        }
+
+        foreach (Button button in buttons)
+        {
+            TryRebuildButtonLayoutRoot(button, rebuiltRoots);
+        }
+    }
+
+    private static void TryRebuildButtonLayoutRoot(Button button, HashSet<RectTransform> rebuiltRoots)
+    {
+        if (button == null || rebuiltRoots == null)
+        {
+            return;
+        }
+
+        RectTransform root = button.transform.parent as RectTransform;
+        if (root == null || rebuiltRoots.Contains(root))
+        {
+            return;
+        }
+
+        rebuiltRoots.Add(root);
+        LayoutRebuilder.ForceRebuildLayoutImmediate(root);
+    }
+
+    private void CacheAnimatedButtonPositions(params Button[] buttons)
+    {
+        if (buttons == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            Button button = buttons[i];
+            if (button == null || cachedAnimatedButtonPositions.ContainsKey(button))
+            {
+                continue;
+            }
+
+            RectTransform rectTransform = button.transform as RectTransform;
+            if (rectTransform == null)
+            {
+                continue;
+            }
+
+            cachedAnimatedButtonPositions[button] = rectTransform.anchoredPosition;
+        }
+    }
+
+    private Vector2 GetCachedAnimatedButtonPosition(Button button)
+    {
+        if (button == null)
+        {
+            return Vector2.zero;
+        }
+
+        if (cachedAnimatedButtonPositions.TryGetValue(button, out Vector2 cachedPosition))
+        {
+            return cachedPosition;
+        }
+
+        RectTransform rectTransform = button.transform as RectTransform;
+        return rectTransform != null ? rectTransform.anchoredPosition : Vector2.zero;
     }
 
     private void UpdateInteractionButtonState()
@@ -570,7 +1193,7 @@ public class PlayerHUD : BagSlot
 
         if (GameManager.Instance == null
             || GameManager.Instance.Player == null
-            || GameManager.Instance.InstallationPlacementActive)
+            || GameManager.Instance.PlayerInteractionLocked)
         {
             ClearInteractionButtonState();
             return;
@@ -584,14 +1207,14 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (!BoxObject.TryFindNearest(bodyTransform.position, out BoxObject nearestBoxObject))
+        if (!TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
         {
             ClearInteractionButtonState();
             return;
         }
 
-        currentInteractionBoxObject = nearestBoxObject;
-        InteractionButton.SetIcon(ResolveInteractionIcon(nearestBoxObject));
+        currentInteractionBoxObject = focusedBoxObject;
+        InteractionButton.SetIcon(ResolveInteractionIcon(focusedBoxObject));
         InteractionButton.SetVisible(true);
     }
 
@@ -605,6 +1228,36 @@ public class PlayerHUD : BagSlot
 
         InteractionButton.SetIcon(null);
         InteractionButton.SetVisible(false);
+    }
+
+    private void UpdateItemFilterButtonState()
+    {
+        if (ItemFilterButton == null)
+        {
+            return;
+        }
+
+        bool isVisible = false;
+        if (GameManager.Instance != null
+            && GameManager.Instance.Player != null
+            && !GameManager.Instance.PlayerInteractionLocked)
+        {
+            PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+            if (playerController != null && playerController.TryGetFocusedItemFilterMapObject(out _))
+            {
+                isVisible = true;
+            }
+        }
+
+        if (ItemFilterButton.gameObject.activeSelf != isVisible)
+        {
+            ItemFilterButton.gameObject.SetActive(isVisible);
+        }
+
+        if (!isVisible && itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        {
+            itemFilterUI.gameObject.SetActive(false);
+        }
     }
 
     private static Sprite ResolveInteractionIcon(BoxObject boxObject)
@@ -670,6 +1323,39 @@ public class PlayerHUD : BagSlot
         return null;
     }
 
+    private static Button ResolveButtonReferenceInRoot(Button currentButton, Transform root, params string[] candidateNames)
+    {
+        if (currentButton != null && root != null && currentButton.transform.IsChildOf(root))
+        {
+            return currentButton;
+        }
+
+        if (root == null || candidateNames == null || candidateNames.Length == 0)
+        {
+            return null;
+        }
+
+        Button[] buttons = root.GetComponentsInChildren<Button>(true);
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            Button candidate = buttons[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            for (int nameIndex = 0; nameIndex < candidateNames.Length; nameIndex++)
+            {
+                if (candidate.name == candidateNames[nameIndex])
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private void BindInteractionButton()
     {
         if (InteractionButton == null)
@@ -678,6 +1364,25 @@ public class PlayerHUD : BagSlot
         }
 
         InteractionButton.SetClickAction(HandleInteractionButtonClicked);
+    }
+
+    private void BindItemFilterButton()
+    {
+        if (ItemFilterButton == null)
+        {
+            return;
+        }
+
+        ItemFilterButton.onClick.RemoveListener(HandleItemFilterButtonClicked);
+        ItemFilterButton.onClick.AddListener(HandleItemFilterButtonClicked);
+    }
+
+    private void HideItemFilterUIImmediate()
+    {
+        if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        {
+            itemFilterUI.gameObject.SetActive(false);
+        }
     }
 
     private void HandleInteractionButtonClicked()
@@ -689,6 +1394,47 @@ public class PlayerHUD : BagSlot
 
         currentInteractionBoxObject.ToggleOpenState();
         UpdateInteractionButtonState();
+    }
+
+    private void HandleItemFilterButtonClicked()
+    {
+        if (itemFilterUI == null)
+        {
+            return;
+        }
+
+        bool shouldOpen = !itemFilterUI.gameObject.activeSelf;
+        if (shouldOpen)
+        {
+            PlayerController playerController = GameManager.Instance != null && GameManager.Instance.Player != null
+                ? GameManager.Instance.Player.GetComponent<PlayerController>()
+                : null;
+            if (playerController == null || !playerController.TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
+            {
+                return;
+            }
+
+            itemFilterUI.Bind(focusedMapObject);
+        }
+
+        itemFilterUI.gameObject.SetActive(shouldOpen);
+    }
+
+    private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
+    {
+        focusedBoxObject = null;
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetFocusedBoxObject(out focusedBoxObject);
     }
 
     private static Type ResolveInstallationPlacementControllerType()
@@ -738,11 +1484,6 @@ public class PlayerHUD : BagSlot
 
     private void HandleCraftingVisibilityChanged(BagSlot slot, bool isVisible)
     {
-        if (isRefreshing)
-        {
-            return;
-        }
-
         if (isVisible)
         {
             expandedBagSlot = slot;
@@ -752,7 +1493,89 @@ public class PlayerHUD : BagSlot
             expandedBagSlot = null;
         }
 
+        if (isRefreshing)
+        {
+            pendingBagRefreshAfterCraftingVisibilityChange = true;
+            QueueBagRefresh();
+            return;
+        }
+
+        QueueBagRefresh();
+    }
+
+    private BagSlot GetVisibleExpandedBagSlot()
+    {
+        if (expandedBagSlot == null || !expandedBagSlot.IsCraftingExpanded)
+        {
+            return null;
+        }
+
+        if (bagSlots == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < bagSlots.Count; i++)
+        {
+            if (bagSlots[i] == expandedBagSlot)
+            {
+                return expandedBagSlot;
+            }
+        }
+
+        return null;
+    }
+
+    private void QueueBagRefresh()
+    {
+        if (isBagRefreshQueued || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        isBagRefreshQueued = true;
+        StartCoroutine(RefreshBagNextFrame());
+    }
+
+    private IEnumerator RefreshBagNextFrame()
+    {
+        yield return null;
+        isBagRefreshQueued = false;
+
+        if (!isActiveAndEnabled)
+        {
+            yield break;
+        }
+
         RefreshBag(boundBag);
+        if (expandedBagSlot == null)
+        {
+            RestoreAllBagSlotVisibility(boundBag != null ? boundBag.SlotCount : 0);
+        }
+    }
+
+    private void RestoreAllBagSlotVisibility(int visibleSlotCount)
+    {
+        if (bagSlots == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < bagSlots.Count; i++)
+        {
+            BagSlot slot = bagSlots[i];
+            if (slot == null || i >= visibleSlotCount)
+            {
+                continue;
+            }
+
+            if (!slot.gameObject.activeSelf)
+            {
+                slot.gameObject.SetActive(true);
+            }
+
+            slot.SetSlotVisible(true);
+        }
     }
 
     private void CollapseExpandedBagSlot(bool immediate)
@@ -785,6 +1608,42 @@ public class PlayerHUD : BagSlot
         for (int i = 0; i < results.Count; i++)
         {
             if (slot.ContainsUiObject(results[i].gameObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsPointerOverItemFilterUiArea(Vector2 pointerPosition)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        PointerEventData pointerData = new PointerEventData(EventSystem.current)
+        {
+            position = pointerPosition
+        };
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointerData, results);
+        for (int i = 0; i < results.Count; i++)
+        {
+            GameObject hitObject = results[i].gameObject;
+            if (hitObject == null)
+            {
+                continue;
+            }
+
+            if (itemFilterUI != null && hitObject.transform.IsChildOf(itemFilterUI.transform))
+            {
+                return true;
+            }
+
+            if (ItemFilterButton != null && hitObject.transform.IsChildOf(ItemFilterButton.transform))
             {
                 return true;
             }
@@ -1154,4 +2013,8 @@ public class PlayerHUD : BagSlot
     public Button InstallCancelButton => installCancelButton;
     public Button InstallRotationButton => installRotationButton;
     public Button InstallCompleteButton => installCompleteButton;
+    public Button MapEditButton => mapEditButton;
+    public Button MapEditCancelButton => mapEditCancelButton;
+    public Button MapEditRotationButton => mapEditRotationButton;
+    public Button MapEditCompleteButton => mapEditCompleteButton;
 }

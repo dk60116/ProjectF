@@ -24,9 +24,6 @@ public class BoxObject : InstallationObject
     [SerializeField]
     private Ease hingeTweenEase = Ease.OutCubic;
 
-    private Vector3 hingeBaseLocalEuler;
-    private bool hingeBaseLocalEulerCached;
-
     [SerializeField]
     private SpriteRenderer itemIcon;
 
@@ -99,7 +96,6 @@ public class BoxObject : InstallationObject
     {
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
-        CacheHingeBaseLocalEuler();
         ApplyHingeRotation(false);
         SyncContainedStackVisibility(true);
         SyncItemIcon(true);
@@ -191,6 +187,16 @@ public class BoxObject : InstallationObject
         return contentBlock.TryPickupOneInputAreaCenterObjectToHand(player, playerPosition, pickupRadius);
     }
 
+    public bool AcceptsItem(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        return IsItemFilterEnabled(itemId, ResolveFilterBitCount(itemId));
+    }
+
     public void ToggleOpenState()
     {
         SetOpenState(!isOpen);
@@ -226,7 +232,6 @@ public class BoxObject : InstallationObject
         }
 
         globalMaxFocusActivationRadiusDirty = true;
-        CacheHingeBaseLocalEuler();
         ApplyHingeRotation(false);
         SyncItemIcon(true);
     }
@@ -241,7 +246,6 @@ public class BoxObject : InstallationObject
 
         hinge.DOKill();
 
-        CacheHingeBaseLocalEuler();
         float targetAngle = isOpen ? OpenAngle : ClosedAngle;
 
         if (animate && hingeTweenDuration > 0f)
@@ -258,17 +262,6 @@ public class BoxObject : InstallationObject
         }
 
         SetHingeAngleX(targetAngle);
-    }
-
-    private void CacheHingeBaseLocalEuler()
-    {
-        if (hinge == null || hingeBaseLocalEulerCached)
-        {
-            return;
-        }
-
-        hingeBaseLocalEuler = hinge.localEulerAngles;
-        hingeBaseLocalEulerCached = true;
     }
 
     private float GetCurrentHingeAngleX()
@@ -296,9 +289,7 @@ public class BoxObject : InstallationObject
             return;
         }
 
-        Vector3 localEulerAngles = hingeBaseLocalEulerCached ? hingeBaseLocalEuler : hinge.localEulerAngles;
-        localEulerAngles.x = angle;
-        hinge.localEulerAngles = localEulerAngles;
+        hinge.localRotation = Quaternion.Euler(angle, 0f, 0f);
     }
 
     private void PersistRuntimeState()
@@ -326,6 +317,33 @@ public class BoxObject : InstallationObject
         Vector3 offset = closestPoint - worldPosition;
         offset.y = 0f;
         return offset.sqrMagnitude;
+    }
+
+    private int ResolveFilterBitCount(int fallbackItemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        List<ItemDefinition> definitions = itemManager != null ? itemManager.ItemDefinitions : null;
+        if (definitions == null || definitions.Count <= 0)
+        {
+            return Mathf.Max(1, fallbackItemId + 1);
+        }
+
+        int maxItemId = fallbackItemId;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            if (definition.id > maxItemId)
+            {
+                maxItemId = definition.id;
+            }
+        }
+
+        return Mathf.Max(1, maxItemId + 1);
     }
 
     private Bounds GetInteractionBounds()

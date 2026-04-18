@@ -149,6 +149,7 @@ MonoBehaviour:
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
+  multiFocusMode: 0
   harvestMode: 1
   definition: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
   resourceStatus:

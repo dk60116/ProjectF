@@ -43,9 +43,13 @@ public class Block : BaseObject
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
     private PortableObjectPool floorObjectPool;
     private Transform inputAreaCenterAnchor;
+    private MeshRenderer[] cachedBodyRenderers = Array.Empty<MeshRenderer>();
+    private float cachedInputAreaCenterHeight;
+    private bool childReferencesCached;
 
     private void Awake()
     {
+        CacheChildReferences();
         EnsureFloorObjectsInitialized();
     }
 
@@ -66,10 +70,12 @@ public class Block : BaseObject
 
     public void Initialize(Vector2Int blockCoordinate, BlockType blockType)
     {
+        CacheChildReferences();
         coordinate = blockCoordinate;
         type = blockType;
         objectName = $"{blockType}_{blockCoordinate.x}_{blockCoordinate.y}";
         gameObject.name = $"Block ({blockCoordinate.x}, {blockCoordinate.y})";
+        SetFocusVisible(false);
     }
 
     public void SetMapObject(MapObject value)
@@ -84,6 +90,63 @@ public class Block : BaseObject
         if (mapObject is Resource resource)
         {
             resource.SetOwningBlock(this);
+        }
+    }
+
+    public void PrepareForPool()
+    {
+        SetFocusVisible(false);
+        ResetFloorObjects();
+
+        MapObject childMapObject = mapObject;
+        if (childMapObject != null && childMapObject.transform != null && childMapObject.transform.parent == transform)
+        {
+            childMapObject.transform.SetParent(null, true);
+            if (Application.isPlaying)
+            {
+                Destroy(childMapObject.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(childMapObject.gameObject);
+            }
+        }
+
+        SetMapObject(null);
+        coordinate = default;
+        type = default;
+        objectName = string.Empty;
+        gameObject.name = "Pooled Block";
+    }
+
+    public void SetBodyRotation(float yRotation)
+    {
+        CacheChildReferences();
+        if (body == null)
+        {
+            return;
+        }
+
+        body.localRotation = Quaternion.Euler(0f, yRotation, 0f);
+    }
+
+    public void SetBaseBodyVisible(bool visible)
+    {
+        CacheChildReferences();
+        if (cachedBodyRenderers == null || cachedBodyRenderers.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < cachedBodyRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedBodyRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.enabled = visible;
         }
     }
 
@@ -600,6 +663,51 @@ public class Block : BaseObject
         }
 
         return count - remaining;
+    }
+
+    public bool TryRemoveFloorObject(PortableObject targetPortableObject)
+    {
+        EnsureFloorObjectsInitialized();
+        if (targetPortableObject == null)
+        {
+            return false;
+        }
+
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null || stack.Count <= 0)
+            {
+                continue;
+            }
+
+            int objectIndex = stack.IndexOf(targetPortableObject);
+            if (objectIndex < 0)
+            {
+                continue;
+            }
+
+            stack.RemoveAt(objectIndex);
+            ReleaseFloorObject(targetPortableObject);
+
+            Transform anchor = stackIndex < floorObjects.Count ? floorObjects[stackIndex] : null;
+            if (anchor != null)
+            {
+                for (int i = objectIndex; i < stack.Count; i++)
+                {
+                    PortableObject portableObject = stack[i];
+                    if (portableObject != null)
+                    {
+                        ConfigureFloorObjectTransform(portableObject, anchor, i);
+                        portableObject.SetBatchedRendering(true);
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null)
@@ -1599,6 +1707,7 @@ public class Block : BaseObject
 
     private void EnsureInputAreaCenterAnchorInitialized()
     {
+        CacheChildReferences();
         if (inputAreaCenterAnchor != null)
         {
             return;
@@ -1627,21 +1736,8 @@ public class Block : BaseObject
 
     private float ResolveInputAreaCenterHeight()
     {
-        if (floorObjects == null)
-        {
-            return 0f;
-        }
-
-        for (int i = 0; i < floorObjects.Count; i++)
-        {
-            Transform anchor = floorObjects[i];
-            if (anchor != null)
-            {
-                return transform.InverseTransformPoint(anchor.position).y;
-            }
-        }
-
-        return 0f;
+        CacheChildReferences();
+        return cachedInputAreaCenterHeight;
     }
 
     private int ResolveInputAreaCenterCapacity()
@@ -1728,5 +1824,53 @@ public class Block : BaseObject
                 gate.UpdateExitState(gateOriginPosition);
             }
         }
+    }
+
+    private void CacheChildReferences()
+    {
+        if (childReferencesCached)
+        {
+            return;
+        }
+
+        if (body == null)
+        {
+            Transform bodyTransform = transform.Find("Body");
+            if (bodyTransform != null)
+            {
+                body = bodyTransform;
+            }
+        }
+
+        cachedBodyRenderers = body != null
+            ? body.GetComponentsInChildren<MeshRenderer>(true)
+            : Array.Empty<MeshRenderer>();
+
+        if (inputAreaCenterAnchor == null)
+        {
+            Transform existingAnchor = transform.Find("InputAreaCenterAnchor");
+            if (existingAnchor != null)
+            {
+                inputAreaCenterAnchor = existingAnchor;
+            }
+        }
+
+        cachedInputAreaCenterHeight = 0f;
+        if (floorObjects != null)
+        {
+            for (int i = 0; i < floorObjects.Count; i++)
+            {
+                Transform anchor = floorObjects[i];
+                if (anchor == null)
+                {
+                    continue;
+                }
+
+                cachedInputAreaCenterHeight = transform.InverseTransformPoint(anchor.position).y;
+                break;
+            }
+        }
+
+        childReferencesCached = true;
     }
 }

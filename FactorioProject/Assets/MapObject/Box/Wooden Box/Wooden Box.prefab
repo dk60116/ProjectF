@@ -24,7 +24,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6825515656191503885}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.86602545, y: -0.000000015999483, z: -0.000000015999483, w: 0.49999997}
+  m_LocalRotation: {x: 0.86602545, y: 0, z: 0, w: 0.49999997}
   m_LocalPosition: {x: 0, y: 0.2, z: 0.2}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -342,6 +342,7 @@ MonoBehaviour:
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
+  multiFocusMode: 1
   mapFilter: 9
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0

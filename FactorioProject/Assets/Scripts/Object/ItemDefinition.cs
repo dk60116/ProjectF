@@ -14,6 +14,7 @@ public class ItemDefinition : ScriptableObject
     public Sprite icon;
     public List<Sprite> interactionButtonList = new List<Sprite>();
     public uint size;
+    public bool itemFilter;
     [Min(1)]
     public int capacity = 10;
     public EnergyType energyType = EnergyType.None;

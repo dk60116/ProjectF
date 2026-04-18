@@ -15,6 +15,8 @@ public class GameManager : MonoBehaviour
     private Player player;
 
     public bool InstallationPlacementActive { get; private set; }
+    public bool MapEditActive { get; private set; }
+    public bool PlayerInteractionLocked => InstallationPlacementActive || MapEditActive;
 
     private void Awake()
     {
@@ -98,5 +100,10 @@ public class GameManager : MonoBehaviour
     public void SetInstallationPlacementActive(bool isActive)
     {
         InstallationPlacementActive = isActive;
+    }
+
+    public void SetMapEditActive(bool isActive)
+    {
+        MapEditActive = isActive;
     }
 }

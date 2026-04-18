@@ -138,6 +138,15 @@ public class ItemSlot : MonoBehaviour
         }
     }
 
+    protected TextMeshProUGUI CountLabel
+    {
+        get
+        {
+            ResolveReferences();
+            return count;
+        }
+    }
+
     public int ItemId => id;
     public bool HasItem => id >= 0;
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -415,6 +416,7 @@ public class TerrainGenerator : MonoBehaviour
     private BlockStateStore resourceStateStore;
     private InstallationPlacementController installationRestoreController;
     private InstallationBackgroundSimulator installationBackgroundSimulator;
+    private BlockPool blockPool;
     private Coroutine chunkGenerationCoroutine;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
@@ -610,6 +612,7 @@ public class TerrainGenerator : MonoBehaviour
         {
             SaveChunkResourceStates(existingChunk);
             RemoveChunkBlocksFromLookup(existingChunk);
+            ReleaseChunkBlocksToPool(existingChunk);
             DestroyChunkObject(existingChunk.gameObject);
             loadedChunks.Remove(chunkCoordinate);
         }
@@ -663,16 +666,43 @@ public class TerrainGenerator : MonoBehaviour
         RestoreChunkInstallations(chunkObject.transform);
         RestoreChunkBlockStates(chunkObject.transform);
 
-        ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(6)
+        ChunkSurfaceBuildData chunkSurface;
+        if (Application.isPlaying)
         {
-            origin = origin
-        };
-        IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
-        while (surfaceRoutine.MoveNext())
-        {
-            if (allowYield && surfaceRoutine.Current != null)
+            Task<ChunkSurfaceBuildData> surfaceTask = CreateChunkSurfaceBuildTask(origin, normalizedChunkSize);
+            while (!surfaceTask.IsCompleted)
             {
-                yield return surfaceRoutine.Current;
+                yield return null;
+            }
+
+            if (surfaceTask.IsFaulted || surfaceTask.IsCanceled)
+            {
+                Exception surfaceException = surfaceTask.Exception?.Flatten().InnerException ?? surfaceTask.Exception;
+                if (surfaceException != null)
+                {
+                    Debug.LogException(surfaceException, this);
+                }
+
+                chunkSurface = BuildCurvedChunkSurface(origin, normalizedChunkSize);
+            }
+            else
+            {
+                chunkSurface = surfaceTask.Result;
+            }
+        }
+        else
+        {
+            chunkSurface = new ChunkSurfaceBuildData(6)
+            {
+                origin = origin
+            };
+            IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
+            while (surfaceRoutine.MoveNext())
+            {
+                if (allowYield && surfaceRoutine.Current != null)
+                {
+                    yield return surfaceRoutine.Current;
+                }
             }
         }
 
@@ -699,6 +729,7 @@ public class TerrainGenerator : MonoBehaviour
 
         SaveChunkResourceStates(chunkTransform);
         RemoveChunkBlocksFromLookup(chunkTransform);
+        ReleaseChunkBlocksToPool(chunkTransform);
         loadedChunks.Remove(chunkCoordinate);
         CleanupOrphanedLiveInstallations();
         DestroyChunkObject(chunkTransform.gameObject);
@@ -723,6 +754,7 @@ public class TerrainGenerator : MonoBehaviour
             {
                 SaveChunkResourceStates(chunkObjects[i]);
                 RemoveChunkBlocksFromLookup(chunkObjects[i]);
+                ReleaseChunkBlocksToPool(chunkObjects[i]);
                 CleanupOrphanedLiveInstallations();
                 DestroyChunkObject(chunkObjects[i].gameObject);
             }
@@ -738,6 +770,17 @@ public class TerrainGenerator : MonoBehaviour
         if (chunkObject == null)
         {
             return;
+        }
+
+        if (Application.isPlaying)
+        {
+            BlockPool resolvedBlockPool = blockPool;
+            if (resolvedBlockPool != null
+                && resolvedBlockPool.PoolRoot != null
+                && chunkObject.transform == resolvedBlockPool.PoolRoot)
+            {
+                return;
+            }
         }
 
         if (Application.isPlaying)
@@ -783,16 +826,31 @@ public class TerrainGenerator : MonoBehaviour
             return null;
         }
 
-        GameObject blockObject = Instantiate(prefab, parent);
-        blockObject.transform.localPosition = localPosition;
-        blockObject.transform.localRotation = Quaternion.identity;
-        ApplyBodyRotation(blockObject, yRotation);
+        GameObject blockObject;
+        if (Application.isPlaying)
+        {
+            Block pooledBlock = ResolveBlockPool()?.Get(prefab, parent);
+            if (pooledBlock == null)
+            {
+                return null;
+            }
+
+            blockObject = pooledBlock.gameObject;
+        }
+        else
+        {
+            blockObject = Instantiate(prefab, parent);
+        }
 
         Block block = blockObject.GetComponent<Block>();
         if (block == null)
         {
             block = blockObject.AddComponent<Block>();
         }
+
+        blockObject.transform.localPosition = localPosition;
+        blockObject.transform.localRotation = Quaternion.identity;
+        block.SetBodyRotation(yRotation);
 
         block.Initialize(coordinate, blockType);
         loadedBlocks[coordinate] = block;
@@ -826,16 +884,7 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        MeshRenderer[] renderers = block.Body.GetComponentsInChildren<MeshRenderer>(true);
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            if (renderers[i] == null || renderers[i].gameObject.name == "GeneratedSurface")
-            {
-                continue;
-            }
-
-            renderers[i].enabled = false;
-        }
+        block.SetBaseBodyVisible(false);
     }
 
     private void ApplyChunkBiomeSurface(Transform chunkRoot, ChunkSurfaceBuildData chunkSurface)
@@ -904,6 +953,490 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return chunkSurface;
+    }
+
+    private Task<ChunkSurfaceBuildData> CreateChunkSurfaceBuildTask(Vector2Int origin, int chunkSizeInBlocks)
+    {
+        ChunkSurfaceWorkerInput input = CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks);
+        return Task.Run(() => BuildCurvedChunkSurfaceFromSnapshot(input));
+    }
+
+    private ChunkSurfaceWorkerInput CreateChunkSurfaceWorkerInput(Vector2Int origin, int chunkSizeInBlocks)
+    {
+        int resolution = Mathf.Max(2, terrainSurfaceSubdivisions);
+        int margin = 4;
+        int gridSize = chunkSizeInBlocks + (margin * 2) + 1;
+        ChunkSurfaceWorkerInput input = new ChunkSurfaceWorkerInput
+        {
+            origin = origin,
+            chunkSizeInBlocks = chunkSizeInBlocks,
+            resolution = resolution,
+            cellCount = Mathf.Max(1, chunkSizeInBlocks * resolution),
+            biomeGridMinX = origin.x - margin,
+            biomeGridMinY = origin.y - margin,
+            biomeGridWidth = gridSize,
+            biomeGridHeight = gridSize,
+            biomeGrid = new TerrainBiome[gridSize * gridSize],
+            blockedWaterGrid = new bool[gridSize * gridSize],
+            generatedSurfaceYOffset = generatedSurfaceYOffset,
+            terrainBlendJitter = terrainBlendJitter,
+            terrainSurfaceVertexJitter = terrainSurfaceVertexJitter,
+            seed = seed
+        };
+
+        for (int y = 0; y < gridSize; y++)
+        {
+            int worldY = input.biomeGridMinY + y;
+            for (int x = 0; x < gridSize; x++)
+            {
+                int worldX = input.biomeGridMinX + x;
+                int index = x + (y * gridSize);
+                Vector2Int coordinate = new Vector2Int(worldX, worldY);
+                input.biomeGrid[index] = GetTileBiome(coordinate);
+                input.blockedWaterGrid[index] = IsBlockedForWater(coordinate);
+            }
+        }
+
+        return input;
+    }
+
+    private static ChunkSurfaceBuildData BuildCurvedChunkSurfaceFromSnapshot(ChunkSurfaceWorkerInput input)
+    {
+        ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(6)
+        {
+            origin = input.origin
+        };
+
+        AppendDominantBiomeBaseSurfaceFromSnapshot(chunkSurface, input);
+        for (int biomeIndex = 0; biomeIndex < 6; biomeIndex++)
+        {
+            AppendBiomeContourSurfaceFromSnapshot(chunkSurface, (TerrainBiome)biomeIndex, input);
+        }
+
+        AppendContourSafetyPatchesFromSnapshot(chunkSurface, input);
+        return chunkSurface;
+    }
+
+    private static void AppendDominantBiomeBaseSurfaceFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
+    {
+        float[] weightBuffer = new float[6];
+        for (int cellY = 0; cellY < input.cellCount; cellY++)
+        {
+            for (int cellX = 0; cellX < input.cellCount; cellX++)
+            {
+                Vector2 p00 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
+                Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
+                Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+                Vector2 p01 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+                Vector2 center = (p00 + p11) * 0.5f;
+                TerrainBiome dominantBiome = GetDominantBiomeAtSampleFromSnapshot(
+                    input,
+                    new Vector2(input.origin.x + center.x, input.origin.y + center.y),
+                    weightBuffer);
+
+                AppendContourPolygonAtHeightFromSnapshot(
+                    chunkSurface,
+                    input,
+                    dominantBiome,
+                    new List<Vector2> { p00, p10, p11, p01 },
+                    input.generatedSurfaceYOffset - 0.0035f);
+            }
+        }
+    }
+
+    private static void AppendBiomeContourSurfaceFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        TerrainBiome biome,
+        ChunkSurfaceWorkerInput input)
+    {
+        float[] weightBuffer = new float[6];
+        float[,] scores = new float[input.cellCount + 1, input.cellCount + 1];
+
+        for (int sampleY = 0; sampleY <= input.cellCount; sampleY++)
+        {
+            for (int sampleX = 0; sampleX <= input.cellCount; sampleX++)
+            {
+                Vector2 sampleLocal = new Vector2(
+                    -0.5f + (sampleX / (float)input.resolution),
+                    -0.5f + (sampleY / (float)input.resolution));
+                Vector2 sampleWorld = new Vector2(input.origin.x + sampleLocal.x, input.origin.y + sampleLocal.y);
+                scores[sampleX, sampleY] = GetBiomeScoreAtSampleFromSnapshot(input, sampleWorld, biome, weightBuffer);
+            }
+        }
+
+        for (int cellY = 0; cellY < input.cellCount; cellY++)
+        {
+            for (int cellX = 0; cellX < input.cellCount; cellX++)
+            {
+                Vector2 p00 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
+                Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
+                Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+                Vector2 p01 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+
+                float s00 = scores[cellX, cellY];
+                float s10 = scores[cellX + 1, cellY];
+                float s11 = scores[cellX + 1, cellY + 1];
+                float s01 = scores[cellX, cellY + 1];
+                float centerScore = GetBiomeScoreAtSampleFromSnapshot(
+                    input,
+                    new Vector2(input.origin.x + (p00.x + p11.x) * 0.5f, input.origin.y + (p00.y + p11.y) * 0.5f),
+                    biome,
+                    weightBuffer);
+
+                AppendMarchingSquaresCellFromSnapshot(
+                    chunkSurface,
+                    input,
+                    biome,
+                    p00,
+                    p10,
+                    p11,
+                    p01,
+                    s00,
+                    s10,
+                    s11,
+                    s01,
+                    centerScore);
+            }
+        }
+    }
+
+    private static void AppendMarchingSquaresCellFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        ChunkSurfaceWorkerInput input,
+        TerrainBiome biome,
+        Vector2 p00,
+        Vector2 p10,
+        Vector2 p11,
+        Vector2 p01,
+        float s00,
+        float s10,
+        float s11,
+        float s01,
+        float centerScore)
+    {
+        bool inside00 = s00 > 0f;
+        bool inside10 = s10 > 0f;
+        bool inside11 = s11 > 0f;
+        bool inside01 = s01 > 0f;
+        int mask = (inside00 ? 1 : 0)
+                   | (inside10 ? 2 : 0)
+                   | (inside11 ? 4 : 0)
+                   | (inside01 ? 8 : 0);
+
+        if (mask == 0)
+        {
+            return;
+        }
+
+        if (mask == 15)
+        {
+            AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p00, p10, p11, p01 });
+            return;
+        }
+
+        Vector2 bottom = InterpolateContourPoint(p00, p10, s00, s10);
+        Vector2 right = InterpolateContourPoint(p10, p11, s10, s11);
+        Vector2 top = InterpolateContourPoint(p11, p01, s11, s01);
+        Vector2 left = InterpolateContourPoint(p01, p00, s01, s00);
+
+        if ((mask == 5 || mask == 10) && centerScore <= 0f)
+        {
+            if (mask == 5)
+            {
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p00, bottom, left });
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p11, top, right });
+            }
+            else
+            {
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p10, right, bottom });
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p01, left, top });
+            }
+
+            return;
+        }
+
+        List<Vector2> polygon = new List<Vector2>(8);
+        if (inside00) polygon.Add(p00);
+        if (inside00 != inside10) polygon.Add(bottom);
+        if (inside10) polygon.Add(p10);
+        if (inside10 != inside11) polygon.Add(right);
+        if (inside11) polygon.Add(p11);
+        if (inside11 != inside01) polygon.Add(top);
+        if (inside01) polygon.Add(p01);
+        if (inside01 != inside00) polygon.Add(left);
+
+        AppendContourPolygonFromSnapshot(chunkSurface, input, biome, polygon);
+    }
+
+    private static void AppendContourPolygonFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        ChunkSurfaceWorkerInput input,
+        TerrainBiome biome,
+        List<Vector2> polygon)
+    {
+        AppendContourPolygonAtHeightFromSnapshot(
+            chunkSurface,
+            input,
+            biome,
+            polygon,
+            input.generatedSurfaceYOffset + (GetBiomeMaterialIndex(biome) * 0.004f));
+    }
+
+    private static void AppendContourPolygonAtHeightFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        ChunkSurfaceWorkerInput input,
+        TerrainBiome biome,
+        List<Vector2> polygon,
+        float y)
+    {
+        if (chunkSurface == null || polygon == null || polygon.Count < 3)
+        {
+            return;
+        }
+
+        int vertexStart = chunkSurface.vertices.Count;
+        float[] weightBuffer = new float[6];
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            Vector2 point = polygon[i];
+            chunkSurface.vertices.Add(new Vector3(point.x, y, point.y));
+            chunkSurface.uvs.Add(point);
+            chunkSurface.colors.Add(GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, point, weightBuffer));
+        }
+
+        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(biome)];
+        for (int i = 1; i < polygon.Count - 1; i++)
+        {
+            targetTriangles.Add(vertexStart + 0);
+            targetTriangles.Add(vertexStart + i + 1);
+            targetTriangles.Add(vertexStart + i);
+        }
+    }
+
+    private static void AppendContourSafetyPatchesFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
+    {
+        float[] weightBuffer = new float[6];
+        float patchRadius = 0.22f / Mathf.Max(1, input.resolution);
+
+        for (int cellY = 0; cellY < input.cellCount; cellY++)
+        {
+            for (int cellX = 0; cellX < input.cellCount; cellX++)
+            {
+                Vector2 p00 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
+                Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
+                Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+                Vector2 p01 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+                Vector2 center = (p00 + p11) * 0.5f;
+
+                TerrainBiome centerBiome = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + center.x, input.origin.y + center.y), weightBuffer);
+                TerrainBiome biome00 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p00.x, input.origin.y + p00.y), weightBuffer);
+                TerrainBiome biome10 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p10.x, input.origin.y + p10.y), weightBuffer);
+                TerrainBiome biome11 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p11.x, input.origin.y + p11.y), weightBuffer);
+                TerrainBiome biome01 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p01.x, input.origin.y + p01.y), weightBuffer);
+
+                int uniqueBiomeCount = CountUniqueBiomes(centerBiome, biome00, biome10, biome11, biome01);
+                if (uniqueBiomeCount >= 3)
+                {
+                    AppendCenterSafetyPatchFromSnapshot(chunkSurface, input, centerBiome, center, patchRadius);
+                }
+            }
+        }
+    }
+
+    private static void AppendCenterSafetyPatchFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        ChunkSurfaceWorkerInput input,
+        TerrainBiome biome,
+        Vector2 center,
+        float patchRadius)
+    {
+        AppendContourPolygonFromSnapshot(
+            chunkSurface,
+            input,
+            biome,
+            new List<Vector2>
+            {
+                new Vector2(center.x, center.y - patchRadius),
+                new Vector2(center.x + patchRadius, center.y),
+                new Vector2(center.x, center.y + patchRadius),
+                new Vector2(center.x - patchRadius, center.y)
+            });
+    }
+
+    private static TerrainBiome GetDominantBiomeAtSampleFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2 sampleWorldPosition,
+        float[] weights)
+    {
+        SampleBiomeWeightsFromSnapshot(input, sampleWorldPosition, weights);
+        int dominantIndex = 0;
+        float dominantWeight = float.MinValue;
+        for (int i = 0; i < weights.Length; i++)
+        {
+            if (weights[i] > dominantWeight)
+            {
+                dominantWeight = weights[i];
+                dominantIndex = i;
+            }
+        }
+
+        return (TerrainBiome)dominantIndex;
+    }
+
+    private static float GetBiomeScoreAtSampleFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2 sampleWorldPosition,
+        TerrainBiome biome,
+        float[] weights)
+    {
+        SampleBiomeWeightsFromSnapshot(input, sampleWorldPosition, weights);
+        int biomeIndex = GetBiomeMaterialIndex(biome);
+        float maxOther = float.MinValue;
+        for (int i = 0; i < weights.Length; i++)
+        {
+            if (i == biomeIndex)
+            {
+                continue;
+            }
+
+            if (weights[i] > maxOther)
+            {
+                maxOther = weights[i];
+            }
+        }
+
+        return weights[biomeIndex] - maxOther;
+    }
+
+    private static void SampleBiomeWeightsFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2 sampleWorldPosition,
+        float[] weights)
+    {
+        if (weights == null || weights.Length < 6)
+        {
+            return;
+        }
+
+        Array.Clear(weights, 0, weights.Length);
+        Vector2Int centerCoordinate = new Vector2Int(Mathf.RoundToInt(sampleWorldPosition.x), Mathf.RoundToInt(sampleWorldPosition.y));
+        bool suppressWaterWeights = GetBlockedForWaterFromSnapshot(input, centerCoordinate);
+        const int sampleRadius = 2;
+        for (int offsetY = -sampleRadius; offsetY <= sampleRadius; offsetY++)
+        {
+            for (int offsetX = -sampleRadius; offsetX <= sampleRadius; offsetX++)
+            {
+                Vector2Int tileCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                TerrainBiome biome = GetTileBiomeFromSnapshot(input, tileCoordinate);
+                if (suppressWaterWeights && biome == TerrainBiome.Water)
+                {
+                    continue;
+                }
+
+                Vector2 jitter = GetBiomeBlendJitterFromSnapshot(input, tileCoordinate) * (0.35f + input.terrainSurfaceVertexJitter);
+                Vector2 tileCenter = new Vector2(tileCoordinate.x, tileCoordinate.y) + jitter;
+                float distanceSqr = (sampleWorldPosition - tileCenter).sqrMagnitude;
+                float weight = 1f / (0.12f + distanceSqr);
+                weights[GetBiomeMaterialIndex(biome)] += weight;
+            }
+        }
+    }
+
+    private static Color GetGeneratedSurfaceBlendWeightsFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2Int origin,
+        Vector2 localPoint,
+        float[] weights)
+    {
+        Vector2 worldPoint = new Vector2(origin.x + localPoint.x, origin.y + localPoint.y);
+        SampleBiomeWeightsFromSnapshot(input, worldPoint, weights);
+
+        float sandWeight = weights[GetBiomeMaterialIndex(TerrainBiome.Sand)];
+        float dirtWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Dirt)];
+        float grassWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Grass)];
+        float forestWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Forest)];
+        float totalWeight = sandWeight + dirtWeightValue + grassWeightValue + forestWeightValue;
+
+        if (totalWeight <= 0.0001f)
+        {
+            if (sandWeight >= dirtWeightValue && sandWeight >= grassWeightValue && sandWeight >= forestWeightValue)
+            {
+                return new Color(1f, 0f, 0f, 0f);
+            }
+
+            if (dirtWeightValue >= grassWeightValue && dirtWeightValue >= forestWeightValue)
+            {
+                return new Color(0f, 1f, 0f, 0f);
+            }
+
+            if (grassWeightValue >= forestWeightValue)
+            {
+                return new Color(0f, 0f, 1f, 0f);
+            }
+
+            return new Color(0f, 0f, 0f, 1f);
+        }
+
+        float inverseTotal = 1f / totalWeight;
+        return new Color(
+            sandWeight * inverseTotal,
+            dirtWeightValue * inverseTotal,
+            grassWeightValue * inverseTotal,
+            forestWeightValue * inverseTotal);
+    }
+
+    private static TerrainBiome GetTileBiomeFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
+    {
+        int localX = worldCoordinate.x - input.biomeGridMinX;
+        int localY = worldCoordinate.y - input.biomeGridMinY;
+        if (localX < 0 || localY < 0 || localX >= input.biomeGridWidth || localY >= input.biomeGridHeight)
+        {
+            return TerrainBiome.Grass;
+        }
+
+        return input.biomeGrid[localX + (localY * input.biomeGridWidth)];
+    }
+
+    private static bool GetBlockedForWaterFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
+    {
+        int localX = worldCoordinate.x - input.biomeGridMinX;
+        int localY = worldCoordinate.y - input.biomeGridMinY;
+        if (localX < 0 || localY < 0 || localX >= input.biomeGridWidth || localY >= input.biomeGridHeight)
+        {
+            return false;
+        }
+
+        return input.blockedWaterGrid[localX + (localY * input.biomeGridWidth)];
+    }
+
+    private static Vector2 GetBiomeBlendJitterFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
+    {
+        float jitterX = Mathf.Lerp(
+            -input.terrainBlendJitter,
+            input.terrainBlendJitter,
+            Hash01WithSeed(input.seed, worldCoordinate.x, worldCoordinate.y, 8801));
+        float jitterY = Mathf.Lerp(
+            -input.terrainBlendJitter,
+            input.terrainBlendJitter,
+            Hash01WithSeed(input.seed, worldCoordinate.x, worldCoordinate.y, 8819));
+        return new Vector2(jitterX, jitterY);
+    }
+
+    private static float Hash01WithSeed(int seedValue, int x, int y, int salt)
+    {
+        unchecked
+        {
+            uint hash = (uint)seedValue;
+            hash = (hash * 397u) ^ (uint)x;
+            hash = (hash * 397u) ^ (uint)y;
+            hash = (hash * 397u) ^ (uint)salt;
+            hash ^= hash >> 15;
+            hash *= 2246822519u;
+            hash ^= hash >> 13;
+            hash *= 326648991u;
+            hash ^= hash >> 16;
+            return hash / (float)uint.MaxValue;
+        }
     }
 
     private IEnumerator BuildCurvedChunkSurfaceRoutine(
@@ -2480,7 +3013,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 playerPosition = player.transform.position;
-        if (BoxObject.TryFindNearest(playerPosition, out BoxObject focusedBoxObject)
+        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToHand(player, playerPosition, 999f))
         {
@@ -2521,7 +3054,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 playerPosition = player.transform.position;
-        if (BoxObject.TryFindNearest(playerPosition, out BoxObject focusedBoxObject)
+        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToBag(player, playerPosition, 999f, preferredSlotIndex))
         {
@@ -2575,6 +3108,12 @@ public class TerrainGenerator : MonoBehaviour
     {
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
+    }
+
+    public void RemoveInstallationPersistence(Vector2Int anchorCoordinate)
+    {
+        EnsureResourceStateStore();
+        resourceStateStore?.RemoveInstallation(anchorCoordinate);
     }
 
     private static void NotifyAreaManualPickup(Vector2Int coordinate)
@@ -2815,7 +3354,7 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (BoxObject.TryFindNearest(pickupOrigin, out BoxObject focusedBoxObject)
+        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToHand(player, pickupOrigin, pickupRadius))
         {
@@ -2862,7 +3401,7 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (BoxObject.TryFindNearest(pickupOrigin, out BoxObject focusedBoxObject)
+        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
         {
@@ -3080,29 +3619,125 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (!BoxObject.TryFindNearest(worldPosition, out BoxObject focusedBox)
+        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (!TryGetFocusedBoxObject(currentPlayer, out BoxObject focusedBox)
             || focusedBox == null
             || !focusedBox.IsOpen
-            || !focusedBox.TryGetGroundDropCoordinate(out Vector2Int targetCoordinate))
+            || !focusedBox.AcceptsItem(itemId))
         {
             return false;
         }
 
-        if (!loadedBlocks.TryGetValue(targetCoordinate, out Block block) || block == null)
+        if (focusedBox.TryGetGroundDropCoordinate(out Vector2Int targetCoordinate))
         {
-            loadedBlocks.Remove(targetCoordinate);
+            if (!loadedBlocks.TryGetValue(targetCoordinate, out Block groundBlock) || groundBlock == null)
+            {
+                loadedBlocks.Remove(targetCoordinate);
+                return false;
+            }
+
+            if (groundBlock.Type != Block.BlockType.Ground
+                || groundBlock.MapObject != focusedBox
+                || !groundBlock.CanAddInputAreaCenterObjects(itemCount, itemId))
+            {
+                return false;
+            }
+
+            targetBlock = groundBlock;
+            return true;
+        }
+
+        return TryResolveFocusedItemAreaBoxDropBlock(focusedBox, itemId, itemCount, out targetBlock);
+    }
+
+    private bool TryResolveFocusedItemAreaBoxDropBlock(
+        BoxObject focusedBox,
+        int itemId,
+        int itemCount,
+        out Block targetBlock)
+    {
+        targetBlock = null;
+        if (focusedBox == null || itemId < 0 || itemCount <= 0)
+        {
             return false;
         }
 
-        if (block.Type != Block.BlockType.Ground
-            || block.MapObject != focusedBox
-            || !block.CanAddInputAreaCenterObjects(itemCount, itemId))
+        IReadOnlyList<Vector2Int> occupiedCoordinates = focusedBox.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
         {
             return false;
         }
 
-        targetBlock = block;
-        return true;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool requireMatchingExistingStack = pass == 0;
+
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                Vector2Int coordinate = occupiedCoordinates[i];
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                {
+                    continue;
+                }
+
+                if (block.Type != Block.BlockType.Ground
+                    || block.MapObject != focusedBox
+                    || !IsValidFocusedItemAreaBoxDropBlock(block, itemId, itemCount))
+                {
+                    continue;
+                }
+
+                if (requireMatchingExistingStack && !block.HasInputAreaCenterItem(itemId))
+                {
+                    continue;
+                }
+
+                targetBlock = block;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsValidFocusedItemAreaBoxDropBlock(Block block, int itemId, int itemCount)
+    {
+        if (block == null || block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        if (IsValidInputItemAreaDropBlock(block, itemId, itemCount))
+        {
+            return true;
+        }
+
+        ItemDefinition definition = ResolveItemDefinition(itemId);
+        if (definition != null
+            && definition.energyType != ItemDefinition.EnergyType.None
+            && IsValidInputEnergyAreaDropBlock(block, definition.energyType, itemId, itemCount))
+        {
+            return true;
+        }
+
+        return IsValidOutputAreaDropBlock(block, itemId, itemCount);
+    }
+
+    private static bool TryGetFocusedBoxObject(Player player, out BoxObject focusedBoxObject)
+    {
+        focusedBoxObject = null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetFocusedBoxObject(out focusedBoxObject);
     }
 
     private bool TryResolveInputAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
@@ -3163,6 +3798,16 @@ public class TerrainGenerator : MonoBehaviour
         return block != null
                && block.Type == Block.BlockType.Ground
                && InputOutputModuleEnergyAreaController.CoordinateAcceptsEnergyType(block.Coordinate, energyType)
+               && block.CanAddInputAreaCenterObjects(itemCount, itemId);
+    }
+
+    private static bool IsValidOutputAreaDropBlock(Block block, int itemId, int itemCount)
+    {
+        return block != null
+               && itemId >= 0
+               && block.Type == Block.BlockType.Ground
+               && InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
+               && InputOutputModule.RuntimeOutputCoordinateProducesItemId(block.Coordinate, itemId)
                && block.CanAddInputAreaCenterObjects(itemCount, itemId);
     }
 
@@ -3416,6 +4061,8 @@ public class TerrainGenerator : MonoBehaviour
             }
         }
 
+        restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
+
         if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
         {
             restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
@@ -3439,6 +4086,50 @@ public class TerrainGenerator : MonoBehaviour
             {
                 block.SetMapObject(installedObject);
             }
+        }
+    }
+
+    private sealed class ChunkSurfaceWorkerInput
+    {
+        public Vector2Int origin;
+        public int chunkSizeInBlocks;
+        public int resolution;
+        public int cellCount;
+        public int biomeGridMinX;
+        public int biomeGridMinY;
+        public int biomeGridWidth;
+        public int biomeGridHeight;
+        public TerrainBiome[] biomeGrid;
+        public bool[] blockedWaterGrid;
+        public float generatedSurfaceYOffset;
+        public float terrainBlendJitter;
+        public float terrainSurfaceVertexJitter;
+        public int seed;
+    }
+
+    private void ReleaseChunkBlocksToPool(Transform chunkTransform)
+    {
+        if (!Application.isPlaying || chunkTransform == null)
+        {
+            return;
+        }
+
+        BlockPool resolvedBlockPool = ResolveBlockPool();
+        if (resolvedBlockPool == null)
+        {
+            return;
+        }
+
+        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            Block block = chunkBlocks[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            resolvedBlockPool.Release(block);
         }
     }
 
@@ -3581,6 +4272,22 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return installationBackgroundSimulator;
+    }
+
+    private BlockPool ResolveBlockPool()
+    {
+        if (blockPool != null)
+        {
+            return blockPool;
+        }
+
+        blockPool = GetComponent<BlockPool>();
+        if (blockPool == null)
+        {
+            blockPool = gameObject.AddComponent<BlockPool>();
+        }
+
+        return blockPool;
     }
 
     private static ItemDefinition ResolveInstallationDefinition(int itemId)
@@ -4792,12 +5499,4 @@ public class TerrainGenerator : MonoBehaviour
         return blockSet.corner != null ? blockSet.corner.gameObject : null;
     }
 
-    private static void ApplyBodyRotation(GameObject blockObject, float yRotation)
-    {
-        Transform body = blockObject.transform.Find("Body");
-        if (body != null)
-        {
-            body.localRotation = Quaternion.Euler(0f, yRotation, 0f);
-        }
-    }
 }

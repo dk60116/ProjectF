@@ -408,6 +408,68 @@ public class InputOutputModule : InstallationObject
         return false;
     }
 
+    public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null)
+        {
+            return false;
+        }
+
+        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.ContainsRuntimeOutputCoordinate(coordinate))
+            {
+                continue;
+            }
+
+            foundAny |= candidate.AppendOutputItemIds(outputItemIds);
+        }
+
+        return foundAny;
+    }
+
+    public static bool RuntimeOutputCoordinateProducesItemId(Vector2Int coordinate, int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.ContainsRuntimeOutputCoordinate(coordinate))
+            {
+                continue;
+            }
+
+            if (candidate.HasOutputItemId(itemId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void Update()
     {
         if (!Application.isPlaying)
@@ -493,6 +555,68 @@ public class InputOutputModule : InstallationObject
             entry.count = Mathf.Max(1, entry.count);
             outputList[i] = entry;
         }
+    }
+
+    private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate)
+    {
+        if (runtimeOutputCoordinates == null || runtimeOutputCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        {
+            if (runtimeOutputCoordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool AppendOutputItemIds(ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null)
+        {
+            return false;
+        }
+
+        EnsurePairData();
+        bool foundAny = false;
+        for (int i = 0; i < outputList.Count; i++)
+        {
+            ItemDefinition itemDefinition = outputList[i].itemDefinition;
+            if (itemDefinition == null || itemDefinition.id < 0)
+            {
+                continue;
+            }
+
+            outputItemIds.Add(itemDefinition.id);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    private bool HasOutputItemId(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        EnsurePairData();
+        for (int i = 0; i < outputList.Count; i++)
+        {
+            ItemDefinition itemDefinition = outputList[i].itemDefinition;
+            if (itemDefinition != null && itemDefinition.id == itemId)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void ConfigureRectGrid(int width, int height)

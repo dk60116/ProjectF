@@ -13,6 +13,8 @@ public class BlockStateStore : MonoBehaviour
         public InputOutputModule.PersistentState inputOutputState;
         public long lastBackgroundSimulationTicks;
         public bool? boxIsOpen;
+        public bool itemFilterMaskInitialized;
+        public List<ulong> itemFilterMaskWords = new List<ulong>();
 
         public InstallationSaveState Clone()
         {
@@ -24,7 +26,9 @@ public class BlockStateStore : MonoBehaviour
                 occupiedCoordinates = new List<Vector2Int>(occupiedCoordinates ?? new List<Vector2Int>()),
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
                 lastBackgroundSimulationTicks = lastBackgroundSimulationTicks,
-                boxIsOpen = boxIsOpen
+                boxIsOpen = boxIsOpen,
+                itemFilterMaskInitialized = itemFilterMaskInitialized,
+                itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>())
             };
         }
     }
@@ -226,6 +230,17 @@ public class BlockStateStore : MonoBehaviour
         liveInstallationStates.Remove(anchorCoordinate);
     }
 
+    public void RemoveInstallation(Vector2Int anchorCoordinate)
+    {
+        if (savedInstallationStates.TryGetValue(anchorCoordinate, out InstallationSaveState savedState))
+        {
+            UnregisterSavedCoordinateMappings(savedState);
+            savedInstallationStates.Remove(anchorCoordinate);
+        }
+
+        UnregisterLiveInstallation(anchorCoordinate);
+    }
+
     public void ClearStates()
     {
         savedStates.Clear();
@@ -268,6 +283,9 @@ public class BlockStateStore : MonoBehaviour
         {
             state.boxIsOpen = boxObject.IsOpen;
         }
+
+        state.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
+        state.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
 
         return true;
     }
