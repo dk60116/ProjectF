@@ -1,6 +1,8 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using DG.Tweening;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -25,11 +27,15 @@ public class BoxObject : InstallationObject
     private Ease hingeTweenEase = Ease.OutCubic;
 
     [SerializeField]
-    private SpriteRenderer itemIcon;
+    private SpriteRenderer itemIcon, lockIcon;
+    [SerializeField]
+    private TextMeshPro countText;
 
     private TerrainGenerator cachedTerrainGenerator;
     private int cachedDisplayedItemId = int.MinValue;
     private Sprite cachedDisplayedSprite;
+    private bool cachedLockIconVisible;
+    private string cachedCountTextValue;
 
     public float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
     public bool IsOpen => isOpen;
@@ -99,6 +105,7 @@ public class BoxObject : InstallationObject
         ApplyHingeRotation(false);
         SyncContainedStackVisibility(true);
         SyncItemIcon(true);
+        SyncCountText(true);
     }
 
     private void OnDisable()
@@ -107,12 +114,15 @@ public class BoxObject : InstallationObject
         globalMaxFocusActivationRadiusDirty = true;
         hinge?.DOKill();
         ApplyItemIconSprite(null, -1, true);
+        SetLockIconVisible(false, true);
+        ApplyCountText(string.Empty, true);
     }
 
     private void LateUpdate()
     {
         SyncContainedStackVisibility();
         SyncItemIcon();
+        SyncCountText();
     }
 
     public bool IsWithinFocusRange(Vector3 worldPosition)
@@ -234,6 +244,7 @@ public class BoxObject : InstallationObject
         globalMaxFocusActivationRadiusDirty = true;
         ApplyHingeRotation(false);
         SyncItemIcon(true);
+        SyncCountText(true);
     }
 #endif
 
@@ -403,8 +414,18 @@ public class BoxObject : InstallationObject
     {
         if (itemIcon == null)
         {
+            SetLockIconVisible(false, force);
             return;
         }
+
+        if (TryGetSingleFilteredItemId(out int filteredItemId))
+        {
+            ApplyItemIconSprite(ResolveItemIconSprite(filteredItemId), filteredItemId, force);
+            SetLockIconVisible(true, force);
+            return;
+        }
+
+        SetLockIconVisible(false, force);
 
         if (!TryGetContentBlock(out Block contentBlock))
         {
@@ -421,6 +442,35 @@ public class BoxObject : InstallationObject
         }
 
         ApplyItemIconSprite(ResolveItemIconSprite(itemId), itemId, force);
+    }
+
+    private void SyncCountText(bool force = false)
+    {
+        if (countText == null)
+        {
+            return;
+        }
+
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            ApplyCountText(string.Empty, force);
+            return;
+        }
+
+        int itemCount = contentBlock.GetInputAreaCenterItemCount();
+        if (itemCount <= 0)
+        {
+            ApplyCountText(string.Empty, force);
+            return;
+        }
+
+        int capacity = 10;
+        if (contentBlock.TryGetInstalledItemAreaCapacity(out int installedCapacity))
+        {
+            capacity = installedCapacity;
+        }
+
+        ApplyCountText($"{itemCount:00} / {Mathf.Max(1, capacity):00}", force);
     }
 
     private void ApplyItemIconSprite(Sprite sprite, int itemId, bool force)
@@ -440,6 +490,87 @@ public class BoxObject : InstallationObject
 
         itemIcon.sprite = sprite;
         itemIcon.enabled = sprite != null;
+    }
+
+    private void SetLockIconVisible(bool visible, bool force)
+    {
+        if (lockIcon == null)
+        {
+            return;
+        }
+
+        if (!force && cachedLockIconVisible == visible)
+        {
+            return;
+        }
+
+        cachedLockIconVisible = visible;
+
+        if (lockIcon.gameObject != null && !lockIcon.gameObject.activeSelf)
+        {
+            lockIcon.gameObject.SetActive(true);
+        }
+
+        lockIcon.enabled = visible;
+    }
+
+    private void ApplyCountText(string value, bool force)
+    {
+        if (countText == null)
+        {
+            return;
+        }
+
+        value ??= string.Empty;
+        if (!force && string.Equals(cachedCountTextValue, value, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        cachedCountTextValue = value;
+        countText.text = value;
+    }
+
+    private bool TryGetSingleFilteredItemId(out int itemId)
+    {
+        itemId = -1;
+        if (!IsItemFilterMaskInitialized || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return false;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null || definitions.Count <= 0)
+        {
+            return false;
+        }
+
+        int totalItemCount = ResolveFilterBitCount(-1);
+        int matchedItemCount = 0;
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null || definition.id < 0)
+            {
+                continue;
+            }
+
+            if (!IsItemFilterEnabled(definition.id, totalItemCount))
+            {
+                continue;
+            }
+
+            matchedItemCount++;
+            itemId = definition.id;
+            if (matchedItemCount > 1)
+            {
+                itemId = -1;
+                return false;
+            }
+        }
+
+        return matchedItemCount == 1 && itemId >= 0;
     }
 
     private bool TryGetAnchorBlock(out Block anchorBlock)

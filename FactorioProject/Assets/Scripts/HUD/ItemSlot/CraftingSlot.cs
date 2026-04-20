@@ -313,8 +313,14 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        List<CraftingTreeRuntime.IngredientEntry> refundIngredients = new List<CraftingTreeRuntime.IngredientEntry>(ingredientBuffer.Count);
+        for (int i = 0; i < ingredientBuffer.Count; i++)
+        {
+            refundIngredients.Add(ingredientBuffer[i]);
+        }
+
         PlayerHUD hud = FindObjectOfType<PlayerHUD>();
-        if (hud == null || !hud.TryEnqueueCrafting(craftItemId))
+        if (hud == null || !hud.TryEnqueueCrafting(craftItemId, refundIngredients))
         {
             return;
         }

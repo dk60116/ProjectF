@@ -168,49 +168,25 @@ public class Block : BaseObject
         for (int pass = 0; pass < 2; pass++)
         {
             bool requireExisting = pass == 0;
-
-            for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+            if (!TryGetBestFloorStackIndex(objectId, requireExisting, ResolveDefaultFloorDropReferenceWorldPosition(), out int stackIndex))
             {
-                Transform anchor = floorObjects[stackIndex];
-                if (anchor == null)
-                {
-                    continue;
-                }
-
-                List<PortableObject> stack = floorStacks[stackIndex];
-                if (stack == null)
-                {
-                    continue;
-                }
-
-                if (requireExisting && stack.Count == 0)
-                {
-                    continue;
-                }
-
-                if (!IsStackCompatible(stack, objectId))
-                {
-                    continue;
-                }
-
-                if (stack.Count >= Mathf.Max(1, maxFloorObjectsPerStack))
-                {
-                    continue;
-                }
-
-                PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
-                if (portableObject == null)
-                {
-                    continue;
-                }
-
-                ConfigureFloorObjectTransform(portableObject, anchor, stack.Count);
-                portableObject.SetItem(objectId);
-                portableObject.SetBatchedRendering(true);
-                stack.Add(portableObject);
-                targetPortableObject = portableObject;
-                return true;
+                continue;
             }
+
+            Transform anchor = floorObjects[stackIndex];
+            List<PortableObject> stack = floorStacks[stackIndex];
+            PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            ConfigureFloorObjectTransform(portableObject, anchor, stack.Count);
+            portableObject.SetItem(objectId);
+            portableObject.SetBatchedRendering(true);
+            stack.Add(portableObject);
+            targetPortableObject = portableObject;
+            return true;
         }
 
         return false;
@@ -484,7 +460,7 @@ public class Block : BaseObject
         return consumed;
     }
 
-    public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null)
+    public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -511,7 +487,7 @@ public class Block : BaseObject
         portableObject.SetItem(objectId);
         portableObject.SetBatchedRendering(false);
         portableObject.transform.SetParent(inputAreaCenterAnchor, true);
-        portableObject.transform.position = startWorldPosition;
+        portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
         portableObject.transform.rotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
         portableObject.gameObject.SetActive(true);
@@ -526,7 +502,7 @@ public class Block : BaseObject
             gate = portableObject.gameObject.AddComponent<DroppedItemPickupGate>();
         }
 
-        portableObject.MoveTo(finalWorldPosition, delay, () =>
+        portableObject.MoveTo(() => inputAreaCenterAnchor != null ? inputAreaCenterAnchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
         {
             if (portableObject == null || inputAreaCenterAnchor == null)
             {
@@ -710,7 +686,7 @@ public class Block : BaseObject
         return false;
     }
 
-    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null)
+    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -728,81 +704,57 @@ public class Block : BaseObject
         for (int pass = 0; pass < 2; pass++)
         {
             bool requireExisting = pass == 0;
-
-            for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+            if (!TryGetBestFloorStackIndex(objectId, requireExisting, startWorldPosition, out int stackIndex))
             {
-                Transform anchor = floorObjects[stackIndex];
-                if (anchor == null)
+                continue;
+            }
+
+            Transform anchor = floorObjects[stackIndex];
+            List<PortableObject> stack = floorStacks[stackIndex];
+            PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            portableObject.SetItem(objectId);
+            portableObject.SetBatchedRendering(false);
+            portableObject.transform.SetParent(anchor, true);
+            portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
+            portableObject.transform.rotation = Quaternion.identity;
+            portableObject.transform.localScale = Vector3.one;
+            portableObject.gameObject.SetActive(true);
+
+            int objectIndex = stack.Count;
+            Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
+            Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
+            stack.Add(portableObject);
+            DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
+            if (gate == null)
+            {
+                gate = portableObject.gameObject.AddComponent<DroppedItemPickupGate>();
+            }
+
+            portableObject.MoveTo(() => anchor != null ? anchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
+            {
+                if (portableObject == null || anchor == null)
                 {
-                    continue;
+                    onComplete?.Invoke();
+                    return;
                 }
 
-                List<PortableObject> stack = floorStacks[stackIndex];
-                if (stack == null)
-                {
-                    continue;
-                }
-
-                if (requireExisting && stack.Count == 0)
-                {
-                    continue;
-                }
-
-                if (!IsStackCompatible(stack, objectId))
-                {
-                    continue;
-                }
-
-                if (stack.Count >= Mathf.Max(1, maxFloorObjectsPerStack))
-                {
-                    continue;
-                }
-
-                PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
-                if (portableObject == null)
-                {
-                    continue;
-                }
-
-                portableObject.SetItem(objectId);
-                portableObject.SetBatchedRendering(false);
-                portableObject.transform.SetParent(anchor, true);
-                portableObject.transform.position = startWorldPosition;
-                portableObject.transform.rotation = Quaternion.identity;
+                portableObject.transform.SetParent(anchor, false);
+                portableObject.transform.localPosition = finalLocalPosition;
+                portableObject.transform.localRotation = Quaternion.identity;
                 portableObject.transform.localScale = Vector3.one;
                 portableObject.gameObject.SetActive(true);
+                portableObject.SetBatchedRendering(true);
+                gate?.MarkSettled();
+                onComplete?.Invoke();
+            }, false);
 
-                int objectIndex = stack.Count;
-                Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
-                Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
-                stack.Add(portableObject);
-                DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
-                if (gate == null)
-                {
-                    gate = portableObject.gameObject.AddComponent<DroppedItemPickupGate>();
-                }
-
-                portableObject.MoveTo(finalWorldPosition, delay, () =>
-                {
-                    if (portableObject == null || anchor == null)
-                    {
-                        onComplete?.Invoke();
-                        return;
-                    }
-
-                    portableObject.transform.SetParent(anchor, false);
-                    portableObject.transform.localPosition = finalLocalPosition;
-                    portableObject.transform.localRotation = Quaternion.identity;
-                    portableObject.transform.localScale = Vector3.one;
-                    portableObject.gameObject.SetActive(true);
-                    portableObject.SetBatchedRendering(true);
-                    gate?.MarkSettled();
-                    onComplete?.Invoke();
-                }, false);
-
-                targetPortableObject = portableObject;
-                return true;
-            }
+            targetPortableObject = portableObject;
+            return true;
         }
 
         return false;
@@ -1386,6 +1338,70 @@ public class Block : BaseObject
         }
 
         return capacity;
+    }
+
+    private bool TryGetBestFloorStackIndex(int objectId, bool requireExisting, Vector3 referenceWorldPosition, out int bestStackIndex)
+    {
+        bestStackIndex = -1;
+        float bestDistanceSqr = float.MaxValue;
+
+        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        {
+            Transform anchor = floorObjects[stackIndex];
+            if (anchor == null)
+            {
+                continue;
+            }
+
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (stack == null)
+            {
+                continue;
+            }
+
+            if (requireExisting && stack.Count == 0)
+            {
+                continue;
+            }
+
+            if (!IsStackCompatible(stack, objectId))
+            {
+                continue;
+            }
+
+            if (stack.Count >= Mathf.Max(1, maxFloorObjectsPerStack))
+            {
+                continue;
+            }
+
+            Vector3 offset = anchor.position - referenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (bestStackIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            bestDistanceSqr = distanceSqr;
+            bestStackIndex = stackIndex;
+        }
+
+        return bestStackIndex >= 0;
+    }
+
+    private Vector3 ResolveDefaultFloorDropReferenceWorldPosition()
+    {
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player != null)
+        {
+            Transform bodyTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
+            if (bodyTransform != null)
+            {
+                return bodyTransform.position;
+            }
+        }
+
+        return transform.position;
     }
 
     private bool BlocksFloorObjectStacking()

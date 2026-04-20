@@ -143,13 +143,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: 
-  objId: 4
+  objId: 2
   itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
   multiFocusMode: 0
+  itemFilterMaskInitialized: 0
+  itemFilterMaskWords: 
   harvestMode: 1
   definition: {fileID: 11400000, guid: 96e45d7fa97ca7e4aad0fb7b1ad1db16, type: 2}
   resourceStatus:

@@ -98,6 +98,8 @@ MonoBehaviour:
     mapSizeX: 1
     mapSizeY: 1
   multiFocusMode: 0
+  itemFilterMaskInitialized: 0
+  itemFilterMaskWords: 
   harvestMode: 1
   definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
   resourceStatus:

@@ -20,6 +20,7 @@ MonoBehaviour:
   icon: {fileID: 21300000, guid: 2df89a6ca7b038141bc380d89e523bfc, type: 3}
   interactionButtonList: []
   size: 0
+  itemFilter: 0
   capacity: 10
   energyType: 0
   energyAmount: 0

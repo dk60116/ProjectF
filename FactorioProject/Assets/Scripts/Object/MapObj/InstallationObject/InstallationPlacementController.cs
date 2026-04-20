@@ -546,7 +546,6 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         CleanupSelectedEditableInstallation();
-        mapEditButton.gameObject.SetActive(true);
         mapEditButton.interactable = !IsInstallationModeActive();
 
         bool canPack = mapEditModeActive && CanPackSelectedInstallation();

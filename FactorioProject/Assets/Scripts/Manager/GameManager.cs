@@ -38,7 +38,9 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Alpha1))
+        if (Input.GetKeyDown(KeyCode.Alpha0))
+            Time.timeScale = 0.5f;
+        else if (Input.GetKeyDown(KeyCode.Alpha1))
             Time.timeScale = 1f;
         else if (Input.GetKeyDown(KeyCode.Alpha2))
             Time.timeScale = 2f;

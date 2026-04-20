@@ -105,6 +105,8 @@ MonoBehaviour:
     mapSizeX: 1
     mapSizeY: 1
   multiFocusMode: 0
+  itemFilterMaskInitialized: 0
+  itemFilterMaskWords: 
   mapFilter: 1
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0

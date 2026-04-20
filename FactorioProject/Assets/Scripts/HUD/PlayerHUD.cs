@@ -55,10 +55,10 @@ public class PlayerHUD : BagSlot
     private Button mapEditPackButton;
     [SerializeField]
     private Button mapEditUndoButton;
-    [SerializeField, Min(0.05f)]
-    private float mapEditButtonExpandDuration = 0.18f;
+    [SerializeField, Min(0.01f)]
+    private float mapEditButtonExpandDuration = 0.08f;
     [SerializeField, Min(0f)]
-    private float mapEditButtonExpandStagger = 0.045f;
+    private float mapEditButtonExpandStagger = 0.02f;
 
     [SerializeField]
     private InteractionButton InteractionButton;
@@ -81,7 +81,11 @@ public class PlayerHUD : BagSlot
     private bool lastMapEditExtraButtonsVisible;
     private bool pendingBagRefreshAfterCraftingVisibilityChange;
     private bool isBagRefreshQueued;
-    private readonly Dictionary<Button, Vector2> cachedAnimatedButtonPositions = new Dictionary<Button, Vector2>();
+    private int queuedBagRefreshFrame = -1;
+    private readonly Dictionary<Button, Vector2> cachedInstallButtonPositions = new Dictionary<Button, Vector2>();
+    private readonly Dictionary<Button, Vector2> cachedMapEditButtonPositions = new Dictionary<Button, Vector2>();
+    private Sequence mapEditButtonAnimationSequence;
+    private bool mapEditButtonsAnimating;
 
 
     private class CraftingQueueEntry
@@ -91,14 +95,18 @@ public class PlayerHUD : BagSlot
         public int remainingOutputCount;
         public float remainingTime;
         public float duration;
+        public readonly List<CraftingTreeRuntime.IngredientEntry> refundIngredients;
 
-        public CraftingQueueEntry(int itemId, int outputCount, float duration)
+        public CraftingQueueEntry(int itemId, int outputCount, float duration, List<CraftingTreeRuntime.IngredientEntry> refundIngredients = null)
         {
             this.itemId = itemId;
             this.outputCount = Mathf.Max(1, outputCount);
             remainingOutputCount = this.outputCount;
             this.duration = Mathf.Max(0.01f, duration);
             remainingTime = this.duration;
+            this.refundIngredients = refundIngredients != null
+                ? new List<CraftingTreeRuntime.IngredientEntry>(refundIngredients)
+                : new List<CraftingTreeRuntime.IngredientEntry>();
         }
     }
 
@@ -147,6 +155,9 @@ public class PlayerHUD : BagSlot
     {
         CollapseExpandedBagSlot(true);
         UnbindCurrentBag();
+        isBagRefreshQueued = false;
+        queuedBagRefreshFrame = -1;
+        pendingBagRefreshAfterCraftingVisibilityChange = false;
     }
 
     private void Update()
@@ -159,6 +170,7 @@ public class PlayerHUD : BagSlot
         ResolveItemFilterUI();
         ResolveMapPaper();
         UpdateInstallModeButtons();
+        ProcessQueuedBagRefresh();
         UpdateInteractionButtonState();
         UpdateItemFilterButtonState();
         UpdateInventoryEditLockState();
@@ -503,6 +515,15 @@ public class PlayerHUD : BagSlot
             mapEditCompleteButton,
             mapEditPackButton,
             mapEditUndoButton);
+        WarmAnimatedButtonLayoutPositions(
+            installCancelButton,
+            installRotationButton,
+            installCompleteButton,
+            mapEditCancelButton,
+            mapEditRotationButton,
+            mapEditCompleteButton,
+            mapEditPackButton,
+            mapEditUndoButton);
     }
 
     private void ResolveMapPaper()
@@ -657,6 +678,15 @@ public class PlayerHUD : BagSlot
         bool showInstallActionButtons = isInstallModeActive && !isMapEditModeActive;
         bool showMapEditActionButtons = isMapEditModeActive;
 
+        if (mapEditButton != null && !mapEditButtonsAnimating)
+        {
+            bool shouldShowMapEditButton = !showMapEditActionButtons;
+            if (mapEditButton.gameObject.activeSelf != shouldShowMapEditButton)
+            {
+                mapEditButton.gameObject.SetActive(shouldShowMapEditButton);
+            }
+        }
+
         if (!mapEditButtonsInitialized)
         {
             SetAnimatedButtonVisibleImmediate(installCancelButton, showInstallActionButtons);
@@ -698,8 +728,225 @@ public class PlayerHUD : BagSlot
     {
         AnimateButtonGroupSlide(installButton != null ? installButton : mapEditButton, showInstallActionButtons,
             installCancelButton, installRotationButton, installCompleteButton);
-        AnimateButtonGroupSlide(mapEditButton, showMapEditActionButtons,
-            mapEditCancelButton, mapEditRotationButton, mapEditCompleteButton, mapEditPackButton, mapEditUndoButton);
+
+        AnimateMapEditActionButtons(showMapEditActionButtons);
+    }
+
+    private void AnimateMapEditActionButtons(bool shouldBeVisible)
+    {
+        List<Button> orderedButtons = GetButtonsInSiblingOrder(
+            mapEditCancelButton,
+            mapEditRotationButton,
+            mapEditCompleteButton,
+            mapEditPackButton,
+            mapEditUndoButton);
+
+        if (orderedButtons.Count == 0)
+        {
+            if (mapEditButton != null)
+            {
+                mapEditButton.gameObject.SetActive(!shouldBeVisible);
+            }
+
+            return;
+        }
+
+        if (mapEditButtonAnimationSequence != null && mapEditButtonAnimationSequence.IsActive())
+        {
+            mapEditButtonAnimationSequence.Kill();
+        }
+
+        ResetMapEditAnimationState(orderedButtons);
+        mapEditButtonsAnimating = true;
+
+        Vector3 sourceLocalPosition = mapEditButton != null
+            ? GetButtonLocalPosition(mapEditButton)
+            : Vector3.zero;
+
+        if (shouldBeVisible && mapEditButton != null)
+        {
+            CaptureAnimatedButtonPosition(mapEditButton);
+            sourceLocalPosition = GetButtonLocalPosition(mapEditButton);
+        }
+
+        Dictionary<Button, Vector3> targetLocalPositions = shouldBeVisible
+            ? ResolveMapEditActionTargetLocalPositions(orderedButtons)
+            : null;
+
+        if (shouldBeVisible && mapEditButton != null)
+        {
+            mapEditButton.gameObject.SetActive(false);
+        }
+
+        SetMapEditLayoutEnabled(false);
+
+        if (shouldBeVisible)
+        {
+            for (int i = 0; i < orderedButtons.Count; i++)
+            {
+                Button button = orderedButtons[i];
+                if (button == null)
+                {
+                    continue;
+                }
+
+                LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+                if (layoutElement != null)
+                {
+                    layoutElement.ignoreLayout = true;
+                }
+
+                RectTransform rectTransform = button.transform as RectTransform;
+                if (rectTransform != null)
+                {
+                    DOTween.Kill(rectTransform);
+                    rectTransform.localPosition = sourceLocalPosition;
+                }
+
+                NormalizeButtonCanvasGroup(button);
+                SetButtonRaycastTargetsEnabled(button, false);
+                button.interactable = true;
+                button.gameObject.SetActive(false);
+            }
+
+            Sequence sequence = DOTween.Sequence().SetUpdate(true);
+            for (int i = 0; i < orderedButtons.Count; i++)
+            {
+                Button animatedButton = orderedButtons[i];
+                if (animatedButton == null)
+                {
+                    continue;
+                }
+
+                float delay = i * mapEditButtonExpandStagger;
+                sequence.InsertCallback(delay, () =>
+                {
+                    if (animatedButton == null)
+                    {
+                        return;
+                    }
+
+                    RectTransform animatedRectTransform = animatedButton.transform as RectTransform;
+                    if (animatedRectTransform == null)
+                    {
+                        animatedButton.gameObject.SetActive(true);
+                        SetButtonRaycastTargetsEnabled(animatedButton, true);
+                        return;
+                    }
+
+                    animatedButton.gameObject.SetActive(true);
+                    animatedRectTransform.localPosition = sourceLocalPosition;
+                    Vector3 targetLocalPosition = targetLocalPositions != null
+                        && targetLocalPositions.TryGetValue(animatedButton, out Vector3 resolvedTargetLocalPosition)
+                        ? resolvedTargetLocalPosition
+                        : sourceLocalPosition;
+                    animatedRectTransform.DOLocalMove(targetLocalPosition, mapEditButtonExpandDuration)
+                        .SetEase(Ease.OutCubic)
+                        .OnComplete(() =>
+                        {
+                            if (animatedButton == null)
+                            {
+                                return;
+                            }
+
+                            RectTransform completedRectTransform = animatedButton.transform as RectTransform;
+                            if (completedRectTransform != null)
+                            {
+                                completedRectTransform.localPosition = targetLocalPosition;
+                            }
+
+                            SetButtonRaycastTargetsEnabled(animatedButton, true);
+                            animatedButton.interactable = true;
+                        });
+                });
+            }
+
+            sequence.OnComplete(() =>
+            {
+                mapEditButtonsAnimating = false;
+                mapEditButtonAnimationSequence = null;
+            });
+            sequence.OnKill(() =>
+            {
+                mapEditButtonsAnimating = false;
+                mapEditButtonAnimationSequence = null;
+            });
+            mapEditButtonAnimationSequence = sequence;
+            return;
+        }
+
+        Sequence hideSequence = DOTween.Sequence().SetUpdate(true);
+        for (int i = orderedButtons.Count - 1; i >= 0; i--)
+        {
+            Button animatedButton = orderedButtons[i];
+            if (animatedButton == null || !animatedButton.gameObject.activeSelf)
+            {
+                continue;
+            }
+
+            LayoutElement layoutElement = EnsureButtonLayoutElement(animatedButton);
+            if (layoutElement != null)
+            {
+                layoutElement.ignoreLayout = true;
+            }
+
+            RectTransform rectTransform = animatedButton.transform as RectTransform;
+            if (rectTransform != null)
+            {
+                DOTween.Kill(rectTransform);
+            }
+
+            NormalizeButtonCanvasGroup(animatedButton);
+            SetButtonRaycastTargetsEnabled(animatedButton, false);
+            animatedButton.interactable = true;
+
+            float delay = (orderedButtons.Count - 1 - i) * mapEditButtonExpandStagger;
+            hideSequence.InsertCallback(delay, () =>
+            {
+                if (animatedButton == null)
+                {
+                    return;
+                }
+
+                RectTransform animatedRectTransform = animatedButton.transform as RectTransform;
+                if (animatedRectTransform == null)
+                {
+                    animatedButton.gameObject.SetActive(false);
+                    return;
+                }
+
+                animatedRectTransform.DOLocalMove(sourceLocalPosition, mapEditButtonExpandDuration * 0.85f)
+                    .SetEase(Ease.InCubic)
+                    .OnComplete(() =>
+                    {
+                        if (animatedButton == null)
+                        {
+                            return;
+                        }
+
+                        animatedButton.gameObject.SetActive(false);
+                    });
+            });
+        }
+
+        hideSequence.OnComplete(() =>
+        {
+            if (mapEditButton != null)
+            {
+                mapEditButton.gameObject.SetActive(true);
+            }
+
+            SetMapEditLayoutEnabled(true);
+            RestoreAnimatedButtonGroupLayout(orderedButtons);
+            mapEditButtonsAnimating = false;
+            mapEditButtonAnimationSequence = null;
+        });
+        hideSequence.OnKill(() =>
+        {
+            mapEditButtonsAnimating = false;
+            mapEditButtonAnimationSequence = null;
+        });
+        mapEditButtonAnimationSequence = hideSequence;
     }
 
     private void SetAnimatedButtonVisibleImmediate(Button button, bool isVisible)
@@ -730,6 +977,11 @@ public class PlayerHUD : BagSlot
 
     private void AnimateButtonGroupSlide(Button sourceButton, bool shouldBeVisible, params Button[] buttons)
     {
+        AnimateButtonGroupSlide(GetButtonAnchorPosition(sourceButton), shouldBeVisible, buttons);
+    }
+
+    private void AnimateButtonGroupSlide(Vector2 sourcePosition, bool shouldBeVisible, params Button[] buttons)
+    {
         if (buttons == null || buttons.Length == 0)
         {
             return;
@@ -740,8 +992,6 @@ public class PlayerHUD : BagSlot
         {
             return;
         }
-
-        Vector2 sourcePosition = GetButtonAnchorPosition(sourceButton);
         if (shouldBeVisible)
         {
             Dictionary<Button, Vector2> resolvedTargetPositions = ResolveAnimatedButtonTargetPositions(orderedButtons);
@@ -759,7 +1009,6 @@ public class PlayerHUD : BagSlot
                 }
 
                 DOTween.Kill(rectTransform);
-                button.gameObject.SetActive(true);
                 rectTransform.localScale = Vector3.one;
                 NormalizeButtonCanvasGroup(button);
                 SetButtonRaycastTargetsEnabled(button, false);
@@ -770,6 +1019,7 @@ public class PlayerHUD : BagSlot
                 }
 
                 rectTransform.anchoredPosition = sourcePosition;
+                button.gameObject.SetActive(false);
                 animatedButtons.Add(button);
             }
 
@@ -793,32 +1043,53 @@ public class PlayerHUD : BagSlot
                     ? resolvedTargetPosition
                     : GetCachedAnimatedButtonPosition(button);
                 Button animatedButton = button;
-                rectTransform.DOAnchorPos(targetPosition, mapEditButtonExpandDuration)
-                    .SetDelay(delay)
-                    .SetEase(Ease.OutCubic)
-                    .OnComplete(() =>
+                DOVirtual.DelayedCall(delay, () =>
                     {
                         if (animatedButton == null)
                         {
                             return;
                         }
 
-                        RectTransform completedRectTransform = animatedButton.transform as RectTransform;
-                        if (completedRectTransform != null)
+                        RectTransform animatedRectTransform = animatedButton.transform as RectTransform;
+                        if (animatedRectTransform == null)
                         {
-                            completedRectTransform.anchoredPosition = targetPosition;
+                            completedCount++;
+                            if (completedCount >= animatedButtons.Count)
+                            {
+                                RestoreAnimatedButtonGroupLayout(animatedButtons);
+                            }
+                            return;
                         }
 
-                        NormalizeButtonCanvasGroup(animatedButton);
-                        SetButtonRaycastTargetsEnabled(animatedButton, true);
-                        animatedButton.interactable = true;
+                        animatedButton.gameObject.SetActive(true);
+                        animatedRectTransform.anchoredPosition = sourcePosition;
+                        animatedRectTransform.DOAnchorPos(targetPosition, mapEditButtonExpandDuration)
+                            .SetEase(Ease.OutCubic)
+                            .OnComplete(() =>
+                            {
+                                if (animatedButton == null)
+                                {
+                                    return;
+                                }
 
-                        completedCount++;
-                        if (completedCount >= animatedButtons.Count)
-                        {
-                            RestoreAnimatedButtonGroupLayout(sourceButton, animatedButtons);
-                        }
-                    });
+                                RectTransform completedRectTransform = animatedButton.transform as RectTransform;
+                                if (completedRectTransform != null)
+                                {
+                                    completedRectTransform.anchoredPosition = targetPosition;
+                                }
+
+                                NormalizeButtonCanvasGroup(animatedButton);
+                                SetButtonRaycastTargetsEnabled(animatedButton, true);
+                                animatedButton.interactable = true;
+
+                                completedCount++;
+                                if (completedCount >= animatedButtons.Count)
+                                {
+                                    RestoreAnimatedButtonGroupLayout(animatedButtons);
+                                }
+                            });
+                    })
+                    .SetUpdate(true);
             }
 
             return;
@@ -883,7 +1154,7 @@ public class PlayerHUD : BagSlot
                     }
 
                     RectTransform completedRectTransform = animatedButton.transform as RectTransform;
-                    if (completedRectTransform != null)
+                    if (completedRectTransform != null && !IsLayoutManagedButton(animatedButton))
                     {
                         completedRectTransform.anchoredPosition = GetCachedAnimatedButtonPosition(animatedButton);
                     }
@@ -894,7 +1165,7 @@ public class PlayerHUD : BagSlot
 
         DOVirtual.DelayedCall(
             (activeButtons.Count - 1) * mapEditButtonExpandStagger + (mapEditButtonExpandDuration * 0.85f),
-            () => RestoreAnimatedButtonGroupLayout(sourceButton, activeButtons))
+            () => RestoreAnimatedButtonGroupLayout(activeButtons))
             .SetUpdate(true);
     }
 
@@ -974,7 +1245,7 @@ public class PlayerHUD : BagSlot
         return orderedButtons;
     }
 
-    private void RestoreAnimatedButtonGroupLayout(Button sourceButton, List<Button> buttons)
+    private void RestoreAnimatedButtonGroupLayout(List<Button> buttons)
     {
         if (buttons == null)
         {
@@ -996,13 +1267,192 @@ public class PlayerHUD : BagSlot
             }
 
             RectTransform rectTransform = button.transform as RectTransform;
-            if (rectTransform != null)
+            if (rectTransform != null && !IsLayoutManagedButton(button))
             {
                 rectTransform.anchoredPosition = GetCachedAnimatedButtonPosition(button);
             }
         }
 
-        ForceButtonGroupLayoutRebuild(sourceButton, buttons);
+        ForceButtonGroupLayoutRebuild(null, buttons);
+    }
+
+    private void SetMapEditLayoutEnabled(bool isEnabled)
+    {
+        RectTransform mapEditRoot = mapEditButton != null
+            ? mapEditButton.transform.parent as RectTransform
+            : null;
+        if (mapEditRoot == null)
+        {
+            return;
+        }
+
+        LayoutGroup layoutGroup = mapEditRoot.GetComponent<LayoutGroup>();
+        if (layoutGroup != null)
+        {
+            layoutGroup.enabled = isEnabled;
+        }
+
+        ContentSizeFitter contentSizeFitter = mapEditRoot.GetComponent<ContentSizeFitter>();
+        if (contentSizeFitter != null)
+        {
+            contentSizeFitter.enabled = isEnabled;
+        }
+
+        if (isEnabled)
+        {
+            LayoutRebuilder.ForceRebuildLayoutImmediate(mapEditRoot);
+            Canvas.ForceUpdateCanvases();
+        }
+    }
+
+    private void ResetMapEditAnimationState(List<Button> orderedButtons)
+    {
+        SetMapEditLayoutEnabled(true);
+
+        if (orderedButtons == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < orderedButtons.Count; i++)
+        {
+            Button button = orderedButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            RectTransform rectTransform = button.transform as RectTransform;
+            if (rectTransform != null)
+            {
+                DOTween.Kill(rectTransform);
+                rectTransform.anchoredPosition = GetCachedAnimatedButtonPosition(button);
+            }
+
+            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+            if (layoutElement != null)
+            {
+                layoutElement.ignoreLayout = false;
+            }
+
+            NormalizeButtonCanvasGroup(button);
+            SetButtonRaycastTargetsEnabled(button, button.gameObject.activeSelf);
+            button.interactable = true;
+        }
+
+        if (!IsMapEditModeActive() && mapEditButton != null)
+        {
+            mapEditButton.gameObject.SetActive(true);
+        }
+
+        ForceButtonGroupLayoutRebuild(mapEditButton, orderedButtons);
+    }
+
+    private Dictionary<Button, Vector3> ResolveMapEditActionTargetLocalPositions(List<Button> orderedButtons)
+    {
+        Dictionary<Button, Vector3> positions = new Dictionary<Button, Vector3>();
+        if (orderedButtons == null || orderedButtons.Count == 0)
+        {
+            return positions;
+        }
+
+        RectTransform mapEditRoot = mapEditButton != null
+            ? mapEditButton.transform.parent as RectTransform
+            : null;
+        if (mapEditRoot == null)
+        {
+            for (int i = 0; i < orderedButtons.Count; i++)
+            {
+                Button button = orderedButtons[i];
+                if (button == null)
+                {
+                    continue;
+                }
+
+                positions[button] = GetButtonLocalPosition(button);
+            }
+
+            return positions;
+        }
+
+        Dictionary<Button, bool> activeStates = new Dictionary<Button, bool>();
+        Dictionary<Button, bool> ignoreLayoutStates = new Dictionary<Button, bool>();
+        bool mapEditButtonWasActive = mapEditButton != null && mapEditButton.gameObject.activeSelf;
+        LayoutElement mapEditLayoutElement = EnsureButtonLayoutElement(mapEditButton);
+        bool mapEditIgnoreLayout = mapEditLayoutElement != null && mapEditLayoutElement.ignoreLayout;
+
+        SetMapEditLayoutEnabled(true);
+
+        if (mapEditButton != null)
+        {
+            mapEditButton.gameObject.SetActive(false);
+        }
+
+        for (int i = 0; i < orderedButtons.Count; i++)
+        {
+            Button button = orderedButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            activeStates[button] = button.gameObject.activeSelf;
+
+            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+            ignoreLayoutStates[button] = layoutElement != null && layoutElement.ignoreLayout;
+
+            button.gameObject.SetActive(true);
+            if (layoutElement != null)
+            {
+                layoutElement.ignoreLayout = false;
+            }
+        }
+
+        LayoutRebuilder.ForceRebuildLayoutImmediate(mapEditRoot);
+        Canvas.ForceUpdateCanvases();
+
+        for (int i = 0; i < orderedButtons.Count; i++)
+        {
+            Button button = orderedButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            positions[button] = GetButtonLocalPosition(button);
+        }
+
+        if (mapEditLayoutElement != null)
+        {
+            mapEditLayoutElement.ignoreLayout = mapEditIgnoreLayout;
+        }
+
+        if (mapEditButton != null)
+        {
+            mapEditButton.gameObject.SetActive(mapEditButtonWasActive);
+        }
+
+        for (int i = 0; i < orderedButtons.Count; i++)
+        {
+            Button button = orderedButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+            if (layoutElement != null && ignoreLayoutStates.TryGetValue(button, out bool ignoreLayout))
+            {
+                layoutElement.ignoreLayout = ignoreLayout;
+            }
+
+            if (activeStates.TryGetValue(button, out bool wasActive))
+            {
+                button.gameObject.SetActive(wasActive);
+            }
+        }
+
+        return positions;
     }
 
     private Dictionary<Button, Vector2> ResolveAnimatedButtonTargetPositions(IEnumerable<Button> buttons)
@@ -1013,9 +1463,6 @@ public class PlayerHUD : BagSlot
             return resolvedPositions;
         }
 
-        List<Button> buttonList = new List<Button>();
-        HashSet<RectTransform> dynamicLayoutRoots = new HashSet<RectTransform>();
-
         foreach (Button button in buttons)
         {
             if (button == null)
@@ -1023,69 +1470,21 @@ public class PlayerHUD : BagSlot
                 continue;
             }
 
-            buttonList.Add(button);
-            RectTransform root = button.transform.parent as RectTransform;
-            if (root != null && root.GetComponent<LayoutGroup>() != null)
-            {
-                dynamicLayoutRoots.Add(root);
-            }
-        }
-
-        if (buttonList.Count == 0)
-        {
-            return resolvedPositions;
-        }
-
-        if (dynamicLayoutRoots.Count == 0)
-        {
-            for (int i = 0; i < buttonList.Count; i++)
-            {
-                Button button = buttonList[i];
-                resolvedPositions[button] = GetCachedAnimatedButtonPosition(button);
-            }
-
-            return resolvedPositions;
-        }
-
-        for (int i = 0; i < buttonList.Count; i++)
-        {
-            Button button = buttonList[i];
-            if (button == null)
-            {
-                continue;
-            }
-
-            if (!button.gameObject.activeSelf)
-            {
-                button.gameObject.SetActive(true);
-            }
-
-            LayoutElement layoutElement = EnsureButtonLayoutElement(button);
-            if (layoutElement != null)
-            {
-                layoutElement.ignoreLayout = false;
-            }
-        }
-
-        foreach (RectTransform root in dynamicLayoutRoots)
-        {
-            LayoutRebuilder.ForceRebuildLayoutImmediate(root);
-        }
-
-        Canvas.ForceUpdateCanvases();
-
-        for (int i = 0; i < buttonList.Count; i++)
-        {
-            Button button = buttonList[i];
-            RectTransform rectTransform = button != null ? button.transform as RectTransform : null;
-            Vector2 resolvedPosition = rectTransform != null
-                ? rectTransform.anchoredPosition
-                : GetCachedAnimatedButtonPosition(button);
-            resolvedPositions[button] = resolvedPosition;
-            cachedAnimatedButtonPositions[button] = resolvedPosition;
+            resolvedPositions[button] = GetCachedAnimatedButtonPosition(button);
         }
 
         return resolvedPositions;
+    }
+
+    private static bool IsLayoutManagedButton(Button button)
+    {
+        if (button == null)
+        {
+            return false;
+        }
+
+        return button.transform.parent is RectTransform parent
+            && parent.GetComponent<LayoutGroup>() != null;
     }
 
     private LayoutElement EnsureButtonLayoutElement(Button button)
@@ -1108,6 +1507,12 @@ public class PlayerHUD : BagSlot
     {
         RectTransform rectTransform = button != null ? button.transform as RectTransform : null;
         return rectTransform != null ? rectTransform.anchoredPosition : Vector2.zero;
+    }
+
+    private static Vector3 GetButtonLocalPosition(Button button)
+    {
+        RectTransform rectTransform = button != null ? button.transform as RectTransform : null;
+        return rectTransform != null ? rectTransform.localPosition : Vector3.zero;
     }
 
     private void ForceButtonGroupLayoutRebuild(Button sourceButton, IEnumerable<Button> buttons)
@@ -1153,7 +1558,13 @@ public class PlayerHUD : BagSlot
         for (int i = 0; i < buttons.Length; i++)
         {
             Button button = buttons[i];
-            if (button == null || cachedAnimatedButtonPositions.ContainsKey(button))
+            if (button == null)
+            {
+                continue;
+            }
+
+            Dictionary<Button, Vector2> cache = GetAnimatedButtonPositionCache(button);
+            if (cache.ContainsKey(button))
             {
                 continue;
             }
@@ -1164,7 +1575,115 @@ public class PlayerHUD : BagSlot
                 continue;
             }
 
-            cachedAnimatedButtonPositions[button] = rectTransform.anchoredPosition;
+            cache[button] = rectTransform.anchoredPosition;
+        }
+    }
+
+    private void CaptureAnimatedButtonPosition(Button button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        RectTransform rectTransform = button.transform as RectTransform;
+        if (rectTransform == null)
+        {
+            return;
+        }
+
+        Dictionary<Button, Vector2> cache = GetAnimatedButtonPositionCache(button);
+        cache[button] = rectTransform.anchoredPosition;
+    }
+
+    private void WarmAnimatedButtonLayoutPositions(params Button[] buttons)
+    {
+        if (buttons == null || buttons.Length == 0)
+        {
+            return;
+        }
+
+        Dictionary<RectTransform, List<Button>> buttonsByRoot = new Dictionary<RectTransform, List<Button>>();
+        foreach (Button button in buttons)
+        {
+            if (button == null)
+            {
+                continue;
+            }
+
+            Dictionary<Button, Vector2> cache = GetAnimatedButtonPositionCache(button);
+            if (cache.ContainsKey(button))
+            {
+                continue;
+            }
+
+            RectTransform root = button.transform.parent as RectTransform;
+            if (root == null || root.GetComponent<LayoutGroup>() == null)
+            {
+                CaptureAnimatedButtonPosition(button);
+                continue;
+            }
+
+            if (!buttonsByRoot.TryGetValue(root, out List<Button> groupedButtons))
+            {
+                groupedButtons = new List<Button>();
+                buttonsByRoot[root] = groupedButtons;
+            }
+
+            groupedButtons.Add(button);
+        }
+
+        foreach ((RectTransform root, List<Button> groupedButtons) in buttonsByRoot)
+        {
+            Dictionary<Button, bool> activeStates = new Dictionary<Button, bool>();
+            Dictionary<Button, bool> ignoreLayoutStates = new Dictionary<Button, bool>();
+
+            for (int i = 0; i < groupedButtons.Count; i++)
+            {
+                Button button = groupedButtons[i];
+                if (button == null)
+                {
+                    continue;
+                }
+
+                activeStates[button] = button.gameObject.activeSelf;
+                LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+                ignoreLayoutStates[button] = layoutElement != null && layoutElement.ignoreLayout;
+
+                button.gameObject.SetActive(true);
+                if (layoutElement != null)
+                {
+                    layoutElement.ignoreLayout = false;
+                }
+            }
+
+            LayoutRebuilder.ForceRebuildLayoutImmediate(root);
+            Canvas.ForceUpdateCanvases();
+
+            for (int i = 0; i < groupedButtons.Count; i++)
+            {
+                CaptureAnimatedButtonPosition(groupedButtons[i]);
+            }
+
+            for (int i = 0; i < groupedButtons.Count; i++)
+            {
+                Button button = groupedButtons[i];
+                if (button == null)
+                {
+                    continue;
+                }
+
+                LayoutElement layoutElement = EnsureButtonLayoutElement(button);
+                if (layoutElement != null && ignoreLayoutStates.TryGetValue(button, out bool ignoreLayout))
+                {
+                    layoutElement.ignoreLayout = ignoreLayout;
+                }
+
+                if (activeStates.TryGetValue(button, out bool wasActive))
+                {
+                    button.gameObject.SetActive(wasActive);
+                }
+            }
         }
     }
 
@@ -1175,13 +1694,31 @@ public class PlayerHUD : BagSlot
             return Vector2.zero;
         }
 
-        if (cachedAnimatedButtonPositions.TryGetValue(button, out Vector2 cachedPosition))
+        Dictionary<Button, Vector2> cache = GetAnimatedButtonPositionCache(button);
+        if (cache.TryGetValue(button, out Vector2 cachedPosition))
         {
             return cachedPosition;
         }
 
         RectTransform rectTransform = button.transform as RectTransform;
         return rectTransform != null ? rectTransform.anchoredPosition : Vector2.zero;
+    }
+
+    private Dictionary<Button, Vector2> GetAnimatedButtonPositionCache(Button button)
+    {
+        return IsMapEditAnimatedButton(button)
+            ? cachedMapEditButtonPositions
+            : cachedInstallButtonPositions;
+    }
+
+    private bool IsMapEditAnimatedButton(Button button)
+    {
+        return button == mapEditButton
+               || button == mapEditCancelButton
+               || button == mapEditRotationButton
+               || button == mapEditCompleteButton
+               || button == mapEditPackButton
+               || button == mapEditUndoButton;
     }
 
     private void UpdateInteractionButtonState()
@@ -1528,24 +2065,36 @@ public class PlayerHUD : BagSlot
 
     private void QueueBagRefresh()
     {
-        if (isBagRefreshQueued || !isActiveAndEnabled)
+        if (!isActiveAndEnabled || !gameObject.activeInHierarchy)
         {
             return;
         }
 
         isBagRefreshQueued = true;
-        StartCoroutine(RefreshBagNextFrame());
+        queuedBagRefreshFrame = Time.frameCount + 1;
     }
 
-    private IEnumerator RefreshBagNextFrame()
+    private void ProcessQueuedBagRefresh()
     {
-        yield return null;
-        isBagRefreshQueued = false;
-
-        if (!isActiveAndEnabled)
+        if (!isBagRefreshQueued)
         {
-            yield break;
+            return;
         }
+
+        if (!isActiveAndEnabled || !gameObject.activeInHierarchy)
+        {
+            isBagRefreshQueued = false;
+            queuedBagRefreshFrame = -1;
+            return;
+        }
+
+        if (Time.frameCount < queuedBagRefreshFrame)
+        {
+            return;
+        }
+
+        isBagRefreshQueued = false;
+        queuedBagRefreshFrame = -1;
 
         RefreshBag(boundBag);
         if (expandedBagSlot == null)
@@ -1670,7 +2219,7 @@ public class PlayerHUD : BagSlot
         RefreshVisibleCraftingUi();
     }
 
-    public bool TryEnqueueCrafting(int itemId)
+    public bool TryEnqueueCrafting(int itemId, List<CraftingTreeRuntime.IngredientEntry> refundIngredients = null)
     {
         if (itemId < 0 || IsInventoryEditLocked())
         {
@@ -1688,7 +2237,7 @@ public class PlayerHUD : BagSlot
         }
 
         int outputCount = CraftingTreeRuntime.GetOutputCount(itemId);
-        craftingQueue.Add(new CraftingQueueEntry(itemId, outputCount, CraftingDurationSeconds));
+        craftingQueue.Add(new CraftingQueueEntry(itemId, outputCount, CraftingDurationSeconds, refundIngredients));
         craftingQueueDirty = true;
         RefreshCraftingQueueSlots(true);
         return true;
@@ -1857,8 +2406,18 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        Vector3 targetPosition = targetPortableObject.transform.position;
-        movingPortableObject.MoveTo(targetPosition, delay, () =>
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        Func<Vector3> startPositionProvider = null;
+        if (player != null)
+        {
+            Transform startTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
+            if (startTransform != null)
+            {
+                startPositionProvider = () => startTransform != null ? startTransform.position : startPosition;
+            }
+        }
+
+        movingPortableObject.MoveTo(targetPortableObject.transform, delay, startPositionProvider, () =>
         {
             commitAction?.Invoke();
 
@@ -1894,6 +2453,7 @@ public class PlayerHUD : BagSlot
             if (i < craftingQueue.Count)
             {
                 CraftingQueueEntry entry = craftingQueue[i];
+                int capturedIndex = i;
                 if (!slot.gameObject.activeSelf)
                 {
                     slot.gameObject.SetActive(true);
@@ -1909,6 +2469,9 @@ public class PlayerHUD : BagSlot
 
                 float fillValue = i == 0 ? currentFill : 1f;
                 slot.SetFill(fillValue);
+                bool canCancel = entry.remainingTime > 0f;
+                slot.BindCancelAction(canCancel ? () => CancelCraftingQueueAt(capturedIndex) : null);
+                slot.SetCancelInteractable(canCancel);
             }
             else
             {
@@ -1918,10 +2481,79 @@ public class PlayerHUD : BagSlot
                 }
 
                 slot.SetFill(0f);
+                slot.BindCancelAction(null);
                 if (slot.gameObject.activeSelf)
                 {
                     slot.gameObject.SetActive(false);
                 }
+            }
+        }
+    }
+
+    private bool CancelCraftingQueueAt(int index)
+    {
+        if (index < 0 || index >= craftingQueue.Count)
+        {
+            return false;
+        }
+
+        CraftingQueueEntry entry = craftingQueue[index];
+        if (entry == null || entry.remainingTime <= 0f)
+        {
+            return false;
+        }
+
+        RefundCraftingIngredients(entry);
+        craftingQueue.RemoveAt(index);
+        craftingQueueDirty = true;
+        RefreshCraftingQueueSlots(true);
+        return true;
+    }
+
+    private void RefundCraftingIngredients(CraftingQueueEntry entry)
+    {
+        if (entry == null || entry.refundIngredients == null || entry.refundIngredients.Count == 0)
+        {
+            return;
+        }
+
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance.Player;
+        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        Vector3 refundOrigin = player.transform.position;
+
+        for (int i = 0; i < entry.refundIngredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = entry.refundIngredients[i];
+            int remaining = Mathf.Max(0, ingredient.count);
+            while (remaining > 0)
+            {
+                if (player.TryAddToBag(ingredient.itemId, out _))
+                {
+                    remaining--;
+                    continue;
+                }
+
+                if (player.TryAddToHand(ingredient.itemId, out _))
+                {
+                    remaining--;
+                    continue;
+                }
+
+                if (terrain != null
+                    && (terrain.TryAddDroppedItemAnimated(refundOrigin, ingredient.itemId, refundOrigin, out _)
+                        || terrain.TryAddDroppedItemAtPlayerBlock(refundOrigin, ingredient.itemId, out _)
+                        || terrain.TryAddDroppedItemNear(refundOrigin, ingredient.itemId, out _)))
+                {
+                    remaining--;
+                    continue;
+                }
+
+                return;
             }
         }
     }

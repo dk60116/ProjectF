@@ -180,20 +180,32 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        Vector3 dropOrigin = GameManager.Instance.Player.transform.position;
+        Player player = GameManager.Instance.Player;
+        Transform movingStartTransform = null;
+        if (player != null)
+        {
+            movingStartTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
+        }
+
+        Func<Vector3> startWorldPositionProvider = movingStartTransform != null
+            ? () => movingStartTransform != null ? movingStartTransform.position : startWorldPosition
+            : null;
+
+        Vector3 dropOrigin = player != null ? player.transform.position : startWorldPosition;
 
         bool dropped = terrainGenerator.TryAddDroppedItemStackAtPlayerBlock(
             dropOrigin,
             itemId,
             removedCount,
             startWorldPosition,
+            startWorldPositionProvider,
             0.1f,
             out Vector2Int dropCoordinate);
 
         if (dropped)
         {
-            GameManager.Instance.Player.MarkDropExitGate(dropOrigin, 0.5f);
-            GameManager.Instance.Player.SetLastDropTarget(dropCoordinate);
+            player.MarkDropExitGate(dropOrigin, 0.5f);
+            player.SetLastDropTarget(dropCoordinate);
         }
         else
         {

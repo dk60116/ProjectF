@@ -1195,6 +1195,34 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
         }
 
+        results.Sort((left, right) =>
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+
+            if (left == null)
+            {
+                return 1;
+            }
+
+            if (right == null)
+            {
+                return -1;
+            }
+
+            int idCompare = left.id.CompareTo(right.id);
+            if (idCompare != 0)
+            {
+                return idCompare;
+            }
+
+            string leftName = string.IsNullOrWhiteSpace(left.itemName) ? left.name : left.itemName;
+            string rightName = string.IsNullOrWhiteSpace(right.itemName) ? right.name : right.itemName;
+            return string.Compare(leftName, rightName, StringComparison.OrdinalIgnoreCase);
+        });
+
         return results;
     }
 

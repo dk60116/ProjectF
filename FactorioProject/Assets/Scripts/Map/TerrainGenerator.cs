@@ -2877,6 +2877,7 @@ public class TerrainGenerator : MonoBehaviour
             itemId,
             itemCount,
             startWorldPosition,
+            null,
             moveInterval,
             out _);
     }
@@ -2886,6 +2887,43 @@ public class TerrainGenerator : MonoBehaviour
         int itemId,
         int itemCount,
         Vector3 startWorldPosition,
+        Func<Vector3> startWorldPositionProvider,
+        float moveInterval = 0.1f)
+    {
+        return TryAddDroppedItemStackAtPlayerBlock(
+            worldPosition,
+            itemId,
+            itemCount,
+            startWorldPosition,
+            startWorldPositionProvider,
+            moveInterval,
+            out _);
+    }
+
+    public bool TryAddDroppedItemStackAtPlayerBlock(
+        Vector3 worldPosition,
+        int itemId,
+        int itemCount,
+        Vector3 startWorldPosition,
+        float moveInterval,
+        out Vector2Int dropCoordinate)
+    {
+        return TryAddDroppedItemStackAtPlayerBlock(
+            worldPosition,
+            itemId,
+            itemCount,
+            startWorldPosition,
+            null,
+            moveInterval,
+            out dropCoordinate);
+    }
+
+    public bool TryAddDroppedItemStackAtPlayerBlock(
+        Vector3 worldPosition,
+        int itemId,
+        int itemCount,
+        Vector3 startWorldPosition,
+        Func<Vector3> startWorldPositionProvider,
         float moveInterval,
         out Vector2Int dropCoordinate)
     {
@@ -2904,7 +2942,9 @@ public class TerrainGenerator : MonoBehaviour
                         itemId,
                         startWorldPosition,
                         i * Mathf.Max(0f, moveInterval),
-                        out PortableObject droppedObject))
+                        out PortableObject droppedObject,
+                        null,
+                        startWorldPositionProvider))
                 {
                     return false;
                 }
@@ -2924,7 +2964,9 @@ public class TerrainGenerator : MonoBehaviour
                         itemId,
                         startWorldPosition,
                         i * Mathf.Max(0f, moveInterval),
-                        out PortableObject droppedObject))
+                        out PortableObject droppedObject,
+                        null,
+                        startWorldPositionProvider))
                 {
                     return false;
                 }
@@ -2944,7 +2986,7 @@ public class TerrainGenerator : MonoBehaviour
         dropCoordinate = targetBlock.Coordinate;
         for (int i = 0; i < itemCount; i++)
         {
-            if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, i * Mathf.Max(0f, moveInterval), out PortableObject droppedObject))
+            if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, i * Mathf.Max(0f, moveInterval), out PortableObject droppedObject, null, startWorldPositionProvider))
             {
                 return false;
             }

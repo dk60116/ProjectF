@@ -7,6 +7,7 @@ using UnityEngine;
 public class ItemDataEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 260f;
+    private const float GiveButtonWidth = 46f;
     private const float RectGridCellSize = 34f;
     private const float RectGridCellSpacing = 5f;
     private const float RectGridPaletteBlockWidth = 78f;
@@ -22,6 +23,7 @@ public class ItemDataEditorWindow : EditorWindow
     private Vector2 detailScroll;
     private int selectedItemId = -1;
     private string itemSearchText = string.Empty;
+    private ItemDefinition pendingReorderSelection;
 
     private readonly struct RectGridPaletteEntry
     {
@@ -180,6 +182,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
         EnsureSelection(definitions, visibleDefinitions);
+        bool allowReorder = string.IsNullOrWhiteSpace(itemSearchText);
 
         if (visibleDefinitions.Count == 0)
         {
@@ -200,16 +203,266 @@ public class ItemDataEditorWindow : EditorWindow
             string displayName = GetDefinitionDisplayName(definition);
             bool isSelected = definition.id == selectedItemId;
             Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
+            Rect selectRect = new Rect(rowRect.x, rowRect.y, Mathf.Max(1f, rowRect.width - GiveButtonWidth - 4f), rowRect.height);
+            Rect giveRect = new Rect(selectRect.xMax + 4f, rowRect.y, GiveButtonWidth, rowRect.height);
             GUIContent content = new GUIContent($"[{definition.id}] {displayName}", GetItemIcon(definition));
-            ItemDefinitionDragAndDropUtility.HandleListItemDrag(rowRect, definition, content.text, this);
-            bool pressed = GUI.Toggle(rowRect, isSelected, content, "Button");
+            ItemDefinitionDragAndDropUtility.HandleListItemDrag(selectRect, definition, content.text, this);
+            if (allowReorder)
+            {
+                HandleDefinitionReorderDropTarget(rowRect, itemManager, definitions, visibleDefinitions, i);
+            }
+
+            bool pressed = GUI.Toggle(selectRect, isSelected, content, "Button");
             if (pressed)
             {
                 selectedItemId = definition.id;
             }
+
+            EditorGUI.BeginDisabledGroup(!EditorApplication.isPlaying);
+            if (GUI.Button(giveRect, "Give"))
+            {
+                TryGiveItemToPlayer(definition);
+            }
+            EditorGUI.EndDisabledGroup();
         }
+
+        if (allowReorder)
+        {
+            Rect endDropRect = GUILayoutUtility.GetRect(1f, 16f, GUILayout.ExpandWidth(true));
+            HandleDefinitionReorderDropTarget(endDropRect, itemManager, definitions, visibleDefinitions, visibleDefinitions.Count);
+        }
+
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
+    }
+
+    private void HandleDefinitionReorderDropTarget(
+        Rect rect,
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> visibleDefinitions,
+        int visibleInsertIndex)
+    {
+        ItemDefinition draggedDefinition = GetDraggedItemDefinition();
+        if (draggedDefinition == null || definitions == null || visibleDefinitions == null || itemManager == null)
+        {
+            return;
+        }
+
+        Event current = Event.current;
+        if (current == null || !rect.Contains(current.mousePosition))
+        {
+            return;
+        }
+
+        bool insertAfter = visibleInsertIndex < visibleDefinitions.Count && current.mousePosition.y > rect.center.y;
+        bool isEndTarget = visibleInsertIndex >= visibleDefinitions.Count;
+        if (isEndTarget)
+        {
+            insertAfter = false;
+        }
+
+        switch (current.type)
+        {
+            case EventType.DragUpdated:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                current.Use();
+                break;
+
+            case EventType.DragPerform:
+                DragAndDrop.AcceptDrag();
+                ReorderDefinitions(itemManager, definitions, visibleDefinitions, draggedDefinition, visibleInsertIndex, insertAfter);
+                GUI.changed = true;
+                current.Use();
+                break;
+
+            case EventType.Repaint:
+                DrawDefinitionReorderHighlight(rect, insertAfter, isEndTarget);
+                break;
+        }
+    }
+
+    private void ReorderDefinitions(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> visibleDefinitions,
+        ItemDefinition draggedDefinition,
+        int visibleInsertIndex,
+        bool insertAfter)
+    {
+        if (itemManager == null || definitions == null || draggedDefinition == null)
+        {
+            return;
+        }
+
+        int sourceIndex = definitions.IndexOf(draggedDefinition);
+        if (sourceIndex < 0)
+        {
+            return;
+        }
+
+        int targetIndex;
+        if (visibleInsertIndex >= visibleDefinitions.Count)
+        {
+            targetIndex = definitions.Count;
+        }
+        else
+        {
+            ItemDefinition targetDefinition = visibleDefinitions[visibleInsertIndex];
+            targetIndex = definitions.IndexOf(targetDefinition);
+            if (targetIndex < 0)
+            {
+                return;
+            }
+
+            if (insertAfter)
+            {
+                targetIndex++;
+            }
+        }
+
+        if (sourceIndex < targetIndex)
+        {
+            targetIndex--;
+        }
+
+        if (targetIndex < 0)
+        {
+            targetIndex = 0;
+        }
+
+        if (targetIndex > definitions.Count - 1)
+        {
+            targetIndex = definitions.Count - 1;
+        }
+
+        if (sourceIndex == targetIndex)
+        {
+            return;
+        }
+
+        ItemDefinition selectedDefinition = FindDefinitionById(definitions, selectedItemId);
+        pendingReorderSelection = selectedDefinition != null ? selectedDefinition : draggedDefinition;
+
+        Undo.RegisterCompleteObjectUndo(itemManager, "Reorder Item Definitions");
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            if (definitions[i] != null)
+            {
+                Undo.RecordObject(definitions[i], "Reorder Item Definitions");
+            }
+        }
+
+        definitions.RemoveAt(sourceIndex);
+        definitions.Insert(targetIndex, draggedDefinition);
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            definition.id = i;
+            EditorUtility.SetDirty(definition);
+        }
+
+        SyncItemManagerItemSets(itemManager, definitions);
+        itemManager.ApplyItemIdsToPrefabs();
+        EditorUtility.SetDirty(itemManager);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        if (pendingReorderSelection != null)
+        {
+            selectedItemId = pendingReorderSelection.id;
+            pendingReorderSelection = null;
+        }
+
+        Repaint();
+    }
+
+    private static void SyncItemManagerItemSets(ItemManager itemManager, List<ItemDefinition> definitions)
+    {
+        if (itemManager == null)
+        {
+            return;
+        }
+
+        List<ItemManager.ItemSet> itemSets = itemManager.ItemSets;
+        if (itemSets == null)
+        {
+            return;
+        }
+
+        Dictionary<string, int> idByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string key = GetDefinitionDisplayName(definition);
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                idByName[key] = definition.id;
+            }
+        }
+
+        for (int i = 0; i < itemSets.Count; i++)
+        {
+            ItemManager.ItemSet itemSet = itemSets[i];
+            if (string.IsNullOrWhiteSpace(itemSet.name))
+            {
+                continue;
+            }
+
+            if (idByName.TryGetValue(itemSet.name, out int reorderedId))
+            {
+                itemSet.id = reorderedId;
+                itemSets[i] = itemSet;
+            }
+        }
+
+        itemSets.Sort((left, right) =>
+        {
+            int idCompare = left.id.CompareTo(right.id);
+            if (idCompare != 0)
+            {
+                return idCompare;
+            }
+
+            return string.Compare(left.name, right.name, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    private static ItemDefinition GetDraggedItemDefinition()
+    {
+        UnityEngine.Object[] objectReferences = DragAndDrop.objectReferences;
+        if (objectReferences == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < objectReferences.Length; i++)
+        {
+            if (objectReferences[i] is ItemDefinition definition)
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private static void DrawDefinitionReorderHighlight(Rect rect, bool insertAfter, bool isEndTarget)
+    {
+        Color color = new Color(0.35f, 0.65f, 1f, 0.95f);
+        float y = isEndTarget || insertAfter ? rect.yMax - 1f : rect.yMin;
+        EditorGUI.DrawRect(new Rect(rect.xMin, y, rect.width, 2f), color);
     }
 
     private void DrawToolbar()
@@ -2258,6 +2511,49 @@ public class ItemDataEditorWindow : EditorWindow
         return definition.icon.texture;
     }
 
+    private void TryGiveItemToPlayer(ItemDefinition definition)
+    {
+        if (definition == null || definition.id < 0)
+        {
+            ShowNotification(new GUIContent("지급할 아이템이 없습니다."));
+            return;
+        }
+
+        if (!EditorApplication.isPlaying)
+        {
+            ShowNotification(new GUIContent("플레이 중일 때만 지급할 수 있습니다."));
+            return;
+        }
+
+        Player player = FindRuntimePlayer();
+        if (player == null)
+        {
+            ShowNotification(new GUIContent("플레이어를 찾을 수 없습니다."));
+            return;
+        }
+
+        if (player.TryAddToBag(definition.id, out _) || player.TryAddToHand(definition.id, out _))
+        {
+            ShowNotification(new GUIContent($"{GetDefinitionDisplayName(definition)} 지급"));
+            Repaint();
+            return;
+        }
+
+        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        Vector3 playerPosition = player.transform.position;
+        if (terrain != null
+            && (terrain.TryAddDroppedItemAnimated(playerPosition, definition.id, playerPosition, out _)
+                || terrain.TryAddDroppedItemAtPlayerBlock(playerPosition, definition.id, out _)
+                || terrain.TryAddDroppedItemNear(playerPosition, definition.id, out _)))
+        {
+            ShowNotification(new GUIContent($"{GetDefinitionDisplayName(definition)} 바닥 지급"));
+            Repaint();
+            return;
+        }
+
+        ShowNotification(new GUIContent("가방과 손이 모두 가득 찼습니다."));
+    }
+
     private static void DrawIconBackground(Rect rect)
     {
         EditorGUI.DrawRect(rect, new Color(0.2f, 0.2f, 0.2f));
@@ -2304,6 +2600,43 @@ public class ItemDataEditorWindow : EditorWindow
             if (managers[i] != null)
             {
                 return managers[i];
+            }
+        }
+
+        return null;
+    }
+
+    private static Player FindRuntimePlayer()
+    {
+        Player[] players = Resources.FindObjectsOfTypeAll<Player>();
+        if (players == null || players.Length == 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < players.Length; i++)
+        {
+            Player player = players[i];
+            if (player == null)
+            {
+                continue;
+            }
+
+            GameObject playerObject = player.gameObject;
+            if (!EditorUtility.IsPersistent(player)
+                && playerObject.scene.IsValid()
+                && playerObject.scene.isLoaded
+                && playerObject.activeInHierarchy)
+            {
+                return player;
+            }
+        }
+
+        for (int i = 0; i < players.Length; i++)
+        {
+            if (players[i] != null)
+            {
+                return players[i];
             }
         }
 

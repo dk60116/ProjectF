@@ -134,11 +134,33 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        MoveTo(target.position, 0f, onComplete, true);
+        MoveTo(() => target != null ? target.position : transform.position, 0f, null, onComplete, true);
+    }
+
+    public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true)
+    {
+        if (target == null)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
+        MoveTo(() => target != null ? target.position : transform.position, delay, startPositionProvider, onComplete, deactivateOnComplete);
     }
 
     public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null, bool deactivateOnComplete = true)
     {
+        MoveTo(() => targetPosition, delay, null, onComplete, deactivateOnComplete);
+    }
+
+    public void MoveTo(Func<Vector3> targetPositionProvider, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true)
+    {
+        if (targetPositionProvider == null)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
         SetBatchedRendering(false);
         transform.DOKill();
         ResolveBodyRenderer();
@@ -148,18 +170,47 @@ public class PortableObject : MonoBehaviour
         if (delay > 0f)
         {
             SetBodyRendererVisible(false);
-            sequence.AppendInterval(delay);
+            sequence.Append(
+                DOVirtual.Float(0f, 1f, delay, _ =>
+                {
+                    if (startPositionProvider != null)
+                    {
+                        transform.position = startPositionProvider();
+                    }
+                }).SetEase(Ease.Linear));
             sequence.AppendCallback(() => SetBodyRendererVisible(true));
         }
         else
         {
             SetBodyRendererVisible(true);
+            if (startPositionProvider != null)
+            {
+                transform.position = startPositionProvider();
+            }
         }
 
-        sequence.Append(transform.DOJump(targetPosition, 1f, 1, 0.3f));
+        Vector3 launchStartPosition = transform.position;
+        sequence.AppendCallback(() =>
+        {
+            launchStartPosition = startPositionProvider != null ? startPositionProvider() : transform.position;
+            transform.position = launchStartPosition;
+        });
+
+        const float moveDuration = 0.3f;
+        const float jumpPower = 1f;
+        sequence.Append(
+            DOVirtual.Float(0f, 1f, moveDuration, t =>
+            {
+                Vector3 currentStartPosition = startPositionProvider != null ? startPositionProvider() : launchStartPosition;
+                Vector3 currentTargetPosition = targetPositionProvider();
+                Vector3 horizontalPosition = Vector3.Lerp(currentStartPosition, currentTargetPosition, t);
+                float verticalOffset = 4f * jumpPower * t * (1f - t);
+                transform.position = horizontalPosition + (Vector3.up * verticalOffset);
+            }).SetEase(Ease.Linear));
         sequence.OnComplete(() =>
         {
             isMovingToTarget = false;
+            transform.position = targetPositionProvider();
             SetBodyRendererVisible(true);
             if (deactivateOnComplete)
             {

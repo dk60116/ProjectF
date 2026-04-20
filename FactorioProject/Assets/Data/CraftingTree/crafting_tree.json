@@ -4,15 +4,60 @@
     "recipes": [
         {
             "itemId": 0,
-            "itemName": "Pickaxe",
-            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
+            "itemName": "Log",
+            "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
             "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 1,
+            "itemName": "Coar",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 2,
+            "itemName": "Stone",
+            "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 3,
+            "itemName": "IronOre",
+            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 4,
+            "itemName": "CooperOre",
+            "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 5,
+            "itemName": "Woodplank",
+            "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+            "outputCount": 2,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 4
+                    "itemId": 0,
+                    "itemName": "Log",
+                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 1
                 }
             ],
             "craftingMapObjects": [
@@ -31,61 +76,16 @@
             ]
         },
         {
-            "itemId": 1,
-            "itemName": "Coar",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coar.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 2,
-            "itemName": "CooperOre",
-            "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 3,
-            "itemName": "IronOre",
-            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 4,
-            "itemName": "Stone",
-            "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 5,
-            "itemName": "Log",
-            "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
             "itemId": 6,
-            "itemName": "Woodplank",
-            "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-            "outputCount": 2,
+            "itemName": "WoodenBox",
+            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
                     "itemId": 5,
-                    "itemName": "Log",
-                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
-                    "count": 1
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 6
                 }
             ],
             "craftingMapObjects": [
@@ -110,13 +110,13 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 5,
+                    "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
                     "count": 6
                 },
                 {
-                    "itemId": 4,
+                    "itemId": 2,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 3
@@ -132,7 +132,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 4,
+                    "itemId": 2,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
@@ -160,7 +160,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 5,
+                    "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
                     "count": 1
@@ -216,7 +216,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 2,
+                    "itemId": 4,
                     "itemName": "CooperOre",
                     "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
@@ -239,15 +239,43 @@
         },
         {
             "itemId": 13,
-            "itemName": "WoodenBox",
-            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "itemName": "Nail",
+            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 10,
+                    "itemName": "IronPlate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 14,
+            "itemName": "Pickaxe",
+            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
+                    "itemId": 5,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 6
+                    "count": 4
                 }
             ],
             "craftingMapObjects": [
@@ -269,15 +297,60 @@
     "items": [
         {
             "itemId": 0,
-            "itemName": "Pickaxe",
-            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
+            "itemName": "Log",
+            "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
             "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 1,
+            "itemName": "Coar",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 2,
+            "itemName": "Stone",
+            "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 3,
+            "itemName": "IronOre",
+            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 4,
+            "itemName": "CooperOre",
+            "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 5,
+            "itemName": "Woodplank",
+            "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+            "outputCount": 2,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 4
+                    "itemId": 0,
+                    "itemName": "Log",
+                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 1
                 }
             ],
             "craftingMapObjects": [
@@ -296,61 +369,16 @@
             ]
         },
         {
-            "itemId": 1,
-            "itemName": "Coar",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coar.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 2,
-            "itemName": "CooperOre",
-            "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 3,
-            "itemName": "IronOre",
-            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 4,
-            "itemName": "Stone",
-            "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 5,
-            "itemName": "Log",
-            "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
             "itemId": 6,
-            "itemName": "Woodplank",
-            "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-            "outputCount": 2,
+            "itemName": "WoodenBox",
+            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
                     "itemId": 5,
-                    "itemName": "Log",
-                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
-                    "count": 1
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 6
                 }
             ],
             "craftingMapObjects": [
@@ -375,13 +403,13 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 5,
+                    "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
                     "count": 6
                 },
                 {
-                    "itemId": 4,
+                    "itemId": 2,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 3
@@ -397,7 +425,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 4,
+                    "itemId": 2,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
@@ -425,7 +453,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 5,
+                    "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
                     "count": 1
@@ -481,7 +509,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 2,
+                    "itemId": 4,
                     "itemName": "CooperOre",
                     "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
@@ -504,15 +532,43 @@
         },
         {
             "itemId": 13,
-            "itemName": "WoodenBox",
-            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "itemName": "Nail",
+            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 10,
+                    "itemName": "IronPlate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 14,
+            "itemName": "Pickaxe",
+            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
+                    "itemId": 5,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 6
+                    "count": 4
                 }
             ],
             "craftingMapObjects": [
@@ -534,15 +590,60 @@
     "entries": [
         {
             "itemId": 0,
-            "itemName": "Pickaxe",
-            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
+            "itemName": "Log",
+            "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
             "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 1,
+            "itemName": "Coar",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 2,
+            "itemName": "Stone",
+            "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 3,
+            "itemName": "IronOre",
+            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 4,
+            "itemName": "CooperOre",
+            "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 5,
+            "itemName": "Woodplank",
+            "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+            "outputCount": 2,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 4
+                    "itemId": 0,
+                    "itemName": "Log",
+                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 1
                 }
             ],
             "craftingMapObjects": [
@@ -561,61 +662,16 @@
             ]
         },
         {
-            "itemId": 1,
-            "itemName": "Coar",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coar.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 2,
-            "itemName": "CooperOre",
-            "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 3,
-            "itemName": "IronOre",
-            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 4,
-            "itemName": "Stone",
-            "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
-            "itemId": 5,
-            "itemName": "Log",
-            "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
-            "outputCount": 1,
-            "ingredients": [],
-            "craftingMapObjects": [],
-            "requiredMapObjects": []
-        },
-        {
             "itemId": 6,
-            "itemName": "Woodplank",
-            "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-            "outputCount": 2,
+            "itemName": "WoodenBox",
+            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
                     "itemId": 5,
-                    "itemName": "Log",
-                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
-                    "count": 1
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 6
                 }
             ],
             "craftingMapObjects": [
@@ -640,13 +696,13 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 5,
+                    "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
                     "count": 6
                 },
                 {
-                    "itemId": 4,
+                    "itemId": 2,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 3
@@ -662,7 +718,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 4,
+                    "itemId": 2,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
@@ -690,7 +746,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 5,
+                    "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
                     "count": 1
@@ -746,7 +802,7 @@
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 2,
+                    "itemId": 4,
                     "itemName": "CooperOre",
                     "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
@@ -769,15 +825,43 @@
         },
         {
             "itemId": 13,
-            "itemName": "WoodenBox",
-            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "itemName": "Nail",
+            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 10,
+                    "itemName": "IronPlate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 14,
+            "itemName": "Pickaxe",
+            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
+                    "itemId": 5,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 6
+                    "count": 4
                 }
             ],
             "craftingMapObjects": [
