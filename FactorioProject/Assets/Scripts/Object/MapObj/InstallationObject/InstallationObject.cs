@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ProjectF.Attributes;
 using UnityEngine;
 
 [Flags]
@@ -10,6 +11,14 @@ public enum InstallationMapFilter
     Water = 1 << 1,
     Resource = 1 << 2,
     ItemArea = 1 << 3
+}
+
+public enum InstallationFacingDirection
+{
+    PositiveZ,
+    PositiveX,
+    NegativeZ,
+    NegativeX
 }
 
 public class InstallationObject : MapObject
@@ -23,6 +32,8 @@ public class InstallationObject : MapObject
     [SerializeField]
     [Min(0f)]
     private float installationFocusRadius = 1f;
+    [SerializeField, ReadOnly]
+    private InstallationFacingDirection installedDirection = InstallationFacingDirection.PositiveZ;
     [SerializeField, HideInInspector]
     private Vector2Int runtimeAnchorCoordinate;
     [SerializeField, HideInInspector]
@@ -37,6 +48,7 @@ public class InstallationObject : MapObject
     }
 
     public virtual float FocusActivationRadius => Mathf.Max(0f, installationFocusRadius);
+    public InstallationFacingDirection InstalledDirection => installedDirection;
     public Vector2Int RuntimeAnchorCoordinate => runtimeAnchorCoordinate;
     public int RuntimeQuarterTurns => runtimeQuarterTurns;
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
@@ -71,6 +83,7 @@ public class InstallationObject : MapObject
     {
         runtimeAnchorCoordinate = anchorCoordinate;
         runtimeQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        RefreshInstalledDirection();
 
         if (runtimeOccupiedCoordinates == null)
         {
@@ -107,6 +120,7 @@ public class InstallationObject : MapObject
     {
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
+        RefreshInstalledDirection();
     }
 
     protected virtual void OnDisable()
@@ -118,6 +132,33 @@ public class InstallationObject : MapObject
     protected void MarkFocusActivationRadiusDirty()
     {
         globalMaxFocusActivationRadiusDirty = true;
+    }
+
+    private void RefreshInstalledDirection()
+    {
+        installedDirection = ResolveInstalledDirection(transform.rotation);
+    }
+
+    private static InstallationFacingDirection ResolveInstalledDirection(Quaternion rotation)
+    {
+        Vector3 forward = rotation * Vector3.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            return InstallationFacingDirection.PositiveZ;
+        }
+
+        forward.Normalize();
+        if (Mathf.Abs(forward.x) >= Mathf.Abs(forward.z))
+        {
+            return forward.x >= 0f
+                ? InstallationFacingDirection.PositiveX
+                : InstallationFacingDirection.NegativeX;
+        }
+
+        return forward.z >= 0f
+            ? InstallationFacingDirection.PositiveZ
+            : InstallationFacingDirection.NegativeZ;
     }
 
 #if UNITY_EDITOR
@@ -134,6 +175,7 @@ public class InstallationObject : MapObject
         }
 
         globalMaxFocusActivationRadiusDirty = true;
+        RefreshInstalledDirection();
     }
 #endif
 }

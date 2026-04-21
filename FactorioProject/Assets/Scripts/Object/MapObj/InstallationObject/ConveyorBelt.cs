@@ -5,6 +5,16 @@ public class ConveyorBelt : InstallationObject
     private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
 
+    [SerializeField]
+    private ConveyorBelt straightVariantPrefab;
+    [SerializeField]
+    private ConveyorBelt cornerVariantPrefab;
+    [SerializeField]
+    private ConveyorBelt reverseCornerVariantPrefab;
+    [SerializeField]
+    private bool isCornerVariant;
+    [SerializeField]
+    private bool isReverseCornerVariant;
     [SerializeField, Min(0f)]
     private float conveyorSpeed = 1f;
     [SerializeField]
@@ -14,6 +24,77 @@ public class ConveyorBelt : InstallationObject
     private float lastAppliedUvScrollY = float.NaN;
 
     public float ConveyorSpeed => Mathf.Max(0f, conveyorSpeed);
+    public ConveyorBelt StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
+    public ConveyorBelt CornerVariantPrefab => cornerVariantPrefab != null ? cornerVariantPrefab : this;
+    public ConveyorBelt ReverseCornerVariantPrefab => reverseCornerVariantPrefab != null ? reverseCornerVariantPrefab : CornerVariantPrefab;
+    public bool IsCornerVariant => isCornerVariant || isReverseCornerVariant;
+    public bool IsReverseCornerVariant => isReverseCornerVariant;
+    public int PlacementRotationQuarterTurnOffset => IsCornerVariant ? 3 : 0;
+
+    public static bool TryGetFlowDirection(Quaternion rotation, out Vector2Int flowDirection)
+    {
+        flowDirection = Vector2Int.zero;
+
+        Vector3 forward = rotation * Vector3.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        forward = -forward.normalized;
+        if (Mathf.Abs(forward.x) >= Mathf.Abs(forward.z))
+        {
+            flowDirection = new Vector2Int(forward.x >= 0f ? 1 : -1, 0);
+        }
+        else
+        {
+            flowDirection = new Vector2Int(0, forward.z >= 0f ? 1 : -1);
+        }
+
+        return true;
+    }
+
+    public static Vector2Int RotateDirectionClockwise(Vector2Int direction)
+    {
+        return new Vector2Int(direction.y, -direction.x);
+    }
+
+    public static Vector2Int RotateDirectionCounterClockwise(Vector2Int direction)
+    {
+        return new Vector2Int(-direction.y, direction.x);
+    }
+
+    public bool TryGetInputDirection(Quaternion rotation, out Vector2Int inputDirection)
+    {
+        inputDirection = Vector2Int.zero;
+        if (!TryGetFlowDirection(rotation, out Vector2Int outputDirection) || outputDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (!IsCornerVariant)
+        {
+            inputDirection = -outputDirection;
+            return true;
+        }
+
+        inputDirection = IsReverseCornerVariant
+            ? RotateDirectionClockwise(outputDirection)
+            : RotateDirectionCounterClockwise(outputDirection);
+        return true;
+    }
+
+    public void HandlePlacementRotation()
+    {
+    }
+
+    public static bool IsPerpendicular(Vector2Int left, Vector2Int right)
+    {
+        return left != Vector2Int.zero
+               && right != Vector2Int.zero
+               && ((left.x * right.x) + (left.y * right.y)) == 0;
+    }
 
     protected new void Awake()
     {

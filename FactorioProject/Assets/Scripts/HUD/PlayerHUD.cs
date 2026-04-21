@@ -703,11 +703,17 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (lastInstallActionButtonsVisible != showInstallActionButtons
-            || lastMapEditExtraButtonsVisible != showMapEditActionButtons)
+        if (lastInstallActionButtonsVisible != showInstallActionButtons)
         {
-            AnimateMapEditButtons(showInstallActionButtons, showMapEditActionButtons);
+            SetAnimatedButtonVisibleImmediate(installCancelButton, showInstallActionButtons);
+            SetAnimatedButtonVisibleImmediate(installRotationButton, showInstallActionButtons);
+            SetAnimatedButtonVisibleImmediate(installCompleteButton, showInstallActionButtons);
             lastInstallActionButtonsVisible = showInstallActionButtons;
+        }
+
+        if (lastMapEditExtraButtonsVisible != showMapEditActionButtons)
+        {
+            AnimateMapEditActionButtons(showMapEditActionButtons);
             lastMapEditExtraButtonsVisible = showMapEditActionButtons;
         }
     }
@@ -722,14 +728,6 @@ public class PlayerHUD : BagSlot
 
         object value = controllerType.GetProperty("MapEditModeActive")?.GetValue(installationPlacementController);
         return value is bool isActive && isActive;
-    }
-
-    private void AnimateMapEditButtons(bool showInstallActionButtons, bool showMapEditActionButtons)
-    {
-        AnimateButtonGroupSlide(installButton != null ? installButton : mapEditButton, showInstallActionButtons,
-            installCancelButton, installRotationButton, installCompleteButton);
-
-        AnimateMapEditActionButtons(showMapEditActionButtons);
     }
 
     private void AnimateMapEditActionButtons(bool shouldBeVisible)

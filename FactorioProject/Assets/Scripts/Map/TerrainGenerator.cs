@@ -4186,14 +4186,40 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         InstallationPlacementController placementController = ResolveInstallationPlacementController();
+        MapObject sourcePrefab = null;
+        if (definition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
+        {
+            sourcePrefab = savedState.conveyorVariantKind switch
+            {
+                2 => conveyorPrototype.ReverseCornerVariantPrefab != null
+                    ? conveyorPrototype.ReverseCornerVariantPrefab
+                    : conveyorPrototype.CornerVariantPrefab,
+                1 => conveyorPrototype.CornerVariantPrefab != null
+                    ? conveyorPrototype.CornerVariantPrefab
+                    : conveyorPrototype.StraightVariantPrefab,
+                _ => conveyorPrototype.StraightVariantPrefab
+            };
+        }
+
+        if (sourcePrefab == null)
+        {
+            sourcePrefab = placementController != null
+                ? placementController.ResolveInstalledObjectSourcePrefab(definition, savedState.anchorCoordinate, savedState.quarterTurns)
+                : definition.mapObject;
+        }
+        if (sourcePrefab == null)
+        {
+            sourcePrefab = definition.mapObject;
+        }
+
         Quaternion rotation = placementController != null
-            ? placementController.GetInstalledObjectRotation(definition, savedState.quarterTurns)
-            : definition.mapObject.transform.rotation * Quaternion.Euler(0f, (((savedState.quarterTurns % 4) + 4) % 4) * 90f, 0f);
+            ? placementController.GetInstalledObjectRotation(sourcePrefab, savedState.quarterTurns)
+            : sourcePrefab.transform.rotation * Quaternion.Euler(0f, (((savedState.quarterTurns % 4) + 4) % 4) * 90f, 0f);
         Vector3 position = placementController != null
             ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, definition, savedState.quarterTurns, 0f)
             : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
 
-        MapObject restoredObject = Instantiate(definition.mapObject, transform);
+        MapObject restoredObject = Instantiate(sourcePrefab, transform);
         restoredObject.transform.SetPositionAndRotation(position, rotation);
 
         if (!(restoredObject is InstallationObject restoredInstallation))
@@ -4260,6 +4286,26 @@ public class TerrainGenerator : MonoBehaviour
                 block.SetMapObject(installedObject);
             }
         }
+    }
+
+    public bool TryGetInstallationStateAtCoordinate(Vector2Int worldCoordinate, out BlockStateStore.InstallationSaveState state)
+    {
+        state = null;
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || !resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out Vector2Int anchorCoordinate))
+        {
+            return false;
+        }
+
+        if (resourceStateStore.TryGetLiveInstallation(anchorCoordinate, out _, out BlockStateStore.InstallationSaveState liveState)
+            && liveState != null)
+        {
+            state = liveState;
+            return true;
+        }
+
+        return resourceStateStore.TryGetInstallationState(anchorCoordinate, out state);
     }
 
     private sealed class ChunkSurfaceWorkerInput

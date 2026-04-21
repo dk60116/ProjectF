@@ -597,6 +597,11 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   conveyorSpeed: 1
   beltTopRenderer: {fileID: 533515098945374496}
+  straightVariantPrefab: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+  cornerVariantPrefab: {fileID: 7247929509108097568, guid: 2951280184e64c841a0a3752bda94b24, type: 3}
+  reverseCornerVariantPrefab: {fileID: 7247929509108097568, guid: 8f0cf7fe48c14db4a2d646e5f9b44a61, type: 3}
+  isCornerVariant: 0
+  isReverseCornerVariant: 0
 --- !u!4 &6329141710235238171 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 354565451974692786, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}

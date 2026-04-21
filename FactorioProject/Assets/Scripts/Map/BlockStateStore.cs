@@ -9,6 +9,7 @@ public class BlockStateStore : MonoBehaviour
         public Vector2Int anchorCoordinate;
         public int itemId;
         public int quarterTurns;
+        public int conveyorVariantKind = -1;
         public List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
         public InputOutputModule.PersistentState inputOutputState;
         public long lastBackgroundSimulationTicks;
@@ -23,6 +24,7 @@ public class BlockStateStore : MonoBehaviour
                 anchorCoordinate = anchorCoordinate,
                 itemId = itemId,
                 quarterTurns = quarterTurns,
+                conveyorVariantKind = conveyorVariantKind,
                 occupiedCoordinates = new List<Vector2Int>(occupiedCoordinates ?? new List<Vector2Int>()),
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
                 lastBackgroundSimulationTicks = lastBackgroundSimulationTicks,
@@ -273,6 +275,13 @@ public class BlockStateStore : MonoBehaviour
             quarterTurns = ((quarterTurns % 4) + 4) % 4,
             occupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
         };
+
+        if (installationObject is ConveyorBelt conveyorBelt)
+        {
+            state.conveyorVariantKind = conveyorBelt.IsReverseCornerVariant
+                ? 2
+                : (conveyorBelt.IsCornerVariant ? 1 : 0);
+        }
 
         if (installationObject is InputOutputModule inputOutputModule)
         {
