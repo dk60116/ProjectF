@@ -75,6 +75,7 @@ public class ItemDataEditorWindow : EditorWindow
         public int mapSizeY = -1;
         public float focusRadius = -1f;
         public float workableFocusRadius = -1f;
+        public float conveyorSpeed = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
         public string mapFilter;
@@ -759,6 +760,16 @@ public class ItemDataEditorWindow : EditorWindow
         {
             focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
             EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
+        }
+
+        if (mapObject is ConveyorBelt)
+        {
+            SerializedProperty conveyorSpeedProperty = mapObjectSerializedObject.FindProperty("conveyorSpeed");
+            if (conveyorSpeedProperty != null)
+            {
+                conveyorSpeedProperty.floatValue = Mathf.Max(0f, conveyorSpeedProperty.floatValue);
+                EditorGUILayout.PropertyField(conveyorSpeedProperty, new GUIContent("Conveyor Speed"));
+            }
         }
 
         if (mapObject is InstallationObject)
@@ -1672,6 +1683,11 @@ public class ItemDataEditorWindow : EditorWindow
                 entry.focusRadius = installationObjectWithFocus.FocusActivationRadius;
             }
 
+            if (definition.mapObject is ConveyorBelt conveyorBelt)
+            {
+                entry.conveyorSpeed = conveyorBelt.ConveyorSpeed;
+            }
+
             if (definition.mapObject is InstallationObject installationObject)
             {
                 entry.mapFilter = installationObject.MapFilter.ToString();
@@ -1967,6 +1983,15 @@ public class ItemDataEditorWindow : EditorWindow
             if (focusActivationRadiusProperty != null)
             {
                 focusActivationRadiusProperty.floatValue = Mathf.Max(0f, savedFocusRadius);
+            }
+        }
+
+        if (entry.conveyorSpeed >= 0f)
+        {
+            SerializedProperty conveyorSpeedProperty = serializedMapObject.FindProperty("conveyorSpeed");
+            if (conveyorSpeedProperty != null)
+            {
+                conveyorSpeedProperty.floatValue = Mathf.Max(0f, entry.conveyorSpeed);
             }
         }
 

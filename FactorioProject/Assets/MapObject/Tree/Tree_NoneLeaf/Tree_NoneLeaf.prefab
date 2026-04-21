@@ -111,6 +111,7 @@ MonoBehaviour:
   definition: {fileID: 11400000, guid: 80276c4a24ae3374aba9f63d5130db06, type: 2}
   resourceStatus:
     outputId: 5
+    outputItemName: Log
     resourceCount: 1
     getCount: 4
     maxGauge: 10

@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class Resource : MapObject
 {
@@ -16,7 +19,9 @@ public class Resource : MapObject
     [Serializable]
     public struct ResourceStatus
     {
+        [HideInInspector]
         public int outputId;
+        public string outputItemName;
         public int resourceCount;
         public int getCount;
         public int maxGauge;
@@ -133,6 +138,7 @@ public class Resource : MapObject
         CachePortableObjects();
         ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
+        MigrateOutputItemNameIfNeeded();
         CaptureInitialStateIfNeeded();
         EnsurePortableObjectPool(GetCount);
         UpdateBodyScale();
@@ -144,6 +150,7 @@ public class Resource : MapObject
         CachePortableObjects();
         ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
+        MigrateOutputItemNameIfNeeded();
         CaptureInitialStateIfNeeded();
         EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
@@ -181,6 +188,7 @@ public class Resource : MapObject
         CacheBodyTransform();
         ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
+        MigrateOutputItemNameIfNeeded();
         batchComponentsResolved = false;
         supportsBatchedRendering = false;
         batchedMeshFilter = null;
@@ -657,6 +665,11 @@ public class Resource : MapObject
 
     private int ResolveOutputItemId()
     {
+        if (TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int outputItemId))
+        {
+            return outputItemId;
+        }
+
         if (resourceStatus.outputId >= 0)
         {
             return resourceStatus.outputId;
@@ -664,6 +677,160 @@ public class Resource : MapObject
 
         return ResolveItemId();
     }
+
+    private void MigrateOutputItemNameIfNeeded()
+    {
+        if (!string.IsNullOrWhiteSpace(resourceStatus.outputItemName))
+        {
+            resourceStatus.outputItemName = resourceStatus.outputItemName.Trim();
+            return;
+        }
+
+        if (TryResolveItemNameFromId(resourceStatus.outputId, out string outputItemName))
+        {
+            resourceStatus.outputItemName = outputItemName;
+            return;
+        }
+
+        if (TryResolveItemNameFromId(ResolveItemId(), out outputItemName))
+        {
+            resourceStatus.outputItemName = outputItemName;
+        }
+    }
+
+    private bool TryResolveOutputItemNameToId(string outputItemName, out int outputItemId)
+    {
+        outputItemId = -1;
+        if (string.IsNullOrWhiteSpace(outputItemName))
+        {
+            return false;
+        }
+
+        string normalizedName = outputItemName.Trim();
+        if (GameManager.Instance != null && GameManager.Instance.ItemManger != null)
+        {
+            List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+            if (definitions != null)
+            {
+                for (int i = 0; i < definitions.Count; i++)
+                {
+                    ItemDefinition definition = definitions[i];
+                    if (definition == null)
+                    {
+                        continue;
+                    }
+
+                    string definitionName = string.IsNullOrWhiteSpace(definition.itemName)
+                        ? definition.name
+                        : definition.itemName;
+                    if (!string.Equals(definitionName, normalizedName, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(definition.name, normalizedName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    outputItemId = definition.id;
+                    return outputItemId >= 0;
+                }
+            }
+        }
+
+#if UNITY_EDITOR
+        return TryResolveItemIdFromEditorAssets(normalizedName, out outputItemId);
+#else
+        return false;
+#endif
+    }
+
+    private bool TryResolveItemNameFromId(int itemId, out string outputItemName)
+    {
+        outputItemName = null;
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (GameManager.Instance != null
+            && GameManager.Instance.ItemManger != null
+            && GameManager.Instance.ItemManger.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet))
+        {
+            outputItemName = string.IsNullOrWhiteSpace(itemSet.name) ? null : itemSet.name.Trim();
+            if (!string.IsNullOrWhiteSpace(outputItemName))
+            {
+                return true;
+            }
+        }
+
+#if UNITY_EDITOR
+        return TryResolveItemNameFromEditorAssets(itemId, out outputItemName);
+#else
+        return false;
+#endif
+    }
+
+#if UNITY_EDITOR
+    private static bool TryResolveItemNameFromEditorAssets(int itemId, out string outputItemName)
+    {
+        outputItemName = null;
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        string[] definitionGuids = AssetDatabase.FindAssets("t:ItemDefinition", new[] { "Assets/Data/Items" });
+        for (int i = 0; i < definitionGuids.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(definitionGuids[i]);
+            ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
+            if (definition == null || definition.id != itemId)
+            {
+                continue;
+            }
+
+            outputItemName = string.IsNullOrWhiteSpace(definition.itemName)
+                ? definition.name
+                : definition.itemName.Trim();
+            return !string.IsNullOrWhiteSpace(outputItemName);
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveItemIdFromEditorAssets(string outputItemName, out int outputItemId)
+    {
+        outputItemId = -1;
+        if (string.IsNullOrWhiteSpace(outputItemName))
+        {
+            return false;
+        }
+
+        string normalizedName = outputItemName.Trim();
+        string[] definitionGuids = AssetDatabase.FindAssets("t:ItemDefinition", new[] { "Assets/Data/Items" });
+        for (int i = 0; i < definitionGuids.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(definitionGuids[i]);
+            ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string definitionName = string.IsNullOrWhiteSpace(definition.itemName)
+                ? definition.name
+                : definition.itemName.Trim();
+            if (!string.Equals(definitionName, normalizedName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(definition.name, normalizedName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            outputItemId = definition.id;
+            return outputItemId >= 0;
+        }
+
+        return false;
+    }
+#endif
 
     private void CacheBodyTransform()
     {

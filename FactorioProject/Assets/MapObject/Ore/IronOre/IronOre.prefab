@@ -156,6 +156,7 @@ MonoBehaviour:
   definition: {fileID: 11400000, guid: 6a0778f55af03994a8d8400ed270cda4, type: 2}
   resourceStatus:
     outputId: 3
+    outputItemName: IronOre
     resourceCount: 1
     getCount: 1
     maxGauge: 10

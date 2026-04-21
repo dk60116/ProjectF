@@ -156,6 +156,7 @@ MonoBehaviour:
   definition: {fileID: 11400000, guid: 96e45d7fa97ca7e4aad0fb7b1ad1db16, type: 2}
   resourceStatus:
     outputId: 4
+    outputItemName: Stone
     resourceCount: 1
     getCount: 1
     maxGauge: 10

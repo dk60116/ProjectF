@@ -3,12 +3,23 @@ Shader "Custom/ConveyorBeltScroll"
     Properties
     {
         [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
+        _FlowMap("Flow Map", 2D) = "white" {}
         [MainColor] _BaseColor("Base Color", Color) = (1,1,1,1)
         _ShadowColor("Shadow Color", Color) = (0.7,0.7,0.75,1)
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
         _UVScrollX("UV Scroll X", Float) = 0
         _UVScrollY("UV Scroll Y", Float) = -0.75
+        _FlowBlend("Flow Blend", Range(0,1)) = 1
+        _CornerFlowMode("Corner Flow Mode", Float) = 0
+        _CornerCenter("Corner Center (TopLeft UV)", Vector) = (0,0,0,0)
+        _CornerInnerRadius("Corner Inner Radius", Float) = 0.38
+        _CornerOuterRadius("Corner Outer Radius", Float) = 1.02
+        _CornerStartAngle("Corner Start Angle", Float) = 0
+        _CornerEndAngle("Corner End Angle", Float) = 1.5707964
+        _CornerRotationSteps("Corner Rotation Steps", Float) = 0
+        _FlowAlongScale("Flow Along Scale", Float) = 1
+        _FlowAcrossTiling("Flow Across Tiling", Float) = 1
 
         _Surface("__surface", Float) = 0.0
         _Blend("__blend", Float) = 0.0
@@ -109,6 +120,8 @@ Shader "Custom/ConveyorBeltScroll"
 
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
+            TEXTURE2D(_FlowMap);
+            SAMPLER(sampler_FlowMap);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
@@ -118,8 +131,38 @@ Shader "Custom/ConveyorBeltScroll"
                 half _ShadeSmoothness;
                 float _UVScrollX;
                 float _UVScrollY;
+                half _FlowBlend;
+                half _CornerFlowMode;
+                float4 _CornerCenter;
+                float _CornerInnerRadius;
+                float _CornerOuterRadius;
+                float _CornerStartAngle;
+                float _CornerEndAngle;
+                float _CornerRotationSteps;
+                float _FlowAlongScale;
+                float _FlowAcrossTiling;
                 half _Surface;
             CBUFFER_END
+
+            float2 RotateUvQuarter(float2 uv, int steps)
+            {
+                steps = (steps % 4 + 4) % 4;
+                float2 centered = uv - 0.5;
+                if (steps == 1)
+                {
+                    centered = float2(centered.y, -centered.x);
+                }
+                else if (steps == 2)
+                {
+                    centered = float2(-centered.x, -centered.y);
+                }
+                else if (steps == 3)
+                {
+                    centered = float2(-centered.y, centered.x);
+                }
+
+                return centered + 0.5;
+            }
 
             Varyings vert(Attributes input)
             {
@@ -132,7 +175,7 @@ Shader "Custom/ConveyorBeltScroll"
                 VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS);
 
-                output.uv = TRANSFORM_TEX(input.uv, _BaseMap) + float2(_UVScrollX, _UVScrollY) * _Time.y;
+                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
                 output.positionWS = vertexInput.positionWS;
                 output.normalWS = NormalizeNormalPerVertex(normalInput.normalWS);
 
@@ -198,7 +241,57 @@ Shader "Custom/ConveyorBeltScroll"
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
 
-                half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv) * _BaseColor;
+                float2 scrollOffset = float2(_UVScrollX, _UVScrollY) * _Time.y;
+                half4 baseSample;
+
+                if (_CornerFlowMode > 0.5h)
+                {
+                    int rotationSteps = (int)round(_CornerRotationSteps);
+                    float2 rotatedUv = RotateUvQuarter(input.uv, rotationSteps);
+                    half4 baseStatic = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, rotatedUv) * _BaseColor;
+
+                    // Convert UV to top-left image space so the corner can be described naturally.
+                    float2 imageUv = float2(rotatedUv.x, 1.0 - rotatedUv.y);
+                    float2 cornerVector = imageUv - _CornerCenter.xy;
+                    float radius = length(cornerVector);
+                    float angle = atan2(cornerVector.y, cornerVector.x);
+
+                    float startAngle = _CornerStartAngle;
+                    float endAngle = _CornerEndAngle;
+                    float minAngle = min(startAngle, endAngle);
+                    float maxAngle = max(startAngle, endAngle);
+                    float radiusRange = max(_CornerOuterRadius - _CornerInnerRadius, 0.0001);
+                    float angleRange = max(maxAngle - minAngle, 0.0001);
+                    float feather = 0.015;
+
+                    float radiusMask = smoothstep(_CornerInnerRadius - feather, _CornerInnerRadius + feather, radius)
+                        * (1.0 - smoothstep(_CornerOuterRadius - feather, _CornerOuterRadius + feather, radius));
+                    float angleMask = smoothstep(minAngle - feather, minAngle + feather, angle)
+                        * (1.0 - smoothstep(maxAngle - feather, maxAngle + feather, angle));
+                    float baseLuma = dot(baseStatic.rgb, half3(0.2126h, 0.7152h, 0.0722h));
+                    float pathShapeMask = smoothstep(0.18, 0.28, baseLuma);
+                    float flowMask = saturate(radiusMask * angleMask * pathShapeMask);
+
+                    float widthCoord = saturate((radius - _CornerInnerRadius) / radiusRange);
+                    float alongCoord = saturate((angle - minAngle) / angleRange);
+                    if (endAngle < startAngle)
+                    {
+                        alongCoord = 1.0 - alongCoord;
+                    }
+                    float2 flowUv = float2(
+                        widthCoord * max(_FlowAcrossTiling, 0.0001),
+                        frac(alongCoord * max(_FlowAlongScale, 0.0001) + _UVScrollY * _Time.y));
+
+                    half4 flowSample = SAMPLE_TEXTURE2D(_FlowMap, sampler_FlowMap, flowUv) * _BaseColor;
+                    half4 sanitizedBase = baseStatic;
+                    sanitizedBase.rgb = lerp(baseStatic.rgb, baseStatic.rgb * 0.18h, pathShapeMask);
+                    baseSample = lerp(sanitizedBase, flowSample, flowMask * _FlowBlend);
+                }
+                else
+                {
+                    baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv + scrollOffset) * _BaseColor;
+                }
+
                 Light mainLight = GetMainLight(inputData.shadowCoord);
 
                 half NdotL = saturate(dot(inputData.normalWS, mainLight.direction));

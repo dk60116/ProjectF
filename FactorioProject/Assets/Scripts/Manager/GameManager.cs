@@ -74,14 +74,7 @@ public class GameManager : MonoBehaviour
 
     private void ApplySceneShadowSettings()
     {
-        Renderer[] renderers = FindObjectsOfType<Renderer>(true);
         Light[] lights = FindObjectsOfType<Light>(true);
-
-        foreach (Renderer rendererComponent in renderers)
-        {
-            rendererComponent.shadowCastingMode = ShadowCastingMode.On;
-            rendererComponent.receiveShadows = true;
-        }
 
         foreach (Light lightComponent in lights)
         {

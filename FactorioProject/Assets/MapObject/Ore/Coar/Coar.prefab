@@ -104,6 +104,7 @@ MonoBehaviour:
   definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
   resourceStatus:
     outputId: 1
+    outputItemName: Coar
     resourceCount: 1
     getCount: 1
     maxGauge: 10

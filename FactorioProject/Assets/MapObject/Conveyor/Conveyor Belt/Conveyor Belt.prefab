@@ -86,7 +86,7 @@ MeshRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6448747719361446765}
   m_Enabled: 1
-  m_CastShadows: 1
+  m_CastShadows: 0
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
   m_StaticShadowCaster: 0
@@ -441,7 +441,7 @@ PrefabInstance:
     - target: {fileID: -5754084199372789682, guid: d7556c5bef46db341ac1a0ea152ce055, type: 3}
       propertyPath: m_Mesh
       value: 
-      objectReference: {fileID: -5320583514307937505, guid: c4358c7182a7cea4db3f917b34ed454d, type: 3}
+      objectReference: {fileID: 4300000, guid: b9fb55ad42546b24589be8281fd7453c, type: 2}
     - target: {fileID: 919132149155446097, guid: d7556c5bef46db341ac1a0ea152ce055, type: 3}
       propertyPath: m_Name
       value: Body (1)
@@ -539,7 +539,7 @@ PrefabInstance:
     - target: {fileID: 3694201783877156887, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Mesh
       value: 
-      objectReference: {fileID: -5320583514307937505, guid: c4358c7182a7cea4db3f917b34ed454d, type: 3}
+      objectReference: {fileID: 4300000, guid: b9fb55ad42546b24589be8281fd7453c, type: 2}
     - target: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Name
       value: Conveyor Belt
@@ -595,6 +595,8 @@ MonoBehaviour:
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
+  conveyorSpeed: 1
+  beltTopRenderer: {fileID: 533515098945374496}
 --- !u!4 &6329141710235238171 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 354565451974692786, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
