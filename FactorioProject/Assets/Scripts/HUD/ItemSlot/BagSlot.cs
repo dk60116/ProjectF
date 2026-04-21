@@ -200,16 +200,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             startWorldPosition,
             startWorldPositionProvider,
             0.1f,
-            out Vector2Int dropCoordinate);
+            out Vector2Int dropCoordinate,
+            out int droppedCount);
 
-        if (dropped)
+        if (dropped && droppedCount > 0)
         {
             player.MarkDropExitGate(dropOrigin, 0.5f);
             player.SetLastDropTarget(dropCoordinate);
         }
-        else
+
+        int remainingCount = Mathf.Max(0, removedCount - droppedCount);
+        if (remainingCount > 0)
         {
-            for (int i = 0; i < removedCount; i++)
+            for (int i = 0; i < remainingCount; i++)
             {
                 if (!boundBag.TryAddObject(slotIndex, itemId, out _))
                 {
@@ -1535,6 +1538,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        if (IsFocusedConveyorPickup(player))
+        {
+            TryHandleSinglePickup(player, terrain);
+            return;
+        }
+
         StopPickupRoutine();
         pickupRoutine = StartCoroutine(PickupRoutine(player, terrain));
     }
@@ -1638,6 +1647,36 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         return slotIndex;
+    }
+
+    private bool TryHandleSinglePickup(Player player, TerrainGenerator terrain)
+    {
+        if (player == null || terrain == null)
+        {
+            return false;
+        }
+
+        Vector3 pickupOrigin = ResolvePickupOrigin(player);
+        Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
+
+        if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate))
+        {
+            return true;
+        }
+
+        return TryPickupOneItem(terrain, player, pickupOrigin, Mathf.Max(0, pickupRadius), pickupRadius);
+    }
+
+    private static bool IsFocusedConveyorPickup(Player player)
+    {
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        return playerController != null
+            && playerController.TryGetFocusedConveyorBelt(out _, out _);
     }
 
     private static Player ResolvePlayer()

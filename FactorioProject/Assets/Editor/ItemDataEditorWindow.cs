@@ -754,14 +754,11 @@ public class ItemDataEditorWindow : EditorWindow
             DrawMultiFocusModeField(multiFocusModeProperty);
         }
 
-        if (mapObject is WorkableObject || mapObject is BoxObject)
+        SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(mapObjectSerializedObject, mapObject);
+        if (focusActivationRadiusProperty != null)
         {
-            SerializedProperty focusActivationRadiusProperty = mapObjectSerializedObject.FindProperty("focusActivationRadius");
-            if (focusActivationRadiusProperty != null)
-            {
-                focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
-                EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
-            }
+            focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
+            EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
         }
 
         if (mapObject is InstallationObject)
@@ -920,6 +917,26 @@ public class ItemDataEditorWindow : EditorWindow
         rectGridCellsProperty = mapObjectSerializedObject.FindProperty("rectGridCells");
         EditorGUILayout.LabelField($"Cells: {rectGridCellsProperty.arraySize}", EditorStyles.miniLabel);
         DrawRectGridPreview(mapObjectSerializedObject, inputOutputModule, rectGridWidthProperty.intValue, rectGridHeightProperty.intValue);
+    }
+
+    private static SerializedProperty GetMapObjectFocusRadiusProperty(SerializedObject serializedMapObject, MapObject mapObject)
+    {
+        if (serializedMapObject == null || mapObject == null)
+        {
+            return null;
+        }
+
+        if (mapObject is WorkableObject || mapObject is BoxObject)
+        {
+            return serializedMapObject.FindProperty("focusActivationRadius");
+        }
+
+        if (mapObject is InstallationObject)
+        {
+            return serializedMapObject.FindProperty("installationFocusRadius");
+        }
+
+        return null;
     }
 
     private void DrawRectGridPreview(SerializedObject mapObjectSerializedObject, InputOutputModule inputOutputModule, int width, int height)
@@ -1650,6 +1667,10 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 entry.focusRadius = boxObject.FocusActivationRadius;
             }
+            else if (definition.mapObject is InstallationObject installationObjectWithFocus)
+            {
+                entry.focusRadius = installationObjectWithFocus.FocusActivationRadius;
+            }
 
             if (definition.mapObject is InstallationObject installationObject)
             {
@@ -1940,9 +1961,9 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         float savedFocusRadius = entry.focusRadius >= 0f ? entry.focusRadius : entry.workableFocusRadius;
-        if ((mapObject is WorkableObject || mapObject is BoxObject) && savedFocusRadius >= 0f)
+        if (savedFocusRadius >= 0f)
         {
-            SerializedProperty focusActivationRadiusProperty = serializedMapObject.FindProperty("focusActivationRadius");
+            SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(serializedMapObject, mapObject);
             if (focusActivationRadiusProperty != null)
             {
                 focusActivationRadiusProperty.floatValue = Mathf.Max(0f, savedFocusRadius);

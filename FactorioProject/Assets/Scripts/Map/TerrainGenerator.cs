@@ -2841,6 +2841,17 @@ public class TerrainGenerator : MonoBehaviour
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
+        if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
+        {
+            if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
+            {
+                return false;
+            }
+
+            MarkDroppedPickupGate(targetPortableObject, true, worldPosition);
+            return true;
+        }
+
         if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock)
             && focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
         {
@@ -2879,6 +2890,7 @@ public class TerrainGenerator : MonoBehaviour
             startWorldPosition,
             null,
             moveInterval,
+            out _,
             out _);
     }
 
@@ -2897,6 +2909,7 @@ public class TerrainGenerator : MonoBehaviour
             startWorldPosition,
             startWorldPositionProvider,
             moveInterval,
+            out _,
             out _);
     }
 
@@ -2915,7 +2928,8 @@ public class TerrainGenerator : MonoBehaviour
             startWorldPosition,
             null,
             moveInterval,
-            out dropCoordinate);
+            out dropCoordinate,
+            out _);
     }
 
     public bool TryAddDroppedItemStackAtPlayerBlock(
@@ -2927,10 +2941,56 @@ public class TerrainGenerator : MonoBehaviour
         float moveInterval,
         out Vector2Int dropCoordinate)
     {
+        return TryAddDroppedItemStackAtPlayerBlock(
+            worldPosition,
+            itemId,
+            itemCount,
+            startWorldPosition,
+            startWorldPositionProvider,
+            moveInterval,
+            out dropCoordinate,
+            out _);
+    }
+
+    public bool TryAddDroppedItemStackAtPlayerBlock(
+        Vector3 worldPosition,
+        int itemId,
+        int itemCount,
+        Vector3 startWorldPosition,
+        Func<Vector3> startWorldPositionProvider,
+        float moveInterval,
+        out Vector2Int dropCoordinate,
+        out int droppedCount)
+    {
         dropCoordinate = GetWorldBlockCoordinate(worldPosition);
+        droppedCount = 0;
         if (itemCount <= 0)
         {
             return false;
+        }
+
+        if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
+        {
+            dropCoordinate = focusedConveyorBlock.Coordinate;
+            int acceptedCount = Mathf.Min(itemCount, 1, focusedConveyorBlock.GetAvailableConveyorCapacity());
+            for (int i = 0; i < acceptedCount; i++)
+            {
+                if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(
+                        itemId,
+                        startWorldPosition,
+                        i * Mathf.Max(0f, moveInterval),
+                        out PortableObject droppedObject,
+                        null,
+                        startWorldPositionProvider))
+                {
+                    break;
+                }
+
+                droppedCount++;
+                MarkDroppedPickupGate(droppedObject, false, worldPosition);
+            }
+
+            return droppedCount > 0;
         }
 
         if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, itemCount, out Block focusedBoxBlock))
@@ -2946,9 +3006,10 @@ public class TerrainGenerator : MonoBehaviour
                         null,
                         startWorldPositionProvider))
                 {
-                    return false;
+                    return droppedCount > 0;
                 }
 
+                droppedCount++;
                 MarkInputAreaDroppedPickupGate(droppedObject, false, worldPosition);
             }
 
@@ -2968,9 +3029,10 @@ public class TerrainGenerator : MonoBehaviour
                         null,
                         startWorldPositionProvider))
                 {
-                    return false;
+                    return droppedCount > 0;
                 }
 
+                droppedCount++;
                 MarkInputAreaDroppedPickupGate(droppedObject, false, worldPosition);
             }
 
@@ -2988,9 +3050,10 @@ public class TerrainGenerator : MonoBehaviour
         {
             if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, i * Mathf.Max(0f, moveInterval), out PortableObject droppedObject, null, startWorldPositionProvider))
             {
-                return false;
+                return droppedCount > 0;
             }
 
+            droppedCount++;
             MarkDroppedPickupGate(droppedObject, false, worldPosition);
         }
 
@@ -3006,6 +3069,17 @@ public class TerrainGenerator : MonoBehaviour
     {
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+        if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
+        {
+            if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
+            {
+                return false;
+            }
+
+            MarkDroppedPickupGate(targetPortableObject, false, worldPosition);
+            return true;
+        }
+
         if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock))
         {
             if (!focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
@@ -3055,6 +3129,13 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 playerPosition = player.transform.position;
+        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+            && focusedConveyorBlock != null
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, playerPosition, 999f))
+        {
+            return true;
+        }
+
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToHand(player, playerPosition, 999f))
@@ -3096,6 +3177,13 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 playerPosition = player.transform.position;
+        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+            && focusedConveyorBlock != null
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, playerPosition, 999f, preferredSlotIndex))
+        {
+            return true;
+        }
+
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToBag(player, playerPosition, 999f, preferredSlotIndex))
@@ -3198,6 +3286,17 @@ public class TerrainGenerator : MonoBehaviour
     {
         targetPortableObject = null;
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
+
+        if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
+        {
+            if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
+            {
+                return false;
+            }
+
+            MarkDroppedPickupGate(targetPortableObject, true, worldPosition);
+            return true;
+        }
 
         if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock)
             && focusedBoxBlock.TryAddInputAreaCenterObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
@@ -3396,6 +3495,13 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+            && focusedConveyorBlock != null
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, pickupOrigin, pickupRadius))
+        {
+            return true;
+        }
+
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
             && focusedBoxObject.TryPickupContainedObjectToHand(player, pickupOrigin, pickupRadius))
@@ -3441,6 +3547,13 @@ public class TerrainGenerator : MonoBehaviour
         if (player == null || radius < 0 || pickupRadius <= 0f)
         {
             return false;
+        }
+
+        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+            && focusedConveyorBlock != null
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
+        {
+            return true;
         }
 
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
@@ -3780,6 +3893,24 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return playerController.TryGetFocusedBoxObject(out focusedBoxObject);
+    }
+
+    private static bool TryGetFocusedConveyorBeltBlock(Player player, out ConveyorBelt focusedConveyorBelt, out Block focusedBlock)
+    {
+        focusedConveyorBelt = null;
+        focusedBlock = null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetFocusedConveyorBelt(out focusedConveyorBelt, out focusedBlock);
     }
 
     private bool TryResolveInputAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)

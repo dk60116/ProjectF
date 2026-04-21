@@ -613,42 +613,12 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
-        RaycastHit[] hits = Physics.RaycastAll(ray, 512f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-        if (hits != null && hits.Length > 0)
-        {
-            System.Array.Sort(hits, CompareRaycastHits);
-            for (int i = 0; i < hits.Length; i++)
-            {
-                RaycastHit hit = hits[i];
-                if (TryResolveEditableInstallation(hit.collider, out installationObject, out anchorCoordinate))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private bool TryResolveEditableInstallation(Collider hitCollider, out InstallationObject installationObject, out Vector2Int anchorCoordinate)
-    {
-        installationObject = null;
-        anchorCoordinate = Vector2Int.zero;
-
-        if (hitCollider == null)
+        if (!TryGetBlockFromGroundPlane(ray, out Block clickedBlock) || clickedBlock == null)
         {
             return false;
         }
 
-        installationObject = hitCollider.GetComponentInParent<InstallationObject>();
-        if (installationObject == null)
-        {
-            Block hitBlock = hitCollider.GetComponentInParent<Block>();
-            if (hitBlock != null)
-            {
-                installationObject = hitBlock.MapObject as InstallationObject;
-            }
-        }
+        installationObject = clickedBlock.MapObject as InstallationObject;
 
         if (installationObject == null || !installationObject.TryGetPlacementRuntime(out anchorCoordinate, out _))
         {

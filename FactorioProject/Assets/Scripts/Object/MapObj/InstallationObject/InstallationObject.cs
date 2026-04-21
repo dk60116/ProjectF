@@ -14,8 +14,15 @@ public enum InstallationMapFilter
 
 public class InstallationObject : MapObject
 {
+    private static readonly HashSet<InstallationObject> ActiveInstances = new HashSet<InstallationObject>();
+    private static float cachedGlobalMaxFocusActivationRadius;
+    private static bool globalMaxFocusActivationRadiusDirty = true;
+
     [SerializeField]
     private InstallationMapFilter mapFilter = InstallationMapFilter.Ground;
+    [SerializeField]
+    [Min(0f)]
+    private float installationFocusRadius = 1f;
     [SerializeField, HideInInspector]
     private Vector2Int runtimeAnchorCoordinate;
     [SerializeField, HideInInspector]
@@ -29,9 +36,36 @@ public class InstallationObject : MapObject
         set => mapFilter = value == InstallationMapFilter.None ? InstallationMapFilter.Ground : value;
     }
 
+    public virtual float FocusActivationRadius => Mathf.Max(0f, installationFocusRadius);
     public Vector2Int RuntimeAnchorCoordinate => runtimeAnchorCoordinate;
     public int RuntimeQuarterTurns => runtimeQuarterTurns;
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
+    public static float GlobalMaxFocusActivationRadius
+    {
+        get
+        {
+            if (!globalMaxFocusActivationRadiusDirty)
+            {
+                return cachedGlobalMaxFocusActivationRadius;
+            }
+
+            cachedGlobalMaxFocusActivationRadius = 0f;
+            foreach (InstallationObject installationObject in ActiveInstances)
+            {
+                if (installationObject == null)
+                {
+                    continue;
+                }
+
+                cachedGlobalMaxFocusActivationRadius = Mathf.Max(
+                    cachedGlobalMaxFocusActivationRadius,
+                    installationObject.FocusActivationRadius);
+            }
+
+            globalMaxFocusActivationRadiusDirty = false;
+            return cachedGlobalMaxFocusActivationRadius;
+        }
+    }
 
     public void ConfigurePlacementRuntime(Vector2Int anchorCoordinate, int quarterTurns, IReadOnlyList<Vector2Int> occupiedCoordinates)
     {
@@ -69,13 +103,37 @@ public class InstallationObject : MapObject
         return runtimeOccupiedCoordinates != null && runtimeOccupiedCoordinates.Count > 0;
     }
 
+    protected virtual void OnEnable()
+    {
+        ActiveInstances.Add(this);
+        globalMaxFocusActivationRadiusDirty = true;
+    }
+
+    protected virtual void OnDisable()
+    {
+        ActiveInstances.Remove(this);
+        globalMaxFocusActivationRadiusDirty = true;
+    }
+
+    protected void MarkFocusActivationRadiusDirty()
+    {
+        globalMaxFocusActivationRadiusDirty = true;
+    }
+
 #if UNITY_EDITOR
-    private void OnValidate()
+    protected virtual void OnValidate()
     {
         if (mapFilter == InstallationMapFilter.None)
         {
             mapFilter = InstallationMapFilter.Ground;
         }
+
+        if (installationFocusRadius < 0f)
+        {
+            installationFocusRadius = 0f;
+        }
+
+        globalMaxFocusActivationRadiusDirty = true;
     }
 #endif
 }

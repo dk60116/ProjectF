@@ -7,7 +7,6 @@ Shader "Custom/ToonCharacter"
         _ShadowColor("Shadow Color", Color) = (0.7,0.7,0.75,1)
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
-
         _Surface("__surface", Float) = 0.0
         _Blend("__blend", Float) = 0.0
         _Cull("__cull", Float) = 2.0

@@ -7,8 +7,10 @@ public class Block : BaseObject
 {
     public enum BlockType { Ground, Water }
     private const int InputAreaCenterStackStateSentinel = -1000000001;
+    private const int ConveyorStackStateSentinel = -1000000002;
     private const float InputAreaCenterVerticalSpacing = 0.05f;
-
+    private const int ConveyorStackLaneLimit = 4;
+    private const float ConveyorLaneHeight = 0.15f;
     [SerializeField, ReadOnly]
     private Vector2Int coordinate;
 
@@ -41,6 +43,7 @@ public class Block : BaseObject
 
     private readonly List<List<PortableObject>> floorStacks = new List<List<PortableObject>>();
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
+    private readonly List<PortableObject> conveyorStack = new List<PortableObject>();
     private PortableObjectPool floorObjectPool;
     private Transform inputAreaCenterAnchor;
     private MeshRenderer[] cachedBodyRenderers = Array.Empty<MeshRenderer>();
@@ -760,9 +763,243 @@ public class Block : BaseObject
         return false;
     }
 
+    public bool IsConveyorStackingEnabled()
+    {
+        return mapObject is ConveyorBelt conveyorBelt
+               && conveyorBelt != null
+               && conveyorBelt.gameObject != null
+               && conveyorBelt.gameObject.activeInHierarchy;
+    }
+
+    public bool CanAddConveyorObjects(int count)
+    {
+        if (count <= 0)
+        {
+            return true;
+        }
+
+        CleanupConveyorStack();
+        return IsConveyorStackingEnabled() && GetAvailableConveyorCapacity() >= count;
+    }
+
+    public int GetAvailableConveyorCapacity()
+    {
+        CleanupConveyorStack();
+        if (!IsConveyorStackingEnabled())
+        {
+            return 0;
+        }
+
+        int capacity = 0;
+        int laneCount = GetConveyorLaneCount();
+        for (int i = 0; i < laneCount; i++)
+        {
+            if (conveyorStack[i] == null)
+            {
+                capacity++;
+            }
+        }
+
+        return capacity;
+    }
+
+    public bool TryAddConveyorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null)
+    {
+        targetPortableObject = null;
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+
+        if (objectId < 0
+            || !IsConveyorStackingEnabled()
+            || !ResolveFloorObjectPool()
+            || !TryGetBestConveyorLaneIndex(startWorldPosition, out int laneIndex))
+        {
+            return false;
+        }
+
+        Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
+        if (anchor == null)
+        {
+            return false;
+        }
+
+        PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+        if (portableObject == null)
+        {
+            return false;
+        }
+
+        portableObject.SetItem(objectId);
+        portableObject.SetBatchedRendering(false);
+        portableObject.transform.SetParent(transform, true);
+        portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
+        portableObject.transform.rotation = Quaternion.identity;
+        portableObject.transform.localScale = Vector3.one;
+        portableObject.gameObject.SetActive(true);
+        conveyorStack[laneIndex] = portableObject;
+
+        DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
+        if (gate == null)
+        {
+            gate = portableObject.gameObject.AddComponent<DroppedItemPickupGate>();
+        }
+
+        Vector3 finalWorldPosition = GetConveyorLaneWorldPosition(laneIndex, anchor);
+        portableObject.MoveTo(() => anchor != null ? GetConveyorLaneWorldPosition(laneIndex, anchor) : finalWorldPosition, delay, startWorldPositionProvider, () =>
+        {
+            if (portableObject == null)
+            {
+                onComplete?.Invoke();
+                return;
+            }
+
+            if (anchor != null)
+            {
+                ConfigureConveyorObjectTransform(portableObject, laneIndex, anchor);
+            }
+
+            portableObject.SetBatchedRendering(true);
+            gate?.MarkSettled();
+            onComplete?.Invoke();
+        }, false);
+
+        targetPortableObject = portableObject;
+        return true;
+    }
+
+    public bool TryPickupOneConveyorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex = -1)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+        int laneIndex = FindBestConveyorPickupLaneIndex(playerPosition, pickupRadiusSqr, gateOriginPosition, true);
+        if (laneIndex < 0)
+        {
+            return false;
+        }
+
+        PortableObject targetObject = conveyorStack[laneIndex];
+        int itemId = targetObject != null ? targetObject.ItemId : -1;
+        if (itemId < 0)
+        {
+            conveyorStack[laneIndex] = null;
+            ReleaseFloorObject(targetObject);
+            return false;
+        }
+
+        bool added;
+        PortableObject bagTarget;
+        if (preferredSlotIndex >= 0)
+        {
+            added = player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out bagTarget);
+        }
+        else
+        {
+            added = player.TryAddToBag(itemId, out bagTarget);
+        }
+
+        if (!added)
+        {
+            return false;
+        }
+
+        conveyorStack[laneIndex] = null;
+        ReleaseFloorObjectToBag(targetObject, bagTarget);
+        return true;
+    }
+
+    public bool TryPickupOneConveyorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+        int laneIndex = FindBestConveyorPickupLaneIndex(playerPosition, pickupRadiusSqr, gateOriginPosition, true);
+        if (laneIndex < 0)
+        {
+            return false;
+        }
+
+        PortableObject targetObject = conveyorStack[laneIndex];
+        int itemId = targetObject != null ? targetObject.ItemId : -1;
+        if (itemId < 0)
+        {
+            conveyorStack[laneIndex] = null;
+            ReleaseFloorObject(targetObject);
+            return false;
+        }
+
+        if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+        {
+            return false;
+        }
+
+        conveyorStack[laneIndex] = null;
+        ReleaseFloorObjectToHand(targetObject, handTarget);
+        return true;
+    }
+
+    private bool TrySetConveyorObjectAtLane(int laneIndex, int objectId, out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+
+        if (objectId < 0
+            || !IsConveyorStackingEnabled()
+            || !ResolveFloorObjectPool()
+            || laneIndex < 0
+            || laneIndex >= GetConveyorLaneCount()
+            || conveyorStack[laneIndex] != null)
+        {
+            return false;
+        }
+
+        Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
+        if (anchor == null)
+        {
+            return false;
+        }
+
+        PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+        if (portableObject == null)
+        {
+            return false;
+        }
+
+        portableObject.SetItem(objectId);
+        ConfigureConveyorObjectTransform(portableObject, laneIndex, anchor);
+        portableObject.SetBatchedRendering(true);
+        conveyorStack[laneIndex] = portableObject;
+        targetPortableObject = portableObject;
+        return true;
+    }
+
     public List<int> CaptureFloorObjectState()
     {
         EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
 
         List<int> itemIds = new List<int>();
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
@@ -802,6 +1039,27 @@ public class Block : BaseObject
             }
         }
 
+        bool hasConveyorObjects = false;
+        int conveyorLaneCount = GetConveyorLaneCount();
+        for (int i = 0; i < conveyorLaneCount; i++)
+        {
+            if (conveyorStack[i] != null)
+            {
+                hasConveyorObjects = true;
+                break;
+            }
+        }
+
+        if (hasConveyorObjects)
+        {
+            itemIds.Add(ConveyorStackStateSentinel);
+            itemIds.Add(conveyorLaneCount);
+            for (int i = 0; i < conveyorLaneCount; i++)
+            {
+                itemIds.Add(conveyorStack[i] != null ? conveyorStack[i].ItemId : -1);
+            }
+        }
+
         return itemIds;
     }
 
@@ -838,6 +1096,28 @@ public class Block : BaseObject
                 continue;
             }
 
+            if (itemId == ConveyorStackStateSentinel)
+            {
+                if (i + 1 >= itemIds.Count)
+                {
+                    break;
+                }
+
+                int laneCount = Mathf.Max(0, itemIds[++i]);
+                for (int laneIndex = 0; laneIndex < laneCount && i + 1 < itemIds.Count; laneIndex++)
+                {
+                    int laneItemId = itemIds[++i];
+                    if (laneItemId < 0)
+                    {
+                        continue;
+                    }
+
+                    TrySetConveyorObjectAtLane(laneIndex, laneItemId, out _);
+                }
+
+                continue;
+            }
+
             if (!TryAddFloorObject(itemId, out _))
             {
                 break;
@@ -847,6 +1127,11 @@ public class Block : BaseObject
 
     public void SetFocusVisible(bool isVisible)
     {
+        if (this == null)
+        {
+            return;
+        }
+
         if (focus == null)
         {
             focus = GetComponentInChildren<MapFocus>(true);
@@ -1262,6 +1547,17 @@ public class Block : BaseObject
         {
             floorStacks.RemoveAt(floorStacks.Count - 1);
         }
+
+        int conveyorLaneCount = GetConveyorLaneCount();
+        while (conveyorStack.Count < conveyorLaneCount)
+        {
+            conveyorStack.Add(null);
+        }
+
+        while (conveyorStack.Count > conveyorLaneCount)
+        {
+            conveyorStack.RemoveAt(conveyorStack.Count - 1);
+        }
     }
 
     private void ResetFloorObjects()
@@ -1275,6 +1571,7 @@ public class Block : BaseObject
             }
 
             inputAreaCenterStack.Clear();
+            conveyorStack.Clear();
             return;
         }
 
@@ -1303,6 +1600,17 @@ public class Block : BaseObject
         }
 
         inputAreaCenterStack.Clear();
+
+        for (int i = 0; i < conveyorStack.Count; i++)
+        {
+            PortableObject portableObject = conveyorStack[i];
+            if (portableObject != null)
+            {
+                floorObjectPool.Release(portableObject);
+            }
+        }
+
+        conveyorStack.Clear();
     }
 
     private int GetAvailableFloorCapacity()
@@ -1374,7 +1682,7 @@ public class Block : BaseObject
                 continue;
             }
 
-            Vector3 offset = anchor.position - referenceWorldPosition;
+            Vector3 offset = GetConveyorLaneWorldPosition(stackIndex, anchor) - referenceWorldPosition;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
             if (bestStackIndex >= 0 && distanceSqr >= bestDistanceSqr)
@@ -1527,6 +1835,20 @@ public class Block : BaseObject
         portableObject.gameObject.SetActive(true);
     }
 
+    private void ConfigureConveyorObjectTransform(PortableObject portableObject, int laneIndex, Transform anchor)
+    {
+        if (portableObject == null || anchor == null)
+        {
+            return;
+        }
+
+        portableObject.transform.SetParent(transform, true);
+        portableObject.transform.position = GetConveyorLaneWorldPosition(laneIndex, anchor);
+        portableObject.transform.localRotation = Quaternion.identity;
+        portableObject.transform.localScale = Vector3.one;
+        portableObject.gameObject.SetActive(true);
+    }
+
     private void ConfigureInputAreaCenterObjectTransform(PortableObject portableObject, int stackIndex)
     {
         if (portableObject == null || inputAreaCenterAnchor == null)
@@ -1561,6 +1883,171 @@ public class Block : BaseObject
         }
 
         return bottom.ItemId == objectId;
+    }
+
+    private int GetConveyorLaneCount()
+    {
+        return Mathf.Min(ConveyorStackLaneLimit, floorObjects != null ? floorObjects.Count : 0);
+    }
+
+    private void CleanupConveyorStack()
+    {
+        EnsureFloorObjectsInitialized();
+    }
+
+    private bool TryGetBestConveyorLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
+    {
+        bestLaneIndex = -1;
+        float bestDistanceSqr = float.MaxValue;
+        int laneCount = GetConveyorLaneCount();
+
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            if (conveyorStack[laneIndex] != null)
+            {
+                continue;
+            }
+
+            Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
+            if (anchor == null)
+            {
+                continue;
+            }
+
+            Vector3 offset = GetConveyorLaneWorldPosition(laneIndex, anchor) - referenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            bestDistanceSqr = distanceSqr;
+            bestLaneIndex = laneIndex;
+        }
+
+        return bestLaneIndex >= 0;
+    }
+
+    private int FindBestConveyorPickupLaneIndex(Vector3 playerPosition, float pickupRadiusSqr, Vector3 gateOriginPosition, bool manualPickup)
+    {
+        float bestDistanceSqr = float.MaxValue;
+        int bestLaneIndex = -1;
+        int laneCount = GetConveyorLaneCount();
+
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            PortableObject portableObject = conveyorStack[laneIndex];
+            Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
+            if (portableObject == null || anchor == null)
+            {
+                continue;
+            }
+
+            DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
+            if (gate != null)
+            {
+                gate.UpdateExitState(gateOriginPosition);
+            }
+
+            Vector3 offset = GetConveyorLaneWorldPosition(laneIndex, anchor) - playerPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (distanceSqr > pickupRadiusSqr || distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            if (gate != null)
+            {
+                bool canPickup = manualPickup
+                    ? gate.CanManualPickup(distanceSqr, pickupRadiusSqr)
+                    : gate.CanPickup(distanceSqr, pickupRadiusSqr);
+                if (!canPickup)
+                {
+                    continue;
+                }
+            }
+
+            bestDistanceSqr = distanceSqr;
+            bestLaneIndex = laneIndex;
+        }
+
+        return bestLaneIndex;
+    }
+
+    private Vector3 GetConveyorLaneWorldPosition(int laneIndex, Transform anchor = null)
+    {
+        Vector3 localPosition = GetConveyorLaneLocalOffset(laneIndex);
+        localPosition.y = GetConveyorLaneHeight();
+
+        return transform.TransformPoint(localPosition);
+    }
+
+    private Vector3 GetConveyorLaneLocalOffset(int laneIndex)
+    {
+        float halfExtent = GetConveyorLaneHalfExtent();
+        switch (laneIndex)
+        {
+            case 0:
+                return new Vector3(halfExtent, 0f, halfExtent);
+            case 1:
+                return new Vector3(-halfExtent, 0f, halfExtent);
+            case 2:
+                return new Vector3(-halfExtent, 0f, -halfExtent);
+            case 3:
+                return new Vector3(halfExtent, 0f, -halfExtent);
+            default:
+                return Vector3.zero;
+        }
+    }
+
+    private float GetConveyorLaneHalfExtent()
+    {
+        float targetRadius = GetConveyorLaneTargetRadius();
+        if (targetRadius <= 0f)
+        {
+            return 0.24f;
+        }
+
+        return targetRadius / Mathf.Sqrt(2f);
+    }
+
+    private float GetConveyorLaneHeight()
+    {
+        return ConveyorLaneHeight;
+    }
+
+    private float GetConveyorLaneTargetRadius()
+    {
+        if (floorObjects == null || floorObjects.Count == 0)
+        {
+            return 0f;
+        }
+
+        float totalRadius = 0f;
+        int validCount = 0;
+        for (int i = 0; i < floorObjects.Count; i++)
+        {
+            Transform laneAnchor = floorObjects[i];
+            if (laneAnchor == null)
+            {
+                continue;
+            }
+
+            Vector3 localPosition = transform.InverseTransformPoint(laneAnchor.position);
+            Vector2 flat = new Vector2(localPosition.x, localPosition.z);
+            float radius = flat.magnitude;
+            if (radius <= 0.0001f)
+            {
+                continue;
+            }
+
+            totalRadius += radius;
+            validCount++;
+        }
+
+        return validCount > 0 ? totalRadius / validCount : 0f;
     }
 
     public bool TryAddInputAreaCenterObject(int objectId, out PortableObject targetPortableObject)

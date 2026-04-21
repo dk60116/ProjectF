@@ -490,15 +490,17 @@ public class InputOutputModule : InstallationObject
         UpdateEnergyGaugeVisual();
     }
 
-    private void OnEnable()
+    protected override void OnEnable()
     {
+        base.OnEnable();
         RegisterRuntimeGridCoordinates();
     }
 
-    private void OnDisable()
+    protected override void OnDisable()
     {
         UnregisterRuntimeGridCoordinates();
         ReleaseEnergyGaugeVisual();
+        base.OnDisable();
     }
 
     private void OnDestroy()
@@ -1816,8 +1818,9 @@ public class InputOutputModule : InstallationObject
         }
     }
 #if UNITY_EDITOR
-    private void OnValidate()
+    protected override void OnValidate()
     {
+        base.OnValidate();
         EnsurePairData();
         EnsureRectGridData();
         EnsureRectGridPlacementData();

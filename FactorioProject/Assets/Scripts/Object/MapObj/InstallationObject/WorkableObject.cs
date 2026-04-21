@@ -10,11 +10,11 @@ public class WorkableObject : InstallationObject
 
     [SerializeField]
     [Min(0f)]
-    private float focusActivationRadius = 0f;
+    private float focusActivationRadius = 1f;
 
-    public float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
+    public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
 
-    public static float GlobalMaxFocusActivationRadius
+    public new static float GlobalMaxFocusActivationRadius
     {
         get
         {
@@ -41,21 +41,24 @@ public class WorkableObject : InstallationObject
         }
     }
 
-    private void OnEnable()
+    protected override void OnEnable()
     {
+        base.OnEnable();
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
     }
 
-    private void OnDisable()
+    protected override void OnDisable()
     {
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
+        base.OnDisable();
     }
 
 #if UNITY_EDITOR
-    private void OnValidate()
+    protected override void OnValidate()
     {
+        base.OnValidate();
         if (focusActivationRadius < 0f)
         {
             focusActivationRadius = 0f;

@@ -18,7 +18,7 @@ public class BoxObject : InstallationObject
     private Transform hinge;
     [SerializeField]
     [Min(0f)]
-    private float focusActivationRadius = 2f;
+    private float focusActivationRadius = 1f;
     [SerializeField]
     private bool isOpen = true;
     [SerializeField, Min(0.01f)]
@@ -37,9 +37,9 @@ public class BoxObject : InstallationObject
     private bool cachedLockIconVisible;
     private string cachedCountTextValue;
 
-    public float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
+    public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
     public bool IsOpen => isOpen;
-    public static float GlobalMaxFocusActivationRadius
+    public new static float GlobalMaxFocusActivationRadius
     {
         get
         {
@@ -98,8 +98,9 @@ public class BoxObject : InstallationObject
         return nearestBoxObject != null;
     }
 
-    private void OnEnable()
+    protected override void OnEnable()
     {
+        base.OnEnable();
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
         ApplyHingeRotation(false);
@@ -108,7 +109,7 @@ public class BoxObject : InstallationObject
         SyncCountText(true);
     }
 
-    private void OnDisable()
+    protected override void OnDisable()
     {
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
@@ -116,6 +117,7 @@ public class BoxObject : InstallationObject
         ApplyItemIconSprite(null, -1, true);
         SetLockIconVisible(false, true);
         ApplyCountText(string.Empty, true);
+        base.OnDisable();
     }
 
     private void LateUpdate()
@@ -234,8 +236,9 @@ public class BoxObject : InstallationObject
     }
 
 #if UNITY_EDITOR
-    private void OnValidate()
+    protected override void OnValidate()
     {
+        base.OnValidate();
         if (focusActivationRadius < 0f)
         {
             focusActivationRadius = 0f;
