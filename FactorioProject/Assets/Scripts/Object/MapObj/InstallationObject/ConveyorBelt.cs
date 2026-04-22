@@ -15,6 +15,10 @@ public class ConveyorBelt : InstallationObject
     private bool isCornerVariant;
     [SerializeField]
     private bool isReverseCornerVariant;
+    [SerializeField]
+    private InstallationFacingDirection localOutputDirection = InstallationFacingDirection.NegativeZ;
+    [SerializeField]
+    private InstallationFacingDirection localInputDirection = InstallationFacingDirection.PositiveZ;
     [SerializeField, Min(0f)]
     private float conveyorSpeed = 1f;
     [SerializeField]
@@ -33,26 +37,7 @@ public class ConveyorBelt : InstallationObject
 
     public static bool TryGetFlowDirection(Quaternion rotation, out Vector2Int flowDirection)
     {
-        flowDirection = Vector2Int.zero;
-
-        Vector3 forward = rotation * Vector3.forward;
-        forward.y = 0f;
-        if (forward.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        forward = -forward.normalized;
-        if (Mathf.Abs(forward.x) >= Mathf.Abs(forward.z))
-        {
-            flowDirection = new Vector2Int(forward.x >= 0f ? 1 : -1, 0);
-        }
-        else
-        {
-            flowDirection = new Vector2Int(0, forward.z >= 0f ? 1 : -1);
-        }
-
-        return true;
+        return TryResolveCardinalDirection(rotation * Vector3.forward, out flowDirection);
     }
 
     public static Vector2Int RotateDirectionClockwise(Vector2Int direction)
@@ -67,26 +52,36 @@ public class ConveyorBelt : InstallationObject
 
     public bool TryGetInputDirection(Quaternion rotation, out Vector2Int inputDirection)
     {
-        inputDirection = Vector2Int.zero;
-        if (!TryGetFlowDirection(rotation, out Vector2Int outputDirection) || outputDirection == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        if (!IsCornerVariant)
-        {
-            inputDirection = -outputDirection;
-            return true;
-        }
-
-        inputDirection = IsReverseCornerVariant
-            ? RotateDirectionClockwise(outputDirection)
-            : RotateDirectionCounterClockwise(outputDirection);
-        return true;
+        return TryResolveDirection(rotation, localInputDirection, out inputDirection);
     }
 
-    public void HandlePlacementRotation()
+    public bool TryGetOutputDirection(Quaternion rotation, out Vector2Int outputDirection)
     {
+        return TryResolveDirection(rotation, localOutputDirection, out outputDirection);
+    }
+
+    public ConveyorBelt GetPlacementPreviewVariantPrefab(bool useCornerVariant)
+    {
+        if (useCornerVariant)
+        {
+            return CornerVariantPrefab != null ? CornerVariantPrefab : this;
+        }
+
+        return StraightVariantPrefab != null ? StraightVariantPrefab : this;
+    }
+
+    public void HandlePlacementRotation(ref int quarterTurns, ref bool useCornerVariant, bool canUseCornerVariantAfterTurn)
+    {
+        quarterTurns = ((quarterTurns % 4) + 4) % 4;
+
+        if (useCornerVariant)
+        {
+            useCornerVariant = false;
+            return;
+        }
+
+        quarterTurns = (quarterTurns + 1) % 4;
+        useCornerVariant = canUseCornerVariantAfterTurn;
     }
 
     public static bool IsPerpendicular(Vector2Int left, Vector2Int right)
@@ -94,6 +89,78 @@ public class ConveyorBelt : InstallationObject
         return left != Vector2Int.zero
                && right != Vector2Int.zero
                && ((left.x * right.x) + (left.y * right.y)) == 0;
+    }
+
+    private bool TryResolveDirection(Quaternion rotation, InstallationFacingDirection localDirection, out Vector2Int resolvedDirection)
+    {
+        return TryResolveCardinalDirection(rotation * FacingDirectionToVector(localDirection), out resolvedDirection);
+    }
+
+    private static bool TryResolveCardinalDirection(Vector3 directionVector, out Vector2Int resolvedDirection)
+    {
+        resolvedDirection = Vector2Int.zero;
+
+        directionVector.y = 0f;
+        if (directionVector.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        directionVector.Normalize();
+        if (Mathf.Abs(directionVector.x) >= Mathf.Abs(directionVector.z))
+        {
+            resolvedDirection = new Vector2Int(directionVector.x >= 0f ? 1 : -1, 0);
+        }
+        else
+        {
+            resolvedDirection = new Vector2Int(0, directionVector.z >= 0f ? 1 : -1);
+        }
+
+        return true;
+    }
+
+    private static Vector3 FacingDirectionToVector(InstallationFacingDirection direction)
+    {
+        switch (direction)
+        {
+            case InstallationFacingDirection.PositiveX:
+                return Vector3.right;
+            case InstallationFacingDirection.NegativeX:
+                return Vector3.left;
+            case InstallationFacingDirection.NegativeZ:
+                return Vector3.back;
+            default:
+                return Vector3.forward;
+        }
+    }
+
+    protected override InstallationFacingDirection ResolveInstalledDirection(Quaternion rotation)
+    {
+        if (TryGetInputDirection(rotation, out Vector2Int inputDirection))
+        {
+            return ToFacingDirection(inputDirection);
+        }
+
+        if (TryGetOutputDirection(rotation, out Vector2Int outputDirection))
+        {
+            return ToFacingDirection(outputDirection);
+        }
+
+        return base.ResolveInstalledDirection(rotation);
+    }
+
+    private static InstallationFacingDirection ToFacingDirection(Vector2Int direction)
+    {
+        if (Mathf.Abs(direction.x) >= Mathf.Abs(direction.y))
+        {
+            return direction.x >= 0
+                ? InstallationFacingDirection.PositiveX
+                : InstallationFacingDirection.NegativeX;
+        }
+
+        return direction.y >= 0
+            ? InstallationFacingDirection.PositiveZ
+            : InstallationFacingDirection.NegativeZ;
     }
 
     protected new void Awake()

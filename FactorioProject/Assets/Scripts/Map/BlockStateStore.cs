@@ -9,6 +9,7 @@ public class BlockStateStore : MonoBehaviour
         public Vector2Int anchorCoordinate;
         public int itemId;
         public int quarterTurns;
+        public long placementSequence;
         public int conveyorVariantKind = -1;
         public List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
         public InputOutputModule.PersistentState inputOutputState;
@@ -24,6 +25,7 @@ public class BlockStateStore : MonoBehaviour
                 anchorCoordinate = anchorCoordinate,
                 itemId = itemId,
                 quarterTurns = quarterTurns,
+                placementSequence = placementSequence,
                 conveyorVariantKind = conveyorVariantKind,
                 occupiedCoordinates = new List<Vector2Int>(occupiedCoordinates ?? new List<Vector2Int>()),
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
@@ -273,6 +275,7 @@ public class BlockStateStore : MonoBehaviour
             anchorCoordinate = anchorCoordinate,
             itemId = itemId,
             quarterTurns = ((quarterTurns % 4) + 4) % 4,
+            placementSequence = installationObject.RuntimePlacementSequence,
             occupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
         };
 

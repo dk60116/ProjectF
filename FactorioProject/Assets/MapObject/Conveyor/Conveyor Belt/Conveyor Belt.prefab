@@ -602,6 +602,8 @@ MonoBehaviour:
   reverseCornerVariantPrefab: {fileID: 7247929509108097568, guid: 8f0cf7fe48c14db4a2d646e5f9b44a61, type: 3}
   isCornerVariant: 0
   isReverseCornerVariant: 0
+  localOutputDirection: 2
+  localInputDirection: 0
 --- !u!4 &6329141710235238171 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 354565451974692786, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}

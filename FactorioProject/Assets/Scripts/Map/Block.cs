@@ -2147,25 +2147,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 forward = conveyorBelt.transform.forward;
-        forward.y = 0f;
-        if (forward.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        forward = -forward;
-
-        if (Mathf.Abs(forward.x) >= Mathf.Abs(forward.z))
-        {
-            flowDirection = new Vector2Int(forward.x >= 0f ? 1 : -1, 0);
-        }
-        else
-        {
-            flowDirection = new Vector2Int(0, forward.z >= 0f ? 1 : -1);
-        }
-
-        return true;
+        return conveyorBelt.TryGetOutputDirection(conveyorBelt.transform.rotation, out flowDirection);
     }
 
     private bool TryReceiveConveyorObject(PortableObject portableObject, Vector3 sourceWorldPosition, out int laneIndex)

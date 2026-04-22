@@ -13,6 +13,8 @@ public class GameManager : MonoBehaviour
 
     [SerializeField]
     private Player player;
+    [SerializeField]
+    private bool debugConveyorInstallGridEnds;
 
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
@@ -91,6 +93,7 @@ public class GameManager : MonoBehaviour
     public ItemManager ItemManger => itemManager;
 
     public Player Player => player;
+    public bool DebugConveyorInstallGridEnds => debugConveyorInstallGridEnds;
 
     public void SetInstallationPlacementActive(bool isActive)
     {

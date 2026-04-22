@@ -26,6 +26,7 @@ public class InstallationObject : MapObject
     private static readonly HashSet<InstallationObject> ActiveInstances = new HashSet<InstallationObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
+    private static long nextPlacementSequence = 1;
 
     [SerializeField]
     private InstallationMapFilter mapFilter = InstallationMapFilter.Ground;
@@ -40,6 +41,8 @@ public class InstallationObject : MapObject
     private int runtimeQuarterTurns;
     [SerializeField, HideInInspector]
     private List<Vector2Int> runtimeOccupiedCoordinates = new List<Vector2Int>();
+    [SerializeField, HideInInspector]
+    private long runtimePlacementSequence;
 
     public InstallationMapFilter MapFilter
     {
@@ -52,6 +55,7 @@ public class InstallationObject : MapObject
     public Vector2Int RuntimeAnchorCoordinate => runtimeAnchorCoordinate;
     public int RuntimeQuarterTurns => runtimeQuarterTurns;
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
+    public long RuntimePlacementSequence => runtimePlacementSequence;
     public static float GlobalMaxFocusActivationRadius
     {
         get
@@ -79,11 +83,16 @@ public class InstallationObject : MapObject
         }
     }
 
-    public void ConfigurePlacementRuntime(Vector2Int anchorCoordinate, int quarterTurns, IReadOnlyList<Vector2Int> occupiedCoordinates)
+    public void ConfigurePlacementRuntime(
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        IReadOnlyList<Vector2Int> occupiedCoordinates,
+        long placementSequence = 0)
     {
         runtimeAnchorCoordinate = anchorCoordinate;
         runtimeQuarterTurns = ((quarterTurns % 4) + 4) % 4;
-        RefreshInstalledDirection();
+        runtimePlacementSequence = ClaimPlacementSequence(placementSequence);
+        RefreshInstalledDirectionFromCurrentTransform();
 
         if (runtimeOccupiedCoordinates == null)
         {
@@ -109,6 +118,26 @@ public class InstallationObject : MapObject
         }
     }
 
+    private static long ClaimPlacementSequence(long placementSequence)
+    {
+        if (placementSequence > 0)
+        {
+            if (placementSequence >= nextPlacementSequence)
+            {
+                nextPlacementSequence = placementSequence + 1;
+            }
+
+            return placementSequence;
+        }
+
+        return nextPlacementSequence++;
+    }
+
+    public static long ClaimNextPlacementSequence(long placementSequence = 0)
+    {
+        return ClaimPlacementSequence(placementSequence);
+    }
+
     public bool TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
     {
         anchorCoordinate = runtimeAnchorCoordinate;
@@ -120,7 +149,7 @@ public class InstallationObject : MapObject
     {
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
-        RefreshInstalledDirection();
+        RefreshInstalledDirectionFromCurrentTransform();
     }
 
     protected virtual void OnDisable()
@@ -134,12 +163,12 @@ public class InstallationObject : MapObject
         globalMaxFocusActivationRadiusDirty = true;
     }
 
-    private void RefreshInstalledDirection()
+    public void RefreshInstalledDirectionFromCurrentTransform()
     {
         installedDirection = ResolveInstalledDirection(transform.rotation);
     }
 
-    private static InstallationFacingDirection ResolveInstalledDirection(Quaternion rotation)
+    protected virtual InstallationFacingDirection ResolveInstalledDirection(Quaternion rotation)
     {
         Vector3 forward = rotation * Vector3.forward;
         forward.y = 0f;
@@ -175,7 +204,7 @@ public class InstallationObject : MapObject
         }
 
         globalMaxFocusActivationRadiusDirty = true;
-        RefreshInstalledDirection();
+        RefreshInstalledDirectionFromCurrentTransform();
     }
 #endif
 }

@@ -4249,11 +4249,16 @@ public class TerrainGenerator : MonoBehaviour
                 restoredInstallation,
                 savedState.anchorCoordinate,
                 savedState.quarterTurns,
-                savedState.inputOutputState);
+                savedState.inputOutputState,
+                savedState.placementSequence);
         }
         else
         {
-            restoredInstallation.ConfigurePlacementRuntime(savedState.anchorCoordinate, savedState.quarterTurns, occupiedCoordinates);
+            restoredInstallation.ConfigurePlacementRuntime(
+                savedState.anchorCoordinate,
+                savedState.quarterTurns,
+                occupiedCoordinates,
+                savedState.placementSequence);
             if (savedState.inputOutputState != null && restoredInstallation is InputOutputModule inputOutputModule)
             {
                 inputOutputModule.ApplyPersistentState(savedState.inputOutputState);

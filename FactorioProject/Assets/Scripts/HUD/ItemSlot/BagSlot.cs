@@ -137,7 +137,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             gameObject.SetActive(true);
         }
 
-        bool canInteract = visible && !IsInventoryEditLocked();
+        bool canInteract = visible && !IsInventoryUiLocked();
         if (canvasGroup != null)
         {
             canvasGroup.alpha = visible ? 1f : 0f;
@@ -159,6 +159,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     public void DropItem()
     {
+        if (IsItemDropLocked())
+        {
+            return;
+        }
+
         if (!CanDragItem())
         {
             return;
@@ -304,8 +309,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool CanDragItem()
     {
-        return !IsInventoryEditLocked()
-               && CanDragDrop
+        return CanDragDrop
                && boundBag != null
                && slotIndex >= 0
                && id >= 0
@@ -314,7 +318,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool CanOpenCraftingSlots()
     {
-        return !IsInventoryEditLocked()
+        return !IsInventoryUiLocked()
                && boundBag != null
                && slotIndex >= 0
                && craftingRoot != null
@@ -538,7 +542,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        if (IsInventoryEditLocked())
+        if (IsInventoryUiLocked())
         {
             CollapseCraftingSlots(false);
             return;
@@ -1143,7 +1147,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool TryTransferToSlot(BagSlot targetSlot)
     {
-        if (IsInventoryEditLocked() || targetSlot == null || targetSlot == this)
+        if (IsInventoryUiLocked() || targetSlot == null || targetSlot == this)
         {
             return false;
         }
@@ -1521,7 +1525,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void HandlePickupClick()
     {
-        if (!AllowPickupOnClick || IsInventoryEditLocked())
+        if (!AllowPickupOnClick || IsInventoryUiLocked())
         {
             return;
         }
@@ -1566,7 +1570,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         while (player != null && terrain != null)
         {
-            if (IsInventoryEditLocked())
+            if (IsInventoryUiLocked())
             {
                 break;
             }
@@ -1715,7 +1719,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
     }
 
+    protected bool IsInventoryUiLocked()
+    {
+        return false;
+    }
+
     protected bool IsInventoryEditLocked()
+    {
+        return IsInventoryUiLocked();
+    }
+
+    protected bool IsItemDropLocked()
     {
         return GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
     }
