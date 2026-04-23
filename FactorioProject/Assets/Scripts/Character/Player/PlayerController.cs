@@ -4,6 +4,16 @@ using UnityEngine;
 [RequireComponent(typeof(Player))]
 public class PlayerController : MonoBehaviour
 {
+    private const float ConveyorStandingHeight = 0.2f;
+    private const float ConveyorStandingSmoothTime = 0.08f;
+    private const float ConveyorStandingEnterDistance = 0.08f;
+    private const float ConveyorStandingExitDistance = 0.12f;
+    private const float ConveyorStandingHandoffDistance = 0.2f;
+    private const float ConveyorCarryAcceleration = 8f;
+    private const float ConveyorCarryDeceleration = 10f;
+    private const float MinPhysicsMoveDistance = 0.00001f;
+    private const float MinPhysicsMoveDistanceSqr = MinPhysicsMoveDistance * MinPhysicsMoveDistance;
+
     [SerializeField]
     private Transform movementReference;
 
@@ -40,11 +50,18 @@ public class PlayerController : MonoBehaviour
     private Rigidbody cachedRigidbody;
     private Vector3 pendingMoveDirection;
     private const float MoveSweepBuffer = 0.01f;
+    private const float ConveyorCarrySweepBuffer = 0f;
     private float stationaryHarvestTimer;
     private float autoPickupTimer;
     private TerrainGenerator cachedTerrainGenerator;
     private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
     private bool wasInstallationPlacementActive;
+    private bool hasDefaultBodyLocalPosition;
+    private Vector3 defaultBodyLocalPosition;
+    private float standingVisualOffsetVelocity;
+    private bool hasStandingConveyorCoordinate;
+    private Vector2Int standingConveyorCoordinate;
+    private Vector3 currentConveyorCarryVelocity;
 
     private void Awake()
     {
@@ -62,10 +79,13 @@ public class PlayerController : MonoBehaviour
         resourceWorkGauge = ResourceWrokGauge.FindOrCreate();
         resourceWorkGauge?.Hide();
         ResolveMovementReference();
+        CacheDefaultBodyLocalPosition();
     }
 
     private void OnDisable()
     {
+        RestoreStandingVisualOffset();
+        currentConveyorCarryVelocity = Vector3.zero;
         SetFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         focusRemovalBuffer.Clear();
@@ -159,6 +179,7 @@ public class PlayerController : MonoBehaviour
         if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
         {
             pendingMoveDirection = Vector3.zero;
+            currentConveyorCarryVelocity = Vector3.zero;
             return;
         }
 
@@ -167,30 +188,91 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (pendingMoveDirection.sqrMagnitude <= 0.0001f)
+        Vector3 manualVelocity = pendingMoveDirection * player.Stat.currentMoveSpeed;
+        Vector3 targetCarryVelocity = Vector3.zero;
+        bool hasRawCarryDelta = TryGetStandingConveyorCarryDelta(Time.fixedDeltaTime, out Vector3 rawCarryDelta);
+        if (hasRawCarryDelta)
+        {
+            targetCarryVelocity = rawCarryDelta / Mathf.Max(Time.fixedDeltaTime, 0.0001f);
+        }
+
+        float carryRate = targetCarryVelocity.sqrMagnitude > currentConveyorCarryVelocity.sqrMagnitude
+            ? ConveyorCarryAcceleration
+            : ConveyorCarryDeceleration;
+        currentConveyorCarryVelocity = Vector3.MoveTowards(
+            currentConveyorCarryVelocity,
+            targetCarryVelocity,
+            carryRate * Time.fixedDeltaTime);
+
+        Vector3 manualDelta = manualVelocity * Time.fixedDeltaTime;
+        Vector3 carryDelta = currentConveyorCarryVelocity * Time.fixedDeltaTime;
+        Vector3 totalDelta = manualDelta + carryDelta;
+
+        if (manualDelta.sqrMagnitude <= 0.0001f)
+        {
+            if (hasRawCarryDelta && rawCarryDelta.sqrMagnitude > 0.0000001f)
+            {
+                if (cachedRigidbody.IsSleeping())
+                {
+                    cachedRigidbody.WakeUp();
+                }
+
+                MoveRigidbody(rawCarryDelta, ConveyorCarrySweepBuffer);
+                return;
+            }
+
+            if (carryDelta.sqrMagnitude > 0.0000001f)
+            {
+                if (cachedRigidbody.IsSleeping())
+                {
+                    cachedRigidbody.WakeUp();
+                }
+
+                MoveRigidbody(carryDelta, ConveyorCarrySweepBuffer);
+                return;
+            }
+        }
+
+        if (totalDelta.sqrMagnitude <= MinPhysicsMoveDistanceSqr)
         {
             return;
         }
 
-        Vector3 delta = pendingMoveDirection * player.Stat.currentMoveSpeed * Time.fixedDeltaTime;
-        MoveRigidbody(delta);
+        if (cachedRigidbody.IsSleeping())
+        {
+            cachedRigidbody.WakeUp();
+        }
+
+        MoveRigidbody(totalDelta, MoveSweepBuffer);
+    }
+
+    private void LateUpdate()
+    {
+        ApplyStandingVisualOffset();
     }
 
     private void MoveRigidbody(Vector3 delta)
     {
+        MoveRigidbody(delta, MoveSweepBuffer);
+    }
+
+    private void MoveRigidbody(Vector3 delta, float maxSweepBuffer)
+    {
         float distance = delta.magnitude;
-        if (distance <= 0.0001f)
+        if (distance <= MinPhysicsMoveDistance)
         {
             return;
         }
+
+        float sweepBuffer = Mathf.Min(maxSweepBuffer, distance * 0.25f);
 
         Vector3 direction = delta / distance;
         Vector3 startPosition = cachedRigidbody.position;
         Vector3 finalMove = Vector3.zero;
 
-        if (cachedRigidbody.SweepTest(direction, out RaycastHit hit, distance + MoveSweepBuffer, QueryTriggerInteraction.Ignore))
+        if (cachedRigidbody.SweepTest(direction, out RaycastHit hit, distance + sweepBuffer, QueryTriggerInteraction.Ignore))
         {
-            float allowedDistance = Mathf.Max(0f, hit.distance - MoveSweepBuffer);
+            float allowedDistance = Mathf.Max(0f, hit.distance - sweepBuffer);
             if (allowedDistance > 0f)
             {
                 finalMove += direction * allowedDistance;
@@ -205,7 +287,7 @@ public class PlayerController : MonoBehaviour
                 {
                     Vector3 slideDirection = slide.normalized;
                     float slideDistance = slide.magnitude;
-                    if (!cachedRigidbody.SweepTest(slideDirection, out _, slideDistance + MoveSweepBuffer, QueryTriggerInteraction.Ignore))
+                    if (!cachedRigidbody.SweepTest(slideDirection, out _, slideDistance + sweepBuffer, QueryTriggerInteraction.Ignore))
                     {
                         finalMove += slide;
                     }
@@ -217,10 +299,206 @@ public class PlayerController : MonoBehaviour
             finalMove = delta;
         }
 
-        if (finalMove.sqrMagnitude > 0.0001f)
+        Vector3 finalPosition = startPosition + finalMove;
+        if (finalMove.sqrMagnitude > MinPhysicsMoveDistanceSqr)
         {
-            cachedRigidbody.MovePosition(startPosition + finalMove);
+            cachedRigidbody.MovePosition(finalPosition);
         }
+    }
+
+    private void CacheDefaultBodyLocalPosition()
+    {
+        Transform bodyTransform = player != null ? player.BodyTransform : null;
+        if (hasDefaultBodyLocalPosition || bodyTransform == null || bodyTransform == transform)
+        {
+            return;
+        }
+
+        defaultBodyLocalPosition = bodyTransform.localPosition;
+        hasDefaultBodyLocalPosition = true;
+    }
+
+    private void ApplyStandingVisualOffset()
+    {
+        CacheDefaultBodyLocalPosition();
+
+        Transform bodyTransform = player != null ? player.BodyTransform : null;
+        if (!hasDefaultBodyLocalPosition || bodyTransform == null || bodyTransform == transform)
+        {
+            return;
+        }
+
+        float targetOffset = TryGetStandingConveyorBlock(out _) ? ConveyorStandingHeight : 0f;
+        float targetY = defaultBodyLocalPosition.y + targetOffset;
+        Vector3 localPosition = bodyTransform.localPosition;
+
+        localPosition.y = Mathf.SmoothDamp(
+            localPosition.y,
+            targetY,
+            ref standingVisualOffsetVelocity,
+            ConveyorStandingSmoothTime);
+
+        if (Mathf.Abs(localPosition.y - targetY) <= 0.001f
+            && Mathf.Abs(standingVisualOffsetVelocity) <= 0.001f)
+        {
+            localPosition.y = targetY;
+            standingVisualOffsetVelocity = 0f;
+        }
+
+        bodyTransform.localPosition = localPosition;
+    }
+
+    private void RestoreStandingVisualOffset()
+    {
+        Transform bodyTransform = player != null ? player.BodyTransform : null;
+        if (!hasDefaultBodyLocalPosition || bodyTransform == null || bodyTransform == transform)
+        {
+            return;
+        }
+
+        bodyTransform.localPosition = defaultBodyLocalPosition;
+        standingVisualOffsetVelocity = 0f;
+        hasStandingConveyorCoordinate = false;
+        standingConveyorCoordinate = default;
+    }
+
+    private bool TryGetStandingConveyorBlock(out Block standingBlock)
+    {
+        standingBlock = null;
+
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+        }
+
+        if (cachedTerrainGenerator == null)
+        {
+            hasStandingConveyorCoordinate = false;
+            standingConveyorCoordinate = default;
+            return false;
+        }
+
+        Vector3 samplePosition = cachedRigidbody != null
+            ? cachedRigidbody.position
+            : transform.position;
+
+        float enterDistanceSqr = ConveyorStandingEnterDistance * ConveyorStandingEnterDistance;
+        float exitDistanceSqr = ConveyorStandingExitDistance * ConveyorStandingExitDistance;
+        float handoffDistanceSqr = ConveyorStandingHandoffDistance * ConveyorStandingHandoffDistance;
+
+        if (hasStandingConveyorCoordinate
+            && cachedTerrainGenerator.TryGetLoadedBlock(standingConveyorCoordinate, out Block currentBlock)
+            && currentBlock != null
+            && currentBlock.TryGetConveyorStandingDistanceSqr(samplePosition, out float currentDistanceSqr))
+        {
+            if (currentDistanceSqr <= exitDistanceSqr
+                || (currentConveyorCarryVelocity.sqrMagnitude > 0.0001f && currentDistanceSqr <= handoffDistanceSqr))
+            {
+                standingBlock = currentBlock;
+                return true;
+            }
+
+            if (currentBlock.TryGetNextConnectedConveyorBlock(out Block nextBlock)
+                && nextBlock != null
+                && nextBlock.TryGetConveyorStandingDistanceSqr(samplePosition, out float nextDistanceSqr)
+                && nextDistanceSqr <= handoffDistanceSqr)
+            {
+                standingBlock = nextBlock;
+                hasStandingConveyorCoordinate = true;
+                standingConveyorCoordinate = nextBlock.Coordinate;
+                return true;
+            }
+        }
+
+        hasStandingConveyorCoordinate = false;
+        standingConveyorCoordinate = default;
+
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(samplePosition.x),
+            Mathf.RoundToInt(samplePosition.z));
+
+        float searchDistanceSqr = currentConveyorCarryVelocity.sqrMagnitude > 0.0001f
+            ? handoffDistanceSqr
+            : enterDistanceSqr;
+        float bestDistanceSqr = float.MaxValue;
+        Block bestBlock = null;
+        Vector2Int bestCoordinate = default;
+
+        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        {
+            for (int offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (!cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block)
+                    || block == null
+                    || !block.TryGetConveyorStandingDistanceSqr(samplePosition, out float distanceSqr)
+                    || distanceSqr > searchDistanceSqr
+                    || distanceSqr >= bestDistanceSqr)
+                {
+                    continue;
+                }
+
+                bestDistanceSqr = distanceSqr;
+                bestBlock = block;
+                bestCoordinate = coordinate;
+            }
+        }
+
+        if (bestBlock == null)
+        {
+            return false;
+        }
+
+        standingBlock = bestBlock;
+        hasStandingConveyorCoordinate = true;
+        standingConveyorCoordinate = bestCoordinate;
+        return true;
+    }
+
+    private bool TryGetStandingConveyorCarryDelta(float deltaTime, out Vector3 carryDelta)
+    {
+        carryDelta = Vector3.zero;
+        if (deltaTime <= 0f
+            || !TryGetStandingConveyorBlock(out Block standingBlock)
+            || standingBlock == null)
+        {
+            return false;
+        }
+
+        Vector3 samplePosition = cachedRigidbody != null
+            ? cachedRigidbody.position
+            : transform.position;
+
+        if (!standingBlock.TryGetConveyorCarryDeltaWithHandoff(samplePosition, deltaTime, out Block resultingBlock, out carryDelta))
+        {
+            return false;
+        }
+
+        if (resultingBlock != null)
+        {
+            float switchDistanceSqr = ConveyorStandingHandoffDistance * ConveyorStandingHandoffDistance;
+            Vector3 predictedPosition = samplePosition + carryDelta;
+
+            if (resultingBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float resultingDistanceSqr)
+                && resultingDistanceSqr <= switchDistanceSqr)
+            {
+                hasStandingConveyorCoordinate = true;
+                standingConveyorCoordinate = resultingBlock.Coordinate;
+            }
+            else if (standingBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float standingDistanceSqr)
+                     && standingDistanceSqr <= switchDistanceSqr)
+            {
+                hasStandingConveyorCoordinate = true;
+                standingConveyorCoordinate = standingBlock.Coordinate;
+            }
+            else
+            {
+                hasStandingConveyorCoordinate = false;
+                standingConveyorCoordinate = default;
+            }
+        }
+
+        return true;
     }
 
     private void HandleInstallationPlacementLock()
