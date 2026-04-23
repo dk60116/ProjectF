@@ -931,6 +931,11 @@ public class Block : BaseObject
         return TryGetNextConveyorBlock(out nextBlock);
     }
 
+    public bool IsCornerConveyorBlock()
+    {
+        return IsConveyorStackingEnabled() && IsCornerConveyor();
+    }
+
     public bool CanAddConveyorObjects(int count)
     {
         if (count <= 0)

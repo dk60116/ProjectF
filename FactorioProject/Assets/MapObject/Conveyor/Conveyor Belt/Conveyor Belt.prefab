@@ -604,7 +604,7 @@ MonoBehaviour:
   isReverseCornerVariant: 0
   localOutputDirection: 2
   localInputDirection: 0
-  conveyorSpeed: 1
+  conveyorSpeed: 0.5
   beltTopRenderer: {fileID: 533515098945374496}
 --- !u!4 &6329141710235238171 stripped
 Transform:

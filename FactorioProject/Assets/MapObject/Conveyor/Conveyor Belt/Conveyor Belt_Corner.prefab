@@ -364,14 +364,15 @@ MonoBehaviour:
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
+  runtimePlacementSequence: 0
   straightVariantPrefab: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
   cornerVariantPrefab: {fileID: 7247929509108097568}
   reverseCornerVariantPrefab: {fileID: 7247929509108097568, guid: 8f0cf7fe48c14db4a2d646e5f9b44a61, type: 3}
   isCornerVariant: 1
+  isReverseCornerVariant: 0
   localOutputDirection: 3
   localInputDirection: 0
-  isReverseCornerVariant: 0
-  conveyorSpeed: 1
+  conveyorSpeed: 0.5
   beltTopRenderer: {fileID: 533515098945374496}
 --- !u!4 &8553229865070038503 stripped
 Transform:

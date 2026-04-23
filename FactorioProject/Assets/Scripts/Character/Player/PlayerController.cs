@@ -190,10 +190,22 @@ public class PlayerController : MonoBehaviour
 
         Vector3 manualVelocity = pendingMoveDirection * player.Stat.currentMoveSpeed;
         Vector3 targetCarryVelocity = Vector3.zero;
-        bool hasRawCarryDelta = TryGetStandingConveyorCarryDelta(Time.fixedDeltaTime, out Vector3 rawCarryDelta);
+        bool hasRawCarryDelta = TryGetStandingConveyorCarryDelta(
+            Time.fixedDeltaTime,
+            out Vector3 rawCarryDelta,
+            out Block standingConveyorBlock);
         if (hasRawCarryDelta)
         {
             targetCarryVelocity = rawCarryDelta / Mathf.Max(Time.fixedDeltaTime, 0.0001f);
+            if (standingConveyorBlock != null
+                && standingConveyorBlock.IsCornerConveyorBlock()
+                && IsOpposingConveyorCarry(targetCarryVelocity))
+            {
+                hasRawCarryDelta = false;
+                rawCarryDelta = Vector3.zero;
+                targetCarryVelocity = Vector3.zero;
+                currentConveyorCarryVelocity = Vector3.zero;
+            }
         }
 
         float carryRate = targetCarryVelocity.sqrMagnitude > currentConveyorCarryVelocity.sqrMagnitude
@@ -362,6 +374,35 @@ public class PlayerController : MonoBehaviour
         standingConveyorCoordinate = default;
     }
 
+    private bool IsOpposingConveyorCarry(Vector3 carryVelocity)
+    {
+        Vector3 inputDirection = pendingMoveDirection;
+        inputDirection.y = 0f;
+        if (inputDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        carryVelocity.y = 0f;
+        if (carryVelocity.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        return Vector3.Dot(inputDirection.normalized, carryVelocity.normalized) <= -0.2f;
+    }
+
+    private bool IsOpposingConveyorCarry(Block conveyorBlock, Vector3 samplePosition)
+    {
+        if (conveyorBlock == null
+            || !conveyorBlock.TryGetConveyorCarryVelocity(samplePosition, out Vector3 carryVelocity))
+        {
+            return false;
+        }
+
+        return IsOpposingConveyorCarry(carryVelocity);
+    }
+
     private bool TryGetStandingConveyorBlock(out Block standingBlock)
     {
         standingBlock = null;
@@ -391,14 +432,19 @@ public class PlayerController : MonoBehaviour
             && currentBlock != null
             && currentBlock.TryGetConveyorStandingDistanceSqr(samplePosition, out float currentDistanceSqr))
         {
-            if (currentDistanceSqr <= exitDistanceSqr
-                || (currentConveyorCarryVelocity.sqrMagnitude > 0.0001f && currentDistanceSqr <= handoffDistanceSqr))
+            bool isOpposingCurrentCarry = IsOpposingConveyorCarry(currentBlock, samplePosition);
+            float retainedDistanceSqr = isOpposingCurrentCarry ? enterDistanceSqr : exitDistanceSqr;
+            bool canUseCarryHandoff = !isOpposingCurrentCarry && currentConveyorCarryVelocity.sqrMagnitude > 0.0001f;
+
+            if (currentDistanceSqr <= retainedDistanceSqr
+                || (canUseCarryHandoff && currentDistanceSqr <= handoffDistanceSqr))
             {
                 standingBlock = currentBlock;
                 return true;
             }
 
-            if (currentBlock.TryGetNextConnectedConveyorBlock(out Block nextBlock)
+            if (!isOpposingCurrentCarry
+                && currentBlock.TryGetNextConnectedConveyorBlock(out Block nextBlock)
                 && nextBlock != null
                 && nextBlock.TryGetConveyorStandingDistanceSqr(samplePosition, out float nextDistanceSqr)
                 && nextDistanceSqr <= handoffDistanceSqr)
@@ -417,7 +463,8 @@ public class PlayerController : MonoBehaviour
             Mathf.RoundToInt(samplePosition.x),
             Mathf.RoundToInt(samplePosition.z));
 
-        float searchDistanceSqr = currentConveyorCarryVelocity.sqrMagnitude > 0.0001f
+        bool isOpposingResidualCarry = IsOpposingConveyorCarry(currentConveyorCarryVelocity);
+        float searchDistanceSqr = currentConveyorCarryVelocity.sqrMagnitude > 0.0001f && !isOpposingResidualCarry
             ? handoffDistanceSqr
             : enterDistanceSqr;
         float bestDistanceSqr = float.MaxValue;
@@ -455,15 +502,18 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
-    private bool TryGetStandingConveyorCarryDelta(float deltaTime, out Vector3 carryDelta)
+    private bool TryGetStandingConveyorCarryDelta(float deltaTime, out Vector3 carryDelta, out Block standingBlock)
     {
         carryDelta = Vector3.zero;
+        standingBlock = null;
         if (deltaTime <= 0f
-            || !TryGetStandingConveyorBlock(out Block standingBlock)
-            || standingBlock == null)
+            || !TryGetStandingConveyorBlock(out Block resolvedStandingBlock)
+            || resolvedStandingBlock == null)
         {
             return false;
         }
+
+        standingBlock = resolvedStandingBlock;
 
         Vector3 samplePosition = cachedRigidbody != null
             ? cachedRigidbody.position
