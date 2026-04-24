@@ -57,6 +57,8 @@ public class CraftingSlot : ItemSlot
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
 
+    public float ExpandDuration => Mathf.Max(0f, expandDuration);
+
     private void Awake()
     {
         CacheReferences();

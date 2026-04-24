@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
@@ -8,6 +9,7 @@ using UnityEngine.UI;
 public class InstallationPlacementController : MonoBehaviour
 {
     private const string InstallGridOverlayShaderName = "Custom/InstallGridOverlay";
+    private const int ConveyorStackStateSentinel = -1000000002;
 
     [SerializeField]
     private Button installButton;
@@ -37,6 +39,12 @@ public class InstallationPlacementController : MonoBehaviour
     private Color installGridColor = new Color(1f, 1f, 1f, 0.55f);
     [SerializeField]
     private Color installGridBlockedFillColor = new Color(1f, 0.2f, 0.2f, 0.22f);
+    [SerializeField, Min(0f)]
+    private float installPlacementPortableLaunchInterval = 0.04f;
+    [SerializeField, Min(0.01f)]
+    private float installPlacementScaleDuration = 0.2f;
+    [SerializeField]
+    private Ease installPlacementScaleEase = Ease.OutBack;
     [SerializeField]
     private Color installGridBlockedLineColor = new Color(1f, 0.2f, 0.2f, 0.9f);
     [SerializeField]
@@ -122,9 +130,11 @@ public class InstallationPlacementController : MonoBehaviour
         public InstallationEditSession editSession;
         public Vector2Int anchorCoordinate;
         public int quarterTurns;
+        public int conveyorVariantKind = -1;
         public int itemId;
         public Vector2Int dropCoordinate;
         public PortableObject portableObject;
+        public Dictionary<Vector2Int, List<int>> pendingDroppedBlockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
     }
 
     private sealed class ConveyorChangeInfo
@@ -518,6 +528,40 @@ public class InstallationPlacementController : MonoBehaviour
         return GameManager.Instance.Player.GetHandBag();
     }
 
+    private List<PortableObject> GetPlayerHandPortableSources(int itemId, int requestedCount)
+    {
+        List<PortableObject> results = new List<PortableObject>();
+        if (requestedCount <= 0 || itemId < 0)
+        {
+            return results;
+        }
+
+        PlayerBag handBag = GetPlayerHandBag();
+        if (handBag == null)
+        {
+            return results;
+        }
+
+        List<PortableObject> occupiedObjects = new List<PortableObject>();
+        if (!handBag.TryGetOccupiedSlotObjects(0, occupiedObjects))
+        {
+            return results;
+        }
+
+        for (int i = occupiedObjects.Count - 1; i >= 0 && results.Count < requestedCount; i--)
+        {
+            PortableObject portableObject = occupiedObjects[i];
+            if (portableObject == null || portableObject.ItemId != itemId)
+            {
+                continue;
+            }
+
+            results.Add(portableObject);
+        }
+
+        return results;
+    }
+
     private void BindInstallButtons()
     {
         BindButton(installButton, HandleInstallButtonClicked);
@@ -773,14 +817,10 @@ public class InstallationPlacementController : MonoBehaviour
         int itemId = editSession?.definition != null
             ? editSession.definition.id
             : editSession?.originalInstallation != null ? editSession.originalInstallation.ResolveItemId() : -1;
+        int packedConveyorVariantKind = wasEditingInstallation && activeInstallPreview != null
+            ? GetConveyorVariantKind(activeInstallPreview)
+            : editSession.originalConveyorVariantKind;
         if (itemId < 0)
-        {
-            RestoreEditedInstallation(editSession, targetAnchorCoordinate, targetQuarterTurns);
-            ClearInstallPreview();
-            return false;
-        }
-
-        if (!TryDropPackedPortable(itemId, targetAnchorCoordinate, out PortableObject portableObject, out Vector2Int dropCoordinate))
         {
             RestoreEditedInstallation(editSession, targetAnchorCoordinate, targetQuarterTurns);
             ClearInstallPreview();
@@ -792,9 +832,11 @@ public class InstallationPlacementController : MonoBehaviour
             editSession = editSession,
             anchorCoordinate = targetAnchorCoordinate,
             quarterTurns = ((targetQuarterTurns % 4) + 4) % 4,
+            conveyorVariantKind = packedConveyorVariantKind,
             itemId = itemId,
-            dropCoordinate = dropCoordinate,
-            portableObject = portableObject
+            dropCoordinate = targetAnchorCoordinate,
+            portableObject = null,
+            pendingDroppedBlockStatesByCanonicalOffset = BuildPackedInstallationDroppedBlockStates(editSession)
         });
 
         ConveyorChangeInfo removedConveyorChange = null;
@@ -829,7 +871,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (!TryRemovePackedPortable(packedSession))
+        if (packedSession.portableObject != null && !TryRemovePackedPortable(packedSession))
         {
             return false;
         }
@@ -913,6 +955,18 @@ public class InstallationPlacementController : MonoBehaviour
         while (packedInstallationHistory.Count > 0)
         {
             PackedInstallationSession packedSession = packedInstallationHistory.Pop();
+            ApplyPackedInstallationDroppedBlockStates(packedSession);
+            if (packedSession.itemId >= 0
+                && TryDropPackedPortable(
+                    packedSession.itemId,
+                    packedSession.dropCoordinate,
+                    out PortableObject packedPortableObject,
+                    out Vector2Int packedDropCoordinate))
+            {
+                packedSession.portableObject = packedPortableObject;
+                packedSession.dropCoordinate = packedDropCoordinate;
+            }
+
             InstallationObject originalInstallation = packedSession?.editSession?.originalInstallation;
             if (originalInstallation == null)
             {
@@ -928,6 +982,113 @@ public class InstallationPlacementController : MonoBehaviour
                 DestroyImmediate(originalInstallation.gameObject);
             }
         }
+    }
+
+    private void ApplyPackedInstallationDroppedBlockStates(PackedInstallationSession packedSession)
+    {
+        if (packedSession?.editSession == null
+            || packedSession.pendingDroppedBlockStatesByCanonicalOffset == null
+            || packedSession.pendingDroppedBlockStatesByCanonicalOffset.Count <= 0)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return;
+        }
+
+        MapObject footprintSource = packedSession.editSession.definition != null
+            ? packedSession.editSession.definition.mapObject
+            : null;
+        if (footprintSource is ConveyorBelt conveyorPrototype && packedSession.conveyorVariantKind >= 0)
+        {
+            footprintSource = ResolveConveyorVariantPrefab(conveyorPrototype, packedSession.conveyorVariantKind)
+                ?? footprintSource;
+        }
+
+        if (footprintSource == null)
+        {
+            return;
+        }
+
+        List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(
+            packedSession.anchorCoordinate,
+            footprintSource,
+            packedSession.quarterTurns);
+
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = occupiedCoordinates[i];
+            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            Vector2Int worldOffset = coordinate - packedSession.anchorCoordinate;
+            Vector2Int canonicalOffset = RotateFootprintOffset(worldOffset, -packedSession.quarterTurns);
+            if (!packedSession.pendingDroppedBlockStatesByCanonicalOffset.TryGetValue(canonicalOffset, out List<int> droppedItemIds)
+                || droppedItemIds == null
+                || droppedItemIds.Count <= 0)
+            {
+                continue;
+            }
+
+            for (int itemIndex = 0; itemIndex < droppedItemIds.Count; itemIndex++)
+            {
+                int itemId = droppedItemIds[itemIndex];
+                if (itemId < 0)
+                {
+                    continue;
+                }
+
+                TryDropPackedFloorObject(itemId, coordinate, out _, out _);
+            }
+        }
+    }
+
+    private bool TryDropPackedFloorObject(int itemId, Vector2Int preferredCoordinate, out PortableObject portableObject, out Vector2Int dropCoordinate)
+    {
+        portableObject = null;
+        dropCoordinate = preferredCoordinate;
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || itemId < 0)
+        {
+            return false;
+        }
+
+        const int maxSearchRadius = 2;
+        for (int radius = 0; radius <= maxSearchRadius; radius++)
+        {
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (radius > 0 && Mathf.Abs(offsetX) != radius && Mathf.Abs(offsetY) != radius)
+                    {
+                        continue;
+                    }
+
+                    Vector2Int coordinate = preferredCoordinate + new Vector2Int(offsetX, offsetY);
+                    if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
+                    {
+                        continue;
+                    }
+
+                    if (!block.TryAddFloorObject(itemId, out portableObject))
+                    {
+                        continue;
+                    }
+
+                    dropCoordinate = coordinate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void RestorePackedInstallationHistory()
@@ -1079,7 +1240,58 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private void DetachInstallationForEditing(InstallationEditSession editSession)
+    private Dictionary<Vector2Int, List<int>> BuildPackedInstallationDroppedBlockStates(InstallationEditSession editSession)
+    {
+        Dictionary<Vector2Int, List<int>> droppedStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
+        if (editSession == null || editSession.blockStatesByCanonicalOffset == null || editSession.blockStatesByCanonicalOffset.Count <= 0)
+        {
+            return droppedStatesByCanonicalOffset;
+        }
+
+        List<Vector2Int> keys = new List<Vector2Int>(editSession.blockStatesByCanonicalOffset.Keys);
+        for (int keyIndex = 0; keyIndex < keys.Count; keyIndex++)
+        {
+            Vector2Int key = keys[keyIndex];
+            if (!editSession.blockStatesByCanonicalOffset.TryGetValue(key, out List<int> blockState) || blockState == null || blockState.Count <= 0)
+            {
+                continue;
+            }
+
+            List<int> droppedItemIds = new List<int>(blockState.Count);
+            for (int i = 0; i < blockState.Count; i++)
+            {
+                int itemId = blockState[i];
+                if (itemId != ConveyorStackStateSentinel)
+                {
+                    continue;
+                }
+
+                if (i + 1 >= blockState.Count)
+                {
+                    break;
+                }
+
+                int laneCount = Mathf.Max(0, blockState[++i]);
+                for (int laneIndex = 0; laneIndex < laneCount && i + 1 < blockState.Count; laneIndex++)
+                {
+                    int laneItemId = blockState[++i];
+                    if (laneItemId >= 0)
+                    {
+                        droppedItemIds.Add(laneItemId);
+                    }
+                }
+            }
+
+            if (droppedItemIds.Count > 0)
+            {
+                droppedStatesByCanonicalOffset[key] = droppedItemIds;
+            }
+        }
+
+        return droppedStatesByCanonicalOffset;
+    }
+
+    private void DetachInstallationForEditing(InstallationEditSession editSession, bool preserveConveyorItemsOnGround = false)
     {
         if (editSession == null || editSession.originalInstallation == null)
         {
@@ -1096,12 +1308,16 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            IReadOnlyList<int> detachedFloorState = preserveConveyorItemsOnGround
+                ? block.CaptureFloorObjectStateWithDroppedConveyorObjects()
+                : null;
+
             if (block.MapObject == editSession.originalInstallation)
             {
                 block.SetMapObject(null);
             }
 
-            block.ApplyFloorObjectState(null);
+            block.ApplyFloorObjectState(detachedFloorState);
         }
 
         editSession.originalInstallation.gameObject.SetActive(false);
@@ -1532,6 +1748,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         List<MapObject> previewsToPlace = new List<MapObject>(installPreviewInstances);
         List<Vector2Int> placedAnchorCoordinates = new List<Vector2Int>(previewsToPlace.Count);
+        List<MapObject> placedObjects = new List<MapObject>(previewsToPlace.Count);
         int placedCount = 0;
 
         for (int i = 0; i < previewsToPlace.Count; i++)
@@ -1575,7 +1792,7 @@ public class InstallationPlacementController : MonoBehaviour
                 previewQuarterTurns);
 
             MapObject footprintSource = preview;
-            if (!TryGetFootprintBlocks(anchorBlock.Coordinate, footprintSource, resolvedQuarterTurns, preview, out List<Block> footprintBlocks)
+            if (!TryGetFootprintBlocks(anchorBlock.Coordinate, footprintSource, resolvedQuarterTurns, preview, out List<Block> footprintBlocks, true)
                 || footprintBlocks.Count <= 0)
             {
                 continue;
@@ -1596,12 +1813,24 @@ public class InstallationPlacementController : MonoBehaviour
             ConfigureInstalledObjectRuntime(installedObject, anchorBlock.Coordinate, resolvedQuarterTurns);
             RegisterInstalledObjectPersistence(installedObject);
             placedAnchorCoordinates.Add(anchorBlock.Coordinate);
+            placedObjects.Add(installedObject);
 
             placedCount++;
         }
 
         if (placedCount > 0)
         {
+            List<PortableObject> handPortableSources = GetPlayerHandPortableSources(activeInstallDefinition.id, placedCount);
+            for (int i = 0; i < placedObjects.Count; i++)
+            {
+                PortableObject sourcePortableObject = i < handPortableSources.Count ? handPortableSources[i] : null;
+                PlayInstallPlacementAnimation(
+                    placedObjects[i],
+                    sourcePortableObject,
+                    activeInstallDefinition.id,
+                    i * Mathf.Max(0f, installPlacementPortableLaunchInterval));
+            }
+
             PlayerBag handBag = GetPlayerHandBag();
             handBag?.RemoveItems(activeInstallDefinition.id, placedCount);
             handBag?.RefreshExternalStackCounts();
@@ -5701,7 +5930,8 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         int quarterTurns,
         MapObject previewToIgnore,
-        out List<Block> footprintBlocks)
+        out List<Block> footprintBlocks,
+        bool ignoreOtherPreviews = false)
     {
         footprintBlocks = new List<Block>();
 
@@ -5725,7 +5955,8 @@ public class InstallationPlacementController : MonoBehaviour
                 return false;
             }
 
-            if (TryGetInstallPreviewAtCoordinate(coordinate, out MapObject existingPreview)
+            if (!ignoreOtherPreviews
+                && TryGetInstallPreviewAtCoordinate(coordinate, out MapObject existingPreview)
                 && existingPreview != null
                 && existingPreview != previewToIgnore)
             {
@@ -5777,7 +6008,6 @@ public class InstallationPlacementController : MonoBehaviour
         return block.Type switch
         {
             Block.BlockType.Ground => (allowedFilter & InstallationMapFilter.Ground) != 0,
-            Block.BlockType.Water => (allowedFilter & InstallationMapFilter.Water) != 0,
             _ => false
         };
     }
@@ -5956,6 +6186,90 @@ public class InstallationPlacementController : MonoBehaviour
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         terrain?.RegisterLiveInstallationObject(installationObject);
+    }
+
+    private void PlayInstallPlacementAnimation(MapObject installedObject, PortableObject sourcePortableObject, int itemId, float delay)
+    {
+        if (installedObject == null)
+        {
+            return;
+        }
+
+        Transform installedTransform = installedObject.transform;
+        Vector3 originalScale = installedTransform.localScale;
+        installedTransform.DOKill();
+        installedTransform.localScale = Vector3.zero;
+        SetInstalledObjectVisualVisible(installedObject, false);
+
+        if (sourcePortableObject == null || itemId < 0)
+        {
+            SetInstalledObjectVisualVisible(installedObject, true);
+            installedTransform
+                .DOScale(originalScale, installPlacementScaleDuration)
+                .SetDelay(Mathf.Max(0f, delay))
+                .SetEase(installPlacementScaleEase)
+                .SetLink(installedObject.gameObject);
+            return;
+        }
+
+        PortableObject movingPortableObject = Instantiate(
+            sourcePortableObject,
+            sourcePortableObject.transform.position,
+            sourcePortableObject.transform.rotation);
+        if (movingPortableObject == null)
+        {
+            return;
+        }
+
+        movingPortableObject.name = $"{sourcePortableObject.name}_InstallMove";
+        movingPortableObject.transform.SetParent(null, true);
+        movingPortableObject.transform.position = sourcePortableObject.transform.position;
+        movingPortableObject.transform.localScale = sourcePortableObject.transform.lossyScale;
+        if (!movingPortableObject.gameObject.activeSelf)
+        {
+            movingPortableObject.gameObject.SetActive(true);
+        }
+
+        if (!movingPortableObject.SetItem(itemId))
+        {
+            Destroy(movingPortableObject.gameObject);
+            return;
+        }
+
+        Vector3 targetPosition = installedTransform != null ? installedTransform.position : movingPortableObject.transform.position;
+        movingPortableObject.MoveTo(targetPosition, Mathf.Max(0f, delay), () =>
+        {
+            if (movingPortableObject != null)
+            {
+                Destroy(movingPortableObject.gameObject);
+            }
+
+            if (installedObject != null && installedTransform != null)
+            {
+                SetInstalledObjectVisualVisible(installedObject, true);
+                installedTransform
+                    .DOScale(originalScale, installPlacementScaleDuration)
+                    .SetEase(installPlacementScaleEase)
+                    .SetLink(installedObject.gameObject);
+            }
+        }, false);
+    }
+
+    private void SetInstalledObjectVisualVisible(MapObject installedObject, bool isVisible)
+    {
+        if (installedObject == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = installedObject.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null)
+            {
+                renderers[i].enabled = isVisible;
+            }
+        }
     }
 
     private bool TryGetPrimaryPointerPosition(out Vector2 pointerPosition)

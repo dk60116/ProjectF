@@ -9,7 +9,7 @@ Shader "Custom/InstallGridOverlay"
     {
         Tags
         {
-            "Queue" = "Overlay"
+            "Queue" = "Transparent"
             "RenderType" = "Transparent"
             "RenderPipeline" = "UniversalPipeline"
             "IgnoreProjector" = "True"
@@ -18,7 +18,7 @@ Shader "Custom/InstallGridOverlay"
         Cull Off
         Lighting Off
         ZWrite Off
-        ZTest Always
+        ZTest LEqual
         Blend SrcAlpha OneMinusSrcAlpha
 
         Pass

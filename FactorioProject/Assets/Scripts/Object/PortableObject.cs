@@ -23,9 +23,16 @@ public class PortableObject : MonoBehaviour
     private PortableObjectBatchRenderer batchRenderer;
     private bool useBatchedRendering;
     private bool isMovingToTarget;
+    private int lastConveyorMoveFrame = -1;
 
     public int ItemId => id;
     public bool IsMovingToTarget => isMovingToTarget;
+    public bool WasMovedByConveyorThisFrame => lastConveyorMoveFrame == Time.frameCount;
+
+    public void MarkMovedByConveyorThisFrame()
+    {
+        lastConveyorMoveFrame = Time.frameCount;
+    }
     
     public bool SetItem(int id)
     {

@@ -519,36 +519,68 @@ public class PlayerController : MonoBehaviour
             ? cachedRigidbody.position
             : transform.position;
 
-        if (!standingBlock.TryGetConveyorCarryDeltaWithHandoff(samplePosition, deltaTime, out Block resultingBlock, out carryDelta))
+        if (standingBlock.IsCornerConveyorBlock())
+        {
+            if (!standingBlock.TryGetConveyorCarryVelocity(samplePosition, out Vector3 carryVelocity))
+            {
+                return false;
+            }
+
+            carryDelta = carryVelocity * deltaTime;
+            if (carryDelta.sqrMagnitude <= 0.0000001f)
+            {
+                return false;
+            }
+
+            Block resultingBlock = standingBlock;
+            Vector3 predictedPosition = samplePosition + carryDelta;
+            float switchDistanceSqr = ConveyorStandingHandoffDistance * ConveyorStandingHandoffDistance;
+            if (standingBlock.TryGetNextConnectedConveyorBlock(out Block nextBlock)
+                && nextBlock != null
+                && nextBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float nextDistanceSqr)
+                && nextDistanceSqr <= switchDistanceSqr)
+            {
+                resultingBlock = nextBlock;
+            }
+
+            UpdateStandingConveyorCoordinateAfterCarry(standingBlock, resultingBlock, predictedPosition);
+            return true;
+        }
+
+        if (!standingBlock.TryGetConveyorCarryDeltaWithHandoff(samplePosition, deltaTime, out Block resolvedResultingBlock, out carryDelta))
         {
             return false;
         }
 
-        if (resultingBlock != null)
-        {
-            float switchDistanceSqr = ConveyorStandingHandoffDistance * ConveyorStandingHandoffDistance;
-            Vector3 predictedPosition = samplePosition + carryDelta;
-
-            if (resultingBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float resultingDistanceSqr)
-                && resultingDistanceSqr <= switchDistanceSqr)
-            {
-                hasStandingConveyorCoordinate = true;
-                standingConveyorCoordinate = resultingBlock.Coordinate;
-            }
-            else if (standingBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float standingDistanceSqr)
-                     && standingDistanceSqr <= switchDistanceSqr)
-            {
-                hasStandingConveyorCoordinate = true;
-                standingConveyorCoordinate = standingBlock.Coordinate;
-            }
-            else
-            {
-                hasStandingConveyorCoordinate = false;
-                standingConveyorCoordinate = default;
-            }
-        }
+        UpdateStandingConveyorCoordinateAfterCarry(standingBlock, resolvedResultingBlock, samplePosition + carryDelta);
 
         return true;
+    }
+
+    private void UpdateStandingConveyorCoordinateAfterCarry(Block standingBlock, Block resultingBlock, Vector3 predictedPosition)
+    {
+        float switchDistanceSqr = ConveyorStandingHandoffDistance * ConveyorStandingHandoffDistance;
+
+        if (resultingBlock != null
+            && resultingBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float resultingDistanceSqr)
+            && resultingDistanceSqr <= switchDistanceSqr)
+        {
+            hasStandingConveyorCoordinate = true;
+            standingConveyorCoordinate = resultingBlock.Coordinate;
+            return;
+        }
+
+        if (standingBlock != null
+            && standingBlock.TryGetConveyorStandingDistanceSqr(predictedPosition, out float standingDistanceSqr)
+            && standingDistanceSqr <= switchDistanceSqr)
+        {
+            hasStandingConveyorCoordinate = true;
+            standingConveyorCoordinate = standingBlock.Coordinate;
+            return;
+        }
+
+        hasStandingConveyorCoordinate = false;
+        standingConveyorCoordinate = default;
     }
 
     private void HandleInstallationPlacementLock()

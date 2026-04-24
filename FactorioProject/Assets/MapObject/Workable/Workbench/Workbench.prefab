@@ -108,9 +108,12 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   mapFilter: 1
+  installationFocusRadius: 1
+  installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
+  runtimePlacementSequence: 0
   focusActivationRadius: 3
 --- !u!65 &3506328195643533228
 BoxCollider:

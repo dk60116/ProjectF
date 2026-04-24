@@ -470,6 +470,79 @@ public class InputOutputModule : InstallationObject
         return false;
     }
 
+    public bool TryGetRuntimeInputBlock(TerrainGenerator terrainGenerator, int preferredItemId, out Block block)
+    {
+        block = null;
+        if (terrainGenerator == null || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        if (preferredItemId >= 0)
+        {
+            for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+            {
+                RuntimeInputItemArea inputArea = runtimeInputItemAreas[i];
+                if (inputArea.itemId != preferredItemId)
+                {
+                    continue;
+                }
+
+                if (terrainGenerator.TryGetLoadedBlock(inputArea.coordinate, out block) && block != null)
+                {
+                    return true;
+                }
+            }
+        }
+
+        Block firstBlock = null;
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea inputArea = runtimeInputItemAreas[i];
+            if (!terrainGenerator.TryGetLoadedBlock(inputArea.coordinate, out Block candidateBlock) || candidateBlock == null)
+            {
+                continue;
+            }
+
+            if (firstBlock == null)
+            {
+                firstBlock = candidateBlock;
+            }
+
+            if (candidateBlock.GetInputAreaCenterItemCount() > 0)
+            {
+                block = candidateBlock;
+                return true;
+            }
+        }
+
+        block = firstBlock;
+        return block != null;
+    }
+
+    public bool AppendRuntimeInputItemIds(ISet<int> inputItemIds)
+    {
+        if (inputItemIds == null || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            int itemId = runtimeInputItemAreas[i].itemId;
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            inputItemIds.Add(itemId);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
     private void Update()
     {
         if (!Application.isPlaying)

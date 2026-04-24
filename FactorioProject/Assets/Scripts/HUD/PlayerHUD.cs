@@ -67,6 +67,7 @@ public class PlayerHUD : BagSlot
 
     [SerializeField]
     private FilterSelectUI itemFilterUI;
+    private int itemFilterUiOpenedFrame = -1;
 
     [SerializeField]
     private MapPaper mapPaper;
@@ -190,10 +191,16 @@ public class PlayerHUD : BagSlot
 
         if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
         {
+            if (itemFilterUiOpenedFrame == Time.frameCount)
+            {
+                return;
+            }
+
             bool isPointerOverFilterUi = IsPointerOverItemFilterUiArea(pointerPosition);
             if (!isPointerOverFilterUi)
             {
                 itemFilterUI.gameObject.SetActive(false);
+                itemFilterUiOpenedFrame = -1;
             }
             else
             {
@@ -1784,6 +1791,14 @@ public class PlayerHUD : BagSlot
             }
         }
 
+        if (!isVisible
+            && itemFilterUI != null
+            && itemFilterUI.gameObject.activeSelf
+            && itemFilterUI.TryGetBoundTarget(out _))
+        {
+            isVisible = true;
+        }
+
         if (ItemFilterButton.gameObject.activeSelf != isVisible)
         {
             ItemFilterButton.gameObject.SetActive(isVisible);
@@ -1792,6 +1807,7 @@ public class PlayerHUD : BagSlot
         if (!isVisible && itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
         {
             itemFilterUI.gameObject.SetActive(false);
+            itemFilterUiOpenedFrame = -1;
         }
     }
 
@@ -1953,6 +1969,7 @@ public class PlayerHUD : BagSlot
         }
 
         itemFilterUI.gameObject.SetActive(shouldOpen);
+        itemFilterUiOpenedFrame = shouldOpen ? Time.frameCount : -1;
     }
 
     private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)

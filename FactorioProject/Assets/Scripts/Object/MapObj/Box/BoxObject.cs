@@ -169,7 +169,7 @@ public class BoxObject : InstallationObject
         return true;
     }
 
-    public bool TryPickupContainedObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex)
+    public bool TryPickupContainedObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId = -1)
     {
         if (!isOpen || player == null || pickupRadius <= 0f)
         {
@@ -181,7 +181,7 @@ public class BoxObject : InstallationObject
             return false;
         }
 
-        return contentBlock.TryPickupOneInputAreaCenterObjectToBag(player, playerPosition, pickupRadius, preferredSlotIndex);
+        return contentBlock.TryPickupOneInputAreaCenterObjectToBag(player, playerPosition, pickupRadius, preferredSlotIndex, preferredItemId);
     }
 
     public bool TryPickupContainedObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
@@ -221,6 +221,7 @@ public class BoxObject : InstallationObject
             ApplyHingeRotation(false);
             SyncContainedStackVisibility(true);
             SyncItemIcon(true);
+            SyncCountText(true);
             return;
         }
 
@@ -228,6 +229,7 @@ public class BoxObject : InstallationObject
         ApplyHingeRotation(Application.isPlaying);
         SyncContainedStackVisibility(true);
         SyncItemIcon(true);
+        SyncCountText(true);
 
         if (persistState)
         {
@@ -421,7 +423,7 @@ public class BoxObject : InstallationObject
             return;
         }
 
-        if (TryGetSingleFilteredItemId(out int filteredItemId))
+        if (TryGetSingleResolvedItemId(out int filteredItemId))
         {
             ApplyItemIconSprite(ResolveItemIconSprite(filteredItemId), filteredItemId, force);
             SetLockIconVisible(true, force);
@@ -460,17 +462,21 @@ public class BoxObject : InstallationObject
             return;
         }
 
-        int itemCount = contentBlock.GetInputAreaCenterItemCount();
-        if (itemCount <= 0)
-        {
-            ApplyCountText(string.Empty, force);
-            return;
-        }
-
         int capacity = 10;
         if (contentBlock.TryGetInstalledItemAreaCapacity(out int installedCapacity))
         {
             capacity = installedCapacity;
+        }
+
+        bool hasSingleFilteredItem = TryGetSingleResolvedItemId(out int filteredItemId);
+        int itemCount = hasSingleFilteredItem && filteredItemId >= 0
+            ? contentBlock.GetInputAreaCenterItemCount(filteredItemId)
+            : contentBlock.GetInputAreaCenterItemCount();
+
+        if (itemCount <= 0 && !hasSingleFilteredItem)
+        {
+            ApplyCountText(string.Empty, force);
+            return;
         }
 
         ApplyCountText($"{itemCount:00} / {Mathf.Max(1, capacity):00}", force);
@@ -576,6 +582,58 @@ public class BoxObject : InstallationObject
         return matchedItemCount == 1 && itemId >= 0;
     }
 
+    private bool TryGetSingleResolvedItemId(out int itemId)
+    {
+        itemId = -1;
+        if (TryGetSingleFilteredItemId(out itemId))
+        {
+            return true;
+        }
+
+        HashSet<int> acceptedItemIds = new HashSet<int>();
+        if (!TryCollectAreaAcceptedItemIds(acceptedItemIds) || acceptedItemIds.Count != 1)
+        {
+            return false;
+        }
+
+        foreach (int acceptedItemId in acceptedItemIds)
+        {
+            itemId = acceptedItemId;
+            break;
+        }
+
+        return itemId >= 0;
+    }
+
+    private bool TryCollectAreaAcceptedItemIds(ISet<int> acceptedItemIds)
+    {
+        if (acceptedItemIds == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = occupiedCoordinates[i];
+            foundAny |= InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, acceptedItemIds);
+
+            if (InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(coordinate, out InputOutputModule module)
+                && module != null)
+            {
+                foundAny |= module.AppendRuntimeInputItemIds(acceptedItemIds);
+            }
+        }
+
+        return foundAny;
+    }
+
     private bool TryGetAnchorBlock(out Block anchorBlock)
     {
         anchorBlock = null;
@@ -615,6 +673,9 @@ public class BoxObject : InstallationObject
         }
 
         IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
+        Block firstOccupiedBlock = null;
+        Block preferredItemAreaBlock = null;
+        int preferredFilteredItemId = TryGetSingleResolvedItemId(out int filteredItemId) ? filteredItemId : -1;
         if (occupiedCoordinates != null)
         {
             for (int i = 0; i < occupiedCoordinates.Count; i++)
@@ -625,12 +686,51 @@ public class BoxObject : InstallationObject
                     continue;
                 }
 
+                if (firstOccupiedBlock == null)
+                {
+                    firstOccupiedBlock = occupiedBlock;
+                }
+
+                if (InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(occupiedCoordinates[i], out InputOutputModule module)
+                    && module != null
+                    && module.TryGetRuntimeInputBlock(terrainGenerator, preferredFilteredItemId, out Block moduleInputBlock)
+                    && moduleInputBlock != null)
+                {
+                    if (moduleInputBlock.GetInputAreaCenterItemCount() > 0)
+                    {
+                        contentBlock = moduleInputBlock;
+                        return true;
+                    }
+
+                    if (preferredItemAreaBlock == null)
+                    {
+                        preferredItemAreaBlock = moduleInputBlock;
+                    }
+                }
+
+                if (preferredItemAreaBlock == null && IsItemAreaCoordinate(occupiedCoordinates[i]))
+                {
+                    preferredItemAreaBlock = occupiedBlock;
+                }
+
                 if (occupiedBlock.GetInputAreaCenterItemCount() > 0)
                 {
                     contentBlock = occupiedBlock;
                     return true;
                 }
             }
+        }
+
+        if (preferredItemAreaBlock != null)
+        {
+            contentBlock = preferredItemAreaBlock;
+            return true;
+        }
+
+        if (firstOccupiedBlock != null)
+        {
+            contentBlock = firstOccupiedBlock;
+            return true;
         }
 
         return TryGetAnchorBlock(out contentBlock);

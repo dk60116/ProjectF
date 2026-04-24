@@ -9,6 +9,8 @@ using UnityEditor;
 
 public class TerrainGenerator : MonoBehaviour
 {
+    public static TerrainGenerator Active { get; private set; }
+
     public enum ResourcePlacementMode
     {
         Clustered,
@@ -29,8 +31,6 @@ public class TerrainGenerator : MonoBehaviour
     {
         public TerrainBiome primaryBiome;
         public TerrainBiome[] surfaceBiomes;
-
-        public bool IsWaterBlock => primaryBiome == TerrainBiome.Water;
     }
 
     private readonly struct ChunkGenerationRequest
@@ -71,7 +71,6 @@ public class TerrainGenerator : MonoBehaviour
         private Block.BlockType type;
 
         public Block normal;
-        public Block corner;
 
         public Block.BlockType Type => type;
     }
@@ -201,6 +200,9 @@ public class TerrainGenerator : MonoBehaviour
     private Texture2D generatedSurfaceBlendWaterTexture;
 
     [SerializeField, HideInInspector]
+    private Material generatedSurfaceWaterMaterial;
+
+    [SerializeField, HideInInspector]
     private Texture2D generatedSurfaceBlendSandTexture;
 
     [SerializeField, HideInInspector]
@@ -246,7 +248,7 @@ public class TerrainGenerator : MonoBehaviour
     private float riverChance = 0.035f;
 
     [SerializeField, Min(0.25f)]
-    private float riverWidth = 1.35f;
+    private float riverWidth = 2.7f;
 
     [SerializeField, Min(0f)]
     private float riverCurveStrength = 14f;
@@ -399,8 +401,21 @@ public class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(1)]
     private int oreScaleAtResourceCount = 300;
 
+    [SerializeField, Range(1f, 6f)]
+    private float treeSingleDensityMultiplier = 2.4f;
+
+    [SerializeField, Range(1f, 6f)]
+    private float treePatchDensityMultiplier = 2.1f;
+
+    [SerializeField, Range(1f, 3f)]
+    private float treePatchSizeMultiplier = 1.35f;
+
     private readonly Dictionary<Vector2Int, Transform> loadedChunks = new Dictionary<Vector2Int, Transform>();
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
+    private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
+    private readonly List<Block> conveyorTickBuffer = new List<Block>();
+    private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
+    private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
     private readonly Dictionary<Vector2Int, TerrainBiome> tileBiomeCache = new Dictionary<Vector2Int, TerrainBiome>();
     private readonly Dictionary<Vector2Int, bool> rawWaterCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<Vector2Int, bool> directWaterBlockCache = new Dictionary<Vector2Int, bool>();
@@ -423,6 +438,7 @@ public class TerrainGenerator : MonoBehaviour
     private readonly List<Vector2Int> starterTreeCacheCandidates = new List<Vector2Int>();
     private readonly Dictionary<Vector2Int, Resource> starterTreeCacheLookup = new Dictionary<Vector2Int, Resource>();
     private int starterTreeCacheSeed = int.MinValue;
+    private int starterTreeCacheConfigHash = int.MinValue;
     private bool starterTreeCacheValid;
     private Material generatedSurfaceBlendMaterial;
 
@@ -432,6 +448,7 @@ public class TerrainGenerator : MonoBehaviour
         UpgradeLegacyGeneratedSurfaceBlendSettings();
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
+        starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
         oreMaximumBodyScaleRatio = Mathf.Max(oreMinimumBodyScaleRatio, oreMaximumBodyScaleRatio);
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
@@ -442,6 +459,11 @@ public class TerrainGenerator : MonoBehaviour
         PopulateGeneratedSurfaceBlendEditorDefaults();
 #endif
         ApplyGeneratedSurfaceBlendSettingsToRuntimeMaterial();
+    }
+
+    private void Awake()
+    {
+        Active = this;
     }
 
     private void Start()
@@ -466,11 +488,22 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        TickActiveConveyors(Time.deltaTime);
+        TickActiveConveyorDotVisuals(Time.deltaTime);
         RefreshTrackedChunks();
     }
 
     private void OnDisable()
     {
+        if (Active == this)
+        {
+            Active = null;
+        }
+
+        activeConveyors.Clear();
+        conveyorTickBuffer.Clear();
+        activeConveyorDotVisuals.Clear();
+        conveyorDotVisualTickBuffer.Clear();
         ClearPendingChunkGenerations();
     }
 
@@ -617,7 +650,6 @@ public class TerrainGenerator : MonoBehaviour
             loadedChunks.Remove(chunkCoordinate);
         }
 
-        bool hasWaterSet = TryGetBlockSet(Block.BlockType.Water, out BlockSet waterSet);
         Vector2Int origin = new Vector2Int(chunkCoordinate.x * normalizedChunkSize, chunkCoordinate.y * normalizedChunkSize);
         GameObject chunkObject = new GameObject($"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})");
         chunkObject.transform.SetParent(transform, false);
@@ -633,17 +665,14 @@ public class TerrainGenerator : MonoBehaviour
                 Vector2Int worldCoordinate = new Vector2Int(origin.x + localX, origin.y + localY);
                 Vector3 localPosition = new Vector3(localX, 0f, localY);
                 BlockBiomeVisualData visualData = BuildBlockBiomeVisualData(worldCoordinate);
-                Block.BlockType blockType = visualData.IsWaterBlock ? Block.BlockType.Water : Block.BlockType.Ground;
-                BlockSet activeBlockSet = blockType == Block.BlockType.Water && hasWaterSet ? waterSet : groundSet;
-                Block block = CreateBlock(chunkObject.transform, activeBlockSet, blockType, worldCoordinate, localPosition, false, 0f);
+                Block block = CreateBlock(chunkObject.transform, groundSet, Block.BlockType.Ground, worldCoordinate, localPosition, false, 0f);
                 if (block == null)
                 {
                     continue;
                 }
 
                 ApplyBlockBiomeVisuals(block, visualData);
-                if (blockType == Block.BlockType.Ground
-                    && !HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
+                if (!HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
                     && CanSpawnResourceOnBiome(visualData.primaryBiome)
                     && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab))
                 {
@@ -762,6 +791,10 @@ public class TerrainGenerator : MonoBehaviour
 
         loadedChunks.Clear();
         loadedBlocks.Clear();
+        activeConveyors.Clear();
+        conveyorTickBuffer.Clear();
+        activeConveyorDotVisuals.Clear();
+        conveyorDotVisualTickBuffer.Clear();
         CleanupOrphanedLiveInstallations();
     }
 
@@ -854,7 +887,124 @@ public class TerrainGenerator : MonoBehaviour
 
         block.Initialize(coordinate, blockType);
         loadedBlocks[coordinate] = block;
+        block.RefreshConveyorActivityRegistration();
         return block;
+    }
+
+    public void SetConveyorActive(Block block, bool isActive)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (isActive)
+        {
+            activeConveyors.Add(block);
+        }
+        else
+        {
+            activeConveyors.Remove(block);
+        }
+    }
+
+    public void SetConveyorDotVisualActive(Block block, bool isActive)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (isActive)
+        {
+            activeConveyorDotVisuals.Add(block);
+        }
+        else
+        {
+            activeConveyorDotVisuals.Remove(block);
+        }
+    }
+
+    private void TickActiveConveyors(float deltaTime)
+    {
+        if (deltaTime <= 0f || activeConveyors.Count == 0)
+        {
+            return;
+        }
+
+        conveyorTickBuffer.Clear();
+        foreach (Block block in activeConveyors)
+        {
+            conveyorTickBuffer.Add(block);
+        }
+
+        conveyorTickBuffer.Sort(CompareActiveConveyorTickOrder);
+
+        for (int i = 0; i < conveyorTickBuffer.Count; i++)
+        {
+            Block block = conveyorTickBuffer[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            block.TickConveyor(deltaTime);
+        }
+
+        conveyorTickBuffer.Clear();
+    }
+
+    private void TickActiveConveyorDotVisuals(float deltaTime)
+    {
+        if (deltaTime <= 0f || activeConveyorDotVisuals.Count == 0)
+        {
+            return;
+        }
+
+        conveyorDotVisualTickBuffer.Clear();
+        foreach (Block block in activeConveyorDotVisuals)
+        {
+            conveyorDotVisualTickBuffer.Add(block);
+        }
+
+        for (int i = 0; i < conveyorDotVisualTickBuffer.Count; i++)
+        {
+            Block block = conveyorDotVisualTickBuffer[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            block.TickConveyorSlotDots(deltaTime);
+        }
+
+        conveyorDotVisualTickBuffer.Clear();
+    }
+
+    private static int CompareActiveConveyorTickOrder(Block left, Block right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        int yComparison = left.Coordinate.y.CompareTo(right.Coordinate.y);
+        if (yComparison != 0)
+        {
+            return yComparison;
+        }
+
+        return left.Coordinate.x.CompareTo(right.Coordinate.x);
     }
 
     private BlockBiomeVisualData BuildBlockBiomeVisualData(Vector2Int worldCoordinate)
@@ -2127,14 +2277,13 @@ public class TerrainGenerator : MonoBehaviour
 
     private Material ResolveSourceMaterialForBiome(TerrainBiome biome)
     {
-        Block.BlockType blockType = biome == TerrainBiome.Water ? Block.BlockType.Water : Block.BlockType.Ground;
-        if (!TryGetBlockSet(blockType, out BlockSet blockSet))
+        if (biome == TerrainBiome.Water)
         {
-            if (blockType == Block.BlockType.Water && TryGetBlockSet(Block.BlockType.Ground, out blockSet))
-            {
-                return GetBlockSetMaterial(blockSet);
-            }
+            return generatedSurfaceWaterMaterial;
+        }
 
+        if (!TryGetBlockSet(Block.BlockType.Ground, out BlockSet blockSet))
+        {
             return null;
         }
 
@@ -2325,13 +2474,8 @@ public class TerrainGenerator : MonoBehaviour
 
     private TerrainBiome ResolveLandBiome(Vector2Int worldCoordinate)
     {
-        float primary = SampleNoise(worldCoordinate, landBiomePrimaryScale, new Vector2(117.3f, 901.8f));
-        float detail = SampleNoise(worldCoordinate, landBiomeDetailScale, new Vector2(611.5f, 273.4f));
-        float selector = Mathf.Clamp01((primary * 0.72f) + (detail * 0.28f));
-        float totalWeight = Mathf.Max(0.001f, dirtWeight + grassWeight + forestWeight + rockWeight);
-        float dirtThreshold = dirtWeight / totalWeight;
-        float grassThreshold = dirtThreshold + (grassWeight / totalWeight);
-        float forestThreshold = grassThreshold + (forestWeight / totalWeight);
+        float selector = GetLandBiomeSelector(worldCoordinate);
+        GetLandBiomeThresholds(out float dirtThreshold, out float grassThreshold, out float forestThreshold);
 
         if (selector < dirtThreshold)
         {
@@ -2351,6 +2495,65 @@ public class TerrainGenerator : MonoBehaviour
         return TerrainBiome.Rock;
     }
 
+    private float GetLandBiomeSelector(Vector2Int worldCoordinate)
+    {
+        float primary = SampleNoise(worldCoordinate, landBiomePrimaryScale, new Vector2(117.3f, 901.8f));
+        float detail = SampleNoise(worldCoordinate, landBiomeDetailScale, new Vector2(611.5f, 273.4f));
+        return Mathf.Clamp01((primary * 0.72f) + (detail * 0.28f));
+    }
+
+    private void GetLandBiomeThresholds(out float dirtThreshold, out float grassThreshold, out float forestThreshold)
+    {
+        float totalWeight = Mathf.Max(0.001f, dirtWeight + grassWeight + forestWeight + rockWeight);
+        dirtThreshold = dirtWeight / totalWeight;
+        grassThreshold = dirtThreshold + (grassWeight / totalWeight);
+        forestThreshold = grassThreshold + (forestWeight / totalWeight);
+    }
+
+    private float EvaluateTerrainDrivenTreeShapeMask(Vector2Int worldCoordinate, ResourceEntry entry)
+    {
+        TerrainBiome biome = GetTileBiome(worldCoordinate);
+        if (!CanSpawnResourceOnBiome(biome))
+        {
+            return 0f;
+        }
+
+        Vector2 primaryOffset = new Vector2(117.3f, 901.8f) + (entry.patchOffset * 0.026f);
+        Vector2 detailOffset = new Vector2(611.5f, 273.4f) + (entry.detailOffset * 0.032f);
+        Vector2 coarseOffset = new Vector2(381.2f, 719.5f) + (entry.patchOffset * 0.014f) - (entry.detailOffset * 0.011f);
+
+        float selector = SampleNoise(worldCoordinate, landBiomePrimaryScale * 0.95f, primaryOffset);
+        float detail = SampleNoise(worldCoordinate, landBiomeDetailScale * 1.18f, detailOffset);
+        float coarse = SampleNoise(worldCoordinate, landBiomePrimaryScale * 0.58f, coarseOffset);
+
+        // Reuse the same terrain-noise "grain" as biome generation, but do not bind trees to the Forest biome band.
+        float terrainShape = Mathf.Clamp01((selector * 0.54f) + (coarse * 0.31f) + (detail * 0.15f));
+        float bandCenter = Mathf.Lerp(0.24f, 0.76f, Hash01(entry.salt, 177, 931));
+        float bandHalfWidth = Mathf.Lerp(
+            0.14f,
+            0.34f,
+            Mathf.InverseLerp(1f, 3f, Mathf.Max(1f, treePatchSizeMultiplier)));
+        float normalizedDistance = Mathf.Abs(terrainShape - bandCenter) / Mathf.Max(0.001f, bandHalfWidth);
+        float mask = Mathf.Clamp01(1f - normalizedDistance);
+        mask = mask * mask * (3f - (2f * mask));
+
+        float contourNoise = SampleNoise(
+            worldCoordinate,
+            landBiomeDetailScale * 0.82f,
+            new Vector2(843.4f, 151.9f) + (entry.patchOffset * 0.017f));
+        float contourMask = Mathf.Lerp(0.72f, 1f, contourNoise);
+        return Mathf.Clamp01(mask * contourMask);
+    }
+
+    private float SampleTerrainDrivenTreeDensityNoise(Vector2Int worldCoordinate, ResourceEntry entry)
+    {
+        Vector2 primaryOffset = new Vector2(117.3f, 901.8f) + (entry.patchOffset * 0.035f);
+        Vector2 detailOffset = new Vector2(611.5f, 273.4f) + (entry.detailOffset * 0.045f);
+        float primary = SampleNoise(worldCoordinate, landBiomePrimaryScale * 1.15f, primaryOffset);
+        float detail = SampleNoise(worldCoordinate, landBiomeDetailScale * 1.45f, detailOffset);
+        return Mathf.Clamp01((primary * 0.58f) + (detail * 0.42f));
+    }
+
     private bool IsRawWaterTileBiome(Vector2Int worldCoordinate)
     {
         if (rawWaterCache.TryGetValue(worldCoordinate, out bool cachedWater))
@@ -2358,7 +2561,16 @@ public class TerrainGenerator : MonoBehaviour
             return cachedWater;
         }
 
-        bool isWater = !IsBlockedForWater(worldCoordinate) && EvaluateWaterField(worldCoordinate) > Mathf.Lerp(0.64f, 0.48f, Mathf.Clamp01(waterFillPercent * 1.35f));
+        bool isWater = false;
+        if (!IsBlockedForWater(worldCoordinate))
+        {
+            float waterThreshold = Mathf.Lerp(0.64f, 0.48f, Mathf.Clamp01(waterFillPercent * 1.35f));
+            float waterField = EvaluateWaterField(worldCoordinate);
+            float continuityThreshold = waterThreshold - Mathf.Lerp(0.1f, 0.18f, Mathf.InverseLerp(0.8f, 3f, riverWidth));
+            isWater = waterField > waterThreshold
+                      || (waterField >= continuityThreshold && HasRiverContinuitySupport(worldCoordinate));
+        }
+
         rawWaterCache[worldCoordinate] = isWater;
         return isWater;
     }
@@ -2503,7 +2715,7 @@ public class TerrainGenerator : MonoBehaviour
                     controlPoint = cellCenter + new Vector2(controlJitter, 0f);
                 }
 
-                float pathWidth = riverWidth * Mathf.Lerp(0.9f, 1.3f, Hash01(candidateCellX, candidateCellY, 6989));
+                float pathWidth = riverWidth * Mathf.Lerp(1.05f, 1.42f, Hash01(candidateCellX, candidateCellY, 6989));
                 float distanceToPath = DistanceToQuadraticBezier(position, startPoint, controlPoint, endPoint, 12);
                 float riverInfluence = 1f - (distanceToPath / Mathf.Max(0.01f, pathWidth));
 
@@ -2659,6 +2871,12 @@ public class TerrainGenerator : MonoBehaviour
         {
             generatedSurfaceBlendWaterTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
                 "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Procedural/waterTex2.png");
+        }
+
+        if (generatedSurfaceWaterMaterial == null)
+        {
+            generatedSurfaceWaterMaterial = AssetDatabase.LoadAssetAtPath<Material>(
+                "Assets/Materials/M_StylizedOceanWater_Sector.mat");
         }
 
         if (generatedSurfaceBlendSandTexture == null)
@@ -3171,6 +3389,11 @@ public class TerrainGenerator : MonoBehaviour
 
     public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate, int preferredSlotIndex)
     {
+        return TryPickupOneItemToBagAtCoordinate(player, coordinate, preferredSlotIndex, -1);
+    }
+
+    public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate, int preferredSlotIndex, int preferredItemId)
+    {
         if (player == null)
         {
             return false;
@@ -3179,14 +3402,14 @@ public class TerrainGenerator : MonoBehaviour
         Vector3 playerPosition = player.transform.position;
         if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
-            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, playerPosition, 999f, preferredSlotIndex))
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, playerPosition, 999f, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
 
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
-            && focusedBoxObject.TryPickupContainedObjectToBag(player, playerPosition, 999f, preferredSlotIndex))
+            && focusedBoxObject.TryPickupContainedObjectToBag(player, playerPosition, 999f, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
@@ -3203,13 +3426,13 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
-        if (block.TryPickupOneInputAreaCenterObjectToBag(player, anchorPosition, 999f, preferredSlotIndex))
+        if (block.TryPickupOneInputAreaCenterObjectToBag(player, anchorPosition, 999f, preferredSlotIndex, preferredItemId))
         {
             NotifyAreaManualPickup(coordinate);
             return true;
         }
 
-        return block.TryPickupOneFloorObjectToBag(player, anchorPosition, 999f, preferredSlotIndex);
+        return block.TryPickupOneFloorObjectToBag(player, anchorPosition, 999f, preferredSlotIndex, preferredItemId);
     }
 
     public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
@@ -3544,6 +3767,11 @@ public class TerrainGenerator : MonoBehaviour
 
     public bool TryPickupOneItemToBag(Player player, Vector3 pickupOrigin, int radius, float pickupRadius, int preferredSlotIndex)
     {
+        return TryPickupOneItemToBag(player, pickupOrigin, radius, pickupRadius, preferredSlotIndex, -1);
+    }
+
+    public bool TryPickupOneItemToBag(Player player, Vector3 pickupOrigin, int radius, float pickupRadius, int preferredSlotIndex, int preferredItemId)
+    {
         if (player == null || radius < 0 || pickupRadius <= 0f)
         {
             return false;
@@ -3551,14 +3779,14 @@ public class TerrainGenerator : MonoBehaviour
 
         if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
-            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
 
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
-            && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
+            && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
@@ -3581,7 +3809,7 @@ public class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                if (block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex))
+                if (block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
                 {
                     return true;
                 }
@@ -4083,11 +4311,13 @@ public class TerrainGenerator : MonoBehaviour
                     bool south = GetWaterMapValue(map, x, y - 1);
                     bool west = GetWaterMapValue(map, x - 1, y);
 
+                    Vector2Int worldCoordinate = new Vector2Int(origin.x + x - margin, origin.y + y - margin);
+                    bool preserveRiverTile = orthogonalCount >= 2 && HasRiverContinuitySupport(worldCoordinate);
                     bool shouldRemove =
                         orthogonalCount <= 1
-                        || (orthogonalCount == 2 && ((north && south) || (east && west)))
-                        || HasDisconnectedDiagonal(map, x, y)
-                        || (orthogonalCount <= 2 && !HasWaterSquareSupport(map, x, y));
+                        || (!preserveRiverTile && orthogonalCount == 2 && ((north && south) || (east && west)))
+                        || (!preserveRiverTile && HasDisconnectedDiagonal(map, x, y))
+                        || (!preserveRiverTile && orthogonalCount <= 2 && !HasWaterSquareSupport(map, x, y));
 
                      if (!shouldRemove)
                      {
@@ -4562,7 +4792,7 @@ public class TerrainGenerator : MonoBehaviour
 
         for (int i = 0; i < oreResources.Count; i++)
         {
-            if (!TryEvaluateResourceEntry(worldCoordinate, oreResources[i], out float score))
+            if (!TryEvaluateResourceEntry(worldCoordinate, oreResources[i], false, out float score))
             {
                 continue;
             }
@@ -4581,7 +4811,7 @@ public class TerrainGenerator : MonoBehaviour
 
         for (int i = 0; i < treeResources.Count; i++)
         {
-            if (!TryEvaluateResourceEntry(worldCoordinate, treeResources[i], out float score))
+            if (!TryEvaluateResourceEntry(worldCoordinate, treeResources[i], true, out float score))
             {
                 continue;
             }
@@ -4596,12 +4826,22 @@ public class TerrainGenerator : MonoBehaviour
         return prefab != null;
     }
 
-    private bool TryEvaluateResourceEntry(Vector2Int worldCoordinate, ResourceEntry entry, out float score)
+    private bool TryEvaluateResourceEntry(Vector2Int worldCoordinate, ResourceEntry entry, bool isTreeEntry, out float score)
     {
         score = float.MinValue;
         if (entry.Prefab == null || entry.spawnChance <= 0f)
         {
             return false;
+        }
+
+        if (isTreeEntry)
+        {
+            if (entry.placementMode == ResourcePlacementMode.Clustered)
+            {
+                return TryEvaluateSingleTreeResource(worldCoordinate, entry, out score);
+            }
+
+            return TryEvaluateTreePatchResource(worldCoordinate, entry, out score);
         }
 
         if (entry.placementMode == ResourcePlacementMode.Sparse)
@@ -4747,16 +4987,36 @@ public class TerrainGenerator : MonoBehaviour
         starterTreeCacheValid = false;
     }
 
+    private int GetStarterTreeCacheConfigHash()
+    {
+        unchecked
+        {
+            int hash = 17;
+            hash = (hash * 31) + seed;
+            hash = (hash * 31) + (generateStarterTrees ? 1 : 0);
+            hash = (hash * 31) + starterTreeMinCount;
+            hash = (hash * 31) + starterTreeMaxCount;
+            hash = (hash * 31) + starterTreeDistanceFromCenter;
+            hash = (hash * 31) + startSafeZoneRadius;
+            hash = (hash * 31) + starterPatchHalfSize;
+            hash = (hash * 31) + starterPatchDistanceFromCenter;
+            hash = (hash * 31) + (treeResources != null ? treeResources.Count : 0);
+            return hash;
+        }
+    }
+
     private void EnsureStarterTreeCache()
     {
         EnsureSeedInitialized();
+        int configHash = GetStarterTreeCacheConfigHash();
 
-        if (starterTreeCacheValid && starterTreeCacheSeed == seed)
+        if (starterTreeCacheValid && starterTreeCacheSeed == seed && starterTreeCacheConfigHash == configHash)
         {
             return;
         }
 
         starterTreeCacheSeed = seed;
+        starterTreeCacheConfigHash = configHash;
         starterTreeCacheValid = true;
         starterTreeCacheEntries.Clear();
         starterTreeCacheLookup.Clear();
@@ -4815,21 +5075,63 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         candidates.Clear();
-        int primary = Mathf.Max(startSafeZoneRadius + 1, starterTreeDistanceFromCenter);
-        int secondary = Mathf.Max(2, primary - 1);
+        List<Vector2Int> preferredCandidates = GetStarterTreeCandidateOffsets();
 
-        candidates.Add(new Vector2Int(primary, primary));
-        candidates.Add(new Vector2Int(-primary, primary));
-        candidates.Add(new Vector2Int(primary, -primary));
-        candidates.Add(new Vector2Int(-primary, -primary));
-        candidates.Add(new Vector2Int(primary, secondary));
-        candidates.Add(new Vector2Int(-primary, secondary));
-        candidates.Add(new Vector2Int(primary, -secondary));
-        candidates.Add(new Vector2Int(-primary, -secondary));
-        candidates.Add(new Vector2Int(secondary, primary));
-        candidates.Add(new Vector2Int(-secondary, primary));
-        candidates.Add(new Vector2Int(secondary, -primary));
-        candidates.Add(new Vector2Int(-secondary, -primary));
+        HashSet<Vector2Int> usedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < preferredCandidates.Count; i++)
+        {
+            if (TryResolveStarterTreeCandidateCoordinate(preferredCandidates[i], usedCoordinates, out Vector2Int resolvedCoordinate))
+            {
+                candidates.Add(resolvedCoordinate);
+                usedCoordinates.Add(resolvedCoordinate);
+            }
+        }
+    }
+
+    private bool TryResolveStarterTreeCandidateCoordinate(Vector2Int preferredCoordinate, HashSet<Vector2Int> usedCoordinates, out Vector2Int resolvedCoordinate)
+    {
+        resolvedCoordinate = preferredCoordinate;
+        const int searchRadius = 4;
+
+        for (int radius = 0; radius <= searchRadius; radius++)
+        {
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (Mathf.Abs(offsetX) != radius && Mathf.Abs(offsetY) != radius)
+                    {
+                        continue;
+                    }
+
+                    Vector2Int candidateCoordinate = preferredCoordinate + new Vector2Int(offsetX, offsetY);
+                    if (!IsValidStarterTreeCandidateCoordinate(candidateCoordinate, usedCoordinates))
+                    {
+                        continue;
+                    }
+
+                    resolvedCoordinate = candidateCoordinate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsValidStarterTreeCandidateCoordinate(Vector2Int coordinate, HashSet<Vector2Int> usedCoordinates)
+    {
+        if (usedCoordinates != null && usedCoordinates.Contains(coordinate))
+        {
+            return false;
+        }
+
+        if (IsInsideAnyStarterPatch(coordinate))
+        {
+            return false;
+        }
+
+        return CanSpawnResourceOnBiome(GetTileBiome(coordinate));
     }
 
     private bool IsInsideStarterPatch(Vector2Int worldCoordinate, Vector2Int center, int patchSize, int salt)
@@ -4846,9 +5148,21 @@ public class TerrainGenerator : MonoBehaviour
 
     private bool TryEvaluateResourcePatch(Vector2Int worldCoordinate, ResourceRule rule, float spacingMultiplier, out float bestScore)
     {
-        bestScore = float.MinValue;
         int baseCellSize = Mathf.Max(maximumResourcePatchSize + 4, resourcePatchCellSize);
         float spacing = Mathf.Max(1f, resourcePatchSpacing * Mathf.Max(1f, spacingMultiplier));
+        return TryEvaluateResourcePatchWithSettings(worldCoordinate, rule, baseCellSize, spacing, 1f, 0f, out bestScore);
+    }
+
+    private bool TryEvaluateResourcePatchWithSettings(
+        Vector2Int worldCoordinate,
+        ResourceRule rule,
+        int baseCellSize,
+        float spacing,
+        float presenceDensityScale,
+        float scoreBias,
+        out float bestScore)
+    {
+        bestScore = float.MinValue;
         int cellSize = Mathf.Max(baseCellSize, Mathf.RoundToInt(baseCellSize * spacing));
         int baseCellX = FloorDivide(worldCoordinate.x, cellSize);
         int baseCellY = FloorDivide(worldCoordinate.y, cellSize);
@@ -4858,7 +5172,7 @@ public class TerrainGenerator : MonoBehaviour
         {
             for (int cellX = baseCellX - 1; cellX <= baseCellX + 1; cellX++)
             {
-                if (!TryBuildResourcePatch(rule, cellX, cellY, cellSize, out Vector2 center, out int width, out int height, out int salt))
+                if (!TryBuildResourcePatch(rule, cellX, cellY, cellSize, spacing, presenceDensityScale, out Vector2 center, out int width, out int height, out int salt))
                 {
                     continue;
                 }
@@ -4867,6 +5181,8 @@ public class TerrainGenerator : MonoBehaviour
                 {
                     continue;
                 }
+
+                score += scoreBias;
 
                 if (score > bestScore)
                 {
@@ -4909,11 +5225,76 @@ public class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    private bool TryEvaluateSingleTreeResource(Vector2Int worldCoordinate, ResourceEntry entry, out float score)
+    {
+        score = float.MinValue;
+
+        int baseCellSize = 1;
+        float spacing = Mathf.Max(1f, Mathf.Lerp(1f, 3.2f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, entry.spacingMultiplier * 0.7f))));
+        int cellSize = Mathf.Max(baseCellSize, Mathf.RoundToInt(baseCellSize * spacing));
+        int cellX = FloorDivide(worldCoordinate.x, cellSize);
+        int cellY = FloorDivide(worldCoordinate.y, cellSize);
+
+        float normalizedChance = Mathf.Clamp01(entry.spawnChance);
+        float chanceWeight = Mathf.Pow(normalizedChance, 1.85f);
+        float densityBoost = Mathf.Lerp(1.2f, 2.6f, Mathf.Clamp01(resourceDensityMultiplier));
+        float treeDensityWeight = Mathf.Lerp(0.85f, 1.35f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treeSingleDensityMultiplier)));
+        float density = Mathf.Clamp01(chanceWeight * densityBoost * treeDensityWeight * (1.55f / spacing));
+        if (Hash01(cellX, cellY, entry.salt) > density)
+        {
+            return false;
+        }
+
+        int originX = cellX * cellSize;
+        int originY = cellY * cellSize;
+        int targetX = originX + Mathf.RoundToInt(Mathf.Lerp(0.5f, cellSize - 0.5f, Hash01(cellX, cellY, entry.salt + 11)));
+        int targetY = originY + Mathf.RoundToInt(Mathf.Lerp(0.5f, cellSize - 0.5f, Hash01(cellX, cellY, entry.salt + 23)));
+
+        if (worldCoordinate.x != targetX || worldCoordinate.y != targetY)
+        {
+            return false;
+        }
+
+        score = (chanceWeight * 3f) + Hash01(cellX, cellY, entry.salt + 37) * 0.1f;
+        return true;
+    }
+
+    private bool TryEvaluateTreePatchResource(Vector2Int worldCoordinate, ResourceEntry entry, out float score)
+    {
+        score = float.MinValue;
+        float shapeMask = EvaluateTerrainDrivenTreeShapeMask(worldCoordinate, entry);
+        if (shapeMask <= 0f)
+        {
+            return false;
+        }
+
+        float normalizedChance = Mathf.Clamp01(entry.spawnChance);
+        float chanceWeight = Mathf.Pow(normalizedChance, 1.45f);
+        float spacingWeight = Mathf.Lerp(1.25f, 0.55f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, entry.spacingMultiplier)));
+        float densityWeight = Mathf.Lerp(0.8f, 1.35f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treePatchDensityMultiplier)));
+        float density = Mathf.Clamp01(chanceWeight * spacingWeight * densityWeight);
+
+        float terrainDensityNoise = SampleTerrainDrivenTreeDensityNoise(worldCoordinate, entry);
+        float patchSizeWeight = Mathf.Lerp(0.2f, 0.5f, Mathf.InverseLerp(1f, 3f, Mathf.Max(1f, treePatchSizeMultiplier)));
+        float combined = Mathf.Clamp01((shapeMask * (1f - patchSizeWeight)) + (terrainDensityNoise * patchSizeWeight));
+        float threshold = Mathf.Lerp(0.94f, 0.16f, density);
+        threshold = Mathf.Lerp(threshold + 0.08f, threshold - 0.12f, shapeMask);
+        if (combined < threshold)
+        {
+            return false;
+        }
+
+        score = (shapeMask * 2.2f) + combined + (normalizedChance * 0.45f);
+        return true;
+    }
+
     private bool TryBuildResourcePatch(
         ResourceRule rule,
         int cellX,
         int cellY,
         int cellSize,
+        float spacingFactor,
+        float presenceDensityScale,
         out Vector2 center,
         out int width,
         out int height,
@@ -4924,8 +5305,11 @@ public class TerrainGenerator : MonoBehaviour
         height = 0;
         salt = rule.salt;
 
-        float spacingFactor = Mathf.Max(1f, resourcePatchSpacing);
-        float density = Mathf.Clamp01(rule.spawnChance * Mathf.Max(0.15f, resourceDensityMultiplier) * (4.2f / spacingFactor));
+        float normalizedSpacing = Mathf.Max(0.35f, spacingFactor);
+        float density = Mathf.Clamp01(rule.spawnChance
+                                      * Mathf.Max(0.15f, resourceDensityMultiplier)
+                                      * Mathf.Max(0.1f, presenceDensityScale)
+                                      * (4.2f / normalizedSpacing));
         float presence = Hash01(cellX, cellY, rule.salt);
         if (presence > density)
         {
@@ -5007,6 +5391,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         int orthogonalCount = GetOrthogonalCandidateWaterCount(worldCoordinate);
+        bool preserveRiverTile = orthogonalCount >= 2 && HasRiverContinuitySupport(worldCoordinate);
         if (orthogonalCount <= 1)
         {
             return false;
@@ -5017,17 +5402,17 @@ public class TerrainGenerator : MonoBehaviour
         bool south = IsWaterCandidate(worldCoordinate + Vector2Int.down);
         bool west = IsWaterCandidate(worldCoordinate + Vector2Int.left);
 
-        if (orthogonalCount == 2 && ((north && south) || (east && west)))
+        if (!preserveRiverTile && orthogonalCount == 2 && ((north && south) || (east && west)))
         {
             return false;
         }
 
-        if (HasDisconnectedDiagonalCandidate(worldCoordinate))
+        if (!preserveRiverTile && HasDisconnectedDiagonalCandidate(worldCoordinate))
         {
             return false;
         }
 
-        if (orthogonalCount <= 2 && !HasCandidateWaterSquareSupport(worldCoordinate))
+        if (!preserveRiverTile && orthogonalCount <= 2 && !HasCandidateWaterSquareSupport(worldCoordinate))
         {
             return false;
         }
@@ -5074,24 +5459,76 @@ public class TerrainGenerator : MonoBehaviour
 
     private List<Vector2Int> GetStarterTreeCandidateOffsets()
     {
-        int primary = Mathf.Max(startSafeZoneRadius + 1, starterTreeDistanceFromCenter);
-        int secondary = Mathf.Max(2, primary - 1);
+        int baseRadius = Mathf.Max(startSafeZoneRadius + 1, starterTreeDistanceFromCenter);
+        int targetCandidateCount = Mathf.Max(starterTreeMaxCount * 3, 24);
+        int radialLayers = Mathf.Max(2, Mathf.CeilToInt(targetCandidateCount / 16f));
+        float angleOffset = Hash01(seed, 1889, 733) * Mathf.PI * 2f;
+        float goldenAngle = Mathf.PI * (3f - Mathf.Sqrt(5f));
 
-        return new List<Vector2Int>
+        List<Vector2Int> candidates = new List<Vector2Int>(targetCandidateCount);
+        HashSet<Vector2Int> uniqueCandidates = new HashSet<Vector2Int>();
+
+        int spiralAttempts = Mathf.Max(targetCandidateCount * 8, 64);
+        for (int attempt = 0; attempt < spiralAttempts && candidates.Count < targetCandidateCount; attempt++)
         {
-            new Vector2Int(primary, primary),
-            new Vector2Int(-primary, primary),
-            new Vector2Int(primary, -primary),
-            new Vector2Int(-primary, -primary),
-            new Vector2Int(primary, secondary),
-            new Vector2Int(-primary, secondary),
-            new Vector2Int(primary, -secondary),
-            new Vector2Int(-primary, -secondary),
-            new Vector2Int(secondary, primary),
-            new Vector2Int(-secondary, primary),
-            new Vector2Int(secondary, -primary),
-            new Vector2Int(-secondary, -primary)
-        };
+            int layer = attempt % radialLayers;
+            float radius = baseRadius + layer;
+            float angle = angleOffset + (attempt * goldenAngle);
+            Vector2Int coordinate = new Vector2Int(
+                Mathf.RoundToInt(Mathf.Cos(angle) * radius),
+                Mathf.RoundToInt(Mathf.Sin(angle) * radius));
+
+            if (uniqueCandidates.Add(coordinate))
+            {
+                candidates.Add(coordinate);
+            }
+        }
+
+        for (int radius = baseRadius;
+             candidates.Count < targetCandidateCount && radius <= baseRadius + targetCandidateCount;
+             radius++)
+        {
+            for (int offset = -radius; offset <= radius && candidates.Count < targetCandidateCount; offset++)
+            {
+                TryAddStarterTreeCandidateCoordinate(new Vector2Int(-radius, offset), uniqueCandidates, candidates);
+                if (candidates.Count >= targetCandidateCount)
+                {
+                    break;
+                }
+
+                TryAddStarterTreeCandidateCoordinate(new Vector2Int(radius, offset), uniqueCandidates, candidates);
+                if (candidates.Count >= targetCandidateCount)
+                {
+                    break;
+                }
+
+                TryAddStarterTreeCandidateCoordinate(new Vector2Int(offset, -radius), uniqueCandidates, candidates);
+                if (candidates.Count >= targetCandidateCount)
+                {
+                    break;
+                }
+
+                TryAddStarterTreeCandidateCoordinate(new Vector2Int(offset, radius), uniqueCandidates, candidates);
+            }
+        }
+
+        return candidates;
+    }
+
+    private void TryAddStarterTreeCandidateCoordinate(
+        Vector2Int coordinate,
+        HashSet<Vector2Int> uniqueCandidates,
+        List<Vector2Int> candidates)
+    {
+        if (uniqueCandidates == null || candidates == null)
+        {
+            return;
+        }
+
+        if (uniqueCandidates.Add(coordinate))
+        {
+            candidates.Add(coordinate);
+        }
     }
 
     private bool IsStarterTreeCandidateSelected(List<Vector2Int> candidates, int candidateIndex, int selectedCount)
@@ -5123,9 +5560,37 @@ public class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (HasRiverContinuitySupport(worldCoordinate))
+        {
+            return true;
+        }
+
         bool raw = IsRawWaterTile(worldCoordinate);
         int surroundingRawWater = GetSurroundingRawWaterCount(worldCoordinate);
         return raw ? surroundingRawWater >= 4 : surroundingRawWater >= 6;
+    }
+
+    private bool HasRiverContinuitySupport(Vector2Int worldCoordinate)
+    {
+        float center = SampleRiverLayer(worldCoordinate);
+        if (center < 0.1f)
+        {
+            return false;
+        }
+
+        float north = SampleRiverLayer(worldCoordinate + Vector2Int.up);
+        float east = SampleRiverLayer(worldCoordinate + Vector2Int.right);
+        float south = SampleRiverLayer(worldCoordinate + Vector2Int.down);
+        float west = SampleRiverLayer(worldCoordinate + Vector2Int.left);
+
+        bool straightSupport = (north >= 0.12f && south >= 0.12f)
+                               || (east >= 0.12f && west >= 0.12f);
+        bool cornerSupport = (north >= 0.16f && east >= 0.16f)
+                             || (east >= 0.16f && south >= 0.16f)
+                             || (south >= 0.16f && west >= 0.16f)
+                             || (west >= 0.16f && north >= 0.16f);
+
+        return center >= 0.34f || (center >= 0.12f && (straightSupport || cornerSupport));
     }
 
     private bool IsRawWaterTile(Vector2Int worldCoordinate)
@@ -5710,17 +6175,12 @@ public class TerrainGenerator : MonoBehaviour
 
     private static GameObject SelectBlockPrefab(BlockSet blockSet, bool isCorner)
     {
-        if (isCorner && blockSet.corner != null)
-        {
-            return blockSet.corner.gameObject;
-        }
-
         if (blockSet.normal != null)
         {
             return blockSet.normal.gameObject;
         }
 
-        return blockSet.corner != null ? blockSet.corner.gameObject : null;
+        return null;
     }
 
 }

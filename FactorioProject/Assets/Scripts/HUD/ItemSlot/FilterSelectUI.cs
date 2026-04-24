@@ -55,6 +55,12 @@ public class FilterSelectUI : MonoBehaviour
         ApplyDefinitionsToSlots();
     }
 
+    public bool TryGetBoundTarget(out MapObject target)
+    {
+        target = ResolveCurrentTarget();
+        return target != null;
+    }
+
     [ContextMenu("SetSlotLit")]
     private void SetSlotList()
     {
@@ -270,8 +276,16 @@ public class FilterSelectUI : MonoBehaviour
             return;
         }
 
+        if (TryApplyAreaScopedFilterSelection(target, itemId, isOn))
+        {
+            PersistTargetFilterState(target);
+            Refresh();
+            return;
+        }
+
         target.SetItemFilterEnabled(itemId, GetFilterBitCount(), isOn);
         PersistTargetFilterState(target);
+        Refresh();
     }
 
     private int GetFilterBitCount()
@@ -354,6 +368,13 @@ public class FilterSelectUI : MonoBehaviour
             return;
         }
 
+        if (TryApplyAreaScopedBulkSelection(target, isEnabled))
+        {
+            PersistTargetFilterState(target);
+            Refresh();
+            return;
+        }
+
         int filterBitCount = GetFilterBitCount();
         for (int i = 0; i < visibleDefinitions.Count; i++)
         {
@@ -368,6 +389,125 @@ public class FilterSelectUI : MonoBehaviour
 
         PersistTargetFilterState(target);
         Refresh();
+    }
+
+    private bool TryApplyAreaScopedFilterSelection(MapObject target, int changedItemId, bool changedState)
+    {
+        if (!TryIsAreaScopedTarget(target))
+        {
+            return false;
+        }
+
+        int totalFilterBitCount = GetTotalItemFilterBitCount();
+        if (totalFilterBitCount <= 0)
+        {
+            return false;
+        }
+
+        HashSet<int> enabledItemIds = new HashSet<int>();
+        for (int i = 0; i < visibleDefinitions.Count; i++)
+        {
+            ItemDefinition definition = visibleDefinitions[i];
+            if (definition == null || definition.id < 0)
+            {
+                continue;
+            }
+
+            bool isEnabled = definition.id == changedItemId
+                ? changedState
+                : target.IsItemFilterEnabled(definition.id, totalFilterBitCount);
+            if (isEnabled)
+            {
+                enabledItemIds.Add(definition.id);
+            }
+        }
+
+        OverwriteTargetFilterMask(target, totalFilterBitCount, enabledItemIds);
+        return true;
+    }
+
+    private bool TryApplyAreaScopedBulkSelection(MapObject target, bool isEnabled)
+    {
+        if (!TryIsAreaScopedTarget(target))
+        {
+            return false;
+        }
+
+        int totalFilterBitCount = GetTotalItemFilterBitCount();
+        if (totalFilterBitCount <= 0)
+        {
+            return false;
+        }
+
+        HashSet<int> enabledItemIds = new HashSet<int>();
+        if (isEnabled)
+        {
+            for (int i = 0; i < visibleDefinitions.Count; i++)
+            {
+                ItemDefinition definition = visibleDefinitions[i];
+                if (definition == null || definition.id < 0)
+                {
+                    continue;
+                }
+
+                enabledItemIds.Add(definition.id);
+            }
+        }
+
+        OverwriteTargetFilterMask(target, totalFilterBitCount, enabledItemIds);
+        return true;
+    }
+
+    private bool TryIsAreaScopedTarget(MapObject target)
+    {
+        HashSet<int> allowedItemIds = new HashSet<int>();
+        HashSet<ItemDefinition.EnergyType> allowedEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+        return TryBuildAreaRestrictedFilter(target, allowedItemIds, allowedEnergyTypes);
+    }
+
+    private static void OverwriteTargetFilterMask(MapObject target, int totalFilterBitCount, ISet<int> enabledItemIds)
+    {
+        if (target == null || totalFilterBitCount <= 0)
+        {
+            return;
+        }
+
+        for (int itemId = 0; itemId < totalFilterBitCount; itemId++)
+        {
+            bool enabled = enabledItemIds != null && enabledItemIds.Contains(itemId);
+            target.SetItemFilterEnabled(itemId, totalFilterBitCount, enabled);
+        }
+    }
+
+    private int GetTotalItemFilterBitCount()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return GetFilterBitCount();
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null || definitions.Count <= 0)
+        {
+            return GetFilterBitCount();
+        }
+
+        int maxItemId = -1;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            if (definition.id > maxItemId)
+            {
+                maxItemId = definition.id;
+            }
+        }
+
+        return Mathf.Max(GetFilterBitCount(), maxItemId + 1);
     }
 
     private Button FindButtonByNames(params string[] names)

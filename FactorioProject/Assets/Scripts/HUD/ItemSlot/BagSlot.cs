@@ -62,6 +62,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private int lastBoundItemCount;
     private Coroutine pickupRoutine;
     private Tween craftingRootHideTween;
+    private float craftingExpandAnimationUntilTime;
 
     private readonly List<int> craftableItems = new List<int>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
@@ -493,6 +494,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Vector2 startPosition = targetPositions[0];
+        float expandStepDelay = Mathf.Max(0f, craftingExpandStepDelay);
+        float latestDelay = slotCount > 0 ? (slotCount - 1) * expandStepDelay : 0f;
+        float longestExpandDuration = GetLongestCraftingSlotExpandDuration(visibleSlots);
+        craftingExpandAnimationUntilTime = Time.unscaledTime + latestDelay + longestExpandDuration;
 
         visibleIndex = 0;
         for (int i = 0; i < visibleSlots.Count; i++)
@@ -522,7 +527,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             craftingSlot.Show(
                 startPosition,
                 targetPositions[visibleIndex],
-                visibleIndex * Mathf.Max(0f, craftingExpandStepDelay));
+                visibleIndex * expandStepDelay);
             visibleIndex++;
         }
 
@@ -754,6 +759,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (isCraftingExpanded)
         {
+            if (IsCraftingExpandAnimationPlaying())
+            {
+                return;
+            }
+
             RefreshExpandedCraftingSlotsImmediate();
         }
     }
@@ -1039,6 +1049,33 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     protected virtual int GetCraftingDirectionSign()
     {
         return -1;
+    }
+
+    private bool IsCraftingExpandAnimationPlaying()
+    {
+        return isCraftingExpanded && Time.unscaledTime < craftingExpandAnimationUntilTime;
+    }
+
+    private static float GetLongestCraftingSlotExpandDuration(List<CraftingSlot> slots)
+    {
+        if (slots == null || slots.Count == 0)
+        {
+            return 0f;
+        }
+
+        float duration = 0f;
+        for (int i = 0; i < slots.Count; i++)
+        {
+            CraftingSlot craftingSlot = slots[i];
+            if (craftingSlot == null)
+            {
+                continue;
+            }
+
+            duration = Mathf.Max(duration, craftingSlot.ExpandDuration);
+        }
+
+        return duration;
     }
 
     private void SetIconAlpha(float alpha)
@@ -1624,7 +1661,13 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        return terrain.TryPickupOneItemToBag(player, pickupOrigin, radius, pickupRange, targetSlotIndex);
+        return terrain.TryPickupOneItemToBag(
+            player,
+            pickupOrigin,
+            radius,
+            pickupRange,
+            targetSlotIndex,
+            GetPreferredPickupItemId());
     }
 
     protected virtual bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate)
@@ -1640,7 +1683,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        return terrain.TryPickupOneItemToBagAtCoordinate(player, coordinate, targetSlotIndex);
+        return terrain.TryPickupOneItemToBagAtCoordinate(
+            player,
+            coordinate,
+            targetSlotIndex,
+            GetPreferredPickupItemId());
     }
 
     protected virtual int GetPickupSlotIndex()
@@ -1651,6 +1698,16 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         return slotIndex;
+    }
+
+    protected virtual int GetPreferredPickupItemId()
+    {
+        if (boundBag == null || slotIndex < 0 || boundBag.GetSlotCount(slotIndex) <= 0)
+        {
+            return -1;
+        }
+
+        return boundBag.GetSlotItemId(slotIndex);
     }
 
     private bool TryHandleSinglePickup(Player player, TerrainGenerator terrain)

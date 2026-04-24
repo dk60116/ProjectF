@@ -126,7 +126,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 1.1
+  m_fontSize: 1.5
   m_fontSizeBase: 1.5
   m_fontWeight: 400
   m_enableAutoSizing: 1
@@ -586,9 +586,12 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   mapFilter: 9
+  installationFocusRadius: 1
+  installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
+  runtimePlacementSequence: 0
   hinge: {fileID: 301880319019724162}
   focusActivationRadius: 1
   isOpen: 1

@@ -7,12 +7,17 @@ public class TerrainGeneratorEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        DrawDefaultInspector();
+        serializedObject.Update();
+        DrawSerializedProperties();
+        serializedObject.ApplyModifiedProperties();
 
         EditorGUILayout.Space();
 
         if (GUILayout.Button("Generate"))
         {
+            GUI.FocusControl(null);
+            EditorGUIUtility.editingTextField = false;
+            serializedObject.ApplyModifiedProperties();
             TerrainGenerator generator = (TerrainGenerator)target;
             Selection.activeGameObject = generator.gameObject;
             Undo.RegisterCompleteObjectUndo(generator, "Generate Terrain");
@@ -23,6 +28,9 @@ public class TerrainGeneratorEditor : Editor
 
         if (GUILayout.Button("Reset"))
         {
+            GUI.FocusControl(null);
+            EditorGUIUtility.editingTextField = false;
+            serializedObject.ApplyModifiedProperties();
             TerrainGenerator generator = (TerrainGenerator)target;
             Selection.activeGameObject = generator.gameObject;
             Undo.RegisterCompleteObjectUndo(generator, "Reset Terrain Chunks");
@@ -33,12 +41,107 @@ public class TerrainGeneratorEditor : Editor
 
         if (GUILayout.Button("Random Seed"))
         {
+            GUI.FocusControl(null);
+            EditorGUIUtility.editingTextField = false;
+            serializedObject.ApplyModifiedProperties();
             TerrainGenerator generator = (TerrainGenerator)target;
             Selection.activeGameObject = generator.gameObject;
             Undo.RegisterCompleteObjectUndo(generator, "Randomize Terrain Seed");
             generator.RandomizeSeed();
             EditorUtility.SetDirty(generator);
             EditorSceneManager.MarkSceneDirty(generator.gameObject.scene);
+        }
+
+        EditorGUILayout.Space();
+
+        if (GUILayout.Button("Open Terrain Editor"))
+        {
+            TerrainDataEditorWindow.ShowWindow();
+        }
+    }
+
+    private void DrawSerializedProperties()
+    {
+        SerializedProperty iterator = serializedObject.GetIterator();
+        bool enterChildren = true;
+        while (iterator.NextVisible(enterChildren))
+        {
+            enterChildren = false;
+
+            using (new EditorGUI.DisabledScope(iterator.propertyPath == "m_Script"))
+            {
+                ApplyPersistedFoldoutState(iterator);
+                EditorGUILayout.PropertyField(iterator, true);
+                PersistFoldoutState(iterator);
+            }
+        }
+    }
+
+    private void ApplyPersistedFoldoutState(SerializedProperty property)
+    {
+        if (property == null || !property.hasVisibleChildren)
+        {
+            return;
+        }
+
+        property.isExpanded = SessionState.GetBool(GetFoldoutStateKey(property.propertyPath), property.isExpanded);
+        if (!property.isExpanded)
+        {
+            return;
+        }
+
+        VisitChildProperties(property, child =>
+        {
+            if (!child.hasVisibleChildren)
+            {
+                return;
+            }
+
+            child.isExpanded = SessionState.GetBool(GetFoldoutStateKey(child.propertyPath), child.isExpanded);
+        });
+    }
+
+    private void PersistFoldoutState(SerializedProperty property)
+    {
+        if (property == null || !property.hasVisibleChildren)
+        {
+            return;
+        }
+
+        SessionState.SetBool(GetFoldoutStateKey(property.propertyPath), property.isExpanded);
+
+        VisitChildProperties(property, child =>
+        {
+            if (!child.hasVisibleChildren)
+            {
+                return;
+            }
+
+            SessionState.SetBool(GetFoldoutStateKey(child.propertyPath), child.isExpanded);
+        });
+    }
+
+    private string GetFoldoutStateKey(string propertyPath)
+    {
+        int instanceId = target != null ? target.GetInstanceID() : 0;
+        return $"TerrainGeneratorEditor.Foldout.{instanceId}.{propertyPath}";
+    }
+
+    private static void VisitChildProperties(SerializedProperty rootProperty, System.Action<SerializedProperty> visitor)
+    {
+        if (rootProperty == null || visitor == null)
+        {
+            return;
+        }
+
+        SerializedProperty iterator = rootProperty.Copy();
+        SerializedProperty endProperty = iterator.GetEndProperty();
+        bool enterChildren = true;
+
+        while (iterator.NextVisible(enterChildren) && !SerializedProperty.EqualContents(iterator, endProperty))
+        {
+            visitor(iterator);
+            enterChildren = true;
         }
     }
 }
