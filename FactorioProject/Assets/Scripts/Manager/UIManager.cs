@@ -101,6 +101,11 @@ public class UIManager : MonoBehaviour
 
     public void UpdateEnergyGauge(DefaultGauge gauge, Vector3 worldPosition, float fillAmount)
     {
+        UpdateEnergyGauge(gauge, worldPosition, fillAmount, Vector2.zero);
+    }
+
+    public void UpdateEnergyGauge(DefaultGauge gauge, Vector3 worldPosition, float fillAmount, Vector2 anchoredOffset)
+    {
         if (gauge == null)
         {
             return;
@@ -114,7 +119,7 @@ public class UIManager : MonoBehaviour
         }
 
         gauge.SetVisible(true);
-        gauge.SetAnchoredPosition(anchoredPosition);
+        gauge.SetAnchoredPosition(anchoredPosition + anchoredOffset);
         gauge.SetFill(fillAmount);
     }
 

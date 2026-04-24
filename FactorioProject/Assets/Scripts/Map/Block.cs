@@ -55,7 +55,9 @@ public class Block : BaseObject
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
     private readonly List<PortableObject> conveyorStack = new List<PortableObject>();
     private readonly Dictionary<PortableObject, ConveyorCornerMotionState> conveyorCornerMotionStates = new Dictionary<PortableObject, ConveyorCornerMotionState>();
+    private readonly Dictionary<PortableObject, ConveyorLinearMotionState> conveyorLinearMotionStates = new Dictionary<PortableObject, ConveyorLinearMotionState>();
     private readonly List<PortableObject> conveyorCornerMotionTickBuffer = new List<PortableObject>();
+    private readonly List<PortableObject> conveyorLinearMotionTickBuffer = new List<PortableObject>();
     private readonly List<Transform> conveyorSlotDots = new List<Transform>();
     private readonly List<MeshRenderer> conveyorSlotDotRenderers = new List<MeshRenderer>();
     private readonly List<ConveyorSlotDotSegment> conveyorSlotDotSegments = new List<ConveyorSlotDotSegment>(ConveyorSlotDotPathMaxSegments);
@@ -74,6 +76,14 @@ public class Block : BaseObject
         public int sourceLaneIndex;
         public int destinationLaneIndex;
         public float progress;
+    }
+
+    private struct ConveyorLinearMotionState
+    {
+        public Vector3 startWorldPosition;
+        public int destinationLaneIndex;
+        public float progress;
+        public float pathLength;
     }
 
     private readonly struct ConveyorLaneKey : IEquatable<ConveyorLaneKey>
@@ -1172,24 +1182,13 @@ public class Block : BaseObject
             return false;
         }
 
-        bool added;
-        PortableObject bagTarget;
-        if (preferredSlotIndex >= 0)
-        {
-            added = player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out bagTarget);
-        }
-        else
-        {
-            added = player.TryAddToBag(itemId, out bagTarget);
-        }
-
-        if (!added)
+        if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, preferredSlotIndex, out PortableObject storageTarget, out bool addedToHand))
         {
             return false;
         }
 
         conveyorStack[laneIndex] = null;
-        ReleaseFloorObjectToBag(targetObject, bagTarget);
+        ReleasePickupObjectToStorage(targetObject, storageTarget, addedToHand);
         return true;
     }
 
@@ -1489,6 +1488,12 @@ public class Block : BaseObject
             return;
         }
 
+        SetConveyorSlotDotsVisible(ShouldShowConveyorSlotDots());
+        if (!ShouldShowConveyorSlotDots())
+        {
+            return;
+        }
+
         UpdateConveyorSlotDotPositions();
     }
 
@@ -1593,13 +1598,13 @@ public class Block : BaseObject
                 continue;
             }
 
-            if (!player.TryAddToBag(itemId, out PortableObject bagTarget))
+            if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, -1, out PortableObject storageTarget, out bool addedToHand))
             {
                 continue;
             }
 
             stack.RemoveAt(stack.Count - 1);
-            ReleaseFloorObjectToBag(topObject, bagTarget);
+            ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
             pickedAny = true;
         }
 
@@ -1690,24 +1695,13 @@ public class Block : BaseObject
                 continue;
             }
 
-            bool added;
-            PortableObject bagTarget;
-            if (preferredSlotIndex >= 0)
-            {
-                added = player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out bagTarget);
-            }
-            else
-            {
-                added = player.TryAddToBag(itemId, out bagTarget);
-            }
-
-            if (!added)
+            if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, preferredSlotIndex, out PortableObject storageTarget, out bool addedToHand))
             {
                 continue;
             }
 
             stack.RemoveAt(stack.Count - 1);
-            ReleaseFloorObjectToBag(topObject, bagTarget);
+            ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
             return true;
         }
 
@@ -1948,9 +1942,17 @@ public class Block : BaseObject
             }
         }
 
-        SetConveyorSlotDotsVisible(laneCount > 0);
+        SetConveyorSlotDotsVisible(laneCount > 0 && ShouldShowConveyorSlotDots());
         TerrainGenerator.Active?.SetConveyorDotVisualActive(this, laneCount > 0);
-        UpdateConveyorSlotDotPositions();
+        if (ShouldShowConveyorSlotDots())
+        {
+            UpdateConveyorSlotDotPositions();
+        }
+    }
+
+    private static bool ShouldShowConveyorSlotDots()
+    {
+        return GameManager.Instance == null || GameManager.Instance.ShowConveyorSlotDots;
     }
 
     private void EnsureConveyorSlotDotRoot()
@@ -2066,11 +2068,31 @@ public class Block : BaseObject
                 continue;
             }
 
-            Vector3 worldPosition = EvaluateAnimatedConveyorSlotDotWorldPosition(laneIndex);
+            Vector3 worldPosition = TryGetOccupiedConveyorSlotDotWorldPosition(laneIndex, out Vector3 occupiedWorldPosition)
+                ? occupiedWorldPosition
+                : EvaluateAnimatedConveyorSlotDotWorldPosition(laneIndex);
             worldPosition.y += ConveyorSlotDotVerticalOffset;
             dot.position = worldPosition;
             UpdateConveyorSlotDotAppearance(laneIndex);
         }
+    }
+
+    private bool TryGetOccupiedConveyorSlotDotWorldPosition(int laneIndex, out Vector3 worldPosition)
+    {
+        worldPosition = Vector3.zero;
+        if (laneIndex < 0 || laneIndex >= conveyorStack.Count)
+        {
+            return false;
+        }
+
+        PortableObject portableObject = conveyorStack[laneIndex];
+        if (portableObject == null || portableObject.IsMovingToTarget)
+        {
+            return false;
+        }
+
+        worldPosition = portableObject.transform.position;
+        return true;
     }
 
     private Vector3 EvaluateAnimatedConveyorSlotDotWorldPosition(int laneIndex)
@@ -2376,6 +2398,7 @@ public class Block : BaseObject
             inputAreaCenterStack.Clear();
             conveyorStack.Clear();
             conveyorCornerMotionStates.Clear();
+            conveyorLinearMotionStates.Clear();
             RefreshConveyorActivityRegistration();
             return;
         }
@@ -2417,6 +2440,7 @@ public class Block : BaseObject
 
         conveyorStack.Clear();
         conveyorCornerMotionStates.Clear();
+        conveyorLinearMotionStates.Clear();
         RefreshConveyorActivityRegistration();
     }
 
@@ -2568,6 +2592,51 @@ public class Block : BaseObject
 
         floorObjectPool.Configure(floorObjectPrefab);
         return floorObjectPool != null;
+    }
+
+    private bool TryAddPickupObjectToBagOrMatchingHand(Player player, int itemId, int preferredSlotIndex, out PortableObject targetPortableObject, out bool addedToHand)
+    {
+        targetPortableObject = null;
+        addedToHand = false;
+        if (player == null || itemId < 0)
+        {
+            return false;
+        }
+
+        if (preferredSlotIndex >= 0)
+        {
+            if (player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out targetPortableObject))
+            {
+                return true;
+            }
+
+            if (player.HasMatchingHandStackSpace(itemId) && player.TryAddToHand(itemId, out targetPortableObject))
+            {
+                addedToHand = true;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (player.HasMatchingHandStackSpace(itemId) && player.TryAddToHand(itemId, out targetPortableObject))
+        {
+            addedToHand = true;
+            return true;
+        }
+
+        return player.TryAddToBag(itemId, out targetPortableObject);
+    }
+
+    private void ReleasePickupObjectToStorage(PortableObject floorObject, PortableObject storageTarget, bool addedToHand)
+    {
+        if (addedToHand)
+        {
+            ReleaseFloorObjectToHand(floorObject, storageTarget);
+            return;
+        }
+
+        ReleaseFloorObjectToBag(floorObject, storageTarget);
     }
 
     private void ReleaseFloorObjectToBag(PortableObject floorObject, PortableObject bagTarget)
@@ -2722,13 +2791,24 @@ public class Block : BaseObject
     {
         EnsureFloorObjectsInitialized();
 
-        if (conveyorCornerMotionStates.Count == 0)
+        if (conveyorCornerMotionStates.Count == 0
+            && conveyorLinearMotionStates.Count == 0)
         {
             return;
         }
 
         List<PortableObject> staleObjects = null;
         foreach (KeyValuePair<PortableObject, ConveyorCornerMotionState> pair in conveyorCornerMotionStates)
+        {
+            PortableObject portableObject = pair.Key;
+            if (portableObject == null || !ContainsPortableObjectInConveyorStack(portableObject))
+            {
+                staleObjects ??= new List<PortableObject>();
+                staleObjects.Add(portableObject);
+            }
+        }
+
+        foreach (KeyValuePair<PortableObject, ConveyorLinearMotionState> pair in conveyorLinearMotionStates)
         {
             PortableObject portableObject = pair.Key;
             if (portableObject == null || !ContainsPortableObjectInConveyorStack(portableObject))
@@ -2746,6 +2826,7 @@ public class Block : BaseObject
         for (int i = 0; i < staleObjects.Count; i++)
         {
             conveyorCornerMotionStates.Remove(staleObjects[i]);
+            conveyorLinearMotionStates.Remove(staleObjects[i]);
         }
     }
 
@@ -2912,6 +2993,7 @@ public class Block : BaseObject
             }
 
             AdvanceStartedCornerConveyorMotionStates(conveyorSpeed, deltaTime);
+            AdvanceStartedLinearConveyorMotionStates(conveyorSpeed, deltaTime);
             RefreshConveyorActivityRegistration();
             return;
         }
@@ -2925,6 +3007,7 @@ public class Block : BaseObject
         TryAdvanceConveyorFrontLane(frontColumn1LaneIndex);
         TryShiftConveyorLane(backColumn0LaneIndex, frontColumn0LaneIndex);
         TryShiftConveyorLane(backColumn1LaneIndex, frontColumn1LaneIndex);
+        AdvanceStartedLinearConveyorMotionStates(conveyorSpeed, deltaTime);
         RefreshConveyorActivityRegistration();
     }
 
@@ -2945,7 +3028,10 @@ public class Block : BaseObject
     private bool HasActiveConveyorMotion()
     {
         CleanupConveyorStack();
-        return IsConveyorStackingEnabled() && (HasAnyConveyorObjects() || conveyorCornerMotionStates.Count > 0);
+        return IsConveyorStackingEnabled()
+            && (HasAnyConveyorObjects()
+                || conveyorCornerMotionStates.Count > 0
+                || conveyorLinearMotionStates.Count > 0);
     }
 
     private float GetConveyorSpeed()
@@ -2979,6 +3065,11 @@ public class Block : BaseObject
                 continue;
             }
 
+            if (TryUpdateLinearConveyorObjectWorldPosition(laneIndex, portableObject, conveyorSpeed, deltaTime))
+            {
+                continue;
+            }
+
             Vector3 targetPosition = GetConveyorLaneWorldPosition(laneIndex);
             if (conveyorSpeed <= 0f || deltaTime <= 0f)
             {
@@ -2991,6 +3082,40 @@ public class Block : BaseObject
                 targetPosition,
                 conveyorSpeed * deltaTime);
         }
+    }
+
+    private bool TryUpdateLinearConveyorObjectWorldPosition(int laneIndex, PortableObject portableObject, float conveyorSpeed, float deltaTime)
+    {
+        if (portableObject == null
+            || !conveyorLinearMotionStates.TryGetValue(portableObject, out ConveyorLinearMotionState motionState))
+        {
+            return false;
+        }
+
+        Vector3 targetPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
+        if (motionState.pathLength <= 0.0001f || conveyorSpeed <= 0f || deltaTime <= 0f)
+        {
+            portableObject.transform.position = targetPosition;
+            conveyorLinearMotionStates.Remove(portableObject);
+            return true;
+        }
+
+        motionState.progress = Mathf.Clamp01(motionState.progress + ((conveyorSpeed * deltaTime) / motionState.pathLength));
+        portableObject.transform.position = Vector3.Lerp(
+            motionState.startWorldPosition,
+            targetPosition,
+            motionState.progress);
+        if (motionState.progress >= 1f - 0.0001f)
+        {
+            portableObject.transform.position = targetPosition;
+            conveyorLinearMotionStates.Remove(portableObject);
+        }
+        else
+        {
+            conveyorLinearMotionStates[portableObject] = motionState;
+        }
+
+        return true;
     }
 
     private bool TryUpdateCornerConveyorObjectWorldPosition(int laneIndex, PortableObject portableObject, float conveyorSpeed, float deltaTime)
@@ -3080,6 +3205,64 @@ public class Block : BaseObject
         conveyorCornerMotionTickBuffer.Clear();
     }
 
+    private void AdvanceStartedLinearConveyorMotionStates(float conveyorSpeed, float deltaTime)
+    {
+        if (conveyorSpeed <= 0f
+            || deltaTime <= 0f
+            || conveyorLinearMotionStates.Count == 0)
+        {
+            return;
+        }
+
+        conveyorLinearMotionTickBuffer.Clear();
+        foreach (KeyValuePair<PortableObject, ConveyorLinearMotionState> pair in conveyorLinearMotionStates)
+        {
+            if (pair.Key == null
+                || !pair.Key.WasMovedByConveyorThisFrame
+                || pair.Value.progress > 0.0001f)
+            {
+                continue;
+            }
+
+            conveyorLinearMotionTickBuffer.Add(pair.Key);
+        }
+
+        for (int i = 0; i < conveyorLinearMotionTickBuffer.Count; i++)
+        {
+            PortableObject portableObject = conveyorLinearMotionTickBuffer[i];
+            if (portableObject == null
+                || !conveyorLinearMotionStates.TryGetValue(portableObject, out ConveyorLinearMotionState motionState))
+            {
+                continue;
+            }
+
+            Vector3 targetPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
+            if (motionState.pathLength <= 0.0001f)
+            {
+                portableObject.transform.position = targetPosition;
+                conveyorLinearMotionStates.Remove(portableObject);
+                continue;
+            }
+
+            motionState.progress = Mathf.Clamp01((conveyorSpeed * deltaTime) / motionState.pathLength);
+            portableObject.transform.position = Vector3.Lerp(
+                motionState.startWorldPosition,
+                targetPosition,
+                motionState.progress);
+            if (motionState.progress >= 1f - 0.0001f)
+            {
+                portableObject.transform.position = targetPosition;
+                conveyorLinearMotionStates.Remove(portableObject);
+            }
+            else
+            {
+                conveyorLinearMotionStates[portableObject] = motionState;
+            }
+        }
+
+        conveyorLinearMotionTickBuffer.Clear();
+    }
+
     private bool TryAdvanceConveyorFrontLane(int laneIndex)
     {
         return TryMoveConveyorLane(laneIndex);
@@ -3150,24 +3333,26 @@ public class Block : BaseObject
         }
 
         ConveyorLaneKey destinationLane = new ConveyorLaneKey(destinationBlock, destinationLaneIndex);
-        if (!destinationLane.Equals(rootLane))
+        if (destinationLane.Equals(rootLane))
         {
-            PortableObject blockingPortableObject = destinationBlock.conveyorStack[destinationLaneIndex];
-            if (blockingPortableObject != null)
-            {
-                if (blockingPortableObject.WasMovedByConveyorThisFrame
-                    || !destinationBlock.IsConveyorObjectSettledAtLane(destinationLaneIndex, blockingPortableObject)
-                    || !visiting.Add(destinationLane))
-                {
-                    return false;
-                }
+            return false;
+        }
 
-                bool planned = TryPlanConveyorLaneMove(rootLane, destinationLane, visiting, plannedMoves);
-                visiting.Remove(destinationLane);
-                if (!planned)
-                {
-                    return false;
-                }
+        PortableObject blockingPortableObject = destinationBlock.conveyorStack[destinationLaneIndex];
+        if (blockingPortableObject != null)
+        {
+            if (blockingPortableObject.WasMovedByConveyorThisFrame
+                || !destinationBlock.IsConveyorObjectSettledAtLane(destinationLaneIndex, blockingPortableObject)
+                || !visiting.Add(destinationLane))
+            {
+                return false;
+            }
+
+            bool planned = TryPlanConveyorLaneMove(rootLane, destinationLane, visiting, plannedMoves);
+            visiting.Remove(destinationLane);
+            if (!planned)
+            {
+                return false;
             }
         }
 
@@ -3199,6 +3384,7 @@ public class Block : BaseObject
             {
                 move.sourceBlock.conveyorStack[move.sourceLaneIndex] = null;
                 move.sourceBlock.conveyorCornerMotionStates.Remove(move.portableObject);
+                move.sourceBlock.conveyorLinearMotionStates.Remove(move.portableObject);
                 touchedBlocks.Add(move.sourceBlock);
             }
         }
@@ -3231,10 +3417,25 @@ public class Block : BaseObject
                     destinationLaneIndex = move.destinationLaneIndex,
                     progress = 0f
                 };
+                move.destinationBlock.conveyorLinearMotionStates.Remove(move.portableObject);
             }
             else
             {
                 move.destinationBlock.conveyorCornerMotionStates.Remove(move.portableObject);
+                float pathLength = move.sourceBlock != null
+                    ? move.sourceBlock.GetConveyorSlotDotSegmentLength(
+                        move.sourceLaneIndex,
+                        move.destinationBlock,
+                        move.destinationLaneIndex,
+                        false)
+                    : 0f;
+                move.destinationBlock.conveyorLinearMotionStates[move.portableObject] = new ConveyorLinearMotionState
+                {
+                    startWorldPosition = move.portableObject.transform.position,
+                    destinationLaneIndex = move.destinationLaneIndex,
+                    progress = 0f,
+                    pathLength = pathLength
+                };
             }
 
             touchedBlocks.Add(move.destinationBlock);
@@ -3256,6 +3457,11 @@ public class Block : BaseObject
         if (conveyorCornerMotionStates.TryGetValue(portableObject, out ConveyorCornerMotionState motionState))
         {
             return motionState.destinationLaneIndex == laneIndex && motionState.progress >= 1f - 0.0001f;
+        }
+
+        if (conveyorLinearMotionStates.TryGetValue(portableObject, out ConveyorLinearMotionState linearMotionState))
+        {
+            return linearMotionState.destinationLaneIndex == laneIndex && linearMotionState.progress >= 1f - 0.0001f;
         }
 
         Vector3 targetPosition = GetConveyorLaneWorldPosition(laneIndex);
@@ -3648,6 +3854,7 @@ public class Block : BaseObject
         DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
         gate?.MarkSettled();
         conveyorCornerMotionStates.Remove(portableObject);
+        conveyorLinearMotionStates.Remove(portableObject);
         return true;
     }
 
@@ -5131,24 +5338,13 @@ public class Block : BaseObject
             return false;
         }
 
-        bool added;
-        PortableObject bagTarget;
-        if (preferredSlotIndex >= 0)
-        {
-            added = player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out bagTarget);
-        }
-        else
-        {
-            added = player.TryAddToBag(itemId, out bagTarget);
-        }
-
-        if (!added)
+        if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, preferredSlotIndex, out PortableObject storageTarget, out bool addedToHand))
         {
             return false;
         }
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
-        ReleaseFloorObjectToBag(topObject, bagTarget);
+        ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
         return true;
     }
 

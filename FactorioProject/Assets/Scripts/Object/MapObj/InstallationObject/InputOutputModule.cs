@@ -158,6 +158,12 @@ public class InputOutputModule : InstallationObject
     private float outputMoveInterval = 0.1f;
     [SerializeField, Min(0f)]
     private float energyGaugeVerticalOffset = 0.25f;
+    [SerializeField, Min(0f)]
+    private float craftProgressGaugeCanvasVerticalOffset = 14f;
+    [SerializeField]
+    private Color energyGaugeFillColor = new Color(1f, 0.05f, 0f, 1f);
+    [SerializeField]
+    private Color craftProgressGaugeFillColor = new Color(0.026268482f, 1f, 0f, 1f);
     [SerializeField, Min(1)]
     private int runtimeAreaMaxObjects = 10;
     [SerializeField]
@@ -191,6 +197,7 @@ public class InputOutputModule : InstallationObject
     private ItemDefinition cachedInstalledDefinition;
     private int cachedInstalledDefinitionId = int.MinValue;
     private DefaultGauge activeEnergyGauge;
+    private DefaultGauge activeCraftProgressGauge;
     private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
     private bool energyGaugeRenderersResolved;
 
@@ -1692,30 +1699,64 @@ public class InputOutputModule : InstallationObject
             }
         }
 
+        if (activeCraftProgressGauge == null)
+        {
+            activeCraftProgressGauge = uiManager.AcquireEnergyGauge();
+            if (activeCraftProgressGauge == null)
+            {
+                return;
+            }
+        }
+
+        activeEnergyGauge.SetFillColor(energyGaugeFillColor);
+        activeCraftProgressGauge.SetFillColor(craftProgressGaugeFillColor);
+        Vector3 gaugeWorldPosition = ResolveEnergyGaugeWorldPosition();
         uiManager.UpdateEnergyGauge(
             activeEnergyGauge,
-            ResolveEnergyGaugeWorldPosition(),
+            gaugeWorldPosition,
             ResolveEnergyGaugeFillAmount(installedDefinition));
+        uiManager.UpdateEnergyGauge(
+            activeCraftProgressGauge,
+            gaugeWorldPosition,
+            ResolveCraftProgressGaugeFillAmount(),
+            new Vector2(0f, -Mathf.Max(0f, craftProgressGaugeCanvasVerticalOffset)));
     }
 
     private void ReleaseEnergyGaugeVisual()
     {
-        if (activeEnergyGauge == null)
+        if (activeEnergyGauge == null && activeCraftProgressGauge == null)
         {
             return;
         }
 
         UIManager uiManager = UIManager.Instance;
-        if (uiManager != null)
+        if (activeEnergyGauge != null)
         {
-            uiManager.ReleaseEnergyGauge(activeEnergyGauge);
-        }
-        else
-        {
-            Destroy(activeEnergyGauge.gameObject);
+            if (uiManager != null)
+            {
+                uiManager.ReleaseEnergyGauge(activeEnergyGauge);
+            }
+            else
+            {
+                Destroy(activeEnergyGauge.gameObject);
+            }
+
+            activeEnergyGauge = null;
         }
 
-        activeEnergyGauge = null;
+        if (activeCraftProgressGauge != null)
+        {
+            if (uiManager != null)
+            {
+                uiManager.ReleaseEnergyGauge(activeCraftProgressGauge);
+            }
+            else
+            {
+                Destroy(activeCraftProgressGauge.gameObject);
+            }
+
+            activeCraftProgressGauge = null;
+        }
     }
 
     private float ResolveEnergyGaugeFillAmount(ItemDefinition installedDefinition)
@@ -1732,6 +1773,22 @@ public class InputOutputModule : InstallationObject
 
         float gaugeCapacity = Mathf.Max(energyGaugeCapacity, 1f);
         return Mathf.Clamp01(storedEnergy / gaugeCapacity);
+    }
+
+    private float ResolveCraftProgressGaugeFillAmount()
+    {
+        float duration = Mathf.Max(0.1f, craftDuration);
+        if (!hasActiveCraft)
+        {
+            return 0f;
+        }
+
+        if (waitingForOutput)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01(1f - (Mathf.Max(0f, remainingCraftTime) / duration));
     }
 
     private Vector3 ResolveEnergyGaugeWorldPosition()

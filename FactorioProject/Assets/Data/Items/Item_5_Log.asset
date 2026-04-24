@@ -23,6 +23,6 @@ MonoBehaviour:
   itemFilter: 0
   capacity: 10
   energyType: 1
-  energyAmount: 8
+  energyAmount: 1
   useEnergyType: 0
   useEnergyAmount: 0

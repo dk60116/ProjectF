@@ -582,6 +582,18 @@ public class Player : Character
         return false;
     }
 
+    public bool HasMatchingHandStackSpace(int objectId)
+    {
+        if (objectId < 0)
+        {
+            return false;
+        }
+
+        EnsureHandBag();
+        InitializeHandStack();
+        return ResolveHandStackItemId() == objectId && CanAcceptHandObject(objectId);
+    }
+
     public bool CanClearHandIntoBag()
     {
         EnsureHandBag();

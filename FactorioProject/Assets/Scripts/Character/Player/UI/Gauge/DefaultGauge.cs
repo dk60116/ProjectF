@@ -9,6 +9,8 @@ public class DefaultGauge : MonoBehaviour
     private Image fill;
 
     private RectTransform cachedRectTransform;
+    private bool hasDefaultFillColor;
+    private Color defaultFillColor = Color.white;
 
     private void Awake()
     {
@@ -24,6 +26,17 @@ public class DefaultGauge : MonoBehaviour
         }
 
         fill.fillAmount = Mathf.Clamp01(amount);
+    }
+
+    public void SetFillColor(Color color)
+    {
+        ResolveReferences();
+        if (fill == null)
+        {
+            return;
+        }
+
+        fill.color = color;
     }
 
     public void SetAnchoredPosition(Vector2 anchoredPosition)
@@ -58,6 +71,7 @@ public class DefaultGauge : MonoBehaviour
             cachedRectTransform.localRotation = Quaternion.identity;
         }
 
+        SetFillColor(defaultFillColor);
         SetFill(1f);
     }
 
@@ -80,6 +94,12 @@ public class DefaultGauge : MonoBehaviour
             {
                 fill = GetComponentInChildren<Image>(true);
             }
+        }
+
+        if (fill != null && !hasDefaultFillColor)
+        {
+            defaultFillColor = fill.color;
+            hasDefaultFillColor = true;
         }
     }
 }

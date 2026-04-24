@@ -340,7 +340,7 @@ public class PlayerBag : MonoBehaviour
         return true;
     }
 
-    public void SetSlotCount(int index, int count, bool notify = true)
+    public void SetSlotCount(int index, int count, bool notify = true, bool mergeDuplicates = true)
     {
         EnsureInitialized();
         if (currentStack == null || portableStack == null)
@@ -362,7 +362,11 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = clamped;
-        TryMergeDuplicateItemStacks();
+        if (mergeDuplicates)
+        {
+            TryMergeDuplicateItemStacks();
+        }
+
         if (notify)
         {
             NotifyChanged();

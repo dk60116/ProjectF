@@ -13,12 +13,16 @@ public class PlayerController : MonoBehaviour
     private const float ConveyorCarryDeceleration = 10f;
     private const float MinPhysicsMoveDistance = 0.00001f;
     private const float MinPhysicsMoveDistanceSqr = MinPhysicsMoveDistance * MinPhysicsMoveDistance;
+    private const float DefaultMultiFocusFacingScoreWeight = 0.75f;
 
     [SerializeField]
     private Transform movementReference;
 
     [SerializeField, Range(-1f, 1f)]
     private float autoHarvestFacingDot = 0.45f;
+
+    [SerializeField, Min(0f)]
+    private float multiFocusFacingScoreWeight = 0.75f;
 
     [SerializeField]
     private float harvestStartDelay = 0.5f;
@@ -62,6 +66,16 @@ public class PlayerController : MonoBehaviour
     private bool hasStandingConveyorCoordinate;
     private Vector2Int standingConveyorCoordinate;
     private Vector3 currentConveyorCarryVelocity;
+
+    private struct InteractionFocusCandidate
+    {
+        public bool hasCandidate;
+        public bool useSingleBlock;
+        public float score;
+        public MapObject mapObject;
+        public Block fallbackBlock;
+        public Block singleBlock;
+    }
 
     private void Awake()
     {
@@ -800,19 +814,22 @@ public class PlayerController : MonoBehaviour
         }
 
         combinedInteractionFocusBlocks.Clear();
-        if (FindCurrentInputOutputModuleFocusBlocks(nearbyInputOutputModuleFocusBlocks))
+        InteractionFocusCandidate nearestFocusCandidate = CreateEmptyInteractionFocusCandidate();
+        if (FindCurrentInputOutputModuleFocusBlocks(nearbyInputOutputModuleFocusBlocks, ref nearestFocusCandidate))
         {
             AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInputOutputModuleFocusBlocks);
         }
 
-        FindNearbyWorkableBlocks(nearbyWorkableFocusBlocks);
+        FindNearbyWorkableBlocks(nearbyWorkableFocusBlocks, ref nearestFocusCandidate);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyWorkableFocusBlocks);
 
-        FindNearbyBoxBlocks(nearbyBoxFocusBlocks);
+        FindNearbyBoxBlocks(nearbyBoxFocusBlocks, ref nearestFocusCandidate);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyBoxFocusBlocks);
 
-        FindNearbyInstallationBlocks(nearbyInstallationFocusBlocks);
+        FindNearbyInstallationBlocks(nearbyInstallationFocusBlocks, ref nearestFocusCandidate);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInstallationFocusBlocks);
+
+        AppendInteractionFocusCandidate(nearestFocusCandidate, combinedInteractionFocusBlocks);
         SetFocusedBlocks(combinedInteractionFocusBlocks);
     }
 
@@ -965,7 +982,7 @@ public class PlayerController : MonoBehaviour
         return focusedMapObject != null;
     }
 
-    private bool FindCurrentInputOutputModuleFocusBlocks(List<Block> results)
+    private bool FindCurrentInputOutputModuleFocusBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)
     {
         if (results == null)
         {
@@ -990,6 +1007,7 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        Vector3 focusForward = GetInteractionFocusForward();
         Vector2Int playerCoordinate = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
@@ -1009,7 +1027,7 @@ public class PlayerController : MonoBehaviour
         if (inputOutputModule.FocusMode == MapObject.MultiFocusMode.NearOne)
         {
             Block nearestBlock = null;
-            float nearestDistanceSqr = float.MaxValue;
+            float nearestScore = float.MaxValue;
 
             for (int i = 0; i < focusCoordinates.Count; i++)
             {
@@ -1018,22 +1036,22 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                float distanceSqr = GetBlockFocusDistanceSqr(block, origin);
-                if (distanceSqr >= nearestDistanceSqr)
+                float score = GetBlockFocusSelectionScore(block, origin, focusForward, out _);
+                if (score >= nearestScore)
                 {
                     continue;
                 }
 
-                nearestDistanceSqr = distanceSqr;
+                nearestScore = score;
                 nearestBlock = block;
             }
 
             if (nearestBlock != null)
             {
-                results.Add(nearestBlock);
+                TrySetInteractionFocusCandidate(ref nearestFocusCandidate, nearestScore, nearestBlock);
             }
 
-            return results.Count > 0;
+            return false;
         }
 
         for (int i = 0; i < focusCoordinates.Count; i++)
@@ -1052,7 +1070,7 @@ public class PlayerController : MonoBehaviour
         return results.Count > 0;
     }
 
-    private void FindNearbyWorkableBlocks(List<Block> results)
+    private void FindNearbyWorkableBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)
     {
         if (results == null)
         {
@@ -1077,6 +1095,7 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        Vector3 focusForward = GetInteractionFocusForward();
         float focusRadius = Mathf.Max(0.5f, player.State.HarvestRange);
         float focusRadiusSqr = focusRadius * focusRadius;
         float globalWorkablePadding = Mathf.Max(0f, WorkableObject.GlobalMaxFocusActivationRadius);
@@ -1085,9 +1104,6 @@ public class PlayerController : MonoBehaviour
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
         nearbyWorkableObjects.Clear();
-        WorkableObject nearestWorkableObject = null;
-        Block nearestWorkableBlock = null;
-        float nearestWorkableDistanceSqr = float.MaxValue;
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -1111,7 +1127,7 @@ public class PlayerController : MonoBehaviour
 
                 nearbyWorkableObjects.Add(workableObject);
 
-                float distanceSqr = GetWorkableFocusDistanceSqr(workableObject, block, origin);
+                float score = GetWorkableFocusSelectionScore(workableObject, block, origin, focusForward, out float distanceSqr);
                 if (distanceSqr > focusRadiusSqr)
                 {
                     continue;
@@ -1119,27 +1135,16 @@ public class PlayerController : MonoBehaviour
 
                 if (workableObject.FocusMode == MapObject.MultiFocusMode.NearOne)
                 {
-                    if (distanceSqr < nearestWorkableDistanceSqr)
-                    {
-                        nearestWorkableDistanceSqr = distanceSqr;
-                        nearestWorkableObject = workableObject;
-                        nearestWorkableBlock = block;
-                    }
-
+                    TrySetInteractionFocusCandidate(ref nearestFocusCandidate, score, workableObject, block);
                     continue;
                 }
 
                 AppendMapObjectFocusBlocks(workableObject, block, results);
             }
         }
-
-        if (nearestWorkableObject != null)
-        {
-            AppendMapObjectFocusBlocks(nearestWorkableObject, nearestWorkableBlock, results);
-        }
     }
 
-    private void FindNearbyBoxBlocks(List<Block> results)
+    private void FindNearbyBoxBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)
     {
         if (results == null)
         {
@@ -1164,15 +1169,13 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        Vector3 focusForward = GetInteractionFocusForward();
         float globalBoxPadding = Mathf.Max(0f, BoxObject.GlobalMaxFocusActivationRadius);
         int searchRadius = Mathf.Max(1, Mathf.CeilToInt(globalBoxPadding + 2f));
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
         nearbyBoxObjects.Clear();
-        BoxObject nearestBoxObject = null;
-        Block nearestBoxBlock = null;
-        float nearestBoxDistanceSqr = float.MaxValue;
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -1201,30 +1204,19 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(boxObject, block, origin);
+                float score = GetMapObjectFocusSelectionScore(boxObject, block, origin, focusForward, out _);
                 if (boxObject.FocusMode == MapObject.MultiFocusMode.NearOne)
                 {
-                    if (distanceSqr < nearestBoxDistanceSqr)
-                    {
-                        nearestBoxDistanceSqr = distanceSqr;
-                        nearestBoxObject = boxObject;
-                        nearestBoxBlock = block;
-                    }
-
+                    TrySetInteractionFocusCandidate(ref nearestFocusCandidate, score, boxObject, block);
                     continue;
                 }
 
                 AppendMapObjectFocusBlocks(boxObject, block, results);
             }
         }
-
-        if (nearestBoxObject != null)
-        {
-            AppendMapObjectFocusBlocks(nearestBoxObject, nearestBoxBlock, results);
-        }
     }
 
-    private void FindNearbyInstallationBlocks(List<Block> results)
+    private void FindNearbyInstallationBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)
     {
         if (results == null)
         {
@@ -1249,15 +1241,13 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        Vector3 focusForward = GetInteractionFocusForward();
         float globalInstallationPadding = Mathf.Max(0f, InstallationObject.GlobalMaxFocusActivationRadius);
         int searchRadius = Mathf.Max(1, Mathf.CeilToInt(globalInstallationPadding + 2f));
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
         nearbyInstallationObjects.Clear();
-        InstallationObject nearestInstallationObject = null;
-        Block nearestInstallationBlock = null;
-        float nearestInstallationDistanceSqr = float.MaxValue;
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -1291,7 +1281,7 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(installationObject, block, origin);
+                float score = GetMapObjectFocusSelectionScore(installationObject, block, origin, focusForward, out float distanceSqr);
                 if (distanceSqr > focusRadius * focusRadius)
                 {
                     continue;
@@ -1299,23 +1289,12 @@ public class PlayerController : MonoBehaviour
 
                 if (installationObject.FocusMode == MapObject.MultiFocusMode.NearOne)
                 {
-                    if (distanceSqr < nearestInstallationDistanceSqr)
-                    {
-                        nearestInstallationDistanceSqr = distanceSqr;
-                        nearestInstallationObject = installationObject;
-                        nearestInstallationBlock = block;
-                    }
-
+                    TrySetInteractionFocusCandidate(ref nearestFocusCandidate, score, installationObject, block);
                     continue;
                 }
 
                 AppendMapObjectFocusBlocks(installationObject, block, results);
             }
-        }
-
-        if (nearestInstallationObject != null)
-        {
-            AppendMapObjectFocusBlocks(nearestInstallationObject, nearestInstallationBlock, results);
         }
     }
 
@@ -1330,9 +1309,23 @@ public class PlayerController : MonoBehaviour
         return offset.sqrMagnitude;
     }
 
+    private float GetWorkableFocusSelectionScore(WorkableObject workableObject, Block block, Vector3 origin, Vector3 focusForward, out float distanceSqr)
+    {
+        Bounds bounds = GetMapObjectFocusBounds(workableObject, block, workableObject != null ? workableObject.FocusActivationRadius : 0f);
+        Vector3 focusPoint = GetFocusPointAndDistance(bounds, origin, out distanceSqr);
+        return GetFacingAdjustedFocusScore(distanceSqr, focusPoint, origin, focusForward);
+    }
+
     private float GetMapObjectFocusSelectionDistanceSqr(MapObject mapObject, Block block, Vector3 origin)
     {
         return GetMapObjectFocusDistanceSqr(mapObject, block, origin, 0f);
+    }
+
+    private float GetMapObjectFocusSelectionScore(MapObject mapObject, Block block, Vector3 origin, Vector3 focusForward, out float distanceSqr)
+    {
+        Bounds bounds = GetMapObjectFocusBounds(mapObject, block);
+        Vector3 focusPoint = GetFocusPointAndDistance(bounds, origin, out distanceSqr);
+        return GetFacingAdjustedFocusScore(distanceSqr, focusPoint, origin, focusForward);
     }
 
     private float GetMapObjectFocusDistanceSqr(MapObject mapObject, Block block, Vector3 origin, float focusPadding = 0f)
@@ -1411,6 +1404,66 @@ public class PlayerController : MonoBehaviour
         return fallbackBounds;
     }
 
+    private Vector3 GetInteractionFocusForward()
+    {
+        Transform rotationTarget = player != null && player.BodyTransform != null ? player.BodyTransform : transform;
+        Vector3 forward = rotationTarget != null ? rotationTarget.forward : Vector3.zero;
+        forward.y = 0f;
+
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            forward = pendingMoveDirection;
+            forward.y = 0f;
+        }
+
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            forward = transform.forward;
+            forward.y = 0f;
+        }
+
+        return forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
+    }
+
+    private Vector3 GetFocusPointAndDistance(Bounds bounds, Vector3 origin, out float distanceSqr)
+    {
+        Vector3 focusPoint = bounds.ClosestPoint(origin);
+        focusPoint.y = origin.y;
+
+        Vector3 offset = focusPoint - origin;
+        offset.y = 0f;
+        distanceSqr = offset.sqrMagnitude;
+
+        if (distanceSqr <= 0.0001f)
+        {
+            focusPoint = bounds.center;
+            focusPoint.y = origin.y;
+        }
+
+        return focusPoint;
+    }
+
+    private float GetFacingAdjustedFocusScore(float distanceSqr, Vector3 focusPoint, Vector3 origin, Vector3 focusForward)
+    {
+        float facingScoreWeight = multiFocusFacingScoreWeight > 0f
+            ? multiFocusFacingScoreWeight
+            : DefaultMultiFocusFacingScoreWeight;
+        if (distanceSqr >= float.MaxValue)
+        {
+            return distanceSqr;
+        }
+
+        Vector3 offset = focusPoint - origin;
+        offset.y = 0f;
+        if (offset.sqrMagnitude <= 0.0001f || focusForward.sqrMagnitude <= 0.0001f)
+        {
+            return distanceSqr;
+        }
+
+        float facingDot = Mathf.Clamp(Vector3.Dot(focusForward.normalized, offset.normalized), -1f, 1f);
+        return distanceSqr + ((1f - facingDot) * facingScoreWeight);
+    }
+
     private static bool IsItemFilterEnabled(int itemId, List<ItemDefinition> definitions)
     {
         if (itemId < 0 || definitions == null)
@@ -1430,6 +1483,65 @@ public class PlayerController : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static InteractionFocusCandidate CreateEmptyInteractionFocusCandidate()
+    {
+        return new InteractionFocusCandidate
+        {
+            score = float.MaxValue
+        };
+    }
+
+    private static void TrySetInteractionFocusCandidate(ref InteractionFocusCandidate candidate, float score, Block singleBlock)
+    {
+        if (singleBlock == null || !(score < candidate.score))
+        {
+            return;
+        }
+
+        candidate.hasCandidate = true;
+        candidate.useSingleBlock = true;
+        candidate.score = score;
+        candidate.mapObject = null;
+        candidate.fallbackBlock = null;
+        candidate.singleBlock = singleBlock;
+    }
+
+    private static void TrySetInteractionFocusCandidate(ref InteractionFocusCandidate candidate, float score, MapObject mapObject, Block fallbackBlock)
+    {
+        if (mapObject == null || !(score < candidate.score))
+        {
+            return;
+        }
+
+        candidate.hasCandidate = true;
+        candidate.useSingleBlock = false;
+        candidate.score = score;
+        candidate.mapObject = mapObject;
+        candidate.fallbackBlock = fallbackBlock;
+        candidate.singleBlock = null;
+    }
+
+    private bool AppendInteractionFocusCandidate(InteractionFocusCandidate candidate, List<Block> results)
+    {
+        if (!candidate.hasCandidate || results == null)
+        {
+            return false;
+        }
+
+        if (candidate.useSingleBlock)
+        {
+            if (candidate.singleBlock == null || results.Contains(candidate.singleBlock))
+            {
+                return false;
+            }
+
+            results.Add(candidate.singleBlock);
+            return true;
+        }
+
+        return AppendMapObjectFocusBlocks(candidate.mapObject, candidate.fallbackBlock, results);
     }
 
     private bool AppendMapObjectFocusBlocks(MapObject mapObject, Block fallbackBlock, List<Block> results)
@@ -1517,6 +1629,22 @@ public class PlayerController : MonoBehaviour
         Vector3 offset = block.transform.position - origin;
         offset.y = 0f;
         return offset.sqrMagnitude;
+    }
+
+    private float GetBlockFocusSelectionScore(Block block, Vector3 origin, Vector3 focusForward, out float distanceSqr)
+    {
+        if (block == null)
+        {
+            distanceSqr = float.MaxValue;
+            return float.MaxValue;
+        }
+
+        Vector3 focusPoint = block.transform.position;
+        focusPoint.y = origin.y;
+        Vector3 offset = focusPoint - origin;
+        offset.y = 0f;
+        distanceSqr = offset.sqrMagnitude;
+        return GetFacingAdjustedFocusScore(distanceSqr, focusPoint, origin, focusForward);
     }
 
     private void SetFocusedBlock(Block nextBlock)

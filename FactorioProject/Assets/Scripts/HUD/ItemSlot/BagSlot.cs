@@ -1213,18 +1213,21 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (targetItemId < 0 || targetCount <= 0)
         {
-            return TryMoveStack(boundBag, slotIndex, sourceItemId, sourceCount, targetBag, targetIndex);
+            int targetMax = targetBag.GetSlotMaxCount(targetIndex);
+            int moveCount = Mathf.Min(sourceCount, Mathf.Max(0, targetMax));
+            return moveCount > 0 && TryMoveStack(boundBag, slotIndex, sourceItemId, moveCount, targetBag, targetIndex);
         }
 
         if (targetItemId == sourceItemId)
         {
             int targetMax = targetBag.GetSlotMaxCount(targetIndex);
-            if (targetMax - targetCount < sourceCount)
+            int moveCount = Mathf.Min(sourceCount, Mathf.Max(0, targetMax - targetCount));
+            if (moveCount <= 0)
             {
                 return false;
             }
 
-            return TryMoveStack(boundBag, slotIndex, sourceItemId, sourceCount, targetBag, targetIndex);
+            return TryMoveStack(boundBag, slotIndex, sourceItemId, moveCount, targetBag, targetIndex);
         }
 
         int sourceMax = boundBag.GetSlotMaxCount(slotIndex);
@@ -1244,10 +1247,15 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
+        int sourceCount = sourceBag.GetSlotCount(sourceIndex);
         int targetCount = targetBag.GetSlotCount(targetIndex);
+        if (sourceCount < itemCount)
+        {
+            return false;
+        }
 
         List<PortableObject> sourceObjects = new List<PortableObject>();
-        if (!sourceBag.TryGetOccupiedSlotObjects(sourceIndex, sourceObjects) || sourceObjects.Count < itemCount)
+        if (!sourceBag.TryGetSlotObjects(sourceIndex, sourceCount - itemCount, itemCount, sourceObjects) || sourceObjects.Count < itemCount)
         {
             return false;
         }
@@ -1291,8 +1299,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             }
         }
 
-        sourceBag.SetSlotCount(sourceIndex, 0, false);
-        targetBag.SetSlotCount(targetIndex, targetCount + itemCount, false);
+        sourceBag.SetSlotCount(sourceIndex, sourceCount - itemCount, false, false);
+        targetBag.SetSlotCount(targetIndex, targetCount + itemCount, false, false);
 
         int moveIndex = 0;
         float moveInterval = Mathf.Max(0f, transferMoveInterval);
@@ -1425,8 +1433,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             destObject.SetItem(sourceItemId);
         }
 
-        sourceBag.SetSlotCount(sourceIndex, targetCount, false);
-        targetBag.SetSlotCount(targetIndex, sourceCount, false);
+        sourceBag.SetSlotCount(sourceIndex, targetCount, false, false);
+        targetBag.SetSlotCount(targetIndex, sourceCount, false, false);
 
         int moveIndex = 0;
         float moveInterval = Mathf.Max(0f, transferMoveInterval);
