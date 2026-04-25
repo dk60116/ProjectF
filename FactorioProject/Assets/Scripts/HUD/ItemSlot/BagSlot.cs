@@ -6,9 +6,10 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandler
+public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler
 {
     private static BagSlot expandedSlot;
+    private static BagSlot hoveredDropSlot;
     private const float DragCancelDistance = 8f;
     private const float CraftingRootHideDelay = 0.12f;
 
@@ -95,6 +96,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void OnDisable()
     {
+        if (hoveredDropSlot == this)
+        {
+            hoveredDropSlot = null;
+        }
+
         EndDragVisual();
         CollapseCraftingSlots(true);
         StopPickupRoutine();
@@ -298,6 +304,32 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         if (ShouldCancelDrop(eventData))
+        {
+            return;
+        }
+
+        DropItem();
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        hoveredDropSlot = this;
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        if (hoveredDropSlot == this)
+        {
+            hoveredDropSlot = null;
+        }
+    }
+
+    private void Update()
+    {
+        if (hoveredDropSlot != this
+            || isDragging
+            || !Input.GetKeyDown(KeyCode.F)
+            || !CanDragItem())
         {
             return;
         }

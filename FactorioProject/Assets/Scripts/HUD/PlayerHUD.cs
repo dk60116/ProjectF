@@ -13,7 +13,7 @@ public class PlayerHUD : BagSlot
     [SerializeField]
     private HandSlot handSlot;
 
-    private PlayerBag boundBag;
+    private PlayerBag boundInventoryBag;
     private PlayerBag boundHandBag;
     private BagSlot expandedBagSlot;
     private bool isRefreshing;
@@ -231,21 +231,21 @@ public class PlayerHUD : BagSlot
 
     public void Bind(PlayerBag bag)
     {
-        if (boundBag == bag)
+        if (boundInventoryBag == bag)
         {
             RefreshBag(bag);
             return;
         }
 
         UnbindCurrentBag();
-        boundBag = bag;
+        boundInventoryBag = bag;
 
-        if (boundBag != null)
+        if (boundInventoryBag != null)
         {
-            boundBag.Changed += HandleBagChanged;
+            boundInventoryBag.Changed += HandleBagChanged;
         }
 
-        RefreshBag(boundBag);
+        RefreshBag(boundInventoryBag);
         BindHandBag(GetPlayerHandBag());
     }
 
@@ -317,7 +317,7 @@ public class PlayerHUD : BagSlot
 
     private void HandleBagChanged()
     {
-        RefreshBag(boundBag);
+        RefreshBag(boundInventoryBag);
         RefreshVisibleCraftingUi();
     }
 
@@ -329,9 +329,9 @@ public class PlayerHUD : BagSlot
 
     private void EnsureInitialBagBinding()
     {
-        if (boundBag != null)
+        if (boundInventoryBag != null)
         {
-            RefreshBag(boundBag);
+            RefreshBag(boundInventoryBag);
             return;
         }
 
@@ -351,10 +351,10 @@ public class PlayerHUD : BagSlot
 
     private void UnbindCurrentBag()
     {
-        if (boundBag != null)
+        if (boundInventoryBag != null)
         {
-            boundBag.Changed -= HandleBagChanged;
-            boundBag = null;
+            boundInventoryBag.Changed -= HandleBagChanged;
+            boundInventoryBag = null;
         }
 
         if (boundHandBag != null)
@@ -2111,10 +2111,10 @@ public class PlayerHUD : BagSlot
         isBagRefreshQueued = false;
         queuedBagRefreshFrame = -1;
 
-        RefreshBag(boundBag);
+        RefreshBag(boundInventoryBag);
         if (expandedBagSlot == null)
         {
-            RestoreAllBagSlotVisibility(boundBag != null ? boundBag.SlotCount : 0);
+            RestoreAllBagSlotVisibility(boundInventoryBag != null ? boundInventoryBag.SlotCount : 0);
         }
     }
 
@@ -2152,7 +2152,7 @@ public class PlayerHUD : BagSlot
         BagSlot target = expandedBagSlot;
         expandedBagSlot = null;
         target.CloseCraftingSlots(immediate);
-        RefreshBag(boundBag);
+        RefreshBag(boundInventoryBag);
     }
 
     private bool IsPointerOverExpandedBagArea(BagSlot slot, Vector2 pointerPosition)
@@ -2653,7 +2653,7 @@ public class PlayerHUD : BagSlot
         }
 
         UpdateInstallModeButtons();
-        RefreshBag(boundBag);
+        RefreshBag(boundInventoryBag);
     }
 
     public Button InstallButton => installButton;

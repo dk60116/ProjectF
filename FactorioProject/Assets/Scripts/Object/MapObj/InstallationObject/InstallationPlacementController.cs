@@ -539,6 +539,16 @@ public class InstallationPlacementController : MonoBehaviour
         return GameManager.Instance.Player.GetHandBag();
     }
 
+    private PlayerBag GetPlayerInventoryBag()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return null;
+        }
+
+        return GameManager.Instance.Player.GetBag();
+    }
+
     private List<PortableObject> GetPlayerHandPortableSources(int itemId, int requestedCount)
     {
         List<PortableObject> results = new List<PortableObject>();
@@ -1844,6 +1854,22 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 placementPlans.Add(placementPlan);
             }
+            else if (TryCreateStraightConveyorPlacementPlan(
+                         previewsToPlace[i],
+                         reservedFootprintCoordinates,
+                         out placementPlan))
+            {
+                placementPlans.Add(placementPlan);
+            }
+        }
+
+        if (!IsEditingInstallation())
+        {
+            int availableInstallItemCount = GetCurrentInstallItemCount();
+            if (placementPlans.Count > availableInstallItemCount)
+            {
+                placementPlans.RemoveRange(availableInstallItemCount, placementPlans.Count - availableInstallItemCount);
+            }
         }
 
         for (int i = 0; i < placementPlans.Count; i++)
@@ -1891,9 +1917,7 @@ public class InstallationPlacementController : MonoBehaviour
                     i * Mathf.Max(0f, installPlacementPortableLaunchInterval));
             }
 
-            PlayerBag handBag = GetPlayerHandBag();
-            handBag?.RemoveItems(activeInstallDefinition.id, placedCount);
-            handBag?.RefreshExternalStackCounts();
+            RemoveInstallItemsFromPlayer(activeInstallDefinition.id, placedCount);
         }
 
         RemovePlacedInstallPreviews(placedPreviews);
@@ -1964,6 +1988,69 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        int resolvedQuarterTurns = ResolvePlacementQuarterTurnsFromRotation(
+            sourcePrefab,
+            preview.transform.rotation,
+            previewQuarterTurns);
+
+        if (!TryGetFootprintBlocks(
+                anchorBlock.Coordinate,
+                sourcePrefab,
+                resolvedQuarterTurns,
+                preview,
+                out List<Block> footprintBlocks,
+                true)
+            || footprintBlocks.Count <= 0)
+        {
+            return false;
+        }
+
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorBlock.Coordinate, sourcePrefab, resolvedQuarterTurns);
+        for (int i = 0; i < footprintCoordinates.Count; i++)
+        {
+            if (reservedFootprintCoordinates != null && reservedFootprintCoordinates.Contains(footprintCoordinates[i]))
+            {
+                return false;
+            }
+        }
+
+        if (reservedFootprintCoordinates != null)
+        {
+            for (int i = 0; i < footprintCoordinates.Count; i++)
+            {
+                reservedFootprintCoordinates.Add(footprintCoordinates[i]);
+            }
+        }
+
+        placementPlan = new InstallPreviewPlacementPlan
+        {
+            preview = preview,
+            anchorBlock = anchorBlock,
+            sourcePrefab = sourcePrefab,
+            quarterTurns = resolvedQuarterTurns,
+            footprintBlocks = footprintBlocks,
+            position = preview.transform.position,
+            rotation = preview.transform.rotation
+        };
+        return true;
+    }
+
+    private bool TryCreateStraightConveyorPlacementPlan(
+        MapObject preview,
+        HashSet<Vector2Int> reservedFootprintCoordinates,
+        out InstallPreviewPlacementPlan placementPlan)
+    {
+        placementPlan = null;
+        if (preview == null
+            || activeInstallDefinition == null
+            || !CanUseStraightConveyorFallback(preview)
+            || !TryGetBlockForPreview(preview, out Block anchorBlock)
+            || !TryResolveStraightConveyorPlacementSource(out MapObject sourcePrefab))
+        {
+            return false;
+        }
+
+        int previewQuarterTurns = GetPreviewQuarterTurns(preview);
         int resolvedQuarterTurns = ResolvePlacementQuarterTurnsFromRotation(
             sourcePrefab,
             preview.transform.rotation,
@@ -3684,6 +3771,18 @@ public class InstallationPlacementController : MonoBehaviour
         if (desiredPrefab == null
             || !RequiresConveyorPreviewReplacement(preview, desiredPrefab))
         {
+            int normalizedResolvedQuarterTurns = NormalizePlacementQuarterTurns(resolvedQuarterTurns);
+            if (desiredPrefab != null && NormalizePlacementQuarterTurns(quarterTurns) != normalizedResolvedQuarterTurns)
+            {
+                installPreviewQuarterTurnsByPreview[preview] = normalizedResolvedQuarterTurns;
+                if (preview == activeInstallPreview)
+                {
+                    installPreviewQuarterTurns = normalizedResolvedQuarterTurns;
+                }
+
+                installPreviewSourcePrefabsByPreview[preview] = desiredPrefab;
+            }
+
             return;
         }
 
@@ -5433,22 +5532,31 @@ public class InstallationPlacementController : MonoBehaviour
 
             bool useCornerVariant = installPreviewConveyorVariantMode == ConveyorPreviewVariantMode.Corner
                 || (activeInstallPreview is ConveyorBelt previewConveyor && previewConveyor.IsCornerVariant);
-            int candidateQuarterTurns = useCornerVariant
-                ? logicalQuarterTurns
-                : (logicalQuarterTurns + 1) % 4;
-            bool canUseCornerVariantAfterTurn = !useCornerVariant
-                && hasAnchorBlock
-                && TryResolveConveyorCornerPlacementPrefab(
-                    conveyorBelt,
-                    anchorCoordinate,
-                    candidateQuarterTurns,
-                    activeInstallPreview,
-                    out _);
-            conveyorBelt.HandlePlacementRotation(ref logicalQuarterTurns, ref useCornerVariant, canUseCornerVariantAfterTurn);
-            installPreviewQuarterTurns = logicalQuarterTurns;
-            installPreviewConveyorVariantMode = useCornerVariant
-                ? ConveyorPreviewVariantMode.Corner
-                : ConveyorPreviewVariantMode.Straight;
+            if (hasAnchorBlock)
+            {
+                if (!TryFindNextPlaceableConveyorPreviewRotation(
+                        anchorBlock,
+                        conveyorBelt,
+                        activeInstallPreview,
+                        logicalQuarterTurns,
+                        useCornerVariant,
+                        out logicalQuarterTurns,
+                        out ConveyorPreviewVariantMode resolvedVariantMode))
+                {
+                    return;
+                }
+
+                installPreviewQuarterTurns = logicalQuarterTurns;
+                installPreviewConveyorVariantMode = resolvedVariantMode;
+            }
+            else
+            {
+                conveyorBelt.HandlePlacementRotation(ref logicalQuarterTurns, ref useCornerVariant, false);
+                installPreviewQuarterTurns = logicalQuarterTurns;
+                installPreviewConveyorVariantMode = useCornerVariant
+                    ? ConveyorPreviewVariantMode.Corner
+                    : ConveyorPreviewVariantMode.Straight;
+            }
         }
         else
         {
@@ -5489,6 +5597,159 @@ public class InstallationPlacementController : MonoBehaviour
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null,
             previousConveyorChange);
         InvalidateInstallGrid();
+    }
+
+    private bool TryFindNextPlaceableConveyorPreviewRotation(
+        Block anchorBlock,
+        ConveyorBelt conveyorPrototype,
+        MapObject previewToIgnore,
+        int currentStraightQuarterTurns,
+        bool currentUsesCornerVariant,
+        out int resolvedQuarterTurns,
+        out ConveyorPreviewVariantMode resolvedVariantMode)
+    {
+        int normalizedCurrentQuarterTurns = NormalizePlacementQuarterTurns(currentStraightQuarterTurns);
+        resolvedQuarterTurns = normalizedCurrentQuarterTurns;
+        resolvedVariantMode = currentUsesCornerVariant
+            ? ConveyorPreviewVariantMode.Corner
+            : ConveyorPreviewVariantMode.Straight;
+
+        if (anchorBlock == null || conveyorPrototype == null)
+        {
+            return false;
+        }
+
+        if (currentUsesCornerVariant
+            && TryUsePlaceableConveyorRotationCandidate(
+                anchorBlock,
+                conveyorPrototype,
+                previewToIgnore,
+                normalizedCurrentQuarterTurns,
+                ConveyorPreviewVariantMode.Straight,
+                out resolvedQuarterTurns,
+                out resolvedVariantMode))
+        {
+            return true;
+        }
+
+        for (int offset = 1; offset <= 4; offset++)
+        {
+            int candidateQuarterTurns = (normalizedCurrentQuarterTurns + offset) % 4;
+
+            if (TryUsePlaceableConveyorRotationCandidate(
+                    anchorBlock,
+                    conveyorPrototype,
+                    previewToIgnore,
+                    candidateQuarterTurns,
+                    ConveyorPreviewVariantMode.Corner,
+                    out resolvedQuarterTurns,
+                    out resolvedVariantMode))
+            {
+                return true;
+            }
+
+            if (TryUsePlaceableConveyorRotationCandidate(
+                    anchorBlock,
+                    conveyorPrototype,
+                    previewToIgnore,
+                    candidateQuarterTurns,
+                    ConveyorPreviewVariantMode.Straight,
+                    out resolvedQuarterTurns,
+                    out resolvedVariantMode))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryUsePlaceableConveyorRotationCandidate(
+        Block anchorBlock,
+        ConveyorBelt conveyorPrototype,
+        MapObject previewToIgnore,
+        int candidateQuarterTurns,
+        ConveyorPreviewVariantMode candidateVariantMode,
+        out int resolvedQuarterTurns,
+        out ConveyorPreviewVariantMode resolvedVariantMode)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
+        resolvedVariantMode = candidateVariantMode;
+        if (!TryResolvePlaceableConveyorRotationCandidate(
+                anchorBlock,
+                conveyorPrototype,
+                previewToIgnore,
+                candidateQuarterTurns,
+                candidateVariantMode,
+                out MapObject resolvedPrefab,
+                out resolvedQuarterTurns))
+        {
+            return false;
+        }
+
+        if (IsSameConveyorPreviewState(previewToIgnore, resolvedPrefab, resolvedQuarterTurns))
+        {
+            return false;
+        }
+
+        if (candidateVariantMode == ConveyorPreviewVariantMode.Corner)
+        {
+            resolvedQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
+        }
+
+        return true;
+    }
+
+    private bool TryResolvePlaceableConveyorRotationCandidate(
+        Block anchorBlock,
+        ConveyorBelt conveyorPrototype,
+        MapObject previewToIgnore,
+        int candidateQuarterTurns,
+        ConveyorPreviewVariantMode candidateVariantMode,
+        out MapObject resolvedPrefab,
+        out int resolvedQuarterTurns)
+    {
+        resolvedPrefab = null;
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
+        if (anchorBlock == null || conveyorPrototype == null)
+        {
+            return false;
+        }
+
+        if (candidateVariantMode == ConveyorPreviewVariantMode.Corner)
+        {
+            if (!TryResolveConveyorCornerPlacementPrefab(
+                    conveyorPrototype,
+                    anchorBlock.Coordinate,
+                    candidateQuarterTurns,
+                    previewToIgnore,
+                    out resolvedPrefab,
+                    out resolvedQuarterTurns)
+                || !(resolvedPrefab is ConveyorBelt cornerConveyor)
+                || !cornerConveyor.IsCornerVariant)
+            {
+                return false;
+            }
+
+            if (!TryGetFootprintBlocks(anchorBlock.Coordinate, resolvedPrefab, resolvedQuarterTurns, previewToIgnore, out _))
+            {
+                return false;
+            }
+
+            return HasConveyorEndpointConnectionAtCoordinate(
+                cornerConveyor,
+                anchorBlock.Coordinate,
+                resolvedQuarterTurns,
+                previewToIgnore);
+        }
+
+        resolvedPrefab = ResolveConveyorVariantPrefab(conveyorPrototype, 0) ?? conveyorPrototype;
+        if (!(resolvedPrefab is ConveyorBelt straightConveyor) || straightConveyor.IsCornerVariant)
+        {
+            return false;
+        }
+
+        return TryGetFootprintBlocks(anchorBlock.Coordinate, resolvedPrefab, resolvedQuarterTurns, previewToIgnore, out _);
     }
 
     private bool TryResolveCornerPreservingConveyorRotation(
@@ -5780,13 +6041,58 @@ public class InstallationPlacementController : MonoBehaviour
             return 1;
         }
 
+        int itemId = activeInstallDefinition != null ? activeInstallDefinition.id : -1;
         PlayerBag handBag = GetPlayerHandBag();
-        if (handBag == null)
+        if (itemId < 0 && handBag != null)
+        {
+            itemId = handBag.GetSlotItemId(0);
+        }
+
+        if (itemId < 0)
         {
             return 0;
         }
 
-        return handBag.GetSlotCount(0);
+        int totalCount = 0;
+        if (handBag != null && handBag.GetSlotItemId(0) == itemId)
+        {
+            totalCount += handBag.GetSlotCount(0);
+        }
+
+        PlayerBag inventoryBag = GetPlayerInventoryBag();
+        if (inventoryBag != null && inventoryBag != handBag)
+        {
+            totalCount += inventoryBag.GetTotalItemCount(itemId);
+        }
+
+        return totalCount;
+    }
+
+    private int RemoveInstallItemsFromPlayer(int itemId, int requestedCount)
+    {
+        if (itemId < 0 || requestedCount <= 0)
+        {
+            return 0;
+        }
+
+        int removedCount = 0;
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
+        if (handBag != null)
+        {
+            removedCount += handBag.RemoveItems(itemId, requestedCount);
+            handBag.RefreshExternalStackCounts();
+        }
+
+        int remainingCount = requestedCount - removedCount;
+        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
+        if (remainingCount > 0 && inventoryBag != null && inventoryBag != handBag)
+        {
+            removedCount += inventoryBag.RemoveItems(itemId, remainingCount);
+        }
+
+        player?.UpdateCarryState();
+        return removedCount;
     }
 
     private int GetInstallPreviewCount()
@@ -6136,7 +6442,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!TryGetFootprintBlocks(block.Coordinate, footprintSource, quarterTurns, previewToIgnore, out _))
         {
-            return false;
+            return CanPlaceStraightConveyorPreviewOnBlock(block, previewToIgnore, quarterTurns);
         }
 
         if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype))
@@ -6160,6 +6466,55 @@ public class InstallationPlacementController : MonoBehaviour
             previewToIgnore);
     }
 
+    private bool CanPlaceStraightConveyorPreviewOnBlock(Block block, MapObject previewToIgnore, int quarterTurns)
+    {
+        if (block == null
+            || !CanUseStraightConveyorFallback(previewToIgnore)
+            || !TryResolveStraightConveyorPlacementSource(out MapObject sourcePrefab))
+        {
+            return false;
+        }
+
+        return TryGetFootprintBlocks(
+            block.Coordinate,
+            sourcePrefab,
+            NormalizePlacementQuarterTurns(quarterTurns),
+            previewToIgnore,
+            out _);
+    }
+
+    private bool CanUseStraightConveyorFallback(MapObject preview)
+    {
+        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt))
+        {
+            return false;
+        }
+
+        if (preview == null)
+        {
+            return true;
+        }
+
+        if (preview == activeInstallPreview && installPreviewConveyorVariantMode == ConveyorPreviewVariantMode.Straight)
+        {
+            return true;
+        }
+
+        return preview is ConveyorBelt conveyorPreview && !conveyorPreview.IsCornerVariant;
+    }
+
+    private bool TryResolveStraightConveyorPlacementSource(out MapObject sourcePrefab)
+    {
+        sourcePrefab = null;
+        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype))
+        {
+            return false;
+        }
+
+        sourcePrefab = ResolveConveyorVariantPrefab(conveyorPrototype, 0) ?? conveyorPrototype;
+        return sourcePrefab is ConveyorBelt straightConveyor && !straightConveyor.IsCornerVariant;
+    }
+
     private bool TryFindPlaceableInstallPreviewQuarterTurns(
         Block block,
         MapObject previewToIgnore,
@@ -6179,6 +6534,11 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (IsConveyorInstallPreview(previewToIgnore))
         {
+            if (CanPlaceStraightConveyorPreviewOnBlock(block, previewToIgnore, resolvedQuarterTurns))
+            {
+                return true;
+            }
+
             return false;
         }
 

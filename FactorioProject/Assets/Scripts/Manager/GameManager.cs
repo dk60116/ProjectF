@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -149,11 +150,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int MaxItemsPerRequest = 1000;
     private const int RequestTimeoutMilliseconds = 5000;
 
-    private readonly Queue<GiveRequest> pendingRequests = new Queue<GiveRequest>();
+    private readonly Queue<ToolRequest> pendingRequests = new Queue<ToolRequest>();
     private readonly object pendingRequestLock = new object();
     private TcpListener listener;
     private Thread listenerThread;
     private int port = DefaultPort;
+    private float fpsSampleElapsed;
+    private int fpsSampleFrames;
+    private float currentFps;
+    private float currentFrameMs;
     private volatile bool stopRequested;
 
     public void Configure(int listenPort)
@@ -199,11 +204,36 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void Update()
     {
-        while (TryDequeueRequest(out GiveRequest request))
+        UpdateFrameStats();
+
+        while (TryDequeueRequest(out ToolRequest request))
         {
-            request.Result = GiveItems(request.ItemId, request.Count);
+            request.Result = request.Command == ToolCommand.Status
+                ? GetStatusResult()
+                : GiveItems(request.ItemId, request.Count);
             request.Completion.Set();
         }
+    }
+
+    private void UpdateFrameStats()
+    {
+        float deltaTime = Time.unscaledDeltaTime;
+        if (deltaTime <= 0f)
+        {
+            return;
+        }
+
+        fpsSampleElapsed += deltaTime;
+        fpsSampleFrames++;
+        if (fpsSampleElapsed < 0.5f)
+        {
+            return;
+        }
+
+        currentFps = fpsSampleFrames / fpsSampleElapsed;
+        currentFrameMs = 1000f / Mathf.Max(currentFps, 0.0001f);
+        fpsSampleElapsed = 0f;
+        fpsSampleFrames = 0;
     }
 
     private void StartServer()
@@ -279,13 +309,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 return;
             }
 
-            if (!TryParseRequest(line, out int itemId, out int count, out string error))
+            if (!TryParseRequest(line, out ToolCommand command, out int itemId, out int count, out string error))
             {
                 writer.WriteLine($"error {error}");
                 return;
             }
 
-            GiveRequest request = new GiveRequest(itemId, count);
+            ToolRequest request = new ToolRequest(command, itemId, count);
             EnqueueRequest(request);
             if (!request.Completion.Wait(RequestTimeoutMilliseconds))
             {
@@ -299,8 +329,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
     }
 
-    private static bool TryParseRequest(string line, out int itemId, out int count, out string error)
+    private static bool TryParseRequest(string line, out ToolCommand command, out int itemId, out int count, out string error)
     {
+        command = ToolCommand.Give;
         itemId = -1;
         count = 1;
         error = string.Empty;
@@ -314,6 +345,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         string[] parts = line.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 1 && string.Equals(parts[0], "ping", StringComparison.OrdinalIgnoreCase))
         {
+            command = ToolCommand.Ping;
+            itemId = 0;
+            count = 0;
+            return true;
+        }
+
+        if (parts.Length == 1 && string.Equals(parts[0], "status", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.Status;
             itemId = 0;
             count = 0;
             return true;
@@ -321,7 +361,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count]";
+            error = "usage: give <itemId> [count] | ping | status";
             return false;
         }
 
@@ -341,7 +381,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return true;
     }
 
-    private void EnqueueRequest(GiveRequest request)
+    private void EnqueueRequest(ToolRequest request)
     {
         lock (pendingRequestLock)
         {
@@ -349,7 +389,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
     }
 
-    private bool TryDequeueRequest(out GiveRequest request)
+    private bool TryDequeueRequest(out ToolRequest request)
     {
         lock (pendingRequestLock)
         {
@@ -362,6 +402,19 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             request = pendingRequests.Dequeue();
             return true;
         }
+    }
+
+    private GiveResult GetStatusResult()
+    {
+        float fps = currentFps;
+        float frameMs = currentFrameMs;
+        if (fps <= 0f && Time.unscaledDeltaTime > 0f)
+        {
+            fps = 1f / Time.unscaledDeltaTime;
+            frameMs = Time.unscaledDeltaTime * 1000f;
+        }
+
+        return GiveResult.Status(fps, frameMs);
     }
 
     private GiveResult GiveItems(int itemId, int count)
@@ -425,14 +478,23 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return GiveResult.Success(itemId, count, givenCount, bagCount, handCount, droppedCount);
     }
 
-    private sealed class GiveRequest
+    private enum ToolCommand
     {
-        public GiveRequest(int itemId, int count)
+        Give,
+        Ping,
+        Status
+    }
+
+    private sealed class ToolRequest
+    {
+        public ToolRequest(ToolCommand command, int itemId, int count)
         {
+            Command = command;
             ItemId = itemId;
             Count = count;
         }
 
+        public ToolCommand Command { get; }
         public int ItemId { get; }
         public int Count { get; }
         public ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
@@ -441,7 +503,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private readonly struct GiveResult
     {
-        private GiveResult(bool success, int itemId, int requested, int given, int bag, int hand, int dropped, string message)
+        private GiveResult(bool success, int itemId, int requested, int given, int bag, int hand, int dropped, float fps, float frameMs, string message)
         {
             IsSuccess = success;
             ItemId = itemId;
@@ -450,6 +512,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             Bag = bag;
             Hand = hand;
             Dropped = dropped;
+            Fps = fps;
+            FrameMs = frameMs;
             Message = message;
         }
 
@@ -460,21 +524,45 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         private int Bag { get; }
         private int Hand { get; }
         private int Dropped { get; }
+        private float Fps { get; }
+        private float FrameMs { get; }
         private string Message { get; }
 
         public static GiveResult Success(int itemId, int requested, int given, int bag, int hand, int dropped, string message = "ok")
         {
-            return new GiveResult(true, itemId, requested, given, bag, hand, dropped, message);
+            return new GiveResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, message);
         }
 
         public static GiveResult Error(int itemId, int requested, string message)
         {
-            return new GiveResult(false, itemId, requested, 0, 0, 0, 0, message);
+            return new GiveResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, message);
+        }
+
+        public static GiveResult Status(float fps, float frameMs)
+        {
+            return new GiveResult(true, 0, 0, 0, 0, 0, 0, fps, frameMs, "status");
         }
 
         public string ToProtocolLine()
         {
             string prefix = IsSuccess ? "ok" : "error";
+            if (Fps >= 0f)
+            {
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} message=\"{9}\"",
+                    prefix,
+                    ItemId,
+                    Requested,
+                    Given,
+                    Bag,
+                    Hand,
+                    Dropped,
+                    Fps,
+                    FrameMs,
+                    Message);
+            }
+
             return $"{prefix} itemId={ItemId} requested={Requested} given={Given} bag={Bag} hand={Hand} dropped={Dropped} message=\"{Message}\"";
         }
     }

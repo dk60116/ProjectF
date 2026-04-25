@@ -37,7 +37,10 @@ internal sealed class ItemGiveForm : Form
     private readonly TextBox logTextBox = new TextBox();
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
+    private readonly Label fpsLabel = new Label();
+    private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private bool refreshingItems;
+    private bool pollingStatus;
 
     public ItemGiveForm()
     {
@@ -85,8 +88,16 @@ internal sealed class ItemGiveForm : Form
         };
 
         Panel headerPanel = new Panel { Dock = DockStyle.Fill };
+        fpsLabel.Text = "FPS: --";
+        fpsLabel.AutoSize = true;
+        fpsLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
+        fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+        fpsLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         headerPanel.Controls.Add(titleLabel);
         headerPanel.Controls.Add(descriptionLabel);
+        headerPanel.Controls.Add(fpsLabel);
+        headerPanel.Resize += (_, _) => PositionFpsLabel(headerPanel);
+        PositionFpsLabel(headerPanel);
         layout.Controls.Add(headerPanel, 0, 0);
         layout.SetColumnSpan(headerPanel, 2);
 
@@ -207,6 +218,11 @@ internal sealed class ItemGiveForm : Form
         AcceptButton = giveButton;
 
         LoadCatalog();
+        statusTimer.Interval = 1000;
+        statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        Shown += async (_, _) => await RefreshStatusAsync();
+        FormClosed += (_, _) => statusTimer.Stop();
+        statusTimer.Start();
     }
 
     private static Panel CreateCardPanel()
@@ -256,6 +272,13 @@ internal sealed class ItemGiveForm : Form
         button.ForeColor = Color.FromArgb(243, 234, 206);
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderColor = Color.FromArgb(101, 105, 84);
+    }
+
+    private void PositionFpsLabel(Control parent)
+    {
+        fpsLabel.Location = new Point(
+            Math.Max(0, parent.ClientSize.Width - fpsLabel.Width),
+            8);
     }
 
     private void LoadCatalog()
@@ -467,6 +490,50 @@ internal sealed class ItemGiveForm : Form
         await SendCommandAsync("ping", "Ping");
     }
 
+    private async Task RefreshStatusAsync()
+    {
+        if (pollingStatus)
+        {
+            return;
+        }
+
+        pollingStatus = true;
+        try
+        {
+            string host = string.IsNullOrWhiteSpace(hostTextBox.Text) ? DefaultHost : hostTextBox.Text.Trim();
+            int port = Decimal.ToInt32(portInput.Value);
+            string response = await SendProtocolLineAsync(host, port, "status");
+            if (response.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
+                && TryReadProtocolFloat(response, "fps", out float fps)
+                && TryReadProtocolFloat(response, "frameMs", out float frameMs))
+            {
+                fpsLabel.Text = $"FPS: {fps:0.0}  ({frameMs:0.0} ms)";
+                fpsLabel.ForeColor = fps >= 50f
+                    ? Color.FromArgb(126, 218, 126)
+                    : fps >= 30f
+                        ? Color.FromArgb(235, 189, 92)
+                        : Color.FromArgb(236, 104, 94);
+            }
+            else
+            {
+                fpsLabel.Text = "FPS: --";
+                fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+            }
+
+            PositionFpsLabel(fpsLabel.Parent ?? this);
+        }
+        catch (Exception exception) when (exception is SocketException || exception is IOException || exception is TimeoutException)
+        {
+            fpsLabel.Text = "FPS: offline";
+            fpsLabel.ForeColor = Color.FromArgb(236, 104, 94);
+            PositionFpsLabel(fpsLabel.Parent ?? this);
+        }
+        finally
+        {
+            pollingStatus = false;
+        }
+    }
+
     private async Task SendCommandAsync(string command, string displayName)
     {
         SetBusy(true, $"{displayName} 전송 중...");
@@ -510,6 +577,28 @@ internal sealed class ItemGiveForm : Form
         await writer.WriteLineAsync(command);
         string? response = await reader.ReadLineAsync().WaitAsync(TimeSpan.FromMilliseconds(TimeoutMilliseconds));
         return string.IsNullOrWhiteSpace(response) ? "error no response from game" : response;
+    }
+
+    private static bool TryReadProtocolFloat(string response, string key, out float value)
+    {
+        value = 0f;
+        string prefix = key + "=";
+        string[] parts = response.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (string part in parts)
+        {
+            if (!part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return float.TryParse(
+                part.Substring(prefix.Length),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out value);
+        }
+
+        return false;
     }
 
     private void SetBusy(bool busy, string status)

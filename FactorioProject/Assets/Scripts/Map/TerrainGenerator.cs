@@ -936,7 +936,15 @@ public class TerrainGenerator : MonoBehaviour
         conveyorTickBuffer.Clear();
         foreach (Block block in activeConveyors)
         {
-            conveyorTickBuffer.Add(block);
+            if (block != null && block.ShouldTickActiveConveyor())
+            {
+                conveyorTickBuffer.Add(block);
+            }
+        }
+
+        if (conveyorTickBuffer.Count == 0)
+        {
+            return;
         }
 
         conveyorTickBuffer.Sort(CompareActiveConveyorTickOrder);
@@ -3062,7 +3070,13 @@ public class TerrainGenerator : MonoBehaviour
 
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
-            if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
+            if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
+                    itemId,
+                    worldPosition,
+                    worldPosition,
+                    0f,
+                    out targetPortableObject,
+                    out _))
             {
                 return false;
             }
@@ -3191,14 +3205,16 @@ public class TerrainGenerator : MonoBehaviour
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
             dropCoordinate = focusedConveyorBlock.Coordinate;
-            int acceptedCount = Mathf.Min(itemCount, 1, focusedConveyorBlock.GetAvailableConveyorCapacity());
+            int acceptedCount = Mathf.Min(itemCount, 1);
             for (int i = 0; i < acceptedCount; i++)
             {
-                if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(
+                if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
                         itemId,
+                        worldPosition,
                         startWorldPosition,
                         i * Mathf.Max(0f, moveInterval),
                         out PortableObject droppedObject,
+                        out Block targetConveyorBlock,
                         null,
                         startWorldPositionProvider))
                 {
@@ -3206,6 +3222,11 @@ public class TerrainGenerator : MonoBehaviour
                 }
 
                 droppedCount++;
+                if (targetConveyorBlock != null)
+                {
+                    dropCoordinate = targetConveyorBlock.Coordinate;
+                }
+
                 MarkDroppedPickupGate(droppedObject, false, worldPosition);
             }
 
@@ -3290,7 +3311,14 @@ public class TerrainGenerator : MonoBehaviour
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
-            if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
+            if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
+                    itemId,
+                    worldPosition,
+                    startWorldPosition,
+                    0f,
+                    out targetPortableObject,
+                    out _,
+                    onComplete))
             {
                 return false;
             }
@@ -3513,7 +3541,13 @@ public class TerrainGenerator : MonoBehaviour
 
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
-            if (!focusedConveyorBlock.TryAddConveyorObjectAnimated(itemId, worldPosition, 0f, out targetPortableObject))
+            if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
+                    itemId,
+                    worldPosition,
+                    worldPosition,
+                    0f,
+                    out targetPortableObject,
+                    out _))
             {
                 return false;
             }
