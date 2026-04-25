@@ -70,6 +70,7 @@ public class Block : BaseObject
     private MeshRenderer[] cachedBodyRenderers = Array.Empty<MeshRenderer>();
     private float cachedInputAreaCenterHeight;
     private bool childReferencesCached;
+    private bool inputAreaCenterObjectsVisible = true;
 
     private struct ConveyorCornerMotionState
     {
@@ -201,6 +202,7 @@ public class Block : BaseObject
         type = blockType;
         objectName = $"{blockType}_{blockCoordinate.x}_{blockCoordinate.y}";
         gameObject.name = $"Block ({blockCoordinate.x}, {blockCoordinate.y})";
+        inputAreaCenterObjectsVisible = true;
         SetFocusVisible(false);
     }
 
@@ -225,6 +227,7 @@ public class Block : BaseObject
     public void PrepareForPool()
     {
         SetFocusVisible(false);
+        inputAreaCenterObjectsVisible = true;
         ResetFloorObjects();
 
         MapObject childMapObject = mapObject;
@@ -241,11 +244,38 @@ public class Block : BaseObject
             }
         }
 
+        DestroyChildMapObjectsForPool(childMapObject);
         SetMapObject(null);
         coordinate = default;
         type = default;
         objectName = string.Empty;
         gameObject.name = "Pooled Block";
+    }
+
+    private void DestroyChildMapObjectsForPool(MapObject skippedObject)
+    {
+        MapObject[] childMapObjects = GetComponentsInChildren<MapObject>(true);
+        for (int i = 0; i < childMapObjects.Length; i++)
+        {
+            MapObject childMapObject = childMapObjects[i];
+            if (childMapObject == null
+                || childMapObject == skippedObject
+                || childMapObject.transform == null
+                || !childMapObject.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            childMapObject.transform.SetParent(null, true);
+            if (Application.isPlaying)
+            {
+                Destroy(childMapObject.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(childMapObject.gameObject);
+            }
+        }
     }
 
     public void SetBodyRotation(float yRotation)
@@ -401,6 +431,7 @@ public class Block : BaseObject
 
     public void SetInputAreaCenterObjectsVisible(bool visible)
     {
+        inputAreaCenterObjectsVisible = visible;
         CleanupPortableStack(inputAreaCenterStack);
         EnsureInputAreaCenterAnchorInitialized();
 
@@ -412,28 +443,7 @@ public class Block : BaseObject
                 continue;
             }
 
-            if (!visible)
-            {
-                portableObject.SetBatchedRendering(false);
-                if (portableObject.gameObject.activeSelf)
-                {
-                    portableObject.gameObject.SetActive(false);
-                }
-                continue;
-            }
-
-            if (portableObject.IsMovingToTarget)
-            {
-                if (!portableObject.gameObject.activeSelf)
-                {
-                    portableObject.gameObject.SetActive(true);
-                }
-
-                continue;
-            }
-
-            ConfigureInputAreaCenterObjectTransform(portableObject, i);
-            portableObject.SetBatchedRendering(true);
+            ApplyInputAreaCenterObjectVisibility(portableObject, i);
         }
     }
 
@@ -620,7 +630,7 @@ public class Block : BaseObject
         portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
         portableObject.transform.rotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.gameObject.SetActive(inputAreaCenterObjectsVisible);
 
         int objectIndex = inputAreaCenterStack.Count;
         Vector3 finalLocalPosition = new Vector3(0f, objectIndex * InputAreaCenterVerticalSpacing, 0f);
@@ -640,12 +650,7 @@ public class Block : BaseObject
                 return;
             }
 
-            portableObject.transform.SetParent(inputAreaCenterAnchor, false);
-            portableObject.transform.localPosition = finalLocalPosition;
-            portableObject.transform.localRotation = Quaternion.identity;
-            portableObject.transform.localScale = Vector3.one;
-            portableObject.gameObject.SetActive(true);
-            portableObject.SetBatchedRendering(true);
+            ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
             gate?.MarkSettled();
             onComplete?.Invoke();
         }, false);
@@ -1456,7 +1461,18 @@ public class Block : BaseObject
     public Vector2Int Coordinate => coordinate;
     public BlockType Type => type;
     public MapObject MapObject => mapObject;
-    public Resource Resource => mapObject as Resource;
+    public Resource Resource
+    {
+        get
+        {
+            if (mapObject is Resource resource)
+            {
+                return resource;
+            }
+
+            return GetComponentInChildren<Resource>(true);
+        }
+    }
     public Transform Body => body;
 
     public void TickConveyor(float deltaTime)
@@ -2758,6 +2774,46 @@ public class Block : BaseObject
         portableObject.transform.localRotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
         portableObject.gameObject.SetActive(true);
+    }
+
+    private void ApplyInputAreaCenterObjectVisibility(PortableObject portableObject, int stackIndex)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        if (!inputAreaCenterObjectsVisible)
+        {
+            if (inputAreaCenterAnchor != null)
+            {
+                portableObject.transform.SetParent(inputAreaCenterAnchor, false);
+                portableObject.transform.localPosition = new Vector3(0f, stackIndex * InputAreaCenterVerticalSpacing, 0f);
+                portableObject.transform.localRotation = Quaternion.identity;
+                portableObject.transform.localScale = Vector3.one;
+            }
+
+            portableObject.SetBatchedRendering(false);
+            if (portableObject.gameObject.activeSelf)
+            {
+                portableObject.gameObject.SetActive(false);
+            }
+
+            return;
+        }
+
+        if (portableObject.IsMovingToTarget)
+        {
+            if (!portableObject.gameObject.activeSelf)
+            {
+                portableObject.gameObject.SetActive(true);
+            }
+
+            return;
+        }
+
+        ConfigureInputAreaCenterObjectTransform(portableObject, stackIndex);
+        portableObject.SetBatchedRendering(true);
     }
 
     private bool IsStackCompatible(List<PortableObject> stack, int objectId)
@@ -5281,9 +5337,9 @@ public class Block : BaseObject
         }
 
         portableObject.SetItem(objectId);
-        ConfigureInputAreaCenterObjectTransform(portableObject, inputAreaCenterStack.Count);
-        portableObject.SetBatchedRendering(true);
+        int objectIndex = inputAreaCenterStack.Count;
         inputAreaCenterStack.Add(portableObject);
+        ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
         targetPortableObject = portableObject;
         return true;
     }

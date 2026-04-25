@@ -328,16 +328,65 @@ public class Resource : MapObject
         UpdateBodyScale();
     }
 
+    public bool TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
+    {
+        outputItemId = ResolveOutputItemId();
+        outputCount = GetCount;
+        return CanHarvest && outputItemId >= 0 && outputCount > 0;
+    }
+
+    public bool TryHarvestForMachine(out int outputItemId, out int outputCount)
+    {
+        if (!TryPeekMachineHarvestOutput(out outputItemId, out outputCount))
+        {
+            outputItemId = -1;
+            outputCount = 0;
+            return false;
+        }
+
+        int depletedResourceCount = ConsumeGaugeDotsInternal(CurrentGauge, out bool resourceFullyDepleted);
+        if (depletedResourceCount <= 0)
+        {
+            outputItemId = -1;
+            outputCount = 0;
+            return false;
+        }
+
+        if (resourceFullyDepleted)
+        {
+            HideBodyPresentation();
+        }
+
+        outputCount *= depletedResourceCount;
+        return outputCount > 0;
+    }
+
     private void ConsumeGaugeDots(int gaugeAmount)
     {
-        if (!CanHarvest || gaugeAmount <= 0)
+        int depletedResourceCount = ConsumeGaugeDotsInternal(gaugeAmount, out bool resourceFullyDepleted);
+        if (depletedResourceCount <= 0)
         {
             return;
         }
 
+        int outputItemId = ResolveOutputItemId();
+        for (int i = 0; i < depletedResourceCount; i++)
+        {
+            bool hideAfterSequence = resourceFullyDepleted && i == depletedResourceCount - 1;
+            PlayPickupSequence(0, outputItemId, hideAfterSequence);
+        }
+    }
+
+    private int ConsumeGaugeDotsInternal(int gaugeAmount, out bool resourceFullyDepleted)
+    {
+        resourceFullyDepleted = false;
+        if (!CanHarvest || gaugeAmount <= 0)
+        {
+            return 0;
+        }
+
         int remainingGaugeAmount = gaugeAmount;
         int depletedResourceCount = 0;
-        bool resourceFullyDepleted = false;
 
         while (remainingGaugeAmount > 0 && CanHarvest)
         {
@@ -365,19 +414,12 @@ public class Resource : MapObject
             resourceStatus.currentGague = MaxGauge;
         }
 
-        if (depletedResourceCount <= 0)
+        if (depletedResourceCount > 0)
         {
-            return;
+            UpdateBodyScale();
         }
 
-        UpdateBodyScale();
-
-        int outputItemId = ResolveOutputItemId();
-        for (int i = 0; i < depletedResourceCount; i++)
-        {
-            bool hideAfterSequence = resourceFullyDepleted && i == depletedResourceCount - 1;
-            PlayPickupSequence(0, outputItemId, hideAfterSequence);
-        }
+        return depletedResourceCount;
     }
 
     private void PlayPickupSequence(int bagNum, int objectId, bool hideAfterSequence)
@@ -665,6 +707,21 @@ public class Resource : MapObject
 
     private int ResolveOutputItemId()
     {
+        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
+        {
+            if (!TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId)
+                || namedOutputItemId != definitionOutputItemId)
+            {
+                resourceStatus.outputId = definitionOutputItemId;
+                resourceStatus.outputItemName = definitionOutputItemName;
+                return definitionOutputItemId;
+            }
+
+            resourceStatus.outputId = definitionOutputItemId;
+            resourceStatus.outputItemName = definitionOutputItemName;
+            return definitionOutputItemId;
+        }
+
         if (TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int outputItemId))
         {
             return outputItemId;
@@ -680,6 +737,21 @@ public class Resource : MapObject
 
     private void MigrateOutputItemNameIfNeeded()
     {
+        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
+        {
+            if (!TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId)
+                || namedOutputItemId != definitionOutputItemId)
+            {
+                resourceStatus.outputId = definitionOutputItemId;
+                resourceStatus.outputItemName = definitionOutputItemName;
+                return;
+            }
+
+            resourceStatus.outputId = definitionOutputItemId;
+            resourceStatus.outputItemName = definitionOutputItemName;
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(resourceStatus.outputItemName))
         {
             resourceStatus.outputItemName = resourceStatus.outputItemName.Trim();
@@ -696,6 +768,25 @@ public class Resource : MapObject
         {
             resourceStatus.outputItemName = outputItemName;
         }
+    }
+
+    private bool TryResolveDefinitionOutputItem(out int outputItemId, out string outputItemName)
+    {
+        outputItemId = -1;
+        outputItemName = null;
+        if (definition == null || string.IsNullOrWhiteSpace(definition.resourceName))
+        {
+            return false;
+        }
+
+        string candidateName = definition.resourceName.Trim();
+        if (!TryResolveOutputItemNameToId(candidateName, out outputItemId))
+        {
+            return false;
+        }
+
+        outputItemName = candidateName;
+        return outputItemId >= 0;
     }
 
     private bool TryResolveOutputItemNameToId(string outputItemName, out int outputItemId)

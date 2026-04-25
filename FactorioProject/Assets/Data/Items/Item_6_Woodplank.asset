@@ -26,3 +26,4 @@ MonoBehaviour:
   energyAmount: 8
   useEnergyType: 0
   useEnergyAmount: 0
+  completeEnergy: 0

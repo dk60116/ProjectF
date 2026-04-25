@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_18_Coil
+  m_EditorClassIdentifier: 
+  itemName: Coil
+  id: 18
+  mapObject: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: f8f6fe632b6192645ad55463e16606bc, type: 2}
+  portableMat: {fileID: 2100000, guid: 750a1b1cd0486ef40b28f8b42514797f, type: 2}
+  icon: {fileID: 21300000, guid: a6db811d32e4d74498bb391f271afca2, type: 3}
+  interactionButtonList: []
+  size: 0
+  itemFilter: 0
+  capacity: 10
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 0
+  useEnergyAmount: 0
+  completeEnergy: 0

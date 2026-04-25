@@ -114,6 +114,9 @@ MonoBehaviour:
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1
   energyGaugeVerticalOffset: 0.25
+  craftProgressGaugeCanvasVerticalOffset: 14
+  energyGaugeFillColor: {r: 1, g: 0.05, b: 0, a: 1}
+  craftProgressGaugeFillColor: {r: 0.026268482, g: 1, b: 0, a: 1}
   runtimeAreaMaxObjects: 10
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []
@@ -125,6 +128,7 @@ MonoBehaviour:
   hasActiveCraft: 0
   waitingForOutput: 0
   remainingCraftTime: 0
+  activeCraftConsumedEnergy: 0
   activeRecipeIndex: -1
   activeOutputItemId: -1
   activeOutputCount: 0

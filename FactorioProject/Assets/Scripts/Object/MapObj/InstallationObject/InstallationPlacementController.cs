@@ -1498,16 +1498,82 @@ public class InstallationPlacementController : MonoBehaviour
         Quaternion previewRotation = activeInstallPreview.transform.rotation;
         Vector3 previewPosition = activeInstallPreview.transform.position;
         int quarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        int conveyorVariantKind = GetConveyorVariantKind(activeInstallPreview);
+        if (!CanRestoreEditedInstallationAt(
+                editSession,
+                anchorCoordinate,
+                quarterTurns,
+                conveyorVariantKind,
+                activeInstallPreview))
+        {
+            InvalidateInstallGrid();
+            return;
+        }
+
         activeInstallationEditSession = null;
         RestoreEditedInstallation(
             editSession,
             anchorCoordinate,
             quarterTurns,
-            GetConveyorVariantKind(activeInstallPreview),
+            conveyorVariantKind,
             previewRotation,
             previewPosition);
         ClearInstallPreview();
         SetMapEditModeActive(false);
+    }
+
+    private bool CanRestoreEditedInstallationAt(
+        InstallationEditSession editSession,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        int conveyorVariantKind,
+        MapObject previewToIgnore)
+    {
+        if (!TryResolveEditedInstallationFootprintSource(
+                editSession,
+                anchorCoordinate,
+                quarterTurns,
+                conveyorVariantKind,
+                previewToIgnore,
+                out MapObject footprintSource))
+        {
+            return false;
+        }
+
+        return TryGetFootprintBlocks(anchorCoordinate, footprintSource, quarterTurns, previewToIgnore, out _);
+    }
+
+    private bool TryResolveEditedInstallationFootprintSource(
+        InstallationEditSession editSession,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        int conveyorVariantKind,
+        MapObject fallbackSource,
+        out MapObject footprintSource)
+    {
+        footprintSource = null;
+        if (editSession == null)
+        {
+            return false;
+        }
+
+        MapObject desiredSourcePrefab = null;
+        if (editSession.definition != null
+            && editSession.definition.mapObject is ConveyorBelt conveyorPrototype
+            && conveyorVariantKind >= 0)
+        {
+            desiredSourcePrefab = ResolveConveyorVariantPrefab(conveyorPrototype, conveyorVariantKind);
+        }
+
+        if (desiredSourcePrefab == null && editSession.definition != null)
+        {
+            desiredSourcePrefab = ResolveInstalledObjectSourcePrefab(editSession.definition, anchorCoordinate, quarterTurns);
+        }
+
+        footprintSource = desiredSourcePrefab != null
+            ? desiredSourcePrefab
+            : (editSession.definition != null ? editSession.definition.mapObject : fallbackSource);
+        return footprintSource != null;
     }
 
     public bool MapEditModeActive => mapEditModeActive;
@@ -1594,16 +1660,20 @@ public class InstallationPlacementController : MonoBehaviour
             restoredRotation);
         restoredObject.gameObject.SetActive(true);
 
+        MapObject footprintSource = desiredSourcePrefab != null ? desiredSourcePrefab : editSession.definition.mapObject;
         List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(
             anchorCoordinate,
-            desiredSourcePrefab != null ? desiredSourcePrefab : editSession.definition.mapObject,
+            footprintSource,
             quarterTurns);
         for (int i = 0; i < occupiedCoordinates.Count; i++)
         {
             if (terrain != null && terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block) && block != null)
             {
-                block.SetMapObject(restoredObject);
-                block.ApplyFloorObjectState(null);
+                if (ShouldBindInstalledObjectToBlock(block, anchorCoordinate, footprintSource, quarterTurns))
+                {
+                    block.SetMapObject(restoredObject);
+                    block.ApplyFloorObjectState(null);
+                }
             }
         }
 
@@ -1788,7 +1858,15 @@ public class InstallationPlacementController : MonoBehaviour
 
             for (int blockIndex = 0; blockIndex < placementPlan.footprintBlocks.Count; blockIndex++)
             {
-                placementPlan.footprintBlocks[blockIndex].SetMapObject(installedObject);
+                Block footprintBlock = placementPlan.footprintBlocks[blockIndex];
+                if (ShouldBindInstalledObjectToBlock(
+                        footprintBlock,
+                        placementPlan.anchorBlock.Coordinate,
+                        placementPlan.sourcePrefab,
+                        placementPlan.quarterTurns))
+                {
+                    footprintBlock.SetMapObject(installedObject);
+                }
             }
 
             ConfigureInstalledObjectRuntime(installedObject, placementPlan.anchorBlock.Coordinate, placementPlan.quarterTurns);
@@ -1845,13 +1923,30 @@ public class InstallationPlacementController : MonoBehaviour
         int previewQuarterTurns = GetPreviewQuarterTurns(preview);
         installPreviewSourcePrefabsByPreview.TryGetValue(preview, out MapObject sourcePrefab);
 
-        if (activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype
-            && preview is ConveyorBelt previewConveyor)
+        if (activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype)
         {
-            sourcePrefab = ResolveConveyorVariantPrefab(
-                             conveyorPrototype,
-                             GetConveyorVariantKind(previewConveyor))
-                         ?? sourcePrefab;
+            ConveyorPreviewVariantMode previewVariantMode = preview == activeInstallPreview
+                ? installPreviewConveyorVariantMode
+                : GetConveyorPreviewVariantMode(preview);
+
+            if (previewVariantMode == ConveyorPreviewVariantMode.Straight)
+            {
+                sourcePrefab = ResolveConveyorVariantPrefab(conveyorPrototype, 0) ?? sourcePrefab;
+            }
+            else if (preview is ConveyorBelt previewConveyor)
+            {
+                sourcePrefab = ResolveConveyorVariantPrefab(conveyorPrototype, GetConveyorVariantKind(previewConveyor)) ?? sourcePrefab;
+            }
+            else
+            {
+                sourcePrefab = ResolveInstalledObjectSourcePrefab(
+                                   activeInstallDefinition,
+                                   anchorBlock.Coordinate,
+                                   previewQuarterTurns,
+                                   preview,
+                                   previewVariantMode)
+                               ?? sourcePrefab;
+            }
         }
 
         if (sourcePrefab == null)
@@ -1876,7 +1971,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!TryGetFootprintBlocks(
                 anchorBlock.Coordinate,
-                preview,
+                sourcePrefab,
                 resolvedQuarterTurns,
                 preview,
                 out List<Block> footprintBlocks,
@@ -1886,7 +1981,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorBlock.Coordinate, preview, resolvedQuarterTurns);
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorBlock.Coordinate, sourcePrefab, resolvedQuarterTurns);
         for (int i = 0; i < footprintCoordinates.Count; i++)
         {
             if (reservedFootprintCoordinates != null && reservedFootprintCoordinates.Contains(footprintCoordinates[i]))
@@ -2127,6 +2222,25 @@ public class InstallationPlacementController : MonoBehaviour
         inputOutputModule.ConfigureRuntimeFocusCoordinates(focusCoordinates);
     }
 
+    private List<Vector2Int> GetInstalledObjectBlockingCoordinates(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        if (TryGetRectGridBlockCoordinates(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                InputOutputModule.RectGridBlockType.Object,
+                out List<Vector2Int> objectCoordinates)
+            && objectCoordinates.Count > 0)
+        {
+            return objectCoordinates;
+        }
+
+        return GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+    }
+
     public void ConfigureInstalledObjectRuntime(
         MapObject installedObject,
         Vector2Int anchorCoordinate,
@@ -2144,7 +2258,7 @@ public class InstallationPlacementController : MonoBehaviour
             installationObject.ConfigurePlacementRuntime(
                 anchorCoordinate,
                 quarterTurns,
-                GetFootprintCoordinates(anchorCoordinate, installedObject, quarterTurns),
+                GetInstalledObjectBlockingCoordinates(anchorCoordinate, installedObject, quarterTurns),
                 placementSequence);
         }
 
@@ -4271,10 +4385,19 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool MoveInstallPreviewToBlock(Block block)
     {
-        if (activeInstallPreview == null || block == null || !CanPlacePreviewOnBlock(block, activeInstallPreview, installPreviewQuarterTurns))
+        if (activeInstallPreview == null
+            || block == null
+            || !TryFindPlaceableInstallPreviewQuarterTurns(
+                block,
+                activeInstallPreview,
+                installPreviewQuarterTurns,
+                out int resolvedQuarterTurns))
         {
             return false;
         }
+
+        installPreviewQuarterTurns = resolvedQuarterTurns;
+        installPreviewQuarterTurnsByPreview[activeInstallPreview] = resolvedQuarterTurns;
 
         Vector2Int previousAnchorCoordinate = Vector2Int.zero;
         bool hadPreviousAnchorCoordinate = TryGetPreviewAnchorCoordinate(activeInstallPreview, out previousAnchorCoordinate);
@@ -5242,6 +5365,17 @@ public class InstallationPlacementController : MonoBehaviour
         Vector3 previewPosition = activeInstallPreview.transform.position;
         int quarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
         int conveyorVariantKind = GetConveyorVariantKind(activeInstallPreview);
+        if (!CanRestoreEditedInstallationAt(
+                editSession,
+                anchorCoordinate,
+                quarterTurns,
+                conveyorVariantKind,
+                activeInstallPreview))
+        {
+            InvalidateInstallGrid();
+            return false;
+        }
+
         activeInstallationEditSession = null;
         RestoreEditedInstallation(
             editSession,
@@ -5289,7 +5423,6 @@ public class InstallationPlacementController : MonoBehaviour
                 out previousConveyorChange);
         }
 
-        bool skipActiveConveyorPreviewRefresh = false;
         if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt conveyorBelt)
         {
             int logicalQuarterTurns = installPreviewQuarterTurns;
@@ -5298,66 +5431,45 @@ public class InstallationPlacementController : MonoBehaviour
                 logicalQuarterTurns = resolvedStraightQuarterTurns;
             }
 
-            bool useCornerVariant = activeInstallPreview is ConveyorBelt previewConveyor && previewConveyor.IsCornerVariant;
-            if (useCornerVariant
-                && TryResolveCornerPreservingConveyorRotation(
+            bool useCornerVariant = installPreviewConveyorVariantMode == ConveyorPreviewVariantMode.Corner
+                || (activeInstallPreview is ConveyorBelt previewConveyor && previewConveyor.IsCornerVariant);
+            int candidateQuarterTurns = useCornerVariant
+                ? logicalQuarterTurns
+                : (logicalQuarterTurns + 1) % 4;
+            bool canUseCornerVariantAfterTurn = !useCornerVariant
+                && hasAnchorBlock
+                && TryResolveConveyorCornerPlacementPrefab(
                     conveyorBelt,
                     anchorCoordinate,
-                    logicalQuarterTurns,
+                    candidateQuarterTurns,
                     activeInstallPreview,
-                    hasAnchorBlock,
-                    out MapObject cornerPreservingPrefab,
-                    out int cornerPreservingQuarterTurns))
-            {
-                installPreviewQuarterTurns = cornerPreservingQuarterTurns;
-                installPreviewConveyorVariantMode = ConveyorPreviewVariantMode.Corner;
-                skipActiveConveyorPreviewRefresh = true;
-                if (cornerPreservingPrefab != null
-                    && RequiresConveyorPreviewReplacement(activeInstallPreview, cornerPreservingPrefab))
-                {
-                    MapObject replacementPreview = Instantiate(cornerPreservingPrefab);
-                    if (replacementPreview != null)
-                    {
-                        replacementPreview.name = $"{cornerPreservingPrefab.name}_Blueprint";
-                        ConfigureInstallPreview(replacementPreview);
-                        ReplaceInstallPreviewInstance(
-                            activeInstallPreview,
-                            replacementPreview,
-                            cornerPreservingPrefab,
-                            anchorCoordinate,
-                            cornerPreservingQuarterTurns);
-                    }
-                }
-            }
-            else
-            {
-                int candidateQuarterTurns = useCornerVariant
-                    ? logicalQuarterTurns
-                    : (logicalQuarterTurns + 1) % 4;
-                bool canUseCornerVariantAfterTurn = hasAnchorBlock
-                    && TryResolveConveyorCornerPlacementPrefab(
-                        conveyorBelt,
-                        anchorCoordinate,
-                        candidateQuarterTurns,
-                        activeInstallPreview,
-                        out _);
-                conveyorBelt.HandlePlacementRotation(ref logicalQuarterTurns, ref useCornerVariant, canUseCornerVariantAfterTurn);
-                installPreviewQuarterTurns = logicalQuarterTurns;
-                installPreviewConveyorVariantMode = useCornerVariant
-                    ? ConveyorPreviewVariantMode.Corner
-                    : ConveyorPreviewVariantMode.Straight;
-            }
+                    out _);
+            conveyorBelt.HandlePlacementRotation(ref logicalQuarterTurns, ref useCornerVariant, canUseCornerVariantAfterTurn);
+            installPreviewQuarterTurns = logicalQuarterTurns;
+            installPreviewConveyorVariantMode = useCornerVariant
+                ? ConveyorPreviewVariantMode.Corner
+                : ConveyorPreviewVariantMode.Straight;
         }
         else
         {
-            installPreviewQuarterTurns = (installPreviewQuarterTurns + 1) % 4;
+            int nextQuarterTurns = (installPreviewQuarterTurns + 1) % 4;
+            if (hasAnchorBlock)
+            {
+                if (!TryFindPlaceableInstallPreviewQuarterTurns(
+                    anchorBlock,
+                    activeInstallPreview,
+                    nextQuarterTurns,
+                    out nextQuarterTurns))
+                {
+                    return;
+                }
+            }
+
+            installPreviewQuarterTurns = nextQuarterTurns;
         }
 
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
-        if (!skipActiveConveyorPreviewRefresh)
-        {
-            RefreshActiveConveyorPreviewVariant();
-        }
+        RefreshActiveConveyorPreviewVariant();
         activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
         if (activeInstallPreview is InstallationObject rotatedInstallationPreview)
         {
@@ -5627,6 +5739,11 @@ public class InstallationPlacementController : MonoBehaviour
         return 0;
     }
 
+    private static int NormalizePlacementQuarterTurns(int quarterTurns)
+    {
+        return ((quarterTurns % 4) + 4) % 4;
+    }
+
     private int ResolvePlacementQuarterTurnsFromRotation(MapObject sourcePrefab, Quaternion worldRotation, int fallbackQuarterTurns)
     {
         if (sourcePrefab == null)
@@ -5781,7 +5898,7 @@ public class InstallationPlacementController : MonoBehaviour
             TryResolveInitialConveyorPreviewQuarterTurns(block.Coordinate, conveyorPrototype, out quarterTurns);
         }
 
-        if (!CanPlacePreviewOnBlock(block, null, quarterTurns))
+        if (!TryFindPlaceableInstallPreviewQuarterTurns(block, null, quarterTurns, out quarterTurns))
         {
             return false;
         }
@@ -5994,15 +6111,29 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        int quarterTurns = quarterTurnsOverride ?? (previewToIgnore != null ? GetPreviewQuarterTurns(previewToIgnore) : installPreviewQuarterTurns);
         MapObject footprintSource = previewToIgnore != null
             ? previewToIgnore
             : (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null);
+        if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt)
+        {
+            ConveyorPreviewVariantMode previewVariantMode = previewToIgnore == activeInstallPreview
+                ? installPreviewConveyorVariantMode
+                : GetConveyorPreviewVariantMode(previewToIgnore);
+            footprintSource = ResolveInstalledObjectSourcePrefab(
+                                  activeInstallDefinition,
+                                  block.Coordinate,
+                                  quarterTurns,
+                                  previewToIgnore,
+                                  previewVariantMode)
+                              ?? footprintSource;
+        }
+
         if (footprintSource == null)
         {
             return false;
         }
 
-        int quarterTurns = quarterTurnsOverride ?? (previewToIgnore != null ? GetPreviewQuarterTurns(previewToIgnore) : installPreviewQuarterTurns);
         if (!TryGetFootprintBlocks(block.Coordinate, footprintSource, quarterTurns, previewToIgnore, out _))
         {
             return false;
@@ -6013,15 +6144,9 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        ConveyorBelt cornerConveyor = null;
-        if (previewToIgnore is ConveyorBelt previewConveyor)
-        {
-            cornerConveyor = previewConveyor.IsCornerVariant ? previewConveyor : null;
-        }
-        else if (footprintSource is ConveyorBelt footprintConveyor)
-        {
-            cornerConveyor = footprintConveyor.IsCornerVariant ? footprintConveyor : null;
-        }
+        ConveyorBelt cornerConveyor = footprintSource is ConveyorBelt footprintConveyor && footprintConveyor.IsCornerVariant
+            ? footprintConveyor
+            : null;
 
         if (cornerConveyor == null)
         {
@@ -6033,6 +6158,53 @@ public class InstallationPlacementController : MonoBehaviour
             block.Coordinate,
             quarterTurns,
             previewToIgnore);
+    }
+
+    private bool TryFindPlaceableInstallPreviewQuarterTurns(
+        Block block,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        if (block == null)
+        {
+            return false;
+        }
+
+        if (CanPlacePreviewOnBlock(block, previewToIgnore, resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (IsConveyorInstallPreview(previewToIgnore))
+        {
+            return false;
+        }
+
+        for (int offset = 1; offset < 4; offset++)
+        {
+            int candidateQuarterTurns = (resolvedQuarterTurns + offset) % 4;
+            if (!CanPlacePreviewOnBlock(block, previewToIgnore, candidateQuarterTurns))
+            {
+                continue;
+            }
+
+            resolvedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsConveyorInstallPreview(MapObject previewToIgnore)
+    {
+        if (previewToIgnore is ConveyorBelt)
+        {
+            return true;
+        }
+
+        return activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt;
     }
 
     private bool TryGetInstallPreviewAtCoordinate(Vector2Int coordinate, out MapObject preview)
@@ -6108,19 +6280,37 @@ public class InstallationPlacementController : MonoBehaviour
 
     private List<Vector2Int> GetFootprintLocalOffsets(MapObject footprintSource, int quarterTurns)
     {
-        if (TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell))
+        if (TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell)
+            && TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
         {
-            List<Vector2Int> rectGridOffsets = new List<Vector2Int>(rectGridWidth * rectGridHeight);
-            for (int y = 0; y < rectGridHeight; y++)
+            IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+            List<Vector2Int> rectGridOffsets = new List<Vector2Int>(placements.Count);
+            HashSet<Vector2Int> occupiedOffsets = new HashSet<Vector2Int>();
+
+            for (int i = 0; i < placements.Count; i++)
             {
-                for (int x = 0; x < rectGridWidth; x++)
+                InputOutputModule.RectGridBlockPlacement placement = placements[i];
+                if (placement.blockType == InputOutputModule.RectGridBlockType.None
+                    || placement.x < 0
+                    || placement.x >= rectGridWidth
+                    || placement.y < 0
+                    || placement.y >= rectGridHeight)
                 {
-                    Vector2Int localOffset = new Vector2Int(x - objectAnchorCell.x, y - objectAnchorCell.y);
-                    rectGridOffsets.Add(RotateFootprintOffset(localOffset, quarterTurns));
+                    continue;
+                }
+
+                Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
+                Vector2Int rotatedOffset = RotateFootprintOffset(localOffset, quarterTurns);
+                if (occupiedOffsets.Add(rotatedOffset))
+                {
+                    rectGridOffsets.Add(rotatedOffset);
                 }
             }
 
-            return rectGridOffsets;
+            if (rectGridOffsets.Count > 0)
+            {
+                return rectGridOffsets;
+            }
         }
 
         int sizeX = 1;
@@ -6202,6 +6392,22 @@ public class InstallationPlacementController : MonoBehaviour
         };
     }
 
+    public bool CanPlaceInstalledObjectAt(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore = null,
+        bool ignoreOtherPreviews = false)
+    {
+        return TryGetFootprintBlocks(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            previewToIgnore,
+            out _,
+            ignoreOtherPreviews);
+    }
+
     private bool TryGetFootprintBlocks(
         Vector2Int anchorCoordinate,
         MapObject footprintSource,
@@ -6227,7 +6433,13 @@ public class InstallationPlacementController : MonoBehaviour
                 return false;
             }
 
-            if (!CanPlacePreviewOnTargetBlockType(footprintBlock, footprintSource))
+            TryGetRectGridFootprintBlockType(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType rectGridBlockType);
+            if (!CanPlacePreviewOnTargetBlockType(footprintBlock, footprintSource, rectGridBlockType))
             {
                 return false;
             }
@@ -6246,7 +6458,77 @@ public class InstallationPlacementController : MonoBehaviour
         return footprintBlocks.Count > 0;
     }
 
-    private bool CanPlacePreviewOnTargetBlockType(Block block, MapObject footprintSource)
+    private bool TryGetRectGridFootprintBlockType(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out InputOutputModule.RectGridBlockType blockType)
+    {
+        blockType = InputOutputModule.RectGridBlockType.None;
+        if (!TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType == InputOutputModule.RectGridBlockType.None
+                || placement.x < 0
+                || placement.x >= rectGridWidth
+                || placement.y < 0
+                || placement.y >= rectGridHeight)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
+            Vector2Int rotatedCoordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+            if (rotatedCoordinate != coordinate)
+            {
+                continue;
+            }
+
+            blockType = placement.blockType;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool ShouldBindInstalledObjectToBlock(
+        Block block,
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        if (block == null)
+        {
+            return false;
+        }
+
+        if (!TryGetRectGridFootprintSettings(footprintSource, out _, out _, out _)
+            || !TryGetInputOutputModule(footprintSource, out _))
+        {
+            return true;
+        }
+
+        return TryGetRectGridFootprintBlockType(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                block.Coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            && blockType == InputOutputModule.RectGridBlockType.Object;
+    }
+
+    private bool CanPlacePreviewOnTargetBlockType(
+        Block block,
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType = InputOutputModule.RectGridBlockType.None)
     {
         if (block == null)
         {
@@ -6265,6 +6547,12 @@ public class InstallationPlacementController : MonoBehaviour
             = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
             || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
             || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate);
+
+        if (IsRectGridAreaBlockType(rectGridBlockType))
+        {
+            return block.Type == Block.BlockType.Ground
+                && (occupyingObject == null || occupyingObject is BoxObject);
+        }
 
         if (occupyingObject is Resource resource)
         {
@@ -6287,6 +6575,13 @@ public class InstallationPlacementController : MonoBehaviour
             Block.BlockType.Ground => (allowedFilter & InstallationMapFilter.Ground) != 0,
             _ => false
         };
+    }
+
+    private static bool IsRectGridAreaBlockType(InputOutputModule.RectGridBlockType blockType)
+    {
+        return blockType == InputOutputModule.RectGridBlockType.InputEnergy
+            || blockType == InputOutputModule.RectGridBlockType.InputItem
+            || blockType == InputOutputModule.RectGridBlockType.Output;
     }
 
     private MapObject GetBlockingMapObject(Block block)

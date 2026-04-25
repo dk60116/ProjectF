@@ -291,7 +291,7 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        if (!TryPrepareHandForCrafting())
+        if (!TryPrepareHandForCrafting(craftItemId))
         {
             RefreshIngredients(false);
             return;
@@ -439,7 +439,7 @@ public class CraftingSlot : ItemSlot
             ingredientsRoot.gameObject.SetActive(true);
         }
 
-        bool handReady = CanPrepareHandForCrafting();
+        bool handReady = CanPrepareHandForCrafting(ItemId);
         SetCreateButtonVisible((hasAllIngredients && handReady) || blockedByCraftingMapObject);
         if (animate)
         {
@@ -478,24 +478,26 @@ public class CraftingSlot : ItemSlot
         return ingredientBuffer.Count > 0;
     }
 
-    private bool CanPrepareHandForCrafting()
+    private bool CanPrepareHandForCrafting(int craftItemId)
     {
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
         {
             return false;
         }
 
-        return GameManager.Instance.Player.CanClearHandIntoBag();
+        Player player = GameManager.Instance.Player;
+        return player.CanAcceptHandObject(craftItemId) || player.CanClearHandIntoBag();
     }
 
-    private bool TryPrepareHandForCrafting()
+    private bool TryPrepareHandForCrafting(int craftItemId)
     {
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
         {
             return false;
         }
 
-        return GameManager.Instance.Player.TryStoreHandItemsInBag();
+        Player player = GameManager.Instance.Player;
+        return player.CanAcceptHandObject(craftItemId) || player.TryStoreHandItemsInBag();
     }
 
     private void ConsumeIngredients()

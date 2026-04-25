@@ -21,6 +21,8 @@ public class ItemDefinition : ScriptableObject
     [Min(0)]
     public int energyAmount = 0;
     public EnergyType useEnergyType = EnergyType.None;
-    [Min(0)]
-    public int useEnergyAmount = 0;
+    [Min(0f)]
+    public float useEnergyAmount = 0f;
+    [Min(0f)]
+    public float completeEnergy = 0f;
 }

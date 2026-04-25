@@ -109,6 +109,7 @@ public class InputOutputModule : InstallationObject
         public bool hasActiveCraft;
         public bool waitingForOutput;
         public float remainingCraftTime;
+        public float activeCraftConsumedEnergy;
         public int activeRecipeIndex = -1;
         public int activeOutputItemId = -1;
         public int activeOutputCount;
@@ -127,6 +128,7 @@ public class InputOutputModule : InstallationObject
                 hasActiveCraft = hasActiveCraft,
                 waitingForOutput = waitingForOutput,
                 remainingCraftTime = remainingCraftTime,
+                activeCraftConsumedEnergy = activeCraftConsumedEnergy,
                 activeRecipeIndex = activeRecipeIndex,
                 activeOutputItemId = activeOutputItemId,
                 activeOutputCount = activeOutputCount
@@ -186,6 +188,8 @@ public class InputOutputModule : InstallationObject
     private bool waitingForOutput;
     [SerializeField]
     private float remainingCraftTime;
+    [SerializeField]
+    private float activeCraftConsumedEnergy;
     [SerializeField]
     private int activeRecipeIndex = -1;
     [SerializeField]
@@ -329,6 +333,7 @@ public class InputOutputModule : InstallationObject
             hasActiveCraft = hasActiveCraft,
             waitingForOutput = waitingForOutput,
             remainingCraftTime = remainingCraftTime,
+            activeCraftConsumedEnergy = activeCraftConsumedEnergy,
             activeRecipeIndex = activeRecipeIndex,
             activeOutputItemId = activeOutputItemId,
             activeOutputCount = activeOutputCount
@@ -385,6 +390,13 @@ public class InputOutputModule : InstallationObject
         hasActiveCraft = state.hasActiveCraft;
         waitingForOutput = state.waitingForOutput;
         remainingCraftTime = Mathf.Max(0f, state.remainingCraftTime);
+        activeCraftConsumedEnergy = Mathf.Max(0f, state.activeCraftConsumedEnergy);
+        if (hasActiveCraft && !waitingForOutput && activeCraftConsumedEnergy <= 0.0001f)
+        {
+            activeCraftConsumedEnergy = ResolveConsumedEnergyFromRemainingTime(
+                ResolveInstalledDefinition(),
+                remainingCraftTime);
+        }
         activeRecipeIndex = state.activeRecipeIndex;
         activeOutputItemId = state.activeOutputItemId;
         activeOutputCount = Mathf.Max(0, state.activeOutputCount);
@@ -1224,22 +1236,35 @@ public class InputOutputModule : InstallationObject
             return;
         }
 
-        if (!TryConsumeOperatingEnergy(Time.deltaTime))
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (RequiresOperationalEnergy(installedDefinition))
         {
-            return;
-        }
+            if (!TryConsumeOperatingEnergy(Time.deltaTime, out float consumedEnergy))
+            {
+                return;
+            }
 
-        remainingCraftTime = Mathf.Max(0f, remainingCraftTime - Time.deltaTime);
-        if (remainingCraftTime > 0f)
+            activeCraftConsumedEnergy += consumedEnergy;
+            remainingCraftTime = ResolveRemainingEnergyCraftTime(installedDefinition, activeCraftConsumedEnergy);
+            if (activeCraftConsumedEnergy + 0.0001f < ResolveCompleteEnergy(installedDefinition))
+            {
+                return;
+            }
+        }
+        else
         {
-            return;
+            remainingCraftTime = Mathf.Max(0f, remainingCraftTime - Time.deltaTime);
+            if (remainingCraftTime > 0f)
+            {
+                return;
+            }
         }
 
         waitingForOutput = true;
         TryCompleteActiveCraft();
     }
 
-    private void TryStartNextCraft()
+    protected virtual void TryStartNextCraft()
     {
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null || runtimeInputItemAreas.Count <= 0 || runtimeOutputCoordinates.Count <= 0)
@@ -1289,12 +1314,7 @@ public class InputOutputModule : InstallationObject
                 continue;
             }
 
-            hasActiveCraft = true;
-            waitingForOutput = false;
-            remainingCraftTime = Mathf.Max(0.1f, craftDuration);
-            activeRecipeIndex = recipeIndex;
-            activeOutputItemId = outputItemId;
-            activeOutputCount = outputCount;
+            BeginActiveCraft(recipeIndex, outputItemId, outputCount, installedDefinition);
             return;
         }
     }
@@ -1332,7 +1352,7 @@ public class InputOutputModule : InstallationObject
         return false;
     }
 
-    private bool TryCompleteActiveCraft()
+    protected virtual bool TryCompleteActiveCraft()
     {
         if (!hasActiveCraft || activeOutputItemId < 0 || activeOutputCount <= 0)
         {
@@ -1340,16 +1360,37 @@ public class InputOutputModule : InstallationObject
             return false;
         }
 
-        if (!TryResolveOutputBlock(activeOutputItemId, activeOutputCount, out Block outputBlock) || outputBlock == null)
+        Vector3 startWorldPosition = ResolveConsumeTargetWorldPosition();
+        if (!TryEmitOutputItems(activeOutputItemId, activeOutputCount, startWorldPosition))
         {
             return false;
         }
 
-        Vector3 startWorldPosition = ResolveConsumeTargetWorldPosition();
-        for (int outputIndex = 0; outputIndex < activeOutputCount; outputIndex++)
+        ClearActiveCraft();
+        return true;
+    }
+
+    protected bool TryEmitOutputItems(int outputItemId, int outputCount, Vector3 startWorldPosition)
+    {
+        if (!TryResolveOutputBlock(outputItemId, outputCount, out Block outputBlock) || outputBlock == null)
+        {
+            return false;
+        }
+
+        return TryEmitOutputItemsToBlock(outputBlock, outputItemId, outputCount, startWorldPosition);
+    }
+
+    protected bool TryEmitOutputItemsToBlock(Block outputBlock, int outputItemId, int outputCount, Vector3 startWorldPosition)
+    {
+        if (outputBlock == null || outputItemId < 0 || outputCount <= 0)
+        {
+            return false;
+        }
+
+        for (int outputIndex = 0; outputIndex < outputCount; outputIndex++)
         {
             if (!outputBlock.TryAddInputAreaCenterObjectAnimated(
-                    activeOutputItemId,
+                    outputItemId,
                     startWorldPosition,
                     outputIndex * Mathf.Max(0f, outputMoveInterval),
                     out PortableObject droppedObject))
@@ -1361,33 +1402,50 @@ public class InputOutputModule : InstallationObject
             gate?.SetAutoPickupBlocked(true);
         }
 
-        ClearActiveCraft();
         return true;
     }
 
-    private bool TryConsumeOperatingEnergy(float deltaTime)
+    private bool TryConsumeOperatingEnergy(float deltaTime, out float consumedEnergy)
     {
+        consumedEnergy = 0f;
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (!RequiresOperationalEnergy(installedDefinition))
         {
             return true;
         }
 
-        if (storedEnergy <= 0f && !TryRefillEnergyStore(installedDefinition))
+        float remainingEnergyCost = Mathf.Max(0f, installedDefinition.useEnergyAmount) * Mathf.Max(0f, deltaTime);
+        if (remainingEnergyCost <= 0.0001f)
         {
             return false;
         }
 
-        float energyCost = Mathf.Max(0f, installedDefinition.useEnergyAmount) * Mathf.Max(0f, deltaTime);
-        storedEnergy = Mathf.Max(0f, storedEnergy - energyCost);
+        while (remainingEnergyCost > 0.0001f)
+        {
+            if (storedEnergy <= 0.0001f && !TryRefillEnergyStore(installedDefinition))
+            {
+                break;
+            }
+
+            float spentEnergy = Mathf.Min(storedEnergy, remainingEnergyCost);
+            if (spentEnergy <= 0.0001f)
+            {
+                break;
+            }
+
+            storedEnergy = Mathf.Max(0f, storedEnergy - spentEnergy);
+            remainingEnergyCost -= spentEnergy;
+            consumedEnergy += spentEnergy;
+        }
+
         if (storedEnergy <= 0f)
         {
             energyGaugeCapacity = 0f;
         }
-        return true;
+        return consumedEnergy > 0.0001f;
     }
 
-    private bool TryEnsureCraftStartEnergy(ItemDefinition installedDefinition)
+    protected bool TryEnsureCraftStartEnergy(ItemDefinition installedDefinition)
     {
         if (!RequiresOperationalEnergy(installedDefinition))
         {
@@ -1474,7 +1532,7 @@ public class InputOutputModule : InstallationObject
         return false;
     }
 
-    private bool TryResolveOutputBlock(int outputItemId, int outputCount, out Block targetBlock)
+    protected bool TryResolveOutputBlock(int outputItemId, int outputCount, out Block targetBlock)
     {
         targetBlock = null;
         if (outputItemId < 0 || outputCount <= 0 || runtimeOutputCoordinates.Count <= 0)
@@ -1597,7 +1655,7 @@ public class InputOutputModule : InstallationObject
         return inputItemId >= 0 && outputItemId >= 0;
     }
 
-    private bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
+    protected bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
     {
         block = null;
         TerrainGenerator terrain = ResolveTerrain();
@@ -1620,7 +1678,7 @@ public class InputOutputModule : InstallationObject
         return cachedTerrain;
     }
 
-    private ItemDefinition ResolveInstalledDefinition()
+    protected ItemDefinition ResolveInstalledDefinition()
     {
         int itemId = ResolveItemId();
         if (cachedInstalledDefinition != null && cachedInstalledDefinitionId == itemId)
@@ -1665,7 +1723,65 @@ public class InputOutputModule : InstallationObject
                && installedDefinition.useEnergyAmount > 0;
     }
 
-    private Vector3 ResolveConsumeTargetWorldPosition()
+    private float ResolveCompleteEnergy(ItemDefinition installedDefinition)
+    {
+        return ResolveCompleteEnergy(installedDefinition, CraftDurationSeconds);
+    }
+
+    public static float ResolveCompleteEnergy(ItemDefinition installedDefinition, float fallbackCraftDuration)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return 0f;
+        }
+
+        float configuredCompleteEnergy = Mathf.Max(0f, installedDefinition.completeEnergy);
+        if (configuredCompleteEnergy > 0.0001f)
+        {
+            return configuredCompleteEnergy;
+        }
+
+        return Mathf.Max(0.1f, fallbackCraftDuration) * Mathf.Max(0f, installedDefinition.useEnergyAmount);
+    }
+
+    protected float ResolveInitialCraftDuration(ItemDefinition installedDefinition)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return CraftDurationSeconds;
+        }
+
+        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        return Mathf.Max(0.1f, ResolveCompleteEnergy(installedDefinition) / energyRate);
+    }
+
+    private float ResolveRemainingEnergyCraftTime(ItemDefinition installedDefinition, float consumedEnergy)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return Mathf.Max(0f, remainingCraftTime);
+        }
+
+        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float remainingEnergy = Mathf.Max(0f, ResolveCompleteEnergy(installedDefinition) - Mathf.Max(0f, consumedEnergy));
+        return remainingEnergy / energyRate;
+    }
+
+    private float ResolveConsumedEnergyFromRemainingTime(ItemDefinition installedDefinition, float savedRemainingCraftTime)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return 0f;
+        }
+
+        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float completeEnergy = ResolveCompleteEnergy(installedDefinition);
+        float totalDuration = completeEnergy / energyRate;
+        float elapsedDuration = Mathf.Clamp(totalDuration - Mathf.Max(0f, savedRemainingCraftTime), 0f, totalDuration);
+        return Mathf.Min(completeEnergy, elapsedDuration * energyRate);
+    }
+
+    protected virtual Vector3 ResolveConsumeTargetWorldPosition()
     {
         if (portableObj != null)
         {
@@ -1679,6 +1795,12 @@ public class InputOutputModule : InstallationObject
     {
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (!RequiresOperationalEnergy(installedDefinition) || !hasActiveCraft)
+        {
+            ReleaseEnergyGaugeVisual();
+            return;
+        }
+
+        if (!ShouldShowGaugeByAreaMarkerVisibility())
         {
             ReleaseEnergyGaugeVisual();
             return;
@@ -1720,6 +1842,12 @@ public class InputOutputModule : InstallationObject
             gaugeWorldPosition,
             ResolveCraftProgressGaugeFillAmount(),
             new Vector2(0f, -Mathf.Max(0f, craftProgressGaugeCanvasVerticalOffset)));
+    }
+
+    private bool ShouldShowGaugeByAreaMarkerVisibility()
+    {
+        InputOutputModuleAreaMarkerController markerController = GetComponent<InputOutputModuleAreaMarkerController>();
+        return markerController == null || markerController.ShouldShowLinkedUi();
     }
 
     private void ReleaseEnergyGaugeVisual()
@@ -1777,7 +1905,6 @@ public class InputOutputModule : InstallationObject
 
     private float ResolveCraftProgressGaugeFillAmount()
     {
-        float duration = Mathf.Max(0.1f, craftDuration);
         if (!hasActiveCraft)
         {
             return 0f;
@@ -1788,6 +1915,16 @@ public class InputOutputModule : InstallationObject
             return 1f;
         }
 
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (RequiresOperationalEnergy(installedDefinition))
+        {
+            float completeEnergy = ResolveCompleteEnergy(installedDefinition);
+            return completeEnergy > 0.0001f
+                ? Mathf.Clamp01(Mathf.Max(0f, activeCraftConsumedEnergy) / completeEnergy)
+                : 0f;
+        }
+
+        float duration = Mathf.Max(0.1f, craftDuration);
         return Mathf.Clamp01(1f - (Mathf.Max(0f, remainingCraftTime) / duration));
     }
 
@@ -1858,11 +1995,32 @@ public class InputOutputModule : InstallationObject
         return cachedEnergyGaugeRenderers;
     }
 
-    private void ClearActiveCraft()
+    protected void BeginActiveCraft(int recipeIndex, int outputItemId, int outputCount, ItemDefinition installedDefinition)
+    {
+        if (outputItemId < 0 || outputCount <= 0)
+        {
+            ClearActiveCraft();
+            return;
+        }
+
+        hasActiveCraft = true;
+        waitingForOutput = false;
+        remainingCraftTime = ResolveInitialCraftDuration(installedDefinition);
+        activeCraftConsumedEnergy = 0f;
+        activeRecipeIndex = recipeIndex;
+        activeOutputItemId = outputItemId;
+        activeOutputCount = outputCount;
+    }
+
+    protected int ActiveOutputItemId => activeOutputItemId;
+    protected int ActiveOutputCount => activeOutputCount;
+
+    protected void ClearActiveCraft()
     {
         hasActiveCraft = false;
         waitingForOutput = false;
         remainingCraftTime = 0f;
+        activeCraftConsumedEnergy = 0f;
         activeRecipeIndex = -1;
         activeOutputItemId = -1;
         activeOutputCount = 0;

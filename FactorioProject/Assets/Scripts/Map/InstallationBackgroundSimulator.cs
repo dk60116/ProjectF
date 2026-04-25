@@ -180,21 +180,21 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return true;
         }
 
-        float remainingCraftTime = Mathf.Max(0f, state.remainingCraftTime);
-        if (remainingCraftTime <= 0.0001f)
-        {
-            state.waitingForOutput = true;
-            if (!TryCompleteActiveCraft(stateStore, state, templateModule))
-            {
-                blocked = true;
-                return false;
-            }
-
-            return true;
-        }
-
         if (!RequiresOperationalEnergy(installedDefinition))
         {
+            float remainingCraftTime = Mathf.Max(0f, state.remainingCraftTime);
+            if (remainingCraftTime <= 0.0001f)
+            {
+                state.waitingForOutput = true;
+                if (!TryCompleteActiveCraft(stateStore, state, templateModule))
+                {
+                    blocked = true;
+                    return false;
+                }
+
+                return true;
+            }
+
             double delta = Math.Min(remainingElapsed, remainingCraftTime);
             if (delta <= 0.0001d)
             {
@@ -209,7 +209,18 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         else
         {
             float energyRate = Mathf.Max(0f, installedDefinition.useEnergyAmount);
-            while (remainingElapsed > 0.0001d && state.remainingCraftTime > 0.0001f)
+            float completeEnergy = InputOutputModule.ResolveCompleteEnergy(
+                installedDefinition,
+                templateModule.CraftDurationSeconds);
+            if (state.activeCraftConsumedEnergy <= 0.0001f)
+            {
+                state.activeCraftConsumedEnergy = ResolveConsumedEnergyFromRemainingTime(
+                    installedDefinition,
+                    templateModule.CraftDurationSeconds,
+                    state.remainingCraftTime);
+            }
+
+            while (remainingElapsed > 0.0001d && state.activeCraftConsumedEnergy + 0.0001f < completeEnergy)
             {
                 if (state.storedEnergy <= 0.0001f && !TryRefillEnergyStore(stateStore, state, templateModule, installedDefinition))
                 {
@@ -217,29 +228,43 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                     return simulatedSeconds > 0d;
                 }
 
-                float maxTimeByEnergy = energyRate <= 0.0001f
-                    ? float.PositiveInfinity
-                    : Mathf.Max(0f, state.storedEnergy / energyRate);
-                double delta = Math.Min(remainingElapsed, Math.Min(state.remainingCraftTime, maxTimeByEnergy));
+                float maxEnergyByTime = energyRate * (float)remainingElapsed;
+                float remainingCraftEnergy = Mathf.Max(0f, completeEnergy - state.activeCraftConsumedEnergy);
+                float consumedEnergy = Mathf.Min(state.storedEnergy, Mathf.Min(maxEnergyByTime, remainingCraftEnergy));
+                double delta = energyRate <= 0.0001f ? 0d : consumedEnergy / energyRate;
                 if (delta <= 0.0001d)
                 {
                     blocked = true;
                     return simulatedSeconds > 0d;
                 }
 
-                state.storedEnergy = Mathf.Max(0f, state.storedEnergy - (energyRate * (float)delta));
+                state.storedEnergy = Mathf.Max(0f, state.storedEnergy - consumedEnergy);
+                state.activeCraftConsumedEnergy = Mathf.Min(completeEnergy, state.activeCraftConsumedEnergy + consumedEnergy);
                 if (state.storedEnergy <= 0.0001f)
                 {
                     state.energyGaugeCapacity = 0f;
                 }
 
-                state.remainingCraftTime = Mathf.Max(0f, state.remainingCraftTime - (float)delta);
+                state.remainingCraftTime = ResolveRemainingEnergyCraftTime(
+                    installedDefinition,
+                    templateModule.CraftDurationSeconds,
+                    state.activeCraftConsumedEnergy);
                 remainingElapsed -= delta;
                 simulatedSeconds += delta;
             }
         }
 
-        if (state.remainingCraftTime > 0.0001f)
+        if (RequiresOperationalEnergy(installedDefinition))
+        {
+            float completeEnergy = InputOutputModule.ResolveCompleteEnergy(
+                installedDefinition,
+                templateModule.CraftDurationSeconds);
+            if (state.activeCraftConsumedEnergy + 0.0001f < completeEnergy)
+            {
+                return true;
+            }
+        }
+        else if (state.remainingCraftTime > 0.0001f)
         {
             return true;
         }
@@ -300,7 +325,8 @@ public class InstallationBackgroundSimulator : MonoBehaviour
 
             state.hasActiveCraft = true;
             state.waitingForOutput = false;
-            state.remainingCraftTime = templateModule.CraftDurationSeconds;
+            state.remainingCraftTime = ResolveInitialCraftDuration(installedDefinition, templateModule.CraftDurationSeconds);
+            state.activeCraftConsumedEnergy = 0f;
             state.activeRecipeIndex = recipeIndex;
             state.activeOutputItemId = outputItemId;
             state.activeOutputCount = outputCount;
@@ -645,6 +671,51 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                && installedDefinition.useEnergyAmount > 0f;
     }
 
+    private static float ResolveInitialCraftDuration(ItemDefinition installedDefinition, float fallbackCraftDuration)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return Mathf.Max(0.1f, fallbackCraftDuration);
+        }
+
+        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        return Mathf.Max(0.1f, InputOutputModule.ResolveCompleteEnergy(installedDefinition, fallbackCraftDuration) / energyRate);
+    }
+
+    private static float ResolveRemainingEnergyCraftTime(
+        ItemDefinition installedDefinition,
+        float fallbackCraftDuration,
+        float consumedEnergy)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return Mathf.Max(0.1f, fallbackCraftDuration);
+        }
+
+        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float remainingEnergy = Mathf.Max(
+            0f,
+            InputOutputModule.ResolveCompleteEnergy(installedDefinition, fallbackCraftDuration) - Mathf.Max(0f, consumedEnergy));
+        return remainingEnergy / energyRate;
+    }
+
+    private static float ResolveConsumedEnergyFromRemainingTime(
+        ItemDefinition installedDefinition,
+        float fallbackCraftDuration,
+        float savedRemainingCraftTime)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return 0f;
+        }
+
+        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float completeEnergy = InputOutputModule.ResolveCompleteEnergy(installedDefinition, fallbackCraftDuration);
+        float totalDuration = completeEnergy / energyRate;
+        float elapsedDuration = Mathf.Clamp(totalDuration - Mathf.Max(0f, savedRemainingCraftTime), 0f, totalDuration);
+        return Mathf.Min(completeEnergy, elapsedDuration * energyRate);
+    }
+
     private static void ClearActiveCraft(InputOutputModule.PersistentState state)
     {
         if (state == null)
@@ -655,6 +726,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         state.hasActiveCraft = false;
         state.waitingForOutput = false;
         state.remainingCraftTime = 0f;
+        state.activeCraftConsumedEnergy = 0f;
         state.activeRecipeIndex = -1;
         state.activeOutputItemId = -1;
         state.activeOutputCount = 0;

@@ -70,7 +70,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int energyAmount;
         public string useEnergyType;
         public int useEnergyTypeValue = -1;
-        public int useEnergyAmount;
+        public float useEnergyAmount;
+        public float completeEnergy;
         public int mapSizeX = -1;
         public int mapSizeY = -1;
         public float focusRadius = -1f;
@@ -614,6 +615,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty energyAmountProperty = serializedObject.FindProperty("energyAmount");
         SerializedProperty useEnergyTypeProperty = serializedObject.FindProperty("useEnergyType");
         SerializedProperty useEnergyAmountProperty = serializedObject.FindProperty("useEnergyAmount");
+        SerializedProperty completeEnergyProperty = serializedObject.FindProperty("completeEnergy");
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Basic", EditorStyles.boldLabel);
@@ -689,12 +691,25 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 if (useEnergyAmountProperty != null)
                 {
-                    useEnergyAmountProperty.longValue = 0;
+                    useEnergyAmountProperty.floatValue = 0f;
+                }
+
+                if (completeEnergyProperty != null)
+                {
+                    completeEnergyProperty.floatValue = 0f;
                 }
             }
-            else if (useEnergyAmountProperty != null)
+            else
             {
-                EditorGUILayout.PropertyField(useEnergyAmountProperty, new GUIContent("Use Energy Amount"));
+                if (useEnergyAmountProperty != null)
+                {
+                    EditorGUILayout.PropertyField(useEnergyAmountProperty, new GUIContent("Use Energy Amount / Sec"));
+                }
+
+                if (completeEnergyProperty != null)
+                {
+                    EditorGUILayout.PropertyField(completeEnergyProperty, new GUIContent("Complete Energy"));
+                }
             }
         }
 
@@ -1645,7 +1660,8 @@ public class ItemDataEditorWindow : EditorWindow
             energyAmount = Mathf.Max(0, definition.energyAmount),
               useEnergyType = definition.useEnergyType.ToString(),
               useEnergyTypeValue = (int)definition.useEnergyType,
-              useEnergyAmount = Mathf.Max(0, definition.useEnergyAmount)
+              useEnergyAmount = Mathf.Max(0f, definition.useEnergyAmount),
+              completeEnergy = Mathf.Max(0f, definition.completeEnergy)
           };
 
         if (definition.interactionButtonList != null && definition.interactionButtonList.Count > 0)
@@ -1862,7 +1878,8 @@ public class ItemDataEditorWindow : EditorWindow
         definition.energyType = ParseEnergyType(entry.energyType, entry.energyTypeValue, definition.energyType);
         definition.energyAmount = definition.energyType == ItemDefinition.EnergyType.None ? 0 : Mathf.Max(0, entry.energyAmount);
         definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
-        definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0 : Mathf.Max(0, entry.useEnergyAmount);
+        definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.useEnergyAmount);
+        definition.completeEnergy = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.completeEnergy);
 
         Mesh portableMesh = LoadAssetAtPath<Mesh>(entry.portableMeshAssetPath);
         if (portableMesh != null)

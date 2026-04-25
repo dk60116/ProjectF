@@ -672,7 +672,8 @@ public class TerrainGenerator : MonoBehaviour
                 }
 
                 ApplyBlockBiomeVisuals(block, visualData);
-                if (!HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
+                if ((!HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
+                        || CanSpawnResourceUnderMiningMachine(worldCoordinate))
                     && CanSpawnResourceOnBiome(visualData.primaryBiome)
                     && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab))
                 {
@@ -4442,6 +4443,17 @@ public class TerrainGenerator : MonoBehaviour
             sourcePrefab = definition.mapObject;
         }
 
+        if (placementController != null
+            && !placementController.CanPlaceInstalledObjectAt(
+                savedState.anchorCoordinate,
+                sourcePrefab,
+                savedState.quarterTurns,
+                null,
+                true))
+        {
+            return false;
+        }
+
         Quaternion rotation = placementController != null
             ? placementController.GetInstalledObjectRotation(sourcePrefab, savedState.quarterTurns)
             : sourcePrefab.transform.rotation * Quaternion.Euler(0f, (((savedState.quarterTurns % 4) + 4) % 4) * 90f, 0f);
@@ -4495,6 +4507,13 @@ public class TerrainGenerator : MonoBehaviour
             }
         }
 
+        if (restoredInstallation.RuntimeOccupiedCoordinates != null
+            && restoredInstallation.RuntimeOccupiedCoordinates.Count > 0)
+        {
+            occupiedCoordinates = new List<Vector2Int>(restoredInstallation.RuntimeOccupiedCoordinates);
+            savedState.occupiedCoordinates = occupiedCoordinates;
+        }
+
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
 
         if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
@@ -4514,9 +4533,17 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        IReadOnlyList<Vector2Int> bindingCoordinates = occupiedCoordinates;
+        if (installedObject is InstallationObject installationObject
+            && installationObject.RuntimeOccupiedCoordinates != null
+            && installationObject.RuntimeOccupiedCoordinates.Count > 0)
         {
-            if (loadedBlocks.TryGetValue(occupiedCoordinates[i], out Block block) && block != null)
+            bindingCoordinates = installationObject.RuntimeOccupiedCoordinates;
+        }
+
+        for (int i = 0; i < bindingCoordinates.Count; i++)
+        {
+            if (loadedBlocks.TryGetValue(bindingCoordinates[i], out Block block) && block != null)
             {
                 block.SetMapObject(installedObject);
             }
@@ -4625,6 +4652,22 @@ public class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         return resourceStateStore != null
                && resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out _);
+    }
+
+    private bool CanSpawnResourceUnderMiningMachine(Vector2Int worldCoordinate)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || !resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out Vector2Int anchorCoordinate)
+            || anchorCoordinate != worldCoordinate
+            || !resourceStateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState)
+            || installationState == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(installationState.itemId);
+        return definition != null && definition.mapObject is MiningMachine;
     }
 
     private void CleanupOrphanedLiveInstallations()

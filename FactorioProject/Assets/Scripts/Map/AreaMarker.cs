@@ -247,6 +247,11 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         RefreshMarkerVisibility(true);
     }
 
+    public bool ShouldShowLinkedUi()
+    {
+        return ShouldMarkersBeVisible();
+    }
+
     private void Update()
     {
         RefreshMarkerVisibility(false);

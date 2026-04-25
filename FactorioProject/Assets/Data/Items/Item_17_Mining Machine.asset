@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_17_Mining Machine
+  m_EditorClassIdentifier: 
+  itemName: Mining Machine
+  id: 17
+  mapObject: {fileID: 8277338630082605383, guid: 1dd1602260bd3534da753f8f0708df08, type: 3}
+  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  icon: {fileID: 21300000, guid: bedd2a65b52676a4fa821c9211aeafdd, type: 3}
+  interactionButtonList: []
+  size: 0
+  itemFilter: 0
+  capacity: 10
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 1
+  useEnergyAmount: 0.1
+  completeEnergy: 1

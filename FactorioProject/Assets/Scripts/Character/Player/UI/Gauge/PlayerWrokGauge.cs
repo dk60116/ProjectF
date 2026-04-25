@@ -54,13 +54,13 @@ public class ResourceWrokGauge : MonoBehaviour
             return existingGauge;
         }
 
-        Canvas canvas = FindObjectOfType<Canvas>(true);
         GameObject gaugeObject = new GameObject("Resource Work Gauge", typeof(RectTransform));
         RectTransform gaugeRect = gaugeObject.GetComponent<RectTransform>();
 
-        if (canvas != null)
+        RectTransform parentRect = ResolveGaugeParentRect();
+        if (parentRect != null)
         {
-            gaugeRect.SetParent(canvas.transform, false);
+            gaugeRect.SetParent(parentRect, false);
         }
 
         gaugeRect.anchorMin = new Vector2(0.5f, 0f);
@@ -86,6 +86,41 @@ public class ResourceWrokGauge : MonoBehaviour
         gauge.EnsureReferencesUpToDate();
         gauge.Hide();
         return gauge;
+    }
+
+    private static RectTransform ResolveGaugeParentRect()
+    {
+        UIManager uiManager = UIManager.Instance;
+        if (uiManager != null && uiManager.HudGaugeRoot != null)
+        {
+            return uiManager.HudGaugeRoot;
+        }
+
+        PlayerHUD playerHUD = FindObjectOfType<PlayerHUD>(true);
+        if (playerHUD != null && playerHUD.transform is RectTransform hudRect)
+        {
+            Transform existing = hudRect.Find("WorldGaugeRoot");
+            RectTransform gaugeRoot = existing as RectTransform;
+            if (gaugeRoot == null)
+            {
+                GameObject rootObject = new GameObject("WorldGaugeRoot", typeof(RectTransform));
+                gaugeRoot = rootObject.GetComponent<RectTransform>();
+                gaugeRoot.SetParent(hudRect, false);
+            }
+
+            gaugeRoot.anchorMin = Vector2.zero;
+            gaugeRoot.anchorMax = Vector2.one;
+            gaugeRoot.offsetMin = Vector2.zero;
+            gaugeRoot.offsetMax = Vector2.zero;
+            gaugeRoot.pivot = new Vector2(0.5f, 0.5f);
+            gaugeRoot.localScale = Vector3.one;
+            gaugeRoot.localRotation = Quaternion.identity;
+            gaugeRoot.SetAsFirstSibling();
+            return gaugeRoot;
+        }
+
+        Canvas canvas = FindObjectOfType<Canvas>(true);
+        return canvas != null ? canvas.transform as RectTransform : null;
     }
 
     private void Awake()

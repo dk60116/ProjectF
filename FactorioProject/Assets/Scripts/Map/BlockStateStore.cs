@@ -43,8 +43,117 @@ public class BlockStateStore : MonoBehaviour
         public InstallationSaveState state;
     }
 
+    private readonly struct IntRun
+    {
+        public readonly int value;
+        public readonly int count;
+
+        public IntRun(int value, int count)
+        {
+            this.value = value;
+            this.count = count;
+        }
+    }
+
+    private sealed class FloorObjectSaveState
+    {
+        private readonly int[] rawItems;
+        private readonly IntRun[] compressedRuns;
+        private readonly int itemCount;
+
+        private FloorObjectSaveState(int[] rawItems, IntRun[] compressedRuns, int itemCount)
+        {
+            this.rawItems = rawItems;
+            this.compressedRuns = compressedRuns;
+            this.itemCount = itemCount;
+        }
+
+        public static FloorObjectSaveState FromSerialized(IReadOnlyList<int> itemIds)
+        {
+            if (itemIds == null || itemIds.Count <= 0)
+            {
+                return null;
+            }
+
+            int count = itemIds.Count;
+            int runCount = 1;
+            int previousValue = itemIds[0];
+            for (int i = 1; i < count; i++)
+            {
+                int value = itemIds[i];
+                if (value == previousValue)
+                {
+                    continue;
+                }
+
+                runCount++;
+                previousValue = value;
+            }
+
+            // Large item stacks repeat the same item id, so RLE keeps saved block state compact.
+            bool shouldCompress = runCount * 2 < count;
+            if (!shouldCompress)
+            {
+                int[] rawCopy = new int[count];
+                for (int i = 0; i < count; i++)
+                {
+                    rawCopy[i] = itemIds[i];
+                }
+
+                return new FloorObjectSaveState(rawCopy, null, count);
+            }
+
+            IntRun[] runs = new IntRun[runCount];
+            int runIndex = 0;
+            int currentValue = itemIds[0];
+            int currentCount = 1;
+            for (int i = 1; i < count; i++)
+            {
+                int value = itemIds[i];
+                if (value == currentValue)
+                {
+                    currentCount++;
+                    continue;
+                }
+
+                runs[runIndex++] = new IntRun(currentValue, currentCount);
+                currentValue = value;
+                currentCount = 1;
+            }
+
+            runs[runIndex] = new IntRun(currentValue, currentCount);
+            return new FloorObjectSaveState(null, runs, count);
+        }
+
+        public List<int> ToSerializedList()
+        {
+            List<int> itemIds = new List<int>(itemCount);
+            if (rawItems != null)
+            {
+                itemIds.AddRange(rawItems);
+                return itemIds;
+            }
+
+            if (compressedRuns == null)
+            {
+                return itemIds;
+            }
+
+            for (int runIndex = 0; runIndex < compressedRuns.Length; runIndex++)
+            {
+                IntRun run = compressedRuns[runIndex];
+                for (int i = 0; i < run.count; i++)
+                {
+                    itemIds.Add(run.value);
+                }
+            }
+
+            return itemIds;
+        }
+    }
+
     private readonly Dictionary<Vector2Int, Resource.ResourceSaveState> savedStates = new Dictionary<Vector2Int, Resource.ResourceSaveState>();
-    private readonly Dictionary<Vector2Int, List<int>> savedFloorObjectStates = new Dictionary<Vector2Int, List<int>>();
+    private readonly Dictionary<Vector2Int, FloorObjectSaveState> savedFloorObjectStates = new Dictionary<Vector2Int, FloorObjectSaveState>();
     private readonly Dictionary<Vector2Int, InstallationSaveState> savedInstallationStates = new Dictionary<Vector2Int, InstallationSaveState>();
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<Vector2Int, LiveInstallationRecord> liveInstallationStates = new Dictionary<Vector2Int, LiveInstallationRecord>();
@@ -74,7 +183,14 @@ public class BlockStateStore : MonoBehaviour
             return;
         }
 
-        savedFloorObjectStates[worldCoordinate] = itemIds;
+        FloorObjectSaveState state = FloorObjectSaveState.FromSerialized(itemIds);
+        if (state == null)
+        {
+            savedFloorObjectStates.Remove(worldCoordinate);
+            return;
+        }
+
+        savedFloorObjectStates[worldCoordinate] = state;
     }
 
     public bool TryGet(Vector2Int worldCoordinate, out Resource.ResourceSaveState state)
@@ -90,14 +206,21 @@ public class BlockStateStore : MonoBehaviour
 
     public bool TryGetFloorObjects(Vector2Int worldCoordinate, out List<int> itemIds)
     {
-        return savedFloorObjectStates.TryGetValue(worldCoordinate, out itemIds);
+        if (savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState) && savedState != null)
+        {
+            itemIds = savedState.ToSerializedList();
+            return true;
+        }
+
+        itemIds = null;
+        return false;
     }
 
     public bool TryGetFloorObjectsCopy(Vector2Int worldCoordinate, out List<int> itemIds)
     {
-        if (savedFloorObjectStates.TryGetValue(worldCoordinate, out List<int> savedItems) && savedItems != null)
+        if (savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState) && savedState != null)
         {
-            itemIds = new List<int>(savedItems);
+            itemIds = savedState.ToSerializedList();
             return true;
         }
 
@@ -113,7 +236,14 @@ public class BlockStateStore : MonoBehaviour
             return;
         }
 
-        savedFloorObjectStates[worldCoordinate] = new List<int>(itemIds);
+        FloorObjectSaveState state = FloorObjectSaveState.FromSerialized(itemIds);
+        if (state == null)
+        {
+            savedFloorObjectStates.Remove(worldCoordinate);
+            return;
+        }
+
+        savedFloorObjectStates[worldCoordinate] = state;
     }
 
     public void SaveInstallation(InstallationObject installationObject)

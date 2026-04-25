@@ -29,10 +29,7 @@ public class UIManager : MonoBehaviour
 
         Instance = this;
 
-        if (playerHUD == null)
-        {
-            playerHUD = GetComponentInChildren<PlayerHUD>(true);
-        }
+        EnsurePlayerHUDReference();
     }
 
     private void OnDestroy()
@@ -45,15 +42,14 @@ public class UIManager : MonoBehaviour
 
     public void BindPlayerBag(PlayerBag bag)
     {
-        if (playerHUD == null)
-        {
-            playerHUD = GetComponentInChildren<PlayerHUD>(true);
-        }
+        EnsurePlayerHUDReference();
 
         playerHUD?.Bind(bag);
     }
 
     public PlayerHUD PlayerHUD => playerHUD;
+    public RectTransform HudRoot => ResolveHudRect();
+    public RectTransform HudGaugeRoot => ResolveEnergyGaugeRoot();
     public Sprite ArrowImage => arrowImage;
 
     public DefaultGauge AcquireEnergyGauge()
@@ -111,8 +107,8 @@ public class UIManager : MonoBehaviour
             return;
         }
 
-        RectTransform canvasRect = ResolveWorldCanvasRect();
-        if (canvasRect == null || !TryConvertWorldToCanvasPoint(worldPosition, canvasRect, out Vector2 anchoredPosition))
+        RectTransform root = ResolveEnergyGaugeRoot();
+        if (root == null || !TryConvertWorldToCanvasPoint(worldPosition, root, out Vector2 anchoredPosition))
         {
             gauge.SetVisible(false);
             return;
@@ -125,40 +121,55 @@ public class UIManager : MonoBehaviour
 
     private RectTransform ResolveEnergyGaugeRoot()
     {
-        if (energyGaugeRoot != null)
+        RectTransform parentRect = ResolveHudRect();
+        if (parentRect == null)
         {
-            return energyGaugeRoot;
+            parentRect = ResolveWorldCanvasRect();
         }
 
-        RectTransform canvasRect = ResolveWorldCanvasRect();
-        if (canvasRect == null)
+        if (parentRect == null)
         {
             return null;
         }
 
-        Transform existing = canvasRect.Find("WorldGaugeRoot");
+        if (energyGaugeRoot != null)
+        {
+            if (energyGaugeRoot.parent != parentRect)
+            {
+                energyGaugeRoot.SetParent(parentRect, false);
+            }
+
+            StretchToParent(energyGaugeRoot);
+            energyGaugeRoot.SetAsFirstSibling();
+            return energyGaugeRoot;
+        }
+
+        Transform existing = parentRect.Find("WorldGaugeRoot");
         if (existing != null)
         {
             energyGaugeRoot = existing as RectTransform;
+            StretchToParent(energyGaugeRoot);
+            energyGaugeRoot.SetAsFirstSibling();
             return energyGaugeRoot;
         }
 
         GameObject rootObject = new GameObject("WorldGaugeRoot", typeof(RectTransform));
         energyGaugeRoot = rootObject.GetComponent<RectTransform>();
-        energyGaugeRoot.SetParent(canvasRect, false);
-        energyGaugeRoot.anchorMin = Vector2.zero;
-        energyGaugeRoot.anchorMax = Vector2.one;
-        energyGaugeRoot.offsetMin = Vector2.zero;
-        energyGaugeRoot.offsetMax = Vector2.zero;
-        energyGaugeRoot.pivot = new Vector2(0.5f, 0.5f);
-        energyGaugeRoot.localScale = Vector3.one;
-        energyGaugeRoot.localRotation = Quaternion.identity;
+        energyGaugeRoot.SetParent(parentRect, false);
+        StretchToParent(energyGaugeRoot);
+        energyGaugeRoot.SetAsFirstSibling();
         return energyGaugeRoot;
     }
 
     private RectTransform ResolveWorldCanvasRect()
     {
         if (cachedWorldCanvasRect != null)
+        {
+            return cachedWorldCanvasRect;
+        }
+
+        RectTransform hudRect = ResolveHudRect();
+        if (hudRect != null && cachedWorldCanvasRect != null)
         {
             return cachedWorldCanvasRect;
         }
@@ -190,9 +201,10 @@ public class UIManager : MonoBehaviour
         return cachedWorldCanvasRect;
     }
 
-    private bool TryConvertWorldToCanvasPoint(Vector3 worldPosition, RectTransform canvasRect, out Vector2 anchoredPosition)
+    private bool TryConvertWorldToCanvasPoint(Vector3 worldPosition, RectTransform targetRect, out Vector2 anchoredPosition)
     {
         anchoredPosition = Vector2.zero;
+        CacheCanvasFromTransform(targetRect);
         Camera camera = ResolveWorldCanvasCamera();
         Vector3 screenPoint = camera != null
             ? camera.WorldToScreenPoint(worldPosition)
@@ -208,7 +220,7 @@ public class UIManager : MonoBehaviour
             : camera;
 
         return RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            canvasRect,
+            targetRect,
             screenPoint,
             conversionCamera,
             out anchoredPosition);
@@ -235,5 +247,65 @@ public class UIManager : MonoBehaviour
         }
 
         return FindObjectOfType<Camera>();
+    }
+
+    private void EnsurePlayerHUDReference()
+    {
+        if (playerHUD != null)
+        {
+            return;
+        }
+
+        playerHUD = GetComponentInChildren<PlayerHUD>(true);
+        if (playerHUD == null)
+        {
+            playerHUD = FindObjectOfType<PlayerHUD>(true);
+        }
+    }
+
+    private RectTransform ResolveHudRect()
+    {
+        EnsurePlayerHUDReference();
+        RectTransform hudRect = playerHUD != null ? playerHUD.transform as RectTransform : null;
+        if (hudRect != null)
+        {
+            CacheCanvasFromTransform(hudRect);
+        }
+
+        return hudRect;
+    }
+
+    private void CacheCanvasFromTransform(Transform target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        Canvas canvas = target.GetComponentInParent<Canvas>(true);
+        if (canvas == null)
+        {
+            return;
+        }
+
+        cachedWorldCanvas = canvas.rootCanvas != null ? canvas.rootCanvas : canvas;
+        cachedWorldCanvasRect = cachedWorldCanvas.transform as RectTransform;
+        cachedWorldCanvasCamera = cachedWorldCanvas.worldCamera;
+    }
+
+    private static void StretchToParent(RectTransform rectTransform)
+    {
+        if (rectTransform == null)
+        {
+            return;
+        }
+
+        rectTransform.anchorMin = Vector2.zero;
+        rectTransform.anchorMax = Vector2.one;
+        rectTransform.offsetMin = Vector2.zero;
+        rectTransform.offsetMax = Vector2.zero;
+        rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        rectTransform.localScale = Vector3.one;
+        rectTransform.localRotation = Quaternion.identity;
     }
 }

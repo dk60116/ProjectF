@@ -36,6 +36,7 @@ public class BoxObject : InstallationObject
     private Sprite cachedDisplayedSprite;
     private bool cachedLockIconVisible;
     private string cachedCountTextValue;
+    private Block lastContainedStackVisibilityBlock;
 
     public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
     public bool IsOpen => isOpen;
@@ -114,6 +115,7 @@ public class BoxObject : InstallationObject
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
         hinge?.DOKill();
+        RestoreLastContainedStackVisibilityBlock();
         ApplyItemIconSprite(null, -1, true);
         SetLockIconVisible(false, true);
         ApplyCountText(string.Empty, true);
@@ -407,12 +409,30 @@ public class BoxObject : InstallationObject
 
     private void SyncContainedStackVisibility(bool force = false)
     {
-        if (!TryGetContentBlock(out Block contentBlock))
+        if (!TryGetVisibilityContentBlock(out Block contentBlock))
+        {
+            RestoreLastContainedStackVisibilityBlock();
+            return;
+        }
+
+        if (lastContainedStackVisibilityBlock != null && lastContainedStackVisibilityBlock != contentBlock)
+        {
+            lastContainedStackVisibilityBlock.SetInputAreaCenterObjectsVisible(true);
+        }
+
+        lastContainedStackVisibilityBlock = contentBlock;
+        contentBlock.SetInputAreaCenterObjectsVisible(isOpen);
+    }
+
+    private void RestoreLastContainedStackVisibilityBlock()
+    {
+        if (lastContainedStackVisibilityBlock == null)
         {
             return;
         }
 
-        contentBlock.SetInputAreaCenterObjectsVisible(isOpen);
+        lastContainedStackVisibilityBlock.SetInputAreaCenterObjectsVisible(true);
+        lastContainedStackVisibilityBlock = null;
     }
 
     private void SyncItemIcon(bool force = false)
@@ -652,6 +672,18 @@ public class BoxObject : InstallationObject
             return false;
         }
 
+        return true;
+    }
+
+    private bool TryGetVisibilityContentBlock(out Block contentBlock)
+    {
+        contentBlock = null;
+        if (!TryGetAnchorBlock(out Block anchorBlock) || anchorBlock == null)
+        {
+            return false;
+        }
+
+        contentBlock = anchorBlock;
         return true;
     }
 

@@ -155,8 +155,8 @@ MonoBehaviour:
   harvestMode: 1
   definition: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
   resourceStatus:
-    outputId: 2
-    outputItemName: Stone
+    outputId: 4
+    outputItemName: CooperOre
     resourceCount: 1
     getCount: 1
     maxGauge: 10
