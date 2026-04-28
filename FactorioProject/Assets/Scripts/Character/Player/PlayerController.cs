@@ -36,6 +36,9 @@ public class PlayerController : MonoBehaviour
     [SerializeField, Min(0f)]
     private float autoPickupInterval = 0.1f;
 
+    [SerializeField, Min(0.01f)]
+    private float rotationInterpolationSpeed = 12f;
+
     private Player player;
     private Joystick joystick;
     private ResourceWrokGauge resourceWorkGauge;
@@ -66,6 +69,8 @@ public class PlayerController : MonoBehaviour
     private bool hasStandingConveyorCoordinate;
     private Vector2Int standingConveyorCoordinate;
     private Vector3 currentConveyorCarryVelocity;
+    private bool hasPendingFacingDirection;
+    private Vector3 pendingFacingDirection;
 
     private struct InteractionFocusCandidate
     {
@@ -100,6 +105,8 @@ public class PlayerController : MonoBehaviour
     {
         RestoreStandingVisualOffset();
         currentConveyorCarryVelocity = Vector3.zero;
+        hasPendingFacingDirection = false;
+        pendingFacingDirection = Vector3.zero;
         SetFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         focusRemovalBuffer.Clear();
@@ -127,12 +134,19 @@ public class PlayerController : MonoBehaviour
             input = joystick.InputDirection;
         }
 
+        if (!isInteractionLocked)
+        {
+            input = Vector2.ClampMagnitude(input + GetKeyboardMoveInput(), 1f);
+        }
+
         Vector3 moveDirection = GetMoveDirection(input);
         bool hasMovement = moveDirection.sqrMagnitude > 0.0001f;
 
         if (hasMovement)
         {
             stationaryHarvestTimer = 0f;
+            pendingFacingDirection = moveDirection;
+            hasPendingFacingDirection = true;
         }
         else
         {
@@ -160,14 +174,9 @@ public class PlayerController : MonoBehaviour
             {
                 transform.position += moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime;
             }
-
-            Quaternion targetRotation = Quaternion.LookRotation(moveDirection.normalized, Vector3.up);
-            Transform rotationTarget = player.BodyTransform != null ? player.BodyTransform : transform;
-            rotationTarget.rotation = Quaternion.RotateTowards(
-                rotationTarget.rotation,
-                targetRotation,
-                player.Stat.rotateSpeed * Time.deltaTime);
         }
+
+        UpdateBodyRotation();
 
         player.UpdateCarryState();
         if (player.IsCarrying)
@@ -600,6 +609,8 @@ public class PlayerController : MonoBehaviour
     private void HandleInstallationPlacementLock()
     {
         pendingMoveDirection = Vector3.zero;
+        pendingFacingDirection = Vector3.zero;
+        hasPendingFacingDirection = false;
         stationaryHarvestTimer = 0f;
         autoPickupTimer = 0f;
 
@@ -802,6 +813,11 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshInteractionFocus(bool hasMovement)
     {
+        if (TryFocusStandingConveyorBelt())
+        {
+            return;
+        }
+
         if (!player.IsCarrying
             && currentTargetResource != null
             && currentTargetResource.CanHarvest
@@ -831,6 +847,21 @@ public class PlayerController : MonoBehaviour
 
         AppendInteractionFocusCandidate(nearestFocusCandidate, combinedInteractionFocusBlocks);
         SetFocusedBlocks(combinedInteractionFocusBlocks);
+    }
+
+    private bool TryFocusStandingConveyorBelt()
+    {
+        if (!TryGetStandingConveyorBlock(out Block standingBlock)
+            || standingBlock == null
+            || !(standingBlock.MapObject is ConveyorBelt conveyorBelt)
+            || conveyorBelt == null
+            || !conveyorBelt.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        SetFocusedBlock(standingBlock);
+        return true;
     }
 
     public bool HasFocusedWorkableObject(IReadOnlyList<int> requiredItemIds)
@@ -1784,6 +1815,81 @@ public class PlayerController : MonoBehaviour
 
         Vector3 moveDirection = (right * input.x) + (forward * input.y);
         return moveDirection.sqrMagnitude > 1f ? moveDirection.normalized : moveDirection;
+    }
+
+    private void UpdateBodyRotation()
+    {
+        if (!hasPendingFacingDirection)
+        {
+            return;
+        }
+
+        if (RotateBodyTowards(pendingFacingDirection))
+        {
+            hasPendingFacingDirection = false;
+            pendingFacingDirection = Vector3.zero;
+        }
+    }
+
+    private bool RotateBodyTowards(Vector3 moveDirection)
+    {
+        if (moveDirection.sqrMagnitude <= 0.0001f || player == null)
+        {
+            return true;
+        }
+
+        Transform rotationTarget = player.BodyTransform != null ? player.BodyTransform : transform;
+        Quaternion targetRotation = Quaternion.LookRotation(moveDirection.normalized, Vector3.up);
+        float remainingAngle = Quaternion.Angle(rotationTarget.rotation, targetRotation);
+        if (remainingAngle <= 0.1f)
+        {
+            rotationTarget.rotation = targetRotation;
+            return true;
+        }
+
+        float interpolation = 1f - Mathf.Exp(-Mathf.Max(0.01f, rotationInterpolationSpeed) * Time.deltaTime);
+        float maxDegrees = Mathf.Max(0f, player.Stat.rotateSpeed) * Time.deltaTime;
+        if (maxDegrees <= 0f)
+        {
+            return false;
+        }
+
+        float stepDegrees = Mathf.Min(maxDegrees, remainingAngle * interpolation);
+        rotationTarget.rotation = Quaternion.RotateTowards(rotationTarget.rotation, targetRotation, stepDegrees);
+        if (Quaternion.Angle(rotationTarget.rotation, targetRotation) <= 0.1f)
+        {
+            rotationTarget.rotation = targetRotation;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static Vector2 GetKeyboardMoveInput()
+    {
+        Vector2 input = Vector2.zero;
+
+        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+        {
+            input.x -= 1f;
+        }
+
+        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+        {
+            input.x += 1f;
+        }
+
+        if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))
+        {
+            input.y -= 1f;
+        }
+
+        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
+        {
+            input.y += 1f;
+        }
+
+        return input.sqrMagnitude > 1f ? input.normalized : input;
     }
 
     private void UpdateAutoPickup()

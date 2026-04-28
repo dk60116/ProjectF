@@ -112,8 +112,23 @@ public class InstallationPlacementController : MonoBehaviour
         public Quaternion originalRotation = Quaternion.identity;
         public int originalConveyorVariantKind = -1;
         public List<Vector2Int> originalOccupiedCoordinates = new List<Vector2Int>();
+        public List<Vector2Int> originalStateCoordinates = new List<Vector2Int>();
+        public List<AreaAttachedBoxState> attachedAreaBoxes = new List<AreaAttachedBoxState>();
         public Dictionary<Vector2Int, List<int>> blockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
         public InputOutputModule.PersistentState inputOutputState;
+        public bool? boxIsOpen;
+        public bool itemFilterMaskInitialized;
+        public List<ulong> itemFilterMaskWords = new List<ulong>();
+    }
+
+    private sealed class AreaAttachedBoxState
+    {
+        public BoxObject boxObject;
+        public ItemDefinition definition;
+        public Vector2Int originalAnchorCoordinate;
+        public int originalQuarterTurns;
+        public Quaternion originalRotation = Quaternion.identity;
+        public Vector2Int canonicalAnchorOffset;
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
@@ -1213,6 +1228,10 @@ public class InstallationPlacementController : MonoBehaviour
             originalConveyorVariantKind = GetConveyorVariantKind(installationObject),
             originalOccupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
         };
+        editSession.originalStateCoordinates = GetInstallationEditStateCoordinates(
+            editSession,
+            editSession.originalAnchorCoordinate,
+            editSession.originalQuarterTurns);
 
         if (installationObject is InputOutputModule inputOutputModule)
         {
@@ -1227,7 +1246,97 @@ public class InstallationPlacementController : MonoBehaviour
         editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
 
+        CaptureAttachedAreaBoxes(editSession);
         CaptureInstallationBlockStates(editSession);
+        return true;
+    }
+
+    private List<Vector2Int> GetInstallationEditStateCoordinates(
+        InstallationEditSession editSession,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (editSession == null)
+        {
+            return new List<Vector2Int>();
+        }
+
+        MapObject footprintSource = editSession.definition != null && editSession.definition.mapObject != null
+            ? editSession.definition.mapObject
+            : editSession.originalInstallation;
+        return GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+    }
+
+    private void CaptureAttachedAreaBoxes(InstallationEditSession editSession)
+    {
+        if (editSession == null)
+        {
+            return;
+        }
+
+        editSession.attachedAreaBoxes.Clear();
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || editSession.originalStateCoordinates == null)
+        {
+            return;
+        }
+
+        HashSet<Vector2Int> occupiedCoordinates = new HashSet<Vector2Int>(editSession.originalOccupiedCoordinates);
+        HashSet<BoxObject> capturedBoxes = new HashSet<BoxObject>();
+        for (int i = 0; i < editSession.originalStateCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = editSession.originalStateCoordinates[i];
+            if (occupiedCoordinates.Contains(coordinate)
+                || !terrain.TryGetLoadedBlock(coordinate, out Block block)
+                || block == null
+                || !(block.MapObject is BoxObject boxObject)
+                || !capturedBoxes.Add(boxObject))
+            {
+                continue;
+            }
+
+            if (TryCaptureAttachedAreaBox(editSession, boxObject, out AreaAttachedBoxState boxState))
+            {
+                editSession.attachedAreaBoxes.Add(boxState);
+            }
+        }
+    }
+
+    private bool TryCaptureAttachedAreaBox(
+        InstallationEditSession editSession,
+        BoxObject boxObject,
+        out AreaAttachedBoxState boxState)
+    {
+        boxState = null;
+        if (editSession == null
+            || boxObject == null
+            || boxObject == editSession.originalInstallation
+            || !boxObject.TryGetPlacementRuntime(out Vector2Int boxAnchorCoordinate, out int boxRuntimeQuarterTurns))
+        {
+            return false;
+        }
+
+        ItemDefinition boxDefinition = null;
+        int boxItemId = boxObject.ResolveItemId();
+        TryGetInstallationDefinition(boxItemId, out boxDefinition);
+        int boxQuarterTurns = boxDefinition != null
+            ? ResolveInstallationEditQuarterTurns(boxObject, boxDefinition, boxAnchorCoordinate, boxRuntimeQuarterTurns)
+            : NormalizePlacementQuarterTurns(boxRuntimeQuarterTurns);
+
+        Vector2Int worldOffset = boxAnchorCoordinate - editSession.originalAnchorCoordinate;
+        boxState = new AreaAttachedBoxState
+        {
+            boxObject = boxObject,
+            definition = boxDefinition,
+            originalAnchorCoordinate = boxAnchorCoordinate,
+            originalQuarterTurns = boxQuarterTurns,
+            originalRotation = boxObject.transform.rotation,
+            canonicalAnchorOffset = RotateFootprintOffset(worldOffset, -editSession.originalQuarterTurns),
+            boxIsOpen = boxObject.IsOpen,
+            itemFilterMaskInitialized = boxObject.IsItemFilterMaskInitialized,
+            itemFilterMaskWords = boxObject.CaptureItemFilterMaskWords()
+        };
         return true;
     }
 
@@ -1236,15 +1345,15 @@ public class InstallationPlacementController : MonoBehaviour
         editSession.blockStatesByCanonicalOffset.Clear();
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null || editSession.originalOccupiedCoordinates == null)
+        if (terrain == null || editSession.originalStateCoordinates == null)
         {
             return;
         }
 
-        for (int i = 0; i < editSession.originalOccupiedCoordinates.Count; i++)
+        for (int i = 0; i < editSession.originalStateCoordinates.Count; i++)
         {
-            Vector2Int occupiedCoordinate = editSession.originalOccupiedCoordinates[i];
-            if (!terrain.TryGetLoadedBlock(occupiedCoordinate, out Block block) || block == null)
+            Vector2Int stateCoordinate = editSession.originalStateCoordinates[i];
+            if (!terrain.TryGetLoadedBlock(stateCoordinate, out Block block) || block == null)
             {
                 continue;
             }
@@ -1255,7 +1364,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            Vector2Int worldOffset = occupiedCoordinate - editSession.originalAnchorCoordinate;
+            Vector2Int worldOffset = stateCoordinate - editSession.originalAnchorCoordinate;
             Vector2Int canonicalOffset = RotateFootprintOffset(worldOffset, -editSession.originalQuarterTurns);
             editSession.blockStatesByCanonicalOffset[canonicalOffset] = new List<int>(blockState);
         }
@@ -1321,10 +1430,14 @@ public class InstallationPlacementController : MonoBehaviour
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         terrain?.RemoveInstallationPersistence(editSession.originalAnchorCoordinate);
+        DetachAttachedAreaBoxes(editSession, terrain);
 
-        for (int i = 0; i < editSession.originalOccupiedCoordinates.Count; i++)
+        List<Vector2Int> stateCoordinates = editSession.originalStateCoordinates != null && editSession.originalStateCoordinates.Count > 0
+            ? editSession.originalStateCoordinates
+            : editSession.originalOccupiedCoordinates;
+        for (int i = 0; i < stateCoordinates.Count; i++)
         {
-            if (terrain == null || !terrain.TryGetLoadedBlock(editSession.originalOccupiedCoordinates[i], out Block block) || block == null)
+            if (terrain == null || !terrain.TryGetLoadedBlock(stateCoordinates[i], out Block block) || block == null)
             {
                 continue;
             }
@@ -1333,7 +1446,7 @@ public class InstallationPlacementController : MonoBehaviour
                 ? block.CaptureFloorObjectStateWithDroppedConveyorObjects()
                 : null;
 
-            if (block.MapObject == editSession.originalInstallation)
+            if (block.MapObject == editSession.originalInstallation || IsAttachedAreaBox(editSession, block.MapObject))
             {
                 block.SetMapObject(null);
             }
@@ -1342,6 +1455,63 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         editSession.originalInstallation.gameObject.SetActive(false);
+    }
+
+    private void DetachAttachedAreaBoxes(InstallationEditSession editSession, TerrainGenerator terrain)
+    {
+        if (editSession?.attachedAreaBoxes == null || editSession.attachedAreaBoxes.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < editSession.attachedAreaBoxes.Count; i++)
+        {
+            AreaAttachedBoxState boxState = editSession.attachedAreaBoxes[i];
+            if (boxState?.boxObject == null)
+            {
+                continue;
+            }
+
+            terrain?.RemoveInstallationPersistence(boxState.originalAnchorCoordinate);
+            MapObject footprintSource = boxState.definition != null && boxState.definition.mapObject != null
+                ? boxState.definition.mapObject
+                : boxState.boxObject;
+            List<Vector2Int> boxCoordinates = GetFootprintCoordinates(
+                boxState.originalAnchorCoordinate,
+                footprintSource,
+                boxState.originalQuarterTurns);
+            for (int coordinateIndex = 0; coordinateIndex < boxCoordinates.Count; coordinateIndex++)
+            {
+                if (terrain != null
+                    && terrain.TryGetLoadedBlock(boxCoordinates[coordinateIndex], out Block block)
+                    && block != null
+                    && block.MapObject == boxState.boxObject)
+                {
+                    block.SetMapObject(null);
+                }
+            }
+
+            boxState.boxObject.gameObject.SetActive(false);
+        }
+    }
+
+    private bool IsAttachedAreaBox(InstallationEditSession editSession, MapObject mapObject)
+    {
+        if (editSession?.attachedAreaBoxes == null || !(mapObject is BoxObject boxObject))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < editSession.attachedAreaBoxes.Count; i++)
+        {
+            AreaAttachedBoxState boxState = editSession.attachedAreaBoxes[i];
+            if (boxState != null && boxState.boxObject == boxObject)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void BeginInstallationEditPreview(InstallationEditSession editSession)
@@ -1521,13 +1691,14 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         activeInstallationEditSession = null;
-        RestoreEditedInstallation(
+        MapObject restoredObject = RestoreEditedInstallation(
             editSession,
             anchorCoordinate,
             quarterTurns,
             conveyorVariantKind,
             previewRotation,
             previewPosition);
+        PlayInstallationEditCompleteAnimation(restoredObject, editSession);
         ClearInstallPreview();
         SetMapEditModeActive(false);
     }
@@ -1550,7 +1721,106 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        return TryGetFootprintBlocks(anchorCoordinate, footprintSource, quarterTurns, previewToIgnore, out _);
+        if (!TryGetFootprintBlocks(anchorCoordinate, footprintSource, quarterTurns, previewToIgnore, out _))
+        {
+            return false;
+        }
+
+        return CanRestoreAttachedAreaBoxesAt(editSession, anchorCoordinate, quarterTurns);
+    }
+
+    private bool CanRestoreAttachedAreaBoxesAt(
+        InstallationEditSession editSession,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (editSession?.attachedAreaBoxes == null || editSession.attachedAreaBoxes.Count <= 0)
+        {
+            return true;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        HashSet<MapObject> movingObjects = new HashSet<MapObject>();
+        if (editSession.originalInstallation != null)
+        {
+            movingObjects.Add(editSession.originalInstallation);
+        }
+
+        for (int i = 0; i < editSession.attachedAreaBoxes.Count; i++)
+        {
+            if (editSession.attachedAreaBoxes[i]?.boxObject != null)
+            {
+                movingObjects.Add(editSession.attachedAreaBoxes[i].boxObject);
+            }
+        }
+
+        for (int i = 0; i < editSession.attachedAreaBoxes.Count; i++)
+        {
+            AreaAttachedBoxState boxState = editSession.attachedAreaBoxes[i];
+            if (boxState?.boxObject == null)
+            {
+                continue;
+            }
+
+            Vector2Int targetAnchorCoordinate = GetMovedAttachedBoxAnchorCoordinate(
+                editSession,
+                boxState,
+                anchorCoordinate,
+                quarterTurns);
+            int targetQuarterTurns = GetMovedAttachedBoxQuarterTurns(editSession, boxState, quarterTurns);
+            MapObject footprintSource = boxState.definition != null && boxState.definition.mapObject != null
+                ? boxState.definition.mapObject
+                : boxState.boxObject;
+            List<Vector2Int> boxCoordinates = GetFootprintCoordinates(targetAnchorCoordinate, footprintSource, targetQuarterTurns);
+            for (int coordinateIndex = 0; coordinateIndex < boxCoordinates.Count; coordinateIndex++)
+            {
+                if (!terrain.TryGetLoadedBlock(boxCoordinates[coordinateIndex], out Block block) || block == null)
+                {
+                    return false;
+                }
+
+                MapObject occupyingObject = GetBlockingMapObject(block);
+                if (occupyingObject != null && !movingObjects.Contains(occupyingObject))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private Vector2Int GetMovedAttachedBoxAnchorCoordinate(
+        InstallationEditSession editSession,
+        AreaAttachedBoxState boxState,
+        Vector2Int newAnchorCoordinate,
+        int newQuarterTurns)
+    {
+        if (editSession == null || boxState == null)
+        {
+            return newAnchorCoordinate;
+        }
+
+        return newAnchorCoordinate + RotateFootprintOffset(boxState.canonicalAnchorOffset, newQuarterTurns);
+    }
+
+    private int GetMovedAttachedBoxQuarterTurns(
+        InstallationEditSession editSession,
+        AreaAttachedBoxState boxState,
+        int newQuarterTurns)
+    {
+        if (editSession == null || boxState == null)
+        {
+            return NormalizePlacementQuarterTurns(newQuarterTurns);
+        }
+
+        int quarterTurnDelta = NormalizePlacementQuarterTurns(newQuarterTurns - editSession.originalQuarterTurns);
+        return NormalizePlacementQuarterTurns(boxState.originalQuarterTurns + quarterTurnDelta);
     }
 
     private bool TryResolveEditedInstallationFootprintSource(
@@ -1618,7 +1888,7 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshMapEditButtonState();
     }
 
-    private void RestoreEditedInstallation(
+    private MapObject RestoreEditedInstallation(
         InstallationEditSession editSession,
         Vector2Int anchorCoordinate,
         int quarterTurns,
@@ -1628,7 +1898,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (editSession == null || editSession.originalInstallation == null || editSession.definition == null)
         {
-            return;
+            return null;
         }
 
         bool placementChanged = HasInstallationEditPlacementChanged(
@@ -1651,7 +1921,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject restoredObject = ResolveRestoredInstallationObject(editSession, desiredSourcePrefab, terrain);
         if (restoredObject == null)
         {
-            return;
+            return null;
         }
 
         Transform installParent = terrain != null ? terrain.transform : transform;
@@ -1695,6 +1965,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ApplyEditedInstallationBlockStates(editSession, anchorCoordinate, quarterTurns);
+        RestoreAttachedAreaBoxes(editSession, anchorCoordinate, quarterTurns, terrain);
         RegisterInstalledObjectPersistence(restoredObject);
         if (placementChanged)
         {
@@ -1720,6 +1991,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             SelectEditableInstallation(restoredInstallation, anchorCoordinate);
         }
+
+        return restoredObject;
     }
 
     private void ApplyEditedInstallationBlockStates(InstallationEditSession editSession, Vector2Int newAnchorCoordinate, int newQuarterTurns)
@@ -1735,10 +2008,10 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        List<Vector2Int> newOccupiedCoordinates = GetInstalledObjectFootprintCoordinates(newAnchorCoordinate, editSession.definition, newQuarterTurns);
-        for (int i = 0; i < newOccupiedCoordinates.Count; i++)
+        List<Vector2Int> newStateCoordinates = GetInstallationEditStateCoordinates(editSession, newAnchorCoordinate, newQuarterTurns);
+        for (int i = 0; i < newStateCoordinates.Count; i++)
         {
-            Vector2Int coordinate = newOccupiedCoordinates[i];
+            Vector2Int coordinate = newStateCoordinates[i];
             if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
             {
                 continue;
@@ -1754,6 +2027,66 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 block.ApplyFloorObjectState(null);
             }
+        }
+    }
+
+    private void RestoreAttachedAreaBoxes(
+        InstallationEditSession editSession,
+        Vector2Int newAnchorCoordinate,
+        int newQuarterTurns,
+        TerrainGenerator terrain)
+    {
+        if (editSession?.attachedAreaBoxes == null || editSession.attachedAreaBoxes.Count <= 0)
+        {
+            return;
+        }
+
+        Transform installParent = terrain != null ? terrain.transform : transform;
+        for (int i = 0; i < editSession.attachedAreaBoxes.Count; i++)
+        {
+            AreaAttachedBoxState boxState = editSession.attachedAreaBoxes[i];
+            if (boxState?.boxObject == null)
+            {
+                continue;
+            }
+
+            BoxObject boxObject = boxState.boxObject;
+            MapObject footprintSource = boxState.definition != null && boxState.definition.mapObject != null
+                ? boxState.definition.mapObject
+                : boxObject;
+            Vector2Int targetAnchorCoordinate = GetMovedAttachedBoxAnchorCoordinate(
+                editSession,
+                boxState,
+                newAnchorCoordinate,
+                newQuarterTurns);
+            int targetQuarterTurns = GetMovedAttachedBoxQuarterTurns(editSession, boxState, newQuarterTurns);
+
+            boxObject.transform.SetParent(installParent, true);
+            boxObject.transform.SetPositionAndRotation(
+                GetInstalledObjectWorldPosition(targetAnchorCoordinate, footprintSource, targetQuarterTurns, 0f),
+                GetInstalledObjectRotation(footprintSource, targetQuarterTurns));
+            boxObject.gameObject.SetActive(true);
+
+            List<Vector2Int> boxCoordinates = GetFootprintCoordinates(targetAnchorCoordinate, footprintSource, targetQuarterTurns);
+            for (int coordinateIndex = 0; coordinateIndex < boxCoordinates.Count; coordinateIndex++)
+            {
+                if (terrain != null
+                    && terrain.TryGetLoadedBlock(boxCoordinates[coordinateIndex], out Block block)
+                    && block != null
+                    && ShouldBindInstalledObjectToBlock(block, targetAnchorCoordinate, footprintSource, targetQuarterTurns))
+                {
+                    block.SetMapObject(boxObject);
+                }
+            }
+
+            ConfigureInstalledObjectRuntime(boxObject, targetAnchorCoordinate, targetQuarterTurns);
+            boxObject.ApplyItemFilterMask(boxState.itemFilterMaskWords, boxState.itemFilterMaskInitialized);
+            if (boxState.boxIsOpen.HasValue)
+            {
+                boxObject.SetOpenState(boxState.boxIsOpen.Value, false);
+            }
+
+            RegisterInstalledObjectPersistence(boxObject);
         }
     }
 
@@ -2359,6 +2692,8 @@ public class InstallationPlacementController : MonoBehaviour
         if (persistentState != null && TryGetInputOutputModule(installedObject, out InputOutputModule inputOutputModule))
         {
             inputOutputModule.ApplyPersistentState(persistentState);
+            ConfigureInstalledInputOutputRuntimeAreas(installedObject, anchorCoordinate, quarterTurns);
+            ConfigureInstalledInputOutputRuntimeGrid(installedObject, anchorCoordinate, quarterTurns);
         }
     }
 
@@ -6903,10 +7238,13 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InstallationMapFilter allowedFilter = installationObject.MapFilter;
-        bool isInputOutputAreaBlock
-            = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
-            || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
-            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate);
+        bool isInputOutputEnergyAreaBlock = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputEnergy);
+        bool isInputOutputItemAreaBlock = InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputItem);
+        bool isInputOutputOutputAreaBlock = InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.Output);
+        bool isInputOutputAreaBlock = isInputOutputEnergyAreaBlock || isInputOutputItemAreaBlock || isInputOutputOutputAreaBlock;
 
         if (IsRectGridAreaBlockType(rectGridBlockType))
         {
@@ -6914,15 +7252,16 @@ public class InstallationPlacementController : MonoBehaviour
                 && (occupyingObject == null || occupyingObject is BoxObject);
         }
 
+        if (isInputOutputAreaBlock)
+        {
+            return installationObject is BoxObject
+                && block.Type == Block.BlockType.Ground
+                && (occupyingObject == null || occupyingObject is InputOutputModule);
+        }
+
         if (occupyingObject is Resource resource)
         {
             return resource.CanHarvest && (allowedFilter & InstallationMapFilter.Resource) != 0;
-        }
-
-        if (isInputOutputAreaBlock && (allowedFilter & InstallationMapFilter.ItemArea) != 0)
-        {
-            return block.Type == Block.BlockType.Ground
-                && (occupyingObject == null || occupyingObject is InputOutputModule);
         }
 
         if (occupyingObject != null)
@@ -7185,6 +7524,41 @@ public class InstallationPlacementController : MonoBehaviour
                     .SetLink(installedObject.gameObject);
             }
         }, false);
+    }
+
+    private void PlayInstallationEditCompleteAnimation(MapObject restoredObject, InstallationEditSession editSession)
+    {
+        if (restoredObject == null)
+        {
+            return;
+        }
+
+        int itemId = editSession?.definition != null
+            ? editSession.definition.id
+            : restoredObject.ResolveItemId();
+        PortableObject sourcePortableObject = null;
+        List<PortableObject> handPortableSources = GetPlayerHandPortableSources(itemId, 1);
+        if (handPortableSources.Count > 0)
+        {
+            sourcePortableObject = handPortableSources[0];
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        bool reservedTemporarySource = false;
+        if (sourcePortableObject == null
+            && player != null
+            && player.TryReserveHandObject(itemId, out sourcePortableObject))
+        {
+            reservedTemporarySource = true;
+            player.CommitReservedHandObject(sourcePortableObject);
+        }
+
+        PlayInstallPlacementAnimation(restoredObject, sourcePortableObject, itemId, 0f);
+
+        if (reservedTemporarySource)
+        {
+            player.ReleaseReservedHandObject(sourcePortableObject);
+        }
     }
 
     private void SetInstalledObjectVisualVisible(MapObject installedObject, bool isVisible)

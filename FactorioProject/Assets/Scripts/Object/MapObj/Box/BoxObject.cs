@@ -644,7 +644,8 @@ public class BoxObject : InstallationObject
             Vector2Int coordinate = occupiedCoordinates[i];
             foundAny |= InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, acceptedItemIds);
 
-            if (InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(coordinate, out InputOutputModule module)
+            if (InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
+                && InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(coordinate, out InputOutputModule module)
                 && module != null)
             {
                 foundAny |= module.AppendRuntimeInputItemIds(acceptedItemIds);
@@ -723,7 +724,9 @@ public class BoxObject : InstallationObject
                     firstOccupiedBlock = occupiedBlock;
                 }
 
-                if (InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(occupiedCoordinates[i], out InputOutputModule module)
+                bool isInputItemAreaCoordinate = InputOutputModuleItemAreaController.CoordinateIsItemArea(occupiedCoordinates[i]);
+                if (isInputItemAreaCoordinate
+                    && InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(occupiedCoordinates[i], out InputOutputModule module)
                     && module != null
                     && module.TryGetRuntimeInputBlock(terrainGenerator, preferredFilteredItemId, out Block moduleInputBlock)
                     && moduleInputBlock != null)

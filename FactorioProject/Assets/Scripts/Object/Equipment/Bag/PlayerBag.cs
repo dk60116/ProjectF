@@ -564,7 +564,7 @@ public class PlayerBag : MonoBehaviour
         }
     }
 
-    public bool TryRemoveOneAtSlot(int index, out int objectId)
+    public bool TryRemoveOneAtSlot(int index, out int objectId, bool mergeDuplicates = true)
     {
         EnsureInitialized();
         objectId = -1;
@@ -601,7 +601,11 @@ public class PlayerBag : MonoBehaviour
             topObject.gameObject.SetActive(false);
         }
 
-        TryMergeDuplicateItemStacks();
+        if (mergeDuplicates)
+        {
+            TryMergeDuplicateItemStacks();
+        }
+
         NotifyChanged();
         return objectId >= 0;
     }

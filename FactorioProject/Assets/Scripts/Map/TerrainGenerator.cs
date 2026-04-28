@@ -9,6 +9,9 @@ using UnityEditor;
 
 public class TerrainGenerator : MonoBehaviour
 {
+    private const float MinOreBodyScaleRatioLimit = 0.3f;
+    private const float MaxOreBodyScaleRatioLimit = 1.5f;
+
     public static TerrainGenerator Active { get; private set; }
 
     public enum ResourcePlacementMode
@@ -392,11 +395,11 @@ public class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(1), HideInInspector]
     private int normalOreMaxResourceCount = 300;
 
-    [SerializeField, Range(0f, 2f)]
+    [SerializeField, Range(MinOreBodyScaleRatioLimit, MaxOreBodyScaleRatioLimit)]
     private float oreMinimumBodyScaleRatio = 0.3f;
 
-    [SerializeField, Min(0.01f)]
-    private float oreMaximumBodyScaleRatio = 2f;
+    [SerializeField, Range(MinOreBodyScaleRatioLimit, MaxOreBodyScaleRatioLimit)]
+    private float oreMaximumBodyScaleRatio = 1.5f;
 
     [SerializeField, Min(1)]
     private int oreScaleAtResourceCount = 300;
@@ -449,7 +452,7 @@ public class TerrainGenerator : MonoBehaviour
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
-        oreMaximumBodyScaleRatio = Mathf.Max(oreMinimumBodyScaleRatio, oreMaximumBodyScaleRatio);
+        NormalizeOreBodyScaleSettings();
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
@@ -466,10 +469,23 @@ public class TerrainGenerator : MonoBehaviour
         Active = this;
     }
 
+    private void NormalizeOreBodyScaleSettings()
+    {
+        oreMinimumBodyScaleRatio = Mathf.Clamp(
+            oreMinimumBodyScaleRatio,
+            MinOreBodyScaleRatioLimit,
+            MaxOreBodyScaleRatioLimit);
+        oreMaximumBodyScaleRatio = Mathf.Clamp(
+            oreMaximumBodyScaleRatio,
+            oreMinimumBodyScaleRatio,
+            MaxOreBodyScaleRatioLimit);
+    }
+
     private void Start()
     {
         MigrateLegacyResourcesIfNeeded();
         UpgradeLegacyGeneratedSurfaceBlendSettings();
+        NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
@@ -510,6 +526,7 @@ public class TerrainGenerator : MonoBehaviour
     public void Generate()
     {
         MigrateLegacyResourcesIfNeeded();
+        NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
@@ -536,6 +553,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         MigrateLegacyResourcesIfNeeded();
+        NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();

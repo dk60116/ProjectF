@@ -427,6 +427,32 @@ public class InputOutputModule : InstallationObject
         return false;
     }
 
+    public static bool CoordinateIsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType blockType)
+    {
+        if (blockType == RectGridBlockType.None
+            || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (candidate.ContainsRuntimeRectGridBlockType(coordinate, blockType))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
         if (outputItemIds == null)
@@ -481,6 +507,35 @@ public class InputOutputModule : InstallationObject
             }
 
             if (candidate.HasOutputItemId(itemId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool ContainsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType blockType)
+    {
+        if (blockType == RectGridBlockType.None
+            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+            || !TryGetPrimaryObjectCell(out Vector2Int objectCell))
+        {
+            return false;
+        }
+
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != blockType)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(placement.x - objectCell.x, placement.y - objectCell.y);
+            Vector2Int runtimeCoordinate = anchorCoordinate + RotateCellOffset(localOffset, quarterTurns);
+            if (runtimeCoordinate == coordinate)
             {
                 return true;
             }

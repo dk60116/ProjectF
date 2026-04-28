@@ -326,9 +326,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void Update()
     {
+        bool dropRequested = Input.GetKeyDown(KeyCode.F) || Input.GetMouseButtonDown(1);
         if (hoveredDropSlot != this
             || isDragging
-            || !Input.GetKeyDown(KeyCode.F)
+            || !dropRequested
             || !CanDragItem())
         {
             return;

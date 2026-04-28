@@ -619,7 +619,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             return false;
         }
 
-        if (sourceBag == null || !sourceBag.TryRemoveOneAtSlot(slotIndex, out int removedItemId) || removedItemId != itemId)
+        if (sourceBag == null || !sourceBag.TryRemoveOneAtSlot(slotIndex, out int removedItemId, false) || removedItemId != itemId)
         {
             return false;
         }
@@ -674,14 +674,15 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         }
 
         PlayerBag handBag = player.GetHandBag();
-        if (TryFindMatchingEnergyItemInBag(handBag, out slotIndex, out itemId, out startWorldPosition, out targetBlock))
+        if (TryFindMatchingEnergyItemInBagSlot(handBag, 0, out itemId, out startWorldPosition, out targetBlock))
         {
             sourceBag = handBag;
+            slotIndex = 0;
             return true;
         }
 
         PlayerBag bag = player.GetBag();
-        if (TryFindMatchingEnergyItemInBag(bag, out slotIndex, out itemId, out startWorldPosition, out targetBlock))
+        if (TryFindMatchingEnergyItemInBagSlotOrder(bag, out slotIndex, out itemId, out startWorldPosition, out targetBlock))
         {
             sourceBag = bag;
             return true;
@@ -690,7 +691,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         return false;
     }
 
-    private bool TryFindMatchingEnergyItemInBag(
+    private bool TryFindMatchingEnergyItemInBagSlotOrder(
         PlayerBag bag,
         out int slotIndex,
         out int itemId,
@@ -711,42 +712,94 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         int slotCount = bag.SlotCount;
         for (int i = 0; i < slotCount; i++)
         {
-            int candidateItemId = bag.GetSlotItemId(i);
-            if (candidateItemId < 0 || bag.GetSlotCount(i) <= 0)
+            if (TryFindMatchingEnergyItemInBagSlotWithoutRefresh(
+                bag,
+                i,
+                out itemId,
+                out startWorldPosition,
+                out targetBlock))
             {
-                continue;
+                slotIndex = i;
+                return true;
             }
-
-            ItemDefinition candidateDefinition = ResolveItemDefinition(candidateItemId);
-            if (candidateDefinition == null
-                || candidateDefinition.energyType != acceptedEnergyType
-                || candidateDefinition.energyAmount <= 0)
-            {
-                continue;
-            }
-
-            if (!TryResolveDepositBlock(candidateItemId, out Block candidateTargetBlock) || candidateTargetBlock == null)
-            {
-                continue;
-            }
-
-            PortableObject topObject = bag.GetTopObject(i);
-            if (topObject != null)
-            {
-                startWorldPosition = topObject.transform.position;
-            }
-            else if (GameManager.Instance != null && GameManager.Instance.Player != null)
-            {
-                startWorldPosition = GameManager.Instance.Player.transform.position;
-            }
-
-            slotIndex = i;
-            itemId = candidateItemId;
-            targetBlock = candidateTargetBlock;
-            return true;
         }
 
         return false;
+    }
+
+    private bool TryFindMatchingEnergyItemInBagSlot(
+        PlayerBag bag,
+        int candidateSlotIndex,
+        out int itemId,
+        out Vector3 startWorldPosition,
+        out Block targetBlock)
+    {
+        itemId = -1;
+        startWorldPosition = transform.position;
+        targetBlock = null;
+
+        if (bag == null)
+        {
+            return false;
+        }
+
+        bag.RefreshExternalStackCounts(false);
+        return TryFindMatchingEnergyItemInBagSlotWithoutRefresh(
+            bag,
+            candidateSlotIndex,
+            out itemId,
+            out startWorldPosition,
+            out targetBlock);
+    }
+
+    private bool TryFindMatchingEnergyItemInBagSlotWithoutRefresh(
+        PlayerBag bag,
+        int candidateSlotIndex,
+        out int itemId,
+        out Vector3 startWorldPosition,
+        out Block targetBlock)
+    {
+        itemId = -1;
+        startWorldPosition = transform.position;
+        targetBlock = null;
+
+        if (bag == null || candidateSlotIndex < 0 || candidateSlotIndex >= bag.SlotCount)
+        {
+            return false;
+        }
+
+        int candidateItemId = bag.GetSlotItemId(candidateSlotIndex);
+        if (candidateItemId < 0 || bag.GetSlotCount(candidateSlotIndex) <= 0)
+        {
+            return false;
+        }
+
+        ItemDefinition candidateDefinition = ResolveItemDefinition(candidateItemId);
+        if (candidateDefinition == null
+            || candidateDefinition.energyType != acceptedEnergyType
+            || candidateDefinition.energyAmount <= 0)
+        {
+            return false;
+        }
+
+        if (!TryResolveDepositBlock(candidateItemId, out Block candidateTargetBlock) || candidateTargetBlock == null)
+        {
+            return false;
+        }
+
+        PortableObject topObject = bag.GetTopObject(candidateSlotIndex);
+        if (topObject != null)
+        {
+            startWorldPosition = topObject.transform.position;
+        }
+        else if (GameManager.Instance != null && GameManager.Instance.Player != null)
+        {
+            startWorldPosition = GameManager.Instance.Player.transform.position;
+        }
+
+        itemId = candidateItemId;
+        targetBlock = candidateTargetBlock;
+        return true;
     }
 
     private int ResolveAreaMaxObjects()
@@ -1332,7 +1385,7 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
             return false;
         }
 
-        if (sourceBag == null || !sourceBag.TryRemoveOneAtSlot(slotIndex, out int removedItemId) || removedItemId != itemId)
+        if (sourceBag == null || !sourceBag.TryRemoveOneAtSlot(slotIndex, out int removedItemId, false) || removedItemId != itemId)
         {
             return false;
         }
@@ -1455,14 +1508,15 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
         }
 
         PlayerBag handBag = player.GetHandBag();
-        if (TryFindMatchingItemInBag(handBag, acceptedItemId, out slotIndex, out itemId, out startWorldPosition))
+        if (TryFindMatchingItemInBagSlot(handBag, 0, acceptedItemId, out itemId, out startWorldPosition))
         {
             sourceBag = handBag;
+            slotIndex = 0;
             return true;
         }
 
         PlayerBag bag = player.GetBag();
-        if (TryFindMatchingItemInBag(bag, acceptedItemId, out slotIndex, out itemId, out startWorldPosition))
+        if (TryFindMatchingItemInBagSlotOrder(bag, acceptedItemId, out slotIndex, out itemId, out startWorldPosition))
         {
             sourceBag = bag;
             return true;
@@ -1471,7 +1525,7 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
         return false;
     }
 
-    private bool TryFindMatchingItemInBag(
+    private bool TryFindMatchingItemInBagSlotOrder(
         PlayerBag bag,
         int acceptedItemId,
         out int slotIndex,
@@ -1491,28 +1545,81 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
         int slotCount = bag.SlotCount;
         for (int i = 0; i < slotCount; i++)
         {
-            int candidateItemId = bag.GetSlotItemId(i);
-            if (candidateItemId != acceptedItemId || bag.GetSlotCount(i) <= 0)
+            if (TryFindMatchingItemInBagSlotWithoutRefresh(
+                bag,
+                i,
+                acceptedItemId,
+                out itemId,
+                out startWorldPosition))
             {
-                continue;
+                slotIndex = i;
+                return true;
             }
-
-            PortableObject topObject = bag.GetTopObject(i);
-            if (topObject != null)
-            {
-                startWorldPosition = topObject.transform.position;
-            }
-            else if (GameManager.Instance != null && GameManager.Instance.Player != null)
-            {
-                startWorldPosition = GameManager.Instance.Player.transform.position;
-            }
-
-            slotIndex = i;
-            itemId = candidateItemId;
-            return true;
         }
 
         return false;
+    }
+
+    private bool TryFindMatchingItemInBagSlot(
+        PlayerBag bag,
+        int candidateSlotIndex,
+        int acceptedItemId,
+        out int itemId,
+        out Vector3 startWorldPosition)
+    {
+        itemId = -1;
+        startWorldPosition = transform.position;
+
+        if (bag == null || acceptedItemId < 0)
+        {
+            return false;
+        }
+
+        bag.RefreshExternalStackCounts(false);
+        return TryFindMatchingItemInBagSlotWithoutRefresh(
+            bag,
+            candidateSlotIndex,
+            acceptedItemId,
+            out itemId,
+            out startWorldPosition);
+    }
+
+    private bool TryFindMatchingItemInBagSlotWithoutRefresh(
+        PlayerBag bag,
+        int candidateSlotIndex,
+        int acceptedItemId,
+        out int itemId,
+        out Vector3 startWorldPosition)
+    {
+        itemId = -1;
+        startWorldPosition = transform.position;
+
+        if (bag == null
+            || acceptedItemId < 0
+            || candidateSlotIndex < 0
+            || candidateSlotIndex >= bag.SlotCount)
+        {
+            return false;
+        }
+
+        int candidateItemId = bag.GetSlotItemId(candidateSlotIndex);
+        if (candidateItemId != acceptedItemId || bag.GetSlotCount(candidateSlotIndex) <= 0)
+        {
+            return false;
+        }
+
+        PortableObject topObject = bag.GetTopObject(candidateSlotIndex);
+        if (topObject != null)
+        {
+            startWorldPosition = topObject.transform.position;
+        }
+        else if (GameManager.Instance != null && GameManager.Instance.Player != null)
+        {
+            startWorldPosition = GameManager.Instance.Player.transform.position;
+        }
+
+        itemId = candidateItemId;
+        return true;
     }
 
     private bool TryResolveDepositBlock(Vector2Int targetCoordinate, int itemId, out Block targetBlock)
