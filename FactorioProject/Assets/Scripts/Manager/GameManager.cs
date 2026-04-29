@@ -17,6 +17,8 @@ public class GameManager : MonoBehaviour
 
     private UIManager uiManager;
     private ItemManager itemManager;
+    private VirtualObjectWorld virtualObjectWorld;
+    private VirtualItemStackRenderer virtualItemStackRenderer;
 
     [SerializeField]
     private Player player;
@@ -49,6 +51,14 @@ public class GameManager : MonoBehaviour
         
         uiManager = GetComponentInChildren<UIManager>();
         itemManager = GetComponentInChildren<ItemManager>();
+        virtualObjectWorld = VirtualObjectWorld.EnsureFor(gameObject);
+        virtualItemStackRenderer = GetComponent<VirtualItemStackRenderer>();
+        if (virtualItemStackRenderer == null)
+        {
+            virtualItemStackRenderer = gameObject.AddComponent<VirtualItemStackRenderer>();
+        }
+
+        virtualItemStackRenderer.Configure(virtualObjectWorld, itemManager);
         ConfigureRuntimeItemGiveReceiver();
     }
 
@@ -105,6 +115,8 @@ public class GameManager : MonoBehaviour
 
     public UIManager UIManager => uiManager;
     public ItemManager ItemManger => itemManager;
+    public VirtualObjectWorld VirtualWorld => virtualObjectWorld;
+    public VirtualItemStackRenderer VirtualItemRenderer => virtualItemStackRenderer;
 
     public Player Player => player;
     public bool DebugConveyorInstallGridEnds => debugConveyorInstallGridEnds;

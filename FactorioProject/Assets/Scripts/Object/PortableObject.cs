@@ -21,17 +21,83 @@ public class PortableObject : MonoBehaviour
 
     private MeshRenderer bodyRenderer;
     private PortableObjectBatchRenderer batchRenderer;
+    private Transform cachedTransform;
+    private GameObject cachedGameObject;
+    private DroppedItemPickupGate cachedPickupGate;
     private bool useBatchedRendering;
+    private bool suppressVisualRendering;
     private bool isMovingToTarget;
     private int lastConveyorMoveFrame = -1;
 
     public int ItemId => id;
     public bool IsMovingToTarget => isMovingToTarget;
+    public bool IsUsingBatchedRendering => useBatchedRendering;
+    public bool IsVisualRenderingSuppressed => suppressVisualRendering;
     public bool WasMovedByConveyorThisFrame => lastConveyorMoveFrame == Time.frameCount;
+    public Transform CachedTransform => cachedTransform != null ? cachedTransform : (cachedTransform = transform);
+    public GameObject CachedGameObject => cachedGameObject != null ? cachedGameObject : (cachedGameObject = gameObject);
+    public Vector3 WorldPosition => CachedTransform.position;
+    public DroppedItemPickupGate PickupGate
+    {
+        get
+        {
+            if (cachedPickupGate == null)
+            {
+                cachedPickupGate = GetComponent<DroppedItemPickupGate>();
+            }
+
+            return cachedPickupGate;
+        }
+    }
+
+    public DroppedItemPickupGate GetOrAddPickupGate()
+    {
+        DroppedItemPickupGate gate = PickupGate;
+        if (gate == null)
+        {
+            gate = CachedGameObject.AddComponent<DroppedItemPickupGate>();
+            cachedPickupGate = gate;
+        }
+
+        return gate;
+    }
 
     public void MarkMovedByConveyorThisFrame()
     {
         lastConveyorMoveFrame = Time.frameCount;
+    }
+
+    public void SetCachedParent(Transform parent, bool worldPositionStays)
+    {
+        CachedTransform.SetParent(parent, worldPositionStays);
+        NotifyBatchRenderDataChanged();
+    }
+
+    public void SetCachedActive(bool active)
+    {
+        if (CachedGameObject.activeSelf == active)
+        {
+            UpdateRendererVisibility();
+            return;
+        }
+
+        CachedGameObject.SetActive(active);
+        NotifyBatchRenderDataChanged();
+        UpdateRendererVisibility();
+    }
+
+    public void SetWorldPosition(Vector3 position)
+    {
+        CachedTransform.position = position;
+        NotifyBatchRenderDataChanged();
+    }
+
+    public void NotifyBatchRenderDataChanged()
+    {
+        if (useBatchedRendering)
+        {
+            batchRenderer?.MarkDirty();
+        }
     }
     
     public bool SetItem(int id)
@@ -74,15 +140,18 @@ public class PortableObject : MonoBehaviour
 
         body.sharedMesh = portableMesh;
         bodyRenderer.sharedMaterial = portableMat;
+        NotifyBatchRenderDataChanged();
         UpdateRendererVisibility();
         return true;
     }
 
     public void SetBatchedRendering(bool shouldUseBatchedRendering)
     {
+        suppressVisualRendering = false;
         ResolveBodyRenderer();
         if (useBatchedRendering == shouldUseBatchedRendering && (!useBatchedRendering || batchRenderer != null))
         {
+            NotifyBatchRenderDataChanged();
             UpdateRendererVisibility();
             return;
         }
@@ -104,6 +173,31 @@ public class PortableObject : MonoBehaviour
         }
 
         batchRenderer.Register(this);
+        NotifyBatchRenderDataChanged();
+        UpdateRendererVisibility();
+    }
+
+    public void SetVisualRenderingSuppressed(bool suppressed)
+    {
+        ResolveBodyRenderer();
+        if (suppressVisualRendering == suppressed)
+        {
+            UpdateRendererVisibility();
+            return;
+        }
+
+        suppressVisualRendering = suppressed;
+        if (suppressVisualRendering)
+        {
+            if (useBatchedRendering)
+            {
+                UnregisterFromBatchRenderer();
+            }
+
+            useBatchedRendering = false;
+        }
+
+        NotifyBatchRenderDataChanged();
         UpdateRendererVisibility();
     }
 
@@ -120,14 +214,16 @@ public class PortableObject : MonoBehaviour
 
         mesh = body != null ? body.sharedMesh : null;
         material = bodyRenderer != null ? bodyRenderer.sharedMaterial : null;
-        localToWorldMatrix = transform.localToWorldMatrix;
-        worldPosition = transform.position;
-        layer = gameObject.layer;
+        Transform targetTransform = CachedTransform;
+        GameObject targetGameObject = CachedGameObject;
+        localToWorldMatrix = targetTransform.localToWorldMatrix;
+        worldPosition = targetTransform.position;
+        layer = targetGameObject.layer;
         shadowCastingMode = bodyRenderer != null ? bodyRenderer.shadowCastingMode : ShadowCastingMode.Off;
         receiveShadows = bodyRenderer != null && bodyRenderer.receiveShadows;
 
         return useBatchedRendering
-               && gameObject.activeInHierarchy
+               && targetGameObject.activeInHierarchy
                && bodyRenderer != null
                && mesh != null
                && material != null;
@@ -141,7 +237,7 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        MoveTo(() => target != null ? target.position : transform.position, 0f, null, onComplete, true);
+        MoveTo(() => target != null ? target.position : WorldPosition, 0f, null, onComplete, true);
     }
 
     public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true)
@@ -152,7 +248,7 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        MoveTo(() => target != null ? target.position : transform.position, delay, startPositionProvider, onComplete, deactivateOnComplete);
+        MoveTo(() => target != null ? target.position : WorldPosition, delay, startPositionProvider, onComplete, deactivateOnComplete);
     }
 
     public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null, bool deactivateOnComplete = true)
@@ -169,7 +265,7 @@ public class PortableObject : MonoBehaviour
         }
 
         SetBatchedRendering(false);
-        transform.DOKill();
+        CachedTransform.DOKill();
         ResolveBodyRenderer();
         isMovingToTarget = true;
 
@@ -182,7 +278,7 @@ public class PortableObject : MonoBehaviour
                 {
                     if (startPositionProvider != null)
                     {
-                        transform.position = startPositionProvider();
+                        CachedTransform.position = startPositionProvider();
                     }
                 }).SetEase(Ease.Linear));
             sequence.AppendCallback(() => SetBodyRendererVisible(true));
@@ -192,15 +288,15 @@ public class PortableObject : MonoBehaviour
             SetBodyRendererVisible(true);
             if (startPositionProvider != null)
             {
-                transform.position = startPositionProvider();
+                CachedTransform.position = startPositionProvider();
             }
         }
 
-        Vector3 launchStartPosition = transform.position;
+        Vector3 launchStartPosition = WorldPosition;
         sequence.AppendCallback(() =>
         {
-            launchStartPosition = startPositionProvider != null ? startPositionProvider() : transform.position;
-            transform.position = launchStartPosition;
+            launchStartPosition = startPositionProvider != null ? startPositionProvider() : WorldPosition;
+            CachedTransform.position = launchStartPosition;
         });
 
         const float moveDuration = 0.3f;
@@ -212,16 +308,16 @@ public class PortableObject : MonoBehaviour
                 Vector3 currentTargetPosition = targetPositionProvider();
                 Vector3 horizontalPosition = Vector3.Lerp(currentStartPosition, currentTargetPosition, t);
                 float verticalOffset = 4f * jumpPower * t * (1f - t);
-                transform.position = horizontalPosition + (Vector3.up * verticalOffset);
+                CachedTransform.position = horizontalPosition + (Vector3.up * verticalOffset);
             }).SetEase(Ease.Linear));
         sequence.OnComplete(() =>
         {
             isMovingToTarget = false;
-            transform.position = targetPositionProvider();
+            CachedTransform.position = targetPositionProvider();
             SetBodyRendererVisible(true);
             if (deactivateOnComplete)
             {
-                gameObject.SetActive(false);
+                CachedGameObject.SetActive(false);
             }
 
             onComplete?.Invoke();
@@ -241,6 +337,8 @@ public class PortableObject : MonoBehaviour
 
     private void OnEnable()
     {
+        cachedTransform = transform;
+        cachedGameObject = gameObject;
         if (useBatchedRendering)
         {
             batchRenderer = ResolveBatchRenderer();
@@ -295,7 +393,7 @@ public class PortableObject : MonoBehaviour
             return batchRenderer;
         }
 
-        TerrainGenerator generator = GetComponentInParent<TerrainGenerator>();
+        TerrainGenerator generator = CachedTransform.GetComponentInParent<TerrainGenerator>();
         GameObject host = generator != null ? generator.gameObject : null;
         if (host == null)
         {
@@ -333,6 +431,6 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        bodyRenderer.enabled = gameObject.activeInHierarchy && !useBatchedRendering;
+        bodyRenderer.enabled = CachedGameObject.activeInHierarchy && !useBatchedRendering && !suppressVisualRendering;
     }
 }

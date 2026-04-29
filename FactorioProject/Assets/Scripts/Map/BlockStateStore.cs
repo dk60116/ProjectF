@@ -158,6 +158,7 @@ public class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<Vector2Int, LiveInstallationRecord> liveInstallationStates = new Dictionary<Vector2Int, LiveInstallationRecord>();
     private readonly Dictionary<Vector2Int, Vector2Int> liveInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
+    private VirtualObjectWorld virtualObjectWorld;
 
     public void Save(Vector2Int worldCoordinate, Resource resource)
     {
@@ -166,7 +167,9 @@ public class BlockStateStore : MonoBehaviour
             return;
         }
 
-        savedStates[worldCoordinate] = resource.CaptureState();
+        Resource.ResourceSaveState state = resource.CaptureState();
+        savedStates[worldCoordinate] = state;
+        ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, resource.ResolveItemId(), state);
     }
 
     public void SaveFloorObjects(Vector2Int worldCoordinate, Block block)
@@ -180,6 +183,7 @@ public class BlockStateStore : MonoBehaviour
         if (itemIds == null || itemIds.Count == 0)
         {
             savedFloorObjectStates.Remove(worldCoordinate);
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
             return;
         }
 
@@ -187,10 +191,12 @@ public class BlockStateStore : MonoBehaviour
         if (state == null)
         {
             savedFloorObjectStates.Remove(worldCoordinate);
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
             return;
         }
 
         savedFloorObjectStates[worldCoordinate] = state;
+        ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds);
     }
 
     public bool TryGet(Vector2Int worldCoordinate, out Resource.ResourceSaveState state)
@@ -233,6 +239,7 @@ public class BlockStateStore : MonoBehaviour
         if (itemIds == null || itemIds.Count <= 0)
         {
             savedFloorObjectStates.Remove(worldCoordinate);
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
             return;
         }
 
@@ -240,10 +247,23 @@ public class BlockStateStore : MonoBehaviour
         if (state == null)
         {
             savedFloorObjectStates.Remove(worldCoordinate);
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
             return;
         }
 
         savedFloorObjectStates[worldCoordinate] = state;
+        ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds);
+    }
+
+    public void SetFloorObjectsResidency(Vector2Int worldCoordinate, VirtualObjectResidency residency)
+    {
+        if (!savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState) || savedState == null)
+        {
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
+            return;
+        }
+
+        ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, savedState.ToSerializedList(), residency);
     }
 
     public void SaveInstallation(InstallationObject installationObject)
@@ -288,6 +308,7 @@ public class BlockStateStore : MonoBehaviour
             state = clonedState
         };
         RegisterLiveCoordinateMappings(clonedState);
+        ResolveVirtualObjectWorld()?.UpsertInstallation(clonedState, VirtualObjectResidency.Live, installationObject);
     }
 
     public bool TryGetInstallationState(Vector2Int anchorCoordinate, out InstallationSaveState state)
@@ -362,6 +383,16 @@ public class BlockStateStore : MonoBehaviour
 
         UnregisterLiveCoordinateMappings(record.state);
         liveInstallationStates.Remove(anchorCoordinate);
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        if (savedInstallationStates.TryGetValue(anchorCoordinate, out InstallationSaveState savedState))
+        {
+            world?.UpsertInstallation(savedState);
+        }
+        else
+        {
+            world?.RemoveInstallation(anchorCoordinate);
+        }
     }
 
     public void RemoveInstallation(Vector2Int anchorCoordinate)
@@ -373,6 +404,7 @@ public class BlockStateStore : MonoBehaviour
         }
 
         UnregisterLiveInstallation(anchorCoordinate);
+        ResolveVirtualObjectWorld()?.RemoveInstallation(anchorCoordinate);
     }
 
     public void ClearStates()
@@ -383,6 +415,7 @@ public class BlockStateStore : MonoBehaviour
         savedInstallationAnchorsByCoordinate.Clear();
         liveInstallationStates.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
+        ResolveVirtualObjectWorld()?.Clear();
     }
 
     private bool TryBuildInstallationState(InstallationObject installationObject, out InstallationSaveState state)
@@ -452,6 +485,24 @@ public class BlockStateStore : MonoBehaviour
 
         savedInstallationStates[clonedState.anchorCoordinate] = clonedState;
         RegisterSavedCoordinateMappings(clonedState);
+        ResolveVirtualObjectWorld()?.UpsertInstallation(clonedState);
+    }
+
+    private VirtualObjectWorld ResolveVirtualObjectWorld()
+    {
+        if (virtualObjectWorld != null)
+        {
+            return virtualObjectWorld;
+        }
+
+        virtualObjectWorld = VirtualObjectWorld.Current;
+        if (virtualObjectWorld != null)
+        {
+            return virtualObjectWorld;
+        }
+
+        virtualObjectWorld = VirtualObjectWorld.EnsureFor(gameObject);
+        return virtualObjectWorld;
     }
 
     private void RegisterSavedCoordinateMappings(InstallationSaveState state)

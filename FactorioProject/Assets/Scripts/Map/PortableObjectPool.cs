@@ -100,6 +100,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
     private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<PortableObject> cleanupBuffer = new List<PortableObject>();
+    private bool batchesDirty = true;
 
     public void Register(PortableObject portableObject)
     {
@@ -108,7 +109,10 @@ public class PortableObjectBatchRenderer : MonoBehaviour
             return;
         }
 
-        registeredObjects.Add(portableObject);
+        if (registeredObjects.Add(portableObject))
+        {
+            batchesDirty = true;
+        }
     }
 
     public void Unregister(PortableObject portableObject)
@@ -118,7 +122,15 @@ public class PortableObjectBatchRenderer : MonoBehaviour
             return;
         }
 
-        registeredObjects.Remove(portableObject);
+        if (registeredObjects.Remove(portableObject))
+        {
+            batchesDirty = true;
+        }
+    }
+
+    public void MarkDirty()
+    {
+        batchesDirty = true;
     }
 
     private void LateUpdate()
@@ -128,7 +140,12 @@ public class PortableObjectBatchRenderer : MonoBehaviour
             return;
         }
 
-        RebuildBatches();
+        if (batchesDirty)
+        {
+            RebuildBatches();
+            batchesDirty = false;
+        }
+
         RenderBatches();
     }
 
