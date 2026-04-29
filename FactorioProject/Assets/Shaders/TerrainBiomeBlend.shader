@@ -6,7 +6,6 @@ Shader "ProjectF/Terrain/BiomeBlend"
         [NoScaleOffset] _DirtMap("Dirt Map", 2D) = "white" {}
         [NoScaleOffset] _GrassMap("Grass Map", 2D) = "white" {}
         [NoScaleOffset] _ForestMap("Forest Map", 2D) = "white" {}
-        [NoScaleOffset] _BlendNoise("Blend Noise", 2D) = "gray" {}
         _SandColor("Sand Color", Color) = (0.94, 0.85, 0.58, 1)
         _DirtColor("Dirt Color", Color) = (0.55, 0.37, 0.18, 1)
         _GrassColor("Grass Color", Color) = (0.63, 0.76, 0.21, 1)
@@ -123,8 +122,6 @@ Shader "ProjectF/Terrain/BiomeBlend"
             SAMPLER(sampler_GrassMap);
             TEXTURE2D(_ForestMap);
             SAMPLER(sampler_ForestMap);
-            TEXTURE2D(_BlendNoise);
-            SAMPLER(sampler_BlendNoise);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _SandColor;
@@ -209,10 +206,21 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
             }
 
-            half4 ApplyNoiseToWeights(half4 weights, float2 noiseUV)
+            half4 NormalizeTerrainWeights(half4 weights)
             {
                 half4 normalizedWeights = max(weights, half4(0.0001, 0.0001, 0.0001, 0.0001));
                 normalizedWeights /= max(normalizedWeights.r + normalizedWeights.g + normalizedWeights.b + normalizedWeights.a, 0.0001);
+                return normalizedWeights;
+            }
+
+            half HashNoise(float2 value)
+            {
+                return frac(sin(dot(value, float2(12.9898, 78.233))) * 43758.5453);
+            }
+
+            half4 ApplyNoiseToWeights(half4 weights, float2 noiseUV)
+            {
+                half4 normalizedWeights = NormalizeTerrainWeights(weights);
 
                 half dominantWeight = max(max(normalizedWeights.r, normalizedWeights.g), max(normalizedWeights.b, normalizedWeights.a));
                 half boundaryStrength = saturate(1.0h - dominantWeight);
@@ -221,23 +229,24 @@ Shader "ProjectF/Terrain/BiomeBlend"
                     return normalizedWeights;
                 }
 
-                half sandNoise = SAMPLE_TEXTURE2D(_BlendNoise, sampler_BlendNoise, noiseUV + float2(0.31, 0.19)).r * 2.0h - 1.0h;
-                half dirtNoise = SAMPLE_TEXTURE2D(_BlendNoise, sampler_BlendNoise, noiseUV + float2(0.17, 0.41)).r * 2.0h - 1.0h;
-                half grassNoise = SAMPLE_TEXTURE2D(_BlendNoise, sampler_BlendNoise, noiseUV + float2(0.43, 0.29)).r * 2.0h - 1.0h;
-                half forestNoise = SAMPLE_TEXTURE2D(_BlendNoise, sampler_BlendNoise, noiseUV + float2(0.11, 0.53)).r * 2.0h - 1.0h;
+                half sandNoise = HashNoise(noiseUV + float2(0.31, 0.19)) * 2.0h - 1.0h;
+                half dirtNoise = HashNoise(noiseUV + float2(0.17, 0.41)) * 2.0h - 1.0h;
+                half grassNoise = HashNoise(noiseUV + float2(0.43, 0.29)) * 2.0h - 1.0h;
+                half forestNoise = HashNoise(noiseUV + float2(0.11, 0.53)) * 2.0h - 1.0h;
 
                 normalizedWeights += half4(sandNoise, dirtNoise, grassNoise, forestNoise) * boundaryStrength * _NoiseStrength;
-                normalizedWeights = max(normalizedWeights, half4(0.0001, 0.0001, 0.0001, 0.0001));
-                normalizedWeights /= max(normalizedWeights.r + normalizedWeights.g + normalizedWeights.b + normalizedWeights.a, 0.0001);
-                return normalizedWeights;
+                return NormalizeTerrainWeights(normalizedWeights);
             }
 
-            half4 SampleBlendedBase(float3 positionWS, half4 blendWeights)
+            half4 GetTerrainBlendWeights(float3 positionWS, half4 blendWeights)
+            {
+                float2 noiseUV = positionWS.xz * _NoiseScale;
+                return ApplyNoiseToWeights(blendWeights, noiseUV);
+            }
+
+            half4 SampleBlendedBase(float3 positionWS, half4 weights)
             {
                 float2 uv = positionWS.xz * _TextureTiling;
-                float2 noiseUV = positionWS.xz * _NoiseScale;
-                half4 weights = ApplyNoiseToWeights(blendWeights, noiseUV);
-
                 half4 sandSample = SAMPLE_TEXTURE2D(_SandMap, sampler_SandMap, uv) * _SandColor;
                 half4 dirtSample = SAMPLE_TEXTURE2D(_DirtMap, sampler_DirtMap, uv) * _DirtColor;
                 half4 grassSample = SAMPLE_TEXTURE2D(_GrassMap, sampler_GrassMap, uv) * _GrassColor;
@@ -256,8 +265,9 @@ Shader "ProjectF/Terrain/BiomeBlend"
 
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
+                half4 terrainWeights = GetTerrainBlendWeights(input.positionWS, input.blendWeights);
 
-                half4 baseSample = SampleBlendedBase(input.positionWS, input.blendWeights);
+                half4 baseSample = SampleBlendedBase(input.positionWS, terrainWeights);
                 Light mainLight = GetMainLight(inputData.shadowCoord);
 
                 half NdotL = saturate(dot(inputData.normalWS, mainLight.direction));
@@ -279,7 +289,10 @@ Shader "ProjectF/Terrain/BiomeBlend"
                         _ShadeThreshold - _ShadeSmoothness,
                         _ShadeThreshold + _ShadeSmoothness,
                         additionalNdotL * light.shadowAttenuation);
-                    additional += lerp(baseSample.rgb * _ShadowColor.rgb, baseSample.rgb, additionalBand) * light.color * light.distanceAttenuation;
+                    half3 additionalDiffuse = lerp(baseSample.rgb * _ShadowColor.rgb, baseSample.rgb, additionalBand)
+                        * light.color
+                        * light.distanceAttenuation;
+                    additional += additionalDiffuse;
                 }
 #endif
 

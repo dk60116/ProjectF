@@ -68,19 +68,6 @@ public class Player : Character
             handStack = new List<PortableObject>();
         }
 
-        if (handStack.Count == 0)
-        {
-            Transform handRoot = FindHandRoot();
-            if (handRoot != null)
-            {
-                handStack.AddRange(handRoot.GetComponentsInChildren<PortableObject>(true));
-            }
-            else
-            {
-                handStack.AddRange(GetComponentsInChildren<PortableObject>(true));
-            }
-        }
-
         if (handStackInitialized)
         {
             return;
@@ -108,14 +95,16 @@ public class Player : Character
 
         if (handBag == null)
         {
-            Transform handRoot = FindHandRoot();
-            if (handRoot != null)
+            Transform handRoot = ResolveHandStackRoot();
+            if (handRoot == null)
             {
-                handBag = handRoot.GetComponent<PlayerBag>();
-                if (handBag == null)
-                {
-                    handBag = handRoot.gameObject.AddComponent<PlayerBag>();
-                }
+                handRoot = transform;
+            }
+
+            handBag = handRoot.GetComponent<PlayerBag>();
+            if (handBag == null)
+            {
+                handBag = handRoot.gameObject.AddComponent<PlayerBag>();
             }
         }
 
@@ -125,21 +114,23 @@ public class Player : Character
         }
     }
 
-    private Transform FindHandRoot()
+    private Transform ResolveHandStackRoot()
     {
-        Transform direct = transform.Find("Hand Stack");
-        if (direct != null)
+        if (handStack == null)
         {
-            return direct;
+            return null;
         }
 
-        Transform[] children = GetComponentsInChildren<Transform>(true);
-        for (int i = 0; i < children.Length; i++)
+        for (int i = 0; i < handStack.Count; i++)
         {
-            if (children[i] != null && children[i].name == "Hand Stack")
+            PortableObject portableObject = handStack[i];
+            if (portableObject == null)
             {
-                return children[i];
+                continue;
             }
+
+            Transform portableTransform = portableObject.transform;
+            return portableTransform.parent != null ? portableTransform.parent : portableTransform;
         }
 
         return null;

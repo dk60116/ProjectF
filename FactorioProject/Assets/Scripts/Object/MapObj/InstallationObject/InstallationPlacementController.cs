@@ -4021,6 +4021,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        HashSet<Vector2Int> affectedPreviewCoordinates = BuildConveyorVariantRefreshCoordinates(changedConveyors, true);
         List<MapObject> previews = new List<MapObject>(installPreviewInstances);
         for (int i = 0; i < previews.Count; i++)
         {
@@ -4030,8 +4031,54 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            if (affectedPreviewCoordinates != null && !affectedPreviewCoordinates.Contains(anchorCoordinate))
+            {
+                continue;
+            }
+
             RefreshSingleConveyorPreviewVariant(preview, anchorCoordinate, changedConveyors, previewToIgnore);
         }
+    }
+
+    private static HashSet<Vector2Int> BuildConveyorVariantRefreshCoordinates(
+        IReadOnlyList<ConveyorChangeInfo> changedConveyors,
+        bool includeSelf)
+    {
+        if (changedConveyors == null || changedConveyors.Count <= 0)
+        {
+            return null;
+        }
+
+        HashSet<Vector2Int> coordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < changedConveyors.Count; i++)
+        {
+            ConveyorChangeInfo change = changedConveyors[i];
+            if (change == null)
+            {
+                continue;
+            }
+
+            IReadOnlyList<Vector2Int> sourceCoordinates = change.occupiedCoordinates != null
+                && change.occupiedCoordinates.Count > 0
+                    ? change.occupiedCoordinates
+                    : new List<Vector2Int> { change.coordinate };
+
+            for (int sourceIndex = 0; sourceIndex < sourceCoordinates.Count; sourceIndex++)
+            {
+                Vector2Int sourceCoordinate = sourceCoordinates[sourceIndex];
+                if (includeSelf)
+                {
+                    coordinates.Add(sourceCoordinate);
+                }
+
+                coordinates.Add(sourceCoordinate + Vector2Int.up);
+                coordinates.Add(sourceCoordinate + Vector2Int.right);
+                coordinates.Add(sourceCoordinate + Vector2Int.down);
+                coordinates.Add(sourceCoordinate + Vector2Int.left);
+            }
+        }
+
+        return coordinates.Count > 0 ? coordinates : null;
     }
 
     private void RefreshActiveConveyorPreviewVariant(

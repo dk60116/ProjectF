@@ -9,6 +9,10 @@ using UnityEditor;
 
 public class Resource : MapObject
 {
+    private const string ExtraBodyRendererRootName = "_ResourceBodyExtraRenderers";
+    private const int BodyYawStepCount = 8;
+    private const float BodyYawStepDegrees = 45f;
+
     public enum HarvestMode
     {
         Auto,
@@ -35,6 +39,8 @@ public class Resource : MapObject
         public int maxGauge;
         public int currentGauge;
         public int initialResourceCount;
+        public bool hasBodyYawStep;
+        public int bodyYawStep;
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
@@ -61,13 +67,13 @@ public class Resource : MapObject
     private Vector3 focusOffset = new Vector3(0f, 0.5f, 0f);
 
     [SerializeField, Range(0f, 1f)]
-    private float minimumBodyScaleRatio = 0.3f;
+    private float minimumBodyScaleRatio = 0.5f;
 
     [SerializeField, Min(0.01f)]
     private float maximumBodyScaleRatio = 1f;
 
     [SerializeField, Min(1)]
-    private int dynamicScaleMaxResourceCount = 1;
+    private int dynamicScaleMaxResourceCount = 1000;
 
     private float accumulatedWork;
     private readonly Queue<int> reservedHarvestGaugeCosts = new Queue<int>();
@@ -75,11 +81,13 @@ public class Resource : MapObject
     private Renderer cachedRenderer;
     private Transform bodyTransform;
     private Vector3 initialBodyLocalScale = Vector3.one;
+    private Quaternion initialBodyLocalRotation = Quaternion.identity;
+    private bool hasBodyYawStep;
+    private int bodyYawStep;
     private int initialResourceCount;
     private Block owningBlock;
     private ResourceBatchRenderer batchRenderer;
-    private MeshFilter batchedMeshFilter;
-    private MeshRenderer batchedMeshRenderer;
+    private readonly List<BatchRenderEntry> batchedRenderEntries = new List<BatchRenderEntry>();
     private bool batchComponentsResolved;
     private bool supportsBatchedRendering;
     private bool useBatchedRendering;
@@ -191,8 +199,7 @@ public class Resource : MapObject
         MigrateOutputItemNameIfNeeded();
         batchComponentsResolved = false;
         supportsBatchedRendering = false;
-        batchedMeshFilter = null;
-        batchedMeshRenderer = null;
+        batchedRenderEntries.Clear();
         if (!Application.isPlaying)
         {
             initialResourceCount = Mathf.Max(1, resourceStatus.resourceCount);
@@ -281,7 +288,9 @@ public class Resource : MapObject
             resourceCount = ResourceCount,
             maxGauge = MaxGauge,
             currentGauge = CurrentGauge,
-            initialResourceCount = Mathf.Max(1, initialResourceCount)
+            initialResourceCount = Mathf.Max(1, initialResourceCount),
+            hasBodyYawStep = hasBodyYawStep,
+            bodyYawStep = NormalizeBodyYawStep(bodyYawStep)
         };
     }
 
@@ -302,6 +311,11 @@ public class Resource : MapObject
         accumulatedWork = 0f;
         ClearReservedHarvestSteps();
         initialResourceCount = Mathf.Max(resourceStatus.resourceCount, state.initialResourceCount);
+        if (state.hasBodyYawStep)
+        {
+            ApplyBodyYawStep(state.bodyYawStep);
+        }
+
         EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
         UpdateBodyScale();
@@ -326,6 +340,22 @@ public class Resource : MapObject
         maximumBodyScaleRatio = Mathf.Max(minimumBodyScaleRatio, maximumScaleRatio);
         dynamicScaleMaxResourceCount = Mathf.Max(1, maxResourceCountForScale);
         UpdateBodyScale();
+    }
+
+    public void ApplyBodyYawStep(int yawStep)
+    {
+        CacheBodyTransform();
+
+        bodyYawStep = NormalizeBodyYawStep(yawStep);
+        hasBodyYawStep = true;
+
+        if (bodyTransform == null)
+        {
+            return;
+        }
+
+        bodyTransform.localRotation = initialBodyLocalRotation * Quaternion.Euler(0f, bodyYawStep * BodyYawStepDegrees, 0f);
+        SyncExtraBodyRendererRootToBody();
     }
 
     public bool TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
@@ -933,6 +963,38 @@ public class Resource : MapObject
         Transform foundBody = transform.Find("Body");
         bodyTransform = foundBody != null ? foundBody : transform;
         initialBodyLocalScale = bodyTransform.localScale;
+        initialBodyLocalRotation = bodyTransform.localRotation;
+    }
+
+    private static int NormalizeBodyYawStep(int yawStep)
+    {
+        int normalizedStep = yawStep % BodyYawStepCount;
+        return normalizedStep < 0 ? normalizedStep + BodyYawStepCount : normalizedStep;
+    }
+
+    private Transform GetExtraBodyRendererRoot()
+    {
+        Transform extraRoot = transform.Find(ExtraBodyRendererRootName);
+        if (extraRoot == null || extraRoot == bodyTransform)
+        {
+            return null;
+        }
+
+        return extraRoot;
+    }
+
+    private void SyncExtraBodyRendererRootToBody()
+    {
+        CacheBodyTransform();
+        Transform extraRoot = GetExtraBodyRendererRoot();
+        if (bodyTransform == null || extraRoot == null)
+        {
+            return;
+        }
+
+        extraRoot.localPosition = bodyTransform.localPosition;
+        extraRoot.localRotation = bodyTransform.localRotation;
+        extraRoot.localScale = bodyTransform.localScale;
     }
 
     private void CachePortableObjects()
@@ -1091,6 +1153,7 @@ public class Resource : MapObject
         }
 
         bodyTransform.localScale = initialBodyLocalScale * scaleRatio;
+        SyncExtraBodyRendererRootToBody();
     }
 
     private void ApplyDefinitionIfNeeded()
@@ -1135,6 +1198,7 @@ public class Resource : MapObject
         }
 
         bodyTransform.localScale = Vector3.one;
+        SyncExtraBodyRendererRootToBody();
     }
 
     private void HideBodyPresentation()
@@ -1156,7 +1220,22 @@ public class Resource : MapObject
             return;
         }
 
-        Renderer[] renderers = bodyTransform.GetComponentsInChildren<Renderer>(true);
+        ToggleBodyPresentationForRoot(bodyTransform);
+        Transform extraRoot = GetExtraBodyRendererRoot();
+        if (extraRoot != null)
+        {
+            ToggleBodyPresentationForRoot(extraRoot);
+        }
+    }
+
+    private void ToggleBodyPresentationForRoot(Transform renderRoot)
+    {
+        if (renderRoot == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = renderRoot.GetComponentsInChildren<Renderer>(true);
         for (int i = 0; i < renderers.Length; i++)
         {
             Renderer targetRenderer = renderers[i];
@@ -1168,11 +1247,14 @@ public class Resource : MapObject
             targetRenderer.enabled = bodyPresentationVisible;
             if (targetRenderer is MeshRenderer meshRenderer)
             {
-                meshRenderer.forceRenderingOff = bodyPresentationVisible && useBatchedRendering && supportsBatchedRendering;
+                meshRenderer.forceRenderingOff = bodyPresentationVisible
+                                                 && useBatchedRendering
+                                                 && supportsBatchedRendering
+                                                 && IsBatchedMeshRenderer(meshRenderer);
             }
         }
 
-        Collider[] colliders = bodyTransform.GetComponentsInChildren<Collider>(true);
+        Collider[] colliders = renderRoot.GetComponentsInChildren<Collider>(true);
         for (int i = 0; i < colliders.Length; i++)
         {
             Collider targetCollider = colliders[i];
@@ -1196,6 +1278,24 @@ public class Resource : MapObject
         {
             PortableObject candidate = portableObjects[i];
             if (candidate != null && target.IsChildOf(candidate.transform))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsBatchedMeshRenderer(MeshRenderer meshRenderer)
+    {
+        if (meshRenderer == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < batchedRenderEntries.Count; i++)
+        {
+            if (batchedRenderEntries[i].MeshRenderer == meshRenderer)
             {
                 return true;
             }
@@ -1239,31 +1339,60 @@ public class Resource : MapObject
         ToggleBodyPresentation(bodyPresentationVisible);
     }
 
+    public int BatchRenderEntryCount
+    {
+        get
+        {
+            ResolveBatchComponents();
+            return batchedRenderEntries.Count;
+        }
+    }
+
     public bool TryGetBatchRenderData(
+        int entryIndex,
         out Mesh mesh,
-        out Material material,
+        out Material[] materials,
         out Matrix4x4 localToWorldMatrix,
         out Vector3 worldPosition,
         out int layer,
         out ShadowCastingMode shadowCastingMode,
-        out bool receiveShadows)
+        out bool receiveShadows,
+        out bool useGlobalBatch)
     {
         ResolveBatchComponents();
 
-        mesh = batchedMeshFilter != null ? batchedMeshFilter.sharedMesh : null;
-        material = batchedMeshRenderer != null ? batchedMeshRenderer.sharedMaterial : null;
-        localToWorldMatrix = batchedMeshFilter != null ? batchedMeshFilter.transform.localToWorldMatrix : Matrix4x4.identity;
-        worldPosition = batchedMeshFilter != null ? batchedMeshFilter.transform.position : transform.position;
-        layer = batchedMeshRenderer != null ? batchedMeshRenderer.gameObject.layer : gameObject.layer;
-        shadowCastingMode = batchedMeshRenderer != null ? batchedMeshRenderer.shadowCastingMode : ShadowCastingMode.Off;
-        receiveShadows = batchedMeshRenderer != null && batchedMeshRenderer.receiveShadows;
+        mesh = null;
+        materials = Array.Empty<Material>();
+        localToWorldMatrix = Matrix4x4.identity;
+        worldPosition = transform.position;
+        layer = gameObject.layer;
+        shadowCastingMode = ShadowCastingMode.Off;
+        receiveShadows = false;
+        useGlobalBatch = false;
+
+        if (entryIndex < 0 || entryIndex >= batchedRenderEntries.Count)
+        {
+            return false;
+        }
+
+        BatchRenderEntry entry = batchedRenderEntries[entryIndex];
+        MeshFilter meshFilter = entry.MeshFilter;
+        MeshRenderer meshRenderer = entry.MeshRenderer;
+        mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+        materials = entry.Materials ?? Array.Empty<Material>();
+        localToWorldMatrix = meshFilter != null ? meshFilter.transform.localToWorldMatrix : Matrix4x4.identity;
+        worldPosition = meshFilter != null ? meshFilter.transform.position : transform.position;
+        layer = meshRenderer != null ? meshRenderer.gameObject.layer : gameObject.layer;
+        shadowCastingMode = meshRenderer != null ? meshRenderer.shadowCastingMode : ShadowCastingMode.Off;
+        receiveShadows = meshRenderer != null && meshRenderer.receiveShadows;
+        useGlobalBatch = ResolvedHarvestMode == HarvestMode.Logging;
 
         return useBatchedRendering
                && bodyPresentationVisible
                && gameObject.activeInHierarchy
                && supportsBatchedRendering
                && mesh != null
-               && material != null;
+               && HasAnyBatchMaterial(materials);
     }
 
     private void ResolveBatchComponents()
@@ -1275,8 +1404,7 @@ public class Resource : MapObject
 
         batchComponentsResolved = true;
         supportsBatchedRendering = false;
-        batchedMeshFilter = null;
-        batchedMeshRenderer = null;
+        batchedRenderEntries.Clear();
 
         CacheBodyTransform();
         CachePortableObjects();
@@ -1285,12 +1413,28 @@ public class Resource : MapObject
             return;
         }
 
-        List<MeshFilter> candidates = new List<MeshFilter>();
-        MeshFilter[] meshFilters = bodyTransform.GetComponentsInChildren<MeshFilter>(true);
+        AddBatchRenderEntriesFromRoot(bodyTransform);
+        Transform extraRoot = GetExtraBodyRendererRoot();
+        if (extraRoot != null)
+        {
+            AddBatchRenderEntriesFromRoot(extraRoot);
+        }
+
+        supportsBatchedRendering = batchedRenderEntries.Count > 0;
+    }
+
+    private void AddBatchRenderEntriesFromRoot(Transform renderRoot)
+    {
+        if (renderRoot == null)
+        {
+            return;
+        }
+
+        MeshFilter[] meshFilters = renderRoot.GetComponentsInChildren<MeshFilter>(true);
         for (int i = 0; i < meshFilters.Length; i++)
         {
             MeshFilter candidate = meshFilters[i];
-            if (candidate == null || IsPortableHierarchy(candidate.transform))
+            if (candidate == null || candidate.sharedMesh == null || IsPortableHierarchy(candidate.transform))
             {
                 continue;
             }
@@ -1301,30 +1445,56 @@ public class Resource : MapObject
                 continue;
             }
 
-            candidates.Add(candidate);
-        }
+            Material[] sharedMaterials = candidateRenderer.sharedMaterials ?? Array.Empty<Material>();
+            if (!HasAnyBatchMaterial(sharedMaterials))
+            {
+                continue;
+            }
 
-        if (candidates.Count != 1)
+            for (int materialIndex = 0; materialIndex < sharedMaterials.Length; materialIndex++)
+            {
+                Material material = sharedMaterials[materialIndex];
+                if (material != null && !material.enableInstancing)
+                {
+                    material.enableInstancing = true;
+                }
+            }
+
+            batchedRenderEntries.Add(new BatchRenderEntry(candidate, candidateRenderer, sharedMaterials));
+            cachedRenderer ??= candidateRenderer;
+        }
+    }
+
+    private readonly struct BatchRenderEntry
+    {
+        public readonly MeshFilter MeshFilter;
+        public readonly MeshRenderer MeshRenderer;
+        public readonly Material[] Materials;
+
+        public BatchRenderEntry(MeshFilter meshFilter, MeshRenderer meshRenderer, Material[] materials)
         {
-            return;
+            MeshFilter = meshFilter;
+            MeshRenderer = meshRenderer;
+            Materials = materials;
         }
+    }
 
-        batchedMeshFilter = candidates[0];
-        batchedMeshRenderer = batchedMeshFilter != null ? batchedMeshFilter.GetComponent<MeshRenderer>() : null;
-        if (batchedMeshFilter == null || batchedMeshRenderer == null)
+    private static bool HasAnyBatchMaterial(Material[] materials)
+    {
+        if (materials == null)
         {
-            batchedMeshFilter = null;
-            batchedMeshRenderer = null;
-            return;
+            return false;
         }
 
-        if (batchedMeshRenderer.sharedMaterial != null && !batchedMeshRenderer.sharedMaterial.enableInstancing)
+        for (int i = 0; i < materials.Length; i++)
         {
-            batchedMeshRenderer.sharedMaterial.enableInstancing = true;
+            if (materials[i] != null)
+            {
+                return true;
+            }
         }
 
-        cachedRenderer ??= batchedMeshRenderer;
-        supportsBatchedRendering = true;
+        return false;
     }
 
     private ResourceBatchRenderer ResolveBatchRenderer()
@@ -1430,44 +1600,110 @@ public class ResourceBatchRenderer : MonoBehaviour
                 continue;
             }
 
-            if (!resource.TryGetBatchRenderData(
-                    out Mesh mesh,
-                    out Material material,
-                    out Matrix4x4 localToWorldMatrix,
-                    out Vector3 worldPosition,
-                    out int layer,
-                    out ShadowCastingMode shadowCastingMode,
-                    out bool receiveShadows))
+            int entryCount = resource.BatchRenderEntryCount;
+            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
             {
-                continue;
-            }
+                if (!resource.TryGetBatchRenderData(
+                        entryIndex,
+                        out Mesh mesh,
+                        out Material[] materials,
+                        out Matrix4x4 localToWorldMatrix,
+                        out Vector3 worldPosition,
+                        out int layer,
+                        out ShadowCastingMode shadowCastingMode,
+                        out bool receiveShadows,
+                        out bool useGlobalBatch))
+                {
+                    continue;
+                }
 
-            if (material != null && !material.enableInstancing)
-            {
-                material.enableInstancing = true;
-            }
+                int renderPassCount = Mathf.Max(mesh.subMeshCount, materials.Length);
+                for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+                {
+                    Material material = materials[materialIndex];
+                    if (material == null)
+                    {
+                        continue;
+                    }
 
-            int cellX = Mathf.FloorToInt(worldPosition.x / batchCellSize);
-            int cellZ = Mathf.FloorToInt(worldPosition.z / batchCellSize);
-            BatchKey key = new BatchKey(mesh, material, layer, shadowCastingMode, receiveShadows, cellX, cellZ);
-            if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
-            {
-                matrices = new List<Matrix4x4>(16);
-                matricesByBatch.Add(key, matrices);
-            }
+                    if (!material.enableInstancing)
+                    {
+                        material.enableInstancing = true;
+                    }
 
-            if (matrices.Count == 0)
-            {
-                activeBatchKeys.Add(key);
-            }
+                    int subMeshIndex = Mathf.Min(materialIndex, mesh.subMeshCount - 1);
+                    AddBatchMatrix(
+                        mesh,
+                        material,
+                        subMeshIndex,
+                        localToWorldMatrix,
+                        worldPosition,
+                        layer,
+                        shadowCastingMode,
+                        receiveShadows,
+                        useGlobalBatch);
+                }
 
-            matrices.Add(localToWorldMatrix);
+                for (int passIndex = materials.Length; passIndex < renderPassCount; passIndex++)
+                {
+                    Material fallbackMaterial = materials[materials.Length - 1];
+                    if (fallbackMaterial == null)
+                    {
+                        continue;
+                    }
+
+                    int subMeshIndex = Mathf.Min(passIndex, mesh.subMeshCount - 1);
+                    AddBatchMatrix(
+                        mesh,
+                        fallbackMaterial,
+                        subMeshIndex,
+                        localToWorldMatrix,
+                        worldPosition,
+                        layer,
+                        shadowCastingMode,
+                        receiveShadows,
+                        useGlobalBatch);
+                }
+            }
         }
 
         for (int i = 0; i < cleanupBuffer.Count; i++)
         {
             registeredResources.Remove(cleanupBuffer[i]);
         }
+    }
+
+    private void AddBatchMatrix(
+        Mesh mesh,
+        Material material,
+        int subMeshIndex,
+        Matrix4x4 localToWorldMatrix,
+        Vector3 worldPosition,
+        int layer,
+        ShadowCastingMode shadowCastingMode,
+        bool receiveShadows,
+        bool useGlobalBatch)
+    {
+        if (mesh == null || material == null || subMeshIndex < 0)
+        {
+            return;
+        }
+
+        int cellX = useGlobalBatch ? 0 : Mathf.FloorToInt(worldPosition.x / batchCellSize);
+        int cellZ = useGlobalBatch ? 0 : Mathf.FloorToInt(worldPosition.z / batchCellSize);
+        BatchKey key = new BatchKey(mesh, material, subMeshIndex, layer, shadowCastingMode, receiveShadows, cellX, cellZ);
+        if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
+        {
+            matrices = new List<Matrix4x4>(16);
+            matricesByBatch.Add(key, matrices);
+        }
+
+        if (matrices.Count == 0)
+        {
+            activeBatchKeys.Add(key);
+        }
+
+        matrices.Add(localToWorldMatrix);
     }
 
     private void RenderBatches()
@@ -1492,7 +1728,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             while (remaining > 0)
             {
                 int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
-                Graphics.RenderMeshInstanced(renderParams, key.Mesh, 0, matrices, drawCount, startIndex);
+                Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubMeshIndex, matrices, drawCount, startIndex);
                 startIndex += drawCount;
                 remaining -= drawCount;
             }
@@ -1503,6 +1739,7 @@ public class ResourceBatchRenderer : MonoBehaviour
     {
         public readonly Mesh Mesh;
         public readonly Material Material;
+        public readonly int SubMeshIndex;
         public readonly int Layer;
         public readonly ShadowCastingMode ShadowCastingMode;
         public readonly bool ReceiveShadows;
@@ -1512,6 +1749,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         public BatchKey(
             Mesh mesh,
             Material material,
+            int subMeshIndex,
             int layer,
             ShadowCastingMode shadowCastingMode,
             bool receiveShadows,
@@ -1520,6 +1758,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         {
             Mesh = mesh;
             Material = material;
+            SubMeshIndex = subMeshIndex;
             Layer = layer;
             ShadowCastingMode = shadowCastingMode;
             ReceiveShadows = receiveShadows;
@@ -1531,6 +1770,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         {
             int hash = Mesh != null ? Mesh.GetInstanceID() : 0;
             hash = (hash * 397) ^ (Material != null ? Material.GetInstanceID() : 0);
+            hash = (hash * 397) ^ SubMeshIndex;
             hash = (hash * 397) ^ Layer;
             hash = (hash * 397) ^ (int)ShadowCastingMode;
             hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
@@ -1548,6 +1788,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         {
             return Mesh == other.Mesh
                    && Material == other.Material
+                   && SubMeshIndex == other.SubMeshIndex
                    && Layer == other.Layer
                    && ShadowCastingMode == other.ShadowCastingMode
                    && ReceiveShadows == other.ReceiveShadows

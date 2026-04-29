@@ -6,6 +6,11 @@ using UnityEngine;
 public class TerrainDataEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 280f;
+    private const float TexturePreviewSize = 42f;
+    private static readonly int TextureReferenceControlHash = "TerrainTextureReferenceField".GetHashCode();
+    private static int activeTexturePickerControlId;
+    private static int activeTexturePickerTargetId;
+    private static string activeTexturePickerPropertyPath;
 
     private static readonly string[] CorePropertyPaths =
     {
@@ -42,7 +47,7 @@ public class TerrainDataEditorWindow : EditorWindow
         "sandMaxWidth"
     };
 
-    private static readonly string[] SurfacePropertyPaths =
+    private static readonly string[] SurfaceGeneralPropertyPaths =
     {
         "terrainSurfaceSubdivisions",
         "terrainBlendJitter",
@@ -52,14 +57,46 @@ public class TerrainDataEditorWindow : EditorWindow
         "generatedSurfaceBlendNoiseScale",
         "generatedSurfaceBlendNoiseStrength",
         "generatedSurfaceBlendShader",
-        "generatedSurfaceBlendWaterTexture",
-        "generatedSurfaceBlendSandTexture",
-        "generatedSurfaceBlendDirtTexture",
-        "generatedSurfaceBlendGrassTexture",
-        "generatedSurfaceBlendForestTexture",
-        "generatedSurfaceBlendNoiseTexture",
+        "generatedSurfaceWaterMaterial",
         "generatedSurfaceYOffset"
     };
+
+    private static readonly TerrainTextureSet[] SurfaceTextureSets =
+    {
+        new TerrainTextureSet(
+            "Sand",
+            "generatedSurfaceBlendSandTexture",
+            "sandBiomeColor"),
+        new TerrainTextureSet(
+            "Dirt",
+            "generatedSurfaceBlendDirtTexture",
+            "dirtBiomeColor"),
+        new TerrainTextureSet(
+            "Grass",
+            "generatedSurfaceBlendGrassTexture",
+            "grassBiomeColor"),
+        new TerrainTextureSet(
+            "Forest",
+            "generatedSurfaceBlendForestTexture",
+            "forestBiomeColor")
+    };
+
+    private readonly struct TerrainTextureSet
+    {
+        public readonly string title;
+        public readonly string baseTexturePropertyPath;
+        public readonly string baseColorPropertyPath;
+
+        public TerrainTextureSet(
+            string title,
+            string baseTexturePropertyPath,
+            string baseColorPropertyPath)
+        {
+            this.title = title;
+            this.baseTexturePropertyPath = baseTexturePropertyPath;
+            this.baseColorPropertyPath = baseColorPropertyPath;
+        }
+    }
 
     private static readonly string[] LandBiomePropertyPaths =
     {
@@ -248,7 +285,7 @@ public class TerrainDataEditorWindow : EditorWindow
 
         DrawPropertySection(serializedGenerator, "Core", CorePropertyPaths);
         DrawPropertySection(serializedGenerator, "Water", WaterPropertyPaths);
-        DrawPropertySection(serializedGenerator, "Surface Blend", SurfacePropertyPaths);
+        DrawSurfaceBlendSection(serializedGenerator);
         DrawPropertySection(serializedGenerator, "Land Biomes", LandBiomePropertyPaths);
         DrawPropertySection(serializedGenerator, "Start Area", StartAreaPropertyPaths);
         DrawPropertySection(serializedGenerator, "Ore Resources", "oreResources");
@@ -350,6 +387,306 @@ public class TerrainDataEditorWindow : EditorWindow
 
         EditorGUILayout.EndVertical();
         GUILayout.Space(6f);
+    }
+
+    private void DrawSurfaceBlendSection(SerializedObject serializedObject)
+    {
+        if (serializedObject == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Surface Blend", EditorStyles.boldLabel);
+        DrawProperties(serializedObject, SurfaceGeneralPropertyPaths);
+
+        GUILayout.Space(4f);
+        EditorGUILayout.LabelField("Texture Sets", EditorStyles.miniBoldLabel);
+        for (int i = 0; i < SurfaceTextureSets.Length; i++)
+        {
+            DrawTerrainTextureSet(serializedObject, SurfaceTextureSets[i]);
+        }
+
+        EditorGUILayout.EndVertical();
+        GUILayout.Space(6f);
+    }
+
+    private void DrawProperties(SerializedObject serializedObject, params string[] propertyPaths)
+    {
+        if (serializedObject == null || propertyPaths == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < propertyPaths.Length; i++)
+        {
+            SerializedProperty property = serializedObject.FindProperty(propertyPaths[i]);
+            if (property == null)
+            {
+                continue;
+            }
+
+            ApplyPersistedFoldoutState(serializedObject, property);
+            EditorGUILayout.PropertyField(property, true);
+            PersistFoldoutState(serializedObject, property);
+        }
+    }
+
+    private void DrawTerrainTextureSet(SerializedObject serializedObject, TerrainTextureSet textureSet)
+    {
+        string foldoutKey = GetFoldoutStateKey(serializedObject, $"SurfaceTextureSet.{textureSet.title}");
+        bool isExpanded = SessionState.GetBool(foldoutKey, false);
+        Rect foldoutRect = GUILayoutUtility.GetRect(1f, EditorGUIUtility.singleLineHeight + 4f, GUILayout.ExpandWidth(true));
+        foldoutRect.x += 8f;
+        foldoutRect.width -= 8f;
+        isExpanded = EditorGUI.Foldout(foldoutRect, isExpanded, textureSet.title, true);
+        SessionState.SetBool(foldoutKey, isExpanded);
+
+        if (!isExpanded)
+        {
+            return;
+        }
+
+        EditorGUI.indentLevel++;
+        SerializedProperty baseTexture = serializedObject.FindProperty(textureSet.baseTexturePropertyPath);
+        SerializedProperty baseColor = serializedObject.FindProperty(textureSet.baseColorPropertyPath);
+        Color basePreviewTint = baseColor != null ? baseColor.colorValue : Color.white;
+        basePreviewTint.a = 1f;
+        DrawTextureProperty(baseTexture, "Base Texture", false, basePreviewTint);
+
+        EditorGUI.indentLevel--;
+        GUILayout.Space(2f);
+    }
+
+    private static void DrawTextureProperty(SerializedProperty property, string label)
+    {
+        DrawTextureProperty(property, label, false, Color.white);
+    }
+
+    private static void DrawTextureProperty(SerializedProperty property, string label, bool useAssetPreview)
+    {
+        DrawTextureProperty(property, label, useAssetPreview, Color.white);
+    }
+
+    private static void DrawTextureProperty(SerializedProperty property, string label, bool useAssetPreview, Color previewTint)
+    {
+        if (property == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Space(EditorGUI.indentLevel * 14f);
+        Rect previewRect = GUILayoutUtility.GetRect(
+            TexturePreviewSize,
+            TexturePreviewSize,
+            GUILayout.Width(TexturePreviewSize),
+            GUILayout.Height(TexturePreviewSize));
+        DrawTexturePreview(previewRect, property.objectReferenceValue as Texture2D, useAssetPreview, previewTint);
+
+        EditorGUILayout.BeginVertical();
+        GUILayout.Space((TexturePreviewSize - EditorGUIUtility.singleLineHeight) * 0.5f);
+        Rect fieldRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
+        DrawTextureReferenceField(fieldRect, property, label, useAssetPreview, previewTint);
+        EditorGUILayout.EndVertical();
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private static void DrawTexturePreview(Rect rect, Texture2D texture, bool useAssetPreview, Color previewTint)
+    {
+        EditorGUI.DrawRect(rect, new Color(0.09f, 0.09f, 0.09f));
+        GUI.Box(rect, GUIContent.none);
+
+        if (texture == null)
+        {
+            return;
+        }
+
+        Texture preview = texture;
+        if (useAssetPreview)
+        {
+            preview = AssetPreview.GetAssetPreview(texture);
+            if (preview == null)
+            {
+                preview = AssetPreview.GetMiniThumbnail(texture);
+            }
+        }
+
+        Color previousColor = GUI.color;
+        GUI.color = previousColor * previewTint;
+        GUI.DrawTexture(rect, preview != null ? preview : texture, ScaleMode.ScaleToFit);
+        GUI.color = previousColor;
+    }
+
+    private static void DrawTextureReferenceField(
+        Rect rect,
+        SerializedProperty property,
+        string label,
+        bool useAssetPreview,
+        Color previewTint)
+    {
+        int controlId = GUIUtility.GetControlID(TextureReferenceControlHash, FocusType.Keyboard, rect);
+        HandleTextureObjectPicker(property);
+
+        int previousIndent = EditorGUI.indentLevel;
+        EditorGUI.indentLevel = 0;
+        Rect valueRect = EditorGUI.PrefixLabel(rect, controlId, new GUIContent(label));
+        EditorGUI.indentLevel = previousIndent;
+
+        GUIStyle objectFieldStyle = GUI.skin.FindStyle("ObjectField") ?? EditorStyles.textField;
+        GUIStyle objectFieldButtonStyle = GUI.skin.FindStyle("ObjectFieldButton") ?? EditorStyles.miniButton;
+
+        Texture2D texture = property.objectReferenceValue as Texture2D;
+        GUI.Box(valueRect, GUIContent.none, objectFieldStyle);
+        Rect buttonRect = new Rect(valueRect.xMax - 19f, valueRect.y, 19f, valueRect.height);
+        Rect iconRect = new Rect(valueRect.x + 3f, valueRect.y + 2f, valueRect.height - 4f, valueRect.height - 4f);
+        Rect nameRect = new Rect(
+            iconRect.xMax + 4f,
+            valueRect.y,
+            Mathf.Max(0f, buttonRect.x - iconRect.xMax - 7f),
+            valueRect.height);
+
+        DrawTexturePreview(iconRect, texture, useAssetPreview, previewTint);
+
+        string assetPath = texture != null ? AssetDatabase.GetAssetPath(texture) : string.Empty;
+        string displayName = texture != null ? texture.name : "None (Texture2D)";
+        GUI.Label(nameRect, new GUIContent(displayName, assetPath), EditorStyles.label);
+
+        Event currentEvent = Event.current;
+        HandleTextureReferenceDragAndDrop(valueRect, property, currentEvent);
+        if (GUI.Button(buttonRect, GUIContent.none, objectFieldButtonStyle))
+        {
+            BeginTextureObjectPicker(property, controlId, texture);
+        }
+
+        Rect clickableValueRect = new Rect(
+            valueRect.x,
+            valueRect.y,
+            Mathf.Max(0f, buttonRect.x - valueRect.x),
+            valueRect.height);
+        if (texture != null
+            && currentEvent.type == EventType.MouseDown
+            && currentEvent.clickCount > 1
+            && clickableValueRect.Contains(currentEvent.mousePosition))
+        {
+            EditorGUIUtility.PingObject(texture);
+            Selection.activeObject = texture;
+            currentEvent.Use();
+        }
+    }
+
+    private static void BeginTextureObjectPicker(SerializedProperty property, int controlId, Texture2D currentTexture)
+    {
+        activeTexturePickerControlId = controlId;
+        activeTexturePickerTargetId = GetSerializedTargetId(property);
+        activeTexturePickerPropertyPath = property.propertyPath;
+        EditorGUIUtility.ShowObjectPicker<Texture2D>(currentTexture, false, string.Empty, controlId);
+    }
+
+    private static void HandleTextureObjectPicker(SerializedProperty property)
+    {
+        Event currentEvent = Event.current;
+        if (activeTexturePickerControlId == 0
+            || currentEvent.type != EventType.ExecuteCommand
+            || EditorGUIUtility.GetObjectPickerControlID() != activeTexturePickerControlId
+            || !IsActiveTexturePickerProperty(property))
+        {
+            return;
+        }
+
+        if (currentEvent.commandName != "ObjectSelectorUpdated"
+            && currentEvent.commandName != "ObjectSelectorClosed")
+        {
+            return;
+        }
+
+        Object selectedObject = EditorGUIUtility.GetObjectPickerObject();
+        if (selectedObject == null || selectedObject is Texture2D)
+        {
+            SetTextureProperty(property, selectedObject as Texture2D);
+        }
+
+        if (currentEvent.commandName == "ObjectSelectorClosed")
+        {
+            activeTexturePickerControlId = 0;
+            activeTexturePickerTargetId = 0;
+            activeTexturePickerPropertyPath = null;
+        }
+
+        currentEvent.Use();
+    }
+
+    private static bool IsActiveTexturePickerProperty(SerializedProperty property)
+    {
+        return property != null
+            && activeTexturePickerTargetId == GetSerializedTargetId(property)
+            && activeTexturePickerPropertyPath == property.propertyPath;
+    }
+
+    private static int GetSerializedTargetId(SerializedProperty property)
+    {
+        return property != null
+            && property.serializedObject != null
+            && property.serializedObject.targetObject != null
+            ? property.serializedObject.targetObject.GetInstanceID()
+            : 0;
+    }
+
+    private static void SetTextureProperty(SerializedProperty property, Texture2D texture)
+    {
+        SerializedProperty defaultsInitialized = property.serializedObject.FindProperty("generatedSurfaceBlendTextureDefaultsInitialized");
+        if (defaultsInitialized != null)
+        {
+            defaultsInitialized.boolValue = true;
+        }
+
+        property.objectReferenceValue = texture;
+        property.serializedObject.ApplyModifiedProperties();
+        Object targetObject = property.serializedObject.targetObject;
+        if (targetObject != null)
+        {
+            EditorUtility.SetDirty(targetObject);
+            if (targetObject is Component component && component.gameObject.scene.IsValid())
+            {
+                EditorSceneManager.MarkSceneDirty(component.gameObject.scene);
+            }
+        }
+
+        GUI.changed = true;
+    }
+
+    private static void HandleTextureReferenceDragAndDrop(Rect rect, SerializedProperty property, Event currentEvent)
+    {
+        if (!rect.Contains(currentEvent.mousePosition)
+            || (currentEvent.type != EventType.DragUpdated && currentEvent.type != EventType.DragPerform))
+        {
+            return;
+        }
+
+        Texture2D draggedTexture = null;
+        Object[] draggedObjects = DragAndDrop.objectReferences;
+        for (int i = 0; i < draggedObjects.Length; i++)
+        {
+            if (draggedObjects[i] is Texture2D texture)
+            {
+                draggedTexture = texture;
+                break;
+            }
+        }
+
+        if (draggedTexture == null)
+        {
+            return;
+        }
+
+        DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+        if (currentEvent.type == EventType.DragPerform)
+        {
+            DragAndDrop.AcceptDrag();
+            SetTextureProperty(property, draggedTexture);
+        }
+
+        currentEvent.Use();
     }
 
     private static void ApplyPersistedFoldoutState(SerializedObject serializedObject, SerializedProperty property)

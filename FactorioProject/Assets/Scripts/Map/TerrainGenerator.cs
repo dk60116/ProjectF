@@ -9,8 +9,8 @@ using UnityEditor;
 
 public class TerrainGenerator : MonoBehaviour
 {
-    private const float MinOreBodyScaleRatioLimit = 0.3f;
-    private const float MaxOreBodyScaleRatioLimit = 1.5f;
+    private const float MinOreBodyScaleRatioLimit = 0.5f;
+    private const float MaxOreBodyScaleRatioLimit = 1f;
 
     public static TerrainGenerator Active { get; private set; }
 
@@ -188,7 +188,7 @@ public class TerrainGenerator : MonoBehaviour
     private bool enableGeneratedSurfaceTextureBlend = true;
 
     [SerializeField, Min(0.01f)]
-    private float generatedSurfaceBlendTextureTiling = 1.12f;
+    private float generatedSurfaceBlendTextureTiling = 0.28f;
 
     [SerializeField, Min(0.01f)]
     private float generatedSurfaceBlendNoiseScale = 0.11f;
@@ -198,9 +198,6 @@ public class TerrainGenerator : MonoBehaviour
 
     [SerializeField, HideInInspector]
     private Shader generatedSurfaceBlendShader;
-
-    [SerializeField, HideInInspector]
-    private Texture2D generatedSurfaceBlendWaterTexture;
 
     [SerializeField, HideInInspector]
     private Material generatedSurfaceWaterMaterial;
@@ -218,7 +215,7 @@ public class TerrainGenerator : MonoBehaviour
     private Texture2D generatedSurfaceBlendForestTexture;
 
     [SerializeField, HideInInspector]
-    private Texture2D generatedSurfaceBlendNoiseTexture;
+    private bool generatedSurfaceBlendTextureDefaultsInitialized;
 
     [SerializeField, Min(0.001f)]
     private float largeLakeCellSize = 72f;
@@ -318,19 +315,19 @@ public class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
-    private float stoneSpawnChance = 0.08f;
+    private float stoneSpawnChance = 0.1f;
 
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
-    private float coarSpawnChance = 0.05f;
+    private float coarSpawnChance = 0.1f;
 
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
-    private float ironSpawnChance = 0.04f;
+    private float ironSpawnChance = 0.1f;
 
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
-    private float cooperSpawnChance = 0.05f;
+    private float cooperSpawnChance = 0.1f;
 
     [SerializeField, Min(0.001f)]
     private float resourcePatchScale = 0.12f;
@@ -384,25 +381,25 @@ public class TerrainGenerator : MonoBehaviour
     private int starterTreeDistanceFromCenter = 4;
 
     [SerializeField, Min(1), HideInInspector]
-    private int starterOreMinResourceCount = 30;
+    private int starterOreMinResourceCount = 256;
 
     [SerializeField, Min(1), HideInInspector]
-    private int starterOreMaxResourceCount = 50;
+    private int starterOreMaxResourceCount = 512;
 
     [SerializeField, Min(1), HideInInspector]
-    private int normalOreMinResourceCount = 100;
+    private int normalOreMinResourceCount = 512;
 
     [SerializeField, Min(1), HideInInspector]
-    private int normalOreMaxResourceCount = 300;
+    private int normalOreMaxResourceCount = 1024;
 
     [SerializeField, Range(MinOreBodyScaleRatioLimit, MaxOreBodyScaleRatioLimit)]
-    private float oreMinimumBodyScaleRatio = 0.3f;
+    private float oreMinimumBodyScaleRatio = 0.5f;
 
     [SerializeField, Range(MinOreBodyScaleRatioLimit, MaxOreBodyScaleRatioLimit)]
-    private float oreMaximumBodyScaleRatio = 1.5f;
+    private float oreMaximumBodyScaleRatio = 1f;
 
     [SerializeField, Min(1)]
-    private int oreScaleAtResourceCount = 300;
+    private int oreScaleAtResourceCount = 1000;
 
     [SerializeField, Range(1f, 6f)]
     private float treeSingleDensityMultiplier = 2.4f;
@@ -1700,19 +1697,6 @@ public class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void AppendBiomeContourSurface(
-        ChunkSurfaceBuildData chunkSurface,
-        TerrainBiome biome,
-        Vector2Int origin,
-        int cellCount,
-        int resolution)
-    {
-        IEnumerator routine = AppendBiomeContourSurfaceRoutine(chunkSurface, biome, origin, cellCount, resolution, false);
-        while (routine.MoveNext())
-        {
-        }
-    }
-
     private IEnumerator AppendBiomeContourSurfaceRoutine(
         ChunkSurfaceBuildData chunkSurface,
         TerrainBiome biome,
@@ -2174,28 +2158,39 @@ public class TerrainGenerator : MonoBehaviour
             enableInstancing = true
         };
 
-        generatedSurfaceBlendMaterial.SetColor("_SandColor", GetBiomeColor(TerrainBiome.Sand));
-        generatedSurfaceBlendMaterial.SetColor("_DirtColor", GetBiomeColor(TerrainBiome.Dirt));
-        generatedSurfaceBlendMaterial.SetColor("_GrassColor", GetBiomeColor(TerrainBiome.Grass));
-        generatedSurfaceBlendMaterial.SetColor("_ForestColor", GetBiomeColor(TerrainBiome.Forest));
-        generatedSurfaceBlendMaterial.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
-        generatedSurfaceBlendMaterial.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
-        generatedSurfaceBlendMaterial.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
+        ApplyGeneratedSurfaceBlendMaterialProperties(generatedSurfaceBlendMaterial);
+        return generatedSurfaceBlendMaterial;
+    }
+
+    private void ApplyGeneratedSurfaceBlendMaterialProperties(Material material)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        material.SetColor("_SandColor", GetBiomeColor(TerrainBiome.Sand));
+        material.SetColor("_DirtColor", GetBiomeColor(TerrainBiome.Dirt));
+        material.SetColor("_GrassColor", GetBiomeColor(TerrainBiome.Grass));
+        material.SetColor("_ForestColor", GetBiomeColor(TerrainBiome.Forest));
+        material.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
+        material.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
+        material.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
 
         Material groundMaterial = ResolveSourceMaterialForBiome(TerrainBiome.Grass);
         if (groundMaterial != null && groundMaterial.HasProperty("_ShadowColor"))
         {
-            generatedSurfaceBlendMaterial.SetColor("_ShadowColor", groundMaterial.GetColor("_ShadowColor"));
+            material.SetColor("_ShadowColor", groundMaterial.GetColor("_ShadowColor"));
         }
 
         if (groundMaterial != null && groundMaterial.HasProperty("_ShadeThreshold"))
         {
-            generatedSurfaceBlendMaterial.SetFloat("_ShadeThreshold", groundMaterial.GetFloat("_ShadeThreshold"));
+            material.SetFloat("_ShadeThreshold", groundMaterial.GetFloat("_ShadeThreshold"));
         }
 
         if (groundMaterial != null && groundMaterial.HasProperty("_ShadeSmoothness"))
         {
-            generatedSurfaceBlendMaterial.SetFloat("_ShadeSmoothness", groundMaterial.GetFloat("_ShadeSmoothness"));
+            material.SetFloat("_ShadeSmoothness", groundMaterial.GetFloat("_ShadeSmoothness"));
         }
 
         Texture2D grassTexture = ResolveGeneratedSurfaceBlendTexture(
@@ -2219,44 +2214,33 @@ public class TerrainGenerator : MonoBehaviour
             forestTexture = grassTexture;
         }
 
-        Texture2D noiseTexture = generatedSurfaceBlendNoiseTexture != null
-            ? generatedSurfaceBlendNoiseTexture
-            : grassTexture;
-
         if (sandTexture != null)
         {
-            generatedSurfaceBlendMaterial.SetTexture("_SandMap", sandTexture);
+            material.SetTexture("_SandMap", sandTexture);
         }
 
         if (dirtTexture != null)
         {
-            generatedSurfaceBlendMaterial.SetTexture("_DirtMap", dirtTexture);
+            material.SetTexture("_DirtMap", dirtTexture);
         }
 
         if (grassTexture != null)
         {
-            generatedSurfaceBlendMaterial.SetTexture("_GrassMap", grassTexture);
+            material.SetTexture("_GrassMap", grassTexture);
         }
 
         if (forestTexture != null)
         {
-            generatedSurfaceBlendMaterial.SetTexture("_ForestMap", forestTexture);
+            material.SetTexture("_ForestMap", forestTexture);
         }
 
-        if (noiseTexture != null)
-        {
-            generatedSurfaceBlendMaterial.SetTexture("_BlendNoise", noiseTexture);
-        }
-
-        return generatedSurfaceBlendMaterial;
     }
 
     private void UpgradeLegacyGeneratedSurfaceBlendSettings()
     {
-        if (Mathf.Approximately(generatedSurfaceBlendTextureTiling, 0.28f)
-            || Mathf.Approximately(generatedSurfaceBlendTextureTiling, 0.56f))
+        if (Mathf.Approximately(generatedSurfaceBlendTextureTiling, 1.12f))
         {
-            generatedSurfaceBlendTextureTiling = 1.12f;
+            generatedSurfaceBlendTextureTiling = 0.28f;
         }
     }
 
@@ -2267,9 +2251,7 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        generatedSurfaceBlendMaterial.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
-        generatedSurfaceBlendMaterial.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
-        generatedSurfaceBlendMaterial.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
+        ApplyGeneratedSurfaceBlendMaterialProperties(generatedSurfaceBlendMaterial);
     }
 
     private Material GetBiomeMaterial(TerrainBiome biome)
@@ -2836,12 +2818,6 @@ public class TerrainGenerator : MonoBehaviour
         return new Vector2(jitterX, jitterY);
     }
 
-    private void InvalidateTerrainBiomeCaches()
-    {
-        InvalidateTerrainBiomeDataCaches();
-        InvalidateTerrainBiomeMaterialCaches();
-    }
-
     private void InvalidateTerrainBiomeDataCaches()
     {
         tileBiomeCache.Clear();
@@ -2887,17 +2863,18 @@ public class TerrainGenerator : MonoBehaviour
     }
 
 #if UNITY_EDITOR
+    private const string SandBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/sand_ground/T_sand_ground_basecolor.tga";
+    private const string DirtBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/earth/T_earth_basecolor.tga";
+    private const string GrassBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/grass_a/T_grass_a_basecolor.tga";
+    private const string ForestBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/grass_b/T_grass_b_basecolor.tga";
+    private const string LegacySandBaseTexturePath = "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Sand/Sand.png";
+    private const string LegacyGroundBaseTexturePath = "Assets/Materials/Ground_TD_00.png";
+
     private void PopulateGeneratedSurfaceBlendEditorDefaults()
     {
         if (generatedSurfaceBlendShader == null)
         {
             generatedSurfaceBlendShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainBiomeBlend.shader");
-        }
-
-        if (generatedSurfaceBlendWaterTexture == null)
-        {
-            generatedSurfaceBlendWaterTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Procedural/waterTex2.png");
         }
 
         if (generatedSurfaceWaterMaterial == null)
@@ -2906,36 +2883,41 @@ public class TerrainGenerator : MonoBehaviour
                 "Assets/Materials/M_StylizedOceanWater_Sector.mat");
         }
 
-        if (generatedSurfaceBlendSandTexture == null)
+        if (generatedSurfaceBlendTextureDefaultsInitialized)
         {
-            generatedSurfaceBlendSandTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Sand/Sand.png");
+            return;
         }
 
-        if (generatedSurfaceBlendDirtTexture == null)
-        {
-            generatedSurfaceBlendDirtTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Materials/Ground_TD_00.png");
-        }
+        generatedSurfaceBlendTextureDefaultsInitialized = true;
 
-        if (generatedSurfaceBlendNoiseTexture == null)
-        {
-            generatedSurfaceBlendNoiseTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(
-                "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Procedural/perlinNoise.png");
-        }
+        AssignEditorTextureIfMissingOrLegacy(
+            ref generatedSurfaceBlendSandTexture,
+            SandBaseColorTexturePath,
+            LegacySandBaseTexturePath);
 
+        AssignEditorTextureIfMissingOrLegacy(
+            ref generatedSurfaceBlendDirtTexture,
+            DirtBaseColorTexturePath,
+            LegacyGroundBaseTexturePath);
+
+        AssignEditorTextureIfMissingOrLegacy(
+            ref generatedSurfaceBlendGrassTexture,
+            GrassBaseColorTexturePath,
+            LegacyGroundBaseTexturePath);
         if (generatedSurfaceBlendGrassTexture == null)
         {
-            generatedSurfaceBlendGrassTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Materials/Ground_TD_00.png");
-            if (generatedSurfaceBlendGrassTexture == null)
-            {
-                generatedSurfaceBlendGrassTexture = ResolveGeneratedSurfaceBlendTexture(
-                    null,
-                    ResolveSourceMaterialForBiome(TerrainBiome.Grass),
-                    "_BaseMap",
-                    "_MainTex");
-            }
+            generatedSurfaceBlendGrassTexture = ResolveGeneratedSurfaceBlendTexture(
+                null,
+                ResolveSourceMaterialForBiome(TerrainBiome.Grass),
+                "_BaseMap",
+                "_MainTex");
         }
 
+        AssignEditorTextureIfMissingOrLegacy(
+            ref generatedSurfaceBlendForestTexture,
+            ForestBaseColorTexturePath,
+            LegacyGroundBaseTexturePath,
+            GrassBaseColorTexturePath);
         if (generatedSurfaceBlendForestTexture == null)
         {
             generatedSurfaceBlendForestTexture = ResolveGeneratedSurfaceBlendTexture(
@@ -2949,6 +2931,39 @@ public class TerrainGenerator : MonoBehaviour
                 generatedSurfaceBlendForestTexture = generatedSurfaceBlendGrassTexture;
             }
         }
+    }
+
+    private static void AssignEditorTextureIfMissingOrLegacy(ref Texture2D texture, string defaultAssetPath, params string[] legacyAssetPaths)
+    {
+        if (texture != null && !IsEditorTextureAtAnyPath(texture, legacyAssetPaths))
+        {
+            return;
+        }
+
+        Texture2D defaultTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(defaultAssetPath);
+        if (defaultTexture != null)
+        {
+            texture = defaultTexture;
+        }
+    }
+
+    private static bool IsEditorTextureAtAnyPath(Texture2D texture, params string[] assetPaths)
+    {
+        if (texture == null || assetPaths == null)
+        {
+            return false;
+        }
+
+        string texturePath = AssetDatabase.GetAssetPath(texture);
+        for (int i = 0; i < assetPaths.Length; i++)
+        {
+            if (string.Equals(texturePath, assetPaths[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 #endif
 
@@ -3890,6 +3905,7 @@ public class TerrainGenerator : MonoBehaviour
         spawnedResource.transform.localPosition = Vector3.zero;
         spawnedResource.transform.localRotation = Quaternion.identity;
         ApplyResourceScaleProfile(spawnedResource, prefab);
+        spawnedResource.ApplyBodyYawStep(GetResourceBodyYawStep(prefab, worldCoordinate));
 
         if (resourceStateStore != null && resourceStateStore.TryGet(worldCoordinate, out Resource.ResourceSaveState savedState))
         {
@@ -4323,73 +4339,6 @@ public class TerrainGenerator : MonoBehaviour
         return new Vector2Int(
             Mathf.RoundToInt(worldPosition.x),
             Mathf.RoundToInt(worldPosition.z));
-    }
-
-    private bool[,] BuildChunkWaterMap(Vector2Int origin, int chunkLength)
-    {
-        const int margin = 1;
-        int mapLength = chunkLength + (margin * 2);
-        bool[,] map = new bool[mapLength, mapLength];
-        bool[,] nextMap = new bool[mapLength, mapLength];
-
-        for (int y = 0; y < mapLength; y++)
-        {
-            for (int x = 0; x < mapLength; x++)
-            {
-                Vector2Int worldCoordinate = new Vector2Int(origin.x + x - margin, origin.y + y - margin);
-                map[x, y] = IsWaterTile(worldCoordinate);
-            }
-        }
-
-        bool changed;
-        int safetyIteration = 0;
-        do
-        {
-            changed = false;
-            safetyIteration++;
-
-            for (int y = 0; y < mapLength; y++)
-            {
-                for (int x = 0; x < mapLength; x++)
-                {
-                    if (!map[x, y])
-                    {
-                        nextMap[x, y] = false;
-                        continue;
-                    }
-
-                    int orthogonalCount = GetOrthogonalWaterCount(map, x, y);
-                    bool north = GetWaterMapValue(map, x, y + 1);
-                    bool east = GetWaterMapValue(map, x + 1, y);
-                    bool south = GetWaterMapValue(map, x, y - 1);
-                    bool west = GetWaterMapValue(map, x - 1, y);
-
-                    Vector2Int worldCoordinate = new Vector2Int(origin.x + x - margin, origin.y + y - margin);
-                    bool preserveRiverTile = orthogonalCount >= 2 && HasRiverContinuitySupport(worldCoordinate);
-                    bool shouldRemove =
-                        orthogonalCount <= 1
-                        || (!preserveRiverTile && orthogonalCount == 2 && ((north && south) || (east && west)))
-                        || (!preserveRiverTile && HasDisconnectedDiagonal(map, x, y))
-                        || (!preserveRiverTile && orthogonalCount <= 2 && !HasWaterSquareSupport(map, x, y));
-
-                     if (!shouldRemove)
-                     {
-                        nextMap[x, y] = true;
-                        continue;
-                     }
-
-                    nextMap[x, y] = false;
-                    changed = true;
-                }
-            }
-
-            bool[,] swap = map;
-            map = nextMap;
-            nextMap = swap;
-        }
-        while (changed && safetyIteration < 8);
-
-        return map;
     }
 
     private void RestoreChunkInstallations(Transform chunkTransform)
@@ -4977,6 +4926,12 @@ public class TerrainGenerator : MonoBehaviour
         return 1;
     }
 
+    private int GetResourceBodyYawStep(Resource prefab, Vector2Int worldCoordinate)
+    {
+        int prefabSalt = GetStableStringHash(prefab != null ? prefab.name : string.Empty);
+        return Mathf.Clamp(Mathf.FloorToInt(Hash01(worldCoordinate.x, worldCoordinate.y, prefabSalt ^ 7349) * 8f), 0, 7);
+    }
+
     private bool IsTreeResourcePrefab(Resource prefab)
     {
         for (int i = 0; i < treeResources.Count; i++)
@@ -5331,7 +5286,7 @@ public class TerrainGenerator : MonoBehaviour
         int cellY = FloorDivide(worldCoordinate.y, cellSize);
 
         float normalizedChance = Mathf.Clamp01(entry.spawnChance);
-        float chanceWeight = Mathf.Pow(normalizedChance, 1.85f);
+        float chanceWeight = Mathf.Pow(normalizedChance, 1.35f);
         float densityBoost = Mathf.Lerp(1.2f, 2.6f, Mathf.Clamp01(resourceDensityMultiplier));
         float treeDensityWeight = Mathf.Lerp(0.85f, 1.35f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treeSingleDensityMultiplier)));
         float density = Mathf.Clamp01(chanceWeight * densityBoost * treeDensityWeight * (1.55f / spacing));
@@ -5364,16 +5319,16 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         float normalizedChance = Mathf.Clamp01(entry.spawnChance);
-        float chanceWeight = Mathf.Pow(normalizedChance, 1.45f);
-        float spacingWeight = Mathf.Lerp(1.25f, 0.55f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, entry.spacingMultiplier)));
-        float densityWeight = Mathf.Lerp(0.8f, 1.35f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treePatchDensityMultiplier)));
+        float chanceWeight = Mathf.Pow(normalizedChance, 1.15f);
+        float spacingWeight = Mathf.Lerp(1.35f, 0.65f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, entry.spacingMultiplier)));
+        float densityWeight = Mathf.Lerp(1f, 1.8f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treePatchDensityMultiplier)));
         float density = Mathf.Clamp01(chanceWeight * spacingWeight * densityWeight);
 
         float terrainDensityNoise = SampleTerrainDrivenTreeDensityNoise(worldCoordinate, entry);
         float patchSizeWeight = Mathf.Lerp(0.2f, 0.5f, Mathf.InverseLerp(1f, 3f, Mathf.Max(1f, treePatchSizeMultiplier)));
         float combined = Mathf.Clamp01((shapeMask * (1f - patchSizeWeight)) + (terrainDensityNoise * patchSizeWeight));
-        float threshold = Mathf.Lerp(0.94f, 0.16f, density);
-        threshold = Mathf.Lerp(threshold + 0.08f, threshold - 0.12f, shapeMask);
+        float threshold = Mathf.Lerp(0.9f, 0.12f, density);
+        threshold = Mathf.Lerp(threshold + 0.04f, threshold - 0.16f, shapeMask);
         if (combined < threshold)
         {
             return false;
@@ -5535,21 +5490,6 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return false;
-    }
-
-    private List<ResourceEntry> GetStarterTreeEntries()
-    {
-        List<ResourceEntry> entries = new List<ResourceEntry>();
-
-        for (int i = 0; i < treeResources.Count; i++)
-        {
-            if (treeResources[i].Prefab != null)
-            {
-                entries.Add(treeResources[i]);
-            }
-        }
-
-        return entries;
     }
 
     private List<Vector2Int> GetStarterTreeCandidateOffsets()
@@ -6001,166 +5941,6 @@ public class TerrainGenerator : MonoBehaviour
         bool southEast = IsWaterCandidate(worldCoordinate + Vector2Int.down + Vector2Int.right);
         bool southWest = IsWaterCandidate(worldCoordinate + Vector2Int.down + Vector2Int.left);
         bool northWest = IsWaterCandidate(worldCoordinate + Vector2Int.up + Vector2Int.left);
-
-        return (northEast && !north && !east)
-               || (southEast && !south && !east)
-               || (southWest && !south && !west)
-               || (northWest && !north && !west);
-    }
-
-    private bool TryGetWaterCornerRotation(Vector2Int worldCoordinate, out float yRotation)
-    {
-        yRotation = 0f;
-
-        bool north = IsWaterTile(worldCoordinate + Vector2Int.up);
-        bool east = IsWaterTile(worldCoordinate + Vector2Int.right);
-        bool south = IsWaterTile(worldCoordinate + Vector2Int.down);
-        bool west = IsWaterTile(worldCoordinate + Vector2Int.left);
-        int orthogonalCount = (north ? 1 : 0) + (east ? 1 : 0) + (south ? 1 : 0) + (west ? 1 : 0);
-
-        if (orthogonalCount != 2)
-        {
-            return false;
-        }
-
-        if (east && south)
-        {
-            yRotation = 0f;
-            return true;
-        }
-
-        if (west && south)
-        {
-            yRotation = 90f;
-            return true;
-        }
-
-        if (west && north)
-        {
-            yRotation = 180f;
-            return true;
-        }
-
-        if (east && north)
-        {
-            yRotation = -90f;
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryGetWaterCornerRotation(bool[,] map, int x, int y, out float yRotation)
-    {
-        yRotation = 0f;
-
-        bool north = GetWaterMapValue(map, x, y + 1);
-        bool east = GetWaterMapValue(map, x + 1, y);
-        bool south = GetWaterMapValue(map, x, y - 1);
-        bool west = GetWaterMapValue(map, x - 1, y);
-        int orthogonalCount = (north ? 1 : 0) + (east ? 1 : 0) + (south ? 1 : 0) + (west ? 1 : 0);
-
-        if (orthogonalCount != 2)
-        {
-            return false;
-        }
-
-        if (east && south)
-        {
-            yRotation = 0f;
-            return true;
-        }
-
-        if (west && south)
-        {
-            yRotation = 90f;
-            return true;
-        }
-
-        if (west && north)
-        {
-            yRotation = 180f;
-            return true;
-        }
-
-        if (east && north)
-        {
-            yRotation = -90f;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool GetWaterMapValue(bool[,] map, int x, int y)
-    {
-        if (map == null)
-        {
-            return false;
-        }
-
-        if (x < 0 || y < 0 || x >= map.GetLength(0) || y >= map.GetLength(1))
-        {
-            return false;
-        }
-
-        return map[x, y];
-    }
-
-    private static int GetOrthogonalWaterCount(bool[,] map, int x, int y)
-    {
-        int count = 0;
-
-        if (GetWaterMapValue(map, x, y + 1))
-        {
-            count++;
-        }
-
-        if (GetWaterMapValue(map, x + 1, y))
-        {
-            count++;
-        }
-
-        if (GetWaterMapValue(map, x, y - 1))
-        {
-            count++;
-        }
-
-        if (GetWaterMapValue(map, x - 1, y))
-        {
-            count++;
-        }
-
-        return count;
-    }
-
-    private static bool HasWaterSquareSupport(bool[,] map, int x, int y)
-    {
-        return (GetWaterMapValue(map, x - 1, y)
-                && GetWaterMapValue(map, x, y - 1)
-                && GetWaterMapValue(map, x - 1, y - 1))
-               || (GetWaterMapValue(map, x + 1, y)
-                   && GetWaterMapValue(map, x, y - 1)
-                   && GetWaterMapValue(map, x + 1, y - 1))
-               || (GetWaterMapValue(map, x - 1, y)
-                   && GetWaterMapValue(map, x, y + 1)
-                   && GetWaterMapValue(map, x - 1, y + 1))
-               || (GetWaterMapValue(map, x + 1, y)
-                   && GetWaterMapValue(map, x, y + 1)
-                   && GetWaterMapValue(map, x + 1, y + 1));
-    }
-
-    private static bool HasDisconnectedDiagonal(bool[,] map, int x, int y)
-    {
-        bool north = GetWaterMapValue(map, x, y + 1);
-        bool east = GetWaterMapValue(map, x + 1, y);
-        bool south = GetWaterMapValue(map, x, y - 1);
-        bool west = GetWaterMapValue(map, x - 1, y);
-
-        bool northEast = GetWaterMapValue(map, x + 1, y + 1);
-        bool southEast = GetWaterMapValue(map, x + 1, y - 1);
-        bool southWest = GetWaterMapValue(map, x - 1, y - 1);
-        bool northWest = GetWaterMapValue(map, x - 1, y + 1);
 
         return (northEast && !north && !east)
                || (southEast && !south && !east)
