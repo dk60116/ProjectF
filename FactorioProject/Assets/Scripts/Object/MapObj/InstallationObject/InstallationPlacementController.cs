@@ -92,12 +92,19 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<MapObject, Vector2Int> installPreviewAnchorCoordinates = new Dictionary<MapObject, Vector2Int>();
     private readonly Dictionary<MapObject, MapObject> installPreviewSourcePrefabsByPreview = new Dictionary<MapObject, MapObject>();
     private readonly Dictionary<MapObject, long> installPreviewPlacementSequencesByPreview = new Dictionary<MapObject, long>();
+    private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
+    private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
     private InstallationObject selectedEditableInstallation;
     private Vector2Int selectedEditableAnchorCoordinate;
     private InstallationEditSession activeInstallationEditSession;
     private readonly Stack<PackedInstallationSession> packedInstallationHistory = new Stack<PackedInstallationSession>();
     private bool mapEditModeActive;
     private ConveyorPreviewVariantMode installPreviewConveyorVariantMode = ConveyorPreviewVariantMode.Straight;
+    private bool hasLastBlueprintQuarterTurns;
+    private int lastBlueprintQuarterTurns;
+    private bool hasLastInstalledQuarterTurns;
+    private int lastInstalledQuarterTurns;
+    private bool preferDifferentConveyorCornerOnNextRefresh;
 
     private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
@@ -194,6 +201,11 @@ public class InstallationPlacementController : MonoBehaviour
         ResolveInstallButtons();
         RefreshInstallButton();
         RefreshMapEditButtonState();
+        if (TryHandleModeCancelInput())
+        {
+            return;
+        }
+
         UpdateInstallGrid(Time.deltaTime);
 
         if (!IsInstallationModeActive())
@@ -216,6 +228,22 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         UpdateInstallPreviewPointerInput();
+    }
+
+    private bool TryHandleModeCancelInput()
+    {
+        if (!Input.GetKeyDown(KeyCode.Escape))
+        {
+            return false;
+        }
+
+        if (!IsEditingInstallation() && !IsInstallationModeActive() && !mapEditModeActive)
+        {
+            return false;
+        }
+
+        HandleInstallCancelClicked();
+        return true;
     }
 
     private void OnDisable()
@@ -1698,6 +1726,11 @@ public class InstallationPlacementController : MonoBehaviour
             conveyorVariantKind,
             previewRotation,
             previewPosition);
+        if (restoredObject != null)
+        {
+            RememberLastInstalledRotation(editSession.definition, quarterTurns);
+        }
+
         PlayInstallationEditCompleteAnimation(restoredObject, editSession);
         ClearInstallPreview();
         SetMapEditModeActive(false);
@@ -2230,6 +2263,7 @@ public class InstallationPlacementController : MonoBehaviour
 
             ConfigureInstalledObjectRuntime(installedObject, placementPlan.anchorBlock.Coordinate, placementPlan.quarterTurns);
             RegisterInstalledObjectPersistence(installedObject);
+            RememberLastInstalledRotation(activeInstallDefinition, placementPlan.quarterTurns);
             placedPreviews.Add(placementPlan.preview);
             placedAnchorCoordinates.Add(placementPlan.anchorBlock.Coordinate);
             placedObjects.Add(installedObject);
@@ -2889,7 +2923,8 @@ public class InstallationPlacementController : MonoBehaviour
             quarterTurns,
             previewToIgnore,
             out resolvedPrefab,
-            out _);
+            out _,
+            false);
     }
 
     private bool TryResolveConveyorCornerPlacementPrefab(
@@ -2898,7 +2933,8 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         MapObject previewToIgnore,
         out MapObject resolvedPrefab,
-        out int resolvedQuarterTurns)
+        out int resolvedQuarterTurns,
+        bool preferDifferentFromPreview = false)
     {
         resolvedPrefab = null;
         resolvedQuarterTurns = quarterTurns;
@@ -2947,6 +2983,45 @@ public class InstallationPlacementController : MonoBehaviour
                 out reverseOutputConnected)
             && (reverseInputConnected || reverseOutputConnected);
 
+        if (!preferDifferentFromPreview
+            && TryPreserveCurrentConveyorCornerState(
+                anchorCoordinate,
+                previewToIgnore,
+                cornerCandidate,
+                cornerMatches,
+                cornerInputConnected,
+                cornerOutputConnected,
+                cornerQuarterTurns,
+                reverseCornerCandidate,
+                reverseMatches,
+                reverseInputConnected,
+                reverseOutputConnected,
+                reverseQuarterTurns,
+                out resolvedPrefab,
+                out resolvedQuarterTurns))
+        {
+            return resolvedPrefab != null;
+        }
+
+        if (preferDifferentFromPreview
+            && TryResolveDifferentCurrentConveyorCornerState(
+                previewToIgnore,
+                cornerCandidate,
+                cornerMatches,
+                cornerInputConnected,
+                cornerOutputConnected,
+                cornerQuarterTurns,
+                reverseCornerCandidate,
+                reverseMatches,
+                reverseInputConnected,
+                reverseOutputConnected,
+                reverseQuarterTurns,
+                out resolvedPrefab,
+                out resolvedQuarterTurns))
+        {
+            return resolvedPrefab != null;
+        }
+
         bool cornerPreferred = cornerMatches && cornerInputConnected;
         bool reversePreferred = reverseMatches && reverseInputConnected;
 
@@ -2987,6 +3062,96 @@ public class InstallationPlacementController : MonoBehaviour
         resolvedPrefab = preferReverseVariant ? reverseCornerCandidate : cornerCandidate;
         resolvedQuarterTurns = preferReverseVariant ? reverseQuarterTurns : cornerQuarterTurns;
         return resolvedPrefab != null;
+    }
+
+    private bool TryPreserveCurrentConveyorCornerState(
+        Vector2Int anchorCoordinate,
+        MapObject currentPreview,
+        ConveyorBelt cornerCandidate,
+        bool cornerMatches,
+        bool cornerInputConnected,
+        bool cornerOutputConnected,
+        int cornerQuarterTurns,
+        ConveyorBelt reverseCornerCandidate,
+        bool reverseMatches,
+        bool reverseInputConnected,
+        bool reverseOutputConnected,
+        int reverseQuarterTurns,
+        out MapObject resolvedPrefab,
+        out int resolvedQuarterTurns)
+    {
+        resolvedPrefab = null;
+        resolvedQuarterTurns = 0;
+        if (!(currentPreview is ConveyorBelt currentConveyor)
+            || !currentConveyor.IsCornerVariant
+            || !TryGetPreviewAnchorCoordinate(currentPreview, out Vector2Int currentAnchorCoordinate)
+            || currentAnchorCoordinate != anchorCoordinate)
+        {
+            return false;
+        }
+
+        if (cornerMatches
+            && (cornerInputConnected || cornerOutputConnected)
+            && IsSameConveyorPreviewState(currentPreview, cornerCandidate, cornerQuarterTurns))
+        {
+            resolvedPrefab = cornerCandidate;
+            resolvedQuarterTurns = cornerQuarterTurns;
+            return true;
+        }
+
+        if (reverseMatches
+            && (reverseInputConnected || reverseOutputConnected)
+            && IsSameConveyorPreviewState(currentPreview, reverseCornerCandidate, reverseQuarterTurns))
+        {
+            resolvedPrefab = reverseCornerCandidate;
+            resolvedQuarterTurns = reverseQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveDifferentCurrentConveyorCornerState(
+        MapObject currentPreview,
+        ConveyorBelt cornerCandidate,
+        bool cornerMatches,
+        bool cornerInputConnected,
+        bool cornerOutputConnected,
+        int cornerQuarterTurns,
+        ConveyorBelt reverseCornerCandidate,
+        bool reverseMatches,
+        bool reverseInputConnected,
+        bool reverseOutputConnected,
+        int reverseQuarterTurns,
+        out MapObject resolvedPrefab,
+        out int resolvedQuarterTurns)
+    {
+        resolvedPrefab = null;
+        resolvedQuarterTurns = 0;
+        if (!(currentPreview is ConveyorBelt currentConveyor) || !currentConveyor.IsCornerVariant)
+        {
+            return false;
+        }
+
+        if (cornerMatches
+            && (cornerInputConnected || cornerOutputConnected)
+            && !IsSameConveyorPreviewState(currentPreview, cornerCandidate, cornerQuarterTurns))
+        {
+            resolvedPrefab = cornerCandidate;
+            resolvedQuarterTurns = cornerQuarterTurns;
+            return true;
+        }
+
+        if (reverseMatches
+            && (reverseInputConnected || reverseOutputConnected)
+            && !IsSameConveyorPreviewState(currentPreview, reverseCornerCandidate, reverseQuarterTurns))
+        {
+            resolvedPrefab = reverseCornerCandidate;
+            resolvedQuarterTurns = reverseQuarterTurns;
+            return true;
+        }
+
+        return false;
     }
 
     private Vector2Int[] GetValidConveyorIncomingDirections(Vector2Int anchorCoordinate, MapObject previewToIgnore)
@@ -3670,6 +3835,11 @@ public class InstallationPlacementController : MonoBehaviour
 
         ConveyorChangeInfo changedInputSide = FindConveyorChangeAtCoordinate(changedConveyors, anchorCoordinate + inputDirection);
         ConveyorChangeInfo changedOutputSide = FindConveyorChangeAtCoordinate(changedConveyors, anchorCoordinate + outputDirection);
+        if (changedInputSide != null || changedOutputSide != null)
+        {
+            // Removing an adjacent belt should not reinterpret the corner into the opposite side.
+            return false;
+        }
 
         ConveyorBelt straightPrefab = installedConveyor.StraightVariantPrefab != null
             ? installedConveyor.StraightVariantPrefab
@@ -3679,62 +3849,14 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        int straightQuarterTurns;
-        if ((changedInputSide != null) ^ (changedOutputSide != null))
+        installedConveyor.RefreshInstalledDirectionFromCurrentTransform();
+        if (!TryGetInstallationFacingVector(installedConveyor.InstalledDirection, out Vector2Int desiredInputDirection)
+            || !TryGetConveyorPlacementQuarterTurnsForInput(
+                straightPrefab,
+                desiredInputDirection,
+                out int straightQuarterTurns))
         {
-            ConveyorChangeInfo preferredChange = changedInputSide ?? changedOutputSide;
-            if (preferredChange != null
-                && !preferredChange.isCornerVariant
-                && TryGetConveyorPlacementQuarterTurnsForRotation(
-                    straightPrefab,
-                    preferredChange.rotation,
-                    out straightQuarterTurns))
-            {
-                // Keep the fallback straight aligned to the disappearing straight belt itself.
-            }
-            else if (preferredChange != null
-                && TryGetConveyorPlacementQuarterTurnsForOutput(
-                    straightPrefab,
-                    preferredChange.outputDirection,
-                    out straightQuarterTurns))
-            {
-                // Keep the fallback aligned with the disappearing belt's flow direction.
-            }
-            else
-            {
-                if (changedInputSide != null)
-                {
-                    if (!TryGetConveyorPlacementQuarterTurnsForInput(
-                            straightPrefab,
-                            inputDirection,
-                            out straightQuarterTurns))
-                    {
-                        return false;
-                    }
-                }
-                else
-                {
-                    if (!TryGetConveyorPlacementQuarterTurnsForOutput(
-                            straightPrefab,
-                            outputDirection,
-                            out straightQuarterTurns))
-                    {
-                        return false;
-                    }
-                }
-            }
-        }
-        else
-        {
-            installedConveyor.RefreshInstalledDirectionFromCurrentTransform();
-            if (!TryGetInstallationFacingVector(installedConveyor.InstalledDirection, out Vector2Int desiredInputDirection)
-                || !TryGetConveyorPlacementQuarterTurnsForInput(
-                    straightPrefab,
-                    desiredInputDirection,
-                    out straightQuarterTurns))
-            {
-                return false;
-            }
+            return false;
         }
 
         MapObject desiredPrefab = straightPrefab;
@@ -4087,11 +4209,13 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt))
         {
+            preferDifferentConveyorCornerOnNextRefresh = false;
             return;
         }
 
         if (activeInstallPreview == null || !TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate))
         {
+            preferDifferentConveyorCornerOnNextRefresh = false;
             return;
         }
 
@@ -4110,17 +4234,29 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         int quarterTurns = GetPreviewQuarterTurns(preview);
-        ConveyorPreviewVariantMode previewVariantMode = preview == activeInstallPreview
-            ? installPreviewConveyorVariantMode
-            : GetConveyorPreviewVariantMode(preview);
-        MapObject desiredPrefab = ResolveInstalledObjectSourcePrefab(
-            activeInstallDefinition,
-            anchorCoordinate,
-            quarterTurns,
-            preview,
-            previewVariantMode);
+        MapObject explicitSourcePrefab = null;
+        bool hasExplicitConveyorVariant = activeInstallDefinition.mapObject is ConveyorBelt
+            && installPreviewSourcePrefabsByPreview.TryGetValue(preview, out explicitSourcePrefab)
+            && explicitSourcePrefab is ConveyorBelt;
+        ConveyorPreviewVariantMode previewVariantMode = hasExplicitConveyorVariant
+            ? GetConveyorPreviewVariantMode(explicitSourcePrefab)
+            : preview == activeInstallPreview
+                ? installPreviewConveyorVariantMode
+                : GetConveyorPreviewVariantMode(preview);
+        bool preferDifferentCurrentCorner = !hasExplicitConveyorVariant
+            && preview == activeInstallPreview
+            && preferDifferentConveyorCornerOnNextRefresh;
+        MapObject desiredPrefab = hasExplicitConveyorVariant
+            ? explicitSourcePrefab
+            : ResolveInstalledObjectSourcePrefab(
+                activeInstallDefinition,
+                anchorCoordinate,
+                quarterTurns,
+                preview,
+                previewVariantMode);
         int resolvedQuarterTurns = quarterTurns;
-        if (activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype
+        if (!hasExplicitConveyorVariant
+            && activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype
             && previewVariantMode == ConveyorPreviewVariantMode.Corner
             && TryResolveConveyorCornerPlacementPrefab(
                 conveyorPrototype,
@@ -4128,7 +4264,8 @@ public class InstallationPlacementController : MonoBehaviour
                 quarterTurns,
                 preview,
                 out MapObject resolvedCornerPrefab,
-                out int resolvedCornerQuarterTurns))
+                out int resolvedCornerQuarterTurns,
+                preferDifferentCurrentCorner))
         {
             desiredPrefab = resolvedCornerPrefab;
             resolvedQuarterTurns = resolvedCornerQuarterTurns;
@@ -4165,12 +4302,22 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewSourcePrefabsByPreview[preview] = desiredPrefab;
             }
 
+            if (preferDifferentCurrentCorner)
+            {
+                preferDifferentConveyorCornerOnNextRefresh = false;
+            }
+
             return;
         }
 
         MapObject replacementPreview = Instantiate(desiredPrefab);
         if (replacementPreview == null)
         {
+            if (preferDifferentCurrentCorner)
+            {
+                preferDifferentConveyorCornerOnNextRefresh = false;
+            }
+
             return;
         }
 
@@ -4240,6 +4387,11 @@ public class InstallationPlacementController : MonoBehaviour
             activeInstallPreview = replacementPreview;
             installPreviewQuarterTurns = resolvedQuarterTurns;
             installPreviewConveyorVariantMode = GetConveyorPreviewVariantMode(replacementPreview);
+        }
+
+        if (wasActivePreview)
+        {
+            preferDifferentConveyorCornerOnNextRefresh = false;
         }
 
         if (wasPointerOriginPreview)
@@ -4697,7 +4849,7 @@ public class InstallationPlacementController : MonoBehaviour
         activeInstallDefinition = definition;
         activeInstallPreview = null;
         activeInstallBaseRotation = definition.mapObject != null ? definition.mapObject.transform.rotation : Quaternion.identity;
-        installPreviewQuarterTurns = 0;
+        installPreviewQuarterTurns = GetPreferredInstallPreviewQuarterTurns(definition, null);
         waitForPointerReleaseAfterPreviewSpawn = true;
         installGridRefreshTimer = 0f;
         GameManager.Instance?.SetInstallationPlacementActive(true);
@@ -4909,6 +5061,7 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshConveyorVariantsAroundActivePreview(
             hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null,
             previousConveyorChange);
+        RememberLastBlueprintRotation(activeInstallDefinition, installPreviewQuarterTurns);
         InvalidateInstallGrid();
         return true;
     }
@@ -5906,11 +6059,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt conveyorBelt)
         {
-            int logicalQuarterTurns = installPreviewQuarterTurns;
-            if (TryGetConveyorStraightQuarterTurnsFromPreview(activeInstallPreview, conveyorBelt, out int resolvedStraightQuarterTurns))
-            {
-                logicalQuarterTurns = resolvedStraightQuarterTurns;
-            }
+            int logicalQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
 
             bool useCornerVariant = installPreviewConveyorVariantMode == ConveyorPreviewVariantMode.Corner
                 || (activeInstallPreview is ConveyorBelt previewConveyor && previewConveyor.IsCornerVariant);
@@ -5923,13 +6072,18 @@ public class InstallationPlacementController : MonoBehaviour
                         logicalQuarterTurns,
                         useCornerVariant,
                         out logicalQuarterTurns,
-                        out ConveyorPreviewVariantMode resolvedVariantMode))
+                        out ConveyorPreviewVariantMode resolvedVariantMode,
+                        out MapObject resolvedVariantPrefab))
                 {
                     return;
                 }
 
                 installPreviewQuarterTurns = logicalQuarterTurns;
                 installPreviewConveyorVariantMode = resolvedVariantMode;
+                if (resolvedVariantPrefab != null)
+                {
+                    installPreviewSourcePrefabsByPreview[activeInstallPreview] = resolvedVariantPrefab;
+                }
             }
             else
             {
@@ -5959,6 +6113,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
+        preferDifferentConveyorCornerOnNextRefresh = activeInstallDefinition != null
+            && activeInstallDefinition.mapObject is ConveyorBelt
+            && installPreviewConveyorVariantMode == ConveyorPreviewVariantMode.Corner;
         RefreshActiveConveyorPreviewVariant();
         activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
         if (activeInstallPreview is InstallationObject rotatedInstallationPreview)
@@ -5975,6 +6132,7 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewVerticalOffset);
         }
 
+        RememberLastBlueprintRotation(activeInstallDefinition, installPreviewQuarterTurns);
         RefreshConveyorVariantsAroundActivePreview(
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null,
             previousConveyorChange);
@@ -5988,56 +6146,42 @@ public class InstallationPlacementController : MonoBehaviour
         int currentStraightQuarterTurns,
         bool currentUsesCornerVariant,
         out int resolvedQuarterTurns,
-        out ConveyorPreviewVariantMode resolvedVariantMode)
+        out ConveyorPreviewVariantMode resolvedVariantMode,
+        out MapObject resolvedVariantPrefab)
     {
         int normalizedCurrentQuarterTurns = NormalizePlacementQuarterTurns(currentStraightQuarterTurns);
         resolvedQuarterTurns = normalizedCurrentQuarterTurns;
         resolvedVariantMode = currentUsesCornerVariant
             ? ConveyorPreviewVariantMode.Corner
             : ConveyorPreviewVariantMode.Straight;
+        resolvedVariantPrefab = null;
 
         if (anchorBlock == null || conveyorPrototype == null)
         {
             return false;
         }
 
-        if (currentUsesCornerVariant
-            && TryUsePlaceableConveyorRotationCandidate(
-                anchorBlock,
-                conveyorPrototype,
-                previewToIgnore,
-                normalizedCurrentQuarterTurns,
-                ConveyorPreviewVariantMode.Straight,
-                out resolvedQuarterTurns,
-                out resolvedVariantMode))
+        bool currentIsCorner = currentUsesCornerVariant && GetConveyorVariantKind(previewToIgnore) > 0;
+        int currentSequenceIndex = currentIsCorner
+            ? (((normalizedCurrentQuarterTurns + 3) % 4) * 2) + 1
+            : normalizedCurrentQuarterTurns * 2;
+        const int sequenceCount = 8;
+        for (int step = 1; step <= sequenceCount; step++)
         {
-            return true;
-        }
-
-        for (int offset = 1; offset <= 4; offset++)
-        {
-            int candidateQuarterTurns = (normalizedCurrentQuarterTurns + offset) % 4;
-
-            if (TryUsePlaceableConveyorRotationCandidate(
+            int candidateSequenceIndex = (currentSequenceIndex + step) % sequenceCount;
+            bool candidateUsesCorner = (candidateSequenceIndex % 2) == 1;
+            int candidateQuarterTurns = candidateUsesCorner
+                ? ((candidateSequenceIndex / 2) + 1) % 4
+                : candidateSequenceIndex / 2;
+            if (TryUseConveyorRotationSequenceCandidate(
                     anchorBlock,
                     conveyorPrototype,
                     previewToIgnore,
                     candidateQuarterTurns,
-                    ConveyorPreviewVariantMode.Corner,
+                    candidateUsesCorner,
                     out resolvedQuarterTurns,
-                    out resolvedVariantMode))
-            {
-                return true;
-            }
-
-            if (TryUsePlaceableConveyorRotationCandidate(
-                    anchorBlock,
-                    conveyorPrototype,
-                    previewToIgnore,
-                    candidateQuarterTurns,
-                    ConveyorPreviewVariantMode.Straight,
-                    out resolvedQuarterTurns,
-                    out resolvedVariantMode))
+                    out resolvedVariantMode,
+                    out resolvedVariantPrefab))
             {
                 return true;
             }
@@ -6046,37 +6190,37 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private bool TryUsePlaceableConveyorRotationCandidate(
+    private bool TryUseConveyorRotationSequenceCandidate(
         Block anchorBlock,
         ConveyorBelt conveyorPrototype,
         MapObject previewToIgnore,
         int candidateQuarterTurns,
-        ConveyorPreviewVariantMode candidateVariantMode,
+        bool candidateUsesCorner,
         out int resolvedQuarterTurns,
-        out ConveyorPreviewVariantMode resolvedVariantMode)
+        out ConveyorPreviewVariantMode resolvedVariantMode,
+        out MapObject resolvedVariantPrefab)
     {
         resolvedQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
-        resolvedVariantMode = candidateVariantMode;
+        resolvedVariantMode = candidateUsesCorner
+            ? ConveyorPreviewVariantMode.Corner
+            : ConveyorPreviewVariantMode.Straight;
+        resolvedVariantPrefab = null;
+
         if (!TryResolvePlaceableConveyorRotationCandidate(
                 anchorBlock,
                 conveyorPrototype,
                 previewToIgnore,
                 candidateQuarterTurns,
-                candidateVariantMode,
-                out MapObject resolvedPrefab,
+                resolvedVariantMode,
+                out resolvedVariantPrefab,
                 out resolvedQuarterTurns))
         {
             return false;
         }
 
-        if (IsSameConveyorPreviewState(previewToIgnore, resolvedPrefab, resolvedQuarterTurns))
+        if (IsSameConveyorPreviewState(previewToIgnore, resolvedVariantPrefab, resolvedQuarterTurns))
         {
             return false;
-        }
-
-        if (candidateVariantMode == ConveyorPreviewVariantMode.Corner)
-        {
-            resolvedQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
         }
 
         return true;
@@ -6106,7 +6250,8 @@ public class InstallationPlacementController : MonoBehaviour
                     candidateQuarterTurns,
                     previewToIgnore,
                     out resolvedPrefab,
-                    out resolvedQuarterTurns)
+                    out resolvedQuarterTurns,
+                    true)
                 || !(resolvedPrefab is ConveyorBelt cornerConveyor)
                 || !cornerConveyor.IsCornerVariant)
             {
@@ -6387,6 +6532,102 @@ public class InstallationPlacementController : MonoBehaviour
         return ((quarterTurns % 4) + 4) % 4;
     }
 
+    private void RememberLastBlueprintRotation(ItemDefinition definition, int quarterTurns)
+    {
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurns(quarterTurns);
+        lastBlueprintQuarterTurns = normalizedQuarterTurns;
+        hasLastBlueprintQuarterTurns = true;
+
+        if (definition != null && definition.id >= 0)
+        {
+            lastBlueprintQuarterTurnsByItemId[definition.id] = normalizedQuarterTurns;
+        }
+    }
+
+    private void RememberLastInstalledRotation(ItemDefinition definition, int quarterTurns)
+    {
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurns(quarterTurns);
+        lastInstalledQuarterTurns = normalizedQuarterTurns;
+        hasLastInstalledQuarterTurns = true;
+
+        if (definition != null && definition.id >= 0)
+        {
+            lastInstalledQuarterTurnsByItemId[definition.id] = normalizedQuarterTurns;
+        }
+    }
+
+    private int GetPreferredInstallPreviewQuarterTurns(ItemDefinition definition, MapObject sourcePreview)
+    {
+        if (sourcePreview != null)
+        {
+            return GetPreviewQuarterTurns(sourcePreview);
+        }
+
+        if (TryGetRememberedBlueprintRotation(definition, out int blueprintQuarterTurns))
+        {
+            return blueprintQuarterTurns;
+        }
+
+        if (activeInstallPreview != null && installPreviewInstances.Contains(activeInstallPreview))
+        {
+            return GetPreviewQuarterTurns(activeInstallPreview);
+        }
+
+        return TryGetRememberedInstallRotation(definition, out int rememberedQuarterTurns)
+            ? rememberedQuarterTurns
+            : 0;
+    }
+
+    private bool HasRememberedInstallRotation(ItemDefinition definition)
+    {
+        return TryGetRememberedInstallRotation(definition, out _);
+    }
+
+    private bool HasRememberedBlueprintRotation(ItemDefinition definition)
+    {
+        return TryGetRememberedBlueprintRotation(definition, out _);
+    }
+
+    private bool TryGetRememberedBlueprintRotation(ItemDefinition definition, out int quarterTurns)
+    {
+        quarterTurns = 0;
+        if (definition != null
+            && definition.id >= 0
+            && lastBlueprintQuarterTurnsByItemId.TryGetValue(definition.id, out int itemQuarterTurns))
+        {
+            quarterTurns = NormalizePlacementQuarterTurns(itemQuarterTurns);
+            return true;
+        }
+
+        if (!hasLastBlueprintQuarterTurns)
+        {
+            return false;
+        }
+
+        quarterTurns = NormalizePlacementQuarterTurns(lastBlueprintQuarterTurns);
+        return true;
+    }
+
+    private bool TryGetRememberedInstallRotation(ItemDefinition definition, out int quarterTurns)
+    {
+        quarterTurns = 0;
+        if (definition != null
+            && definition.id >= 0
+            && lastInstalledQuarterTurnsByItemId.TryGetValue(definition.id, out int itemQuarterTurns))
+        {
+            quarterTurns = NormalizePlacementQuarterTurns(itemQuarterTurns);
+            return true;
+        }
+
+        if (!hasLastInstalledQuarterTurns)
+        {
+            return false;
+        }
+
+        quarterTurns = NormalizePlacementQuarterTurns(lastInstalledQuarterTurns);
+        return true;
+    }
+
     private int ResolvePlacementQuarterTurnsFromRotation(MapObject sourcePrefab, Quaternion worldRotation, int fallbackQuarterTurns)
     {
         if (sourcePrefab == null)
@@ -6580,10 +6821,15 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        int quarterTurns = sourcePreview != null ? GetPreviewQuarterTurns(sourcePreview) : 0;
+        int quarterTurns = GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, sourcePreview);
         if (sourcePreview == null && activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype)
         {
-            TryResolveInitialConveyorPreviewQuarterTurns(block.Coordinate, conveyorPrototype, out quarterTurns);
+            if (!HasRememberedBlueprintRotation(activeInstallDefinition)
+                && !HasRememberedInstallRotation(activeInstallDefinition)
+                && activeInstallPreview == null)
+            {
+                TryResolveInitialConveyorPreviewQuarterTurns(block.Coordinate, conveyorPrototype, out quarterTurns);
+            }
         }
 
         if (!TryFindPlaceableInstallPreviewQuarterTurns(block, null, quarterTurns, out quarterTurns))

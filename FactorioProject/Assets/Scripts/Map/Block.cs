@@ -6,10 +6,11 @@ using UnityEngine;
 public class Block : BaseObject
 {
     public enum BlockType { Ground }
+    public const int ConveyorCellItemUnit = 4;
     private const int InputAreaCenterStackStateSentinel = -1000000001;
     private const int ConveyorStackStateSentinel = -1000000002;
     private const float InputAreaCenterVerticalSpacing = 0.05f;
-    private const int ConveyorStackLaneLimit = 4;
+    private const int ConveyorStackLaneLimit = ConveyorCellItemUnit;
     private const float ConveyorLaneHeight = 0.2f;
     private const float ConveyorLaneSettleEpsilon = 0.01f;
     private const float ConveyorCycleReadyDistance = 0.12f;
@@ -1463,6 +1464,27 @@ public class Block : BaseObject
             return false;
         }
 
+        bool pickedAny = false;
+        for (int i = 0; i < ConveyorCellItemUnit; i++)
+        {
+            if (!TryPickupSingleConveyorObjectToBag(player, playerPosition, pickupRadius, preferredSlotIndex, preferredItemId))
+            {
+                break;
+            }
+
+            pickedAny = true;
+        }
+
+        return pickedAny;
+    }
+
+    private bool TryPickupSingleConveyorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
         if (!IsConveyorStackingEnabled())
@@ -1505,6 +1527,27 @@ public class Block : BaseObject
     }
 
     public bool TryPickupOneConveyorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        bool pickedAny = false;
+        for (int i = 0; i < ConveyorCellItemUnit; i++)
+        {
+            if (!TryPickupSingleConveyorObjectToHand(player, playerPosition, pickupRadius))
+            {
+                break;
+            }
+
+            pickedAny = true;
+        }
+
+        return pickedAny;
+    }
+
+    private bool TryPickupSingleConveyorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
     {
         if (player == null || pickupRadius <= 0f)
         {

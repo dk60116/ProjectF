@@ -4113,7 +4113,7 @@ public class TerrainGenerator : MonoBehaviour
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
             dropCoordinate = focusedConveyorBlock.Coordinate;
-            int acceptedCount = Mathf.Min(itemCount, 1);
+            int acceptedCount = Mathf.Min(itemCount, Block.ConveyorCellItemUnit);
             for (int i = 0; i < acceptedCount; i++)
             {
                 if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
