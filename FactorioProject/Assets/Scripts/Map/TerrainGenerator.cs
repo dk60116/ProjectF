@@ -12,6 +12,7 @@ public class TerrainGenerator : MonoBehaviour
 {
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
+    private const int ConnectedConveyorDropSearchRadius = 2;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -78,7 +79,16 @@ public class TerrainGenerator : MonoBehaviour
     {
         public int id;
         public bool isCycle;
+        public bool simulationCacheValid;
         public readonly List<Block> blocks = new List<Block>();
+        public int[] frontColumn0LaneIndices = Array.Empty<int>();
+        public int[] frontColumn1LaneIndices = Array.Empty<int>();
+        public int[] backColumn0LaneIndices = Array.Empty<int>();
+        public int[] backColumn1LaneIndices = Array.Empty<int>();
+        public float[] withinColumn0PathLengths = Array.Empty<float>();
+        public float[] withinColumn1PathLengths = Array.Empty<float>();
+        public float[] nextColumn0PathLengths = Array.Empty<float>();
+        public float[] nextColumn1PathLengths = Array.Empty<float>();
 
         public ConveyorLine(int id)
         {
@@ -213,6 +223,9 @@ public class TerrainGenerator : MonoBehaviour
 
     [SerializeField]
     private bool virtualizeConveyorItems = true;
+
+    [SerializeField]
+    private bool virtualizeConveyorBelts = true;
 
     [SerializeField, Min(16)]
     private int conveyorWakeQueueProcessLimit = 4096;
@@ -486,6 +499,10 @@ public class TerrainGenerator : MonoBehaviour
     private int conveyorItemVisualBlockSetVersion;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
+    private readonly HashSet<int> conveyorNetworkSleepingIds = new HashSet<int>();
+    private readonly HashSet<int> conveyorNetworkActiveIds = new HashSet<int>();
+    private readonly HashSet<int> conveyorNetworkSleepCheckQueuedIds = new HashSet<int>();
+    private readonly List<int> conveyorNetworkSleepCheckBuffer = new List<int>();
     private readonly Queue<Block> conveyorNetworkBuildQueue = new Queue<Block>();
     private readonly Queue<Block> conveyorWakeQueue = new Queue<Block>();
     private readonly HashSet<Block> conveyorWakeQueued = new HashSet<Block>();
@@ -496,6 +513,7 @@ public class TerrainGenerator : MonoBehaviour
     private readonly HashSet<int> conveyorLinesTickedThisFrame = new HashSet<int>();
     private readonly List<Block> conveyorLineTouchedBlocks = new List<Block>();
     private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
+    private readonly HashSet<int> conveyorWakeQueuedLineIds = new HashSet<int>();
     private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
     private readonly Dictionary<Vector2Int, TerrainBiome> tileBiomeCache = new Dictionary<Vector2Int, TerrainBiome>();
     private readonly Dictionary<Vector2Int, bool> rawWaterCache = new Dictionary<Vector2Int, bool>();
@@ -519,6 +537,7 @@ public class TerrainGenerator : MonoBehaviour
     private InstallationBackgroundSimulator installationBackgroundSimulator;
     private BlockPool blockPool;
     private VirtualConveyorItemRenderer virtualConveyorItemRenderer;
+    private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private Coroutine chunkGenerationCoroutine;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
@@ -552,6 +571,7 @@ public class TerrainGenerator : MonoBehaviour
     {
         Active = this;
         EnsureVirtualConveyorItemRenderer();
+        EnsureVirtualConveyorBeltRenderer();
     }
 
     private void NormalizeOreBodyScaleSettings()
@@ -576,6 +596,7 @@ public class TerrainGenerator : MonoBehaviour
         SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
         EnsureVirtualConveyorItemRenderer();
+        EnsureVirtualConveyorBeltRenderer();
 
         if (generateOnStart)
         {
@@ -631,9 +652,14 @@ public class TerrainGenerator : MonoBehaviour
         activeConveyorOrderDirty = true;
         conveyorNetworkIds.Clear();
         conveyorNetworkRetryTimes.Clear();
+        conveyorNetworkSleepingIds.Clear();
+        conveyorNetworkActiveIds.Clear();
+        conveyorNetworkSleepCheckQueuedIds.Clear();
+        conveyorNetworkSleepCheckBuffer.Clear();
         conveyorNetworkBuildQueue.Clear();
         conveyorWakeQueue.Clear();
         conveyorWakeQueued.Clear();
+        conveyorWakeQueuedLineIds.Clear();
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
@@ -647,6 +673,7 @@ public class TerrainGenerator : MonoBehaviour
     }
 
     public bool VirtualizeConveyorItems => virtualizeConveyorItems;
+    public bool VirtualizeConveyorBelts => virtualizeConveyorBelts;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
 
     public void CopyLoadedBlocks(List<Block> results)
@@ -664,6 +691,33 @@ public class TerrainGenerator : MonoBehaviour
                 results.Add(pair.Value);
             }
         }
+    }
+
+    public int GetLoadedConveyorItemCount()
+    {
+        int count = 0;
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block != null)
+            {
+                count += block.GetRuntimeConveyorItemCount();
+            }
+        }
+
+        return count;
+    }
+
+    public int GetInstallationItemCounts(Dictionary<int, int> countsByItemId)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            countsByItemId?.Clear();
+            return 0;
+        }
+
+        return resourceStateStore.GetInstallationItemCounts(countsByItemId);
     }
 
     public void CopyConveyorItemVisualBlocks(List<Block> results)
@@ -997,9 +1051,14 @@ public class TerrainGenerator : MonoBehaviour
         activeConveyorOrderDirty = true;
         conveyorNetworkIds.Clear();
         conveyorNetworkRetryTimes.Clear();
+        conveyorNetworkSleepingIds.Clear();
+        conveyorNetworkActiveIds.Clear();
+        conveyorNetworkSleepCheckQueuedIds.Clear();
+        conveyorNetworkSleepCheckBuffer.Clear();
         conveyorNetworkBuildQueue.Clear();
         conveyorWakeQueue.Clear();
         conveyorWakeQueued.Clear();
+        conveyorWakeQueuedLineIds.Clear();
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
@@ -1106,7 +1165,7 @@ public class TerrainGenerator : MonoBehaviour
         return block;
     }
 
-    public void SetConveyorActive(Block block, bool isActive)
+    public void SetConveyorActive(Block block, bool isActive, bool queueWake = true)
     {
         if (!Application.isPlaying || block == null)
         {
@@ -1120,7 +1179,10 @@ public class TerrainGenerator : MonoBehaviour
                 activeConveyorOrderDirty = true;
             }
 
-            QueueConveyorWake(block);
+            if (queueWake)
+            {
+                QueueConveyorWake(block);
+            }
         }
         else
         {
@@ -1150,8 +1212,25 @@ public class TerrainGenerator : MonoBehaviour
 
     public void QueueConveyorWake(Block block)
     {
-        if (!Application.isPlaying || block == null || conveyorWakeQueued.Contains(block))
+        if (!Application.isPlaying || block == null)
         {
+            return;
+        }
+
+        int queuedLineId = -1;
+        if (TryGetCachedNonCycleConveyorLineSlot(block, out queuedLineId, out _, out _)
+            && !conveyorWakeQueuedLineIds.Add(queuedLineId))
+        {
+            return;
+        }
+
+        if (conveyorWakeQueued.Contains(block))
+        {
+            if (queuedLineId >= 0)
+            {
+                conveyorWakeQueuedLineIds.Remove(queuedLineId);
+            }
+
             return;
         }
 
@@ -1208,6 +1287,11 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        if (conveyorItemVisualBlocks.Contains(block) && block.HasDynamicVirtualConveyorItemVisuals())
+        {
+            return;
+        }
+
         conveyorItemVisualDirtyBlocks.Add(block);
     }
 
@@ -1215,6 +1299,11 @@ public class TerrainGenerator : MonoBehaviour
     {
         conveyorNetworkCacheDirty = true;
         conveyorLineCacheDirty = true;
+        conveyorNetworkRetryTimes.Clear();
+        conveyorNetworkSleepingIds.Clear();
+        conveyorNetworkActiveIds.Clear();
+        conveyorNetworkSleepCheckQueuedIds.Clear();
+        conveyorNetworkSleepCheckBuffer.Clear();
     }
 
     public int ConveyorLineCount
@@ -1256,6 +1345,30 @@ public class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    private bool TryGetCachedNonCycleConveyorLineSlot(
+        Block block,
+        out int lineId,
+        out int slotIndex,
+        out int lineLength)
+    {
+        lineId = -1;
+        slotIndex = -1;
+        lineLength = 0;
+
+        if (block == null
+            || conveyorLineCacheDirty
+            || !conveyorLineSlots.TryGetValue(block, out ConveyorLineSlot slot)
+            || slot.IsCycle)
+        {
+            return false;
+        }
+
+        lineId = slot.LineId;
+        slotIndex = slot.SlotIndex;
+        lineLength = slot.LineLength;
+        return true;
+    }
+
     public void CopyConveyorLineBlocks(int lineId, List<Block> results)
     {
         if (results == null)
@@ -1291,9 +1404,10 @@ public class TerrainGenerator : MonoBehaviour
 
         EnsureConveyorNetworkCache();
         return conveyorNetworkIds.TryGetValue(block, out int networkId)
-            && conveyorNetworkRetryTimes.TryGetValue(networkId, out float retryTime)
-            && retryTime > 0f
-            && Time.time < retryTime;
+            && (conveyorNetworkSleepingIds.Contains(networkId)
+                || (conveyorNetworkRetryTimes.TryGetValue(networkId, out float retryTime)
+                    && retryTime > 0f
+                    && Time.time < retryTime));
     }
 
     public void DelayConveyorNetwork(Block block, float delay)
@@ -1328,9 +1442,88 @@ public class TerrainGenerator : MonoBehaviour
         if (conveyorNetworkIds.TryGetValue(block, out int networkId))
         {
             conveyorNetworkRetryTimes.Remove(networkId);
+            conveyorNetworkSleepingIds.Remove(networkId);
+            conveyorNetworkSleepCheckQueuedIds.Remove(networkId);
         }
 
         QueueConveyorWake(block);
+    }
+
+    public void QueueConveyorNetworkSleepCheck(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        EnsureConveyorNetworkCache();
+        if (conveyorNetworkIds.TryGetValue(block, out int networkId)
+            && !conveyorNetworkSleepingIds.Contains(networkId))
+        {
+            conveyorNetworkSleepCheckQueuedIds.Add(networkId);
+        }
+    }
+
+    private void ProcessQueuedConveyorNetworkSleepChecks()
+    {
+        if (conveyorNetworkSleepCheckQueuedIds.Count == 0)
+        {
+            return;
+        }
+
+        EnsureConveyorNetworkCache();
+        conveyorNetworkSleepCheckBuffer.Clear();
+        foreach (int networkId in conveyorNetworkSleepCheckQueuedIds)
+        {
+            conveyorNetworkSleepCheckBuffer.Add(networkId);
+        }
+
+        conveyorNetworkSleepCheckQueuedIds.Clear();
+        for (int i = 0; i < conveyorNetworkSleepCheckBuffer.Count; i++)
+        {
+            TrySleepConveyorNetworkIfIdle(conveyorNetworkSleepCheckBuffer[i]);
+        }
+
+        conveyorNetworkSleepCheckBuffer.Clear();
+    }
+
+    private void TrySleepConveyorNetworkIfIdle(int networkId)
+    {
+        if (networkId <= 0 || conveyorNetworkSleepingIds.Contains(networkId))
+        {
+            return;
+        }
+
+        bool hasWork = false;
+        foreach (KeyValuePair<Block, int> pair in conveyorNetworkIds)
+        {
+            if (pair.Value != networkId)
+            {
+                continue;
+            }
+
+            Block block = pair.Key;
+            if (block != null && block.HasConveyorWorkIgnoringNetworkThrottle())
+            {
+                hasWork = true;
+                break;
+            }
+        }
+
+        if (hasWork)
+        {
+            return;
+        }
+
+        conveyorNetworkRetryTimes.Remove(networkId);
+        conveyorNetworkSleepingIds.Add(networkId);
+        foreach (KeyValuePair<Block, int> pair in conveyorNetworkIds)
+        {
+            if (pair.Value == networkId)
+            {
+                pair.Key?.RefreshConveyorActivityRegistration(false);
+            }
+        }
     }
 
     private void TickActiveConveyorDataMotions(float deltaTime)
@@ -1386,7 +1579,10 @@ public class TerrainGenerator : MonoBehaviour
 
     private void TickActiveConveyors(float deltaTime)
     {
-        if (deltaTime <= 0f || (activeConveyors.Count == 0 && conveyorWakeQueue.Count == 0))
+        if (deltaTime <= 0f
+            || (activeConveyors.Count == 0
+                && conveyorWakeQueue.Count == 0
+                && conveyorNetworkSleepCheckQueuedIds.Count == 0))
         {
             return;
         }
@@ -1396,6 +1592,7 @@ public class TerrainGenerator : MonoBehaviour
         MaybeEnqueueActiveConveyorSafetyScan();
         if (conveyorWakeQueue.Count == 0)
         {
+            ProcessQueuedConveyorNetworkSleepChecks();
             return;
         }
 
@@ -1406,15 +1603,25 @@ public class TerrainGenerator : MonoBehaviour
         {
             Block block = conveyorWakeQueue.Dequeue();
             conveyorWakeQueued.Remove(block);
+            if (TryGetCachedNonCycleConveyorLineSlot(block, out int queuedLineId, out _, out _))
+            {
+                conveyorWakeQueuedLineIds.Remove(queuedLineId);
+            }
+
             processedCount++;
             if (block == null)
             {
                 continue;
             }
 
-            if (!activeConveyors.Contains(block) || !block.ShouldTickActiveConveyor())
+            if (!block.ShouldTickActiveConveyor())
             {
                 continue;
+            }
+
+            if (!activeConveyors.Contains(block))
+            {
+                SetConveyorActive(block, true, false);
             }
 
             if (TryTickStraightConveyorLine(block))
@@ -1428,6 +1635,8 @@ public class TerrainGenerator : MonoBehaviour
                 QueueConveyorWake(block);
             }
         }
+
+        ProcessQueuedConveyorNetworkSleepChecks();
     }
 
     private void MaybeEnqueueActiveConveyorSafetyScan()
@@ -1490,10 +1699,11 @@ public class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            block.RefreshConveyorActivityRegistration();
+            block.RefreshConveyorActivityRegistration(false);
             if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);
+                break;
             }
         }
 
@@ -1516,7 +1726,7 @@ public class TerrainGenerator : MonoBehaviour
 
     private static bool CanTickStraightConveyorLine(ConveyorLine line)
     {
-        if (line == null || line.isCycle || line.blocks.Count == 0)
+        if (line == null || line.isCycle || !line.simulationCacheValid || line.blocks.Count == 0)
         {
             return false;
         }
@@ -1524,10 +1734,7 @@ public class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < line.blocks.Count; i++)
         {
             Block block = line.blocks[i];
-            if (block == null
-                || block.IsCornerConveyorBlock()
-                || !block.CanUseStraightConveyorLineSimulation()
-                || !block.TryGetStraightConveyorLineLaneIndices(out _, out _, out _, out _))
+            if (block == null || !block.CanUseStraightConveyorLineSimulationStateOnly())
             {
                 return false;
             }
@@ -1538,26 +1745,32 @@ public class TerrainGenerator : MonoBehaviour
 
     private bool TryTickStraightConveyorLineColumn(ConveyorLine line, int columnIndex)
     {
+        if (line == null || !line.simulationCacheValid)
+        {
+            return false;
+        }
+
         bool movedAny = false;
         for (int i = line.blocks.Count - 1; i >= 0; i--)
         {
             Block block = line.blocks[i];
-            if (!TryGetStraightLineColumnLanes(
-                    block,
-                    columnIndex,
-                    out int frontLaneIndex,
-                    out int backLaneIndex))
-            {
-                continue;
-            }
+            int frontLaneIndex = columnIndex == 0
+                ? line.frontColumn0LaneIndices[i]
+                : line.frontColumn1LaneIndices[i];
+            int backLaneIndex = columnIndex == 0
+                ? line.backColumn0LaneIndices[i]
+                : line.backColumn1LaneIndices[i];
 
             if (i < line.blocks.Count - 1
-                && TryGetStraightLineColumnLanes(
+                && block.TryMoveStraightConveyorDataLaneToCached(
                     line.blocks[i + 1],
-                    columnIndex,
-                    out _,
-                    out int nextBackLaneIndex)
-                && block.TryMoveStraightConveyorDataLaneTo(line.blocks[i + 1], frontLaneIndex, nextBackLaneIndex))
+                    frontLaneIndex,
+                    columnIndex == 0
+                        ? line.backColumn0LaneIndices[i + 1]
+                        : line.backColumn1LaneIndices[i + 1],
+                    columnIndex == 0
+                        ? line.nextColumn0PathLengths[i]
+                        : line.nextColumn1PathLengths[i]))
             {
                 MarkConveyorLineBlockTouched(block);
                 MarkConveyorLineBlockTouched(line.blocks[i + 1]);
@@ -1571,7 +1784,13 @@ public class TerrainGenerator : MonoBehaviour
                 movedAny = true;
             }
 
-            if (block.TryMoveStraightConveyorDataLaneTo(block, backLaneIndex, frontLaneIndex))
+            if (block.TryMoveStraightConveyorDataLaneToCached(
+                    block,
+                    backLaneIndex,
+                    frontLaneIndex,
+                    columnIndex == 0
+                        ? line.withinColumn0PathLengths[i]
+                        : line.withinColumn1PathLengths[i]))
             {
                 MarkConveyorLineBlockTouched(block);
                 movedAny = true;
@@ -1660,6 +1879,7 @@ public class TerrainGenerator : MonoBehaviour
 
         conveyorNetworkCacheDirty = false;
         conveyorNetworkIds.Clear();
+        conveyorNetworkActiveIds.Clear();
         conveyorNetworkBuildQueue.Clear();
 
         int nextNetworkId = 1;
@@ -1672,6 +1892,7 @@ public class TerrainGenerator : MonoBehaviour
             }
 
             int networkId = nextNetworkId++;
+            conveyorNetworkActiveIds.Add(networkId);
             conveyorNetworkIds[startBlock] = networkId;
             conveyorNetworkBuildQueue.Enqueue(startBlock);
 
@@ -1686,7 +1907,7 @@ public class TerrainGenerator : MonoBehaviour
         List<int> staleNetworkIds = null;
         foreach (KeyValuePair<int, float> pair in conveyorNetworkRetryTimes)
         {
-            if (!conveyorNetworkIds.ContainsValue(pair.Key))
+            if (!conveyorNetworkActiveIds.Contains(pair.Key))
             {
                 staleNetworkIds ??= new List<int>();
                 staleNetworkIds.Add(pair.Key);
@@ -1700,6 +1921,33 @@ public class TerrainGenerator : MonoBehaviour
                 conveyorNetworkRetryTimes.Remove(staleNetworkIds[i]);
             }
         }
+
+        RemoveStaleConveyorNetworkIds(conveyorNetworkSleepingIds);
+        RemoveStaleConveyorNetworkIds(conveyorNetworkSleepCheckQueuedIds);
+    }
+
+    private void RemoveStaleConveyorNetworkIds(HashSet<int> networkIds)
+    {
+        if (networkIds == null || networkIds.Count == 0)
+        {
+            return;
+        }
+
+        conveyorNetworkSleepCheckBuffer.Clear();
+        foreach (int networkId in networkIds)
+        {
+            if (!conveyorNetworkActiveIds.Contains(networkId))
+            {
+                conveyorNetworkSleepCheckBuffer.Add(networkId);
+            }
+        }
+
+        for (int i = 0; i < conveyorNetworkSleepCheckBuffer.Count; i++)
+        {
+            networkIds.Remove(conveyorNetworkSleepCheckBuffer[i]);
+        }
+
+        conveyorNetworkSleepCheckBuffer.Clear();
     }
 
     private void TryAddConveyorNetworkNeighbor(Block block, int networkId, bool next)
@@ -1730,6 +1978,7 @@ public class TerrainGenerator : MonoBehaviour
         conveyorLinesTickedThisFrame.Clear();
         conveyorLineTouchedBlocks.Clear();
         conveyorLineTouchedSet.Clear();
+        conveyorWakeQueuedLineIds.Clear();
         conveyorLineCacheDirty = true;
     }
 
@@ -1823,12 +2072,53 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         line.isCycle = isCycle;
+        line.simulationCacheValid = PopulateConveyorLineSimulationCache(line);
         conveyorLines.Add(line);
 
         int lineLength = line.blocks.Count;
         for (int i = 0; i < lineLength; i++)
         {
             conveyorLineSlots[line.blocks[i]] = new ConveyorLineSlot(line.id, i, lineLength, line.isCycle);
+        }
+
+        return true;
+    }
+
+    private static bool PopulateConveyorLineSimulationCache(ConveyorLine line)
+    {
+        if (line == null || line.blocks.Count <= 0 || line.isCycle)
+        {
+            return false;
+        }
+
+        int lineLength = line.blocks.Count;
+        line.frontColumn0LaneIndices = new int[lineLength];
+        line.frontColumn1LaneIndices = new int[lineLength];
+        line.backColumn0LaneIndices = new int[lineLength];
+        line.backColumn1LaneIndices = new int[lineLength];
+        line.withinColumn0PathLengths = new float[lineLength];
+        line.withinColumn1PathLengths = new float[lineLength];
+        line.nextColumn0PathLengths = new float[lineLength];
+        line.nextColumn1PathLengths = new float[lineLength];
+
+        for (int i = 0; i < lineLength; i++)
+        {
+            Block block = line.blocks[i];
+            Block nextBlock = i < lineLength - 1 ? line.blocks[i + 1] : null;
+            if (block == null
+                || !block.TryGetStraightConveyorLineMotionData(
+                    nextBlock,
+                    out line.frontColumn0LaneIndices[i],
+                    out line.frontColumn1LaneIndices[i],
+                    out line.backColumn0LaneIndices[i],
+                    out line.backColumn1LaneIndices[i],
+                    out line.withinColumn0PathLengths[i],
+                    out line.withinColumn1PathLengths[i],
+                    out line.nextColumn0PathLengths[i],
+                    out line.nextColumn1PathLengths[i]))
+            {
+                return false;
+            }
         }
 
         return true;
@@ -1854,7 +2144,10 @@ public class TerrainGenerator : MonoBehaviour
 
     private void TickActiveConveyorDotVisuals(float deltaTime)
     {
-        if (deltaTime <= 0f || activeConveyorDotVisuals.Count == 0)
+        if (deltaTime <= 0f
+            || activeConveyorDotVisuals.Count == 0
+            || GameManager.Instance == null
+            || !GameManager.Instance.ShowConveyorSlotDots)
         {
             return;
         }
@@ -3977,9 +4270,10 @@ public class TerrainGenerator : MonoBehaviour
 
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
-            if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
-                    itemId,
+            if (!TryAddDroppedItemToFocusedConveyor(
                     worldPosition,
+                    focusedConveyorBlock,
+                    itemId,
                     worldPosition,
                     0f,
                     out targetPortableObject,
@@ -4033,6 +4327,201 @@ public class TerrainGenerator : MonoBehaviour
             moveInterval,
             out _,
             out _);
+    }
+
+    public bool TryGetFocusedConveyorDropLimit(out int dropLimit)
+    {
+        dropLimit = 0;
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (!TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+            || focusedConveyorBlock == null)
+        {
+            return false;
+        }
+
+        int focusedCapacity = Mathf.Max(0, focusedConveyorBlock.GetAvailableConveyorCapacity());
+        Vector3 searchWorldPosition = player != null ? player.transform.position : focusedConveyorBlock.transform.position;
+        int connectedCapacity = GetConnectedConveyorDropCapacityNear(
+            searchWorldPosition,
+            focusedConveyorBlock,
+            Mathf.Max(0, Block.ConveyorCellItemUnit - focusedCapacity));
+        dropLimit = Mathf.Min(Block.ConveyorCellItemUnit, focusedCapacity + connectedCapacity);
+        return true;
+    }
+
+    private bool TryResolveFocusedConveyorDropBlock(
+        Vector3 searchWorldPosition,
+        Block focusedConveyorBlock,
+        HashSet<Block> excludedBlocks,
+        out Block targetConveyorBlock)
+    {
+        targetConveyorBlock = null;
+        if (focusedConveyorBlock == null)
+        {
+            return false;
+        }
+
+        if ((excludedBlocks == null || !excludedBlocks.Contains(focusedConveyorBlock))
+            && focusedConveyorBlock.GetAvailableConveyorCapacity() > 0)
+        {
+            targetConveyorBlock = focusedConveyorBlock;
+            return true;
+        }
+
+        return TryFindConnectedConveyorDropBlockNear(
+            searchWorldPosition,
+            focusedConveyorBlock,
+            excludedBlocks,
+            out targetConveyorBlock);
+    }
+
+    private int GetConnectedConveyorDropCapacityNear(Vector3 searchWorldPosition, Block focusedConveyorBlock, int maxCapacity)
+    {
+        if (focusedConveyorBlock == null || maxCapacity <= 0 || !TryGetConveyorNetworkId(focusedConveyorBlock, out int focusedNetworkId))
+        {
+            return 0;
+        }
+
+        int totalCapacity = 0;
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(searchWorldPosition);
+        for (int offsetY = -ConnectedConveyorDropSearchRadius; offsetY <= ConnectedConveyorDropSearchRadius; offsetY++)
+        {
+            for (int offsetX = -ConnectedConveyorDropSearchRadius; offsetX <= ConnectedConveyorDropSearchRadius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block)
+                    || !IsConnectedConveyorDropCandidate(block, focusedConveyorBlock, focusedNetworkId, null, out int candidateCapacity))
+                {
+                    continue;
+                }
+
+                totalCapacity += candidateCapacity;
+                if (totalCapacity >= maxCapacity)
+                {
+                    return maxCapacity;
+                }
+            }
+        }
+
+        return totalCapacity;
+    }
+
+    private bool TryFindConnectedConveyorDropBlockNear(
+        Vector3 searchWorldPosition,
+        Block focusedConveyorBlock,
+        HashSet<Block> excludedBlocks,
+        out Block targetConveyorBlock)
+    {
+        targetConveyorBlock = null;
+        if (focusedConveyorBlock == null || !TryGetConveyorNetworkId(focusedConveyorBlock, out int focusedNetworkId))
+        {
+            return false;
+        }
+
+        Vector2Int centerCoordinate = GetWorldBlockCoordinate(searchWorldPosition);
+        int bestDistanceSqr = int.MaxValue;
+        int bestCapacity = 0;
+
+        for (int offsetY = -ConnectedConveyorDropSearchRadius; offsetY <= ConnectedConveyorDropSearchRadius; offsetY++)
+        {
+            for (int offsetX = -ConnectedConveyorDropSearchRadius; offsetX <= ConnectedConveyorDropSearchRadius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!loadedBlocks.TryGetValue(coordinate, out Block block)
+                    || !IsConnectedConveyorDropCandidate(block, focusedConveyorBlock, focusedNetworkId, excludedBlocks, out int candidateCapacity))
+                {
+                    continue;
+                }
+
+                int distanceSqr = (offsetX * offsetX) + (offsetY * offsetY);
+                if (targetConveyorBlock == null
+                    || distanceSqr < bestDistanceSqr
+                    || (distanceSqr == bestDistanceSqr && candidateCapacity > bestCapacity))
+                {
+                    targetConveyorBlock = block;
+                    bestDistanceSqr = distanceSqr;
+                    bestCapacity = candidateCapacity;
+                }
+            }
+        }
+
+        return targetConveyorBlock != null;
+    }
+
+    private bool IsConnectedConveyorDropCandidate(
+        Block block,
+        Block focusedConveyorBlock,
+        int focusedNetworkId,
+        HashSet<Block> excludedBlocks,
+        out int capacity)
+    {
+        capacity = 0;
+        if (block == null
+            || block == focusedConveyorBlock
+            || !block.IsRuntimeConveyor
+            || (excludedBlocks != null && excludedBlocks.Contains(block))
+            || !TryGetConveyorNetworkId(block, out int candidateNetworkId)
+            || candidateNetworkId != focusedNetworkId)
+        {
+            return false;
+        }
+
+        capacity = block.GetAvailableConveyorCapacity();
+        return capacity > 0;
+    }
+
+    private bool TryGetConveyorNetworkId(Block block, out int networkId)
+    {
+        networkId = 0;
+        if (block == null || !block.IsRuntimeConveyor)
+        {
+            return false;
+        }
+
+        EnsureConveyorNetworkCache();
+        return conveyorNetworkIds.TryGetValue(block, out networkId);
+    }
+
+    private bool TryAddDroppedItemToFocusedConveyor(
+        Vector3 worldPosition,
+        Block focusedConveyorBlock,
+        int itemId,
+        Vector3 startWorldPosition,
+        float delay,
+        out PortableObject targetPortableObject,
+        out Block targetConveyorBlock,
+        Action onComplete = null,
+        Func<Vector3> startWorldPositionProvider = null,
+        float movementReleaseDelay = 0f)
+    {
+        targetPortableObject = null;
+        targetConveyorBlock = null;
+        HashSet<Block> rejectedConveyorDropBlocks = null;
+        while (TryResolveFocusedConveyorDropBlock(
+                   worldPosition,
+                   focusedConveyorBlock,
+                   rejectedConveyorDropBlocks,
+                   out Block candidateBlock))
+        {
+            if (candidateBlock.TryAddConveyorObjectAnimatedAtPlacement(
+                    itemId,
+                    worldPosition,
+                    startWorldPosition,
+                    delay,
+                    out targetPortableObject,
+                    onComplete,
+                    startWorldPositionProvider,
+                    movementReleaseDelay))
+            {
+                targetConveyorBlock = candidateBlock;
+                return true;
+            }
+
+            rejectedConveyorDropBlocks ??= new HashSet<Block>();
+            rejectedConveyorDropBlocks.Add(candidateBlock);
+        }
+
+        return false;
     }
 
     public bool TryAddDroppedItemStackAtPlayerBlock(
@@ -4114,29 +4603,31 @@ public class TerrainGenerator : MonoBehaviour
         {
             dropCoordinate = focusedConveyorBlock.Coordinate;
             int acceptedCount = Mathf.Min(itemCount, Block.ConveyorCellItemUnit);
+            float moveIntervalSeconds = Mathf.Max(0f, moveInterval);
+            float conveyorBatchReleaseDelay = acceptedCount > 1
+                ? ((acceptedCount - 1) * moveIntervalSeconds) + PortableObject.MoveToDuration
+                : 0f;
             for (int i = 0; i < acceptedCount; i++)
             {
-                if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
-                        itemId,
+                if (!TryAddDroppedItemToFocusedConveyor(
                         worldPosition,
+                        focusedConveyorBlock,
+                        itemId,
                         startWorldPosition,
-                        i * Mathf.Max(0f, moveInterval),
+                        i * moveIntervalSeconds,
                         out PortableObject droppedObject,
                         out Block targetConveyorBlock,
                         null,
-                        startWorldPositionProvider))
+                        startWorldPositionProvider,
+                        conveyorBatchReleaseDelay))
                 {
                     break;
                 }
 
                 droppedCount++;
-                if (targetConveyorBlock != null)
-                {
-                    dropCoordinate = targetConveyorBlock.Coordinate;
-                }
-
+                dropCoordinate = targetConveyorBlock.Coordinate;
                 MarkDroppedPickupGate(droppedObject, false, worldPosition);
-                targetConveyorBlock?.MarkConveyorDroppedItem(worldPosition, false);
+                targetConveyorBlock.MarkConveyorDroppedItem(worldPosition, false);
             }
 
             return droppedCount > 0;
@@ -4220,9 +4711,10 @@ public class TerrainGenerator : MonoBehaviour
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
-            if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
-                    itemId,
+            if (!TryAddDroppedItemToFocusedConveyor(
                     worldPosition,
+                    focusedConveyorBlock,
+                    itemId,
                     startWorldPosition,
                     0f,
                     out targetPortableObject,
@@ -4401,12 +4893,40 @@ public class TerrainGenerator : MonoBehaviour
     {
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
+        RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
     }
 
     public void RegisterInstallationRuntimeState(InstallationObject installationObject)
     {
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
+        RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
+    }
+
+    public void RegisterVirtualConveyorBelt(ConveyorBelt conveyorBelt)
+    {
+        if (!Application.isPlaying || conveyorBelt == null)
+        {
+            return;
+        }
+
+        if (!virtualizeConveyorBelts)
+        {
+            UnregisterVirtualConveyorBelt(conveyorBelt);
+            return;
+        }
+
+        EnsureVirtualConveyorBeltRenderer()?.Register(conveyorBelt);
+    }
+
+    public void UnregisterVirtualConveyorBelt(ConveyorBelt conveyorBelt, bool restoreNativeRenderers = true)
+    {
+        if (!Application.isPlaying || conveyorBelt == null)
+        {
+            return;
+        }
+
+        virtualConveyorBeltRenderer?.Unregister(conveyorBelt, restoreNativeRenderers);
     }
 
     public void RemoveInstallationPersistence(Vector2Int anchorCoordinate)
@@ -4458,9 +4978,10 @@ public class TerrainGenerator : MonoBehaviour
 
         if (TryGetFocusedConveyorBeltBlock(GameManager.Instance != null ? GameManager.Instance.Player : null, out _, out Block focusedConveyorBlock))
         {
-            if (!focusedConveyorBlock.TryAddConveyorObjectAnimatedNearConnected(
-                    itemId,
+            if (!TryAddDroppedItemToFocusedConveyor(
                     worldPosition,
+                    focusedConveyorBlock,
+                    itemId,
                     worldPosition,
                     0f,
                     out targetPortableObject,
@@ -5428,6 +5949,8 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        RegisterVirtualConveyorBelt(installedObject as ConveyorBelt);
+
         IReadOnlyList<Vector2Int> bindingCoordinates = occupiedCoordinates;
         if (installedObject is InstallationObject installationObject
             && installationObject.RuntimeOccupiedCoordinates != null
@@ -5833,6 +6356,22 @@ public class TerrainGenerator : MonoBehaviour
         ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
         virtualConveyorItemRenderer.Configure(this, itemManager);
         return virtualConveyorItemRenderer;
+    }
+
+    private VirtualConveyorBeltRenderer EnsureVirtualConveyorBeltRenderer()
+    {
+        if (virtualConveyorBeltRenderer != null)
+        {
+            return virtualConveyorBeltRenderer;
+        }
+
+        virtualConveyorBeltRenderer = GetComponent<VirtualConveyorBeltRenderer>();
+        if (virtualConveyorBeltRenderer == null)
+        {
+            virtualConveyorBeltRenderer = gameObject.AddComponent<VirtualConveyorBeltRenderer>();
+        }
+
+        return virtualConveyorBeltRenderer;
     }
 
     private static ItemDefinition ResolveInstallationDefinition(int itemId)

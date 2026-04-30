@@ -38,6 +38,8 @@ internal sealed class ItemGiveForm : Form
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
     private readonly Label fpsLabel = new Label();
+    private readonly Label runtimeStatsLabel = new Label();
+    private readonly TextBox runtimeStatsTextBox = new TextBox();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private bool refreshingItems;
     private bool pollingStatus;
@@ -45,7 +47,7 @@ internal sealed class ItemGiveForm : Form
     public ItemGiveForm()
     {
         Text = "ProjectF Item Give Tool";
-        MinimumSize = new Size(680, 560);
+        MinimumSize = new Size(760, 700);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -61,13 +63,14 @@ internal sealed class ItemGiveForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 4
+            RowCount = 5
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
         Label titleLabel = new Label
@@ -199,6 +202,39 @@ internal sealed class ItemGiveForm : Form
         layout.Controls.Add(buttonPanel, 0, 2);
         layout.SetColumnSpan(buttonPanel, 2);
 
+        Panel runtimeStatsCard = CreateCardPanel();
+        runtimeStatsCard.Padding = new Padding(14, 10, 14, 10);
+        runtimeStatsCard.Margin = new Padding(0, 0, 0, 14);
+        TableLayoutPanel runtimeStatsLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2
+        };
+        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
+        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+        runtimeStatsLabel.Text = "Runtime Stats: --";
+        runtimeStatsLabel.Dock = DockStyle.Fill;
+        runtimeStatsLabel.ForeColor = Color.FromArgb(243, 234, 206);
+        runtimeStatsLabel.Font = new Font(Font.FontFamily, 11.5f, FontStyle.Bold);
+
+        runtimeStatsTextBox.Dock = DockStyle.Fill;
+        runtimeStatsTextBox.Multiline = true;
+        runtimeStatsTextBox.ScrollBars = ScrollBars.Vertical;
+        runtimeStatsTextBox.ReadOnly = true;
+        runtimeStatsTextBox.BorderStyle = BorderStyle.None;
+        runtimeStatsTextBox.BackColor = Color.FromArgb(43, 46, 39);
+        runtimeStatsTextBox.ForeColor = Color.FromArgb(231, 224, 200);
+        runtimeStatsTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+        runtimeStatsTextBox.Text = "설치 오브젝트 종류: --";
+
+        runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
+        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
+        runtimeStatsCard.Controls.Add(runtimeStatsLayout);
+        layout.Controls.Add(runtimeStatsCard, 0, 3);
+        layout.SetColumnSpan(runtimeStatsCard, 2);
+
         Panel logCard = CreateCardPanel();
         logCard.Dock = DockStyle.Fill;
         logTextBox.Dock = DockStyle.Fill;
@@ -210,7 +246,7 @@ internal sealed class ItemGiveForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 3);
+        layout.Controls.Add(logCard, 0, 4);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -513,11 +549,13 @@ internal sealed class ItemGiveForm : Form
                     : fps >= 30f
                         ? Color.FromArgb(235, 189, 92)
                         : Color.FromArgb(236, 104, 94);
+                UpdateRuntimeStatsFromResponse(response);
             }
             else
             {
                 fpsLabel.Text = "FPS: --";
                 fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+                SetRuntimeStatsUnavailable("상태 응답 없음");
             }
 
             PositionFpsLabel(fpsLabel.Parent ?? this);
@@ -526,12 +564,97 @@ internal sealed class ItemGiveForm : Form
         {
             fpsLabel.Text = "FPS: offline";
             fpsLabel.ForeColor = Color.FromArgb(236, 104, 94);
+            SetRuntimeStatsUnavailable("게임 연결 안 됨");
             PositionFpsLabel(fpsLabel.Parent ?? this);
         }
         finally
         {
             pollingStatus = false;
         }
+    }
+
+    private void UpdateRuntimeStatsFromResponse(string response)
+    {
+        if (!TryReadProtocolInt(response, "installTotal", out int installTotal)
+            || !TryReadProtocolInt(response, "beltItems", out int beltItems))
+        {
+            SetRuntimeStatsUnavailable("통계 응답 없음");
+            return;
+        }
+
+        TryReadProtocolToken(response, "installTypes", out string installTypes);
+        runtimeStatsLabel.Text = $"Runtime Stats: 설치 {installTotal:N0}개    벨트 아이템 {beltItems:N0}개";
+        runtimeStatsTextBox.Text = FormatInstallTypeCounts(installTypes);
+    }
+
+    private void SetRuntimeStatsUnavailable(string message)
+    {
+        runtimeStatsLabel.Text = $"Runtime Stats: {message}";
+        runtimeStatsTextBox.Text = "설치 오브젝트 종류: --";
+    }
+
+    private string FormatInstallTypeCounts(string installTypes)
+    {
+        if (string.IsNullOrWhiteSpace(installTypes) || installTypes == "-")
+        {
+            return "설치 오브젝트 종류: 없음";
+        }
+
+        string[] entries = installTypes.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        List<InstallTypeCount> counts = new List<InstallTypeCount>();
+        foreach (string entry in entries)
+        {
+            string[] parts = entry.Split(':', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2
+                || !int.TryParse(parts[0], out int itemId)
+                || !int.TryParse(parts[1], out int count)
+                || itemId < 0
+                || count <= 0)
+            {
+                continue;
+            }
+
+            counts.Add(new InstallTypeCount(itemId, count));
+        }
+
+        if (counts.Count <= 0)
+        {
+            return "설치 오브젝트 종류: 없음";
+        }
+
+        counts.Sort((left, right) =>
+        {
+            int countComparison = right.Count.CompareTo(left.Count);
+            return countComparison != 0 ? countComparison : left.ItemId.CompareTo(right.ItemId);
+        });
+
+        StringBuilder builder = new StringBuilder();
+        builder.AppendLine("설치 오브젝트 종류별 갯수");
+        for (int i = 0; i < counts.Count; i++)
+        {
+            InstallTypeCount count = counts[i];
+            builder.Append(ResolveCatalogDisplayName(count.ItemId));
+            builder.Append(" [");
+            builder.Append(count.ItemId);
+            builder.Append("]  x ");
+            builder.AppendLine(count.Count.ToString());
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private string ResolveCatalogDisplayName(int itemId)
+    {
+        for (int i = 0; i < allItems.Count; i++)
+        {
+            ItemCatalogEntry item = allItems[i];
+            if (item != null && item.Id == itemId)
+            {
+                return item.DisplayName;
+            }
+        }
+
+        return $"Item {itemId}";
     }
 
     private async Task SendCommandAsync(string command, string displayName)
@@ -601,6 +724,36 @@ internal sealed class ItemGiveForm : Form
         return false;
     }
 
+    private static bool TryReadProtocolInt(string response, string key, out int value)
+    {
+        value = 0;
+        if (!TryReadProtocolToken(response, key, out string token))
+        {
+            return false;
+        }
+
+        return int.TryParse(token, out value);
+    }
+
+    private static bool TryReadProtocolToken(string response, string key, out string value)
+    {
+        value = string.Empty;
+        string prefix = key + "=";
+        string[] parts = response.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (string part in parts)
+        {
+            if (!part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            value = part.Substring(prefix.Length).Trim('"');
+            return true;
+        }
+
+        return false;
+    }
+
     private void SetBusy(bool busy, string status)
     {
         giveButton.Enabled = !busy;
@@ -621,6 +774,18 @@ internal sealed class ItemCatalog
 {
     [JsonPropertyName("items")]
     public List<ItemCatalogEntry>? Items { get; set; }
+}
+
+internal readonly struct InstallTypeCount
+{
+    public InstallTypeCount(int itemId, int count)
+    {
+        ItemId = itemId;
+        Count = count;
+    }
+
+    public int ItemId { get; }
+    public int Count { get; }
 }
 
 internal sealed class ItemCatalogEntry

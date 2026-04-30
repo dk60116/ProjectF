@@ -338,6 +338,32 @@ public class BlockStateStore : MonoBehaviour
         return new List<Vector2Int>(savedInstallationStates.Keys);
     }
 
+    public int GetInstallationItemCounts(Dictionary<int, int> countsByItemId)
+    {
+        countsByItemId?.Clear();
+
+        int total = 0;
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        {
+            InstallationSaveState state = pair.Value;
+            if (state == null || state.itemId < 0)
+            {
+                continue;
+            }
+
+            total++;
+            if (countsByItemId == null)
+            {
+                continue;
+            }
+
+            countsByItemId.TryGetValue(state.itemId, out int currentCount);
+            countsByItemId[state.itemId] = currentCount + 1;
+        }
+
+        return total;
+    }
+
     public bool TryGetLiveInstallation(Vector2Int anchorCoordinate, out InstallationObject installationObject, out InstallationSaveState state)
     {
         if (liveInstallationStates.TryGetValue(anchorCoordinate, out LiveInstallationRecord record)

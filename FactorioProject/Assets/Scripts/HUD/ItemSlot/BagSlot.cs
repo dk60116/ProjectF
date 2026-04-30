@@ -187,11 +187,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        if (!boundBag.TryRemoveAllAtSlot(slotIndex, out int itemId, out int removedCount, out Vector3 startWorldPosition))
-        {
-            return;
-        }
-
         Player player = GameManager.Instance.Player;
         Transform movingStartTransform = null;
         if (player != null)
@@ -199,11 +194,54 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             movingStartTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
         }
 
+        Vector3 startWorldPosition = movingStartTransform != null ? movingStartTransform.position : player.transform.position;
         Func<Vector3> startWorldPositionProvider = movingStartTransform != null
             ? () => movingStartTransform != null ? movingStartTransform.position : startWorldPosition
             : null;
 
         Vector3 dropOrigin = player != null ? player.transform.position : startWorldPosition;
+        bool isFocusedConveyorDrop = terrainGenerator.TryGetFocusedConveyorDropLimit(out int conveyorDropLimit);
+        if (isFocusedConveyorDrop)
+        {
+            int conveyorItemId = boundBag.GetSlotItemId(slotIndex);
+            int conveyorSlotCount = boundBag.GetSlotCount(slotIndex);
+            int conveyorDropCount = Mathf.Min(conveyorSlotCount, conveyorDropLimit);
+            if (conveyorItemId < 0 || conveyorDropCount <= 0)
+            {
+                return;
+            }
+
+            bool conveyorDropped = terrainGenerator.TryAddDroppedItemStackAtPlayerBlock(
+                dropOrigin,
+                conveyorItemId,
+                conveyorDropCount,
+                startWorldPosition,
+                startWorldPositionProvider,
+                0.1f,
+                out Vector2Int conveyorDropCoordinate,
+                out int conveyorDroppedCount);
+
+            if (!conveyorDropped || conveyorDroppedCount <= 0)
+            {
+                return;
+            }
+
+            if (!boundBag.TryRemoveItemsAtSlot(slotIndex, conveyorDroppedCount, out int removedItemId, out int conveyorRemovedCount, out _, false)
+                || removedItemId != conveyorItemId
+                || conveyorRemovedCount <= 0)
+            {
+                return;
+            }
+
+            player.MarkDropExitGate(dropOrigin, 0.5f);
+            player.SetLastDropTarget(conveyorDropCoordinate);
+            return;
+        }
+
+        if (!boundBag.TryRemoveAllAtSlot(slotIndex, out int itemId, out int removedCount, out startWorldPosition))
+        {
+            return;
+        }
 
         bool dropped = terrainGenerator.TryAddDroppedItemStackAtPlayerBlock(
             dropOrigin,

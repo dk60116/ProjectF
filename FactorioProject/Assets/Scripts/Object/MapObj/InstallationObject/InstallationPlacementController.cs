@@ -92,6 +92,7 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<MapObject, Vector2Int> installPreviewAnchorCoordinates = new Dictionary<MapObject, Vector2Int>();
     private readonly Dictionary<MapObject, MapObject> installPreviewSourcePrefabsByPreview = new Dictionary<MapObject, MapObject>();
     private readonly Dictionary<MapObject, long> installPreviewPlacementSequencesByPreview = new Dictionary<MapObject, long>();
+    private readonly Dictionary<MapObject, InstallPreviewItemReservation> installPreviewItemReservationsByPreview = new Dictionary<MapObject, InstallPreviewItemReservation>();
     private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
     private InstallationObject selectedEditableInstallation;
@@ -178,6 +179,13 @@ public class InstallationPlacementController : MonoBehaviour
         public List<Block> footprintBlocks = new List<Block>();
         public Vector3 position;
         public Quaternion rotation = Quaternion.identity;
+    }
+
+    private sealed class InstallPreviewItemReservation
+    {
+        public int itemId = -1;
+        public bool fromHand;
+        public PortableObject sourcePortableObject;
     }
 
     private void Awake()
@@ -590,6 +598,169 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return GameManager.Instance.Player.GetBag();
+    }
+
+    private bool TryReserveInstallPreviewItem(ItemDefinition definition, out InstallPreviewItemReservation reservation)
+    {
+        reservation = null;
+        int itemId = definition != null ? definition.id : -1;
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
+        if (handBag != null && handBag.GetSlotItemId(0) == itemId && handBag.GetSlotCount(0) > 0)
+        {
+            PortableObject sourcePortableObject = null;
+            List<PortableObject> handSources = GetPlayerHandPortableSources(itemId, 1);
+            if (handSources.Count > 0)
+            {
+                sourcePortableObject = handSources[0];
+            }
+
+            if (handBag.RemoveItems(itemId, 1) > 0)
+            {
+                handBag.RefreshExternalStackCounts();
+                player?.UpdateCarryState();
+                reservation = new InstallPreviewItemReservation
+                {
+                    itemId = itemId,
+                    fromHand = true,
+                    sourcePortableObject = sourcePortableObject
+                };
+                return true;
+            }
+        }
+
+        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
+        if (inventoryBag != null && inventoryBag != handBag && inventoryBag.RemoveItems(itemId, 1) > 0)
+        {
+            player?.UpdateCarryState();
+            reservation = new InstallPreviewItemReservation
+            {
+                itemId = itemId,
+                fromHand = false,
+                sourcePortableObject = null
+            };
+            return true;
+        }
+
+        return false;
+    }
+
+    private void RefundInstallPreviewReservation(MapObject preview)
+    {
+        if (preview == null
+            || !installPreviewItemReservationsByPreview.TryGetValue(preview, out InstallPreviewItemReservation reservation))
+        {
+            return;
+        }
+
+        installPreviewItemReservationsByPreview.Remove(preview);
+        RefundInstallPreviewReservation(reservation);
+    }
+
+    private void RefundInstallPreviewReservation(InstallPreviewItemReservation reservation)
+    {
+        if (reservation == null || reservation.itemId < 0)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        bool restored = false;
+        if (player != null)
+        {
+            if (reservation.fromHand)
+            {
+                restored = player.TryAddToHand(reservation.itemId, out _);
+                if (!restored)
+                {
+                    restored = player.TryAddToBag(reservation.itemId, out _);
+                }
+            }
+            else
+            {
+                restored = player.TryAddToBag(reservation.itemId, out _);
+                if (!restored)
+                {
+                    restored = player.TryAddToHand(reservation.itemId, out _);
+                }
+            }
+
+            player.UpdateCarryState();
+        }
+
+        if (restored)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        Vector3 dropPosition = player != null ? player.transform.position : transform.position;
+        if (terrain != null)
+        {
+            bool dropped = terrain.TryAddDroppedItemAnimated(dropPosition, reservation.itemId, dropPosition, out _);
+            if (!dropped)
+            {
+                dropped = terrain.TryAddDroppedItemAtPlayerBlock(dropPosition, reservation.itemId, out _);
+            }
+
+            if (!dropped)
+            {
+                terrain.TryAddDroppedItemNear(dropPosition, reservation.itemId, out _);
+            }
+        }
+    }
+
+    private bool TryConsumeInstallPreviewReservation(MapObject preview, out PortableObject sourcePortableObject)
+    {
+        sourcePortableObject = null;
+        if (preview == null
+            || !installPreviewItemReservationsByPreview.TryGetValue(preview, out InstallPreviewItemReservation reservation))
+        {
+            return false;
+        }
+
+        installPreviewItemReservationsByPreview.Remove(preview);
+        sourcePortableObject = reservation.sourcePortableObject;
+        return true;
+    }
+
+    private int GetReservedInstallPreviewItemCount(int itemId)
+    {
+        if (itemId < 0 || installPreviewItemReservationsByPreview.Count <= 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        foreach (InstallPreviewItemReservation reservation in installPreviewItemReservationsByPreview.Values)
+        {
+            if (reservation != null && reservation.itemId == itemId)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void RefundAllInstallPreviewReservations()
+    {
+        if (installPreviewItemReservationsByPreview.Count <= 0)
+        {
+            return;
+        }
+
+        List<InstallPreviewItemReservation> reservations = new List<InstallPreviewItemReservation>(installPreviewItemReservationsByPreview.Values);
+        installPreviewItemReservationsByPreview.Clear();
+        for (int i = 0; i < reservations.Count; i++)
+        {
+            RefundInstallPreviewReservation(reservations[i]);
+        }
     }
 
     private List<PortableObject> GetPlayerHandPortableSources(int itemId, int requestedCount)
@@ -2209,7 +2380,10 @@ public class InstallationPlacementController : MonoBehaviour
         List<MapObject> placedPreviews = new List<MapObject>(previewsToPlace.Count);
         List<Vector2Int> placedAnchorCoordinates = new List<Vector2Int>(previewsToPlace.Count);
         List<MapObject> placedObjects = new List<MapObject>(previewsToPlace.Count);
+        List<PortableObject> placedAnimationSources = new List<PortableObject>(previewsToPlace.Count);
+        List<bool> placedUsedReservations = new List<bool>(previewsToPlace.Count);
         int placedCount = 0;
+        int unreservedPlacedCount = 0;
 
         for (int i = 0; i < previewsToPlace.Count; i++)
         {
@@ -2231,7 +2405,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!IsEditingInstallation())
         {
-            int availableInstallItemCount = GetCurrentInstallItemCount();
+            int availableInstallItemCount = GetCurrentInstallItemCount()
+                + GetReservedInstallPreviewItemCount(activeInstallDefinition.id);
             if (placementPlans.Count > availableInstallItemCount)
             {
                 placementPlans.RemoveRange(availableInstallItemCount, placementPlans.Count - availableInstallItemCount);
@@ -2267,16 +2442,41 @@ public class InstallationPlacementController : MonoBehaviour
             placedPreviews.Add(placementPlan.preview);
             placedAnchorCoordinates.Add(placementPlan.anchorBlock.Coordinate);
             placedObjects.Add(installedObject);
+            if (TryConsumeInstallPreviewReservation(placementPlan.preview, out PortableObject reservedSourcePortableObject))
+            {
+                placedAnimationSources.Add(reservedSourcePortableObject);
+                placedUsedReservations.Add(true);
+            }
+            else
+            {
+                placedAnimationSources.Add(null);
+                placedUsedReservations.Add(false);
+                unreservedPlacedCount++;
+            }
 
             placedCount++;
         }
 
         if (placedCount > 0)
         {
-            List<PortableObject> handPortableSources = GetPlayerHandPortableSources(activeInstallDefinition.id, placedCount);
+            List<PortableObject> handPortableSources = unreservedPlacedCount > 0
+                ? GetPlayerHandPortableSources(activeInstallDefinition.id, unreservedPlacedCount)
+                : new List<PortableObject>();
+            int handPortableSourceIndex = 0;
             for (int i = 0; i < placedObjects.Count; i++)
             {
-                PortableObject sourcePortableObject = i < handPortableSources.Count ? handPortableSources[i] : null;
+                PortableObject sourcePortableObject = i < placedAnimationSources.Count
+                    ? placedAnimationSources[i]
+                    : null;
+                if (i < placedUsedReservations.Count
+                    && !placedUsedReservations[i])
+                {
+                    sourcePortableObject = handPortableSourceIndex < handPortableSources.Count
+                        ? handPortableSources[handPortableSourceIndex]
+                        : null;
+                    handPortableSourceIndex++;
+                }
+
                 PlayInstallPlacementAnimation(
                     placedObjects[i],
                     sourcePortableObject,
@@ -2284,7 +2484,10 @@ public class InstallationPlacementController : MonoBehaviour
                     i * Mathf.Max(0f, installPlacementPortableLaunchInterval));
             }
 
-            RemoveInstallItemsFromPlayer(activeInstallDefinition.id, placedCount);
+            if (unreservedPlacedCount > 0)
+            {
+                RemoveInstallItemsFromPlayer(activeInstallDefinition.id, unreservedPlacedCount);
+            }
         }
 
         RemovePlacedInstallPreviews(placedPreviews);
@@ -3378,14 +3581,25 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        ConveyorBelt straightPrefab = conveyorPrototype.StraightVariantPrefab != null
+            ? conveyorPrototype.StraightVariantPrefab
+            : conveyorPrototype;
+        if (TryResolveConveyorEndpointAlignedQuarterTurnsForSource(
+                straightPrefab,
+                anchorCoordinate,
+                null,
+                resolvedQuarterTurns,
+                out resolvedQuarterTurns,
+                out _))
+        {
+            return true;
+        }
+
         if (!TryGetLatestAdjacentConveyorOutputDirection(anchorCoordinate, out Vector2Int desiredOutputDirection))
         {
             return false;
         }
 
-        ConveyorBelt straightPrefab = conveyorPrototype.StraightVariantPrefab != null
-            ? conveyorPrototype.StraightVariantPrefab
-            : conveyorPrototype;
         return TryGetConveyorPlacementQuarterTurnsForOutput(straightPrefab, desiredOutputDirection, out resolvedQuarterTurns);
     }
 
@@ -4008,6 +4222,177 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private bool TryResolveConveyorEndpointAlignedQuarterTurns(
+        Vector2Int anchorCoordinate,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype))
+        {
+            return false;
+        }
+
+        ConveyorPreviewVariantMode previewVariantMode = previewToIgnore == activeInstallPreview
+            ? installPreviewConveyorVariantMode
+            : GetConveyorPreviewVariantMode(previewToIgnore);
+        List<MapObject> candidateSources = new List<MapObject>(3);
+        if (previewVariantMode == ConveyorPreviewVariantMode.Straight)
+        {
+            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.StraightVariantPrefab);
+        }
+        else
+        {
+            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.CornerVariantPrefab);
+            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.ReverseCornerVariantPrefab);
+            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.StraightVariantPrefab);
+        }
+
+        bool found = false;
+        int bestScore = 0;
+        int bestOffset = int.MaxValue;
+        for (int i = 0; i < candidateSources.Count; i++)
+        {
+            if (!TryResolveConveyorEndpointAlignedQuarterTurnsForSource(
+                    candidateSources[i],
+                    anchorCoordinate,
+                    previewToIgnore,
+                    preferredQuarterTurns,
+                    out int candidateQuarterTurns,
+                    out int candidateScore))
+            {
+                continue;
+            }
+
+            int candidateOffset = GetQuarterTurnSearchOffset(preferredQuarterTurns, candidateQuarterTurns);
+            if (found
+                && (candidateScore < bestScore
+                    || (candidateScore == bestScore && candidateOffset >= bestOffset)))
+            {
+                continue;
+            }
+
+            found = true;
+            bestScore = candidateScore;
+            bestOffset = candidateOffset;
+            resolvedQuarterTurns = candidateQuarterTurns;
+        }
+
+        return found;
+    }
+
+    private bool TryResolveConveyorEndpointAlignedQuarterTurnsForSource(
+        MapObject sourcePrefab,
+        Vector2Int anchorCoordinate,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns,
+        out int resolvedScore)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        resolvedScore = 0;
+        if (!(sourcePrefab is ConveyorBelt conveyorSource))
+        {
+            return false;
+        }
+
+        int normalizedPreferredQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        for (int offset = 0; offset < 4; offset++)
+        {
+            int candidateQuarterTurns = (normalizedPreferredQuarterTurns + offset) % 4;
+            Quaternion candidateRotation = GetPlacementObjectRotation(conveyorSource, candidateQuarterTurns);
+            if (!conveyorSource.TryGetInputDirection(candidateRotation, out Vector2Int inputDirection)
+                || !conveyorSource.TryGetOutputDirection(candidateRotation, out Vector2Int outputDirection))
+            {
+                continue;
+            }
+
+            int candidateScore = GetConveyorEndpointConnectionScore(
+                anchorCoordinate,
+                inputDirection,
+                outputDirection,
+                previewToIgnore);
+            if (candidateScore <= 0)
+            {
+                continue;
+            }
+
+            if (resolvedScore > 0 && candidateScore <= resolvedScore)
+            {
+                continue;
+            }
+
+            resolvedQuarterTurns = candidateQuarterTurns;
+            resolvedScore = candidateScore;
+            if (candidateScore >= 2)
+            {
+                return true;
+            }
+        }
+
+        return resolvedScore > 0;
+    }
+
+    private int GetConveyorEndpointConnectionScore(
+        Vector2Int anchorCoordinate,
+        Vector2Int inputDirection,
+        Vector2Int outputDirection,
+        MapObject previewToIgnore)
+    {
+        int score = 0;
+        if (inputDirection != Vector2Int.zero
+            && TryGetConveyorPlacementDirectionsAtCoordinate(
+                anchorCoordinate + inputDirection,
+                previewToIgnore,
+                out _,
+                out _,
+                out Vector2Int neighborOutputDirection)
+            && neighborOutputDirection == -inputDirection)
+        {
+            score++;
+        }
+
+        if (outputDirection != Vector2Int.zero
+            && TryGetConveyorPlacementDirectionsAtCoordinate(
+                anchorCoordinate + outputDirection,
+                previewToIgnore,
+                out _,
+                out Vector2Int neighborInputDirection,
+                out _)
+            && neighborInputDirection == -outputDirection)
+        {
+            score++;
+        }
+
+        return score;
+    }
+
+    private static void AddUniqueConveyorCandidateSource(List<MapObject> candidateSources, MapObject candidateSource)
+    {
+        if (candidateSources == null || candidateSource == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < candidateSources.Count; i++)
+        {
+            if (candidateSources[i] == candidateSource)
+            {
+                return;
+            }
+        }
+
+        candidateSources.Add(candidateSource);
+    }
+
+    private static int GetQuarterTurnSearchOffset(int preferredQuarterTurns, int candidateQuarterTurns)
+    {
+        int normalizedPreferredQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        int normalizedCandidateQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
+        return (normalizedCandidateQuarterTurns - normalizedPreferredQuarterTurns + 4) % 4;
+    }
+
     private static bool TryGetInstallationFacingVector(InstallationFacingDirection facingDirection, out Vector2Int direction)
     {
         direction = facingDirection switch
@@ -4373,6 +4758,11 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewSourcePrefabsByPreview[replacementPreview] = replacementSourcePrefab != null ? replacementSourcePrefab : replacementPreview;
         installPreviewAnchorCoordinates.Remove(currentPreview);
         installPreviewAnchorCoordinates[replacementPreview] = anchorCoordinate;
+        if (installPreviewItemReservationsByPreview.TryGetValue(currentPreview, out InstallPreviewItemReservation reservation))
+        {
+            installPreviewItemReservationsByPreview.Remove(currentPreview);
+            installPreviewItemReservationsByPreview[replacementPreview] = reservation;
+        }
 
         replacementPreview.transform.SetPositionAndRotation(
             currentPosition,
@@ -6654,7 +7044,9 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        return GetInstallPreviewCount() < GetCurrentInstallItemCount();
+        int itemId = activeInstallDefinition != null ? activeInstallDefinition.id : -1;
+        int availableItemCount = GetCurrentInstallItemCount() + GetReservedInstallPreviewItemCount(itemId);
+        return GetInstallPreviewCount() < availableItemCount;
     }
 
     private int GetCurrentInstallItemCount()
@@ -6812,6 +7204,21 @@ public class InstallationPlacementController : MonoBehaviour
 
             installPreviewPlacementSequencesByPreview.Remove(previews[i]);
         }
+
+        previews = new List<MapObject>(installPreviewItemReservationsByPreview.Keys);
+        for (int i = 0; i < previews.Count; i++)
+        {
+            if (previews[i] != null)
+            {
+                continue;
+            }
+
+            if (installPreviewItemReservationsByPreview.TryGetValue(previews[i], out InstallPreviewItemReservation reservation))
+            {
+                installPreviewItemReservationsByPreview.Remove(previews[i]);
+                RefundInstallPreviewReservation(reservation);
+            }
+        }
     }
 
     private bool TryCreateAndPlaceInstallPreview(Block block, MapObject sourcePreview)
@@ -6837,12 +7244,19 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject preview = CreateInstallPreviewInstance(activeInstallDefinition);
-        if (preview == null)
+        if (!TryReserveInstallPreviewItem(activeInstallDefinition, out InstallPreviewItemReservation reservation))
         {
             return false;
         }
 
+        MapObject preview = CreateInstallPreviewInstance(activeInstallDefinition);
+        if (preview == null)
+        {
+            RefundInstallPreviewReservation(reservation);
+            return false;
+        }
+
+        installPreviewItemReservationsByPreview[preview] = reservation;
         RegisterInstallPreview(preview, quarterTurns);
         SelectInstallPreview(preview);
         if (sourcePreview != null)
@@ -6865,6 +7279,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             return;
         }
+
+        RefundInstallPreviewReservation(preview);
 
         ConveyorChangeInfo removedPreviewConveyorChange = null;
         if (preview is ConveyorBelt previewConveyor
@@ -6944,6 +7360,7 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewSourcePrefabsByPreview.Remove(preview);
             installPreviewPlacementSequencesByPreview.Remove(preview);
             installPreviewAnchorCoordinates.Remove(preview);
+            installPreviewItemReservationsByPreview.Remove(preview);
 
             if (activeInstallPreview == preview)
             {
@@ -7153,6 +7570,21 @@ public class InstallationPlacementController : MonoBehaviour
         if (block == null)
         {
             return false;
+        }
+
+        if (IsConveyorInstallPreview(previewToIgnore)
+            && TryResolveConveyorEndpointAlignedQuarterTurns(
+                block.Coordinate,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out int endpointAlignedQuarterTurns))
+        {
+            if (CanPlacePreviewOnBlock(block, previewToIgnore, endpointAlignedQuarterTurns)
+                || CanPlaceStraightConveyorPreviewOnBlock(block, previewToIgnore, endpointAlignedQuarterTurns))
+            {
+                resolvedQuarterTurns = endpointAlignedQuarterTurns;
+                return true;
+            }
         }
 
         if (CanPlacePreviewOnBlock(block, previewToIgnore, resolvedQuarterTurns))
@@ -7761,18 +8193,14 @@ public class InstallationPlacementController : MonoBehaviour
 
         Transform installedTransform = installedObject.transform;
         Vector3 originalScale = installedTransform.localScale;
+        SetConveyorBeltVirtualRendering(installedObject, false);
         installedTransform.DOKill();
         installedTransform.localScale = Vector3.zero;
         SetInstalledObjectVisualVisible(installedObject, false);
 
         if (sourcePortableObject == null || itemId < 0)
         {
-            SetInstalledObjectVisualVisible(installedObject, true);
-            installedTransform
-                .DOScale(originalScale, installPlacementScaleDuration)
-                .SetDelay(Mathf.Max(0f, delay))
-                .SetEase(installPlacementScaleEase)
-                .SetLink(installedObject.gameObject);
+            RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, delay);
             return;
         }
 
@@ -7782,6 +8210,7 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePortableObject.transform.rotation);
         if (movingPortableObject == null)
         {
+            RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, delay);
             return;
         }
 
@@ -7797,6 +8226,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (!movingPortableObject.SetItem(itemId))
         {
             Destroy(movingPortableObject.gameObject);
+            RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, delay);
             return;
         }
 
@@ -7810,13 +8240,51 @@ public class InstallationPlacementController : MonoBehaviour
 
             if (installedObject != null && installedTransform != null)
             {
-                SetInstalledObjectVisualVisible(installedObject, true);
-                installedTransform
-                    .DOScale(originalScale, installPlacementScaleDuration)
-                    .SetEase(installPlacementScaleEase)
-                    .SetLink(installedObject.gameObject);
+                RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, 0f);
             }
         }, false);
+    }
+
+    private void RevealInstalledObjectAfterPlacement(
+        MapObject installedObject,
+        Transform installedTransform,
+        Vector3 originalScale,
+        float delay)
+    {
+        if (installedObject == null || installedTransform == null)
+        {
+            return;
+        }
+
+        SetInstalledObjectVisualVisible(installedObject, true);
+
+        bool restoredVirtualRendering = false;
+        TweenCallback restoreVirtualRendering = () =>
+        {
+            if (restoredVirtualRendering || installedObject == null)
+            {
+                return;
+            }
+
+            restoredVirtualRendering = true;
+            SetConveyorBeltVirtualRendering(installedObject, true);
+        };
+
+        Tween revealTween = installedTransform
+            .DOScale(originalScale, installPlacementScaleDuration)
+            .SetDelay(Mathf.Max(0f, delay))
+            .SetEase(installPlacementScaleEase)
+            .SetLink(installedObject.gameObject);
+        revealTween.OnComplete(restoreVirtualRendering);
+        revealTween.OnKill(restoreVirtualRendering);
+    }
+
+    private static void SetConveyorBeltVirtualRendering(MapObject installedObject, bool isEnabled)
+    {
+        if (installedObject is ConveyorBelt conveyorBelt)
+        {
+            conveyorBelt.SetVirtualRuntimeRenderingEnabled(isEnabled);
+        }
     }
 
     private void PlayInstallationEditCompleteAnimation(MapObject restoredObject, InstallationEditSession editSession)
@@ -7962,6 +8430,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ClearInstallPreview()
     {
+        RefundAllInstallPreviewReservations();
         activeInstallDefinition = null;
         activeInstallBaseRotation = Quaternion.identity;
         waitForPointerReleaseAfterPreviewSpawn = false;
@@ -8005,6 +8474,7 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewAnchorCoordinates.Clear();
         installPreviewSourcePrefabsByPreview.Clear();
         installPreviewPlacementSequencesByPreview.Clear();
+        installPreviewItemReservationsByPreview.Clear();
         activeInstallPreview = null;
     }
 

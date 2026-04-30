@@ -15,8 +15,8 @@ MonoBehaviour:
   itemName: Mortor
   id: 20
   mapObject: {fileID: 0}
-  portableMesh: {fileID: 0}
-  portableMat: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: 0bd95ca2de49cd14d83ea614f3342a1d, type: 3}
   interactionButtonList: []
   size: 0

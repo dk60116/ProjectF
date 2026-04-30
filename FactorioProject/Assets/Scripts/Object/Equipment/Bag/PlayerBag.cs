@@ -663,6 +663,59 @@ public class PlayerBag : MonoBehaviour
         return objectId >= 0 && removedCount > 0;
     }
 
+    public bool TryRemoveItemsAtSlot(
+        int index,
+        int count,
+        out int objectId,
+        out int removedCount,
+        out Vector3 startWorldPosition,
+        bool mergeDuplicates = true)
+    {
+        EnsureInitialized();
+        objectId = -1;
+        removedCount = 0;
+        startWorldPosition = transform.position;
+
+        if (count <= 0 || portableStack == null || currentStack == null)
+        {
+            return false;
+        }
+
+        if (index < 0 || index >= portableStack.Count || index >= currentStack.Count)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        if (stack == null || stack.stack == null || stack.stack.Count == 0)
+        {
+            return false;
+        }
+
+        int occupiedCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
+        if (occupiedCount <= 0)
+        {
+            return false;
+        }
+
+        PortableObject topObject = stack.stack[occupiedCount - 1];
+        if (topObject != null)
+        {
+            startWorldPosition = topObject.transform.position;
+        }
+
+        objectId = GetSlotItemId(index);
+        removedCount = RemoveItemsFromSlot(index, count);
+
+        if (mergeDuplicates)
+        {
+            TryMergeDuplicateItemStacks();
+        }
+
+        NotifyChanged();
+        return objectId >= 0 && removedCount > 0;
+    }
+
     public int RemoveItems(int itemId, int count)
     {
         EnsureInitialized();

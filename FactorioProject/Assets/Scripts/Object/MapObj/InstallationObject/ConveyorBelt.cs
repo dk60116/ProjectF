@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class ConveyorBelt : InstallationObject
 {
@@ -25,7 +27,11 @@ public class ConveyorBelt : InstallationObject
     private MeshRenderer beltTopRenderer;
 
     private MaterialPropertyBlock beltTopPropertyBlock;
+    private MeshRenderer[] cachedRenderers;
+    private MeshFilter[] cachedRendererMeshFilters;
+    private readonly List<Material> sharedMaterialBuffer = new List<Material>(4);
     private float lastAppliedUvScrollY = float.NaN;
+    private bool virtualRenderingSuppressed;
 
     public float ConveyorSpeed => Mathf.Max(0f, conveyorSpeed);
     public ConveyorBelt StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
@@ -167,6 +173,7 @@ public class ConveyorBelt : InstallationObject
     {
         base.Awake();
         ResolveBeltTopRenderer();
+        ConfigureRuntimeRenderers();
         ApplyBeltTopScroll();
     }
 
@@ -174,17 +181,102 @@ public class ConveyorBelt : InstallationObject
     {
         base.OnEnable();
         ResolveBeltTopRenderer();
+        ConfigureRuntimeRenderers();
         ApplyBeltTopScroll();
     }
 
-    private void LateUpdate()
+    protected override void OnDisable()
+    {
+        TerrainGenerator.Active?.UnregisterVirtualConveyorBelt(this, false);
+        virtualRenderingSuppressed = false;
+        base.OnDisable();
+    }
+
+    public void SetVirtualRuntimeRenderingEnabled(bool isEnabled)
     {
         if (!Application.isPlaying)
+        {
+            SetVirtualRenderingSuppressed(false);
+            return;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (isEnabled && terrain != null && terrain.VirtualizeConveyorBelts)
+        {
+            terrain.RegisterVirtualConveyorBelt(this);
+        }
+        else
+        {
+            if (terrain != null)
+            {
+                terrain.UnregisterVirtualConveyorBelt(this);
+            }
+            else
+            {
+                SetVirtualRenderingSuppressed(false);
+            }
+        }
+    }
+
+    public void AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results)
+    {
+        if (results == null)
         {
             return;
         }
 
-        ApplyBeltTopScroll();
+        ResolveBeltTopRenderer();
+        EnsureRendererCache();
+
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            MeshFilter meshFilter = i < cachedRendererMeshFilters.Length ? cachedRendererMeshFilters[i] : null;
+            Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+            if (mesh == null)
+            {
+                continue;
+            }
+
+            sharedMaterialBuffer.Clear();
+            renderer.GetSharedMaterials(sharedMaterialBuffer);
+            int materialCount = sharedMaterialBuffer.Count;
+            int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
+            int entryCount = Mathf.Min(materialCount, subMeshCount);
+            bool hasUvScroll = renderer == beltTopRenderer;
+            float uvScrollY = hasUvScroll ? -ConveyorSpeed * 0.75f : 0f;
+            Matrix4x4 matrix = renderer.localToWorldMatrix;
+            int layer = renderer.gameObject.layer;
+
+            for (int materialIndex = 0; materialIndex < entryCount; materialIndex++)
+            {
+                Material material = sharedMaterialBuffer[materialIndex];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                results.Add(new VirtualConveyorBeltRenderData(
+                    mesh,
+                    material,
+                    matrix,
+                    layer,
+                    materialIndex,
+                    hasUvScroll,
+                    uvScrollY));
+            }
+        }
+    }
+
+    public void SetVirtualRenderingSuppressed(bool isSuppressed)
+    {
+        virtualRenderingSuppressed = isSuppressed;
+        SetNativeRenderersEnabled(!isSuppressed);
     }
 
     private void ResolveBeltTopRenderer()
@@ -241,10 +333,71 @@ public class ConveyorBelt : InstallationObject
         lastAppliedUvScrollY = targetUvScrollY;
     }
 
+    private void ConfigureRuntimeRenderers()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        EnsureRendererCache();
+
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            renderer.lightProbeUsage = LightProbeUsage.Off;
+            renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+        }
+
+        SetNativeRenderersEnabled(!virtualRenderingSuppressed);
+    }
+
+    private void EnsureRendererCache()
+    {
+        if (cachedRenderers == null || cachedRenderers.Length == 0)
+        {
+            cachedRenderers = GetComponentsInChildren<MeshRenderer>(true);
+        }
+
+        if (cachedRendererMeshFilters == null || cachedRendererMeshFilters.Length != cachedRenderers.Length)
+        {
+            cachedRendererMeshFilters = new MeshFilter[cachedRenderers.Length];
+            for (int i = 0; i < cachedRenderers.Length; i++)
+            {
+                cachedRendererMeshFilters[i] = cachedRenderers[i] != null
+                    ? cachedRenderers[i].GetComponent<MeshFilter>()
+                    : null;
+            }
+        }
+    }
+
+    private void SetNativeRenderersEnabled(bool isEnabled)
+    {
+        EnsureRendererCache();
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (renderer != null)
+            {
+                renderer.enabled = isEnabled;
+            }
+        }
+    }
+
 #if UNITY_EDITOR
     protected override void OnValidate()
     {
         base.OnValidate();
+
+        cachedRenderers = null;
+        cachedRendererMeshFilters = null;
 
         if (conveyorSpeed < 0f)
         {

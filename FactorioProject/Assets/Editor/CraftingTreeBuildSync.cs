@@ -42,7 +42,7 @@ public static class CraftingTreeBuildSync
     }
 }
 
-public sealed class ItemGiveToolBuildSync : IPostprocessBuildWithReport
+public sealed class EditorToolBuildSync : IPostprocessBuildWithReport
 {
     public int callbackOrder => 100;
 
@@ -52,7 +52,7 @@ public sealed class ItemGiveToolBuildSync : IPostprocessBuildWithReport
         string toolProjectPath = Path.Combine(repositoryRoot, "Tools", "ItemGiveTool", "ItemGiveTool.csproj");
         if (!File.Exists(toolProjectPath))
         {
-            Debug.LogWarning($"ItemGiveToolBuildSync: tool project not found at '{toolProjectPath}'.");
+            Debug.LogWarning($"EditorToolBuildSync: tool project not found at '{toolProjectPath}'.");
             return;
         }
 
@@ -62,11 +62,11 @@ public sealed class ItemGiveToolBuildSync : IPostprocessBuildWithReport
             : Path.GetDirectoryName(buildOutputPath);
         if (string.IsNullOrWhiteSpace(buildDirectory))
         {
-            Debug.LogWarning("ItemGiveToolBuildSync: build output directory could not be resolved.");
+            Debug.LogWarning("EditorToolBuildSync: build output directory could not be resolved.");
             return;
         }
 
-        string publishDirectory = Path.Combine(buildDirectory, "Tools", "ItemGiveTool");
+        string publishDirectory = Path.Combine(buildDirectory, "Tools", "EditorTool");
         Directory.CreateDirectory(publishDirectory);
 
         System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
@@ -89,16 +89,16 @@ public sealed class ItemGiveToolBuildSync : IPostprocessBuildWithReport
 
             if (process.ExitCode != 0)
             {
-                Debug.LogWarning($"ItemGiveToolBuildSync: dotnet publish failed.\n{output}\n{error}");
+                Debug.LogWarning($"EditorToolBuildSync: dotnet publish failed.\n{output}\n{error}");
                 return;
             }
 
             ExportItemCatalog(publishDirectory);
-            Debug.Log($"ItemGiveToolBuildSync: published ItemGiveTool to '{publishDirectory}'.");
+            Debug.Log($"EditorToolBuildSync: published EditorTool to '{publishDirectory}'.");
         }
         catch (System.Exception exception)
         {
-            Debug.LogWarning($"ItemGiveToolBuildSync: failed to publish ItemGiveTool. {exception.Message}");
+            Debug.LogWarning($"EditorToolBuildSync: failed to publish EditorTool. {exception.Message}");
         }
     }
 
@@ -190,7 +190,7 @@ public sealed class ItemGiveToolBuildSync : IPostprocessBuildWithReport
         }
         catch (System.Exception exception)
         {
-            Debug.LogWarning($"ItemGiveToolBuildSync: failed to export icon '{sprite.name}'. {exception.Message}");
+            Debug.LogWarning($"EditorToolBuildSync: failed to export icon '{sprite.name}'. {exception.Message}");
             return false;
         }
         finally

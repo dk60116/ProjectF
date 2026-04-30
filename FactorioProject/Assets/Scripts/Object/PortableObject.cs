@@ -13,6 +13,8 @@ public class PortableStack
 
 public class PortableObject : MonoBehaviour
 {
+    public const float MoveToDuration = 0.3f;
+
     [SerializeField, ReadOnly]
     private int id;
 
@@ -299,10 +301,9 @@ public class PortableObject : MonoBehaviour
             CachedTransform.position = launchStartPosition;
         });
 
-        const float moveDuration = 0.3f;
         const float jumpPower = 1f;
         sequence.Append(
-            DOVirtual.Float(0f, 1f, moveDuration, t =>
+            DOVirtual.Float(0f, 1f, MoveToDuration, t =>
             {
                 Vector3 currentStartPosition = startPositionProvider != null ? startPositionProvider() : launchStartPosition;
                 Vector3 currentTargetPosition = targetPositionProvider();

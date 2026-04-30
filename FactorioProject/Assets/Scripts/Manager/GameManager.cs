@@ -25,7 +25,7 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private bool debugConveyorInstallGridEnds;
     [SerializeField]
-    private bool showConveyorSlotDots = true;
+    private bool showConveyorSlotDots;
     [SerializeField]
     private bool runtimeItemGiveServerEnabled = true;
     [SerializeField, Min(1)]
@@ -164,6 +164,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private readonly Queue<ToolRequest> pendingRequests = new Queue<ToolRequest>();
     private readonly object pendingRequestLock = new object();
+    private readonly Dictionary<int, int> installationCountsByItemId = new Dictionary<int, int>();
+    private readonly List<KeyValuePair<int, int>> installationCountSortBuffer = new List<KeyValuePair<int, int>>();
+    private readonly StringBuilder installationCountTokenBuilder = new StringBuilder(128);
     private TcpListener listener;
     private Thread listenerThread;
     private int port = DefaultPort;
@@ -426,7 +429,72 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             frameMs = Time.unscaledDeltaTime * 1000f;
         }
 
-        return GiveResult.Status(fps, frameMs);
+        CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts);
+        return GiveResult.Status(fps, frameMs, installedObjectTotal, conveyorItemTotal, installationTypeCounts);
+    }
+
+    private void CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts)
+    {
+        installedObjectTotal = 0;
+        conveyorItemTotal = 0;
+        installationTypeCounts = "-";
+
+        TerrainGenerator terrain = TerrainGenerator.Active != null
+            ? TerrainGenerator.Active
+            : FindObjectOfType<TerrainGenerator>();
+        if (terrain == null)
+        {
+            installationCountsByItemId.Clear();
+            return;
+        }
+
+        installedObjectTotal = terrain.GetInstallationItemCounts(installationCountsByItemId);
+        conveyorItemTotal = terrain.GetLoadedConveyorItemCount();
+        installationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
+    }
+
+    private string BuildInstallationTypeCountToken(Dictionary<int, int> countsByItemId)
+    {
+        if (countsByItemId == null || countsByItemId.Count <= 0)
+        {
+            return "-";
+        }
+
+        installationCountSortBuffer.Clear();
+        foreach (KeyValuePair<int, int> pair in countsByItemId)
+        {
+            if (pair.Key >= 0 && pair.Value > 0)
+            {
+                installationCountSortBuffer.Add(pair);
+            }
+        }
+
+        if (installationCountSortBuffer.Count <= 0)
+        {
+            return "-";
+        }
+
+        installationCountSortBuffer.Sort((left, right) =>
+        {
+            int countComparison = right.Value.CompareTo(left.Value);
+            return countComparison != 0 ? countComparison : left.Key.CompareTo(right.Key);
+        });
+
+        installationCountTokenBuilder.Clear();
+        for (int i = 0; i < installationCountSortBuffer.Count; i++)
+        {
+            if (i > 0)
+            {
+                installationCountTokenBuilder.Append(',');
+            }
+
+            KeyValuePair<int, int> pair = installationCountSortBuffer[i];
+            installationCountTokenBuilder.Append(pair.Key);
+            installationCountTokenBuilder.Append(':');
+            installationCountTokenBuilder.Append(pair.Value);
+        }
+
+        return installationCountTokenBuilder.ToString();
     }
 
     private GiveResult GiveItems(int itemId, int count)
@@ -515,7 +583,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private readonly struct GiveResult
     {
-        private GiveResult(bool success, int itemId, int requested, int given, int bag, int hand, int dropped, float fps, float frameMs, string message)
+        private GiveResult(
+            bool success,
+            int itemId,
+            int requested,
+            int given,
+            int bag,
+            int hand,
+            int dropped,
+            float fps,
+            float frameMs,
+            int installedObjectTotal,
+            int conveyorItemTotal,
+            string installationTypeCounts,
+            string message)
         {
             IsSuccess = success;
             ItemId = itemId;
@@ -526,6 +607,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             Dropped = dropped;
             Fps = fps;
             FrameMs = frameMs;
+            InstalledObjectTotal = installedObjectTotal;
+            ConveyorItemTotal = conveyorItemTotal;
+            InstallationTypeCounts = string.IsNullOrWhiteSpace(installationTypeCounts) ? "-" : installationTypeCounts;
             Message = message;
         }
 
@@ -538,21 +622,24 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         private int Dropped { get; }
         private float Fps { get; }
         private float FrameMs { get; }
+        private int InstalledObjectTotal { get; }
+        private int ConveyorItemTotal { get; }
+        private string InstallationTypeCounts { get; }
         private string Message { get; }
 
         public static GiveResult Success(int itemId, int requested, int given, int bag, int hand, int dropped, string message = "ok")
         {
-            return new GiveResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, message);
+            return new GiveResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", message);
         }
 
         public static GiveResult Error(int itemId, int requested, string message)
         {
-            return new GiveResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, message);
+            return new GiveResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", message);
         }
 
-        public static GiveResult Status(float fps, float frameMs)
+        public static GiveResult Status(float fps, float frameMs, int installedObjectTotal, int conveyorItemTotal, string installationTypeCounts)
         {
-            return new GiveResult(true, 0, 0, 0, 0, 0, 0, fps, frameMs, "status");
+            return new GiveResult(true, 0, 0, 0, 0, 0, 0, fps, frameMs, installedObjectTotal, conveyorItemTotal, installationTypeCounts, "status");
         }
 
         public string ToProtocolLine()
@@ -562,7 +649,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             {
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} message=\"{9}\"",
+                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} message=\"{12}\"",
                     prefix,
                     ItemId,
                     Requested,
@@ -572,6 +659,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     Dropped,
                     Fps,
                     FrameMs,
+                    InstalledObjectTotal,
+                    ConveyorItemTotal,
+                    InstallationTypeCounts,
                     Message);
             }
 
