@@ -27,9 +27,15 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private bool showConveyorSlotDots;
     [SerializeField]
+    private bool showSleepAwake;
+    [SerializeField]
     private bool runtimeItemGiveServerEnabled = true;
     [SerializeField, Min(1)]
     private int runtimeItemGiveServerPort = RuntimeItemGiveReceiver.DefaultPort;
+    private bool conveyorSlotDotRuntimeStateInitialized;
+    private bool lastRuntimeShowConveyorSlotDots;
+    private bool sleepAwakeRuntimeStateInitialized;
+    private bool lastRuntimeShowSleepAwake;
 
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
@@ -70,6 +76,18 @@ public class GameManager : MonoBehaviour
             Time.timeScale = 1f;
         else if (Input.GetKeyDown(KeyCode.Alpha2))
             Time.timeScale = 2f;
+
+        SyncConveyorSlotDotRuntimeVisibility();
+        SyncSleepAwakeRuntimeVisibility();
+    }
+
+    private void OnValidate()
+    {
+        if (Application.isPlaying && Instance == this)
+        {
+            SyncConveyorSlotDotRuntimeVisibility(true);
+            SyncSleepAwakeRuntimeVisibility(true);
+        }
     }
 
     private void OnDestroy()
@@ -121,6 +139,7 @@ public class GameManager : MonoBehaviour
     public Player Player => player;
     public bool DebugConveyorInstallGridEnds => debugConveyorInstallGridEnds;
     public bool ShowConveyorSlotDots => showConveyorSlotDots;
+    public bool ShowSleepAwake => showSleepAwake;
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
     public int RuntimeItemGiveServerPort => runtimeItemGiveServerPort;
 
@@ -132,6 +151,57 @@ public class GameManager : MonoBehaviour
     public void SetMapEditActive(bool isActive)
     {
         MapEditActive = isActive;
+    }
+
+    public void SetShowConveyorSlotDots(bool show)
+    {
+        showConveyorSlotDots = show;
+        SyncConveyorSlotDotRuntimeVisibility(true);
+    }
+
+    public void SetShowSleepAwake(bool show)
+    {
+        showSleepAwake = show;
+        SyncSleepAwakeRuntimeVisibility(true);
+    }
+
+    private void SyncConveyorSlotDotRuntimeVisibility(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && conveyorSlotDotRuntimeStateInitialized
+            && lastRuntimeShowConveyorSlotDots == showConveyorSlotDots)
+        {
+            return;
+        }
+
+        conveyorSlotDotRuntimeStateInitialized = true;
+        lastRuntimeShowConveyorSlotDots = showConveyorSlotDots;
+        TerrainGenerator.Active?.RefreshConveyorSlotDotRuntimeVisibility();
+    }
+
+    private void SyncSleepAwakeRuntimeVisibility(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && sleepAwakeRuntimeStateInitialized
+            && lastRuntimeShowSleepAwake == showSleepAwake)
+        {
+            return;
+        }
+
+        sleepAwakeRuntimeStateInitialized = true;
+        lastRuntimeShowSleepAwake = showSleepAwake;
+        PortableObject.RefreshAllSleepAwakeVisuals();
+        TerrainGenerator.Active?.RefreshSleepAwakeRuntimeVisibility();
     }
 
     private void ConfigureRuntimeItemGiveReceiver()
@@ -223,9 +293,22 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         while (TryDequeueRequest(out ToolRequest request))
         {
-            request.Result = request.Command == ToolCommand.Status
-                ? GetStatusResult()
-                : GiveItems(request.ItemId, request.Count);
+            switch (request.Command)
+            {
+                case ToolCommand.Ping:
+                    request.Result = ToolResult.Ping();
+                    break;
+                case ToolCommand.Status:
+                    request.Result = GetStatusResult();
+                    break;
+                case ToolCommand.SetDebugToggle:
+                    request.Result = SetDebugToggle(request.DebugToggleName, request.DebugToggleValue);
+                    break;
+                default:
+                    request.Result = GiveItems(request.ItemId, request.Count);
+                    break;
+            }
+
             request.Completion.Set();
         }
     }
@@ -324,13 +407,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 return;
             }
 
-            if (!TryParseRequest(line, out ToolCommand command, out int itemId, out int count, out string error))
+            if (!TryParseRequest(
+                    line,
+                    out ToolCommand command,
+                    out int itemId,
+                    out int count,
+                    out string debugToggleName,
+                    out bool debugToggleValue,
+                    out string error))
             {
                 writer.WriteLine($"error {error}");
                 return;
             }
 
-            ToolRequest request = new ToolRequest(command, itemId, count);
+            ToolRequest request = new ToolRequest(command, itemId, count, debugToggleName, debugToggleValue);
             EnqueueRequest(request);
             if (!request.Completion.Wait(RequestTimeoutMilliseconds))
             {
@@ -344,11 +434,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
     }
 
-    private static bool TryParseRequest(string line, out ToolCommand command, out int itemId, out int count, out string error)
+    private static bool TryParseRequest(
+        string line,
+        out ToolCommand command,
+        out int itemId,
+        out int count,
+        out string debugToggleName,
+        out bool debugToggleValue,
+        out string error)
     {
         command = ToolCommand.Give;
         itemId = -1;
         count = 1;
+        debugToggleName = string.Empty;
+        debugToggleValue = false;
         error = string.Empty;
 
         if (string.IsNullOrWhiteSpace(line))
@@ -374,9 +473,24 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts.Length == 3 && string.Equals(parts[0], "debug", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.SetDebugToggle;
+            itemId = 0;
+            count = 0;
+            debugToggleName = parts[1];
+            if (!TryParseProtocolBool(parts[2], out debugToggleValue))
+            {
+                error = "debug value must be true/false or 1/0";
+                return false;
+            }
+
+            return true;
+        }
+
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | ping | status";
+            error = "usage: give <itemId> [count] | debug <showConveyorSlotDots|showSleepAwake> <true|false> | ping | status";
             return false;
         }
 
@@ -394,6 +508,28 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         count = Math.Min(Math.Max(count, 1), MaxItemsPerRequest);
         return true;
+    }
+
+    private static bool TryParseProtocolBool(string value, out bool result)
+    {
+        if (string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "on", StringComparison.OrdinalIgnoreCase))
+        {
+            result = true;
+            return true;
+        }
+
+        if (string.Equals(value, "0", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            result = false;
+            return true;
+        }
+
+        result = false;
+        return false;
     }
 
     private void EnqueueRequest(ToolRequest request)
@@ -419,7 +555,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
     }
 
-    private GiveResult GetStatusResult()
+    private ToolResult GetStatusResult()
     {
         float fps = currentFps;
         float frameMs = currentFrameMs;
@@ -430,7 +566,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts);
-        return GiveResult.Status(fps, frameMs, installedObjectTotal, conveyorItemTotal, installationTypeCounts);
+        GameManager gameManager = GameManager.Instance;
+        bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
+        bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
+        return ToolResult.Status(
+            fps,
+            frameMs,
+            installedObjectTotal,
+            conveyorItemTotal,
+            installationTypeCounts,
+            currentShowConveyorSlotDots,
+            currentShowSleepAwake);
     }
 
     private void CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts)
@@ -497,24 +643,19 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return installationCountTokenBuilder.ToString();
     }
 
-    private GiveResult GiveItems(int itemId, int count)
+    private ToolResult GiveItems(int itemId, int count)
     {
-        if (count == 0)
-        {
-            return GiveResult.Success(itemId, 0, 0, 0, 0, 0, "pong");
-        }
-
         GameManager gameManager = GameManager.Instance;
         Player player = gameManager != null ? gameManager.Player : FindObjectOfType<Player>();
         if (player == null)
         {
-            return GiveResult.Error(itemId, count, "player not found");
+            return ToolResult.Error(itemId, count, "player not found");
         }
 
         ItemManager itemManager = gameManager != null ? gameManager.ItemManger : FindObjectOfType<ItemManager>();
         if (itemManager != null && !itemManager.TryGetItemSetById(itemId, out _))
         {
-            return GiveResult.Error(itemId, count, $"item {itemId} not found");
+            return ToolResult.Error(itemId, count, $"item {itemId} not found");
         }
 
         TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
@@ -552,38 +693,68 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         int givenCount = bagCount + handCount + droppedCount;
         if (givenCount <= 0)
         {
-            return GiveResult.Error(itemId, count, "bag, hand, and nearby ground are full");
+            return ToolResult.Error(itemId, count, "bag, hand, and nearby ground are full");
         }
 
-        return GiveResult.Success(itemId, count, givenCount, bagCount, handCount, droppedCount);
+        return ToolResult.Success(itemId, count, givenCount, bagCount, handCount, droppedCount);
+    }
+
+    private ToolResult SetDebugToggle(string toggleName, bool value)
+    {
+        GameManager gameManager = GameManager.Instance;
+        if (gameManager == null)
+        {
+            return ToolResult.Error(0, 0, "game manager not found");
+        }
+
+        if (string.Equals(toggleName, "showConveyorSlotDots", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "conveyorSlotDots", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetShowConveyorSlotDots(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showConveyorSlotDots={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "showSleepAwake", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "sleepAwake", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetShowSleepAwake(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showSleepAwake={(value ? 1 : 0)}");
+        }
+
+        return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");
     }
 
     private enum ToolCommand
     {
         Give,
         Ping,
-        Status
+        Status,
+        SetDebugToggle
     }
 
     private sealed class ToolRequest
     {
-        public ToolRequest(ToolCommand command, int itemId, int count)
+        public ToolRequest(ToolCommand command, int itemId, int count, string debugToggleName, bool debugToggleValue)
         {
             Command = command;
             ItemId = itemId;
             Count = count;
+            DebugToggleName = debugToggleName;
+            DebugToggleValue = debugToggleValue;
         }
 
         public ToolCommand Command { get; }
         public int ItemId { get; }
         public int Count { get; }
+        public string DebugToggleName { get; }
+        public bool DebugToggleValue { get; }
         public ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
-        public GiveResult Result { get; set; }
+        public ToolResult Result { get; set; }
     }
 
-    private readonly struct GiveResult
+    private readonly struct ToolResult
     {
-        private GiveResult(
+        private ToolResult(
             bool success,
             int itemId,
             int requested,
@@ -596,6 +767,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             int installedObjectTotal,
             int conveyorItemTotal,
             string installationTypeCounts,
+            bool showConveyorSlotDots,
+            bool showSleepAwake,
             string message)
         {
             IsSuccess = success;
@@ -610,6 +783,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             InstalledObjectTotal = installedObjectTotal;
             ConveyorItemTotal = conveyorItemTotal;
             InstallationTypeCounts = string.IsNullOrWhiteSpace(installationTypeCounts) ? "-" : installationTypeCounts;
+            ShowConveyorSlotDots = showConveyorSlotDots;
+            ShowSleepAwake = showSleepAwake;
             Message = message;
         }
 
@@ -625,21 +800,50 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         private int InstalledObjectTotal { get; }
         private int ConveyorItemTotal { get; }
         private string InstallationTypeCounts { get; }
+        private bool ShowConveyorSlotDots { get; }
+        private bool ShowSleepAwake { get; }
         private string Message { get; }
 
-        public static GiveResult Success(int itemId, int requested, int given, int bag, int hand, int dropped, string message = "ok")
+        public static ToolResult Success(int itemId, int requested, int given, int bag, int hand, int dropped, string message = "ok")
         {
-            return new GiveResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", message);
+            return new ToolResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", false, false, message);
         }
 
-        public static GiveResult Error(int itemId, int requested, string message)
+        public static ToolResult Error(int itemId, int requested, string message)
         {
-            return new GiveResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", message);
+            return new ToolResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, message);
         }
 
-        public static GiveResult Status(float fps, float frameMs, int installedObjectTotal, int conveyorItemTotal, string installationTypeCounts)
+        public static ToolResult Ping()
         {
-            return new GiveResult(true, 0, 0, 0, 0, 0, 0, fps, frameMs, installedObjectTotal, conveyorItemTotal, installationTypeCounts, "status");
+            return new ToolResult(true, 0, 0, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, "pong");
+        }
+
+        public static ToolResult Status(
+            float fps,
+            float frameMs,
+            int installedObjectTotal,
+            int conveyorItemTotal,
+            string installationTypeCounts,
+            bool showConveyorSlotDots,
+            bool showSleepAwake)
+        {
+            return new ToolResult(
+                true,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                fps,
+                frameMs,
+                installedObjectTotal,
+                conveyorItemTotal,
+                installationTypeCounts,
+                showConveyorSlotDots,
+                showSleepAwake,
+                "status");
         }
 
         public string ToProtocolLine()
@@ -649,7 +853,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             {
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} message=\"{12}\"",
+                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} showConveyorSlotDots={12} showSleepAwake={13} message=\"{14}\"",
                     prefix,
                     ItemId,
                     Requested,
@@ -662,6 +866,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     InstalledObjectTotal,
                     ConveyorItemTotal,
                     InstallationTypeCounts,
+                    ShowConveyorSlotDots ? 1 : 0,
+                    ShowSleepAwake ? 1 : 0,
                     Message);
             }
 

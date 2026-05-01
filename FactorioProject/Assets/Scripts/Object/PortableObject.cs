@@ -15,6 +15,8 @@ public class PortableObject : MonoBehaviour
 {
     public const float MoveToDuration = 0.3f;
 
+    private static readonly HashSet<PortableObject> liveObjects = new HashSet<PortableObject>();
+
     [SerializeField, ReadOnly]
     private int id;
 
@@ -26,9 +28,13 @@ public class PortableObject : MonoBehaviour
     private Transform cachedTransform;
     private GameObject cachedGameObject;
     private DroppedItemPickupGate cachedPickupGate;
+    private MaterialPropertyBlock sleepAwakePropertyBlock;
     private bool useBatchedRendering;
     private bool suppressVisualRendering;
     private bool isMovingToTarget;
+    private bool sleepAwakeSleeping;
+    private bool sleepAwakeVisualStateInitialized;
+    private bool lastSleepAwakeDarkTint;
     private int lastConveyorMoveFrame = -1;
 
     public int ItemId => id;
@@ -52,6 +58,14 @@ public class PortableObject : MonoBehaviour
         }
     }
 
+    public static void RefreshAllSleepAwakeVisuals()
+    {
+        foreach (PortableObject portableObject in liveObjects)
+        {
+            portableObject?.RefreshSleepAwakeVisual(true);
+        }
+    }
+
     public DroppedItemPickupGate GetOrAddPickupGate()
     {
         DroppedItemPickupGate gate = PickupGate;
@@ -62,6 +76,49 @@ public class PortableObject : MonoBehaviour
         }
 
         return gate;
+    }
+
+    public void SetSleepAwakeSleeping(bool sleeping)
+    {
+        if (sleepAwakeSleeping == sleeping)
+        {
+            RefreshSleepAwakeVisual();
+            return;
+        }
+
+        sleepAwakeSleeping = sleeping;
+        RefreshSleepAwakeVisual(true);
+        NotifyBatchRenderDataChanged();
+    }
+
+    public void RefreshSleepAwakeVisual(bool force = false)
+    {
+        ResolveBodyRenderer();
+        bool useDarkTint = ShouldUseSleepAwakeDarkTint();
+        if (!force && sleepAwakeVisualStateInitialized && lastSleepAwakeDarkTint == useDarkTint)
+        {
+            return;
+        }
+
+        sleepAwakeVisualStateInitialized = true;
+        lastSleepAwakeDarkTint = useDarkTint;
+        batchRenderer?.MarkDirty();
+
+        if (bodyRenderer == null)
+        {
+            return;
+        }
+
+        if (!useDarkTint)
+        {
+            bodyRenderer.SetPropertyBlock(null);
+            return;
+        }
+
+        sleepAwakePropertyBlock ??= new MaterialPropertyBlock();
+        sleepAwakePropertyBlock.Clear();
+        SleepAwakeDebugVisual.ApplySleepingColor(sleepAwakePropertyBlock, bodyRenderer.sharedMaterial);
+        bodyRenderer.SetPropertyBlock(sleepAwakePropertyBlock);
     }
 
     public void MarkMovedByConveyorThisFrame()
@@ -144,6 +201,7 @@ public class PortableObject : MonoBehaviour
         bodyRenderer.sharedMaterial = portableMat;
         NotifyBatchRenderDataChanged();
         UpdateRendererVisibility();
+        RefreshSleepAwakeVisual(true);
         return true;
     }
 
@@ -210,7 +268,8 @@ public class PortableObject : MonoBehaviour
         out Vector3 worldPosition,
         out int layer,
         out ShadowCastingMode shadowCastingMode,
-        out bool receiveShadows)
+        out bool receiveShadows,
+        out bool useSleepAwakeDarkTint)
     {
         ResolveBodyRenderer();
 
@@ -223,6 +282,7 @@ public class PortableObject : MonoBehaviour
         layer = targetGameObject.layer;
         shadowCastingMode = bodyRenderer != null ? bodyRenderer.shadowCastingMode : ShadowCastingMode.Off;
         receiveShadows = bodyRenderer != null && bodyRenderer.receiveShadows;
+        useSleepAwakeDarkTint = ShouldUseSleepAwakeDarkTint();
 
         return useBatchedRendering
                && targetGameObject.activeInHierarchy
@@ -267,6 +327,7 @@ public class PortableObject : MonoBehaviour
         }
 
         SetBatchedRendering(false);
+        SetSleepAwakeSleeping(false);
         CachedTransform.DOKill();
         ResolveBodyRenderer();
         isMovingToTarget = true;
@@ -338,6 +399,7 @@ public class PortableObject : MonoBehaviour
 
     private void OnEnable()
     {
+        liveObjects.Add(this);
         cachedTransform = transform;
         cachedGameObject = gameObject;
         if (useBatchedRendering)
@@ -347,16 +409,19 @@ public class PortableObject : MonoBehaviour
         }
 
         UpdateRendererVisibility();
+        RefreshSleepAwakeVisual(true);
     }
 
     private void OnDisable()
     {
+        liveObjects.Remove(this);
         isMovingToTarget = false;
         UnregisterFromBatchRenderer();
     }
 
     private void OnDestroy()
     {
+        liveObjects.Remove(this);
         UnregisterFromBatchRenderer();
     }
 
@@ -433,5 +498,67 @@ public class PortableObject : MonoBehaviour
         }
 
         bodyRenderer.enabled = CachedGameObject.activeInHierarchy && !useBatchedRendering && !suppressVisualRendering;
+        RefreshSleepAwakeVisual();
+    }
+
+    private bool ShouldUseSleepAwakeDarkTint()
+    {
+        return sleepAwakeSleeping
+            && GameManager.Instance != null
+            && GameManager.Instance.ShowSleepAwake;
+    }
+}
+
+internal static class SleepAwakeDebugVisual
+{
+    public const float SleepingBrightness = 0.35f;
+
+    public static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+    public static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
+
+    public static Color GetMaterialBaseColor(Material material)
+    {
+        if (material == null)
+        {
+            return Color.white;
+        }
+
+        if (material.HasProperty(BaseColorPropertyId))
+        {
+            return material.GetColor(BaseColorPropertyId);
+        }
+
+        if (material.HasProperty(ColorPropertyId))
+        {
+            return material.GetColor(ColorPropertyId);
+        }
+
+        return Color.white;
+    }
+
+    public static Color GetSleepingColor(Material material)
+    {
+        return Darken(GetMaterialBaseColor(material));
+    }
+
+    public static Color Darken(Color color)
+    {
+        return new Color(
+            color.r * SleepingBrightness,
+            color.g * SleepingBrightness,
+            color.b * SleepingBrightness,
+            color.a);
+    }
+
+    public static void ApplySleepingColor(MaterialPropertyBlock propertyBlock, Material material)
+    {
+        if (propertyBlock == null)
+        {
+            return;
+        }
+
+        Color color = GetSleepingColor(material);
+        propertyBlock.SetColor(BaseColorPropertyId, color);
+        propertyBlock.SetColor(ColorPropertyId, color);
     }
 }

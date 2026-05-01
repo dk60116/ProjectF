@@ -58,6 +58,7 @@ public class PortableObjectPool : MonoBehaviour
         }
 
         portableObject.transform.DOKill();
+        portableObject.SetSleepAwakeSleeping(false);
         portableObject.SetBatchedRendering(false);
         portableObject.gameObject.SetActive(false);
         portableObject.transform.SetParent(GetPoolRoot(), false);
@@ -70,6 +71,7 @@ public class PortableObjectPool : MonoBehaviour
     private void PrepareBorrowedObject(PortableObject portableObject)
     {
         portableObject.transform.DOKill();
+        portableObject.SetSleepAwakeSleeping(false);
         portableObject.SetBatchedRendering(false);
         portableObject.gameObject.SetActive(true);
     }
@@ -178,7 +180,8 @@ public class PortableObjectBatchRenderer : MonoBehaviour
                     out Vector3 worldPosition,
                     out int layer,
                     out ShadowCastingMode shadowCastingMode,
-                    out bool receiveShadows))
+                    out bool receiveShadows,
+                    out bool useSleepAwakeDarkTint))
             {
                 continue;
             }
@@ -190,7 +193,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
 
             int cellX = Mathf.FloorToInt(worldPosition.x / batchCellSize);
             int cellZ = Mathf.FloorToInt(worldPosition.z / batchCellSize);
-            BatchKey key = new BatchKey(mesh, material, layer, shadowCastingMode, receiveShadows, cellX, cellZ);
+            BatchKey key = new BatchKey(mesh, material, layer, shadowCastingMode, receiveShadows, useSleepAwakeDarkTint, cellX, cellZ);
             if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
             {
                 matrices = new List<Matrix4x4>(16);
@@ -225,7 +228,8 @@ public class PortableObjectBatchRenderer : MonoBehaviour
             {
                 layer = key.Layer,
                 shadowCastingMode = key.ShadowCastingMode,
-                receiveShadows = key.ReceiveShadows
+                receiveShadows = key.ReceiveShadows,
+                matProps = ResolveBatchPropertyBlock(key)
             };
 
             int remaining = matrices.Count;
@@ -240,6 +244,21 @@ public class PortableObjectBatchRenderer : MonoBehaviour
         }
     }
 
+    private MaterialPropertyBlock sleepAwakePropertyBlock;
+
+    private MaterialPropertyBlock ResolveBatchPropertyBlock(BatchKey key)
+    {
+        if (!key.UseSleepAwakeDarkTint)
+        {
+            return null;
+        }
+
+        sleepAwakePropertyBlock ??= new MaterialPropertyBlock();
+        sleepAwakePropertyBlock.Clear();
+        SleepAwakeDebugVisual.ApplySleepingColor(sleepAwakePropertyBlock, key.Material);
+        return sleepAwakePropertyBlock;
+    }
+
     private readonly struct BatchKey
     {
         public readonly Mesh Mesh;
@@ -247,6 +266,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
         public readonly int Layer;
         public readonly ShadowCastingMode ShadowCastingMode;
         public readonly bool ReceiveShadows;
+        public readonly bool UseSleepAwakeDarkTint;
         public readonly int CellX;
         public readonly int CellZ;
 
@@ -256,6 +276,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
             int layer,
             ShadowCastingMode shadowCastingMode,
             bool receiveShadows,
+            bool useSleepAwakeDarkTint,
             int cellX,
             int cellZ)
         {
@@ -264,6 +285,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
             Layer = layer;
             ShadowCastingMode = shadowCastingMode;
             ReceiveShadows = receiveShadows;
+            UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
             CellX = cellX;
             CellZ = cellZ;
         }
@@ -277,6 +299,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
                 hash = (hash * 397) ^ Layer;
                 hash = (hash * 397) ^ (int)ShadowCastingMode;
                 hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
+                hash = (hash * 397) ^ (UseSleepAwakeDarkTint ? 1 : 0);
                 hash = (hash * 397) ^ CellX;
                 hash = (hash * 397) ^ CellZ;
                 return hash;
@@ -295,6 +318,7 @@ public class PortableObjectBatchRenderer : MonoBehaviour
                    && Layer == other.Layer
                    && ShadowCastingMode == other.ShadowCastingMode
                    && ReceiveShadows == other.ReceiveShadows
+                   && UseSleepAwakeDarkTint == other.UseSleepAwakeDarkTint
                    && CellX == other.CellX
                    && CellZ == other.CellZ;
         }

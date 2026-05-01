@@ -12,6 +12,7 @@ public class PlayerBag : MonoBehaviour
     private List<int> currentStack;
 
     private readonly HashSet<PortableObject> reservedObjects = new HashSet<PortableObject>();
+    private readonly List<int> visualPreservedStackCounts = new List<int>();
     private bool initialized;
 
     private void Awake()
@@ -35,6 +36,8 @@ public class PlayerBag : MonoBehaviour
         {
             currentStack.Add(0);
         }
+
+        EnsureVisualPreservedStackCounts();
 
         if (initialized)
         {
@@ -95,6 +98,7 @@ public class PlayerBag : MonoBehaviour
             currentStack.Add(0);
         }
 
+        EnsureVisualPreservedStackCounts();
         initialized = true;
         EnsureInitialized();
         RefreshExternalStackCounts(false);
@@ -123,19 +127,11 @@ public class PlayerBag : MonoBehaviour
             currentStack.Add(0);
         }
 
-        int count = 0;
-        for (int i = 0; i < stack.stack.Count; i++)
-        {
-            PortableObject portableObject = stack.stack[i];
-            if (portableObject == null || !portableObject.gameObject.activeSelf)
-            {
-                break;
-            }
-
-            count++;
-        }
-
-        currentStack[0] = Mathf.Clamp(count, 0, stack.stack.Count);
+        EnsureVisualPreservedStackCounts();
+        int count = CountContiguousActiveObjects(stack);
+        int preservedCount = Mathf.Clamp(GetVisualPreservedStackCount(0), 0, count);
+        visualPreservedStackCounts[0] = preservedCount;
+        currentStack[0] = Mathf.Clamp(count - preservedCount, 0, stack.stack.Count);
 
         if (notify)
         {
@@ -157,6 +153,11 @@ public class PlayerBag : MonoBehaviour
         if (stack == null || stack.stack == null)
         {
             return false;
+        }
+
+        if (TryRestoreVisualPreservedObjectToSlot(index, objectId, true, out targetPortableObject))
+        {
+            return true;
         }
 
         int nextIndex = GetNextAvailableIndex(index);
@@ -202,6 +203,11 @@ public class PlayerBag : MonoBehaviour
         if (stack == null || stack.stack == null)
         {
             return false;
+        }
+
+        if (objectId >= 0 && HasVisualPreservedObject(index, objectId))
+        {
+            return true;
         }
 
         int nextIndex = GetNextAvailableIndex(index);
@@ -362,6 +368,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = clamped;
+        ClampVisualPreservedStackCount(index);
         if (mergeDuplicates)
         {
             TryMergeDuplicateItemStacks();
@@ -669,7 +676,8 @@ public class PlayerBag : MonoBehaviour
         out int objectId,
         out int removedCount,
         out Vector3 startWorldPosition,
-        bool mergeDuplicates = true)
+        bool mergeDuplicates = true,
+        bool preserveVisuals = false)
     {
         EnsureInitialized();
         objectId = -1;
@@ -705,9 +713,9 @@ public class PlayerBag : MonoBehaviour
         }
 
         objectId = GetSlotItemId(index);
-        removedCount = RemoveItemsFromSlot(index, count);
+        removedCount = RemoveItemsFromSlot(index, count, preserveVisuals);
 
-        if (mergeDuplicates)
+        if (mergeDuplicates && !preserveVisuals)
         {
             TryMergeDuplicateItemStacks();
         }
@@ -716,7 +724,7 @@ public class PlayerBag : MonoBehaviour
         return objectId >= 0 && removedCount > 0;
     }
 
-    public int RemoveItems(int itemId, int count)
+    public int RemoveItems(int itemId, int count, bool preserveVisuals = false)
     {
         EnsureInitialized();
 
@@ -739,21 +747,25 @@ public class PlayerBag : MonoBehaviour
                 continue;
             }
 
-            int removed = RemoveItemsFromSlot(i, remaining);
+            int removed = RemoveItemsFromSlot(i, remaining, preserveVisuals);
             remaining -= removed;
         }
 
         int totalRemoved = count - remaining;
         if (totalRemoved > 0)
         {
-            TryMergeDuplicateItemStacks();
+            if (!preserveVisuals)
+            {
+                TryMergeDuplicateItemStacks();
+            }
+
             NotifyChanged();
         }
 
         return totalRemoved;
     }
 
-    private int RemoveItemsFromSlot(int index, int count)
+    private int RemoveItemsFromSlot(int index, int count, bool preserveVisuals = false)
     {
         if (count <= 0)
         {
@@ -783,6 +795,15 @@ public class PlayerBag : MonoBehaviour
         }
 
         int removeCount = Mathf.Clamp(count, 0, occupiedCount);
+        if (preserveVisuals)
+        {
+            int activeCount = CountContiguousActiveObjects(stack);
+            int preservedCount = Mathf.Clamp(GetVisualPreservedStackCount(index), 0, activeCount);
+            visualPreservedStackCounts[index] = Mathf.Clamp(preservedCount + removeCount, 0, activeCount);
+            currentStack[index] = occupiedCount - removeCount;
+            return removeCount;
+        }
+
         for (int i = 0; i < removeCount; i++)
         {
             int topIndex = occupiedCount - 1 - i;
@@ -801,7 +822,7 @@ public class PlayerBag : MonoBehaviour
     {
         EnsureInitialized();
 
-        if (portableStack == null || currentStack == null || reservedObjects.Count > 0)
+        if (portableStack == null || currentStack == null || reservedObjects.Count > 0 || HasAnyVisualPreservedStackCounts())
         {
             return false;
         }
@@ -1008,7 +1029,10 @@ public class PlayerBag : MonoBehaviour
         int startIndex = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
         for (int i = startIndex; i < stack.stack.Count; i++)
         {
-            if (stack.stack[i] != null && !reservedObjects.Contains(stack.stack[i]))
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject != null
+                && !portableObject.gameObject.activeSelf
+                && !reservedObjects.Contains(portableObject))
             {
                 return i;
             }
@@ -1028,6 +1052,12 @@ public class PlayerBag : MonoBehaviour
         int occupiedCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
         if (occupiedCount <= 0)
         {
+            int visualPreservedItemId = GetVisualPreservedItemId(index);
+            if (visualPreservedItemId >= 0)
+            {
+                return visualPreservedItemId == objectId;
+            }
+
             return true;
         }
 
@@ -1093,6 +1123,95 @@ public class PlayerBag : MonoBehaviour
         }
 
         return false;
+    }
+
+    public bool HasVisualPreservedObject(int index, int objectId)
+    {
+        EnsureInitialized();
+        return TryGetVisualPreservedObject(index, objectId, out _, out _);
+    }
+
+    public bool HasVisualPreservedObjects(int index)
+    {
+        EnsureInitialized();
+        return GetVisualPreservedStackCount(index) > 0;
+    }
+
+    public bool TryRestoreVisualPreservedObjectToSlotOnly(
+        int index,
+        int objectId,
+        out PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        return TryRestoreVisualPreservedObjectToSlot(index, objectId, true, out targetPortableObject);
+    }
+
+    public bool ClearVisualPreservedObjects(int index, bool notify = true)
+    {
+        EnsureInitialized();
+        if (portableStack == null
+            || currentStack == null
+            || index < 0
+            || index >= portableStack.Count
+            || index >= currentStack.Count
+            || index >= visualPreservedStackCounts.Count
+            || visualPreservedStackCounts[index] <= 0)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        if (stack == null || stack.stack == null)
+        {
+            visualPreservedStackCounts[index] = 0;
+            return false;
+        }
+
+        int logicalCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
+        int activeCount = CountContiguousActiveObjects(stack);
+        for (int i = logicalCount; i < activeCount; i++)
+        {
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject != null && portableObject.gameObject.activeSelf)
+            {
+                portableObject.gameObject.SetActive(false);
+            }
+        }
+
+        visualPreservedStackCounts[index] = 0;
+        if (notify)
+        {
+            NotifyChanged();
+        }
+
+        return true;
+    }
+
+    public bool CommitVisualPreservedObjectRemoval(
+        int index,
+        int objectId,
+        out PortableObject removedPortableObject,
+        bool notify = true)
+    {
+        EnsureInitialized();
+        removedPortableObject = null;
+        if (!TryGetVisualPreservedObject(index, objectId, true, out _, out removedPortableObject))
+        {
+            return false;
+        }
+
+        if (removedPortableObject.gameObject.activeSelf)
+        {
+            removedPortableObject.gameObject.SetActive(false);
+        }
+
+        visualPreservedStackCounts[index] = Mathf.Max(0, visualPreservedStackCounts[index] - 1);
+        if (notify)
+        {
+            NotifyChanged();
+        }
+
+        return true;
     }
 
     private bool TryReserveObjectToSlot(int index, int objectId, out PortableObject targetPortableObject)
@@ -1259,6 +1378,17 @@ public class PlayerBag : MonoBehaviour
         return bottomObject != null ? bottomObject.ItemId : -1;
     }
 
+    public int GetSlotDisplayItemId(int index)
+    {
+        int itemId = GetSlotItemId(index);
+        if (itemId >= 0)
+        {
+            return itemId;
+        }
+
+        return GetVisualPreservedItemId(index);
+    }
+
     public int GetTotalItemCount(int itemId)
     {
         EnsureInitialized();
@@ -1278,6 +1408,183 @@ public class PlayerBag : MonoBehaviour
         }
 
         return total;
+    }
+
+    private void EnsureVisualPreservedStackCounts()
+    {
+        int targetCount = portableStack != null ? portableStack.Count : 0;
+        while (visualPreservedStackCounts.Count < targetCount)
+        {
+            visualPreservedStackCounts.Add(0);
+        }
+
+        while (visualPreservedStackCounts.Count > targetCount)
+        {
+            visualPreservedStackCounts.RemoveAt(visualPreservedStackCounts.Count - 1);
+        }
+    }
+
+    private int GetVisualPreservedStackCount(int index)
+    {
+        if (index < 0 || index >= visualPreservedStackCounts.Count)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, visualPreservedStackCounts[index]);
+    }
+
+    private bool HasAnyVisualPreservedStackCounts()
+    {
+        for (int i = 0; i < visualPreservedStackCounts.Count; i++)
+        {
+            if (visualPreservedStackCounts[i] > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ClampVisualPreservedStackCount(int index)
+    {
+        if (portableStack == null
+            || currentStack == null
+            || index < 0
+            || index >= portableStack.Count
+            || index >= currentStack.Count
+            || index >= visualPreservedStackCounts.Count)
+        {
+            return;
+        }
+
+        PortableStack stack = portableStack[index];
+        int activeCount = CountContiguousActiveObjects(stack);
+        int logicalCount = Mathf.Clamp(currentStack[index], 0, activeCount);
+        int maxPreservedCount = Mathf.Max(0, activeCount - logicalCount);
+        visualPreservedStackCounts[index] = Mathf.Clamp(visualPreservedStackCounts[index], 0, maxPreservedCount);
+    }
+
+    private int CountContiguousActiveObjects(PortableStack stack)
+    {
+        if (stack == null || stack.stack == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < stack.stack.Count; i++)
+        {
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject == null || !portableObject.gameObject.activeSelf)
+            {
+                break;
+            }
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private int GetVisualPreservedItemId(int index)
+    {
+        return TryGetVisualPreservedObject(index, -1, out _, out PortableObject portableObject) && portableObject != null
+            ? portableObject.ItemId
+            : -1;
+    }
+
+    private bool TryGetVisualPreservedObject(
+        int index,
+        int objectId,
+        out int objectIndex,
+        out PortableObject targetPortableObject)
+    {
+        return TryGetVisualPreservedObject(index, objectId, false, out objectIndex, out targetPortableObject);
+    }
+
+    private bool TryGetVisualPreservedObject(
+        int index,
+        int objectId,
+        bool topFirst,
+        out int objectIndex,
+        out PortableObject targetPortableObject)
+    {
+        objectIndex = -1;
+        targetPortableObject = null;
+        if (portableStack == null
+            || currentStack == null
+            || index < 0
+            || index >= portableStack.Count
+            || index >= currentStack.Count
+            || index >= visualPreservedStackCounts.Count)
+        {
+            return false;
+        }
+
+        int preservedCount = GetVisualPreservedStackCount(index);
+        if (preservedCount <= 0)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        if (stack == null || stack.stack == null || stack.stack.Count == 0)
+        {
+            return false;
+        }
+
+        int logicalCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
+        int activeCount = CountContiguousActiveObjects(stack);
+        int preservedEndExclusive = Mathf.Min(activeCount, logicalCount + preservedCount);
+        int startIndex = topFirst ? preservedEndExclusive - 1 : logicalCount;
+        int endIndex = topFirst ? logicalCount - 1 : preservedEndExclusive;
+        int step = topFirst ? -1 : 1;
+        for (int i = startIndex; i != endIndex; i += step)
+        {
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject == null
+                || !portableObject.gameObject.activeSelf
+                || reservedObjects.Contains(portableObject))
+            {
+                continue;
+            }
+
+            if (objectId >= 0 && portableObject.ItemId != objectId)
+            {
+                continue;
+            }
+
+            objectIndex = i;
+            targetPortableObject = portableObject;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryRestoreVisualPreservedObjectToSlot(
+        int index,
+        int objectId,
+        bool notify,
+        out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+        if (!TryGetVisualPreservedObject(index, objectId, out _, out targetPortableObject))
+        {
+            return false;
+        }
+
+        visualPreservedStackCounts[index] = Mathf.Max(0, visualPreservedStackCounts[index] - 1);
+        PortableStack stack = portableStack[index];
+        currentStack[index] = Mathf.Clamp(currentStack[index] + 1, 0, stack.stack.Count);
+        if (notify)
+        {
+            NotifyChanged();
+        }
+
+        return true;
     }
 
     private PortableObject GetBottomObject(PortableStack stack)

@@ -217,7 +217,7 @@ public class Player : Character
 
     public void UpdateCarryState()
     {
-        bool nextCarry = GetHandItemCount() > 0;
+        bool nextCarry = HasVisibleHandObject();
         if (nextCarry == isCarrying)
         {
             return;
@@ -231,6 +231,27 @@ public class Player : Character
     }
 
     public bool IsCarrying => isCarrying;
+
+    private bool HasVisibleHandObject()
+    {
+        EnsureHandBag();
+        InitializeHandStack();
+        if (handStack == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject != null && portableObject.gameObject.activeSelf)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public void MarkDropExitGate(Vector3 origin, float radius)
     {
@@ -365,7 +386,20 @@ public class Player : Character
         int occupiedItemId = ResolveHandStackItemId();
         if (occupiedItemId >= 0 && occupiedItemId != objectId)
         {
-            return false;
+            if (handBag != null && handBag.GetSlotCount(0) <= 0 && handBag.ClearVisualPreservedObjects(0))
+            {
+                occupiedItemId = ResolveHandStackItemId();
+            }
+
+            if (occupiedItemId >= 0 && occupiedItemId != objectId)
+            {
+                return false;
+            }
+        }
+
+        if (handBag != null && handBag.TryRestoreVisualPreservedObjectToSlotOnly(0, objectId, out targetPortableObject))
+        {
+            return true;
         }
 
         for (int i = 0; i < handStack.Count; i++)
@@ -422,7 +456,17 @@ public class Player : Character
         int occupiedItemId = ResolveHandStackItemId();
         if (occupiedItemId >= 0 && occupiedItemId != objectId)
         {
+            if (handBag != null && handBag.GetSlotCount(0) <= 0 && handBag.HasVisualPreservedObjects(0))
+            {
+                return true;
+            }
+
             return false;
+        }
+
+        if (handBag != null && handBag.HasVisualPreservedObject(0, objectId))
+        {
+            return true;
         }
 
         for (int i = 0; i < handStack.Count; i++)

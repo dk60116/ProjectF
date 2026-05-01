@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
 
-namespace ProjectF.Tools.ItemGiveTool;
+namespace ProjectF.Tools.EditorTool;
 
 internal static class Program
 {
@@ -13,12 +13,13 @@ internal static class Program
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new ItemGiveForm());
+        Application.Run(new EditorToolForm());
     }
 }
 
-internal sealed class ItemGiveForm : Form
+internal sealed class EditorToolForm : Form
 {
+    private const string ToolTitle = "ProjectF EditorTool";
     private const string DefaultHost = "127.0.0.1";
     private const int DefaultPort = 50877;
     private const int TimeoutMilliseconds = 5000;
@@ -34,6 +35,8 @@ internal sealed class ItemGiveForm : Form
     private readonly Button giveButton = new Button();
     private readonly Button pingButton = new Button();
     private readonly Button reloadButton = new Button();
+    private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
+    private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
     private readonly TextBox logTextBox = new TextBox();
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
@@ -43,11 +46,12 @@ internal sealed class ItemGiveForm : Form
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private bool refreshingItems;
     private bool pollingStatus;
+    private bool applyingRuntimeDebugState;
 
-    public ItemGiveForm()
+    public EditorToolForm()
     {
-        Text = "ProjectF Item Give Tool";
-        MinimumSize = new Size(760, 700);
+        Text = ToolTitle;
+        MinimumSize = new Size(760, 744);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -63,19 +67,20 @@ internal sealed class ItemGiveForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 5
+            RowCount = 6
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
         Label titleLabel = new Label
         {
-            Text = "Item Give Tool",
+            Text = "EditorTool",
             AutoSize = true,
             Font = new Font(Font.FontFamily, 22f, FontStyle.Bold),
             ForeColor = Color.FromArgb(243, 234, 206),
@@ -84,7 +89,7 @@ internal sealed class ItemGiveForm : Form
 
         Label descriptionLabel = new Label
         {
-            Text = "아이템을 고르고 실행 중인 게임으로 바로 지급합니다.",
+            Text = "아이템 지급과 런타임 디버그 토글을 조작합니다.",
             AutoSize = true,
             ForeColor = Color.FromArgb(176, 177, 158),
             Location = new Point(2, 42)
@@ -202,6 +207,32 @@ internal sealed class ItemGiveForm : Form
         layout.Controls.Add(buttonPanel, 0, 2);
         layout.SetColumnSpan(buttonPanel, 2);
 
+        FlowLayoutPanel debugTogglePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 4, 0, 0)
+        };
+
+        StyleDebugCheckBox(showConveyorSlotDotsCheckBox, "Show ConveyorSlotDot");
+        showConveyorSlotDotsCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showConveyorSlotDots",
+                showConveyorSlotDotsCheckBox.Checked,
+                "Show ConveyorSlotDot");
+
+        StyleDebugCheckBox(showSleepAwakeCheckBox, "Show SleepAwake");
+        showSleepAwakeCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showSleepAwake",
+                showSleepAwakeCheckBox.Checked,
+                "Show SleepAwake");
+
+        debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
+        debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
+        layout.Controls.Add(debugTogglePanel, 0, 3);
+        layout.SetColumnSpan(debugTogglePanel, 2);
+
         Panel runtimeStatsCard = CreateCardPanel();
         runtimeStatsCard.Padding = new Padding(14, 10, 14, 10);
         runtimeStatsCard.Margin = new Padding(0, 0, 0, 14);
@@ -232,7 +263,7 @@ internal sealed class ItemGiveForm : Form
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
-        layout.Controls.Add(runtimeStatsCard, 0, 3);
+        layout.Controls.Add(runtimeStatsCard, 0, 4);
         layout.SetColumnSpan(runtimeStatsCard, 2);
 
         Panel logCard = CreateCardPanel();
@@ -246,7 +277,7 @@ internal sealed class ItemGiveForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 4);
+        layout.Controls.Add(logCard, 0, 5);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -308,6 +339,21 @@ internal sealed class ItemGiveForm : Form
         button.ForeColor = Color.FromArgb(243, 234, 206);
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderColor = Color.FromArgb(101, 105, 84);
+    }
+
+    private void StyleDebugCheckBox(CheckBox checkBox, string text)
+    {
+        checkBox.Text = text;
+        checkBox.AutoSize = true;
+        checkBox.Margin = new Padding(0, 8, 28, 0);
+        checkBox.ForeColor = Color.FromArgb(243, 234, 206);
+        checkBox.FlatStyle = FlatStyle.Flat;
+        checkBox.CheckedChanged += (_, _) =>
+        {
+            checkBox.ForeColor = checkBox.Checked
+                ? Color.FromArgb(126, 218, 126)
+                : Color.FromArgb(243, 234, 206);
+        };
     }
 
     private void PositionFpsLabel(Control parent)
@@ -526,6 +572,19 @@ internal sealed class ItemGiveForm : Form
         await SendCommandAsync("ping", "Ping");
     }
 
+    private async Task SendDebugToggleAsync(string toggleName, bool value, string displayName)
+    {
+        if (applyingRuntimeDebugState)
+        {
+            return;
+        }
+
+        await SendCommandAsync(
+            $"debug {toggleName} {(value ? 1 : 0)}",
+            $"{displayName} {(value ? "ON" : "OFF")}");
+        await RefreshStatusAsync();
+    }
+
     private async Task RefreshStatusAsync()
     {
         if (pollingStatus)
@@ -585,12 +644,35 @@ internal sealed class ItemGiveForm : Form
         TryReadProtocolToken(response, "installTypes", out string installTypes);
         runtimeStatsLabel.Text = $"Runtime Stats: 설치 {installTotal:N0}개    벨트 아이템 {beltItems:N0}개";
         runtimeStatsTextBox.Text = FormatInstallTypeCounts(installTypes);
+
+        if (TryReadProtocolBool(response, "showConveyorSlotDots", out bool showConveyorSlotDots))
+        {
+            ApplyRuntimeCheckBoxState(showConveyorSlotDotsCheckBox, showConveyorSlotDots);
+        }
+
+        if (TryReadProtocolBool(response, "showSleepAwake", out bool showSleepAwake))
+        {
+            ApplyRuntimeCheckBoxState(showSleepAwakeCheckBox, showSleepAwake);
+        }
     }
 
     private void SetRuntimeStatsUnavailable(string message)
     {
         runtimeStatsLabel.Text = $"Runtime Stats: {message}";
         runtimeStatsTextBox.Text = "설치 오브젝트 종류: --";
+    }
+
+    private void ApplyRuntimeCheckBoxState(CheckBox checkBox, bool isChecked)
+    {
+        applyingRuntimeDebugState = true;
+        try
+        {
+            checkBox.Checked = isChecked;
+        }
+        finally
+        {
+            applyingRuntimeDebugState = false;
+        }
     }
 
     private string FormatInstallTypeCounts(string installTypes)
@@ -735,6 +817,33 @@ internal sealed class ItemGiveForm : Form
         return int.TryParse(token, out value);
     }
 
+    private static bool TryReadProtocolBool(string response, string key, out bool value)
+    {
+        value = false;
+        if (!TryReadProtocolToken(response, key, out string token))
+        {
+            return false;
+        }
+
+        if (string.Equals(token, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token, "on", StringComparison.OrdinalIgnoreCase))
+        {
+            value = true;
+            return true;
+        }
+
+        if (string.Equals(token, "0", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token, "false", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(token, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            value = false;
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool TryReadProtocolToken(string response, string key, out string value)
     {
         value = string.Empty;
@@ -759,6 +868,8 @@ internal sealed class ItemGiveForm : Form
         giveButton.Enabled = !busy;
         pingButton.Enabled = !busy;
         reloadButton.Enabled = !busy;
+        showConveyorSlotDotsCheckBox.Enabled = !busy;
+        showSleepAwakeCheckBox.Enabled = !busy;
         statusLabel.Text = status;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }

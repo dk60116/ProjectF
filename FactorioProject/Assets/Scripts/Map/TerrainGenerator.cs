@@ -12,7 +12,6 @@ public class TerrainGenerator : MonoBehaviour
 {
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
-    private const int ConnectedConveyorDropSearchRadius = 2;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -494,6 +493,8 @@ public class TerrainGenerator : MonoBehaviour
     private readonly List<Block> sortedActiveConveyors = new List<Block>();
     private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
     private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
+    private bool conveyorSlotDotVisibilityInitialized;
+    private bool lastShowConveyorSlotDots;
     private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
     private int conveyorItemVisualBlockSetVersion;
@@ -623,6 +624,7 @@ public class TerrainGenerator : MonoBehaviour
 
         using (TickConveyorDotsMarker.Auto())
         {
+            SyncConveyorSlotDotRuntimeVisibility();
             TickActiveConveyorDotVisuals(Time.deltaTime);
         }
 
@@ -665,6 +667,8 @@ public class TerrainGenerator : MonoBehaviour
         nextConveyorActiveFullScanTime = 0f;
         activeConveyorDotVisuals.Clear();
         conveyorDotVisualTickBuffer.Clear();
+        conveyorSlotDotVisibilityInitialized = false;
+        lastShowConveyorSlotDots = false;
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
         conveyorItemVisualBlockSetVersion++;
@@ -1064,6 +1068,8 @@ public class TerrainGenerator : MonoBehaviour
         nextConveyorActiveFullScanTime = 0f;
         activeConveyorDotVisuals.Clear();
         conveyorDotVisualTickBuffer.Clear();
+        conveyorSlotDotVisibilityInitialized = false;
+        lastShowConveyorSlotDots = false;
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
         conveyorItemVisualBlockSetVersion++;
@@ -1258,6 +1264,44 @@ public class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private void SyncConveyorSlotDotRuntimeVisibility()
+    {
+        bool showConveyorSlotDots = GameManager.Instance != null && GameManager.Instance.ShowConveyorSlotDots;
+        if (conveyorSlotDotVisibilityInitialized && lastShowConveyorSlotDots == showConveyorSlotDots)
+        {
+            return;
+        }
+
+        ApplyConveyorSlotDotRuntimeVisibility(showConveyorSlotDots);
+    }
+
+    public void RefreshConveyorSlotDotRuntimeVisibility()
+    {
+        bool showConveyorSlotDots = GameManager.Instance != null && GameManager.Instance.ShowConveyorSlotDots;
+        ApplyConveyorSlotDotRuntimeVisibility(showConveyorSlotDots);
+    }
+
+    public void RefreshSleepAwakeRuntimeVisibility()
+    {
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            pair.Value?.RefreshSleepAwakeDebugVisuals(true);
+        }
+    }
+
+    private void ApplyConveyorSlotDotRuntimeVisibility(bool showConveyorSlotDots)
+    {
+        conveyorSlotDotVisibilityInitialized = true;
+        lastShowConveyorSlotDots = showConveyorSlotDots;
+        activeConveyorDotVisuals.Clear();
+        conveyorDotVisualTickBuffer.Clear();
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            pair.Value?.RefreshConveyorSlotDotVisuals();
+        }
+    }
+
     public void SetConveyorItemVisualActive(Block block, bool isActive)
     {
         if (!Application.isPlaying || block == null)
@@ -1413,6 +1457,18 @@ public class TerrainGenerator : MonoBehaviour
                     && Time.time < retryTime));
     }
 
+    public bool IsConveyorNetworkSleeping(Block block)
+    {
+        if (block == null)
+        {
+            return false;
+        }
+
+        EnsureConveyorNetworkCache();
+        return conveyorNetworkIds.TryGetValue(block, out int networkId)
+            && conveyorNetworkSleepingIds.Contains(networkId);
+    }
+
     public void DelayConveyorNetwork(Block block, float delay)
     {
         if (block == null)
@@ -1445,8 +1501,12 @@ public class TerrainGenerator : MonoBehaviour
         if (conveyorNetworkIds.TryGetValue(block, out int networkId))
         {
             conveyorNetworkRetryTimes.Remove(networkId);
-            conveyorNetworkSleepingIds.Remove(networkId);
+            bool wasSleeping = conveyorNetworkSleepingIds.Remove(networkId);
             conveyorNetworkSleepCheckQueuedIds.Remove(networkId);
+            if (wasSleeping)
+            {
+                RefreshSleepAwakeDebugVisualsForNetwork(networkId);
+            }
         }
 
         QueueConveyorWake(block);
@@ -1525,6 +1585,22 @@ public class TerrainGenerator : MonoBehaviour
             if (pair.Value == networkId)
             {
                 pair.Key?.RefreshConveyorActivityRegistration(false);
+            }
+        }
+    }
+
+    private void RefreshSleepAwakeDebugVisualsForNetwork(int networkId)
+    {
+        if (networkId <= 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Block, int> pair in conveyorNetworkIds)
+        {
+            if (pair.Value == networkId)
+            {
+                pair.Key?.RefreshSleepAwakeDebugVisuals(true);
             }
         }
     }
@@ -1702,6 +1778,7 @@ public class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
+            block.WakeConveyorMoveAttemptsAround();
             block.RefreshConveyorActivityRegistration(false);
             if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
@@ -4433,9 +4510,7 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         int focusedCapacity = Mathf.Max(0, focusedConveyorBlock.GetAvailableConveyorCapacity());
-        Vector3 searchWorldPosition = player != null ? player.transform.position : focusedConveyorBlock.transform.position;
-        int connectedCapacity = GetConnectedConveyorDropCapacityNear(
-            searchWorldPosition,
+        int connectedCapacity = GetDirectlyConnectedConveyorDropCapacity(
             focusedConveyorBlock,
             Mathf.Max(0, Block.ConveyorCellItemUnit - focusedCapacity));
         dropLimit = Mathf.Min(Block.ConveyorCellItemUnit, focusedCapacity + connectedCapacity);
@@ -4443,7 +4518,6 @@ public class TerrainGenerator : MonoBehaviour
     }
 
     private bool TryResolveFocusedConveyorDropBlock(
-        Vector3 searchWorldPosition,
         Block focusedConveyorBlock,
         HashSet<Block> excludedBlocks,
         out Block targetConveyorBlock)
@@ -4461,118 +4535,111 @@ public class TerrainGenerator : MonoBehaviour
             return true;
         }
 
-        return TryFindConnectedConveyorDropBlockNear(
-            searchWorldPosition,
+        return TryFindDirectlyConnectedConveyorDropBlock(
             focusedConveyorBlock,
             excludedBlocks,
             out targetConveyorBlock);
     }
 
-    private int GetConnectedConveyorDropCapacityNear(Vector3 searchWorldPosition, Block focusedConveyorBlock, int maxCapacity)
+    private int GetDirectlyConnectedConveyorDropCapacity(Block focusedConveyorBlock, int maxCapacity)
     {
-        if (focusedConveyorBlock == null || maxCapacity <= 0 || !TryGetConveyorNetworkId(focusedConveyorBlock, out int focusedNetworkId))
+        if (focusedConveyorBlock == null || maxCapacity <= 0)
         {
             return 0;
         }
 
         int totalCapacity = 0;
-        Vector2Int centerCoordinate = GetWorldBlockCoordinate(searchWorldPosition);
-        for (int offsetY = -ConnectedConveyorDropSearchRadius; offsetY <= ConnectedConveyorDropSearchRadius; offsetY++)
-        {
-            for (int offsetX = -ConnectedConveyorDropSearchRadius; offsetX <= ConnectedConveyorDropSearchRadius; offsetX++)
-            {
-                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!loadedBlocks.TryGetValue(coordinate, out Block block)
-                    || !IsConnectedConveyorDropCandidate(block, focusedConveyorBlock, focusedNetworkId, null, out int candidateCapacity))
-                {
-                    continue;
-                }
+        HashSet<Block> countedBlocks = null;
 
-                totalCapacity += candidateCapacity;
-                if (totalCapacity >= maxCapacity)
-                {
-                    return maxCapacity;
-                }
+        if (TryGetDirectlyConnectedConveyorDropCandidate(
+                focusedConveyorBlock,
+                true,
+                countedBlocks,
+                out Block downstreamBlock,
+                out int downstreamCapacity))
+        {
+            totalCapacity += downstreamCapacity;
+            if (totalCapacity >= maxCapacity)
+            {
+                return maxCapacity;
             }
+
+            countedBlocks = new HashSet<Block> { downstreamBlock };
         }
 
-        return totalCapacity;
+        if (TryGetDirectlyConnectedConveyorDropCandidate(
+                focusedConveyorBlock,
+                false,
+                countedBlocks,
+                out _,
+                out int upstreamCapacity))
+        {
+            totalCapacity += upstreamCapacity;
+        }
+
+        return Mathf.Min(totalCapacity, maxCapacity);
     }
 
-    private bool TryFindConnectedConveyorDropBlockNear(
-        Vector3 searchWorldPosition,
+    private bool TryFindDirectlyConnectedConveyorDropBlock(
         Block focusedConveyorBlock,
         HashSet<Block> excludedBlocks,
         out Block targetConveyorBlock)
     {
         targetConveyorBlock = null;
-        if (focusedConveyorBlock == null || !TryGetConveyorNetworkId(focusedConveyorBlock, out int focusedNetworkId))
+
+        if (TryGetDirectlyConnectedConveyorDropCandidate(
+                focusedConveyorBlock,
+                true,
+                excludedBlocks,
+                out targetConveyorBlock,
+                out _))
         {
-            return false;
+            return true;
         }
 
-        Vector2Int centerCoordinate = GetWorldBlockCoordinate(searchWorldPosition);
-        int bestDistanceSqr = int.MaxValue;
-        int bestCapacity = 0;
-
-        for (int offsetY = -ConnectedConveyorDropSearchRadius; offsetY <= ConnectedConveyorDropSearchRadius; offsetY++)
-        {
-            for (int offsetX = -ConnectedConveyorDropSearchRadius; offsetX <= ConnectedConveyorDropSearchRadius; offsetX++)
-            {
-                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!loadedBlocks.TryGetValue(coordinate, out Block block)
-                    || !IsConnectedConveyorDropCandidate(block, focusedConveyorBlock, focusedNetworkId, excludedBlocks, out int candidateCapacity))
-                {
-                    continue;
-                }
-
-                int distanceSqr = (offsetX * offsetX) + (offsetY * offsetY);
-                if (targetConveyorBlock == null
-                    || distanceSqr < bestDistanceSqr
-                    || (distanceSqr == bestDistanceSqr && candidateCapacity > bestCapacity))
-                {
-                    targetConveyorBlock = block;
-                    bestDistanceSqr = distanceSqr;
-                    bestCapacity = candidateCapacity;
-                }
-            }
-        }
-
-        return targetConveyorBlock != null;
+        return TryGetDirectlyConnectedConveyorDropCandidate(
+            focusedConveyorBlock,
+            false,
+            excludedBlocks,
+            out targetConveyorBlock,
+            out _);
     }
 
-    private bool IsConnectedConveyorDropCandidate(
-        Block block,
+    private static bool TryGetDirectlyConnectedConveyorDropCandidate(
         Block focusedConveyorBlock,
-        int focusedNetworkId,
+        bool downstream,
         HashSet<Block> excludedBlocks,
+        out Block candidateBlock,
         out int capacity)
     {
+        candidateBlock = null;
         capacity = 0;
-        if (block == null
-            || block == focusedConveyorBlock
-            || !block.IsRuntimeConveyor
-            || (excludedBlocks != null && excludedBlocks.Contains(block))
-            || !TryGetConveyorNetworkId(block, out int candidateNetworkId)
-            || candidateNetworkId != focusedNetworkId)
+        if (focusedConveyorBlock == null)
         {
             return false;
         }
 
-        capacity = block.GetAvailableConveyorCapacity();
-        return capacity > 0;
-    }
-
-    private bool TryGetConveyorNetworkId(Block block, out int networkId)
-    {
-        networkId = 0;
-        if (block == null || !block.IsRuntimeConveyor)
+        bool hasCandidate = downstream
+            ? focusedConveyorBlock.TryGetRuntimeNextConveyorBlock(out candidateBlock)
+            : focusedConveyorBlock.TryGetRuntimePreviousConveyorBlock(out candidateBlock);
+        if (!hasCandidate
+            || candidateBlock == null
+            || candidateBlock == focusedConveyorBlock
+            || !candidateBlock.IsRuntimeConveyor
+            || (excludedBlocks != null && excludedBlocks.Contains(candidateBlock)))
         {
+            candidateBlock = null;
             return false;
         }
 
-        EnsureConveyorNetworkCache();
-        return conveyorNetworkIds.TryGetValue(block, out networkId);
+        capacity = candidateBlock.GetAvailableConveyorCapacity();
+        if (capacity <= 0)
+        {
+            candidateBlock = null;
+            return false;
+        }
+
+        return true;
     }
 
     private bool TryAddDroppedItemToFocusedConveyor(
@@ -4591,7 +4658,6 @@ public class TerrainGenerator : MonoBehaviour
         targetConveyorBlock = null;
         HashSet<Block> rejectedConveyorDropBlocks = null;
         while (TryResolveFocusedConveyorDropBlock(
-                   worldPosition,
                    focusedConveyorBlock,
                    rejectedConveyorDropBlocks,
                    out Block candidateBlock))

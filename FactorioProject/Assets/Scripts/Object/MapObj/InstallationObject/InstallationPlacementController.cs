@@ -185,6 +185,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         public int itemId = -1;
         public bool fromHand;
+        public int sourceSlotIndex = -1;
         public PortableObject sourcePortableObject;
     }
 
@@ -611,108 +612,150 @@ public class InstallationPlacementController : MonoBehaviour
 
         Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
         PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
-        if (handBag != null && handBag.GetSlotItemId(0) == itemId && handBag.GetSlotCount(0) > 0)
+        if (TryReserveInstallPreviewItemFromHand(player, handBag, itemId, out reservation))
         {
-            PortableObject sourcePortableObject = null;
-            List<PortableObject> handSources = GetPlayerHandPortableSources(itemId, 1);
-            if (handSources.Count > 0)
-            {
-                sourcePortableObject = handSources[0];
-            }
-
-            if (handBag.RemoveItems(itemId, 1) > 0)
-            {
-                handBag.RefreshExternalStackCounts();
-                player?.UpdateCarryState();
-                reservation = new InstallPreviewItemReservation
-                {
-                    itemId = itemId,
-                    fromHand = true,
-                    sourcePortableObject = sourcePortableObject
-                };
-                return true;
-            }
+            return true;
         }
 
         PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
-        if (inventoryBag != null && inventoryBag != handBag && inventoryBag.RemoveItems(itemId, 1) > 0)
+        return TryReserveInstallPreviewItemFromInventory(inventoryBag, handBag, itemId, out reservation);
+    }
+
+    private bool TryReserveInstallPreviewItemFromHand(
+        Player player,
+        PlayerBag handBag,
+        int itemId,
+        out InstallPreviewItemReservation reservation)
+    {
+        reservation = null;
+        if (handBag == null)
         {
-            player?.UpdateCarryState();
-            reservation = new InstallPreviewItemReservation
+            return false;
+        }
+
+        PortableObject sourcePortableObject = GetFirstPlayerHandPortableSource(itemId);
+        if (!TryReserveInstallPreviewItemFromBagSlot(
+                handBag,
+                itemId,
+                0,
+                true,
+                sourcePortableObject,
+                out reservation))
+        {
+            return false;
+        }
+
+        RefreshHandAfterInstallPreviewReservationChange(player, handBag);
+        return true;
+    }
+
+    private bool TryReserveInstallPreviewItemFromInventory(
+        PlayerBag inventoryBag,
+        PlayerBag handBag,
+        int itemId,
+        out InstallPreviewItemReservation reservation)
+    {
+        reservation = null;
+        if (inventoryBag == null || inventoryBag == handBag)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < inventoryBag.SlotCount; i++)
+        {
+            if (TryReserveInstallPreviewItemFromBagSlot(
+                    inventoryBag,
+                    itemId,
+                    i,
+                    false,
+                    null,
+                    out reservation))
             {
-                itemId = itemId,
-                fromHand = false,
-                sourcePortableObject = null
-            };
-            return true;
+                return true;
+            }
         }
 
         return false;
     }
 
+    private bool TryReserveInstallPreviewItemFromBagSlot(
+        PlayerBag bag,
+        int itemId,
+        int slotIndex,
+        bool fromHand,
+        PortableObject sourcePortableObject,
+        out InstallPreviewItemReservation reservation)
+    {
+        reservation = null;
+        if (bag == null
+            || itemId < 0
+            || slotIndex < 0
+            || bag.GetSlotItemId(slotIndex) != itemId
+            || bag.GetSlotCount(slotIndex) <= 0)
+        {
+            return false;
+        }
+
+        if (!bag.TryRemoveItemsAtSlot(
+                slotIndex,
+                1,
+                out int removedItemId,
+                out int removedCount,
+                out _,
+                false,
+                true)
+            || removedItemId != itemId
+            || removedCount <= 0)
+        {
+            return false;
+        }
+
+        reservation = new InstallPreviewItemReservation
+        {
+            itemId = itemId,
+            fromHand = fromHand,
+            sourceSlotIndex = slotIndex,
+            sourcePortableObject = sourcePortableObject
+        };
+        return true;
+    }
+
+    private PortableObject GetFirstPlayerHandPortableSource(int itemId)
+    {
+        List<PortableObject> handSources = GetPlayerHandPortableSources(itemId, 1);
+        return handSources.Count > 0 ? handSources[0] : null;
+    }
+
+    private static int GetReservationSourceSlotIndex(InstallPreviewItemReservation reservation)
+    {
+        if (reservation == null)
+        {
+            return -1;
+        }
+
+        return reservation.sourceSlotIndex >= 0 ? reservation.sourceSlotIndex : (reservation.fromHand ? 0 : -1);
+    }
+
+    private void RefreshHandAfterInstallPreviewReservationChange(Player player, PlayerBag handBag)
+    {
+        handBag?.RefreshExternalStackCounts(false);
+        player?.UpdateCarryState();
+    }
+
     private void RefundInstallPreviewReservation(MapObject preview)
     {
-        if (preview == null
-            || !installPreviewItemReservationsByPreview.TryGetValue(preview, out InstallPreviewItemReservation reservation))
+        if (preview == null)
+        {
+            return;
+        }
+
+        if (!installPreviewItemReservationsByPreview.TryGetValue(preview, out InstallPreviewItemReservation reservation))
         {
             return;
         }
 
         installPreviewItemReservationsByPreview.Remove(preview);
         RefundInstallPreviewReservation(reservation);
-    }
-
-    private void RefundInstallPreviewReservation(InstallPreviewItemReservation reservation)
-    {
-        if (reservation == null || reservation.itemId < 0)
-        {
-            return;
-        }
-
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        bool restored = false;
-        if (player != null)
-        {
-            if (reservation.fromHand)
-            {
-                restored = player.TryAddToHand(reservation.itemId, out _);
-                if (!restored)
-                {
-                    restored = player.TryAddToBag(reservation.itemId, out _);
-                }
-            }
-            else
-            {
-                restored = player.TryAddToBag(reservation.itemId, out _);
-                if (!restored)
-                {
-                    restored = player.TryAddToHand(reservation.itemId, out _);
-                }
-            }
-
-            player.UpdateCarryState();
-        }
-
-        if (restored)
-        {
-            return;
-        }
-
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        Vector3 dropPosition = player != null ? player.transform.position : transform.position;
-        if (terrain != null)
-        {
-            bool dropped = terrain.TryAddDroppedItemAnimated(dropPosition, reservation.itemId, dropPosition, out _);
-            if (!dropped)
-            {
-                dropped = terrain.TryAddDroppedItemAtPlayerBlock(dropPosition, reservation.itemId, out _);
-            }
-
-            if (!dropped)
-            {
-                terrain.TryAddDroppedItemNear(dropPosition, reservation.itemId, out _);
-            }
-        }
     }
 
     private bool TryConsumeInstallPreviewReservation(MapObject preview, out PortableObject sourcePortableObject)
@@ -725,7 +768,34 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         installPreviewItemReservationsByPreview.Remove(preview);
+        if (reservation == null)
+        {
+            return false;
+        }
+
         sourcePortableObject = reservation.sourcePortableObject;
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
+        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
+        PlayerBag sourceBag = reservation.fromHand ? handBag : inventoryBag;
+        int sourceSlotIndex = GetReservationSourceSlotIndex(reservation);
+
+        if (sourceBag != null
+            && sourceSlotIndex >= 0
+            && sourceBag.CommitVisualPreservedObjectRemoval(
+                sourceSlotIndex,
+                reservation.itemId,
+                out PortableObject removedPortableObject)
+            && sourcePortableObject == null)
+        {
+            sourcePortableObject = removedPortableObject;
+        }
+
+        if (reservation.fromHand)
+        {
+            RefreshHandAfterInstallPreviewReservationChange(player, handBag);
+        }
+
         return true;
     }
 
@@ -750,17 +820,71 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RefundAllInstallPreviewReservations()
     {
-        if (installPreviewItemReservationsByPreview.Count <= 0)
-        {
-            return;
-        }
-
-        List<InstallPreviewItemReservation> reservations = new List<InstallPreviewItemReservation>(installPreviewItemReservationsByPreview.Values);
+        List<InstallPreviewItemReservation> reservations = new List<InstallPreviewItemReservation>(
+            installPreviewItemReservationsByPreview.Values);
         installPreviewItemReservationsByPreview.Clear();
         for (int i = 0; i < reservations.Count; i++)
         {
             RefundInstallPreviewReservation(reservations[i]);
         }
+    }
+
+    private void RefundInstallPreviewReservation(InstallPreviewItemReservation reservation)
+    {
+        if (reservation == null || reservation.itemId < 0)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
+        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
+        if (reservation.fromHand)
+        {
+            if (TryRestoreInstallPreviewReservationToSourceSlot(handBag, reservation))
+            {
+                RefreshHandAfterInstallPreviewReservationChange(player, handBag);
+                return;
+            }
+
+            if (player != null && player.TryAddToHand(reservation.itemId, out _))
+            {
+                RefreshHandAfterInstallPreviewReservationChange(player, handBag);
+                return;
+            }
+        }
+        else if (inventoryBag != null)
+        {
+            if (TryRestoreInstallPreviewReservationToSourceSlot(inventoryBag, reservation)
+                || inventoryBag.TryAddObjectToSlotOnly(
+                    GetReservationSourceSlotIndex(reservation),
+                    reservation.itemId,
+                    out _))
+            {
+                return;
+            }
+
+            if (player != null && player.TryAddToBag(reservation.itemId, out _))
+            {
+                return;
+            }
+        }
+
+        player?.UpdateCarryState();
+    }
+
+    private bool TryRestoreInstallPreviewReservationToSourceSlot(
+        PlayerBag bag,
+        InstallPreviewItemReservation reservation)
+    {
+        int sourceSlotIndex = GetReservationSourceSlotIndex(reservation);
+        return bag != null
+               && reservation != null
+               && sourceSlotIndex >= 0
+               && bag.TryRestoreVisualPreservedObjectToSlotOnly(
+                   sourceSlotIndex,
+                   reservation.itemId,
+                   out _);
     }
 
     private List<PortableObject> GetPlayerHandPortableSources(int itemId, int requestedCount)
@@ -977,36 +1101,18 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        if (mapEditModeActive)
-        {
-            SetMapEditModeActive(false);
-            RefreshMapEditButtonState();
-            return;
-        }
-
-        SetMapEditModeActive(true);
-        RefreshMapEditButtonState();
+        SetMapEditModeActive(!mapEditModeActive);
     }
 
     private void HandleMapEditPackClicked()
     {
-        if (!TryPackSelectedInstallation())
-        {
-            RefreshMapEditButtonState();
-            return;
-        }
-
+        TryPackSelectedInstallation();
         RefreshMapEditButtonState();
     }
 
     private void HandleMapEditUndoClicked()
     {
-        if (!TryUndoPackedInstallation())
-        {
-            RefreshMapEditButtonState();
-            return;
-        }
-
+        TryUndoPackedInstallation();
         RefreshMapEditButtonState();
     }
 
@@ -2062,6 +2168,12 @@ public class InstallationPlacementController : MonoBehaviour
 
     public bool MapEditModeActive => mapEditModeActive;
 
+    public bool TryGetActiveBlueprintHudItemId(out int itemId)
+    {
+        itemId = activeInstallDefinition != null ? activeInstallDefinition.id : -1;
+        return itemId >= 0 && IsInstallationModeActive();
+    }
+
     private void SetMapEditModeActive(bool isActive)
     {
         if (mapEditModeActive == isActive)
@@ -2405,8 +2517,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!IsEditingInstallation())
         {
-            int availableInstallItemCount = GetCurrentInstallItemCount()
-                + GetReservedInstallPreviewItemCount(activeInstallDefinition.id);
+            int availableInstallItemCount = GetAvailableInstallItemCount();
             if (placementPlans.Count > availableInstallItemCount)
             {
                 placementPlans.RemoveRange(availableInstallItemCount, placementPlans.Count - availableInstallItemCount);
@@ -7045,8 +7156,23 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         int itemId = activeInstallDefinition != null ? activeInstallDefinition.id : -1;
-        int availableItemCount = GetCurrentInstallItemCount() + GetReservedInstallPreviewItemCount(itemId);
+        int availableItemCount = GetAvailableInstallItemCount(itemId);
         return GetInstallPreviewCount() < availableItemCount;
+    }
+
+    private int GetAvailableInstallItemCount(int itemId = -1)
+    {
+        if (IsEditingInstallation())
+        {
+            return 1;
+        }
+
+        if (itemId < 0 && activeInstallDefinition != null)
+        {
+            itemId = activeInstallDefinition.id;
+        }
+
+        return GetCurrentInstallItemCount() + GetReservedInstallPreviewItemCount(itemId);
     }
 
     private int GetCurrentInstallItemCount()
@@ -7093,17 +7219,17 @@ public class InstallationPlacementController : MonoBehaviour
         int removedCount = 0;
         Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
         PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
-        if (handBag != null)
+        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
+        if (inventoryBag != null && inventoryBag != handBag)
         {
-            removedCount += handBag.RemoveItems(itemId, requestedCount);
-            handBag.RefreshExternalStackCounts();
+            removedCount += inventoryBag.RemoveItems(itemId, requestedCount);
         }
 
         int remainingCount = requestedCount - removedCount;
-        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
-        if (remainingCount > 0 && inventoryBag != null && inventoryBag != handBag)
+        if (remainingCount > 0 && handBag != null)
         {
-            removedCount += inventoryBag.RemoveItems(itemId, remainingCount);
+            removedCount += handBag.RemoveItems(itemId, remainingCount);
+            handBag.RefreshExternalStackCounts();
         }
 
         player?.UpdateCarryState();
@@ -7213,11 +7339,14 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            if (installPreviewItemReservationsByPreview.TryGetValue(previews[i], out InstallPreviewItemReservation reservation))
+            if (installPreviewItemReservationsByPreview.TryGetValue(
+                    previews[i],
+                    out InstallPreviewItemReservation reservation))
             {
-                installPreviewItemReservationsByPreview.Remove(previews[i]);
                 RefundInstallPreviewReservation(reservation);
             }
+
+            installPreviewItemReservationsByPreview.Remove(previews[i]);
         }
     }
 
@@ -8304,22 +8433,7 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePortableObject = handPortableSources[0];
         }
 
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        bool reservedTemporarySource = false;
-        if (sourcePortableObject == null
-            && player != null
-            && player.TryReserveHandObject(itemId, out sourcePortableObject))
-        {
-            reservedTemporarySource = true;
-            player.CommitReservedHandObject(sourcePortableObject);
-        }
-
         PlayInstallPlacementAnimation(restoredObject, sourcePortableObject, itemId, 0f);
-
-        if (reservedTemporarySource)
-        {
-            player.ReleaseReservedHandObject(sourcePortableObject);
-        }
     }
 
     private void SetInstalledObjectVisualVisible(MapObject installedObject, bool isVisible)

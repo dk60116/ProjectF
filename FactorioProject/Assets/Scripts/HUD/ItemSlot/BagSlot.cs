@@ -116,12 +116,13 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         UnbindPickupClick();
     }
 
-    public void Bind(PlayerBag bag, int index, int itemId, int itemCount, int maxItemCount)
+    public void Bind(PlayerBag bag, int index, int itemId, int itemCount, int maxItemCount, bool allowZeroCountDisplay = false)
     {
         boundBag = bag;
         slotIndex = index;
 
-        if (itemId < 0 || itemCount <= 0)
+        bool shouldDisplayItem = itemId >= 0 && (itemCount > 0 || allowZeroCountDisplay);
+        if (!shouldDisplayItem)
         {
             Clear();
             RefreshCraftingItems(itemId, itemCount);
@@ -132,7 +133,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        SetItem(itemId, itemCount, maxItemCount);
+        SetItemDisplay(itemId, itemCount, maxItemCount, allowZeroCountDisplay);
         RefreshCraftingItems(itemId, itemCount);
     }
 

@@ -28,7 +28,6 @@ public class Block : BaseObject
     private const int ConveyorBlockedRetryJitterSteps = 5;
     private const int ConveyorContinuousMotionMaxCarrySteps = 4;
     private const float ConveyorContinuousMotionEpsilon = 0.0001f;
-    private const float ConveyorContinuousMoveReadyProgress = 1f;
     private const string ConveyorSlotDotRootName = "ConveyorSlotDots";
     private static readonly Vector2Int[] ConveyorNeighborDirections =
     {
@@ -113,6 +112,7 @@ public class Block : BaseObject
     private int cachedBackColumn1LaneIndex = -1;
     private bool conveyorBlockedSleep;
     private readonly bool[] conveyorLaneCycleBlockedSleepStates = new bool[ConveyorStackLaneLimit];
+    private readonly bool[] conveyorLaneSleepAwakeDarkTintStates = new bool[ConveyorStackLaneLimit];
     private int conveyorItemVisualVersion;
     private bool childReferencesCached;
     private bool inputAreaCenterObjectsVisible = true;
@@ -1893,7 +1893,8 @@ public class Block : BaseObject
             results.Add(new VirtualConveyorItemRenderData(
                 itemId,
                 Matrix4x4.TRS(position, Quaternion.identity, Vector3.one),
-                gameObject.layer));
+                gameObject.layer,
+                ShouldUseSleepAwakeDarkTint(laneIndex)));
         }
     }
 
@@ -2087,13 +2088,6 @@ public class Block : BaseObject
             && GetConveyorItemIdAtLane(laneIndex) >= 0;
     }
 
-    public bool IsStraightConveyorDataLaneReadyToMove(int laneIndex)
-    {
-        return HasStraightConveyorDataItemAtLane(laneIndex)
-            && !WasConveyorItemMovedThisFrame(laneIndex)
-            && IsConveyorItemReadyToMoveAtLane(laneIndex);
-    }
-
     public bool TryMoveStraightConveyorDataLaneTo(Block destinationBlock, int sourceLaneIndex, int destinationLaneIndex)
     {
         if (destinationBlock == null
@@ -2160,12 +2154,14 @@ public class Block : BaseObject
             sourceLaneIndex,
             startWorldPosition,
             out Vector3 viaWorldPosition);
-        pathLength = GetConveyorMovePathLength(
-            sourceLaneIndex,
-            destinationBlock,
-            destinationLaneIndex,
-            false,
-            startWorldPosition);
+        if (hasViaWorldPosition)
+        {
+            float leadInLength = Vector3.Distance(startWorldPosition, viaWorldPosition);
+            if (leadInLength > ConveyorContinuousMotionEpsilon)
+            {
+                pathLength = Mathf.Max(0f, pathLength) + leadInLength;
+            }
+        }
 
         ClearConveyorItemAtLane(sourceLaneIndex);
         destinationBlock.SetConveyorItemAtLane(destinationLaneIndex, itemId, null, pickupGateState);
@@ -2448,6 +2444,47 @@ public class Block : BaseObject
         generator.SetConveyorDataMotionActive(this, HasActiveVirtualConveyorDataMotion());
         generator.SetConveyorActive(this, HasActiveConveyorMotion(), queueWake);
         generator.SetConveyorItemVisualActive(this, IsConveyorStackingEnabled() && HasAnyConveyorObjects());
+        RefreshSleepAwakeDebugVisuals();
+    }
+
+    public void RefreshSleepAwakeDebugVisuals(bool forceVirtualRenderRefresh = false)
+    {
+        if (!Application.isPlaying || !IsConveyorStackingEnabled())
+        {
+            return;
+        }
+
+        bool visualStateChanged = false;
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            bool isSleeping = IsConveyorItemSleepAwakeSleeping(laneIndex);
+            GetConveyorPortableObjectAtLane(laneIndex)?.SetSleepAwakeSleeping(isSleeping);
+
+            bool useDarkTint = ShouldUseSleepAwakeDarkTint(laneIndex);
+            if (laneIndex < conveyorLaneSleepAwakeDarkTintStates.Length
+                && conveyorLaneSleepAwakeDarkTintStates[laneIndex] != useDarkTint)
+            {
+                conveyorLaneSleepAwakeDarkTintStates[laneIndex] = useDarkTint;
+                visualStateChanged = true;
+            }
+        }
+
+        for (int laneIndex = laneCount; laneIndex < conveyorLaneSleepAwakeDarkTintStates.Length; laneIndex++)
+        {
+            if (!conveyorLaneSleepAwakeDarkTintStates[laneIndex])
+            {
+                continue;
+            }
+
+            conveyorLaneSleepAwakeDarkTintStates[laneIndex] = false;
+            visualStateChanged = true;
+        }
+
+        if (forceVirtualRenderRefresh || visualStateChanged)
+        {
+            MarkConveyorItemVisualDirty();
+        }
     }
 
     private void WakeConveyorMoveAttempts()
@@ -2462,13 +2499,14 @@ public class Block : BaseObject
             nextConveyorLaneMoveAttemptTimes[i] = 0f;
         }
 
+        RefreshSleepAwakeDebugVisuals();
         if (wasSleeping || hadCycleBlockedLanes)
         {
             RefreshConveyorActivityRegistration();
         }
     }
 
-    private void WakeConveyorMoveAttemptsAround()
+    public void WakeConveyorMoveAttemptsAround()
     {
         WakeConveyorMoveAttempts();
         if (!TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator))
@@ -2499,6 +2537,8 @@ public class Block : BaseObject
         {
             nextConveyorLaneMoveAttemptTimes[i] = 0f;
         }
+
+        RefreshSleepAwakeDebugVisuals();
     }
 
     public void TickConveyorSlotDots(float deltaTime)
@@ -3020,7 +3060,7 @@ public class Block : BaseObject
         }
     }
 
-    private void RefreshConveyorSlotDotVisuals()
+    public void RefreshConveyorSlotDotVisuals()
     {
         if (!Application.isPlaying)
         {
@@ -4106,6 +4146,7 @@ public class Block : BaseObject
         conveyorItemPickupGateStates[laneIndex] = pickupGateState;
         ClearConveyorLaneMovementHold(laneIndex);
         ClearConveyorLaneCycleBlockedSleep(laneIndex);
+        portableObject?.SetSleepAwakeSleeping(IsConveyorItemSleepAwakeSleeping(laneIndex));
         MarkConveyorItemVisualDirty();
     }
 
@@ -4121,6 +4162,7 @@ public class Block : BaseObject
         {
             conveyorCornerMotionStates.Remove(portableObject);
             conveyorLinearMotionStates.Remove(portableObject);
+            portableObject.SetSleepAwakeSleeping(false);
         }
 
         conveyorItemIds[laneIndex] = -1;
@@ -4130,6 +4172,11 @@ public class Block : BaseObject
         conveyorItemPickupGateStates[laneIndex] = default;
         ClearConveyorLaneMovementHold(laneIndex);
         ClearConveyorLaneCycleBlockedSleep(laneIndex);
+        if (laneIndex < conveyorLaneSleepAwakeDarkTintStates.Length)
+        {
+            conveyorLaneSleepAwakeDarkTintStates[laneIndex] = false;
+        }
+
         MarkConveyorItemVisualDirty();
     }
 
@@ -4209,6 +4256,29 @@ public class Block : BaseObject
         }
 
         return hadCycleBlockedLanes;
+    }
+
+    private bool IsConveyorItemSleepAwakeSleeping(int laneIndex)
+    {
+        if (!HasConveyorItemAtLane(laneIndex))
+        {
+            return false;
+        }
+
+        if (conveyorBlockedSleep || IsConveyorLaneCycleBlockedSleep(laneIndex))
+        {
+            return true;
+        }
+
+        TerrainGenerator generator = TerrainGenerator.Active;
+        return generator != null && generator.IsConveyorNetworkSleeping(this);
+    }
+
+    private bool ShouldUseSleepAwakeDarkTint(int laneIndex)
+    {
+        return GameManager.Instance != null
+            && GameManager.Instance.ShowSleepAwake
+            && IsConveyorItemSleepAwakeSleeping(laneIndex);
     }
 
     private void MarkConveyorItemVisualDirty()
@@ -4352,74 +4422,11 @@ public class Block : BaseObject
 
     private bool TryGetBestConveyorLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
-        if (TryGetConveyorLaneLayout(out _, out _, out int backColumn0LaneIndex, out int backColumn1LaneIndex)
-            && TryGetBestConveyorLaneIndexFromPair(
-                referenceWorldPosition,
-                backColumn0LaneIndex,
-                backColumn1LaneIndex,
-                out bestLaneIndex))
-        {
-            return true;
-        }
-
         return TryGetBestConveyorLaneIndexFromRange(referenceWorldPosition, GetConveyorLaneCount(), out bestLaneIndex);
     }
 
     private bool TryGetBestConveyorPlacementLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
-        bestLaneIndex = -1;
-        if (IsCornerConveyor())
-        {
-            return TryGetBestConveyorLaneIndex(referenceWorldPosition, out bestLaneIndex);
-        }
-
-        if (!TryGetConveyorLaneLayout(out int frontColumn0LaneIndex, out int frontColumn1LaneIndex, out int backColumn0LaneIndex, out int backColumn1LaneIndex)
-            || !TryGetPreferredConveyorColumn(referenceWorldPosition, out int preferredColumn))
-        {
-            return TryGetBestConveyorLaneIndex(referenceWorldPosition, out bestLaneIndex);
-        }
-
-        int preferredFrontLaneIndex = preferredColumn == 0 ? frontColumn0LaneIndex : frontColumn1LaneIndex;
-        int preferredBackLaneIndex = preferredColumn == 0 ? backColumn0LaneIndex : backColumn1LaneIndex;
-        int oppositeFrontLaneIndex = preferredColumn == 0 ? frontColumn1LaneIndex : frontColumn0LaneIndex;
-        int oppositeBackLaneIndex = preferredColumn == 0 ? backColumn1LaneIndex : backColumn0LaneIndex;
-
-        if (IsConveyorLaneOccupied(preferredBackLaneIndex) && IsConveyorLaneAvailable(oppositeBackLaneIndex))
-        {
-            bestLaneIndex = oppositeBackLaneIndex;
-            return true;
-        }
-
-        if (IsConveyorLaneOccupied(preferredFrontLaneIndex) && IsConveyorLaneAvailable(oppositeFrontLaneIndex))
-        {
-            bestLaneIndex = oppositeFrontLaneIndex;
-            return true;
-        }
-
-        if (IsConveyorLaneAvailable(preferredFrontLaneIndex) && IsConveyorLaneOccupied(oppositeFrontLaneIndex))
-        {
-            bestLaneIndex = preferredFrontLaneIndex;
-            return true;
-        }
-
-        if (IsConveyorLaneAvailable(preferredBackLaneIndex) && IsConveyorLaneOccupied(oppositeBackLaneIndex))
-        {
-            bestLaneIndex = preferredBackLaneIndex;
-            return true;
-        }
-
-        if (IsConveyorLaneAvailable(preferredBackLaneIndex))
-        {
-            bestLaneIndex = preferredBackLaneIndex;
-            return true;
-        }
-
-        if (IsConveyorLaneAvailable(preferredFrontLaneIndex))
-        {
-            bestLaneIndex = preferredFrontLaneIndex;
-            return true;
-        }
-
         return TryGetBestConveyorLaneIndex(referenceWorldPosition, out bestLaneIndex);
     }
 
@@ -4520,14 +4527,8 @@ public class Block : BaseObject
                     out int innerSourceLaneIndex,
                     out int innerDestinationLaneIndex))
             {
-                movedAny |= TryShiftConveyorLaneWithPairedHold(
-                    outerSourceLaneIndex,
-                    outerDestinationLaneIndex,
-                    innerSourceLaneIndex);
-                movedAny |= TryShiftConveyorLaneWithPairedHold(
-                    innerSourceLaneIndex,
-                    innerDestinationLaneIndex,
-                    outerSourceLaneIndex);
+                movedAny |= TryShiftConveyorLaneWithPairedHold(outerSourceLaneIndex, innerSourceLaneIndex);
+                movedAny |= TryShiftConveyorLaneWithPairedHold(innerSourceLaneIndex, outerSourceLaneIndex);
             }
 
             AdvanceStartedCornerConveyorMotionStates(conveyorSpeed, deltaTime);
@@ -4544,10 +4545,10 @@ public class Block : BaseObject
             return;
         }
 
-        movedAny |= TryAdvanceConveyorFrontLane(frontColumn0LaneIndex);
-        movedAny |= TryAdvanceConveyorFrontLane(frontColumn1LaneIndex);
-        movedAny |= TryShiftConveyorLane(backColumn0LaneIndex, frontColumn0LaneIndex);
-        movedAny |= TryShiftConveyorLane(backColumn1LaneIndex, frontColumn1LaneIndex);
+        movedAny |= TryMoveConveyorLane(frontColumn0LaneIndex);
+        movedAny |= TryMoveConveyorLane(frontColumn1LaneIndex);
+        movedAny |= TryMoveConveyorLane(backColumn0LaneIndex);
+        movedAny |= TryMoveConveyorLane(backColumn1LaneIndex);
         AdvanceStartedLinearConveyorMotionStates(conveyorSpeed, deltaTime);
         UpdateConveyorBlockedRetry(movedAny);
         RefreshConveyorActivityRegistration();
@@ -5017,77 +5018,6 @@ public class Block : BaseObject
         }
 
         return Vector3.Lerp(viaWorldPosition, targetWorldPosition, Mathf.Clamp01((distance - firstLength) / secondLength));
-    }
-
-    private float GetConveyorLinearMotionReadyProgress(
-        Vector3 startWorldPosition,
-        bool hasViaWorldPosition,
-        Vector3 viaWorldPosition,
-        Vector3 targetWorldPosition,
-        float pathLength)
-    {
-        if (!hasViaWorldPosition)
-        {
-            return ConveyorContinuousMoveReadyProgress;
-        }
-
-        float firstLength = Vector3.Distance(startWorldPosition, viaWorldPosition);
-        float secondLength = Vector3.Distance(viaWorldPosition, targetWorldPosition);
-        float resolvedPathLength = pathLength > ConveyorContinuousMotionEpsilon
-            ? pathLength
-            : firstLength + secondLength;
-        if (resolvedPathLength <= ConveyorContinuousMotionEpsilon)
-        {
-            return 1f;
-        }
-
-        return Mathf.Max(ConveyorContinuousMoveReadyProgress, Mathf.Clamp01(firstLength / resolvedPathLength));
-    }
-
-    private float GetConveyorLinearMotionReadyProgress(
-        ConveyorCornerContinuation cornerContinuation,
-        Vector3 startWorldPosition,
-        bool hasViaWorldPosition,
-        Vector3 viaWorldPosition,
-        Vector3 targetWorldPosition,
-        float pathLength)
-    {
-        float cornerRemainingPathLength = GetConveyorCornerContinuationRemainingPathLength(cornerContinuation);
-        if (cornerRemainingPathLength <= ConveyorContinuousMotionEpsilon)
-        {
-            return GetConveyorLinearMotionReadyProgress(
-                startWorldPosition,
-                hasViaWorldPosition,
-                viaWorldPosition,
-                targetWorldPosition,
-                pathLength);
-        }
-
-        float resolvedPathLength = pathLength > ConveyorContinuousMotionEpsilon
-            ? pathLength
-            : cornerRemainingPathLength;
-        if (resolvedPathLength <= ConveyorContinuousMotionEpsilon)
-        {
-            return 1f;
-        }
-
-        Vector3 linearStartWorldPosition = GetConveyorCornerContinuationEndWorldPosition(
-            cornerContinuation,
-            startWorldPosition);
-        float linearPathLength = Mathf.Max(0f, resolvedPathLength - cornerRemainingPathLength);
-        if (linearPathLength <= ConveyorContinuousMotionEpsilon)
-        {
-            return 1f;
-        }
-
-        float linearReadyProgress = GetConveyorLinearMotionReadyProgress(
-            linearStartWorldPosition,
-            hasViaWorldPosition,
-            viaWorldPosition,
-            targetWorldPosition,
-            linearPathLength);
-        float readyDistance = cornerRemainingPathLength + (linearPathLength * linearReadyProgress);
-        return Mathf.Clamp01(readyDistance / resolvedPathLength);
     }
 
     private void UpdateConveyorObjectWorldPositions(float conveyorSpeed, float deltaTime)
@@ -5702,11 +5632,6 @@ public class Block : BaseObject
         conveyorLinearMotionTickBuffer.Clear();
     }
 
-    private bool TryAdvanceConveyorFrontLane(int laneIndex)
-    {
-        return TryMoveConveyorLane(laneIndex);
-    }
-
     private bool TryAdvanceConveyorFrontLaneWithPairedHold(int laneIndex, int pairedLaneIndex)
     {
         if (ShouldHoldConveyorLaneForPairedMove(laneIndex, pairedLaneIndex, true))
@@ -5717,14 +5642,8 @@ public class Block : BaseObject
         return TryMoveConveyorLane(laneIndex, out _, out _, true);
     }
 
-    private bool TryShiftConveyorLane(int sourceLaneIndex, int destinationLaneIndex)
-    {
-        return TryMoveConveyorLane(sourceLaneIndex);
-    }
-
     private bool TryShiftConveyorLaneWithPairedHold(
         int sourceLaneIndex,
-        int destinationLaneIndex,
         int pairedSourceLaneIndex)
     {
         if (ShouldHoldConveyorLaneForPairedMove(sourceLaneIndex, pairedSourceLaneIndex, true))
@@ -6563,28 +6482,7 @@ public class Block : BaseObject
                 return false;
             }
 
-            if (motionState.progress >= 1f - ConveyorContinuousMotionEpsilon)
-            {
-                return true;
-            }
-
-            if (motionState.useCornerMotion)
-            {
-                return motionState.progress >= GetConveyorCornerMotionReadyProgress(
-                    motionState.sourceLaneIndex,
-                    motionState.destinationLaneIndex,
-                    motionState.startWorldPosition,
-                    motionState.pathLength);
-            }
-
-            Vector3 targetWorldPosition = GetConveyorLaneWorldPosition(laneIndex);
-            return motionState.progress >= GetConveyorLinearMotionReadyProgress(
-                motionState.cornerContinuation,
-                motionState.startWorldPosition,
-                motionState.hasViaWorldPosition,
-                motionState.viaWorldPosition,
-                targetWorldPosition,
-                motionState.pathLength);
+            return motionState.progress >= 1f - ConveyorContinuousMotionEpsilon;
         }
 
         return true;
@@ -6604,11 +6502,7 @@ public class Block : BaseObject
                 return false;
             }
 
-            return cornerMotionState.progress >= GetConveyorCornerMotionReadyProgress(
-                cornerMotionState.sourceLaneIndex,
-                cornerMotionState.destinationLaneIndex,
-                cornerMotionState.startWorldPosition,
-                cornerMotionState.pathLength);
+            return cornerMotionState.progress >= 1f - ConveyorContinuousMotionEpsilon;
         }
 
         if (conveyorLinearMotionStates.TryGetValue(portableObject, out ConveyorLinearMotionState linearMotionState))
@@ -6618,19 +6512,7 @@ public class Block : BaseObject
                 return false;
             }
 
-            if (linearMotionState.progress >= 1f - ConveyorContinuousMotionEpsilon)
-            {
-                return true;
-            }
-
-            Vector3 targetWorldPosition = GetConveyorLaneWorldPosition(laneIndex);
-            return linearMotionState.progress >= GetConveyorLinearMotionReadyProgress(
-                linearMotionState.cornerContinuation,
-                linearMotionState.startWorldPosition,
-                linearMotionState.hasViaWorldPosition,
-                linearMotionState.viaWorldPosition,
-                targetWorldPosition,
-                linearMotionState.pathLength);
+            return linearMotionState.progress >= 1f - ConveyorContinuousMotionEpsilon;
         }
 
         return IsConveyorObjectSettledAtLane(laneIndex, portableObject);
@@ -7228,16 +7110,6 @@ public class Block : BaseObject
             && IsValidConveyorLaneIndex(laneIndex);
     }
 
-    private bool TryGetBestConveyorLaneIndexFromPair(Vector3 referenceWorldPosition, int firstLaneIndex, int secondLaneIndex, out int bestLaneIndex)
-    {
-        bestLaneIndex = -1;
-        float bestDistanceSqr = float.MaxValue;
-
-        TryConsiderBestConveyorLane(referenceWorldPosition, firstLaneIndex, true, ref bestLaneIndex, ref bestDistanceSqr);
-        TryConsiderBestConveyorLane(referenceWorldPosition, secondLaneIndex, true, ref bestLaneIndex, ref bestDistanceSqr);
-        return bestLaneIndex >= 0;
-    }
-
     private bool TryGetBestConveyorLaneIndexFromRange(Vector3 referenceWorldPosition, int laneCount, out int bestLaneIndex)
     {
         bestLaneIndex = -1;
@@ -7366,20 +7238,6 @@ public class Block : BaseObject
             default:
                 return -1;
         }
-    }
-
-    private bool IsConveyorLaneAvailable(int laneIndex)
-    {
-        return laneIndex >= 0
-               && IsValidConveyorLaneIndex(laneIndex)
-               && !HasConveyorItemAtLane(laneIndex);
-    }
-
-    private bool IsConveyorLaneOccupied(int laneIndex)
-    {
-        return laneIndex >= 0
-               && IsValidConveyorLaneIndex(laneIndex)
-               && HasConveyorItemAtLane(laneIndex);
     }
 
     private bool TryGetConveyorLocalAxes(out Vector2 localFlowAxis, out Vector2 localRightAxis)
@@ -8326,29 +8184,6 @@ public class Block : BaseObject
             && conveyorItemMotionStates[laneIndex].useCornerMotion
             && conveyorItemMotionStates[laneIndex].sourceLaneIndex == sourceLaneIndex
             && conveyorItemMotionStates[laneIndex].destinationLaneIndex == destinationLaneIndex;
-    }
-
-    private float GetConveyorCornerMotionReadyProgress(
-        int sourceLaneIndex,
-        int destinationLaneIndex,
-        Vector3 startWorldPosition,
-        float pathLength)
-    {
-        float arcLength = GetConveyorCornerMotionPathLength(sourceLaneIndex, destinationLaneIndex);
-        float resolvedPathLength = ResolveConveyorCornerMotionPathLength(
-            sourceLaneIndex,
-            destinationLaneIndex,
-            startWorldPosition,
-            pathLength);
-        if (resolvedPathLength <= ConveyorContinuousMotionEpsilon)
-        {
-            return 1f;
-        }
-
-        float leadInLength = Mathf.Max(0f, resolvedPathLength - Mathf.Max(0f, arcLength));
-        return Mathf.Max(
-            ConveyorContinuousMoveReadyProgress,
-            Mathf.Clamp01(leadInLength / resolvedPathLength));
     }
 
     private float GetConveyorCornerCarryPathLength(int sourceLaneIndex, int destinationLaneIndex)

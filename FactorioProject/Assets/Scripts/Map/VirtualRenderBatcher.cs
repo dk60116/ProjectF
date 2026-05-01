@@ -20,6 +20,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly bool ReceiveShadows;
     public readonly bool HasUvScroll;
     public readonly int UvScrollYTicks;
+    public readonly bool UseSleepAwakeDarkTint;
 
     public VirtualRenderBatchKey(
         Mesh mesh,
@@ -29,7 +30,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         ShadowCastingMode shadowCastingMode,
         bool receiveShadows,
         bool hasUvScroll,
-        int uvScrollYTicks)
+        int uvScrollYTicks,
+        bool useSleepAwakeDarkTint = false)
     {
         Mesh = mesh;
         Material = material;
@@ -39,6 +41,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         ReceiveShadows = receiveShadows;
         HasUvScroll = hasUvScroll;
         UvScrollYTicks = hasUvScroll ? uvScrollYTicks : 0;
+        UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
     }
 
     public static int QuantizeUvScroll(float uvScrollY)
@@ -55,7 +58,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && ShadowCastingMode == other.ShadowCastingMode
             && ReceiveShadows == other.ReceiveShadows
             && HasUvScroll == other.HasUvScroll
-            && UvScrollYTicks == other.UvScrollYTicks;
+            && UvScrollYTicks == other.UvScrollYTicks
+            && UseSleepAwakeDarkTint == other.UseSleepAwakeDarkTint;
     }
 
     public override bool Equals(object obj)
@@ -75,6 +79,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
             hash = (hash * 397) ^ (HasUvScroll ? 1 : 0);
             hash = (hash * 397) ^ UvScrollYTicks;
+            hash = (hash * 397) ^ (UseSleepAwakeDarkTint ? 1 : 0);
             return hash;
         }
     }
@@ -260,7 +265,7 @@ public sealed class VirtualRenderBatchCollection
 
     private MaterialPropertyBlock ResolveBatchPropertyBlock(VirtualRenderBatchKey key, BatchRenderCache batchCache)
     {
-        if (!key.HasUvScroll)
+        if (!key.HasUvScroll && !key.UseSleepAwakeDarkTint)
         {
             return null;
         }
@@ -270,8 +275,18 @@ public sealed class VirtualRenderBatchCollection
             batchCache.PropertyBlock = new MaterialPropertyBlock();
         }
 
-        batchCache.PropertyBlock.SetFloat(UvScrollXShaderId, 0f);
-        batchCache.PropertyBlock.SetFloat(UvScrollYShaderId, key.UvScrollYTicks / (float)VirtualRenderBatchKey.UvScrollQuantize);
+        batchCache.PropertyBlock.Clear();
+        if (key.HasUvScroll)
+        {
+            batchCache.PropertyBlock.SetFloat(UvScrollXShaderId, 0f);
+            batchCache.PropertyBlock.SetFloat(UvScrollYShaderId, key.UvScrollYTicks / (float)VirtualRenderBatchKey.UvScrollQuantize);
+        }
+
+        if (key.UseSleepAwakeDarkTint)
+        {
+            SleepAwakeDebugVisual.ApplySleepingColor(batchCache.PropertyBlock, key.Material);
+        }
+
         return batchCache.PropertyBlock;
     }
 

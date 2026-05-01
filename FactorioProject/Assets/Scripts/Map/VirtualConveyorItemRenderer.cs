@@ -5,16 +5,18 @@ using UnityEngine.Rendering;
 
 public readonly struct VirtualConveyorItemRenderData
 {
-    public VirtualConveyorItemRenderData(int itemId, Matrix4x4 matrix, int layer)
+    public VirtualConveyorItemRenderData(int itemId, Matrix4x4 matrix, int layer, bool useSleepAwakeDarkTint)
     {
         ItemId = itemId;
         Matrix = matrix;
         Layer = layer;
+        UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
     }
 
     public readonly int ItemId;
     public readonly Matrix4x4 Matrix;
     public readonly int Layer;
+    public readonly bool UseSleepAwakeDarkTint;
 }
 
 [DisallowMultipleComponent]
@@ -290,7 +292,8 @@ public sealed class VirtualConveyorItemRenderer : MonoBehaviour
             ShadowCastingMode.On,
             true,
             false,
-            0);
+            0,
+            renderData.UseSleepAwakeDarkTint);
 
         batches.AddOwnedMatrix(blockCache, blockCache.batchEntries, key, renderData.Matrix);
     }
@@ -401,7 +404,8 @@ public sealed class VirtualConveyorItemRenderer : MonoBehaviour
             ShadowCastingMode.On,
             true,
             false,
-            0);
+            0,
+            renderData.UseSleepAwakeDarkTint);
 
         dynamicBatches.AddMatrix(key, renderData.Matrix);
     }
