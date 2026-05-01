@@ -21,6 +21,11 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly bool HasUvScroll;
     public readonly int UvScrollYTicks;
     public readonly bool UseSleepAwakeDarkTint;
+    public readonly bool UseBeltItemLineDebugColor;
+    public readonly Color32 BeltItemLineDebugColor;
+    public readonly int BatchGroupId;
+    public readonly int BatchCellX;
+    public readonly int BatchCellZ;
 
     public VirtualRenderBatchKey(
         Mesh mesh,
@@ -31,7 +36,12 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         bool receiveShadows,
         bool hasUvScroll,
         int uvScrollYTicks,
-        bool useSleepAwakeDarkTint = false)
+        bool useSleepAwakeDarkTint = false,
+        bool useBeltItemLineDebugColor = false,
+        Color32 beltItemLineDebugColor = default,
+        int batchGroupId = 0,
+        int batchCellX = 0,
+        int batchCellZ = 0)
     {
         Mesh = mesh;
         Material = material;
@@ -42,6 +52,11 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         HasUvScroll = hasUvScroll;
         UvScrollYTicks = hasUvScroll ? uvScrollYTicks : 0;
         UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
+        UseBeltItemLineDebugColor = useBeltItemLineDebugColor;
+        BeltItemLineDebugColor = useBeltItemLineDebugColor ? beltItemLineDebugColor : (Color32)Color.white;
+        BatchGroupId = batchGroupId;
+        BatchCellX = batchCellX;
+        BatchCellZ = batchCellZ;
     }
 
     public static int QuantizeUvScroll(float uvScrollY)
@@ -59,7 +74,12 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && ReceiveShadows == other.ReceiveShadows
             && HasUvScroll == other.HasUvScroll
             && UvScrollYTicks == other.UvScrollYTicks
-            && UseSleepAwakeDarkTint == other.UseSleepAwakeDarkTint;
+            && UseSleepAwakeDarkTint == other.UseSleepAwakeDarkTint
+            && UseBeltItemLineDebugColor == other.UseBeltItemLineDebugColor
+            && BeltItemLineDebugColor.Equals(other.BeltItemLineDebugColor)
+            && BatchGroupId == other.BatchGroupId
+            && BatchCellX == other.BatchCellX
+            && BatchCellZ == other.BatchCellZ;
     }
 
     public override bool Equals(object obj)
@@ -80,6 +100,11 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ (HasUvScroll ? 1 : 0);
             hash = (hash * 397) ^ UvScrollYTicks;
             hash = (hash * 397) ^ (UseSleepAwakeDarkTint ? 1 : 0);
+            hash = (hash * 397) ^ (UseBeltItemLineDebugColor ? 1 : 0);
+            hash = (hash * 397) ^ BeltItemLineDebugColor.GetHashCode();
+            hash = (hash * 397) ^ BatchGroupId;
+            hash = (hash * 397) ^ BatchCellX;
+            hash = (hash * 397) ^ BatchCellZ;
             return hash;
         }
     }
@@ -265,7 +290,7 @@ public sealed class VirtualRenderBatchCollection
 
     private MaterialPropertyBlock ResolveBatchPropertyBlock(VirtualRenderBatchKey key, BatchRenderCache batchCache)
     {
-        if (!key.HasUvScroll && !key.UseSleepAwakeDarkTint)
+        if (!key.HasUvScroll && !key.UseSleepAwakeDarkTint && !key.UseBeltItemLineDebugColor)
         {
             return null;
         }
@@ -282,7 +307,17 @@ public sealed class VirtualRenderBatchCollection
             batchCache.PropertyBlock.SetFloat(UvScrollYShaderId, key.UvScrollYTicks / (float)VirtualRenderBatchKey.UvScrollQuantize);
         }
 
-        if (key.UseSleepAwakeDarkTint)
+        if (key.UseBeltItemLineDebugColor)
+        {
+            Color color = key.BeltItemLineDebugColor;
+            if (key.UseSleepAwakeDarkTint)
+            {
+                color = SleepAwakeDebugVisual.Darken(color);
+            }
+
+            BeltItemLineDebugVisual.ApplySolidColor(batchCache.PropertyBlock, color);
+        }
+        else if (key.UseSleepAwakeDarkTint)
         {
             SleepAwakeDebugVisual.ApplySleepingColor(batchCache.PropertyBlock, key.Material);
         }

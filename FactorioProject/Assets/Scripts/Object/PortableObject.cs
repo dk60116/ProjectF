@@ -24,17 +24,21 @@ public class PortableObject : MonoBehaviour
     private MeshFilter body;
 
     private MeshRenderer bodyRenderer;
-    private PortableObjectBatchRenderer batchRenderer;
+    private PortableItemRenderer portableItemRenderer;
     private Transform cachedTransform;
     private GameObject cachedGameObject;
     private DroppedItemPickupGate cachedPickupGate;
-    private MaterialPropertyBlock sleepAwakePropertyBlock;
+    private MaterialPropertyBlock debugVisualPropertyBlock;
     private bool useBatchedRendering;
     private bool suppressVisualRendering;
     private bool isMovingToTarget;
     private bool sleepAwakeSleeping;
-    private bool sleepAwakeVisualStateInitialized;
+    private bool debugVisualStateInitialized;
     private bool lastSleepAwakeDarkTint;
+    private bool beltItemLineDebugActive;
+    private bool lastBeltItemLineDebugActive;
+    private Color32 beltItemLineDebugColor = Color.white;
+    private Color32 lastBeltItemLineDebugColor;
     private int lastConveyorMoveFrame = -1;
 
     public int ItemId => id;
@@ -66,6 +70,14 @@ public class PortableObject : MonoBehaviour
         }
     }
 
+    public static void RefreshAllBeltItemLineDebugVisuals()
+    {
+        foreach (PortableObject portableObject in liveObjects)
+        {
+            portableObject?.RefreshSleepAwakeVisual(true);
+        }
+    }
+
     public DroppedItemPickupGate GetOrAddPickupGate()
     {
         DroppedItemPickupGate gate = PickupGate;
@@ -88,37 +100,78 @@ public class PortableObject : MonoBehaviour
 
         sleepAwakeSleeping = sleeping;
         RefreshSleepAwakeVisual(true);
-        NotifyBatchRenderDataChanged();
+        MarkPortableItemRenderDataDirty();
     }
 
     public void RefreshSleepAwakeVisual(bool force = false)
     {
         ResolveBodyRenderer();
         bool useDarkTint = ShouldUseSleepAwakeDarkTint();
-        if (!force && sleepAwakeVisualStateInitialized && lastSleepAwakeDarkTint == useDarkTint)
+        bool useBeltItemLineDebugColor = ShouldUseBeltItemLineDebugColor();
+        if (!force
+            && debugVisualStateInitialized
+            && lastSleepAwakeDarkTint == useDarkTint
+            && lastBeltItemLineDebugActive == useBeltItemLineDebugColor
+            && (!useBeltItemLineDebugColor || lastBeltItemLineDebugColor.Equals(beltItemLineDebugColor)))
         {
             return;
         }
 
-        sleepAwakeVisualStateInitialized = true;
+        debugVisualStateInitialized = true;
         lastSleepAwakeDarkTint = useDarkTint;
-        batchRenderer?.MarkDirty();
+        lastBeltItemLineDebugActive = useBeltItemLineDebugColor;
+        lastBeltItemLineDebugColor = beltItemLineDebugColor;
+        portableItemRenderer?.MarkDirty();
 
         if (bodyRenderer == null)
         {
             return;
         }
 
-        if (!useDarkTint)
+        if (!useDarkTint && !useBeltItemLineDebugColor)
         {
             bodyRenderer.SetPropertyBlock(null);
             return;
         }
 
-        sleepAwakePropertyBlock ??= new MaterialPropertyBlock();
-        sleepAwakePropertyBlock.Clear();
-        SleepAwakeDebugVisual.ApplySleepingColor(sleepAwakePropertyBlock, bodyRenderer.sharedMaterial);
-        bodyRenderer.SetPropertyBlock(sleepAwakePropertyBlock);
+        debugVisualPropertyBlock ??= new MaterialPropertyBlock();
+        debugVisualPropertyBlock.Clear();
+        if (useBeltItemLineDebugColor)
+        {
+            Color color = beltItemLineDebugColor;
+            if (useDarkTint)
+            {
+                color = SleepAwakeDebugVisual.Darken(color);
+            }
+
+            BeltItemLineDebugVisual.ApplySolidColor(debugVisualPropertyBlock, color);
+        }
+        else
+        {
+            SleepAwakeDebugVisual.ApplySleepingColor(debugVisualPropertyBlock, bodyRenderer.sharedMaterial);
+        }
+
+        bodyRenderer.SetPropertyBlock(debugVisualPropertyBlock);
+    }
+
+    public void SetBeltItemLineDebugColor(bool active, Color32 color)
+    {
+        if (beltItemLineDebugActive == active
+            && (!active || beltItemLineDebugColor.Equals(color)))
+        {
+            RefreshSleepAwakeVisual();
+            return;
+        }
+
+        beltItemLineDebugActive = active;
+        beltItemLineDebugColor = active ? color : (Color32)Color.white;
+        RefreshSleepAwakeVisual(true);
+        MarkPortableItemRenderDataDirty();
+    }
+
+    public void ClearBeltItemLineDebugColor()
+    {
+        SetBeltItemLineDebugColor(false, Color.white);
     }
 
     public void MarkMovedByConveyorThisFrame()
@@ -129,7 +182,7 @@ public class PortableObject : MonoBehaviour
     public void SetCachedParent(Transform parent, bool worldPositionStays)
     {
         CachedTransform.SetParent(parent, worldPositionStays);
-        NotifyBatchRenderDataChanged();
+        MarkPortableItemRenderDataDirty();
     }
 
     public void SetCachedActive(bool active)
@@ -141,21 +194,21 @@ public class PortableObject : MonoBehaviour
         }
 
         CachedGameObject.SetActive(active);
-        NotifyBatchRenderDataChanged();
+        MarkPortableItemRenderDataDirty();
         UpdateRendererVisibility();
     }
 
     public void SetWorldPosition(Vector3 position)
     {
         CachedTransform.position = position;
-        NotifyBatchRenderDataChanged();
+        MarkPortableItemRenderDataDirty();
     }
 
-    public void NotifyBatchRenderDataChanged()
+    private void MarkPortableItemRenderDataDirty()
     {
         if (useBatchedRendering)
         {
-            batchRenderer?.MarkDirty();
+            portableItemRenderer?.MarkDirty();
         }
     }
     
@@ -199,7 +252,7 @@ public class PortableObject : MonoBehaviour
 
         body.sharedMesh = portableMesh;
         bodyRenderer.sharedMaterial = portableMat;
-        NotifyBatchRenderDataChanged();
+        MarkPortableItemRenderDataDirty();
         UpdateRendererVisibility();
         RefreshSleepAwakeVisual(true);
         return true;
@@ -209,9 +262,9 @@ public class PortableObject : MonoBehaviour
     {
         suppressVisualRendering = false;
         ResolveBodyRenderer();
-        if (useBatchedRendering == shouldUseBatchedRendering && (!useBatchedRendering || batchRenderer != null))
+        if (useBatchedRendering == shouldUseBatchedRendering && (!useBatchedRendering || portableItemRenderer != null))
         {
-            NotifyBatchRenderDataChanged();
+            MarkPortableItemRenderDataDirty();
             UpdateRendererVisibility();
             return;
         }
@@ -219,21 +272,21 @@ public class PortableObject : MonoBehaviour
         useBatchedRendering = shouldUseBatchedRendering;
         if (!useBatchedRendering)
         {
-            UnregisterFromBatchRenderer();
+            UnregisterFromPortableItemRenderer();
             UpdateRendererVisibility();
             return;
         }
 
-        batchRenderer = ResolveBatchRenderer();
-        if (batchRenderer == null)
+        portableItemRenderer = ResolvePortableItemRenderer();
+        if (portableItemRenderer == null)
         {
             useBatchedRendering = false;
             UpdateRendererVisibility();
             return;
         }
 
-        batchRenderer.Register(this);
-        NotifyBatchRenderDataChanged();
+        portableItemRenderer.Register(this);
+        MarkPortableItemRenderDataDirty();
         UpdateRendererVisibility();
     }
 
@@ -251,17 +304,18 @@ public class PortableObject : MonoBehaviour
         {
             if (useBatchedRendering)
             {
-                UnregisterFromBatchRenderer();
+                UnregisterFromPortableItemRenderer();
             }
 
             useBatchedRendering = false;
         }
 
-        NotifyBatchRenderDataChanged();
+        MarkPortableItemRenderDataDirty();
         UpdateRendererVisibility();
     }
 
     public bool TryGetBatchRenderData(
+        out int itemId,
         out Mesh mesh,
         out Material material,
         out Matrix4x4 localToWorldMatrix,
@@ -269,10 +323,13 @@ public class PortableObject : MonoBehaviour
         out int layer,
         out ShadowCastingMode shadowCastingMode,
         out bool receiveShadows,
-        out bool useSleepAwakeDarkTint)
+        out bool useSleepAwakeDarkTint,
+        out bool useBeltItemLineDebugColor,
+        out Color32 beltItemLineDebugColor)
     {
         ResolveBodyRenderer();
 
+        itemId = id;
         mesh = body != null ? body.sharedMesh : null;
         material = bodyRenderer != null ? bodyRenderer.sharedMaterial : null;
         Transform targetTransform = CachedTransform;
@@ -283,9 +340,12 @@ public class PortableObject : MonoBehaviour
         shadowCastingMode = bodyRenderer != null ? bodyRenderer.shadowCastingMode : ShadowCastingMode.Off;
         receiveShadows = bodyRenderer != null && bodyRenderer.receiveShadows;
         useSleepAwakeDarkTint = ShouldUseSleepAwakeDarkTint();
+        useBeltItemLineDebugColor = ShouldUseBeltItemLineDebugColor();
+        beltItemLineDebugColor = useBeltItemLineDebugColor ? this.beltItemLineDebugColor : (Color32)Color.white;
 
         return useBatchedRendering
                && targetGameObject.activeInHierarchy
+               && itemId >= 0
                && bodyRenderer != null
                && mesh != null
                && material != null;
@@ -328,6 +388,7 @@ public class PortableObject : MonoBehaviour
 
         SetBatchedRendering(false);
         SetSleepAwakeSleeping(false);
+        ClearBeltItemLineDebugColor();
         CachedTransform.DOKill();
         ResolveBodyRenderer();
         isMovingToTarget = true;
@@ -404,8 +465,8 @@ public class PortableObject : MonoBehaviour
         cachedGameObject = gameObject;
         if (useBatchedRendering)
         {
-            batchRenderer = ResolveBatchRenderer();
-            batchRenderer?.Register(this);
+            portableItemRenderer = ResolvePortableItemRenderer();
+            portableItemRenderer?.Register(this);
         }
 
         UpdateRendererVisibility();
@@ -416,13 +477,13 @@ public class PortableObject : MonoBehaviour
     {
         liveObjects.Remove(this);
         isMovingToTarget = false;
-        UnregisterFromBatchRenderer();
+        UnregisterFromPortableItemRenderer();
     }
 
     private void OnDestroy()
     {
         liveObjects.Remove(this);
-        UnregisterFromBatchRenderer();
+        UnregisterFromPortableItemRenderer();
     }
 
     private void ResolveBodyRenderer()
@@ -452,40 +513,40 @@ public class PortableObject : MonoBehaviour
         }
     }
 
-    private PortableObjectBatchRenderer ResolveBatchRenderer()
+    private PortableItemRenderer ResolvePortableItemRenderer()
     {
-        if (batchRenderer != null)
+        if (portableItemRenderer != null)
         {
-            return batchRenderer;
+            return portableItemRenderer;
         }
 
         TerrainGenerator generator = CachedTransform.GetComponentInParent<TerrainGenerator>();
+        if (generator == null)
+        {
+            generator = TerrainGenerator.Active;
+        }
+
         GameObject host = generator != null ? generator.gameObject : null;
         if (host == null)
         {
             return null;
         }
 
-        batchRenderer = host.GetComponent<PortableObjectBatchRenderer>();
-        if (batchRenderer == null)
-        {
-            batchRenderer = host.AddComponent<PortableObjectBatchRenderer>();
-        }
-
-        return batchRenderer;
+        portableItemRenderer = PortableItemRenderer.EnsureFor(host);
+        return portableItemRenderer;
     }
 
-    private void UnregisterFromBatchRenderer()
+    private void UnregisterFromPortableItemRenderer()
     {
-        if (batchRenderer == null)
+        if (portableItemRenderer == null)
         {
             return;
         }
 
-        batchRenderer.Unregister(this);
+        portableItemRenderer.Unregister(this);
         if (!useBatchedRendering)
         {
-            batchRenderer = null;
+            portableItemRenderer = null;
         }
     }
 
@@ -506,6 +567,13 @@ public class PortableObject : MonoBehaviour
         return sleepAwakeSleeping
             && GameManager.Instance != null
             && GameManager.Instance.ShowSleepAwake;
+    }
+
+    private bool ShouldUseBeltItemLineDebugColor()
+    {
+        return beltItemLineDebugActive
+            && GameManager.Instance != null
+            && GameManager.Instance.ShowBeltItemLine;
     }
 }
 
@@ -560,5 +628,32 @@ internal static class SleepAwakeDebugVisual
         Color color = GetSleepingColor(material);
         propertyBlock.SetColor(BaseColorPropertyId, color);
         propertyBlock.SetColor(ColorPropertyId, color);
+    }
+}
+
+internal static class BeltItemLineDebugVisual
+{
+    private static readonly int BaseMapPropertyId = Shader.PropertyToID("_BaseMap");
+    private static readonly int MainTexPropertyId = Shader.PropertyToID("_MainTex");
+
+    public static Color32 GetColor(int lineId)
+    {
+        float hue = Mathf.Repeat(lineId * 0.61803398875f, 1f);
+        Color color = Color.HSVToRGB(hue, 0.74f, 1f);
+        color.a = 1f;
+        return color;
+    }
+
+    public static void ApplySolidColor(MaterialPropertyBlock propertyBlock, Color color)
+    {
+        if (propertyBlock == null)
+        {
+            return;
+        }
+
+        propertyBlock.SetColor(SleepAwakeDebugVisual.BaseColorPropertyId, color);
+        propertyBlock.SetColor(SleepAwakeDebugVisual.ColorPropertyId, color);
+        propertyBlock.SetTexture(BaseMapPropertyId, Texture2D.whiteTexture);
+        propertyBlock.SetTexture(MainTexPropertyId, Texture2D.whiteTexture);
     }
 }

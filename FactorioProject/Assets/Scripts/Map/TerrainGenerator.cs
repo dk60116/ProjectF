@@ -123,6 +123,36 @@ public class TerrainGenerator : MonoBehaviour
         public bool IsCycle => isCycle;
     }
 
+    private readonly struct BeltItemLineLaneKey : IEquatable<BeltItemLineLaneKey>
+    {
+        public BeltItemLineLaneKey(Block block, int laneIndex)
+        {
+            Block = block;
+            LaneIndex = laneIndex;
+        }
+
+        public readonly Block Block;
+        public readonly int LaneIndex;
+
+        public bool Equals(BeltItemLineLaneKey other)
+        {
+            return Block == other.Block && LaneIndex == other.LaneIndex;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is BeltItemLineLaneKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return ((Block != null ? Block.GetInstanceID() : 0) * 397) ^ LaneIndex;
+            }
+        }
+    }
+
     [Serializable]
     public struct BlockSet
     {
@@ -502,6 +532,16 @@ public class TerrainGenerator : MonoBehaviour
     private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
     private bool conveyorSlotDotVisibilityInitialized;
     private bool lastShowConveyorSlotDots;
+    private bool beltItemLineVisibilityInitialized;
+    private bool lastShowBeltItemLine;
+    private bool beltItemLineVisualsDirty;
+    private bool beltItemLineDebugCacheDirty = true;
+    private bool applyingBeltItemLineRuntimeVisibility;
+    private readonly Dictionary<BeltItemLineLaneKey, int> beltItemLineDebugRunIds = new Dictionary<BeltItemLineLaneKey, int>();
+    private readonly List<BeltItemLineLaneKey> beltItemLineDebugOccupiedLanes = new List<BeltItemLineLaneKey>(512);
+    private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugOccupiedLaneSet = new HashSet<BeltItemLineLaneKey>();
+    private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugIncomingLanes = new HashSet<BeltItemLineLaneKey>();
+    private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugVisitedLanes = new HashSet<BeltItemLineLaneKey>();
     private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
     private int conveyorItemVisualBlockSetVersion;
@@ -544,7 +584,7 @@ public class TerrainGenerator : MonoBehaviour
     private InstallationPlacementController installationRestoreController;
     private InstallationBackgroundSimulator installationBackgroundSimulator;
     private BlockPool blockPool;
-    private VirtualConveyorItemRenderer virtualConveyorItemRenderer;
+    private PortableItemRenderer portableItemRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private Coroutine chunkGenerationCoroutine;
 
@@ -578,7 +618,7 @@ public class TerrainGenerator : MonoBehaviour
     private void Awake()
     {
         Active = this;
-        EnsureVirtualConveyorItemRenderer();
+        EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
     }
 
@@ -603,7 +643,7 @@ public class TerrainGenerator : MonoBehaviour
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
-        EnsureVirtualConveyorItemRenderer();
+        EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
 
         if (generateOnStart)
@@ -632,6 +672,7 @@ public class TerrainGenerator : MonoBehaviour
         using (TickConveyorDotsMarker.Auto())
         {
             SyncConveyorSlotDotRuntimeVisibility();
+            SyncBeltItemLineRuntimeVisibility();
             TickActiveConveyorDotVisuals(Time.deltaTime);
         }
 
@@ -676,6 +717,10 @@ public class TerrainGenerator : MonoBehaviour
         conveyorDotVisualTickBuffer.Clear();
         conveyorSlotDotVisibilityInitialized = false;
         lastShowConveyorSlotDots = false;
+        beltItemLineVisibilityInitialized = false;
+        lastShowBeltItemLine = false;
+        beltItemLineVisualsDirty = false;
+        ClearBeltItemLineDebugCache();
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
         conveyorItemVisualBlockSetVersion++;
@@ -1077,6 +1122,10 @@ public class TerrainGenerator : MonoBehaviour
         conveyorDotVisualTickBuffer.Clear();
         conveyorSlotDotVisibilityInitialized = false;
         lastShowConveyorSlotDots = false;
+        beltItemLineVisibilityInitialized = false;
+        lastShowBeltItemLine = false;
+        beltItemLineVisualsDirty = false;
+        ClearBeltItemLineDebugCache();
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
         conveyorItemVisualBlockSetVersion++;
@@ -1296,6 +1345,203 @@ public class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private void SyncBeltItemLineRuntimeVisibility()
+    {
+        bool showBeltItemLine = GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine;
+        if (beltItemLineVisibilityInitialized
+            && lastShowBeltItemLine == showBeltItemLine
+            && !beltItemLineVisualsDirty)
+        {
+            return;
+        }
+
+        ApplyBeltItemLineRuntimeVisibility(showBeltItemLine);
+    }
+
+    public void RefreshBeltItemLineRuntimeVisibility()
+    {
+        bool showBeltItemLine = GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine;
+        ApplyBeltItemLineRuntimeVisibility(showBeltItemLine);
+    }
+
+    private void ApplyBeltItemLineRuntimeVisibility(bool showBeltItemLine)
+    {
+        beltItemLineVisibilityInitialized = true;
+        lastShowBeltItemLine = showBeltItemLine;
+        beltItemLineVisualsDirty = false;
+        beltItemLineDebugCacheDirty = true;
+
+        applyingBeltItemLineRuntimeVisibility = true;
+        try
+        {
+            foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+            {
+                pair.Value?.RefreshBeltItemLineDebugVisuals(true);
+            }
+        }
+        finally
+        {
+            applyingBeltItemLineRuntimeVisibility = false;
+        }
+
+        beltItemLineVisualsDirty = false;
+    }
+
+    public bool TryGetBeltItemLineDebugColor(Block block, int laneIndex, out Color32 color)
+    {
+        color = Color.white;
+        if (block == null || laneIndex < 0)
+        {
+            return false;
+        }
+
+        EnsureBeltItemLineDebugCache();
+        BeltItemLineLaneKey key = new BeltItemLineLaneKey(block, laneIndex);
+        if (!beltItemLineDebugRunIds.TryGetValue(key, out int runId))
+        {
+            return false;
+        }
+
+        color = BeltItemLineDebugVisual.GetColor(runId);
+        return true;
+    }
+
+    private void EnsureBeltItemLineDebugCache()
+    {
+        if (!beltItemLineDebugCacheDirty)
+        {
+            return;
+        }
+
+        RebuildBeltItemLineDebugCache();
+    }
+
+    private void RebuildBeltItemLineDebugCache()
+    {
+        beltItemLineDebugCacheDirty = false;
+        beltItemLineDebugRunIds.Clear();
+        beltItemLineDebugOccupiedLanes.Clear();
+        beltItemLineDebugOccupiedLaneSet.Clear();
+        beltItemLineDebugIncomingLanes.Clear();
+        beltItemLineDebugVisitedLanes.Clear();
+
+        if (GameManager.Instance == null || !GameManager.Instance.ShowBeltItemLine)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block == null || !block.IsRuntimeConveyor)
+            {
+                continue;
+            }
+
+            int laneCount = block.GetRuntimeConveyorLaneCount();
+            for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+            {
+                if (!block.HasRuntimeConveyorItemAtLane(laneIndex))
+                {
+                    continue;
+                }
+
+                BeltItemLineLaneKey key = new BeltItemLineLaneKey(block, laneIndex);
+                beltItemLineDebugOccupiedLanes.Add(key);
+                beltItemLineDebugOccupiedLaneSet.Add(key);
+            }
+        }
+
+        for (int i = 0; i < beltItemLineDebugOccupiedLanes.Count; i++)
+        {
+            if (TryGetOccupiedBeltItemLineSuccessor(beltItemLineDebugOccupiedLanes[i], out BeltItemLineLaneKey successorKey))
+            {
+                beltItemLineDebugIncomingLanes.Add(successorKey);
+            }
+        }
+
+        int nextRunId = 1;
+        for (int i = 0; i < beltItemLineDebugOccupiedLanes.Count; i++)
+        {
+            BeltItemLineLaneKey key = beltItemLineDebugOccupiedLanes[i];
+            if (beltItemLineDebugIncomingLanes.Contains(key)
+                || beltItemLineDebugVisitedLanes.Contains(key))
+            {
+                continue;
+            }
+
+            AssignBeltItemLineDebugRun(key, nextRunId++);
+        }
+
+        for (int i = 0; i < beltItemLineDebugOccupiedLanes.Count; i++)
+        {
+            BeltItemLineLaneKey key = beltItemLineDebugOccupiedLanes[i];
+            if (beltItemLineDebugVisitedLanes.Contains(key))
+            {
+                continue;
+            }
+
+            AssignBeltItemLineDebugRun(key, nextRunId++);
+        }
+    }
+
+    private void AssignBeltItemLineDebugRun(BeltItemLineLaneKey startKey, int runId)
+    {
+        BeltItemLineLaneKey currentKey = startKey;
+        while (beltItemLineDebugOccupiedLaneSet.Contains(currentKey)
+            && beltItemLineDebugVisitedLanes.Add(currentKey))
+        {
+            beltItemLineDebugRunIds[currentKey] = runId;
+            if (!TryGetOccupiedBeltItemLineSuccessor(currentKey, out currentKey))
+            {
+                break;
+            }
+        }
+    }
+
+    private bool TryGetOccupiedBeltItemLineSuccessor(
+        BeltItemLineLaneKey key,
+        out BeltItemLineLaneKey successorKey)
+    {
+        successorKey = new BeltItemLineLaneKey(null, -1);
+        if (key.Block == null
+            || !key.Block.TryGetRuntimeConveyorSuccessorLane(
+                key.LaneIndex,
+                out Block destinationBlock,
+                out int destinationLaneIndex)
+            || destinationBlock == null)
+        {
+            return false;
+        }
+
+        successorKey = new BeltItemLineLaneKey(destinationBlock, destinationLaneIndex);
+        return beltItemLineDebugOccupiedLaneSet.Contains(successorKey);
+    }
+
+    private void ClearBeltItemLineDebugCache()
+    {
+        beltItemLineDebugCacheDirty = true;
+        beltItemLineDebugRunIds.Clear();
+        beltItemLineDebugOccupiedLanes.Clear();
+        beltItemLineDebugOccupiedLaneSet.Clear();
+        beltItemLineDebugIncomingLanes.Clear();
+        beltItemLineDebugVisitedLanes.Clear();
+    }
+
+    private void InvalidateBeltItemLineDebugVisuals()
+    {
+        if (applyingBeltItemLineRuntimeVisibility)
+        {
+            return;
+        }
+
+        beltItemLineDebugCacheDirty = true;
+        if (GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine)
+        {
+            beltItemLineVisualsDirty = true;
+        }
+    }
+
     private void ApplyConveyorSlotDotRuntimeVisibility(bool showConveyorSlotDots)
     {
         conveyorSlotDotVisibilityInitialized = true;
@@ -1315,6 +1561,8 @@ public class TerrainGenerator : MonoBehaviour
         {
             return;
         }
+
+        InvalidateBeltItemLineDebugVisuals();
 
         if (isActive)
         {
@@ -1341,6 +1589,8 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        InvalidateBeltItemLineDebugVisuals();
+
         if (conveyorItemVisualBlocks.Contains(block) && block.HasDynamicVirtualConveyorItemVisuals())
         {
             return;
@@ -1358,6 +1608,7 @@ public class TerrainGenerator : MonoBehaviour
         conveyorNetworkActiveIds.Clear();
         conveyorNetworkSleepCheckQueuedIds.Clear();
         conveyorNetworkSleepCheckBuffer.Clear();
+        InvalidateBeltItemLineDebugVisuals();
     }
 
     public int ConveyorLineCount
@@ -6435,22 +6686,18 @@ public class TerrainGenerator : MonoBehaviour
         return blockPool;
     }
 
-    private VirtualConveyorItemRenderer EnsureVirtualConveyorItemRenderer()
+    private PortableItemRenderer EnsurePortableItemRenderer()
     {
-        if (virtualConveyorItemRenderer != null)
+        if (portableItemRenderer != null)
         {
-            return virtualConveyorItemRenderer;
+            return portableItemRenderer;
         }
 
-        virtualConveyorItemRenderer = GetComponent<VirtualConveyorItemRenderer>();
-        if (virtualConveyorItemRenderer == null)
-        {
-            virtualConveyorItemRenderer = gameObject.AddComponent<VirtualConveyorItemRenderer>();
-        }
+        portableItemRenderer = PortableItemRenderer.EnsureFor(gameObject);
 
         ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
-        virtualConveyorItemRenderer.Configure(this, itemManager);
-        return virtualConveyorItemRenderer;
+        portableItemRenderer.Configure(this, itemManager);
+        return portableItemRenderer;
     }
 
     private VirtualConveyorBeltRenderer EnsureVirtualConveyorBeltRenderer()

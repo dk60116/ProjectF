@@ -5,8 +5,6 @@ using UnityEngine.Rendering;
 [DisallowMultipleComponent]
 public sealed class VirtualItemStackRenderer : MonoBehaviour
 {
-    private const int MaxInstancesPerDraw = 1023;
-
     [SerializeField, Min(0f)]
     private float stackBaseYOffset = 0.2f;
 
@@ -23,8 +21,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
     private bool renderOnlyVirtualRecords = true;
 
     private readonly List<VirtualObjectRecord> recordSnapshot = new List<VirtualObjectRecord>(512);
-    private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
-    private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
+    private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<int> itemBuffer = new List<int>(64);
     private VirtualObjectWorld virtualWorld;
     private ItemManager itemManager;
@@ -84,16 +81,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
 
     private void RebuildBatches()
     {
-        for (int i = 0; i < activeBatchKeys.Count; i++)
-        {
-            BatchKey key = activeBatchKeys[i];
-            if (matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
-            {
-                matrices.Clear();
-            }
-        }
-
-        activeBatchKeys.Clear();
+        batches.ClearActiveMatrices();
         virtualWorld.CopyRecords(recordSnapshot, !renderOnlyVirtualRecords);
         Vector3 cameraPosition = mainCamera != null ? mainCamera.transform.position : Vector3.zero;
         float renderDistanceSqr = renderDistance > 0f ? renderDistance * renderDistance : float.MaxValue;
@@ -153,81 +141,25 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
             material.enableInstancing = true;
         }
 
-        BatchKey key = new BatchKey(mesh, material, gameObject.layer);
-        if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
-        {
-            matrices = new List<Matrix4x4>(64);
-            matricesByBatch.Add(key, matrices);
-        }
-
-        if (matrices.Count == 0)
-        {
-            activeBatchKeys.Add(key);
-        }
-
+        VirtualRenderBatchKey key = new VirtualRenderBatchKey(
+            mesh,
+            material,
+            gameObject.layer,
+            0,
+            ShadowCastingMode.On,
+            true,
+            false,
+            0,
+            false,
+            false,
+            default,
+            itemId);
         Vector3 position = record.worldPosition + new Vector3(0f, stackBaseYOffset + (stackVerticalSpacing * stackIndex), 0f);
-        matrices.Add(Matrix4x4.TRS(position, record.worldRotation, Vector3.one));
+        batches.AddMatrix(key, Matrix4x4.TRS(position, record.worldRotation, Vector3.one));
     }
 
     private void RenderBatches()
     {
-        for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
-        {
-            BatchKey key = activeBatchKeys[batchIndex];
-            if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices) || matrices.Count <= 0)
-            {
-                continue;
-            }
-
-            RenderParams renderParams = new RenderParams(key.Material)
-            {
-                layer = key.Layer,
-                shadowCastingMode = ShadowCastingMode.On,
-                receiveShadows = true
-            };
-
-            int remaining = matrices.Count;
-            int startIndex = 0;
-            while (remaining > 0)
-            {
-                int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
-                Graphics.RenderMeshInstanced(renderParams, key.Mesh, 0, matrices, drawCount, startIndex);
-                startIndex += drawCount;
-                remaining -= drawCount;
-            }
-        }
-    }
-
-    private readonly struct BatchKey
-    {
-        public readonly Mesh Mesh;
-        public readonly Material Material;
-        public readonly int Layer;
-
-        public BatchKey(Mesh mesh, Material material, int layer)
-        {
-            Mesh = mesh;
-            Material = material;
-            Layer = layer;
-        }
-
-        public override int GetHashCode()
-        {
-            unchecked
-            {
-                int hash = Mesh != null ? Mesh.GetInstanceID() : 0;
-                hash = (hash * 397) ^ (Material != null ? Material.GetInstanceID() : 0);
-                hash = (hash * 397) ^ Layer;
-                return hash;
-            }
-        }
-
-        public override bool Equals(object obj)
-        {
-            return obj is BatchKey other
-                   && Mesh == other.Mesh
-                   && Material == other.Material
-                   && Layer == other.Layer;
-        }
+        batches.RenderBatches();
     }
 }
