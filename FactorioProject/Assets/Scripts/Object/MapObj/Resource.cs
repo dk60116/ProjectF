@@ -683,7 +683,7 @@ public class Resource : MapObject
 
     private TerrainGenerator FindTerrainGenerator()
     {
-        return FindObjectOfType<TerrainGenerator>();
+        return TerrainGenerator.ResolveActive();
     }
 
     private void EnsureStatusInitialized()

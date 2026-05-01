@@ -344,7 +344,7 @@ public class FilterSelectUI : MonoBehaviour
 
         if (cachedTerrainGenerator == null)
         {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+            cachedTerrainGenerator = TerrainGenerator.ResolveActive();
         }
 
         cachedTerrainGenerator?.RegisterInstallationRuntimeState(installationObject);

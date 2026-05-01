@@ -726,7 +726,7 @@ public class PlayerHUD : BagSlot
     {
         if (cachedTerrainGenerator == null)
         {
-            cachedTerrainGenerator = UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
+            cachedTerrainGenerator = TerrainGenerator.ResolveActive();
         }
 
         return cachedTerrainGenerator;
@@ -2363,7 +2363,7 @@ public class PlayerHUD : BagSlot
         }
 
         Player player = GameManager.Instance.Player;
-        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrain = ResolveTerrainGenerator();
         Vector3 refundOrigin = player.transform.position;
 
         for (int i = 0; i < entry.refundIngredients.Count; i++)

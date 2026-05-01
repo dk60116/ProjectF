@@ -928,7 +928,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         cachedTerrain = GetComponentInParent<TerrainGenerator>();
         if (cachedTerrain == null)
         {
-            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+            cachedTerrain = TerrainGenerator.ResolveActive();
         }
 
         return cachedTerrain;
@@ -1687,7 +1687,7 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
         cachedTerrain = GetComponentInParent<TerrainGenerator>();
         if (cachedTerrain == null)
         {
-            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+            cachedTerrain = TerrainGenerator.ResolveActive();
         }
 
         return cachedTerrain;
@@ -1911,7 +1911,7 @@ public class InputOutputModuleOutputAreaController : MonoBehaviour
         cachedTerrain = GetComponentInParent<TerrainGenerator>();
         if (cachedTerrain == null)
         {
-            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+            cachedTerrain = TerrainGenerator.ResolveActive();
         }
 
         return cachedTerrain;

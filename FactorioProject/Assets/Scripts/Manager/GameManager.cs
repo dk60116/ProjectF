@@ -585,9 +585,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         conveyorItemTotal = 0;
         installationTypeCounts = "-";
 
-        TerrainGenerator terrain = TerrainGenerator.Active != null
-            ? TerrainGenerator.Active
-            : FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain == null)
         {
             installationCountsByItemId.Clear();
@@ -658,7 +656,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return ToolResult.Error(itemId, count, $"item {itemId} not found");
         }
 
-        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         Vector3 playerPosition = player.transform.position;
         int bagCount = 0;
         int handCount = 0;

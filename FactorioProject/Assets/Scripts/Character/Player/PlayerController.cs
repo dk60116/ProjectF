@@ -113,6 +113,17 @@ public class PlayerController : MonoBehaviour
         singleFocusedBlockBuffer.Clear();
     }
 
+    private TerrainGenerator ResolveTerrainGenerator()
+    {
+        if (cachedTerrainGenerator != null)
+        {
+            return cachedTerrainGenerator;
+        }
+
+        cachedTerrainGenerator = TerrainGenerator.ResolveActive();
+        return cachedTerrainGenerator;
+    }
+
     private void Update()
     {
         bool isInteractionLocked = GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
@@ -430,12 +441,7 @@ public class PlayerController : MonoBehaviour
     {
         standingBlock = null;
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null)
+        if (ResolveTerrainGenerator() == null)
         {
             hasStandingConveyorCoordinate = false;
             standingConveyorCoordinate = default;
@@ -1027,12 +1033,7 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null)
+        if (ResolveTerrainGenerator() == null)
         {
             return false;
         }
@@ -1115,12 +1116,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null)
+        if (ResolveTerrainGenerator() == null)
         {
             return;
         }
@@ -1189,12 +1185,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null)
+        if (ResolveTerrainGenerator() == null)
         {
             return;
         }
@@ -1261,12 +1252,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null)
+        if (ResolveTerrainGenerator() == null)
         {
             return;
         }
@@ -1633,12 +1619,7 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null
+        if (ResolveTerrainGenerator() == null
             || !cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block)
             || block == null
             || results.Contains(block))
@@ -1913,12 +1894,7 @@ public class PlayerController : MonoBehaviour
 
         autoPickupTimer = Mathf.Max(0f, autoPickupInterval);
 
-        if (cachedTerrainGenerator == null)
-        {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
-        }
-
-        if (cachedTerrainGenerator == null)
+        if (ResolveTerrainGenerator() == null)
         {
             return;
         }

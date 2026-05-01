@@ -510,7 +510,7 @@ public class CraftingSlot : ItemSlot
         Player player = GameManager.Instance.Player;
         PlayerBag bag = player.GetBag();
         PlayerBag handBag = player.GetHandBag();
-        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrain = ResolveTerrain();
         Vector3 origin = player.transform.position;
 
         for (int i = 0; i < ingredientBuffer.Count; i++)
@@ -887,13 +887,18 @@ public class CraftingSlot : ItemSlot
             total += handBag.GetTotalItemCount(itemId);
         }
 
-        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrain = ResolveTerrain();
         if (terrain != null)
         {
             total += terrain.GetDroppedItemCountAround(GameManager.Instance.Player.transform.position, itemId, 2);
         }
 
         return total;
+    }
+
+    private static TerrainGenerator ResolveTerrain()
+    {
+        return TerrainGenerator.ResolveActive();
     }
 
     private bool IsIngredientSlotCandidate(ItemSlot slot, RectTransform expectedRoot)

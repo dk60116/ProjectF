@@ -317,7 +317,7 @@ public class BoxObject : InstallationObject
             return;
         }
 
-        TerrainGenerator terrainGenerator = FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrainGenerator = TerrainGenerator.ResolveActive();
         if (terrainGenerator == null)
         {
             return;
@@ -781,7 +781,7 @@ public class BoxObject : InstallationObject
         cachedTerrainGenerator = GetComponentInParent<TerrainGenerator>();
         if (cachedTerrainGenerator == null)
         {
-            cachedTerrainGenerator = FindObjectOfType<TerrainGenerator>();
+            cachedTerrainGenerator = TerrainGenerator.ResolveActive();
         }
 
         return cachedTerrainGenerator;

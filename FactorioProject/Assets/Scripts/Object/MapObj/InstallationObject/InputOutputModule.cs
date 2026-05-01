@@ -1727,7 +1727,7 @@ public class InputOutputModule : InstallationObject
         cachedTerrain = GetComponentInParent<TerrainGenerator>();
         if (cachedTerrain == null)
         {
-            cachedTerrain = Object.FindObjectOfType<TerrainGenerator>();
+            cachedTerrain = TerrainGenerator.ResolveActive();
         }
 
         return cachedTerrain;

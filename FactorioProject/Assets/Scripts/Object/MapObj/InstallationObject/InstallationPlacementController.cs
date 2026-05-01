@@ -5652,7 +5652,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (installPreviewTerrain == null)
         {
-            installPreviewTerrain = FindObjectOfType<TerrainGenerator>();
+            installPreviewTerrain = TerrainGenerator.ResolveActive();
         }
 
         return installPreviewTerrain;

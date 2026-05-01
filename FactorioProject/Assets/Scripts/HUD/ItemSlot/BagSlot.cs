@@ -182,7 +182,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        TerrainGenerator terrainGenerator = UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrainGenerator = ResolveTerrain();
         if (terrainGenerator == null)
         {
             return;
@@ -1853,7 +1853,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private static TerrainGenerator ResolveTerrain()
     {
-        return UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
+        return TerrainGenerator.ResolveActive();
     }
 
     protected bool IsInventoryUiLocked()

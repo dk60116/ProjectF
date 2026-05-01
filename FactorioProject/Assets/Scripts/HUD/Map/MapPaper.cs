@@ -187,7 +187,7 @@ public class MapPaper : MonoBehaviour
     {
         if (boundTerrain == null)
         {
-            boundTerrain = UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
+            boundTerrain = TerrainGenerator.ResolveActive();
             if (boundTerrain != null)
             {
                 isDirty = true;
