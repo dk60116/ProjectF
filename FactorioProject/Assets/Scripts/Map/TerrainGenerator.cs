@@ -776,6 +776,174 @@ public class TerrainGenerator : MonoBehaviour
         return resourceStateStore.GetInstallationItemCounts(countsByItemId);
     }
 
+    public TerrainSaveData CaptureTerrainSaveState()
+    {
+        return new TerrainSaveData
+        {
+            seed = seed,
+            chunkSize = Mathf.Max(4, chunkSize),
+            loadRadius = Mathf.Max(0, loadRadius),
+            unloadRadius = Mathf.Max(GetEffectiveLoadRadius() + 1, unloadRadius)
+        };
+    }
+
+    public MapSaveData CaptureMapSaveState()
+    {
+        EnsureResourceStateStore();
+        MapSaveData mapSaveData = new MapSaveData();
+        if (resourceStateStore == null)
+        {
+            return mapSaveData;
+        }
+
+        FlushLoadedRuntimeStateToStore();
+        resourceStateStore.CaptureSaveState(mapSaveData);
+        CaptureLoadedConveyorItemSaveStates(mapSaveData);
+        return mapSaveData;
+    }
+
+    public void LoadFromSaveState(TerrainSaveData terrainSaveData, MapSaveData mapSaveData)
+    {
+        MigrateLegacyResourcesIfNeeded();
+        NormalizeOreBodyScaleSettings();
+        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
+        NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        SyncResourceEntryDefinitions();
+        EnsureResourceStateStore();
+        EnsurePortableItemRenderer();
+        EnsureVirtualConveyorBeltRenderer();
+
+        if (terrainSaveData != null)
+        {
+            seed = terrainSaveData.seed;
+            chunkSize = Mathf.Max(4, terrainSaveData.chunkSize);
+            loadRadius = Mathf.Max(0, terrainSaveData.loadRadius);
+            unloadRadius = Mathf.Max(loadRadius + 1, terrainSaveData.unloadRadius);
+            hasSeedInitialized = true;
+        }
+
+        InvalidateStarterTreeCache();
+        InvalidateTerrainBiomeDataCaches();
+        InvalidateTerrainBiomeMaterialCaches();
+        ClearPendingChunkGenerations();
+        ClearLoadedChunks();
+        resourceStateStore?.ApplySaveState(mapSaveData);
+
+        currentCenterChunk = GetCenterChunkCoordinate();
+        hasGeneratedChunks = true;
+        RefreshChunks(currentCenterChunk, true);
+        ProcessQueuedChunkGenerationsImmediate();
+        ApplyLoadedConveyorItemSaveStates(mapSaveData);
+        RefreshLoadedRuntimeRegistrations();
+    }
+
+    public void StartNewGeneratedMap(bool randomizeSeed)
+    {
+        if (randomizeSeed)
+        {
+            RandomizeSeed();
+        }
+
+        Generate();
+        ProcessQueuedChunkGenerationsImmediate();
+        RefreshLoadedRuntimeRegistrations();
+    }
+
+    public void FlushLoadedRuntimeStateToStore()
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block == null)
+            {
+                continue;
+            }
+
+            SaveLoadedBlockFloorObjects(block);
+
+            if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
+            {
+                resourceStateStore.SaveInstallation(installationObject);
+                resourceStateStore.RegisterLiveInstallation(installationObject);
+            }
+
+            Resource resource = block.Resource;
+            if (resource != null)
+            {
+                resourceStateStore.Save(block.Coordinate, resource);
+            }
+        }
+    }
+
+    private void CaptureLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
+    {
+        if (mapSaveData == null)
+        {
+            return;
+        }
+
+        mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
+        mapSaveData.conveyorItems.Clear();
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block == null || !block.IsRuntimeConveyor)
+            {
+                continue;
+            }
+
+            ConveyorItemBlockSaveEntry entry = new ConveyorItemBlockSaveEntry
+            {
+                coordinate = pair.Key
+            };
+            block.CaptureConveyorItemSaveStates(entry.lanes);
+            if (entry.lanes.Count > 0)
+            {
+                mapSaveData.conveyorItems.Add(entry);
+            }
+        }
+    }
+
+    private void ApplyLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
+    {
+        if (mapSaveData?.conveyorItems == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
+        {
+            ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
+            if (entry == null
+                || entry.lanes == null
+                || !loadedBlocks.TryGetValue(entry.coordinate, out Block block)
+                || block == null)
+            {
+                continue;
+            }
+
+            block.ApplyConveyorItemSaveStates(entry.lanes);
+        }
+    }
+
+    private void RefreshLoadedRuntimeRegistrations()
+    {
+        MarkConveyorNetworkDirty();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            pair.Value?.RefreshConveyorActivityRegistration(false);
+            pair.Value?.RefreshConveyorSlotDotVisuals();
+        }
+    }
+
     public void CopyConveyorItemVisualBlocks(List<Block> results)
     {
         if (results == null)
@@ -3951,6 +4119,11 @@ public class TerrainGenerator : MonoBehaviour
     public Color32 GetMapBiomeColor32At(Vector2Int worldCoordinate)
     {
         return (Color32)GetMapBiomeColorAt(worldCoordinate);
+    }
+
+    public bool IsWaterBiomeAt(Vector2Int worldCoordinate)
+    {
+        return GetTileBiome(worldCoordinate) == TerrainBiome.Water;
     }
 
     private Color GetGeneratedSurfaceBlendWeights(Vector2Int origin, Vector2 localPoint, float[] weights)

@@ -29,6 +29,20 @@ public class Player : Character
         [SerializeField]
         public float harvestRange;
 
+        public PlayerState(
+            int miningPower,
+            int loggingPower,
+            float miningSpeed,
+            float loggingSpeed,
+            float harvestRange)
+        {
+            this.miningPower = miningPower;
+            this.loggingPower = loggingPower;
+            this.miningSpeed = miningSpeed;
+            this.loggingSpeed = loggingSpeed;
+            this.harvestRange = harvestRange;
+        }
+
         public float MiningSpeed => miningSpeed > 0f ? miningSpeed : 1f;
         public float LoggingSpeed => loggingSpeed > 0f ? loggingSpeed : 1f;
         public int MiningPower => miningPower > 0 ? miningPower : 1;
@@ -304,6 +318,98 @@ public class Player : Character
     }
 
     public PlayerState State => playerState;
+
+    public PlayerSaveData CaptureSaveState()
+    {
+        EnsureHandBag();
+        PlayerSaveData saveData = new PlayerSaveData
+        {
+            hasPlayer = true,
+            position = transform.position,
+            rotation = transform.rotation,
+            bagLevel = bagLevel,
+            stats = new PlayerStatSaveData
+            {
+                miningPower = playerState.MiningPower,
+                loggingPower = playerState.LoggingPower,
+                miningSpeed = playerState.MiningSpeed,
+                loggingSpeed = playerState.LoggingSpeed,
+                harvestRange = playerState.HarvestRange
+            }
+        };
+
+        PlayerBag activeBag = GetBag();
+        activeBag?.CaptureSaveSlots(saveData.bagSlots);
+
+        if (handBag != null)
+        {
+            handBag.RefreshExternalStackCounts(false);
+            handBag.CaptureSaveSlots(saveData.handSlots);
+        }
+
+        return saveData;
+    }
+
+    public void ApplySaveState(PlayerSaveData saveData)
+    {
+        ApplyTransformState(saveData);
+        ApplyInventoryAndStatState(saveData);
+    }
+
+    public void ApplyTransformState(PlayerSaveData saveData)
+    {
+        if (saveData == null || !saveData.hasPlayer)
+        {
+            return;
+        }
+
+        transform.SetPositionAndRotation(saveData.position, saveData.rotation);
+        Rigidbody rigidbody = GetComponent<Rigidbody>();
+        if (rigidbody != null)
+        {
+            rigidbody.velocity = Vector3.zero;
+            rigidbody.angularVelocity = Vector3.zero;
+        }
+
+        StopImmediateActions();
+        dropExitPending = false;
+        hasLastDropTarget = false;
+    }
+
+    public void ApplyInventoryAndStatState(PlayerSaveData saveData)
+    {
+        if (saveData == null || !saveData.hasPlayer)
+        {
+            return;
+        }
+
+        if (saveData.stats != null)
+        {
+            playerState = new PlayerState(
+                saveData.stats.miningPower,
+                saveData.stats.loggingPower,
+                saveData.stats.miningSpeed,
+                saveData.stats.loggingSpeed,
+                saveData.stats.harvestRange);
+        }
+
+        bagLevel = saveData.bagLevel;
+        ApplyBagLevelVisibility();
+
+        PlayerBag activeBag = GetBag();
+        activeBag?.ApplySaveSlots(saveData.bagSlots);
+
+        EnsureHandBag();
+        reservedHandStack.Clear();
+        if (handBag != null)
+        {
+            handBag.ApplySaveSlots(saveData.handSlots);
+            handBag.RefreshExternalStackCounts(false);
+        }
+
+        UpdateCarryState();
+        RefreshBagUI();
+    }
 
     private bool IsPickStateActive()
     {

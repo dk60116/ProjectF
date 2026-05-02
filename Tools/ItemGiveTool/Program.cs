@@ -23,6 +23,7 @@ internal sealed class EditorToolForm : Form
     private const string DefaultHost = "127.0.0.1";
     private const int DefaultPort = 50877;
     private const int TimeoutMilliseconds = 5000;
+    private const int SaveSlotCount = 10;
 
     private readonly List<ItemCatalogEntry> allItems = new List<ItemCatalogEntry>();
     private readonly ComboBox itemComboBox = new ComboBox();
@@ -34,6 +35,11 @@ internal sealed class EditorToolForm : Form
     private readonly NumericUpDown countInput = new NumericUpDown();
     private readonly Button giveButton = new Button();
     private readonly Button pingButton = new Button();
+    private readonly Button conveyorLineButton = new Button();
+    private readonly ComboBox saveSlotComboBox = new ComboBox();
+    private readonly Button saveSlotButton = new Button();
+    private readonly Button loadSlotButton = new Button();
+    private readonly Button refreshSaveSlotsButton = new Button();
     private readonly Button reloadButton = new Button();
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
@@ -45,13 +51,14 @@ internal sealed class EditorToolForm : Form
     private readonly TextBox runtimeStatsTextBox = new TextBox();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private bool refreshingItems;
+    private bool refreshingSaveSlots;
     private bool pollingStatus;
     private bool applyingRuntimeDebugState;
 
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 744);
+        MinimumSize = new Size(760, 792);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -67,13 +74,14 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 6
+            RowCount = 7
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -89,7 +97,7 @@ internal sealed class EditorToolForm : Form
 
         Label descriptionLabel = new Label
         {
-            Text = "아이템 지급과 런타임 디버그 토글을 조작합니다.",
+            Text = "아이템 지급, 컨베이어 자동 설치, 저장/로드, 런타임 디버그 토글을 조작합니다.",
             AutoSize = true,
             ForeColor = Color.FromArgb(176, 177, 158),
             Location = new Point(2, 42)
@@ -196,6 +204,10 @@ internal sealed class EditorToolForm : Form
         StyleSecondaryButton(pingButton, "연결 확인");
         pingButton.Click += async (_, _) => await SendPingAsync();
 
+        StyleSecondaryButton(conveyorLineButton, "컨베이어 채우기 100개");
+        conveyorLineButton.Width = 190;
+        conveyorLineButton.Click += async (_, _) => await SendConveyorLineAsync();
+
         statusLabel.Text = "대기 중";
         statusLabel.AutoSize = true;
         statusLabel.ForeColor = Color.FromArgb(176, 177, 158);
@@ -203,9 +215,50 @@ internal sealed class EditorToolForm : Form
 
         buttonPanel.Controls.Add(giveButton);
         buttonPanel.Controls.Add(pingButton);
+        buttonPanel.Controls.Add(conveyorLineButton);
         buttonPanel.Controls.Add(statusLabel);
         layout.Controls.Add(buttonPanel, 0, 2);
         layout.SetColumnSpan(buttonPanel, 2);
+
+        FlowLayoutPanel savePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 4, 0, 0)
+        };
+
+        Label saveSlotLabel = new Label
+        {
+            Text = "Save Slot",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(0, 10, 10, 0)
+        };
+
+        saveSlotComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        saveSlotComboBox.Width = 132;
+        saveSlotComboBox.Margin = new Padding(0, 5, 10, 0);
+        ApplySaveSlotsToken(new string('0', SaveSlotCount), 1);
+
+        StyleSecondaryButton(saveSlotButton, "Save");
+        saveSlotButton.Width = 86;
+        saveSlotButton.Click += async (_, _) => await SendSaveSlotAsync();
+
+        StyleSecondaryButton(loadSlotButton, "Load");
+        loadSlotButton.Width = 86;
+        loadSlotButton.Click += async (_, _) => await SendLoadSlotAsync();
+
+        StyleSecondaryButton(refreshSaveSlotsButton, "슬롯 새로고침");
+        refreshSaveSlotsButton.Width = 126;
+        refreshSaveSlotsButton.Click += async (_, _) => await RefreshSaveSlotsAsync();
+
+        savePanel.Controls.Add(saveSlotLabel);
+        savePanel.Controls.Add(saveSlotComboBox);
+        savePanel.Controls.Add(saveSlotButton);
+        savePanel.Controls.Add(loadSlotButton);
+        savePanel.Controls.Add(refreshSaveSlotsButton);
+        layout.Controls.Add(savePanel, 0, 3);
+        layout.SetColumnSpan(savePanel, 2);
 
         FlowLayoutPanel debugTogglePanel = new FlowLayoutPanel
         {
@@ -230,7 +283,7 @@ internal sealed class EditorToolForm : Form
 
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
-        layout.Controls.Add(debugTogglePanel, 0, 3);
+        layout.Controls.Add(debugTogglePanel, 0, 4);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
         Panel runtimeStatsCard = CreateCardPanel();
@@ -263,7 +316,7 @@ internal sealed class EditorToolForm : Form
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
-        layout.Controls.Add(runtimeStatsCard, 0, 4);
+        layout.Controls.Add(runtimeStatsCard, 0, 5);
         layout.SetColumnSpan(runtimeStatsCard, 2);
 
         Panel logCard = CreateCardPanel();
@@ -277,7 +330,7 @@ internal sealed class EditorToolForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 5);
+        layout.Controls.Add(logCard, 0, 6);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -572,6 +625,34 @@ internal sealed class EditorToolForm : Form
         await SendCommandAsync("ping", "Ping");
     }
 
+    private async Task SendConveyorLineAsync()
+    {
+        const int conveyorCount = 100;
+        await SendCommandAsync(
+            $"beltline auto {conveyorCount}",
+            $"Conveyor fill auto, count={conveyorCount}");
+        await RefreshStatusAsync();
+    }
+
+    private async Task SendSaveSlotAsync()
+    {
+        int slotNumber = GetSelectedSaveSlotNumber();
+        await SendCommandAsync($"save {slotNumber}", $"Save Slot {slotNumber}");
+        await RefreshSaveSlotsAsync();
+    }
+
+    private async Task SendLoadSlotAsync()
+    {
+        int slotNumber = GetSelectedSaveSlotNumber();
+        await SendCommandAsync($"load {slotNumber}", $"Load Slot {slotNumber}");
+        await RefreshSaveSlotsAsync();
+    }
+
+    private async Task RefreshSaveSlotsAsync()
+    {
+        await SendCommandAsync("saveslots", "Save Slots");
+    }
+
     private async Task SendDebugToggleAsync(string toggleName, bool value, string displayName)
     {
         if (applyingRuntimeDebugState)
@@ -609,6 +690,7 @@ internal sealed class EditorToolForm : Form
                         ? Color.FromArgb(235, 189, 92)
                         : Color.FromArgb(236, 104, 94);
                 UpdateRuntimeStatsFromResponse(response);
+                UpdateSaveSlotsFromResponse(response);
             }
             else
             {
@@ -739,6 +821,69 @@ internal sealed class EditorToolForm : Form
         return $"Item {itemId}";
     }
 
+    private int GetSelectedSaveSlotNumber()
+    {
+        int selectedIndex = saveSlotComboBox.SelectedIndex;
+        if (selectedIndex < 0)
+        {
+            selectedIndex = 0;
+        }
+
+        return Math.Clamp(selectedIndex + 1, 1, SaveSlotCount);
+    }
+
+    private void UpdateSaveSlotsFromResponse(string response)
+    {
+        if (!TryReadProtocolToken(response, "saveSlots", out string saveSlotsToken))
+        {
+            return;
+        }
+
+        int selectedSlotNumber = GetSelectedSaveSlotNumber();
+        if (TryReadProtocolInt(response, "selectedSlot", out int parsedSelectedSlot))
+        {
+            selectedSlotNumber = parsedSelectedSlot;
+        }
+
+        ApplySaveSlotsToken(saveSlotsToken, selectedSlotNumber);
+    }
+
+    private void ApplySaveSlotsToken(string saveSlotsToken, int selectedSlotNumber)
+    {
+        if (refreshingSaveSlots)
+        {
+            return;
+        }
+
+        refreshingSaveSlots = true;
+        try
+        {
+            int previousSelection = saveSlotComboBox.SelectedIndex >= 0
+                ? saveSlotComboBox.SelectedIndex
+                : Math.Clamp(selectedSlotNumber - 1, 0, SaveSlotCount - 1);
+            int resolvedSelection = Math.Clamp(selectedSlotNumber - 1, 0, SaveSlotCount - 1);
+            if (selectedSlotNumber < 1 || selectedSlotNumber > SaveSlotCount)
+            {
+                resolvedSelection = previousSelection;
+            }
+
+            saveSlotComboBox.BeginUpdate();
+            saveSlotComboBox.Items.Clear();
+            for (int i = 0; i < SaveSlotCount; i++)
+            {
+                bool hasSave = i < saveSlotsToken.Length && saveSlotsToken[i] == '1';
+                saveSlotComboBox.Items.Add($"Slot {i + 1}{(hasSave ? " *" : string.Empty)}");
+            }
+
+            saveSlotComboBox.EndUpdate();
+            saveSlotComboBox.SelectedIndex = Math.Clamp(resolvedSelection, 0, SaveSlotCount - 1);
+        }
+        finally
+        {
+            refreshingSaveSlots = false;
+        }
+    }
+
     private async Task SendCommandAsync(string command, string displayName)
     {
         SetBusy(true, $"{displayName} 전송 중...");
@@ -749,6 +894,7 @@ internal sealed class EditorToolForm : Form
             string response = await SendProtocolLineAsync(host, port, command);
             AppendLog($"> {command}");
             AppendLog(response);
+            UpdateSaveSlotsFromResponse(response);
             statusLabel.Text = response.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
                 ? "성공"
                 : "실패";
@@ -867,6 +1013,11 @@ internal sealed class EditorToolForm : Form
     {
         giveButton.Enabled = !busy;
         pingButton.Enabled = !busy;
+        conveyorLineButton.Enabled = !busy;
+        saveSlotComboBox.Enabled = !busy;
+        saveSlotButton.Enabled = !busy;
+        loadSlotButton.Enabled = !busy;
+        refreshSaveSlotsButton.Enabled = !busy;
         reloadButton.Enabled = !busy;
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;

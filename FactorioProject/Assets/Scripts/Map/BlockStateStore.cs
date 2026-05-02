@@ -153,6 +153,7 @@ public class BlockStateStore : MonoBehaviour
     }
 
     private readonly Dictionary<Vector2Int, Resource.ResourceSaveState> savedStates = new Dictionary<Vector2Int, Resource.ResourceSaveState>();
+    private readonly Dictionary<Vector2Int, int> savedResourceItemIds = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, FloorObjectSaveState> savedFloorObjectStates = new Dictionary<Vector2Int, FloorObjectSaveState>();
     private readonly Dictionary<Vector2Int, InstallationSaveState> savedInstallationStates = new Dictionary<Vector2Int, InstallationSaveState>();
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
@@ -169,7 +170,9 @@ public class BlockStateStore : MonoBehaviour
 
         Resource.ResourceSaveState state = resource.CaptureState();
         savedStates[worldCoordinate] = state;
-        ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, resource.ResolveItemId(), state);
+        int itemId = resource.ResolveItemId();
+        savedResourceItemIds[worldCoordinate] = itemId;
+        ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, itemId, state);
     }
 
     public void SaveFloorObjects(Vector2Int worldCoordinate, Block block)
@@ -436,12 +439,124 @@ public class BlockStateStore : MonoBehaviour
     public void ClearStates()
     {
         savedStates.Clear();
+        savedResourceItemIds.Clear();
         savedFloorObjectStates.Clear();
         savedInstallationStates.Clear();
         savedInstallationAnchorsByCoordinate.Clear();
         liveInstallationStates.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
         ResolveVirtualObjectWorld()?.Clear();
+    }
+
+    public void CaptureSaveState(MapSaveData mapSaveData)
+    {
+        if (mapSaveData == null)
+        {
+            return;
+        }
+
+        mapSaveData.resources ??= new List<ResourceSaveEntry>();
+        mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
+        mapSaveData.installations ??= new List<InstallationSaveEntry>();
+        mapSaveData.resources.Clear();
+        mapSaveData.floorObjects.Clear();
+        mapSaveData.installations.Clear();
+
+        foreach (KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair in savedStates)
+        {
+            savedResourceItemIds.TryGetValue(pair.Key, out int itemId);
+            mapSaveData.resources.Add(new ResourceSaveEntry
+            {
+                coordinate = pair.Key,
+                itemId = itemId,
+                state = pair.Value
+            });
+        }
+
+        foreach (KeyValuePair<Vector2Int, FloorObjectSaveState> pair in savedFloorObjectStates)
+        {
+            if (pair.Value == null)
+            {
+                continue;
+            }
+
+            mapSaveData.floorObjects.Add(new FloorObjectSaveEntry
+            {
+                coordinate = pair.Key,
+                itemIds = pair.Value.ToSerializedList()
+            });
+        }
+
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        {
+            if (pair.Value == null)
+            {
+                continue;
+            }
+
+            mapSaveData.installations.Add(new InstallationSaveEntry
+            {
+                state = pair.Value.Clone()
+            });
+        }
+    }
+
+    public void ApplySaveState(MapSaveData mapSaveData)
+    {
+        ClearStates();
+        if (mapSaveData == null)
+        {
+            return;
+        }
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+
+        if (mapSaveData.resources != null)
+        {
+            for (int i = 0; i < mapSaveData.resources.Count; i++)
+            {
+                ResourceSaveEntry entry = mapSaveData.resources[i];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                savedStates[entry.coordinate] = entry.state;
+                savedResourceItemIds[entry.coordinate] = entry.itemId;
+                if (entry.itemId >= 0)
+                {
+                    world?.UpsertResource(entry.coordinate, entry.itemId, entry.state);
+                }
+            }
+        }
+
+        if (mapSaveData.floorObjects != null)
+        {
+            for (int i = 0; i < mapSaveData.floorObjects.Count; i++)
+            {
+                FloorObjectSaveEntry entry = mapSaveData.floorObjects[i];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                SetFloorObjects(entry.coordinate, entry.itemIds);
+            }
+        }
+
+        if (mapSaveData.installations != null)
+        {
+            for (int i = 0; i < mapSaveData.installations.Count; i++)
+            {
+                InstallationSaveEntry entry = mapSaveData.installations[i];
+                if (entry?.state == null)
+                {
+                    continue;
+                }
+
+                StoreInstallationState(entry.state);
+            }
+        }
     }
 
     private bool TryBuildInstallationState(InstallationObject installationObject, out InstallationSaveState state)

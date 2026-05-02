@@ -48,6 +48,13 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             return;
         }
 
+        if (ShouldUseNativeRendering(conveyorBelt))
+        {
+            Unregister(conveyorBelt);
+            conveyorBelt.SetVirtualRenderingSuppressed(false);
+            return;
+        }
+
         BeltRenderCache cache = GetOrCreateBeltRenderCache(conveyorBelt);
         RefreshBeltRenderCache(conveyorBelt, cache);
         conveyorBelt.SetVirtualRenderingSuppressed(true);
@@ -130,7 +137,8 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             ShadowCastingMode.Off,
             false,
             renderData.HasUvScroll,
-            VirtualRenderBatchKey.QuantizeUvScroll(renderData.UvScrollY));
+            VirtualRenderBatchKey.QuantizeUvScroll(renderData.UvScrollY),
+            invertCulling: HasOddNegativeScale(renderData.Matrix));
 
         batches.AddOwnedMatrix(beltCache, beltCache.batchEntries, key, renderData.Matrix);
     }
@@ -138,6 +146,19 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private void RenderBatches()
     {
         batches.RenderBatches();
+    }
+
+    private static bool ShouldUseNativeRendering(ConveyorBelt conveyorBelt)
+    {
+        return conveyorBelt != null && conveyorBelt.IsCornerVariant;
+    }
+
+    private static bool HasOddNegativeScale(Matrix4x4 matrix)
+    {
+        Vector3 xAxis = new Vector3(matrix.m00, matrix.m10, matrix.m20);
+        Vector3 yAxis = new Vector3(matrix.m01, matrix.m11, matrix.m21);
+        Vector3 zAxis = new Vector3(matrix.m02, matrix.m12, matrix.m22);
+        return Vector3.Dot(Vector3.Cross(xAxis, yAxis), zAxis) < 0f;
     }
 
     private sealed class BeltRenderCache : IVirtualRenderBatchOwner

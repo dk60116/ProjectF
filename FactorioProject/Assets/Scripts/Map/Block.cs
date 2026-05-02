@@ -1970,6 +1970,287 @@ public class Block : BaseObject
         RefreshConveyorActivityRegistration();
     }
 
+    public void CaptureConveyorItemSaveStates(List<ConveyorItemLaneSaveState> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        if (!IsConveyorStackingEnabled())
+        {
+            return;
+        }
+
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            int itemId = GetConveyorItemIdAtLane(laneIndex);
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            ConveyorItemLaneSaveState state = new ConveyorItemLaneSaveState
+            {
+                laneIndex = laneIndex,
+                itemId = itemId,
+                visualWorldPosition = GetConveyorItemVisualWorldPosition(laneIndex)
+            };
+
+            PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
+            if (portableObject != null && conveyorCornerMotionStates.TryGetValue(portableObject, out ConveyorCornerMotionState cornerMotionState))
+            {
+                CopyCornerMotionToSaveState(cornerMotionState, state);
+            }
+            else if (portableObject != null && conveyorLinearMotionStates.TryGetValue(portableObject, out ConveyorLinearMotionState linearMotionState))
+            {
+                CopyLinearMotionToSaveState(linearMotionState, state);
+            }
+            else if (laneIndex < conveyorItemMotionStates.Count && conveyorItemMotionStates[laneIndex].active)
+            {
+                CopyDataMotionToSaveState(conveyorItemMotionStates[laneIndex], state);
+            }
+
+            results.Add(state);
+        }
+    }
+
+    public void ApplyConveyorItemSaveStates(IReadOnlyList<ConveyorItemLaneSaveState> states)
+    {
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        if (!IsConveyorStackingEnabled())
+        {
+            return;
+        }
+
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            PortableObject existingPortableObject = GetConveyorPortableObjectAtLane(laneIndex);
+            ClearConveyorItemAtLane(laneIndex);
+            ReleaseFloorObject(existingPortableObject);
+        }
+
+        if (states != null)
+        {
+            for (int i = 0; i < states.Count; i++)
+            {
+                ConveyorItemLaneSaveState state = states[i];
+                if (state == null
+                    || state.itemId < 0
+                    || state.laneIndex < 0
+                    || state.laneIndex >= laneCount)
+                {
+                    continue;
+                }
+
+                if (!TrySetConveyorObjectAtLane(state.laneIndex, state.itemId, out PortableObject portableObject))
+                {
+                    continue;
+                }
+
+                ApplyConveyorItemLaneSaveState(state, portableObject);
+            }
+        }
+
+        MarkConveyorItemVisualDirty();
+        WakeConveyorMoveAttemptsAround();
+        RefreshConveyorActivityRegistration();
+    }
+
+    private static void CopyCornerMotionToSaveState(
+        ConveyorCornerMotionState motionState,
+        ConveyorItemLaneSaveState state)
+    {
+        state.hasMotion = true;
+        state.useCornerMotion = true;
+        state.sourceLaneIndex = motionState.sourceLaneIndex;
+        state.destinationLaneIndex = motionState.destinationLaneIndex;
+        state.startWorldPosition = motionState.startWorldPosition;
+        state.progress = Mathf.Clamp01(motionState.progress);
+        state.pathLength = motionState.pathLength;
+        state.durationPathLength = motionState.durationPathLength;
+    }
+
+    private void CopyLinearMotionToSaveState(
+        ConveyorLinearMotionState motionState,
+        ConveyorItemLaneSaveState state)
+    {
+        state.hasMotion = true;
+        state.useCornerMotion = false;
+        state.destinationLaneIndex = motionState.destinationLaneIndex;
+        state.startWorldPosition = motionState.startWorldPosition;
+        state.hasViaWorldPosition = motionState.hasViaWorldPosition;
+        state.viaWorldPosition = motionState.viaWorldPosition;
+        state.progress = Mathf.Clamp01(motionState.progress);
+        state.pathLength = motionState.pathLength;
+        CopyCornerContinuationToSaveState(motionState.cornerContinuation, state);
+    }
+
+    private void CopyDataMotionToSaveState(
+        ConveyorDataMotionState motionState,
+        ConveyorItemLaneSaveState state)
+    {
+        state.hasMotion = true;
+        state.useCornerMotion = motionState.useCornerMotion;
+        state.sourceLaneIndex = motionState.sourceLaneIndex;
+        state.destinationLaneIndex = motionState.destinationLaneIndex;
+        state.startWorldPosition = motionState.startWorldPosition;
+        state.hasViaWorldPosition = motionState.hasViaWorldPosition;
+        state.viaWorldPosition = motionState.viaWorldPosition;
+        state.progress = Mathf.Clamp01(motionState.progress);
+        state.pathLength = motionState.pathLength;
+        state.durationPathLength = motionState.durationPathLength;
+        CopyCornerContinuationToSaveState(motionState.cornerContinuation, state);
+    }
+
+    private static void CopyCornerContinuationToSaveState(
+        ConveyorCornerContinuation continuation,
+        ConveyorItemLaneSaveState state)
+    {
+        if (!continuation.active || continuation.block == null)
+        {
+            return;
+        }
+
+        state.cornerContinuationActive = true;
+        state.cornerContinuationBlockCoordinate = continuation.block.Coordinate;
+        state.cornerContinuationSourceLaneIndex = continuation.sourceLaneIndex;
+        state.cornerContinuationDestinationLaneIndex = continuation.destinationLaneIndex;
+        state.cornerContinuationStartWorldPosition = continuation.startWorldPosition;
+        state.cornerContinuationStartProgress = Mathf.Clamp01(continuation.startProgress);
+        state.cornerContinuationPathLength = continuation.pathLength;
+        state.cornerContinuationDurationPathLength = continuation.durationPathLength;
+    }
+
+    private void ApplyConveyorItemLaneSaveState(
+        ConveyorItemLaneSaveState state,
+        PortableObject portableObject)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        if (!state.hasMotion)
+        {
+            if (portableObject != null)
+            {
+                portableObject.SetWorldPosition(state.visualWorldPosition);
+            }
+
+            return;
+        }
+
+        if (state.useCornerMotion)
+        {
+            ConveyorCornerMotionState motionState = new ConveyorCornerMotionState
+            {
+                sourceLaneIndex = state.sourceLaneIndex,
+                destinationLaneIndex = state.destinationLaneIndex,
+                startWorldPosition = state.startWorldPosition,
+                progress = Mathf.Clamp01(state.progress),
+                pathLength = state.pathLength,
+                durationPathLength = state.durationPathLength
+            };
+
+            if (portableObject != null)
+            {
+                conveyorCornerMotionStates[portableObject] = motionState;
+                conveyorLinearMotionStates.Remove(portableObject);
+                portableObject.SetWorldPosition(state.visualWorldPosition);
+            }
+            else if (state.laneIndex >= 0 && state.laneIndex < conveyorItemMotionStates.Count)
+            {
+                conveyorItemMotionStates[state.laneIndex] = new ConveyorDataMotionState
+                {
+                    active = true,
+                    useCornerMotion = true,
+                    sourceLaneIndex = state.sourceLaneIndex,
+                    destinationLaneIndex = state.destinationLaneIndex,
+                    startWorldPosition = state.startWorldPosition,
+                    progress = Mathf.Clamp01(state.progress),
+                    pathLength = state.pathLength,
+                    durationPathLength = state.durationPathLength
+                };
+            }
+
+            return;
+        }
+
+        ConveyorCornerContinuation continuation = BuildCornerContinuationFromSaveState(state);
+        if (portableObject != null)
+        {
+            conveyorCornerMotionStates.Remove(portableObject);
+            conveyorLinearMotionStates[portableObject] = new ConveyorLinearMotionState
+            {
+                cornerContinuation = continuation,
+                startWorldPosition = state.startWorldPosition,
+                hasViaWorldPosition = state.hasViaWorldPosition,
+                viaWorldPosition = state.viaWorldPosition,
+                destinationLaneIndex = state.destinationLaneIndex,
+                progress = Mathf.Clamp01(state.progress),
+                pathLength = state.pathLength
+            };
+            portableObject.SetWorldPosition(state.visualWorldPosition);
+        }
+        else if (state.laneIndex >= 0 && state.laneIndex < conveyorItemMotionStates.Count)
+        {
+            conveyorItemMotionStates[state.laneIndex] = new ConveyorDataMotionState
+            {
+                active = true,
+                useCornerMotion = false,
+                cornerContinuation = continuation,
+                startWorldPosition = state.startWorldPosition,
+                hasViaWorldPosition = state.hasViaWorldPosition,
+                viaWorldPosition = state.viaWorldPosition,
+                destinationLaneIndex = state.destinationLaneIndex,
+                progress = Mathf.Clamp01(state.progress),
+                pathLength = state.pathLength
+            };
+        }
+    }
+
+    private ConveyorCornerContinuation BuildCornerContinuationFromSaveState(ConveyorItemLaneSaveState state)
+    {
+        ConveyorCornerContinuation continuation = default;
+        if (state == null || !state.cornerContinuationActive)
+        {
+            return continuation;
+        }
+
+        Block continuationBlock = null;
+        if (state.cornerContinuationBlockCoordinate == coordinate)
+        {
+            continuationBlock = this;
+        }
+        else if (TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
+                 && terrainGenerator.TryGetLoadedBlock(state.cornerContinuationBlockCoordinate, out Block loadedBlock))
+        {
+            continuationBlock = loadedBlock;
+        }
+
+        if (continuationBlock == null)
+        {
+            return continuation;
+        }
+
+        continuation.active = true;
+        continuation.block = continuationBlock;
+        continuation.sourceLaneIndex = state.cornerContinuationSourceLaneIndex;
+        continuation.destinationLaneIndex = state.cornerContinuationDestinationLaneIndex;
+        continuation.startWorldPosition = state.cornerContinuationStartWorldPosition;
+        continuation.startProgress = Mathf.Clamp01(state.cornerContinuationStartProgress);
+        continuation.pathLength = state.cornerContinuationPathLength;
+        continuation.durationPathLength = state.cornerContinuationDurationPathLength;
+        return continuation;
+    }
+
     public void SetFocusVisible(bool isVisible)
     {
         if (this == null)
@@ -6198,14 +6479,20 @@ public class Block : BaseObject
             return false;
         }
 
+        if (destinationBlock == currentBlock && destinationLaneIndex == currentLane.LaneIndex)
+        {
+            return false;
+        }
+
         if (destinationLane.Equals(rootLane))
         {
-            if (markBlockedCycles)
-            {
-                currentBlock.MarkConveyorLaneCycleBlocked(visiting);
-            }
-
-            return false;
+            return TryAppendConveyorLaneMove(
+                plannedMoves,
+                currentBlock,
+                currentLane.LaneIndex,
+                destinationBlock,
+                destinationLaneIndex,
+                useCornerMotion);
         }
 
         if (destinationBlock.HasConveyorItemAtLane(destinationLaneIndex))

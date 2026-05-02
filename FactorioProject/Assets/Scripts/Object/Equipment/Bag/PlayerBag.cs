@@ -1446,6 +1446,136 @@ public class PlayerBag : MonoBehaviour
         return false;
     }
 
+    public void CaptureSaveSlots(List<PlayerInventorySlotSaveState> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        EnsureInitialized();
+        results.Clear();
+        int slotCount = SlotCount;
+        for (int slotIndex = 0; slotIndex < slotCount; slotIndex++)
+        {
+            results.Add(new PlayerInventorySlotSaveState
+            {
+                slotIndex = slotIndex,
+                itemId = GetSlotItemId(slotIndex),
+                count = GetSlotCount(slotIndex),
+                capacity = GetSlotMaxCount(slotIndex)
+            });
+        }
+    }
+
+    public void ApplySaveSlots(IReadOnlyList<PlayerInventorySlotSaveState> slots)
+    {
+        EnsureInitialized();
+        ClearAllSlots(false);
+
+        if (slots != null)
+        {
+            for (int i = 0; i < slots.Count; i++)
+            {
+                PlayerInventorySlotSaveState slot = slots[i];
+                if (slot == null || slot.slotIndex < 0 || slot.itemId < 0 || slot.count <= 0)
+                {
+                    continue;
+                }
+
+                ApplySaveSlot(slot.slotIndex, slot.itemId, slot.count);
+            }
+        }
+
+        NotifyChanged();
+    }
+
+    private void ClearAllSlots(bool notify = true)
+    {
+        EnsureInitialized();
+        reservedObjects.Clear();
+        if (portableStack == null || currentStack == null)
+        {
+            return;
+        }
+
+        for (int slotIndex = 0; slotIndex < portableStack.Count; slotIndex++)
+        {
+            PortableStack stack = portableStack[slotIndex];
+            if (stack?.stack != null)
+            {
+                for (int objectIndex = 0; objectIndex < stack.stack.Count; objectIndex++)
+                {
+                    PortableObject portableObject = stack.stack[objectIndex];
+                    if (portableObject != null && portableObject.gameObject.activeSelf)
+                    {
+                        portableObject.gameObject.SetActive(false);
+                    }
+                }
+            }
+
+            if (slotIndex < currentStack.Count)
+            {
+                currentStack[slotIndex] = 0;
+            }
+
+            if (slotIndex < visualPreservedStackCounts.Count)
+            {
+                visualPreservedStackCounts[slotIndex] = 0;
+            }
+        }
+
+        if (notify)
+        {
+            NotifyChanged();
+        }
+    }
+
+    private void ApplySaveSlot(int slotIndex, int itemId, int count)
+    {
+        if (portableStack == null
+            || currentStack == null
+            || slotIndex < 0
+            || slotIndex >= portableStack.Count
+            || slotIndex >= currentStack.Count)
+        {
+            return;
+        }
+
+        PortableStack stack = portableStack[slotIndex];
+        if (stack?.stack == null || stack.stack.Count <= 0)
+        {
+            return;
+        }
+
+        int clampedCount = Mathf.Clamp(count, 0, stack.stack.Count);
+        for (int objectIndex = 0; objectIndex < stack.stack.Count; objectIndex++)
+        {
+            PortableObject portableObject = stack.stack[objectIndex];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            bool shouldBeActive = objectIndex < clampedCount;
+            if (shouldBeActive && !portableObject.SetItem(itemId))
+            {
+                shouldBeActive = false;
+            }
+
+            if (portableObject.gameObject.activeSelf != shouldBeActive)
+            {
+                portableObject.gameObject.SetActive(shouldBeActive);
+            }
+        }
+
+        currentStack[slotIndex] = clampedCount;
+        if (slotIndex < visualPreservedStackCounts.Count)
+        {
+            visualPreservedStackCounts[slotIndex] = 0;
+        }
+    }
+
     public int SlotCount
     {
         get
