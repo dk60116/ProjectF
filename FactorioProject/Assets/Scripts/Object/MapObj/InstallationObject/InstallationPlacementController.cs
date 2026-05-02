@@ -661,7 +661,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        for (int i = 0; i < inventoryBag.SlotCount; i++)
+        for (int i = inventoryBag.SlotCount - 1; i >= 0; i--)
         {
             if (TryReserveInstallPreviewItemFromBagSlot(
                     inventoryBag,
@@ -7220,19 +7220,51 @@ public class InstallationPlacementController : MonoBehaviour
         Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
         PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
         PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
-        if (inventoryBag != null && inventoryBag != handBag)
+        if (handBag != null)
         {
-            removedCount += inventoryBag.RemoveItems(itemId, requestedCount);
-        }
-
-        int remainingCount = requestedCount - removedCount;
-        if (remainingCount > 0 && handBag != null)
-        {
-            removedCount += handBag.RemoveItems(itemId, remainingCount);
+            removedCount += handBag.RemoveItems(itemId, requestedCount);
             handBag.RefreshExternalStackCounts();
         }
 
+        int remainingCount = requestedCount - removedCount;
+        if (remainingCount > 0 && inventoryBag != null && inventoryBag != handBag)
+        {
+            removedCount += RemoveInstallItemsFromInventoryHighestFirst(inventoryBag, itemId, remainingCount);
+        }
+
         player?.UpdateCarryState();
+        return removedCount;
+    }
+
+    private static int RemoveInstallItemsFromInventoryHighestFirst(PlayerBag inventoryBag, int itemId, int requestedCount)
+    {
+        if (inventoryBag == null || itemId < 0 || requestedCount <= 0)
+        {
+            return 0;
+        }
+
+        int removedCount = 0;
+        for (int i = inventoryBag.SlotCount - 1; i >= 0 && removedCount < requestedCount; i--)
+        {
+            if (inventoryBag.GetSlotItemId(i) != itemId)
+            {
+                continue;
+            }
+
+            if (inventoryBag.TryRemoveItemsAtSlot(
+                    i,
+                    requestedCount - removedCount,
+                    out int removedItemId,
+                    out int slotRemovedCount,
+                    out _,
+                    false)
+                && removedItemId == itemId
+                && slotRemovedCount > 0)
+            {
+                removedCount += slotRemovedCount;
+            }
+        }
+
         return removedCount;
     }
 

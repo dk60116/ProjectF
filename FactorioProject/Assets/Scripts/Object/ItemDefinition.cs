@@ -6,6 +6,7 @@ public class ItemDefinition : ScriptableObject
 {
     public enum EnergyType { None, Burn, Electricity }
 
+    public string stableId;
     public string itemName;
     public int id;
     public MapObject mapObject;

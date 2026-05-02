@@ -304,6 +304,51 @@ public class Player : Character
     }
 
     public PlayerState State => playerState;
+    public int BagLevel
+    {
+        get
+        {
+            NormalizeBagLevel();
+            return bagLevel;
+        }
+    }
+
+    public void SetBagLevel(int value)
+    {
+        bagLevel = value;
+        NormalizeBagLevel();
+        ApplyBagLevelVisibility();
+        RefreshBagUI();
+    }
+
+    public void RefreshInventoryPresentation()
+    {
+        ApplyBagLevelVisibility();
+        RefreshBagUI();
+        UpdateCarryState();
+    }
+
+    public void ClearInventoryBags(bool notify = true)
+    {
+        EnsureHandBag();
+        handBag?.ClearAllSlots(false);
+
+        if (bagList != null)
+        {
+            for (int i = 0; i < bagList.Count; i++)
+            {
+                if (bagList[i] != null)
+                {
+                    bagList[i].ClearAllSlots(false);
+                }
+            }
+        }
+
+        if (notify)
+        {
+            RefreshInventoryPresentation();
+        }
+    }
 
     private bool IsPickStateActive()
     {

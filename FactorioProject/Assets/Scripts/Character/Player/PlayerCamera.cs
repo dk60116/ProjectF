@@ -31,7 +31,7 @@ public class PlayerCamera : MonoBehaviour
     private float minOrthographicSize = 2f;
 
     [SerializeField, Min(0.1f)]
-    private float maxOrthographicSize = 8f;
+    private float maxOrthographicSize = 15f;
 
     [SerializeField, Min(0f)]
     private float orthographicMouseWheelZoomSpeed = 0.5f;

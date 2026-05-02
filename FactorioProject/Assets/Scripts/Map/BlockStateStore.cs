@@ -210,6 +210,12 @@ public class BlockStateStore : MonoBehaviour
                && state.resourceCount <= 0;
     }
 
+    public void SetResourceState(Vector2Int worldCoordinate, int itemId, Resource.ResourceSaveState state)
+    {
+        savedStates[worldCoordinate] = state;
+        ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, itemId, state);
+    }
+
     public bool TryGetFloorObjects(Vector2Int worldCoordinate, out List<int> itemIds)
     {
         if (savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState) && savedState != null)

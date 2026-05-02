@@ -635,13 +635,30 @@ internal static class BeltItemLineDebugVisual
 {
     private static readonly int BaseMapPropertyId = Shader.PropertyToID("_BaseMap");
     private static readonly int MainTexPropertyId = Shader.PropertyToID("_MainTex");
+    private static readonly Color32[] Palette =
+    {
+        new Color32(255, 91, 91, 255),
+        new Color32(70, 190, 255, 255),
+        new Color32(103, 224, 113, 255),
+        new Color32(255, 200, 74, 255),
+        new Color32(184, 122, 255, 255),
+        new Color32(255, 130, 62, 255),
+        new Color32(83, 223, 204, 255),
+        new Color32(255, 115, 183, 255),
+        new Color32(159, 219, 71, 255),
+        new Color32(121, 149, 255, 255),
+        new Color32(255, 159, 125, 255),
+        new Color32(102, 232, 160, 255),
+        new Color32(218, 117, 255, 255),
+        new Color32(255, 226, 120, 255),
+        new Color32(80, 205, 235, 255),
+        new Color32(238, 111, 129, 255)
+    };
 
     public static Color32 GetColor(int lineId)
     {
-        float hue = Mathf.Repeat(lineId * 0.61803398875f, 1f);
-        Color color = Color.HSVToRGB(hue, 0.74f, 1f);
-        color.a = 1f;
-        return color;
+        int paletteIndex = Mathf.Abs(lineId) % Palette.Length;
+        return Palette[paletteIndex];
     }
 
     public static void ApplySolidColor(MaterialPropertyBlock propertyBlock, Color color)

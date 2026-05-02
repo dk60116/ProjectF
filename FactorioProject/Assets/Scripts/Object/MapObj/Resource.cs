@@ -1554,11 +1554,37 @@ public class ResourceBatchRenderer : MonoBehaviour
     [SerializeField, Min(1f)]
     private float batchCellSize = 8f;
 
+    [SerializeField, Min(0f)]
+    private float batchRebuildDelaySeconds = 0.02f;
+
+    [SerializeField, Min(0f)]
+    private float maxBatchRebuildDelaySeconds = 0.08f;
+
     private readonly HashSet<Resource> registeredResources = new HashSet<Resource>();
     private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<Resource> cleanupBuffer = new List<Resource>();
     private bool batchesDirty = true;
+    private bool batchDirtyTimeInitialized;
+    private float batchDirtySinceTime;
+    private float nextBatchRebuildTime;
+
+    private void Awake()
+    {
+        NormalizeBatchSettings();
+    }
+
+    private void OnValidate()
+    {
+        NormalizeBatchSettings();
+    }
+
+    private void NormalizeBatchSettings()
+    {
+        batchCellSize = Mathf.Max(1f, batchCellSize);
+        batchRebuildDelaySeconds = Mathf.Clamp(batchRebuildDelaySeconds, 0f, 0.02f);
+        maxBatchRebuildDelaySeconds = Mathf.Clamp(maxBatchRebuildDelaySeconds, batchRebuildDelaySeconds, 0.08f);
+    }
 
     public void Register(Resource resource)
     {
@@ -1569,7 +1595,7 @@ public class ResourceBatchRenderer : MonoBehaviour
 
         if (registeredResources.Add(resource))
         {
-            batchesDirty = true;
+            MarkBatchesDirty();
         }
     }
 
@@ -1582,13 +1608,13 @@ public class ResourceBatchRenderer : MonoBehaviour
 
         if (registeredResources.Remove(resource))
         {
-            batchesDirty = true;
+            MarkBatchesDirty();
         }
     }
 
     public void MarkDirty()
     {
-        batchesDirty = true;
+        MarkBatchesDirty();
     }
 
     private void LateUpdate()
@@ -1599,18 +1625,51 @@ public class ResourceBatchRenderer : MonoBehaviour
             {
                 ClearActiveBatches();
                 batchesDirty = false;
+                batchDirtyTimeInitialized = false;
             }
 
             return;
         }
 
-        if (batchesDirty)
+        if (batchesDirty && CanRebuildBatchesNow())
         {
             RebuildBatches();
             batchesDirty = false;
+            batchDirtyTimeInitialized = false;
         }
 
         RenderBatches();
+    }
+
+    private void MarkBatchesDirty()
+    {
+        batchesDirty = true;
+        if (!Application.isPlaying)
+        {
+            batchDirtyTimeInitialized = false;
+            return;
+        }
+
+        float now = Time.unscaledTime;
+        if (!batchDirtyTimeInitialized)
+        {
+            batchDirtyTimeInitialized = true;
+            batchDirtySinceTime = now;
+        }
+
+        nextBatchRebuildTime = now + Mathf.Max(0f, batchRebuildDelaySeconds);
+    }
+
+    private bool CanRebuildBatchesNow()
+    {
+        if (!Application.isPlaying || !batchDirtyTimeInitialized)
+        {
+            return true;
+        }
+
+        float now = Time.unscaledTime;
+        float maxDelay = Mathf.Max(batchRebuildDelaySeconds, maxBatchRebuildDelaySeconds);
+        return now >= nextBatchRebuildTime || now - batchDirtySinceTime >= maxDelay;
     }
 
     private void ClearActiveBatches()

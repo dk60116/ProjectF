@@ -26,6 +26,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly int BatchGroupId;
     public readonly int BatchCellX;
     public readonly int BatchCellZ;
+    public readonly bool InvertCulling;
 
     public VirtualRenderBatchKey(
         Mesh mesh,
@@ -41,7 +42,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         Color32 beltItemLineDebugColor = default,
         int batchGroupId = 0,
         int batchCellX = 0,
-        int batchCellZ = 0)
+        int batchCellZ = 0,
+        bool invertCulling = false)
     {
         Mesh = mesh;
         Material = material;
@@ -57,6 +59,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         BatchGroupId = batchGroupId;
         BatchCellX = batchCellX;
         BatchCellZ = batchCellZ;
+        InvertCulling = invertCulling;
     }
 
     public static int QuantizeUvScroll(float uvScrollY)
@@ -79,7 +82,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && BeltItemLineDebugColor.Equals(other.BeltItemLineDebugColor)
             && BatchGroupId == other.BatchGroupId
             && BatchCellX == other.BatchCellX
-            && BatchCellZ == other.BatchCellZ;
+            && BatchCellZ == other.BatchCellZ
+            && InvertCulling == other.InvertCulling;
     }
 
     public override bool Equals(object obj)
@@ -105,6 +109,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ BatchGroupId;
             hash = (hash * 397) ^ BatchCellX;
             hash = (hash * 397) ^ BatchCellZ;
+            hash = (hash * 397) ^ (InvertCulling ? 1 : 0);
             return hash;
         }
     }
@@ -221,12 +226,28 @@ public sealed class VirtualRenderBatchCollection
             List<Matrix4x4> matrices = batchCache.Matrices;
             int remaining = matrices.Count;
             int startIndex = 0;
-            while (remaining > 0)
+            bool previousInvertCulling = GL.invertCulling;
+            if (key.InvertCulling)
             {
-                int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
-                Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubmeshIndex, matrices, drawCount, startIndex);
-                startIndex += drawCount;
-                remaining -= drawCount;
+                GL.invertCulling = !previousInvertCulling;
+            }
+
+            try
+            {
+                while (remaining > 0)
+                {
+                    int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
+                    Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubmeshIndex, matrices, drawCount, startIndex);
+                    startIndex += drawCount;
+                    remaining -= drawCount;
+                }
+            }
+            finally
+            {
+                if (key.InvertCulling)
+                {
+                    GL.invertCulling = previousInvertCulling;
+                }
             }
         }
     }

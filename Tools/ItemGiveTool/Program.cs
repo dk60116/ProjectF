@@ -32,8 +32,12 @@ internal sealed class EditorToolForm : Form
     private readonly NumericUpDown portInput = new NumericUpDown();
     private readonly NumericUpDown itemIdInput = new NumericUpDown();
     private readonly NumericUpDown countInput = new NumericUpDown();
+    private readonly NumericUpDown saveSlotInput = new NumericUpDown();
     private readonly Button giveButton = new Button();
     private readonly Button pingButton = new Button();
+    private readonly Button saveButton = new Button();
+    private readonly Button loadButton = new Button();
+    private readonly Button resetButton = new Button();
     private readonly Button reloadButton = new Button();
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
@@ -51,7 +55,7 @@ internal sealed class EditorToolForm : Form
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 744);
+        MinimumSize = new Size(900, 792);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -67,13 +71,14 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 6
+            RowCount = 7
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -207,6 +212,51 @@ internal sealed class EditorToolForm : Form
         layout.Controls.Add(buttonPanel, 0, 2);
         layout.SetColumnSpan(buttonPanel, 2);
 
+        FlowLayoutPanel saveLoadPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 6, 0, 0),
+            WrapContents = false
+        };
+
+        Label saveSlotLabel = new Label
+        {
+            Text = "Slot",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(0, 8, 8, 0)
+        };
+
+        saveSlotInput.Minimum = 1;
+        saveSlotInput.Maximum = 10;
+        saveSlotInput.Value = 1;
+        saveSlotInput.Width = 64;
+        saveSlotInput.Height = 30;
+        saveSlotInput.TextAlign = HorizontalAlignment.Right;
+        saveSlotInput.Anchor = AnchorStyles.Left;
+        saveSlotInput.Margin = new Padding(0, 2, 14, 0);
+        saveSlotInput.BackColor = Color.FromArgb(43, 46, 39);
+        saveSlotInput.ForeColor = Color.FromArgb(243, 234, 206);
+
+        StyleSecondaryButton(saveButton, "Save");
+        saveButton.Click += async (_, _) => await SendSaveAsync();
+
+        StyleSecondaryButton(loadButton, "Load");
+        loadButton.Click += async (_, _) => await SendLoadAsync();
+
+        StyleSecondaryButton(resetButton, "초기화");
+        resetButton.Click += async (_, _) => await SendResetAsync();
+
+        saveLoadPanel.Controls.Add(saveSlotLabel);
+        saveLoadPanel.Controls.Add(saveSlotInput);
+        saveLoadPanel.Controls.Add(saveButton);
+        saveLoadPanel.Controls.Add(loadButton);
+        saveLoadPanel.Controls.Add(resetButton);
+        layout.Controls.Add(saveLoadPanel, 0, 3);
+        layout.SetColumnSpan(saveLoadPanel, 2);
+
         FlowLayoutPanel debugTogglePanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -230,7 +280,7 @@ internal sealed class EditorToolForm : Form
 
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
-        layout.Controls.Add(debugTogglePanel, 0, 3);
+        layout.Controls.Add(debugTogglePanel, 0, 4);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
         Panel runtimeStatsCard = CreateCardPanel();
@@ -263,7 +313,7 @@ internal sealed class EditorToolForm : Form
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
-        layout.Controls.Add(runtimeStatsCard, 0, 4);
+        layout.Controls.Add(runtimeStatsCard, 0, 5);
         layout.SetColumnSpan(runtimeStatsCard, 2);
 
         Panel logCard = CreateCardPanel();
@@ -277,7 +327,7 @@ internal sealed class EditorToolForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 5);
+        layout.Controls.Add(logCard, 0, 6);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -571,6 +621,40 @@ internal sealed class EditorToolForm : Form
     {
         await SendCommandAsync("ping", "Ping");
     }
+
+    private async Task SendSaveAsync()
+    {
+        int slotNumber = SelectedSaveSlotNumber;
+        await SendCommandAsync($"save {slotNumber}", $"Save Slot {slotNumber}");
+        await RefreshStatusAsync();
+    }
+
+    private async Task SendLoadAsync()
+    {
+        int slotNumber = SelectedSaveSlotNumber;
+        await SendCommandAsync($"load {slotNumber}", $"Load Slot {slotNumber}");
+        await RefreshStatusAsync();
+    }
+
+    private async Task SendResetAsync()
+    {
+        int slotNumber = SelectedSaveSlotNumber;
+        DialogResult result = MessageBox.Show(
+            this,
+            $"{slotNumber}번 저장 파일과 런타임 월드 상태를 초기화합니다.",
+            "초기화",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Warning);
+        if (result != DialogResult.OK)
+        {
+            return;
+        }
+
+        await SendCommandAsync($"reset {slotNumber}", $"Reset Slot {slotNumber}");
+        await RefreshStatusAsync();
+    }
+
+    private int SelectedSaveSlotNumber => Decimal.ToInt32(saveSlotInput.Value);
 
     private async Task SendDebugToggleAsync(string toggleName, bool value, string displayName)
     {
@@ -867,6 +951,10 @@ internal sealed class EditorToolForm : Form
     {
         giveButton.Enabled = !busy;
         pingButton.Enabled = !busy;
+        saveSlotInput.Enabled = !busy;
+        saveButton.Enabled = !busy;
+        loadButton.Enabled = !busy;
+        resetButton.Enabled = !busy;
         reloadButton.Enabled = !busy;
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;

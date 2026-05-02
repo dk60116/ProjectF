@@ -498,6 +498,52 @@ public class PlayerBag : MonoBehaviour
         }
     }
 
+    public void ClearAllSlots(bool notify = true)
+    {
+        EnsureInitialized();
+
+        reservedObjects.Clear();
+        if (portableStack != null)
+        {
+            for (int stackIndex = 0; stackIndex < portableStack.Count; stackIndex++)
+            {
+                PortableStack stack = portableStack[stackIndex];
+                if (stack == null || stack.stack == null)
+                {
+                    continue;
+                }
+
+                for (int objectIndex = 0; objectIndex < stack.stack.Count; objectIndex++)
+                {
+                    PortableObject portableObject = stack.stack[objectIndex];
+                    if (portableObject != null && portableObject.gameObject.activeSelf)
+                    {
+                        portableObject.gameObject.SetActive(false);
+                    }
+                }
+            }
+        }
+
+        if (currentStack != null)
+        {
+            for (int i = 0; i < currentStack.Count; i++)
+            {
+                currentStack[i] = 0;
+            }
+        }
+
+        EnsureVisualPreservedStackCounts();
+        for (int i = 0; i < visualPreservedStackCounts.Count; i++)
+        {
+            visualPreservedStackCounts[i] = 0;
+        }
+
+        if (notify)
+        {
+            NotifyChanged();
+        }
+    }
+
     public bool TryAddObject(int objectId, out PortableObject targetPortableObject)
     {
         EnsureInitialized();

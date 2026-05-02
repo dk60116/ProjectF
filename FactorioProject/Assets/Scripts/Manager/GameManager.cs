@@ -19,6 +19,7 @@ public class GameManager : MonoBehaviour
     private ItemManager itemManager;
     private VirtualObjectWorld virtualObjectWorld;
     private VirtualItemStackRenderer virtualItemStackRenderer;
+    private SaveManager saveManager;
 
     [SerializeField]
     private Player player;
@@ -69,6 +70,7 @@ public class GameManager : MonoBehaviour
         }
 
         virtualItemStackRenderer.Configure(virtualObjectWorld, itemManager);
+        EnsureSaveManager();
         ConfigureRuntimeItemGiveReceiver();
     }
 
@@ -141,6 +143,7 @@ public class GameManager : MonoBehaviour
     public ItemManager ItemManger => itemManager;
     public VirtualObjectWorld VirtualWorld => virtualObjectWorld;
     public VirtualItemStackRenderer VirtualItemRenderer => virtualItemStackRenderer;
+    public SaveManager SaveManager => saveManager;
 
     public Player Player => player;
     public bool DebugConveyorInstallGridEnds => debugConveyorInstallGridEnds;
@@ -149,6 +152,15 @@ public class GameManager : MonoBehaviour
     public bool ShowBeltItemLine => showBeltItemLine;
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
     public int RuntimeItemGiveServerPort => runtimeItemGiveServerPort;
+
+    private void EnsureSaveManager()
+    {
+        saveManager = GetComponentInChildren<SaveManager>(true);
+        if (saveManager == null)
+        {
+            saveManager = gameObject.AddComponent<SaveManager>();
+        }
+    }
 
     public void SetInstallationPlacementActive(bool isActive)
     {
@@ -337,6 +349,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 case ToolCommand.SetDebugToggle:
                     request.Result = SetDebugToggle(request.DebugToggleName, request.DebugToggleValue);
                     break;
+                case ToolCommand.Save:
+                    request.Result = SaveGameSlot(request.SaveSlotIndex);
+                    break;
+                case ToolCommand.Load:
+                    request.Result = LoadGameSlot(request.SaveSlotIndex);
+                    break;
+                case ToolCommand.Reset:
+                    request.Result = ResetGameSlot(request.SaveSlotIndex);
+                    break;
                 default:
                     request.Result = GiveItems(request.ItemId, request.Count);
                     break;
@@ -447,13 +468,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     out int count,
                     out string debugToggleName,
                     out bool debugToggleValue,
+                    out int saveSlotIndex,
                     out string error))
             {
                 writer.WriteLine($"error {error}");
                 return;
             }
 
-            ToolRequest request = new ToolRequest(command, itemId, count, debugToggleName, debugToggleValue);
+            ToolRequest request = new ToolRequest(command, itemId, count, debugToggleName, debugToggleValue, saveSlotIndex);
             EnqueueRequest(request);
             if (!request.Completion.Wait(RequestTimeoutMilliseconds))
             {
@@ -474,6 +496,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         out int count,
         out string debugToggleName,
         out bool debugToggleValue,
+        out int saveSlotIndex,
         out string error)
     {
         command = ToolCommand.Give;
@@ -481,6 +504,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         count = 1;
         debugToggleName = string.Empty;
         debugToggleValue = false;
+        saveSlotIndex = 0;
         error = string.Empty;
 
         if (string.IsNullOrWhiteSpace(line))
@@ -506,6 +530,31 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (string.Equals(parts[0], "save", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.Save;
+            itemId = 0;
+            count = 0;
+            return TryParseSaveSlotArgument(parts, out saveSlotIndex, out error);
+        }
+
+        if (string.Equals(parts[0], "load", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.Load;
+            itemId = 0;
+            count = 0;
+            return TryParseSaveSlotArgument(parts, out saveSlotIndex, out error);
+        }
+
+        if (string.Equals(parts[0], "reset", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parts[0], "clear", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.Reset;
+            itemId = 0;
+            count = 0;
+            return TryParseSaveSlotArgument(parts, out saveSlotIndex, out error);
+        }
+
         if (parts.Length == 3 && string.Equals(parts[0], "debug", StringComparison.OrdinalIgnoreCase))
         {
             command = ToolCommand.SetDebugToggle;
@@ -523,7 +572,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | ping | status";
+            error = "usage: give <itemId> [count] | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | save [slot 1-10] | load [slot 1-10] | reset [slot 1-10] | ping | status";
             return false;
         }
 
@@ -540,6 +589,34 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         count = Math.Min(Math.Max(count, 1), MaxItemsPerRequest);
+        return true;
+    }
+
+    private static bool TryParseSaveSlotArgument(string[] parts, out int saveSlotIndex, out string error)
+    {
+        saveSlotIndex = 0;
+        error = string.Empty;
+
+        if (parts.Length == 1)
+        {
+            return true;
+        }
+
+        if (parts.Length != 2)
+        {
+            error = $"slot command accepts one optional slot number (1-{SaveManager.SaveSlotCount})";
+            return false;
+        }
+
+        if (!int.TryParse(parts[1], out int displaySlotNumber)
+            || displaySlotNumber < 1
+            || displaySlotNumber > SaveManager.SaveSlotCount)
+        {
+            error = $"slot must be between 1 and {SaveManager.SaveSlotCount}";
+            return false;
+        }
+
+        saveSlotIndex = displaySlotNumber - 1;
         return true;
     }
 
@@ -764,23 +841,75 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");
     }
 
+    private ToolResult SaveGameSlot(int slotIndex)
+    {
+        SaveManager manager = GameManager.Instance != null ? GameManager.Instance.SaveManager : FindObjectOfType<SaveManager>();
+        if (manager == null)
+        {
+            return ToolResult.Error(0, 0, "save manager not found");
+        }
+
+        int displaySlotNumber = SaveManager.NormalizeSlotIndex(slotIndex) + 1;
+        return manager.SaveSlot(slotIndex)
+            ? ToolResult.Success(0, 0, 0, 0, 0, 0, $"saved slot {displaySlotNumber}")
+            : ToolResult.Error(0, 0, "save failed");
+    }
+
+    private ToolResult LoadGameSlot(int slotIndex)
+    {
+        SaveManager manager = GameManager.Instance != null ? GameManager.Instance.SaveManager : FindObjectOfType<SaveManager>();
+        if (manager == null)
+        {
+            return ToolResult.Error(0, 0, "save manager not found");
+        }
+
+        int displaySlotNumber = SaveManager.NormalizeSlotIndex(slotIndex) + 1;
+        return manager.LoadSlot(slotIndex)
+            ? ToolResult.Success(0, 0, 0, 0, 0, 0, $"loaded slot {displaySlotNumber}")
+            : ToolResult.Error(0, 0, "load failed");
+    }
+
+    private ToolResult ResetGameSlot(int slotIndex)
+    {
+        SaveManager manager = GameManager.Instance != null ? GameManager.Instance.SaveManager : FindObjectOfType<SaveManager>();
+        if (manager == null)
+        {
+            return ToolResult.Error(0, 0, "save manager not found");
+        }
+
+        int displaySlotNumber = SaveManager.NormalizeSlotIndex(slotIndex) + 1;
+        return manager.ResetSlot(slotIndex)
+            ? ToolResult.Success(0, 0, 0, 0, 0, 0, $"reset slot {displaySlotNumber}")
+            : ToolResult.Error(0, 0, "reset failed");
+    }
+
     private enum ToolCommand
     {
         Give,
         Ping,
         Status,
-        SetDebugToggle
+        SetDebugToggle,
+        Save,
+        Load,
+        Reset
     }
 
     private sealed class ToolRequest
     {
-        public ToolRequest(ToolCommand command, int itemId, int count, string debugToggleName, bool debugToggleValue)
+        public ToolRequest(
+            ToolCommand command,
+            int itemId,
+            int count,
+            string debugToggleName,
+            bool debugToggleValue,
+            int saveSlotIndex)
         {
             Command = command;
             ItemId = itemId;
             Count = count;
             DebugToggleName = debugToggleName;
             DebugToggleValue = debugToggleValue;
+            SaveSlotIndex = saveSlotIndex;
         }
 
         public ToolCommand Command { get; }
@@ -788,6 +917,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public int Count { get; }
         public string DebugToggleName { get; }
         public bool DebugToggleValue { get; }
+        public int SaveSlotIndex { get; }
         public ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
         public ToolResult Result { get; set; }
     }

@@ -218,6 +218,30 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
+    public bool SupportsVirtualRuntimeRendering()
+    {
+        if (IsCornerVariant)
+        {
+            return false;
+        }
+
+        EnsureRendererCache();
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            MeshFilter meshFilter = i < cachedRendererMeshFilters.Length ? cachedRendererMeshFilters[i] : null;
+            if (renderer != null
+                && meshFilter != null
+                && meshFilter.sharedMesh != null
+                && RequiresInvertedCulling(renderer.localToWorldMatrix))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public void AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results)
     {
         if (results == null)
@@ -251,6 +275,7 @@ public class ConveyorBelt : InstallationObject
             bool hasUvScroll = renderer == beltTopRenderer;
             float uvScrollY = hasUvScroll ? -ConveyorSpeed * 0.75f : 0f;
             Matrix4x4 matrix = renderer.localToWorldMatrix;
+            bool invertCulling = RequiresInvertedCulling(matrix);
             int layer = renderer.gameObject.layer;
 
             for (int materialIndex = 0; materialIndex < entryCount; materialIndex++)
@@ -268,9 +293,20 @@ public class ConveyorBelt : InstallationObject
                     layer,
                     materialIndex,
                     hasUvScroll,
-                    uvScrollY));
+                    uvScrollY,
+                    invertCulling));
             }
         }
+    }
+
+    private static bool RequiresInvertedCulling(Matrix4x4 matrix)
+    {
+        // Odd negative scale, used by the reverse corner prefab, needs flipped culling when instanced.
+        float determinant =
+            (matrix.m00 * ((matrix.m11 * matrix.m22) - (matrix.m12 * matrix.m21)))
+            - (matrix.m01 * ((matrix.m10 * matrix.m22) - (matrix.m12 * matrix.m20)))
+            + (matrix.m02 * ((matrix.m10 * matrix.m21) - (matrix.m11 * matrix.m20)));
+        return determinant < -0.000001f;
     }
 
     public void SetVirtualRenderingSuppressed(bool isSuppressed)

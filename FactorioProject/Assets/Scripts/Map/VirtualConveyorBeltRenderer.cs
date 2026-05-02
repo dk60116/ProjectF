@@ -12,7 +12,8 @@ public readonly struct VirtualConveyorBeltRenderData
         int layer,
         int submeshIndex,
         bool hasUvScroll,
-        float uvScrollY)
+        float uvScrollY,
+        bool invertCulling)
     {
         Mesh = mesh;
         Material = material;
@@ -21,6 +22,7 @@ public readonly struct VirtualConveyorBeltRenderData
         SubmeshIndex = submeshIndex;
         HasUvScroll = hasUvScroll;
         UvScrollY = uvScrollY;
+        InvertCulling = invertCulling;
     }
 
     public readonly Mesh Mesh;
@@ -30,6 +32,7 @@ public readonly struct VirtualConveyorBeltRenderData
     public readonly int SubmeshIndex;
     public readonly bool HasUvScroll;
     public readonly float UvScrollY;
+    public readonly bool InvertCulling;
 }
 
 [DisallowMultipleComponent]
@@ -45,6 +48,12 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     {
         if (!Application.isPlaying || conveyorBelt == null)
         {
+            return;
+        }
+
+        if (!conveyorBelt.SupportsVirtualRuntimeRendering())
+        {
+            Unregister(conveyorBelt);
             return;
         }
 
@@ -130,7 +139,8 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             ShadowCastingMode.Off,
             false,
             renderData.HasUvScroll,
-            VirtualRenderBatchKey.QuantizeUvScroll(renderData.UvScrollY));
+            VirtualRenderBatchKey.QuantizeUvScroll(renderData.UvScrollY),
+            invertCulling: renderData.InvertCulling);
 
         batches.AddOwnedMatrix(beltCache, beltCache.batchEntries, key, renderData.Matrix);
     }
