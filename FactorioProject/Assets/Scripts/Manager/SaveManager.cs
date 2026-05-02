@@ -30,6 +30,8 @@ public class SaveManager : MonoBehaviour
     private Vector3 initialPlayerPosition;
     private Quaternion initialPlayerRotation = Quaternion.identity;
     private int initialBagLevel = 1;
+    private bool hasInitialTerrainState;
+    private int initialTerrainSeed;
 
     public int SlotCount => SaveSlotCount;
     public string SavePath => GetSavePath(DefaultSaveSlotIndex);
@@ -44,7 +46,7 @@ public class SaveManager : MonoBehaviour
 
     private IEnumerator Start()
     {
-        CaptureInitialPlayerState();
+        CaptureInitialRuntimeState();
         yield return null;
 
         if (autoLoadOnStart)
@@ -108,13 +110,14 @@ public class SaveManager : MonoBehaviour
         string savePath = GetSavePath(normalizedSlotIndex);
         if (!File.Exists(savePath))
         {
+            ResetRuntimeState();
             if (!autoLoad)
             {
-                Debug.LogWarning(
-                    $"SaveManager: Save slot {ToDisplaySlotNumber(normalizedSlotIndex)} does not exist at '{savePath}'.");
+                Debug.Log(
+                    $"SaveManager: Save slot {ToDisplaySlotNumber(normalizedSlotIndex)} is empty. Loaded initial runtime state.");
             }
 
-            return false;
+            return true;
         }
 
         try
@@ -774,6 +777,12 @@ public class SaveManager : MonoBehaviour
         writer.Write(value.w);
     }
 
+    private void CaptureInitialRuntimeState()
+    {
+        CaptureInitialPlayerState();
+        CaptureInitialTerrainState();
+    }
+
     private void CaptureInitialPlayerState()
     {
         Player player = ResolvePlayer();
@@ -786,6 +795,18 @@ public class SaveManager : MonoBehaviour
         initialPlayerRotation = player.transform.rotation;
         initialBagLevel = player.BagLevel;
         hasInitialPlayerState = true;
+    }
+
+    private void CaptureInitialTerrainState()
+    {
+        TerrainGenerator terrainGenerator = TerrainGenerator.ResolveActive();
+        if (terrainGenerator == null)
+        {
+            return;
+        }
+
+        initialTerrainSeed = terrainGenerator.CurrentSeed;
+        hasInitialTerrainState = true;
     }
 
     private static LoadedSaveData ReadSaveFile(string savePath)
@@ -1427,7 +1448,21 @@ public class SaveManager : MonoBehaviour
         TerrainGenerator terrainGenerator = TerrainGenerator.ResolveActive();
         if (terrainGenerator != null)
         {
-            terrainGenerator.Generate();
+            if (hasInitialTerrainState)
+            {
+                terrainGenerator.PrepareForSaveLoadApply();
+                terrainGenerator.RebuildAfterSaveLoad(initialTerrainSeed);
+            }
+            else
+            {
+                terrainGenerator.Generate();
+            }
+
+            if (hasInitialPlayerState)
+            {
+                ApplyPlayerTransform(player, initialPlayerPosition, initialPlayerRotation);
+            }
+
             return;
         }
 

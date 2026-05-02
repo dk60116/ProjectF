@@ -12,6 +12,11 @@ public class TerrainGenerator : MonoBehaviour
 {
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
+    private const string ChunkRootNamePrefix = "Chunk (";
+    private const string PooledChunkRootName = "Pooled Chunk";
+    private const string ChunkRootPoolName = "__ChunkRootPool";
+    private const string GeneratedSurfaceName = "GeneratedSurface";
+    private const string GeneratedSurfaceMeshPrefix = "GeneratedSurface_";
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -59,6 +64,23 @@ public class TerrainGenerator : MonoBehaviour
         {
             this.coordinate = coordinate;
             this.chunkSize = chunkSize;
+        }
+    }
+
+    private sealed class ChunkDistanceComparer : IComparer<Vector2Int>
+    {
+        private Vector2Int centerChunk;
+
+        public void SetCenter(Vector2Int centerChunk)
+        {
+            this.centerChunk = centerChunk;
+        }
+
+        public int Compare(Vector2Int left, Vector2Int right)
+        {
+            int leftDistance = GetChunkDistanceSqr(left, centerChunk);
+            int rightDistance = GetChunkDistanceSqr(right, centerChunk);
+            return leftDistance.CompareTo(rightDistance);
         }
     }
 
@@ -265,6 +287,15 @@ public class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(1f)]
     private float highPriorityChunkFrameBudgetMultiplier = 2.5f;
 
+    [SerializeField]
+    private bool prewarmChunkPoolsOnStart;
+
+    [SerializeField, Min(0)]
+    private int maxPrewarmedChunkRoots = 4;
+
+    [SerializeField, Min(0)]
+    private int maxPrewarmedBlocks = 1024;
+
     [Header("Object Virtualization")]
     [SerializeField]
     private bool virtualizeDistantFloorObjects = true;
@@ -289,6 +320,9 @@ public class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Min(0.02f)]
     private float conveyorActiveFullScanInterval = 0.25f;
+
+    [SerializeField, Min(16)]
+    private int conveyorMotionRegistrationRepairBlocksPerScan = 512;
 
     [SerializeField, Min(16)]
     private int conveyorSlotDotMaxBlocksPerFrame = 768;
@@ -582,8 +616,10 @@ public class TerrainGenerator : MonoBehaviour
     private int nextBeltItemLineDebugStableRunId = 1;
     private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
-    private readonly List<Block> conveyorMotionRegistrationRepairBuffer = new List<Block>();
+    private readonly List<Block> conveyorMotionRegistrationRepairScanBlocks = new List<Block>();
+    private readonly Dictionary<Block, int> conveyorMotionRegistrationRepairScanIndices = new Dictionary<Block, int>();
     private int conveyorItemVisualBlockSetVersion;
+    private int conveyorMotionRegistrationRepairCursor;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
     private readonly HashSet<int> conveyorNetworkSleepingIds = new HashSet<int>();
@@ -607,11 +643,19 @@ public class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, bool> directWaterBlockCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<Vector2Int, bool> bufferedWaterBlockCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<TerrainBiome, Material> biomeMaterialCache = new Dictionary<TerrainBiome, Material>();
+    private readonly List<Vector2Int> chunksToGenerateBuffer = new List<Vector2Int>(128);
+    private readonly List<Vector2Int> chunksToRemoveBuffer = new List<Vector2Int>(32);
+    private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly Queue<ChunkGenerationRequest> pendingChunkGenerations = new Queue<ChunkGenerationRequest>();
     private readonly HashSet<Vector2Int> pendingChunkGenerationCoordinates = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> activeChunkGenerationCoordinates = new HashSet<Vector2Int>();
     private readonly Queue<Vector2Int> pendingChunkUnloads = new Queue<Vector2Int>();
     private readonly HashSet<Vector2Int> pendingChunkUnloadCoordinates = new HashSet<Vector2Int>();
+    private readonly Stack<Transform> chunkRootPool = new Stack<Transform>();
+    private readonly Dictionary<Transform, List<Block>> chunkBlockLists = new Dictionary<Transform, List<Block>>();
+    private readonly List<Block> floorObjectVirtualizationScanBlocks = new List<Block>(1024);
+    private readonly Stack<HashSet<InstallationObject>> savedInstallationSetPool = new Stack<HashSet<InstallationObject>>();
+    private readonly Stack<HashSet<Vector2Int>> installationAnchorSetPool = new Stack<HashSet<Vector2Int>>();
 
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
@@ -621,12 +665,16 @@ public class TerrainGenerator : MonoBehaviour
     private float nextConveyorActiveFullScanTime;
     private Vector2Int currentCenterChunk;
     private float nextFloorObjectVirtualizationTime;
+    private int floorObjectVirtualizationScanCursor;
+    private bool floorObjectVirtualizationScanDirty = true;
     private BlockStateStore resourceStateStore;
     private InstallationPlacementController installationRestoreController;
     private InstallationBackgroundSimulator installationBackgroundSimulator;
     private BlockPool blockPool;
+    private MapObjectPool mapObjectPool;
     private PortableItemRenderer portableItemRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
+    private Transform chunkRootPoolRoot;
     private Coroutine chunkGenerationCoroutine;
     private Coroutine chunkUnloadCoroutine;
 
@@ -677,6 +725,9 @@ public class TerrainGenerator : MonoBehaviour
         highPriorityChunkRadius = Mathf.Max(0, highPriorityChunkRadius);
         highPriorityChunkWorkMultiplier = Mathf.Max(1, highPriorityChunkWorkMultiplier);
         highPriorityChunkFrameBudgetMultiplier = Mathf.Max(1f, highPriorityChunkFrameBudgetMultiplier);
+        maxPrewarmedChunkRoots = Mathf.Max(0, maxPrewarmedChunkRoots);
+        maxPrewarmedBlocks = Mathf.Max(0, maxPrewarmedBlocks);
+        conveyorMotionRegistrationRepairBlocksPerScan = Mathf.Max(16, conveyorMotionRegistrationRepairBlocksPerScan);
     }
 
     private void NormalizeOreBodyScaleSettings()
@@ -781,9 +832,23 @@ public class TerrainGenerator : MonoBehaviour
         ClearBeltItemLineDebugRefreshQueue();
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
+        ClearConveyorMotionRegistrationRepairScan();
         conveyorItemVisualBlockSetVersion++;
         virtualizedFloorObjectCoordinates.Clear();
+        chunksToGenerateBuffer.Clear();
+        chunksToRemoveBuffer.Clear();
+        chunkBlockLists.Clear();
+        savedInstallationSetPool.Clear();
+        installationAnchorSetPool.Clear();
+        floorObjectVirtualizationScanBlocks.Clear();
+        floorObjectVirtualizationScanCursor = 0;
+        floorObjectVirtualizationScanDirty = true;
         ClearPendingChunkGenerations();
+    }
+
+    private void OnDestroy()
+    {
+        ClearChunkRootPool();
     }
 
     public bool VirtualizeConveyorItems => virtualizeConveyorItems;
@@ -875,6 +940,7 @@ public class TerrainGenerator : MonoBehaviour
         InvalidateTerrainBiomeMaterialCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
+        PrewarmChunkPoolsIfNeeded();
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
         RefreshChunks(currentCenterChunk, true);
@@ -958,6 +1024,7 @@ public class TerrainGenerator : MonoBehaviour
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
         resourceStateStore?.ClearStates();
+        PrewarmChunkPoolsIfNeeded();
 
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
@@ -983,6 +1050,7 @@ public class TerrainGenerator : MonoBehaviour
         InvalidateTerrainBiomeMaterialCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
+        PrewarmChunkPoolsIfNeeded();
 
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
@@ -1014,7 +1082,28 @@ public class TerrainGenerator : MonoBehaviour
         int normalizedChunkSize = Mathf.Max(4, chunkSize);
         int normalizedLoadRadius = GetEffectiveLoadRadius();
         int normalizedUnloadRadius = GetEffectiveUnloadRadius();
-        List<Vector2Int> chunksToGenerate = new List<Vector2Int>();
+        List<Vector2Int> chunksToGenerate = chunksToGenerateBuffer;
+        List<Vector2Int> chunksToRemove = chunksToRemoveBuffer;
+        chunksToGenerate.Clear();
+        chunksToRemove.Clear();
+
+        foreach (KeyValuePair<Vector2Int, Transform> loadedChunk in loadedChunks)
+        {
+            int distanceX = Mathf.Abs(loadedChunk.Key.x - centerChunk.x);
+            int distanceY = Mathf.Abs(loadedChunk.Key.y - centerChunk.y);
+
+            if (distanceX > normalizedUnloadRadius || distanceY > normalizedUnloadRadius)
+            {
+                chunksToRemove.Add(loadedChunk.Key);
+            }
+        }
+
+        for (int i = 0; i < chunksToRemove.Count; i++)
+        {
+            QueueChunkUnload(chunksToRemove[i]);
+        }
+
+        EnsureChunkUnloadProcessing();
 
         for (int chunkY = centerChunk.y - normalizedLoadRadius; chunkY <= centerChunk.y + normalizedLoadRadius; chunkY++)
         {
@@ -1035,39 +1124,17 @@ public class TerrainGenerator : MonoBehaviour
             }
         }
 
-        chunksToGenerate.Sort((left, right) =>
-        {
-            int leftDistance = GetChunkDistanceSqr(left, centerChunk);
-            int rightDistance = GetChunkDistanceSqr(right, centerChunk);
-            return leftDistance.CompareTo(rightDistance);
-        });
+        chunkDistanceComparer.SetCenter(centerChunk);
+        chunksToGenerate.Sort(chunkDistanceComparer);
 
         for (int i = 0; i < chunksToGenerate.Count; i++)
         {
             QueueChunkGeneration(chunksToGenerate[i], normalizedChunkSize);
         }
 
+        chunksToGenerate.Clear();
+        chunksToRemove.Clear();
         EnsureChunkGenerationProcessing();
-
-        List<Vector2Int> chunksToRemove = new List<Vector2Int>();
-
-        foreach (KeyValuePair<Vector2Int, Transform> loadedChunk in loadedChunks)
-        {
-            int distanceX = Mathf.Abs(loadedChunk.Key.x - centerChunk.x);
-            int distanceY = Mathf.Abs(loadedChunk.Key.y - centerChunk.y);
-
-            if (distanceX > normalizedUnloadRadius || distanceY > normalizedUnloadRadius)
-            {
-                chunksToRemove.Add(loadedChunk.Key);
-            }
-        }
-
-        for (int i = 0; i < chunksToRemove.Count; i++)
-        {
-            QueueChunkUnload(chunksToRemove[i]);
-        }
-
-        EnsureChunkUnloadProcessing();
     }
 
     private void GenerateChunk(Vector2Int chunkCoordinate, int normalizedChunkSize)
@@ -1097,10 +1164,12 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         Vector2Int origin = new Vector2Int(chunkCoordinate.x * normalizedChunkSize, chunkCoordinate.y * normalizedChunkSize);
-        GameObject chunkObject = new GameObject($"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})");
-        chunkObject.transform.SetParent(transform, false);
-        chunkObject.transform.position = new Vector3(origin.x, 0f, origin.y);
-        loadedChunks.Add(chunkCoordinate, chunkObject.transform);
+        Transform chunkTransform = AcquireChunkRoot(chunkCoordinate, origin);
+        GameObject chunkObject = chunkTransform.gameObject;
+        List<Block> chunkBlocks = GetOrCreateChunkBlockList(chunkTransform);
+        chunkBlocks.Clear();
+        loadedChunks.Add(chunkCoordinate, chunkTransform);
+        bool generatedAnyBlock = false;
         bool highPriorityChunk = IsHighPriorityChunk(chunkCoordinate);
         int chunkWorkMultiplier = GetChunkWorkMultiplier(highPriorityChunk);
         float chunkFrameBudgetMultiplier = GetChunkFrameBudgetMultiplier(highPriorityChunk);
@@ -1121,6 +1190,8 @@ public class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
+                chunkBlocks.Add(block);
+                generatedAnyBlock = true;
                 ApplyBlockBiomeVisuals(block, visualData);
                 if ((!HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
                         || CanSpawnResourceUnderMiningMachine(worldCoordinate))
@@ -1138,6 +1209,11 @@ public class TerrainGenerator : MonoBehaviour
                     frameStartTime = Time.realtimeSinceStartup;
                 }
             }
+        }
+
+        if (generatedAnyBlock)
+        {
+            floorObjectVirtualizationScanDirty = true;
         }
 
         if (allowYield)
@@ -1288,13 +1364,13 @@ public class TerrainGenerator : MonoBehaviour
                 SaveChunkResourceStates(chunkObjects[i]);
                 RemoveChunkBlocksFromLookup(chunkObjects[i]);
                 ReleaseChunkBlocksToPool(chunkObjects[i]);
-                CleanupOrphanedLiveInstallations();
                 DestroyChunkObject(chunkObjects[i].gameObject);
             }
         }
 
         loadedChunks.Clear();
         loadedBlocks.Clear();
+        chunkBlockLists.Clear();
         activeConveyors.Clear();
         conveyorTickBuffer.Clear();
         activeConveyorDataMotionBlocks.Clear();
@@ -1325,8 +1401,12 @@ public class TerrainGenerator : MonoBehaviour
         ClearBeltItemLineDebugRefreshQueue();
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
+        ClearConveyorMotionRegistrationRepairScan();
         conveyorItemVisualBlockSetVersion++;
         virtualizedFloorObjectCoordinates.Clear();
+        floorObjectVirtualizationScanBlocks.Clear();
+        floorObjectVirtualizationScanCursor = 0;
+        floorObjectVirtualizationScanDirty = true;
         CleanupOrphanedLiveInstallations();
     }
 
@@ -1346,6 +1426,307 @@ public class TerrainGenerator : MonoBehaviour
             {
                 return;
             }
+        }
+
+        if (Application.isPlaying)
+        {
+            if (chunkRootPoolRoot != null && chunkObject.transform == chunkRootPoolRoot)
+            {
+                return;
+            }
+
+            if (IsPoolableChunkRoot(chunkObject.transform))
+            {
+                ReleaseChunkRoot(chunkObject.transform);
+            }
+            else
+            {
+                chunkBlockLists.Remove(chunkObject.transform);
+                Destroy(chunkObject);
+            }
+        }
+        else
+        {
+            chunkBlockLists.Remove(chunkObject.transform);
+            DestroyImmediate(chunkObject);
+        }
+    }
+
+    private void PrewarmChunkPoolsIfNeeded()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        int targetChunkCount = prewarmChunkPoolsOnStart
+            ? Mathf.Min(CalculateChunkPoolTargetCount(), Mathf.Max(0, maxPrewarmedChunkRoots))
+            : 0;
+        TrimChunkRootPool(targetChunkCount);
+
+        if (!TryGetBlockSet(Block.BlockType.Ground, out BlockSet groundSet))
+        {
+            return;
+        }
+
+        GameObject groundPrefab = SelectBlockPrefab(groundSet, false);
+        if (groundPrefab == null)
+        {
+            return;
+        }
+
+        int normalizedChunkSize = Mathf.Max(4, chunkSize);
+        int targetBlockCount = prewarmChunkPoolsOnStart
+            ? Mathf.Min(targetChunkCount * normalizedChunkSize * normalizedChunkSize, Mathf.Max(0, maxPrewarmedBlocks))
+            : 0;
+
+        BlockPool resolvedBlockPool = ResolveBlockPool();
+        resolvedBlockPool?.TrimAvailable(groundPrefab, targetBlockCount);
+        if (!prewarmChunkPoolsOnStart)
+        {
+            return;
+        }
+
+        PrewarmChunkRootPool(targetChunkCount);
+        resolvedBlockPool?.Prewarm(groundPrefab, targetBlockCount);
+    }
+
+    private List<Block> GetOrCreateChunkBlockList(Transform chunkTransform)
+    {
+        if (chunkTransform == null)
+        {
+            return null;
+        }
+
+        if (!chunkBlockLists.TryGetValue(chunkTransform, out List<Block> chunkBlocks))
+        {
+            int normalizedChunkSize = Mathf.Max(4, chunkSize);
+            chunkBlocks = new List<Block>(normalizedChunkSize * normalizedChunkSize);
+            chunkBlockLists.Add(chunkTransform, chunkBlocks);
+        }
+
+        return chunkBlocks;
+    }
+
+    private List<Block> GetChunkBlockListForRead(Transform chunkTransform)
+    {
+        List<Block> chunkBlocks = GetOrCreateChunkBlockList(chunkTransform);
+        if (chunkBlocks == null || chunkBlocks.Count > 0)
+        {
+            return chunkBlocks;
+        }
+
+        chunkTransform.GetComponentsInChildren<Block>(true, chunkBlocks);
+        return chunkBlocks;
+    }
+
+    private HashSet<InstallationObject> AcquireSavedInstallationSet()
+    {
+        HashSet<InstallationObject> set = savedInstallationSetPool.Count > 0
+            ? savedInstallationSetPool.Pop()
+            : new HashSet<InstallationObject>();
+        set.Clear();
+        return set;
+    }
+
+    private void ReleaseSavedInstallationSet(HashSet<InstallationObject> set)
+    {
+        if (set == null)
+        {
+            return;
+        }
+
+        set.Clear();
+        savedInstallationSetPool.Push(set);
+    }
+
+    private HashSet<Vector2Int> AcquireInstallationAnchorSet()
+    {
+        HashSet<Vector2Int> set = installationAnchorSetPool.Count > 0
+            ? installationAnchorSetPool.Pop()
+            : new HashSet<Vector2Int>();
+        set.Clear();
+        return set;
+    }
+
+    private void ReleaseInstallationAnchorSet(HashSet<Vector2Int> set)
+    {
+        if (set == null)
+        {
+            return;
+        }
+
+        set.Clear();
+        installationAnchorSetPool.Push(set);
+    }
+
+    private int CalculateChunkPoolTargetCount()
+    {
+        int loadChunkDiameter = (GetEffectiveLoadRadius() * 2) + 1;
+        int unloadChunkDiameter = (GetEffectiveUnloadRadius() * 2) + 1;
+        return Mathf.Max(1, (unloadChunkDiameter * unloadChunkDiameter) + (loadChunkDiameter * loadChunkDiameter));
+    }
+
+    private void PrewarmChunkRootPool(int targetAvailableCount)
+    {
+        if (targetAvailableCount <= 0)
+        {
+            return;
+        }
+
+        ResolveChunkRootPoolRoot();
+        int missingCount = targetAvailableCount - CountValidChunkRoots();
+        for (int i = 0; i < missingCount; i++)
+        {
+            Transform chunkRoot = CreateChunkRootInstance();
+            PrepareChunkRootForPool(chunkRoot);
+            chunkRootPool.Push(chunkRoot);
+        }
+    }
+
+    private void TrimChunkRootPool(int maxAvailableCount)
+    {
+        int validCount = CountValidChunkRoots();
+        int normalizedMax = Mathf.Max(0, maxAvailableCount);
+        while (validCount > normalizedMax && chunkRootPool.Count > 0)
+        {
+            Transform chunkRoot = chunkRootPool.Pop();
+            if (chunkRoot == null)
+            {
+                continue;
+            }
+
+            chunkBlockLists.Remove(chunkRoot);
+            DestroyChunkRootObject(chunkRoot.gameObject);
+            validCount--;
+        }
+    }
+
+    private Transform AcquireChunkRoot(Vector2Int chunkCoordinate, Vector2Int origin)
+    {
+        Transform chunkRoot = null;
+        while (chunkRootPool.Count > 0 && chunkRoot == null)
+        {
+            chunkRoot = chunkRootPool.Pop();
+        }
+
+        if (chunkRoot == null)
+        {
+            chunkRoot = CreateChunkRootInstance();
+        }
+
+        chunkRoot.name = $"{ChunkRootNamePrefix}{chunkCoordinate.x}, {chunkCoordinate.y})";
+        chunkRoot.SetParent(transform, false);
+        chunkRoot.SetPositionAndRotation(new Vector3(origin.x, 0f, origin.y), Quaternion.identity);
+        chunkRoot.localScale = Vector3.one;
+        chunkRoot.gameObject.SetActive(true);
+        return chunkRoot;
+    }
+
+    private Transform CreateChunkRootInstance()
+    {
+        GameObject chunkObject = new GameObject(PooledChunkRootName);
+        return chunkObject.transform;
+    }
+
+    private void ReleaseChunkRoot(Transform chunkRoot)
+    {
+        if (chunkRoot == null || chunkRoot == chunkRootPoolRoot)
+        {
+            return;
+        }
+
+        PrepareChunkRootForPool(chunkRoot);
+        chunkRootPool.Push(chunkRoot);
+    }
+
+    private static bool IsPoolableChunkRoot(Transform chunkRoot)
+    {
+        return chunkRoot != null
+               && chunkRoot.name.StartsWith(ChunkRootNamePrefix, StringComparison.Ordinal);
+    }
+
+    private void PrepareChunkRootForPool(Transform chunkRoot)
+    {
+        if (chunkRoot == null)
+        {
+            return;
+        }
+
+        ClearGeneratedSurfaceMesh(chunkRoot);
+        chunkRoot.name = PooledChunkRootName;
+        chunkRoot.SetParent(ResolveChunkRootPoolRoot(), false);
+        chunkRoot.localPosition = Vector3.zero;
+        chunkRoot.localRotation = Quaternion.identity;
+        chunkRoot.localScale = Vector3.one;
+        chunkRoot.gameObject.SetActive(false);
+    }
+
+    private Transform ResolveChunkRootPoolRoot()
+    {
+        if (chunkRootPoolRoot != null)
+        {
+            return chunkRootPoolRoot;
+        }
+
+        GameObject poolRootObject = new GameObject(ChunkRootPoolName);
+        if (Application.isPlaying)
+        {
+            poolRootObject.hideFlags = HideFlags.HideInHierarchy;
+        }
+
+        chunkRootPoolRoot = poolRootObject.transform;
+        chunkRootPoolRoot.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        return chunkRootPoolRoot;
+    }
+
+    private int CountValidChunkRoots()
+    {
+        if (chunkRootPool.Count == 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        foreach (Transform chunkRoot in chunkRootPool)
+        {
+            if (chunkRoot != null)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void ClearChunkRootPool()
+    {
+        chunkRootPool.Clear();
+        chunkBlockLists.Clear();
+        savedInstallationSetPool.Clear();
+        installationAnchorSetPool.Clear();
+        if (chunkRootPoolRoot == null)
+        {
+            return;
+        }
+
+        GameObject poolRootObject = chunkRootPoolRoot.gameObject;
+        chunkRootPoolRoot = null;
+        if (Application.isPlaying)
+        {
+            Destroy(poolRootObject);
+        }
+        else
+        {
+            DestroyImmediate(poolRootObject);
+        }
+    }
+
+    private static void DestroyChunkRootObject(GameObject chunkObject)
+    {
+        if (chunkObject == null)
+        {
+            return;
         }
 
         if (Application.isPlaying)
@@ -2046,6 +2427,7 @@ public class TerrainGenerator : MonoBehaviour
         {
             if (conveyorItemVisualBlocks.Add(block))
             {
+                AddConveyorMotionRegistrationRepairScanBlock(block);
                 conveyorItemVisualDirtyBlocks.Add(block);
                 conveyorItemVisualBlockSetVersion++;
             }
@@ -2054,6 +2436,7 @@ public class TerrainGenerator : MonoBehaviour
         {
             if (conveyorItemVisualBlocks.Remove(block))
             {
+                RemoveConveyorMotionRegistrationRepairScanBlock(block);
                 conveyorItemVisualDirtyBlocks.Add(block);
                 conveyorItemVisualBlockSetVersion++;
             }
@@ -2484,46 +2867,117 @@ public class TerrainGenerator : MonoBehaviour
 
     private void RepairConveyorMotionRegistrations()
     {
-        if (conveyorItemVisualBlocks.Count == 0)
+        if (conveyorMotionRegistrationRepairScanBlocks.Count == 0)
         {
             return;
         }
 
-        conveyorMotionRegistrationRepairBuffer.Clear();
-        foreach (Block block in conveyorItemVisualBlocks)
+        int scanBudget = Mathf.Min(
+            conveyorMotionRegistrationRepairScanBlocks.Count,
+            Mathf.Max(16, conveyorMotionRegistrationRepairBlocksPerScan));
+        for (int scanned = 0; scanned < scanBudget && conveyorMotionRegistrationRepairScanBlocks.Count > 0; scanned++)
         {
-            if (block != null)
+            if (conveyorMotionRegistrationRepairCursor >= conveyorMotionRegistrationRepairScanBlocks.Count)
             {
-                conveyorMotionRegistrationRepairBuffer.Add(block);
+                conveyorMotionRegistrationRepairCursor = 0;
             }
-        }
 
-        if (conveyorMotionRegistrationRepairBuffer.Count != conveyorItemVisualBlocks.Count)
-        {
-            conveyorItemVisualBlocks.Remove(null);
-        }
+            int currentIndex = conveyorMotionRegistrationRepairCursor;
+            Block block = conveyorMotionRegistrationRepairScanBlocks[currentIndex];
+            conveyorMotionRegistrationRepairCursor++;
 
-        for (int i = 0; i < conveyorMotionRegistrationRepairBuffer.Count; i++)
-        {
-            Block block = conveyorMotionRegistrationRepairBuffer[i];
-            if (block == null)
+            if (block == null || !conveyorItemVisualBlocks.Contains(block))
             {
+                conveyorItemVisualBlocks.Remove(block);
+                RemoveConveyorMotionRegistrationRepairScanBlockAt(currentIndex);
                 continue;
             }
 
-            if (block.HasActiveVirtualConveyorDataMotion()
-                && !activeConveyorDataMotionBlocks.Contains(block))
-            {
-                SetConveyorDataMotionActive(block, true);
-            }
+            RepairConveyorMotionRegistration(block);
+        }
+    }
 
-            if (block.ShouldTickActiveConveyor())
-            {
-                QueueConveyorWake(block);
-            }
+    private void RepairConveyorMotionRegistration(Block block)
+    {
+        if (block == null)
+        {
+            return;
         }
 
-        conveyorMotionRegistrationRepairBuffer.Clear();
+        if (block.HasActiveVirtualConveyorDataMotion()
+            && !activeConveyorDataMotionBlocks.Contains(block))
+        {
+            SetConveyorDataMotionActive(block, true);
+        }
+
+        if (block.ShouldTickActiveConveyor())
+        {
+            QueueConveyorWake(block);
+        }
+    }
+
+    private void AddConveyorMotionRegistrationRepairScanBlock(Block block)
+    {
+        if (block == null || conveyorMotionRegistrationRepairScanIndices.ContainsKey(block))
+        {
+            return;
+        }
+
+        conveyorMotionRegistrationRepairScanIndices[block] = conveyorMotionRegistrationRepairScanBlocks.Count;
+        conveyorMotionRegistrationRepairScanBlocks.Add(block);
+    }
+
+    private void RemoveConveyorMotionRegistrationRepairScanBlock(Block block)
+    {
+        if (ReferenceEquals(block, null)
+            || !conveyorMotionRegistrationRepairScanIndices.TryGetValue(block, out int index))
+        {
+            return;
+        }
+
+        RemoveConveyorMotionRegistrationRepairScanBlockAt(index);
+    }
+
+    private void RemoveConveyorMotionRegistrationRepairScanBlockAt(int index)
+    {
+        if (index < 0 || index >= conveyorMotionRegistrationRepairScanBlocks.Count)
+        {
+            return;
+        }
+
+        Block removedBlock = conveyorMotionRegistrationRepairScanBlocks[index];
+        int lastIndex = conveyorMotionRegistrationRepairScanBlocks.Count - 1;
+        Block lastBlock = conveyorMotionRegistrationRepairScanBlocks[lastIndex];
+
+        conveyorMotionRegistrationRepairScanBlocks[index] = lastBlock;
+        conveyorMotionRegistrationRepairScanBlocks.RemoveAt(lastIndex);
+
+        if (!ReferenceEquals(removedBlock, null))
+        {
+            conveyorMotionRegistrationRepairScanIndices.Remove(removedBlock);
+        }
+
+        if (index < lastIndex && !ReferenceEquals(lastBlock, null))
+        {
+            conveyorMotionRegistrationRepairScanIndices[lastBlock] = index;
+        }
+
+        if (conveyorMotionRegistrationRepairCursor > index)
+        {
+            conveyorMotionRegistrationRepairCursor--;
+        }
+
+        if (conveyorMotionRegistrationRepairCursor >= conveyorMotionRegistrationRepairScanBlocks.Count)
+        {
+            conveyorMotionRegistrationRepairCursor = 0;
+        }
+    }
+
+    private void ClearConveyorMotionRegistrationRepairScan()
+    {
+        conveyorMotionRegistrationRepairScanBlocks.Clear();
+        conveyorMotionRegistrationRepairScanIndices.Clear();
+        conveyorMotionRegistrationRepairCursor = 0;
     }
 
     private bool TryTickStraightConveyorLine(Block triggerBlock)
@@ -3241,8 +3695,9 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        ReleaseGeneratedSurfaceMesh(meshFilter);
         Mesh generatedMesh = BuildGeneratedSurfaceMesh(chunkSurface);
-        generatedMesh.name = $"GeneratedSurface_{chunkRoot.name}";
+        generatedMesh.name = $"{GeneratedSurfaceMeshPrefix}{chunkRoot.name}";
         meshFilter.sharedMesh = generatedMesh;
         meshRenderer.sharedMaterials = GetGeneratedSurfaceMaterials();
         meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -3272,6 +3727,51 @@ public class TerrainGenerator : MonoBehaviour
         mesh.RecalculateBounds();
         mesh.UploadMeshData(false);
         return mesh;
+    }
+
+    private void ClearGeneratedSurfaceMesh(Transform chunkRoot)
+    {
+        if (chunkRoot == null)
+        {
+            return;
+        }
+
+        Transform generatedSurface = chunkRoot.Find(GeneratedSurfaceName);
+        if (generatedSurface == null)
+        {
+            return;
+        }
+
+        ReleaseGeneratedSurfaceMesh(generatedSurface.GetComponent<MeshFilter>());
+    }
+
+    private void ReleaseGeneratedSurfaceMesh(MeshFilter meshFilter)
+    {
+        if (meshFilter == null)
+        {
+            return;
+        }
+
+        Mesh mesh = meshFilter.sharedMesh;
+        if (mesh == null)
+        {
+            return;
+        }
+
+        meshFilter.sharedMesh = null;
+        if (!mesh.name.StartsWith(GeneratedSurfaceMeshPrefix, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(mesh);
+        }
+        else
+        {
+            DestroyImmediate(mesh);
+        }
     }
 
     private ChunkSurfaceBuildData BuildCurvedChunkSurface(Vector2Int origin, int chunkSizeInBlocks)
@@ -6348,7 +6848,14 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        Resource spawnedResource = Instantiate(prefab, block.transform);
+        Resource spawnedResource = Application.isPlaying
+            ? ResolveMapObjectPool()?.Get(prefab, block.transform)
+            : Instantiate(prefab, block.transform);
+        if (spawnedResource == null)
+        {
+            return;
+        }
+
         spawnedResource.transform.localPosition = Vector3.zero;
         spawnedResource.transform.localRotation = Quaternion.identity;
         ApplyResourceScaleProfile(spawnedResource, prefab);
@@ -6406,40 +6913,47 @@ public class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
-        HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
-        int blocksSinceYield = 0;
-        int blockBudget = Mathf.Max(1, chunkUnloadBlocksPerFrame);
-        float frameStartTime = Time.realtimeSinceStartup;
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        List<Block> chunkBlocks = GetChunkBlockListForRead(chunkTransform);
+        HashSet<InstallationObject> savedInstallations = AcquireSavedInstallationSet();
+        try
         {
-            Block block = chunkBlocks[i];
-            if (block == null)
+            int blocksSinceYield = 0;
+            int blockBudget = Mathf.Max(1, chunkUnloadBlocksPerFrame);
+            float frameStartTime = Time.realtimeSinceStartup;
+            for (int i = 0; i < chunkBlocks.Count; i++)
             {
-                continue;
-            }
+                Block block = chunkBlocks[i];
+                if (block == null)
+                {
+                    continue;
+                }
 
-            SaveLoadedBlockFloorObjects(block);
+                SaveLoadedBlockFloorObjects(block);
 
-            if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
-            {
-                resourceStateStore.SaveInstallation(installationObject);
-                resourceStateStore.RegisterLiveInstallation(installationObject);
-            }
+                if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
+                {
+                    resourceStateStore.SaveInstallation(installationObject);
+                    resourceStateStore.RegisterLiveInstallation(installationObject);
+                }
 
-            Resource resource = block.Resource;
-            if (resource != null)
-            {
-                resourceStateStore.Save(block.Coordinate, resource);
-            }
+                Resource resource = block.Resource;
+                if (resource != null)
+                {
+                    resourceStateStore.Save(block.Coordinate, resource);
+                }
 
-            blocksSinceYield++;
-            if (ShouldYieldChunkWork(allowYield, blocksSinceYield, blockBudget, frameStartTime))
-            {
-                blocksSinceYield = 0;
-                yield return null;
-                frameStartTime = Time.realtimeSinceStartup;
+                blocksSinceYield++;
+                if (ShouldYieldChunkWork(allowYield, blocksSinceYield, blockBudget, frameStartTime))
+                {
+                    blocksSinceYield = 0;
+                    yield return null;
+                    frameStartTime = Time.realtimeSinceStartup;
+                }
             }
+        }
+        finally
+        {
+            ReleaseSavedInstallationSet(savedInstallations);
         }
     }
 
@@ -6451,8 +6965,8 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         bool removedAnyBlock = false;
-        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        List<Block> chunkBlocks = GetChunkBlockListForRead(chunkTransform);
+        for (int i = 0; i < chunkBlocks.Count; i++)
         {
             Block block = chunkBlocks[i];
             if (block == null)
@@ -6471,6 +6985,7 @@ public class TerrainGenerator : MonoBehaviour
 
         if (removedAnyBlock)
         {
+            floorObjectVirtualizationScanDirty = true;
             MarkConveyorNetworkDirty();
         }
     }
@@ -6841,44 +7356,51 @@ public class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
-        HashSet<Vector2Int> installationAnchors = new HashSet<Vector2Int>();
-        int chunkWorkMultiplier = GetChunkWorkMultiplier(highPriorityChunk);
-        float chunkFrameBudgetMultiplier = GetChunkFrameBudgetMultiplier(highPriorityChunk);
-        int blocksSinceYield = 0;
-        int blockBudget = Mathf.Max(1, chunkRestoreBlocksPerFrame * chunkWorkMultiplier);
-        float frameStartTime = Time.realtimeSinceStartup;
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        List<Block> chunkBlocks = GetChunkBlockListForRead(chunkTransform);
+        HashSet<Vector2Int> installationAnchors = AcquireInstallationAnchorSet();
+        try
         {
-            if (chunkBlocks[i] != null
-                && resourceStateStore.TryGetInstallationAnchorAtCoordinate(chunkBlocks[i].Coordinate, out Vector2Int anchorCoordinate))
+            int chunkWorkMultiplier = GetChunkWorkMultiplier(highPriorityChunk);
+            float chunkFrameBudgetMultiplier = GetChunkFrameBudgetMultiplier(highPriorityChunk);
+            int blocksSinceYield = 0;
+            int blockBudget = Mathf.Max(1, chunkRestoreBlocksPerFrame * chunkWorkMultiplier);
+            float frameStartTime = Time.realtimeSinceStartup;
+            for (int i = 0; i < chunkBlocks.Count; i++)
             {
-                installationAnchors.Add(anchorCoordinate);
+                if (chunkBlocks[i] != null
+                    && resourceStateStore.TryGetInstallationAnchorAtCoordinate(chunkBlocks[i].Coordinate, out Vector2Int anchorCoordinate))
+                {
+                    installationAnchors.Add(anchorCoordinate);
+                }
+
+                blocksSinceYield++;
+                if (ShouldYieldChunkWork(allowYield, blocksSinceYield, blockBudget, frameStartTime, chunkFrameBudgetMultiplier))
+                {
+                    blocksSinceYield = 0;
+                    yield return null;
+                    frameStartTime = Time.realtimeSinceStartup;
+                }
             }
 
-            blocksSinceYield++;
-            if (ShouldYieldChunkWork(allowYield, blocksSinceYield, blockBudget, frameStartTime, chunkFrameBudgetMultiplier))
+            int installationsSinceYield = 0;
+            int installationBudget = Mathf.Max(1, chunkRestoreInstallationsPerFrame * chunkWorkMultiplier);
+            frameStartTime = Time.realtimeSinceStartup;
+            foreach (Vector2Int anchorCoordinate in installationAnchors)
             {
-                blocksSinceYield = 0;
-                yield return null;
-                frameStartTime = Time.realtimeSinceStartup;
+                RestoreOrBindSavedInstallation(anchorCoordinate);
+
+                installationsSinceYield++;
+                if (ShouldYieldChunkWork(allowYield, installationsSinceYield, installationBudget, frameStartTime, chunkFrameBudgetMultiplier))
+                {
+                    installationsSinceYield = 0;
+                    yield return null;
+                    frameStartTime = Time.realtimeSinceStartup;
+                }
             }
         }
-
-        int installationsSinceYield = 0;
-        int installationBudget = Mathf.Max(1, chunkRestoreInstallationsPerFrame * chunkWorkMultiplier);
-        frameStartTime = Time.realtimeSinceStartup;
-        foreach (Vector2Int anchorCoordinate in installationAnchors)
+        finally
         {
-            RestoreOrBindSavedInstallation(anchorCoordinate);
-
-            installationsSinceYield++;
-            if (ShouldYieldChunkWork(allowYield, installationsSinceYield, installationBudget, frameStartTime, chunkFrameBudgetMultiplier))
-            {
-                installationsSinceYield = 0;
-                yield return null;
-                frameStartTime = Time.realtimeSinceStartup;
-            }
+            ReleaseInstallationAnchorSet(installationAnchors);
         }
     }
 
@@ -6929,30 +7451,11 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         InstallationPlacementController placementController = ResolveInstallationPlacementController();
-        MapObject sourcePrefab = null;
-        if (definition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
+        MapObject sourcePrefab = ResolveInstallationSourcePrefab(savedState, definition, placementController);
+        InstallationObject sourceInstallationPrefab = sourcePrefab as InstallationObject;
+        if (sourceInstallationPrefab == null)
         {
-            sourcePrefab = savedState.conveyorVariantKind switch
-            {
-                2 => conveyorPrototype.ReverseCornerVariantPrefab != null
-                    ? conveyorPrototype.ReverseCornerVariantPrefab
-                    : conveyorPrototype.CornerVariantPrefab,
-                1 => conveyorPrototype.CornerVariantPrefab != null
-                    ? conveyorPrototype.CornerVariantPrefab
-                    : conveyorPrototype.StraightVariantPrefab,
-                _ => conveyorPrototype.StraightVariantPrefab
-            };
-        }
-
-        if (sourcePrefab == null)
-        {
-            sourcePrefab = placementController != null
-                ? placementController.ResolveInstalledObjectSourcePrefab(definition, savedState.anchorCoordinate, savedState.quarterTurns)
-                : definition.mapObject;
-        }
-        if (sourcePrefab == null)
-        {
-            sourcePrefab = definition.mapObject;
+            return false;
         }
 
         if (placementController != null
@@ -6973,22 +7476,15 @@ public class TerrainGenerator : MonoBehaviour
             ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, definition, savedState.quarterTurns, 0f)
             : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
 
-        MapObject restoredObject = Instantiate(sourcePrefab, transform);
-        restoredObject.transform.SetPositionAndRotation(position, rotation);
-
-        if (!(restoredObject is InstallationObject restoredInstallation))
+        InstallationObject restoredInstallation = Application.isPlaying
+            ? ResolveMapObjectPool()?.Get(sourceInstallationPrefab, transform)
+            : Instantiate(sourceInstallationPrefab, transform);
+        if (restoredInstallation == null)
         {
-            if (Application.isPlaying)
-            {
-                Destroy(restoredObject.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(restoredObject.gameObject);
-            }
-
             return false;
         }
+
+        restoredInstallation.transform.SetPositionAndRotation(position, rotation);
 
         List<Vector2Int> occupiedCoordinates = savedState.occupiedCoordinates != null && savedState.occupiedCoordinates.Count > 0
             ? new List<Vector2Int>(savedState.occupiedCoordinates)
@@ -7036,6 +7532,53 @@ public class TerrainGenerator : MonoBehaviour
         BindLoadedBlocksToInstallation(restoredInstallation, occupiedCoordinates);
         installationObject = restoredInstallation;
         return true;
+    }
+
+    private MapObject ResolveInstallationSourcePrefab(BlockStateStore.InstallationSaveState savedState)
+    {
+        if (savedState == null)
+        {
+            return null;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(savedState.itemId);
+        return ResolveInstallationSourcePrefab(savedState, definition, ResolveInstallationPlacementController());
+    }
+
+    private MapObject ResolveInstallationSourcePrefab(
+        BlockStateStore.InstallationSaveState savedState,
+        ItemDefinition definition,
+        InstallationPlacementController placementController)
+    {
+        if (savedState == null || definition == null || definition.mapObject == null)
+        {
+            return null;
+        }
+
+        MapObject sourcePrefab = null;
+        if (definition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
+        {
+            sourcePrefab = savedState.conveyorVariantKind switch
+            {
+                2 => conveyorPrototype.ReverseCornerVariantPrefab != null
+                    ? conveyorPrototype.ReverseCornerVariantPrefab
+                    : conveyorPrototype.CornerVariantPrefab,
+                1 => conveyorPrototype.CornerVariantPrefab != null
+                    ? conveyorPrototype.CornerVariantPrefab
+                    : conveyorPrototype.StraightVariantPrefab,
+                _ => conveyorPrototype.StraightVariantPrefab
+            };
+        }
+
+        if (sourcePrefab == null && placementController != null)
+        {
+            sourcePrefab = placementController.ResolveInstalledObjectSourcePrefab(
+                definition,
+                savedState.anchorCoordinate,
+                savedState.quarterTurns);
+        }
+
+        return sourcePrefab != null ? sourcePrefab : definition.mapObject;
     }
 
     private void BindLoadedBlocksToInstallation(MapObject installedObject, IReadOnlyList<Vector2Int> occupiedCoordinates)
@@ -7123,11 +7666,11 @@ public class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
+        List<Block> chunkBlocks = GetChunkBlockListForRead(chunkTransform);
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkUnloadBlocksPerFrame);
         float frameStartTime = Time.realtimeSinceStartup;
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        for (int i = 0; i < chunkBlocks.Count; i++)
         {
             Block block = chunkBlocks[i];
             if (block == null)
@@ -7135,6 +7678,7 @@ public class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
+            ReleaseBlockMapObjectForChunkUnload(block);
             resolvedBlockPool.Release(block);
             blocksSinceYield++;
             if (ShouldYieldChunkWork(allowYield, blocksSinceYield, blockBudget, frameStartTime))
@@ -7143,6 +7687,25 @@ public class TerrainGenerator : MonoBehaviour
                 yield return null;
                 frameStartTime = Time.realtimeSinceStartup;
             }
+        }
+
+        chunkBlocks.Clear();
+    }
+
+    private void ReleaseBlockMapObjectForChunkUnload(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (block.MapObject is Resource resource
+            && resource != null
+            && resource.transform != null
+            && resource.transform.parent == block.transform)
+        {
+            block.SetMapObject(null);
+            ResolveMapObjectPool()?.Release(resource);
         }
     }
 
@@ -7161,13 +7724,13 @@ public class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
+        List<Block> chunkBlocks = GetChunkBlockListForRead(chunkTransform);
         int chunkWorkMultiplier = GetChunkWorkMultiplier(highPriorityChunk);
         float chunkFrameBudgetMultiplier = GetChunkFrameBudgetMultiplier(highPriorityChunk);
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkRestoreBlocksPerFrame * chunkWorkMultiplier);
         float frameStartTime = Time.realtimeSinceStartup;
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        for (int i = 0; i < chunkBlocks.Count; i++)
         {
             RestoreBlockState(chunkBlocks[i]);
             blocksSinceYield++;
@@ -7228,17 +7791,43 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        if (floorObjectVirtualizationScanDirty)
+        {
+            RebuildFloorObjectVirtualizationScanBlocks();
+        }
+
+        int blockCount = floorObjectVirtualizationScanBlocks.Count;
+        if (blockCount <= 0)
+        {
+            return;
+        }
+
         int conversionBudget = Mathf.Max(1, floorObjectVirtualizationConversionsPerTick);
         int conversionCount = 0;
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        int scanBudget = Mathf.Min(blockCount, Mathf.Max(64, conversionBudget));
+        Vector2Int liveCenterCoordinate = GetFloorObjectLiveCenterCoordinate();
+        int liveRadius = Mathf.Max(0, floorObjectLiveRadius);
+
+        for (int scanned = 0; scanned < scanBudget; scanned++)
         {
-            Block block = pair.Value;
-            if (block == null || block.Type != Block.BlockType.Ground)
+            if (floorObjectVirtualizationScanCursor >= blockCount)
             {
+                floorObjectVirtualizationScanCursor = 0;
+            }
+
+            Block block = floorObjectVirtualizationScanBlocks[floorObjectVirtualizationScanCursor];
+            floorObjectVirtualizationScanCursor++;
+
+            if (block == null
+                || !loadedBlocks.TryGetValue(block.Coordinate, out Block loadedBlock)
+                || loadedBlock != block
+                || block.Type != Block.BlockType.Ground)
+            {
+                floorObjectVirtualizationScanDirty = true;
                 continue;
             }
 
-            bool shouldBeLive = IsWithinFloorObjectLiveRadius(pair.Key);
+            bool shouldBeLive = IsWithinFloorObjectLiveRadius(block.Coordinate, liveCenterCoordinate, liveRadius);
             if (shouldBeLive)
             {
                 if (TryMaterializeVirtualFloorObjects(block))
@@ -7258,6 +7847,26 @@ public class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private void RebuildFloorObjectVirtualizationScanBlocks()
+    {
+        floorObjectVirtualizationScanBlocks.Clear();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block != null && block.Type == Block.BlockType.Ground)
+            {
+                floorObjectVirtualizationScanBlocks.Add(block);
+            }
+        }
+
+        if (floorObjectVirtualizationScanCursor >= floorObjectVirtualizationScanBlocks.Count)
+        {
+            floorObjectVirtualizationScanCursor = 0;
+        }
+
+        floorObjectVirtualizationScanDirty = false;
+    }
+
     private bool ShouldKeepFloorObjectsVirtual(Vector2Int coordinate, IReadOnlyList<int> itemIds)
     {
         return virtualizeDistantFloorObjects
@@ -7267,10 +7876,20 @@ public class TerrainGenerator : MonoBehaviour
 
     private bool IsWithinFloorObjectLiveRadius(Vector2Int coordinate)
     {
+        Vector2Int centerCoordinate = GetFloorObjectLiveCenterCoordinate();
+        int radius = Mathf.Max(0, floorObjectLiveRadius);
+        return IsWithinFloorObjectLiveRadius(coordinate, centerCoordinate, radius);
+    }
+
+    private Vector2Int GetFloorObjectLiveCenterCoordinate()
+    {
         ResolveTrackingTarget();
         Vector3 sourcePosition = trackingTarget != null ? trackingTarget.position : transform.position;
-        Vector2Int centerCoordinate = GetWorldBlockCoordinate(sourcePosition);
-        int radius = Mathf.Max(0, floorObjectLiveRadius);
+        return GetWorldBlockCoordinate(sourcePosition);
+    }
+
+    private static bool IsWithinFloorObjectLiveRadius(Vector2Int coordinate, Vector2Int centerCoordinate, int radius)
+    {
         return Mathf.Abs(coordinate.x - centerCoordinate.x) <= radius
                && Mathf.Abs(coordinate.y - centerCoordinate.y) <= radius;
     }
@@ -7393,18 +8012,34 @@ public class TerrainGenerator : MonoBehaviour
             }
 
             resourceStateStore.UnregisterLiveInstallation(anchorCoordinate);
-            if (installationObject != null)
-            {
-                if (Application.isPlaying)
-                {
-                    Destroy(installationObject.gameObject);
-                }
-                else
-                {
-                    DestroyImmediate(installationObject.gameObject);
-                }
-            }
+            ReleaseInstallationObjectForChunkUnload(installationObject, state);
         }
+    }
+
+    private void ReleaseInstallationObjectForChunkUnload(
+        InstallationObject installationObject,
+        BlockStateStore.InstallationSaveState state)
+    {
+        if (installationObject == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            MapObject sourcePrefab = ResolveInstallationSourcePrefab(state);
+            MapObjectPool resolvedMapObjectPool = ResolveMapObjectPool();
+            if (sourcePrefab != null && resolvedMapObjectPool != null)
+            {
+                resolvedMapObjectPool.Release(installationObject, sourcePrefab);
+                return;
+            }
+
+            Destroy(installationObject.gameObject);
+            return;
+        }
+
+        DestroyImmediate(installationObject.gameObject);
     }
 
     private void EnsureResourceStateStore()
@@ -7472,6 +8107,22 @@ public class TerrainGenerator : MonoBehaviour
         }
 
         return blockPool;
+    }
+
+    private MapObjectPool ResolveMapObjectPool()
+    {
+        if (mapObjectPool != null)
+        {
+            return mapObjectPool;
+        }
+
+        mapObjectPool = GetComponent<MapObjectPool>();
+        if (mapObjectPool == null)
+        {
+            mapObjectPool = gameObject.AddComponent<MapObjectPool>();
+        }
+
+        return mapObjectPool;
     }
 
     private PortableItemRenderer EnsurePortableItemRenderer()

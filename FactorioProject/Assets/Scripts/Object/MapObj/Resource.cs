@@ -1550,6 +1550,7 @@ public class Resource : MapObject
 public class ResourceBatchRenderer : MonoBehaviour
 {
     private const int MaxInstancesPerDraw = 1023;
+    private const float CameraCullPaddingCells = 2f;
 
     [SerializeField, Min(1f)]
     private float batchCellSize = 8f;
@@ -1568,6 +1569,7 @@ public class ResourceBatchRenderer : MonoBehaviour
     private bool batchDirtyTimeInitialized;
     private float batchDirtySinceTime;
     private float nextBatchRebuildTime;
+    private Camera cachedRenderCamera;
 
     private void Awake()
     {
@@ -1790,7 +1792,16 @@ public class ResourceBatchRenderer : MonoBehaviour
 
         int cellX = useGlobalBatch ? 0 : Mathf.FloorToInt(worldPosition.x / batchCellSize);
         int cellZ = useGlobalBatch ? 0 : Mathf.FloorToInt(worldPosition.z / batchCellSize);
-        BatchKey key = new BatchKey(mesh, material, subMeshIndex, layer, shadowCastingMode, receiveShadows, cellX, cellZ);
+        BatchKey key = new BatchKey(
+            mesh,
+            material,
+            subMeshIndex,
+            layer,
+            shadowCastingMode,
+            receiveShadows,
+            cellX,
+            cellZ,
+            useGlobalBatch);
         if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
         {
             matrices = new List<Matrix4x4>(16);
@@ -1807,9 +1818,25 @@ public class ResourceBatchRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
+        bool canCullByCamera = TryGetVisibleCellBounds(
+            out int minVisibleCellX,
+            out int maxVisibleCellX,
+            out int minVisibleCellZ,
+            out int maxVisibleCellZ);
+
         for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
         {
             BatchKey key = activeBatchKeys[batchIndex];
+            if (canCullByCamera
+                && !key.UseGlobalBatch
+                && (key.CellX < minVisibleCellX
+                    || key.CellX > maxVisibleCellX
+                    || key.CellZ < minVisibleCellZ
+                    || key.CellZ > maxVisibleCellZ))
+            {
+                continue;
+            }
+
             if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices) || matrices.Count <= 0)
             {
                 continue;
@@ -1834,6 +1861,48 @@ public class ResourceBatchRenderer : MonoBehaviour
         }
     }
 
+    private bool TryGetVisibleCellBounds(
+        out int minVisibleCellX,
+        out int maxVisibleCellX,
+        out int minVisibleCellZ,
+        out int maxVisibleCellZ)
+    {
+        minVisibleCellX = 0;
+        maxVisibleCellX = 0;
+        minVisibleCellZ = 0;
+        maxVisibleCellZ = 0;
+
+        Camera renderCamera = ResolveRenderCamera();
+        if (renderCamera == null || !renderCamera.orthographic)
+        {
+            return false;
+        }
+
+        float normalizedCellSize = Mathf.Max(1f, batchCellSize);
+        Vector3 cameraPosition = renderCamera.transform.position;
+        float halfHeight = renderCamera.orthographicSize;
+        float halfWidth = halfHeight * Mathf.Max(0.1f, renderCamera.aspect);
+        float projectedExtent = (halfWidth + halfHeight) * 1.45f;
+        float padding = normalizedCellSize * CameraCullPaddingCells;
+
+        minVisibleCellX = Mathf.FloorToInt((cameraPosition.x - projectedExtent - padding) / normalizedCellSize);
+        maxVisibleCellX = Mathf.FloorToInt((cameraPosition.x + projectedExtent + padding) / normalizedCellSize);
+        minVisibleCellZ = Mathf.FloorToInt((cameraPosition.z - projectedExtent - padding) / normalizedCellSize);
+        maxVisibleCellZ = Mathf.FloorToInt((cameraPosition.z + projectedExtent + padding) / normalizedCellSize);
+        return true;
+    }
+
+    private Camera ResolveRenderCamera()
+    {
+        if (cachedRenderCamera != null && cachedRenderCamera.isActiveAndEnabled)
+        {
+            return cachedRenderCamera;
+        }
+
+        cachedRenderCamera = Camera.main;
+        return cachedRenderCamera;
+    }
+
     private readonly struct BatchKey
     {
         public readonly Mesh Mesh;
@@ -1844,6 +1913,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         public readonly bool ReceiveShadows;
         public readonly int CellX;
         public readonly int CellZ;
+        public readonly bool UseGlobalBatch;
 
         public BatchKey(
             Mesh mesh,
@@ -1853,7 +1923,8 @@ public class ResourceBatchRenderer : MonoBehaviour
             ShadowCastingMode shadowCastingMode,
             bool receiveShadows,
             int cellX,
-            int cellZ)
+            int cellZ,
+            bool useGlobalBatch)
         {
             Mesh = mesh;
             Material = material;
@@ -1863,6 +1934,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             ReceiveShadows = receiveShadows;
             CellX = cellX;
             CellZ = cellZ;
+            UseGlobalBatch = useGlobalBatch;
         }
 
         public override int GetHashCode()
@@ -1875,6 +1947,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
             hash = (hash * 397) ^ CellX;
             hash = (hash * 397) ^ CellZ;
+            hash = (hash * 397) ^ (UseGlobalBatch ? 1 : 0);
             return hash;
         }
 
@@ -1892,7 +1965,8 @@ public class ResourceBatchRenderer : MonoBehaviour
                    && ShadowCastingMode == other.ShadowCastingMode
                    && ReceiveShadows == other.ReceiveShadows
                    && CellX == other.CellX
-                   && CellZ == other.CellZ;
+                   && CellZ == other.CellZ
+                   && UseGlobalBatch == other.UseGlobalBatch;
         }
     }
 }
