@@ -2196,6 +2196,7 @@ public class TerrainGenerator : MonoBehaviour
             return true;
         }
 
+        bool queuedNextTick = false;
         for (int i = 0; i < conveyorLineTouchedBlocks.Count; i++)
         {
             Block block = conveyorLineTouchedBlocks[i];
@@ -2206,10 +2207,10 @@ public class TerrainGenerator : MonoBehaviour
 
             block.WakeConveyorMoveAttemptsAround();
             block.RefreshConveyorActivityRegistration(false);
-            if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
+            if (!queuedNextTick && activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);
-                break;
+                queuedNextTick = true;
             }
         }
 
