@@ -6,10 +6,10 @@ Shader "ProjectF/Terrain/BiomeBlend"
         [NoScaleOffset] _DirtMap("Dirt Map", 2D) = "white" {}
         [NoScaleOffset] _GrassMap("Grass Map", 2D) = "white" {}
         [NoScaleOffset] _ForestMap("Forest Map", 2D) = "white" {}
-        _SandColor("Sand Color", Color) = (0.94, 0.85, 0.58, 1)
-        _DirtColor("Dirt Color", Color) = (0.55, 0.37, 0.18, 1)
-        _GrassColor("Grass Color", Color) = (0.63, 0.76, 0.21, 1)
-        _ForestColor("Forest Color", Color) = (0.32, 0.52, 0.17, 1)
+        _SandColor("Sand Color", Color) = (1, 1, 1, 1)
+        _DirtColor("Dirt Color", Color) = (1, 1, 1, 1)
+        _GrassColor("Grass Color", Color) = (1, 1, 1, 1)
+        _ForestColor("Forest Color", Color) = (1, 1, 1, 1)
         _TextureTiling("Texture Tiling", Float) = 0.28
         _NoiseScale("Noise Scale", Float) = 0.11
         _NoiseStrength("Noise Strength", Range(0, 0.5)) = 0.18

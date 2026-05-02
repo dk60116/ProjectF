@@ -45,8 +45,8 @@ public class Player : Character
 
     [SerializeField]
     private List<PlayerBag> bagList;
-    [SerializeField]
-    private int bagLevel;
+    [SerializeField, Min(1)]
+    private int bagLevel = 1;
 
     [SerializeField]
     private List<PortableObject> handStack;
@@ -339,7 +339,12 @@ public class Player : Character
             return null;
         }
 
-        int activeBagIndex = Mathf.Clamp(bagLevel, 0, bagList.Count - 1);
+        int activeBagIndex = GetActiveBagIndex();
+        if (activeBagIndex < 0)
+        {
+            return null;
+        }
+
         PlayerBag activeBag = bagList[activeBagIndex];
         return activeBag != null && activeBag.gameObject.activeInHierarchy ? activeBag : null;
     }
@@ -826,7 +831,12 @@ public class Player : Character
             return;
         }
 
-        int activeBagIndex = Mathf.Clamp(bagLevel, 0, bagList.Count - 1);
+        int activeBagIndex = GetActiveBagIndex();
+        if (activeBagIndex < 0)
+        {
+            return;
+        }
+
         for (int i = 0; i < bagList.Count; i++)
         {
             PlayerBag bag = bagList[i];
@@ -841,6 +851,23 @@ public class Player : Character
                 bag.gameObject.SetActive(shouldBeVisible);
             }
         }
+    }
+
+    private int GetActiveBagIndex()
+    {
+        if (bagList == null || bagList.Count == 0)
+        {
+            return -1;
+        }
+
+        NormalizeBagLevel();
+        return bagLevel - 1;
+    }
+
+    private void NormalizeBagLevel()
+    {
+        int maxBagLevel = bagList != null && bagList.Count > 0 ? bagList.Count : 1;
+        bagLevel = Mathf.Clamp(bagLevel, 1, maxBagLevel);
     }
 
     private void RefreshBagUI()

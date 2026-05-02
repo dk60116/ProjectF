@@ -64,6 +64,10 @@ public class TerrainDataEditorWindow : EditorWindow
     private static readonly TerrainTextureSet[] SurfaceTextureSets =
     {
         new TerrainTextureSet(
+            "Water",
+            null,
+            "waterBiomeColor"),
+        new TerrainTextureSet(
             "Sand",
             "generatedSurfaceBlendSandTexture",
             "sandBiomeColor"),
@@ -78,7 +82,11 @@ public class TerrainDataEditorWindow : EditorWindow
         new TerrainTextureSet(
             "Forest",
             "generatedSurfaceBlendForestTexture",
-            "forestBiomeColor")
+            "forestBiomeColor"),
+        new TerrainTextureSet(
+            "Rock",
+            null,
+            "rockBiomeColor")
     };
 
     private readonly struct TerrainTextureSet
@@ -105,13 +113,7 @@ public class TerrainDataEditorWindow : EditorWindow
         "dirtWeight",
         "grassWeight",
         "forestWeight",
-        "rockWeight",
-        "waterBiomeColor",
-        "sandBiomeColor",
-        "dirtBiomeColor",
-        "grassBiomeColor",
-        "forestBiomeColor",
-        "rockBiomeColor"
+        "rockWeight"
     };
 
     private static readonly string[] ResourceGenerationPropertyPaths =
@@ -448,11 +450,21 @@ public class TerrainDataEditorWindow : EditorWindow
         }
 
         EditorGUI.indentLevel++;
-        SerializedProperty baseTexture = serializedObject.FindProperty(textureSet.baseTexturePropertyPath);
-        SerializedProperty baseColor = serializedObject.FindProperty(textureSet.baseColorPropertyPath);
-        Color basePreviewTint = baseColor != null ? baseColor.colorValue : Color.white;
-        basePreviewTint.a = 1f;
-        DrawTextureProperty(baseTexture, "Base Texture", false, basePreviewTint);
+        SerializedProperty baseTexture = !string.IsNullOrEmpty(textureSet.baseTexturePropertyPath)
+            ? serializedObject.FindProperty(textureSet.baseTexturePropertyPath)
+            : null;
+        SerializedProperty baseColor = !string.IsNullOrEmpty(textureSet.baseColorPropertyPath)
+            ? serializedObject.FindProperty(textureSet.baseColorPropertyPath)
+            : null;
+        if (baseTexture != null)
+        {
+            DrawTextureProperty(baseTexture, "Base Texture", false, Color.white);
+        }
+
+        if (baseColor != null)
+        {
+            EditorGUILayout.PropertyField(baseColor, new GUIContent("Minimap Color"));
+        }
 
         EditorGUI.indentLevel--;
         GUILayout.Space(2f);

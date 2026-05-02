@@ -356,6 +356,7 @@ public class Resource : MapObject
 
         bodyTransform.localRotation = initialBodyLocalRotation * Quaternion.Euler(0f, bodyYawStep * BodyYawStepDegrees, 0f);
         SyncExtraBodyRendererRootToBody();
+        MarkBatchRenderDataDirty();
     }
 
     public bool TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
@@ -1154,6 +1155,7 @@ public class Resource : MapObject
 
         bodyTransform.localScale = initialBodyLocalScale * scaleRatio;
         SyncExtraBodyRendererRootToBody();
+        MarkBatchRenderDataDirty();
     }
 
     private void ApplyDefinitionIfNeeded()
@@ -1226,6 +1228,8 @@ public class Resource : MapObject
         {
             ToggleBodyPresentationForRoot(extraRoot);
         }
+
+        MarkBatchRenderDataDirty();
     }
 
     private void ToggleBodyPresentationForRoot(Transform renderRoot)
@@ -1533,6 +1537,14 @@ public class Resource : MapObject
             batchRenderer = null;
         }
     }
+
+    private void MarkBatchRenderDataDirty()
+    {
+        if (useBatchedRendering)
+        {
+            batchRenderer?.MarkDirty();
+        }
+    }
 }
 
 public class ResourceBatchRenderer : MonoBehaviour
@@ -1546,6 +1558,7 @@ public class ResourceBatchRenderer : MonoBehaviour
     private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<Resource> cleanupBuffer = new List<Resource>();
+    private bool batchesDirty = true;
 
     public void Register(Resource resource)
     {
@@ -1554,7 +1567,10 @@ public class ResourceBatchRenderer : MonoBehaviour
             return;
         }
 
-        registeredResources.Add(resource);
+        if (registeredResources.Add(resource))
+        {
+            batchesDirty = true;
+        }
     }
 
     public void Unregister(Resource resource)
@@ -1564,21 +1580,40 @@ public class ResourceBatchRenderer : MonoBehaviour
             return;
         }
 
-        registeredResources.Remove(resource);
+        if (registeredResources.Remove(resource))
+        {
+            batchesDirty = true;
+        }
+    }
+
+    public void MarkDirty()
+    {
+        batchesDirty = true;
     }
 
     private void LateUpdate()
     {
         if (registeredResources.Count <= 0)
         {
+            if (activeBatchKeys.Count > 0)
+            {
+                ClearActiveBatches();
+                batchesDirty = false;
+            }
+
             return;
         }
 
-        RebuildBatches();
+        if (batchesDirty)
+        {
+            RebuildBatches();
+            batchesDirty = false;
+        }
+
         RenderBatches();
     }
 
-    private void RebuildBatches()
+    private void ClearActiveBatches()
     {
         for (int i = 0; i < activeBatchKeys.Count; i++)
         {
@@ -1591,6 +1626,11 @@ public class ResourceBatchRenderer : MonoBehaviour
 
         activeBatchKeys.Clear();
         cleanupBuffer.Clear();
+    }
+
+    private void RebuildBatches()
+    {
+        ClearActiveBatches();
 
         foreach (Resource resource in registeredResources)
         {

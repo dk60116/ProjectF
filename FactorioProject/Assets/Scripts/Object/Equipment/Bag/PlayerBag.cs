@@ -14,6 +14,7 @@ public class PlayerBag : MonoBehaviour
     private readonly HashSet<PortableObject> reservedObjects = new HashSet<PortableObject>();
     private readonly List<int> visualPreservedStackCounts = new List<int>();
     private bool initialized;
+    private bool usesExternalStack;
 
     private void Awake()
     {
@@ -26,6 +27,8 @@ public class PlayerBag : MonoBehaviour
         {
             portableStack = new List<PortableStack>();
         }
+
+        SyncPortableStacksFromChildStackRoots();
 
         if (currentStack == null)
         {
@@ -73,6 +76,8 @@ public class PlayerBag : MonoBehaviour
             return;
         }
 
+        usesExternalStack = true;
+
         if (portableStack == null)
         {
             portableStack = new List<PortableStack>();
@@ -102,6 +107,119 @@ public class PlayerBag : MonoBehaviour
         initialized = true;
         EnsureInitialized();
         RefreshExternalStackCounts(false);
+    }
+
+    private void SyncPortableStacksFromChildStackRoots()
+    {
+        if (usesExternalStack)
+        {
+            return;
+        }
+
+        List<PortableStack> childStacks = BuildPortableStacksFromChildStackRoots();
+        if (childStacks == null || childStacks.Count == 0)
+        {
+            return;
+        }
+
+        if (!ShouldUseChildStackRoots(childStacks))
+        {
+            return;
+        }
+
+        portableStack.Clear();
+        for (int i = 0; i < childStacks.Count; i++)
+        {
+            portableStack.Add(childStacks[i]);
+        }
+    }
+
+    private List<PortableStack> BuildPortableStacksFromChildStackRoots()
+    {
+        List<PortableStack> childStacks = null;
+        Transform bagTransform = transform;
+        for (int i = 0; i < bagTransform.childCount; i++)
+        {
+            Transform child = bagTransform.GetChild(i);
+            if (!IsStackRoot(child))
+            {
+                continue;
+            }
+
+            PortableObject[] stackObjects = child.GetComponentsInChildren<PortableObject>(true);
+            if (stackObjects == null || stackObjects.Length == 0)
+            {
+                continue;
+            }
+
+            PortableStack stack = new PortableStack
+            {
+                stack = new List<PortableObject>(stackObjects.Length)
+            };
+
+            for (int j = 0; j < stackObjects.Length; j++)
+            {
+                if (stackObjects[j] != null)
+                {
+                    stack.stack.Add(stackObjects[j]);
+                }
+            }
+
+            if (stack.stack.Count == 0)
+            {
+                continue;
+            }
+
+            childStacks ??= new List<PortableStack>();
+            childStacks.Add(stack);
+        }
+
+        return childStacks;
+    }
+
+    private static bool IsStackRoot(Transform target)
+    {
+        return target != null
+               && !string.IsNullOrEmpty(target.name)
+               && target.name.StartsWith("Stack", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool ShouldUseChildStackRoots(List<PortableStack> childStacks)
+    {
+        if (portableStack == null || portableStack.Count == 0)
+        {
+            return true;
+        }
+
+        if (childStacks.Count > portableStack.Count)
+        {
+            return true;
+        }
+
+        if (childStacks.Count < portableStack.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < childStacks.Count; i++)
+        {
+            List<PortableObject> childStack = childStacks[i].stack;
+            List<PortableObject> serializedStack = portableStack[i] != null ? portableStack[i].stack : null;
+            if (childStack == null || serializedStack == null || childStack.Count != serializedStack.Count)
+            {
+                return true;
+            }
+
+            for (int j = 0; j < childStack.Count; j++)
+            {
+                if (childStack[j] != serializedStack[j])
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     public void RefreshExternalStackCounts(bool notify = true)

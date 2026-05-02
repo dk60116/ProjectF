@@ -3764,10 +3764,10 @@ public class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        material.SetColor("_SandColor", GetBiomeColor(TerrainBiome.Sand));
-        material.SetColor("_DirtColor", GetBiomeColor(TerrainBiome.Dirt));
-        material.SetColor("_GrassColor", GetBiomeColor(TerrainBiome.Grass));
-        material.SetColor("_ForestColor", GetBiomeColor(TerrainBiome.Forest));
+        material.SetColor("_SandColor", Color.white);
+        material.SetColor("_DirtColor", Color.white);
+        material.SetColor("_GrassColor", Color.white);
+        material.SetColor("_ForestColor", Color.white);
         material.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
         material.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
         material.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
@@ -3861,20 +3861,8 @@ public class TerrainGenerator : MonoBehaviour
             ? new Material(sourceMaterial)
             : new Material(Shader.Find("Universal Render Pipeline/Lit"));
 
-        Color biomeColor = GetBiomeColor(biome);
         material.name = $"Runtime_{biome}";
         material.enableInstancing = true;
-        if (material.HasProperty("_BaseColor"))
-        {
-            material.SetColor("_BaseColor", biomeColor);
-        }
-
-        if (material.HasProperty("_Color"))
-        {
-            material.SetColor("_Color", biomeColor);
-        }
-
-        material.color = biomeColor;
         biomeMaterialCache[biome] = material;
         return material;
     }
@@ -3936,7 +3924,7 @@ public class TerrainGenerator : MonoBehaviour
         return null;
     }
 
-    private Color GetBiomeColor(TerrainBiome biome)
+    private Color GetMapBiomeColor(TerrainBiome biome)
     {
         switch (biome)
         {
@@ -3957,7 +3945,7 @@ public class TerrainGenerator : MonoBehaviour
 
     public Color GetMapBiomeColorAt(Vector2Int worldCoordinate)
     {
-        return GetBiomeColor(GetTileBiome(worldCoordinate));
+        return GetMapBiomeColor(GetTileBiome(worldCoordinate));
     }
 
     public Color32 GetMapBiomeColor32At(Vector2Int worldCoordinate)

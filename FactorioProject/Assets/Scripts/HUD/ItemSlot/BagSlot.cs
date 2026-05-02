@@ -56,6 +56,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private CanvasGroup canvasGroup;
     private bool isDragging;
     private int ignoreNextClickFrame = -1;
+    private int suppressCraftingToggleFrame = -1;
     private bool isCraftingExpanded;
     private bool suppressCraftingEvents;
     private Vector2 dragStartScreenPosition;
@@ -616,6 +617,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (ignoreNextClickFrame == Time.frameCount)
         {
             ignoreNextClickFrame = -1;
+            return;
+        }
+
+        if (suppressCraftingToggleFrame == Time.frameCount)
+        {
+            suppressCraftingToggleFrame = -1;
             return;
         }
 
@@ -1661,12 +1668,22 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (IsFocusedConveyorPickup(player))
         {
-            TryHandleSinglePickup(player, terrain);
+            if (TryHandleSinglePickup(player, terrain))
+            {
+                suppressCraftingToggleFrame = Time.frameCount;
+            }
+
             return;
         }
 
         StopPickupRoutine();
-        pickupRoutine = StartCoroutine(PickupRoutine(player, terrain));
+        if (!TryPickupOneItemForClick(player, terrain))
+        {
+            return;
+        }
+
+        suppressCraftingToggleFrame = Time.frameCount;
+        pickupRoutine = StartCoroutine(PickupRoutine(player, terrain, true));
     }
 
     private void StopPickupRoutine()
@@ -1680,10 +1697,15 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         pickupRoutine = null;
     }
 
-    private IEnumerator PickupRoutine(Player player, TerrainGenerator terrain)
+    private IEnumerator PickupRoutine(Player player, TerrainGenerator terrain, bool delayBeforeFirstPickup = false)
     {
         int radius = Mathf.Max(0, pickupRadius);
         float interval = Mathf.Max(0.01f, pickupInterval);
+
+        if (delayBeforeFirstPickup)
+        {
+            yield return new WaitForSeconds(interval);
+        }
 
         while (player != null && terrain != null)
         {
@@ -1722,6 +1744,40 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         pickupRoutine = null;
+    }
+
+    private bool TryPickupOneItemForClick(Player player, TerrainGenerator terrain)
+    {
+        if (player == null || terrain == null)
+        {
+            return false;
+        }
+
+        Vector3 pickupOrigin = ResolvePickupOrigin(player);
+        Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
+
+        if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate))
+        {
+            return true;
+        }
+
+        if (TryPickupOneItem(terrain, player, pickupOrigin, Mathf.Max(0, pickupRadius), pickupRadius))
+        {
+            return true;
+        }
+
+        if (!AllowDropTargetFallback || !player.IsDropExitPending || !player.TryGetLastDropTarget(out Vector2Int dropTarget))
+        {
+            return false;
+        }
+
+        if (TryPickupOneItemAtCoordinate(terrain, player, dropTarget))
+        {
+            return true;
+        }
+
+        player.ClearLastDropTarget();
+        return false;
     }
 
     protected virtual bool AllowPickupOnClick => enablePickupOnClick;
