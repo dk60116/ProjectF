@@ -25,6 +25,7 @@ public class Resource : MapObject
     {
         [HideInInspector]
         public int outputId;
+        [Tooltip("Harvest output ItemDefinition name. Leave blank to use the ResourceDefinition resource name.")]
         public string outputItemName;
         public int resourceCount;
         public int getCount;
@@ -738,24 +739,22 @@ public class Resource : MapObject
 
     private int ResolveOutputItemId()
     {
-        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
+        if (TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId))
         {
-            if (!TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId)
-                || namedOutputItemId != definitionOutputItemId)
-            {
-                resourceStatus.outputId = definitionOutputItemId;
-                resourceStatus.outputItemName = definitionOutputItemName;
-                return definitionOutputItemId;
-            }
-
-            resourceStatus.outputId = definitionOutputItemId;
-            resourceStatus.outputItemName = definitionOutputItemName;
-            return definitionOutputItemId;
+            resourceStatus.outputId = namedOutputItemId;
+            resourceStatus.outputItemName = resourceStatus.outputItemName.Trim();
+            return namedOutputItemId;
         }
 
-        if (TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int outputItemId))
+        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
         {
-            return outputItemId;
+            resourceStatus.outputId = definitionOutputItemId;
+            if (string.IsNullOrWhiteSpace(resourceStatus.outputItemName))
+            {
+                resourceStatus.outputItemName = definitionOutputItemName;
+            }
+
+            return definitionOutputItemId;
         }
 
         if (resourceStatus.outputId >= 0)
@@ -768,24 +767,21 @@ public class Resource : MapObject
 
     private void MigrateOutputItemNameIfNeeded()
     {
-        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
-        {
-            if (!TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId)
-                || namedOutputItemId != definitionOutputItemId)
-            {
-                resourceStatus.outputId = definitionOutputItemId;
-                resourceStatus.outputItemName = definitionOutputItemName;
-                return;
-            }
-
-            resourceStatus.outputId = definitionOutputItemId;
-            resourceStatus.outputItemName = definitionOutputItemName;
-            return;
-        }
-
         if (!string.IsNullOrWhiteSpace(resourceStatus.outputItemName))
         {
             resourceStatus.outputItemName = resourceStatus.outputItemName.Trim();
+            if (TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId))
+            {
+                resourceStatus.outputId = namedOutputItemId;
+            }
+
+            return;
+        }
+
+        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
+        {
+            resourceStatus.outputId = definitionOutputItemId;
+            resourceStatus.outputItemName = definitionOutputItemName;
             return;
         }
 

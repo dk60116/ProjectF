@@ -213,15 +213,9 @@ public class TerrainGenerator : MonoBehaviour
     [SerializeField]
     private List<ResourceEntry> treeResources = new List<ResourceEntry>();
 
-    [SerializeField, HideInInspector]
     private Resource stone;
-    [SerializeField]
-    private Resource coar;
-    [SerializeField]
-    [HideInInspector]
+    private Resource coal;
     private Resource iron;
-    [SerializeField]
-    [HideInInspector]
     private Resource cooper;
 
     [SerializeField, Min(4)]
@@ -430,7 +424,7 @@ public class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
-    private float coarSpawnChance = 0.1f;
+    private float coalSpawnChance = 0.1f;
 
     [SerializeField, Range(0f, 1f)]
     [HideInInspector]
@@ -7848,7 +7842,7 @@ public class TerrainGenerator : MonoBehaviour
 
         oreResources = new List<ResourceEntry>(4);
         AddLegacyResource("Iron", iron, ironSpawnChance, new Vector2(901.3f, 117.2f), new Vector2(77.6f, 401.7f), 101, true, Vector2Int.right);
-        AddLegacyResource("Coal", coar, coarSpawnChance, new Vector2(451.2f, 772.8f), new Vector2(191.4f, 68.9f), 202, true, Vector2Int.up);
+        AddLegacyResource("Coal", coal, coalSpawnChance, new Vector2(451.2f, 772.8f), new Vector2(191.4f, 68.9f), 202, true, Vector2Int.up);
         AddLegacyResource("Stone", stone, stoneSpawnChance, new Vector2(137.9f, 251.6f), new Vector2(612.5f, 812.3f), 303, true, Vector2Int.left);
         AddLegacyResource("Cooper", cooper, cooperSpawnChance, new Vector2(623.4f, 528.6f), new Vector2(318.2f, 944.7f), 404, true, Vector2Int.down);
     }

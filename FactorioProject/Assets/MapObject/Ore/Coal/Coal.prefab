@@ -86,7 +86,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Name
-      value: Coar
+      value: Coal
       objectReference: {fileID: 0}
     m_RemovedComponents:
     - {fileID: 6362304892840611056, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -129,7 +129,7 @@ MonoBehaviour:
   definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
   resourceStatus:
     outputId: 1
-    outputItemName: Coar
+    outputItemName: Coal
     resourceCount: 1
     getCount: 1
     maxGauge: 10
