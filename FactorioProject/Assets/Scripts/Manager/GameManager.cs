@@ -351,6 +351,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 case ToolCommand.SetCameraSizeRange:
                     request.Result = SetCameraSizeRange(request.CameraMinSize, request.CameraMaxSize);
                     break;
+                case ToolCommand.SetSeed:
+                    request.Result = SetTerrainSeed(request.SeedValue);
+                    break;
                 case ToolCommand.CreateConveyorLine:
                     request.Result = CreateConveyorLine(request.ItemId, request.Count);
                     break;
@@ -359,6 +362,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     break;
                 case ToolCommand.LoadSlot:
                     request.Result = LoadSlot(request.SlotIndex);
+                    break;
+                case ToolCommand.ResetMap:
+                    request.Result = ResetMap(request.SlotIndex, request.RandomizeSeed);
                     break;
                 case ToolCommand.ListSaveSlots:
                     request.Result = GetSaveSlotsResult();
@@ -476,6 +482,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     out bool debugToggleValue,
                     out float cameraMinSize,
                     out float cameraMaxSize,
+                    out int seedValue,
+                    out bool randomizeSeed,
                     out string error))
             {
                 writer.WriteLine($"error {error}");
@@ -490,7 +498,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 debugToggleName,
                 debugToggleValue,
                 cameraMinSize,
-                cameraMaxSize);
+                cameraMaxSize,
+                seedValue,
+                randomizeSeed);
             EnqueueRequest(request);
             if (!request.Completion.Wait(RequestTimeoutMilliseconds))
             {
@@ -514,6 +524,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         out bool debugToggleValue,
         out float cameraMinSize,
         out float cameraMaxSize,
+        out int seedValue,
+        out bool randomizeSeed,
         out string error)
     {
         command = ToolCommand.Give;
@@ -524,6 +536,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         debugToggleValue = false;
         cameraMinSize = 0f;
         cameraMaxSize = 0f;
+        seedValue = 0;
+        randomizeSeed = false;
         error = string.Empty;
 
         if (string.IsNullOrWhiteSpace(line))
@@ -578,6 +592,62 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             }
 
             slotIndex = slotNumber - 1;
+            return true;
+        }
+
+        if (parts.Length >= 1
+            && (string.Equals(parts[0], "seed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "setseed", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.SetSeed;
+            itemId = 0;
+            count = 0;
+
+            if (parts.Length != 2 || !int.TryParse(parts[1], out seedValue))
+            {
+                error = "usage: seed <int>";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (parts.Length >= 1
+            && (string.Equals(parts[0], "reset", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "resetmap", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "newmap", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.ResetMap;
+            itemId = 0;
+            count = 0;
+            slotIndex = -1;
+            randomizeSeed = true;
+
+            if (parts.Length >= 2)
+            {
+                if (!int.TryParse(parts[1], out int slotNumber)
+                    || slotNumber < 1
+                    || slotNumber > SaveManager.SlotCount)
+                {
+                    error = $"slot must be between 1 and {SaveManager.SlotCount}";
+                    return false;
+                }
+
+                slotIndex = slotNumber - 1;
+            }
+
+            if (parts.Length >= 3 && !TryParseProtocolBool(parts[2], out randomizeSeed))
+            {
+                error = "reset randomSeed value must be true/false or 1/0";
+                return false;
+            }
+
+            if (parts.Length > 3)
+            {
+                error = "usage: reset [slot] [randomSeed]";
+                return false;
+            }
+
             return true;
         }
 
@@ -672,7 +742,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | camera size <minSize> <maxSize> | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | camera size <minSize> <maxSize> | ping | status";
             return false;
         }
 
@@ -763,7 +833,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool currentShowBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
         string extraTokens = BuildStatusExtraTokens(
             FindObjectOfType<SaveManager>(),
-            FindObjectOfType<PlayerCamera>());
+            FindObjectOfType<PlayerCamera>(),
+            TerrainGenerator.ResolveActive());
         return ToolResult.Status(
             fps,
             frameMs,
@@ -834,6 +905,52 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return ToolResult.Success(0, 0, 0, 0, 0, 0, message, extraTokens);
     }
 
+    private ToolResult ResetMap(int slotIndex, bool randomizeSeed)
+    {
+        SaveManager saveManager = FindObjectOfType<SaveManager>();
+        if (saveManager == null)
+        {
+            return ToolResult.Error(0, 0, "save manager not found", BuildEmptySaveSlotsExtraTokens());
+        }
+
+        int normalizedSlotIndex = slotIndex >= 0
+            ? Mathf.Clamp(slotIndex, 0, SaveManager.SlotCount - 1)
+            : saveManager.SelectedSlotIndex;
+        saveManager.StartNewMap(normalizedSlotIndex, randomizeSeed);
+        string extraTokens = BuildExtraTokens(
+            BuildSaveSlotsExtraTokens(saveManager),
+            BuildSeedExtraTokens(TerrainGenerator.ResolveActive()));
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            $"reset slot {normalizedSlotIndex + 1} randomSeed={(randomizeSeed ? 1 : 0)}",
+            extraTokens);
+    }
+
+    private ToolResult SetTerrainSeed(int seedValue)
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(0, 0, "terrain generator not found");
+        }
+
+        terrain.SetSeed(seedValue);
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            $"seed {terrain.CurrentSeed}",
+            BuildSeedExtraTokens(terrain));
+    }
+
     private static string BuildSaveSlotsExtraTokens(SaveManager saveManager)
     {
         if (saveManager == null)
@@ -855,13 +972,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return $"saveSlots={new string('0', SaveManager.SlotCount)} selectedSlot=1";
     }
 
-    private static string BuildStatusExtraTokens(SaveManager saveManager, PlayerCamera playerCamera)
+    private static string BuildStatusExtraTokens(SaveManager saveManager, PlayerCamera playerCamera, TerrainGenerator terrain)
     {
-        string saveSlotTokens = BuildSaveSlotsExtraTokens(saveManager);
-        string cameraSizeTokens = BuildCameraSizeExtraTokens(playerCamera);
-        return string.IsNullOrWhiteSpace(cameraSizeTokens)
-            ? saveSlotTokens
-            : $"{saveSlotTokens} {cameraSizeTokens}";
+        return BuildExtraTokens(
+            BuildSaveSlotsExtraTokens(saveManager),
+            BuildCameraSizeExtraTokens(playerCamera),
+            BuildSeedExtraTokens(terrain));
     }
 
     private static string BuildCameraSizeExtraTokens(PlayerCamera playerCamera)
@@ -876,6 +992,40 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             "cameraMinSize={0:0.###} cameraMaxSize={1:0.###}",
             playerCamera.MinimumOrthographicSize,
             playerCamera.MaximumOrthographicSize);
+    }
+
+    private static string BuildSeedExtraTokens(TerrainGenerator terrain)
+    {
+        return terrain != null
+            ? $"seed={terrain.CurrentSeed.ToString(CultureInfo.InvariantCulture)}"
+            : string.Empty;
+    }
+
+    private static string BuildExtraTokens(params string[] tokens)
+    {
+        if (tokens == null || tokens.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            string token = tokens[i];
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append(' ');
+            }
+
+            builder.Append(token.Trim());
+        }
+
+        return builder.ToString();
     }
 
     private void CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts)
@@ -2034,9 +2184,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         Status,
         SetDebugToggle,
         SetCameraSizeRange,
+        SetSeed,
         CreateConveyorLine,
         SaveSlot,
         LoadSlot,
+        ResetMap,
         ListSaveSlots
     }
 
@@ -2050,7 +2202,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             string debugToggleName,
             bool debugToggleValue,
             float cameraMinSize,
-            float cameraMaxSize)
+            float cameraMaxSize,
+            int seedValue,
+            bool randomizeSeed)
         {
             Command = command;
             ItemId = itemId;
@@ -2060,6 +2214,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             DebugToggleValue = debugToggleValue;
             CameraMinSize = cameraMinSize;
             CameraMaxSize = cameraMaxSize;
+            SeedValue = seedValue;
+            RandomizeSeed = randomizeSeed;
         }
 
         public ToolCommand Command { get; }
@@ -2070,6 +2226,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public bool DebugToggleValue { get; }
         public float CameraMinSize { get; }
         public float CameraMaxSize { get; }
+        public int SeedValue { get; }
+        public bool RandomizeSeed { get; }
         public ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
         public ToolResult Result { get; set; }
     }

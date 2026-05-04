@@ -40,13 +40,16 @@ internal sealed class EditorToolForm : Form
     private readonly ComboBox saveSlotComboBox = new ComboBox();
     private readonly Button saveSlotButton = new Button();
     private readonly Button loadSlotButton = new Button();
-    private readonly Button refreshSaveSlotsButton = new Button();
+    private readonly Button resetMapButton = new Button();
     private readonly Button reloadButton = new Button();
+    private readonly CheckBox randomSeedCheckBox = new CheckBox();
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
     private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
     private readonly Button applyCameraSizeButton = new Button();
+    private readonly TextBox seedTextBox = new TextBox();
+    private readonly Button applySeedButton = new Button();
     private readonly TextBox logTextBox = new TextBox();
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
@@ -62,7 +65,7 @@ internal sealed class EditorToolForm : Form
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 850);
+        MinimumSize = new Size(760, 900);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -78,13 +81,14 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 8
+            RowCount = 9
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
@@ -253,17 +257,54 @@ internal sealed class EditorToolForm : Form
         loadSlotButton.Width = 86;
         loadSlotButton.Click += async (_, _) => await SendLoadSlotAsync();
 
-        StyleSecondaryButton(refreshSaveSlotsButton, "슬롯 새로고침");
-        refreshSaveSlotsButton.Width = 126;
-        refreshSaveSlotsButton.Click += async (_, _) => await RefreshSaveSlotsAsync();
+        StyleSecondaryButton(resetMapButton, "Reset");
+        resetMapButton.Width = 86;
+        resetMapButton.Click += async (_, _) => await SendResetMapAsync();
+
+        StyleDebugCheckBox(randomSeedCheckBox, "RandomSeed");
+        randomSeedCheckBox.Checked = true;
+        randomSeedCheckBox.Margin = new Padding(0, 8, 18, 0);
 
         savePanel.Controls.Add(saveSlotLabel);
         savePanel.Controls.Add(saveSlotComboBox);
         savePanel.Controls.Add(saveSlotButton);
         savePanel.Controls.Add(loadSlotButton);
-        savePanel.Controls.Add(refreshSaveSlotsButton);
+        savePanel.Controls.Add(resetMapButton);
+        savePanel.Controls.Add(randomSeedCheckBox);
         layout.Controls.Add(savePanel, 0, 3);
         layout.SetColumnSpan(savePanel, 2);
+
+        FlowLayoutPanel seedPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 4, 0, 0),
+            WrapContents = false
+        };
+
+        Label seedLabel = new Label
+        {
+            Text = "Seed",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(0, 10, 12, 0)
+        };
+
+        seedTextBox.Width = 180;
+        seedTextBox.Margin = new Padding(0, 5, 10, 0);
+        seedTextBox.Text = "0";
+
+        StyleSecondaryButton(applySeedButton, "Apply Seed");
+        applySeedButton.Width = 110;
+        applySeedButton.Height = 30;
+        applySeedButton.Margin = new Padding(0, 4, 10, 0);
+        applySeedButton.Click += async (_, _) => await SendSeedAsync();
+
+        seedPanel.Controls.Add(seedLabel);
+        seedPanel.Controls.Add(seedTextBox);
+        seedPanel.Controls.Add(applySeedButton);
+        layout.Controls.Add(seedPanel, 0, 4);
+        layout.SetColumnSpan(seedPanel, 2);
 
         FlowLayoutPanel debugTogglePanel = new FlowLayoutPanel
         {
@@ -288,7 +329,7 @@ internal sealed class EditorToolForm : Form
 
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
-        layout.Controls.Add(debugTogglePanel, 0, 4);
+        layout.Controls.Add(debugTogglePanel, 0, 5);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
         FlowLayoutPanel cameraSizePanel = new FlowLayoutPanel
@@ -337,7 +378,7 @@ internal sealed class EditorToolForm : Form
         cameraSizePanel.Controls.Add(cameraMaxSizeLabel);
         cameraSizePanel.Controls.Add(cameraMaxSizeInput);
         cameraSizePanel.Controls.Add(applyCameraSizeButton);
-        layout.Controls.Add(cameraSizePanel, 0, 5);
+        layout.Controls.Add(cameraSizePanel, 0, 6);
         layout.SetColumnSpan(cameraSizePanel, 2);
 
         Panel runtimeStatsCard = CreateCardPanel();
@@ -370,7 +411,7 @@ internal sealed class EditorToolForm : Form
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
-        layout.Controls.Add(runtimeStatsCard, 0, 6);
+        layout.Controls.Add(runtimeStatsCard, 0, 7);
         layout.SetColumnSpan(runtimeStatsCard, 2);
 
         Panel logCard = CreateCardPanel();
@@ -384,7 +425,7 @@ internal sealed class EditorToolForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 7);
+        layout.Controls.Add(logCard, 0, 8);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -713,6 +754,17 @@ internal sealed class EditorToolForm : Form
         await RefreshSaveSlotsAsync();
     }
 
+    private async Task SendResetMapAsync()
+    {
+        int slotNumber = GetSelectedSaveSlotNumber();
+        bool randomizeSeed = randomSeedCheckBox.Checked;
+        await SendCommandAsync(
+            $"reset {slotNumber} {(randomizeSeed ? 1 : 0)}",
+            $"Reset Slot {slotNumber}",
+            true);
+        await RefreshStatusAsync();
+    }
+
     private async Task RefreshSaveSlotsAsync()
     {
         await SendCommandAsync("saveslots", "Save Slots");
@@ -747,6 +799,25 @@ internal sealed class EditorToolForm : Form
             minSize,
             maxSize);
         await SendCommandAsync(command, $"Camera Size {minSize:0.##}-{maxSize:0.##}");
+        await RefreshStatusAsync();
+    }
+
+    private async Task SendSeedAsync()
+    {
+        if (!int.TryParse(
+                seedTextBox.Text.Trim(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out int seed))
+        {
+            statusLabel.Text = "Seed 오류";
+            AppendLog("Seed must be a 32-bit integer.");
+            return;
+        }
+
+        await SendCommandAsync(
+            $"seed {seed.ToString(CultureInfo.InvariantCulture)}",
+            $"Seed {seed.ToString(CultureInfo.InvariantCulture)}");
         await RefreshStatusAsync();
     }
 
@@ -826,6 +897,11 @@ internal sealed class EditorToolForm : Form
         {
             ApplyCameraSizeState(cameraMinSize, cameraMaxSize);
         }
+
+        if (TryReadProtocolInt(response, "seed", out int seed))
+        {
+            ApplySeedState(seed);
+        }
     }
 
     private void SetRuntimeStatsUnavailable(string message)
@@ -856,6 +932,16 @@ internal sealed class EditorToolForm : Form
 
         SetNumericValue(cameraMinSizeInput, (decimal)minSize);
         SetNumericValue(cameraMaxSizeInput, (decimal)maxSize);
+    }
+
+    private void ApplySeedState(int seed)
+    {
+        if (seedTextBox.Focused)
+        {
+            return;
+        }
+
+        seedTextBox.Text = seed.ToString(CultureInfo.InvariantCulture);
     }
 
     private static void SetNumericValue(NumericUpDown input, decimal value)
@@ -1124,13 +1210,16 @@ internal sealed class EditorToolForm : Form
         saveSlotComboBox.Enabled = !busy;
         saveSlotButton.Enabled = !busy;
         loadSlotButton.Enabled = !busy;
-        refreshSaveSlotsButton.Enabled = !busy;
+        resetMapButton.Enabled = !busy;
+        randomSeedCheckBox.Enabled = !busy;
         reloadButton.Enabled = !busy;
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;
         cameraMaxSizeInput.Enabled = !busy;
         applyCameraSizeButton.Enabled = !busy;
+        seedTextBox.Enabled = !busy;
+        applySeedButton.Enabled = !busy;
         statusLabel.Text = status;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }

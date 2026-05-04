@@ -53,6 +53,8 @@ public partial class TerrainGenerator : MonoBehaviour
             : UnityEngine.Object.FindObjectOfType<TerrainGenerator>();
     }
 
+    public int CurrentSeed => seed;
+
     public enum ResourcePlacementMode
     {
         Clustered,
@@ -1149,10 +1151,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RandomizeSeed()
     {
-        seed = UnityEngine.Random.Range(int.MinValue, int.MaxValue);
+        SetSeed(UnityEngine.Random.Range(int.MinValue, int.MaxValue));
+    }
+
+    public void SetSeed(int value)
+    {
+        seed = value;
         hasSeedInitialized = true;
         InvalidateStarterTreeCache();
         InvalidateTerrainBiomeDataCaches();
+        InvalidateTerrainBiomeMaterialCaches();
     }
 
     private void RefreshTrackedChunks()

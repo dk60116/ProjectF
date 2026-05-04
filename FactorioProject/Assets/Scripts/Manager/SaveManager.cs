@@ -124,6 +124,11 @@ public class SaveManager : MonoBehaviour
 
     public void StartNewMap(int slotIndex)
     {
+        StartNewMap(slotIndex, randomizeEmptySlotMap);
+    }
+
+    public void StartNewMap(int slotIndex, bool randomizeSeed)
+    {
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
         EnsureDefaultPlayerState();
@@ -137,11 +142,11 @@ public class SaveManager : MonoBehaviour
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain != null)
         {
-            terrain.StartNewGeneratedMap(randomizeEmptySlotMap);
+            terrain.StartNewGeneratedMap(randomizeSeed);
         }
 
         SetRecentSlot(slotIndex);
-        Debug.Log($"[SaveManager] Slot {slotIndex + 1}에 저장 파일이 없어 새 맵을 시작했습니다.");
+        Debug.Log($"[SaveManager] Slot {slotIndex + 1}에 새 맵을 시작했습니다. randomSeed={randomizeSeed}");
     }
 
     public string[] BuildSlotLabels()
