@@ -65,7 +65,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
     }
 
-    public void SimulateSavedInstallation(Vector2Int anchorCoordinate)
+    public void SimulateSavedInstallation(Vector2Int anchorCoordinate, int maxIterationsOverride = -1)
     {
         if (!Application.isPlaying || !TryGetStateStore(out BlockStateStore stateStore))
         {
@@ -110,8 +110,11 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         double simulatedSeconds = 0d;
         bool blockedOrIdle = false;
         int iterationCount = 0;
+        int iterationLimit = maxIterationsOverride > 0
+            ? maxIterationsOverride
+            : Mathf.Max(1, maxCraftIterationsPerSimulation);
 
-        while (remainingElapsed > 0.0001d && iterationCount < Mathf.Max(1, maxCraftIterationsPerSimulation))
+        while (remainingElapsed > 0.0001d && iterationCount < iterationLimit)
         {
             iterationCount++;
 
@@ -140,7 +143,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             }
         }
 
-        bool hitIterationLimit = iterationCount >= Mathf.Max(1, maxCraftIterationsPerSimulation) && remainingElapsed > 0.0001d && !blockedOrIdle;
+        bool hitIterationLimit = iterationCount >= iterationLimit && remainingElapsed > 0.0001d && !blockedOrIdle;
         if (hitIterationLimit)
         {
             installationState.lastBackgroundSimulationTicks += TimeSpan.FromSeconds(simulatedSeconds).Ticks;

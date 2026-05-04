@@ -239,6 +239,21 @@ public class BoxObject : InstallationObject
         }
     }
 
+    public override void PrepareForPool()
+    {
+        hinge?.DOKill();
+        RestoreLastContainedStackVisibilityBlock();
+        ApplyItemIconSprite(null, -1, true);
+        SetLockIconVisible(false, true);
+        ApplyCountText(string.Empty, true);
+        cachedTerrainGenerator = null;
+        cachedDisplayedItemId = int.MinValue;
+        cachedDisplayedSprite = null;
+        cachedLockIconVisible = false;
+        cachedCountTextValue = string.Empty;
+        base.PrepareForPool();
+    }
+
 #if UNITY_EDITOR
     protected override void OnValidate()
     {

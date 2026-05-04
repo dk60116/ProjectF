@@ -1314,14 +1314,13 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            if (Application.isPlaying)
-            {
-                Destroy(originalInstallation.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(originalInstallation.gameObject);
-            }
+            TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+            ReleaseInstalledObjectInstance(
+                originalInstallation,
+                ResolveInstallationSourcePrefab(
+                    packedSession.editSession.definition,
+                    packedSession.editSession.originalConveyorVariantKind),
+                terrain);
         }
     }
 
@@ -2428,7 +2427,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Transform installParent = terrain != null ? terrain.transform : transform;
-        MapObject replacementObject = Instantiate(desiredSourcePrefab, installParent);
+        MapObject replacementObject = CreateInstalledObjectInstance(desiredSourcePrefab, installParent, terrain);
         if (replacementObject == null)
         {
             return originalObject;
@@ -2436,14 +2435,12 @@ public class InstallationPlacementController : MonoBehaviour
 
         replacementObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
 
-        if (Application.isPlaying)
-        {
-            Destroy(originalObject.gameObject);
-        }
-        else
-        {
-            DestroyImmediate(originalObject.gameObject);
-        }
+        ReleaseInstalledObjectInstance(
+            editSession.originalInstallation,
+            ResolveInstallationSourcePrefab(
+                editSession.definition,
+                editSession.originalConveyorVariantKind),
+            terrain);
 
         editSession.originalInstallation = replacementObject as InstallationObject;
         return replacementObject;
@@ -2529,7 +2526,12 @@ public class InstallationPlacementController : MonoBehaviour
             InstallPreviewPlacementPlan placementPlan = placementPlans[i];
             TerrainGenerator terrain = ResolveInstallPreviewTerrain();
             Transform installParent = terrain != null ? terrain.transform : placementPlan.anchorBlock.transform;
-            MapObject installedObject = Instantiate(placementPlan.sourcePrefab, installParent);
+            MapObject installedObject = CreateInstalledObjectInstance(placementPlan.sourcePrefab, installParent, terrain);
+            if (installedObject == null)
+            {
+                continue;
+            }
+
             installedObject.transform.SetPositionAndRotation(
                 placementPlan.position,
                 placementPlan.rotation);
@@ -4203,9 +4205,14 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        ConveyorBelt replacementConveyor = Instantiate(replacementPrefab, installParent);
-        if (replacementConveyor == null)
+        MapObject replacementObject = CreateInstalledObjectInstance(replacementPrefab, installParent, terrain);
+        if (!(replacementObject is ConveyorBelt replacementConveyor))
         {
+            if (replacementObject is InstallationObject replacementInstallation)
+            {
+                ReleaseInstalledObjectInstance(replacementInstallation, replacementPrefab, terrain);
+            }
+
             return false;
         }
 
@@ -4224,14 +4231,13 @@ public class InstallationPlacementController : MonoBehaviour
         ConfigureInstalledObjectRuntime(replacementConveyor, anchorCoordinate, desiredQuarterTurns);
         RegisterInstalledObjectPersistence(replacementConveyor);
 
-        if (Application.isPlaying)
-        {
-            Destroy(installedConveyor.gameObject);
-        }
-        else
-        {
-            DestroyImmediate(installedConveyor.gameObject);
-        }
+        TryGetInstallationDefinition(installedConveyor.ResolveItemId(), out ItemDefinition installedDefinition);
+        ReleaseInstalledObjectInstance(
+            installedConveyor,
+            ResolveInstallationSourcePrefab(
+                installedDefinition,
+                GetConveyorVariantKind(installedConveyor)),
+            terrain);
 
         return true;
     }
@@ -8311,6 +8317,54 @@ public class InstallationPlacementController : MonoBehaviour
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         terrain?.RegisterLiveInstallationObject(installationObject);
+    }
+
+    private MapObject CreateInstalledObjectInstance(MapObject sourcePrefab, Transform parent, TerrainGenerator terrain)
+    {
+        if (sourcePrefab == null)
+        {
+            return null;
+        }
+
+        InstallationObject pooledObject = terrain != null
+            ? terrain.CreateInstallationObject(sourcePrefab, parent)
+            : null;
+        return pooledObject != null ? pooledObject : Instantiate(sourcePrefab, parent);
+    }
+
+    private void ReleaseInstalledObjectInstance(InstallationObject installationObject, MapObject sourcePrefab, TerrainGenerator terrain)
+    {
+        if (installationObject == null)
+        {
+            return;
+        }
+
+        if (terrain != null)
+        {
+            terrain.ReleaseInstallationObject(installationObject, sourcePrefab);
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(installationObject.gameObject);
+        }
+        else
+        {
+            DestroyImmediate(installationObject.gameObject);
+        }
+    }
+
+    private static MapObject ResolveInstallationSourcePrefab(ItemDefinition definition, int conveyorVariantKind)
+    {
+        MapObject sourcePrefab = definition != null ? definition.mapObject : null;
+        if (sourcePrefab is ConveyorBelt conveyorPrototype && conveyorVariantKind >= 0)
+        {
+            sourcePrefab = ResolveConveyorVariantPrefab(conveyorPrototype, conveyorVariantKind)
+                ?? sourcePrefab;
+        }
+
+        return sourcePrefab;
     }
 
     private void PlayInstallPlacementAnimation(MapObject installedObject, PortableObject sourcePortableObject, int itemId, float delay)

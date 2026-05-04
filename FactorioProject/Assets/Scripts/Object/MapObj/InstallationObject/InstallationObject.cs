@@ -145,6 +145,21 @@ public class InstallationObject : MapObject
         return runtimeOccupiedCoordinates != null && runtimeOccupiedCoordinates.Count > 0;
     }
 
+    public virtual void PrepareForPool()
+    {
+        runtimeAnchorCoordinate = default;
+        runtimeQuarterTurns = 0;
+        runtimePlacementSequence = 0;
+        if (runtimeOccupiedCoordinates != null)
+        {
+            runtimeOccupiedCoordinates.Clear();
+        }
+
+        ApplyItemFilterMask(null, false);
+        transform.localPosition = Vector3.zero;
+        RefreshInstalledDirectionFromCurrentTransform();
+    }
+
     protected virtual void OnEnable()
     {
         ActiveInstances.Add(this);

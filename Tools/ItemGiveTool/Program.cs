@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -43,6 +44,9 @@ internal sealed class EditorToolForm : Form
     private readonly Button reloadButton = new Button();
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
+    private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
+    private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
+    private readonly Button applyCameraSizeButton = new Button();
     private readonly TextBox logTextBox = new TextBox();
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
@@ -58,7 +62,7 @@ internal sealed class EditorToolForm : Form
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 792);
+        MinimumSize = new Size(760, 850);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -74,7 +78,7 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 7
+            RowCount = 8
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -83,6 +87,7 @@ internal sealed class EditorToolForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
@@ -286,6 +291,55 @@ internal sealed class EditorToolForm : Form
         layout.Controls.Add(debugTogglePanel, 0, 4);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
+        FlowLayoutPanel cameraSizePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 7, 0, 0),
+            WrapContents = false
+        };
+
+        Label cameraSizeLabel = new Label
+        {
+            Text = "Camera Size",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(0, 10, 12, 0)
+        };
+
+        Label cameraMinSizeLabel = new Label
+        {
+            Text = "Min",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(0, 10, 6, 0)
+        };
+
+        Label cameraMaxSizeLabel = new Label
+        {
+            Text = "Max",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(12, 10, 6, 0)
+        };
+
+        ConfigureCameraSizeInput(cameraMinSizeInput, 2m);
+        ConfigureCameraSizeInput(cameraMaxSizeInput, 8m);
+        StyleSecondaryButton(applyCameraSizeButton, "Apply Size");
+        applyCameraSizeButton.Width = 110;
+        applyCameraSizeButton.Height = 30;
+        applyCameraSizeButton.Margin = new Padding(14, 4, 0, 0);
+        applyCameraSizeButton.Click += async (_, _) => await SendCameraSizeAsync();
+
+        cameraSizePanel.Controls.Add(cameraSizeLabel);
+        cameraSizePanel.Controls.Add(cameraMinSizeLabel);
+        cameraSizePanel.Controls.Add(cameraMinSizeInput);
+        cameraSizePanel.Controls.Add(cameraMaxSizeLabel);
+        cameraSizePanel.Controls.Add(cameraMaxSizeInput);
+        cameraSizePanel.Controls.Add(applyCameraSizeButton);
+        layout.Controls.Add(cameraSizePanel, 0, 5);
+        layout.SetColumnSpan(cameraSizePanel, 2);
+
         Panel runtimeStatsCard = CreateCardPanel();
         runtimeStatsCard.Padding = new Padding(14, 10, 14, 10);
         runtimeStatsCard.Margin = new Padding(0, 0, 0, 14);
@@ -316,7 +370,7 @@ internal sealed class EditorToolForm : Form
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
-        layout.Controls.Add(runtimeStatsCard, 0, 5);
+        layout.Controls.Add(runtimeStatsCard, 0, 6);
         layout.SetColumnSpan(runtimeStatsCard, 2);
 
         Panel logCard = CreateCardPanel();
@@ -330,7 +384,7 @@ internal sealed class EditorToolForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 6);
+        layout.Controls.Add(logCard, 0, 7);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -407,6 +461,17 @@ internal sealed class EditorToolForm : Form
                 ? Color.FromArgb(126, 218, 126)
                 : Color.FromArgb(243, 234, 206);
         };
+    }
+
+    private static void ConfigureCameraSizeInput(NumericUpDown input, decimal value)
+    {
+        input.Minimum = 0.1m;
+        input.Maximum = 1000m;
+        input.DecimalPlaces = 2;
+        input.Increment = 0.1m;
+        input.Value = value;
+        input.Width = 86;
+        input.Margin = new Padding(0, 5, 0, 0);
     }
 
     private void PositionFpsLabel(Control parent)
@@ -666,6 +731,25 @@ internal sealed class EditorToolForm : Form
         await RefreshStatusAsync();
     }
 
+    private async Task SendCameraSizeAsync()
+    {
+        decimal minSize = cameraMinSizeInput.Value;
+        decimal maxSize = cameraMaxSizeInput.Value;
+        if (maxSize < minSize)
+        {
+            maxSize = minSize;
+            cameraMaxSizeInput.Value = maxSize;
+        }
+
+        string command = string.Format(
+            CultureInfo.InvariantCulture,
+            "camera size {0:0.###} {1:0.###}",
+            minSize,
+            maxSize);
+        await SendCommandAsync(command, $"Camera Size {minSize:0.##}-{maxSize:0.##}");
+        await RefreshStatusAsync();
+    }
+
     private async Task RefreshStatusAsync()
     {
         if (pollingStatus)
@@ -736,6 +820,12 @@ internal sealed class EditorToolForm : Form
         {
             ApplyRuntimeCheckBoxState(showSleepAwakeCheckBox, showSleepAwake);
         }
+
+        if (TryReadProtocolFloat(response, "cameraMinSize", out float cameraMinSize)
+            && TryReadProtocolFloat(response, "cameraMaxSize", out float cameraMaxSize))
+        {
+            ApplyCameraSizeState(cameraMinSize, cameraMaxSize);
+        }
     }
 
     private void SetRuntimeStatsUnavailable(string message)
@@ -755,6 +845,22 @@ internal sealed class EditorToolForm : Form
         {
             applyingRuntimeDebugState = false;
         }
+    }
+
+    private void ApplyCameraSizeState(float minSize, float maxSize)
+    {
+        if (minSize <= 0f || maxSize < minSize)
+        {
+            return;
+        }
+
+        SetNumericValue(cameraMinSizeInput, (decimal)minSize);
+        SetNumericValue(cameraMaxSizeInput, (decimal)maxSize);
+    }
+
+    private static void SetNumericValue(NumericUpDown input, decimal value)
+    {
+        input.Value = Math.Min(input.Maximum, Math.Max(input.Minimum, value));
     }
 
     private string FormatInstallTypeCounts(string installTypes)
@@ -1021,6 +1127,9 @@ internal sealed class EditorToolForm : Form
         reloadButton.Enabled = !busy;
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
+        cameraMinSizeInput.Enabled = !busy;
+        cameraMaxSizeInput.Enabled = !busy;
+        applyCameraSizeButton.Enabled = !busy;
         statusLabel.Text = status;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }

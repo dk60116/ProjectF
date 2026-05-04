@@ -27,10 +27,12 @@ public class PlayerCamera : MonoBehaviour
     [SerializeField, Min(0f)]
     private float zoomSmoothTime = 0.08f;
 
-    [SerializeField, Min(0.1f)]
+    [SerializeField, Min(0.1f), InspectorName("Minimum Size")]
+    [Tooltip("Orthographic camera minimum size.")]
     private float minOrthographicSize = 2f;
 
-    [SerializeField, Min(0.1f)]
+    [SerializeField, Min(0.1f), InspectorName("Maximum Size")]
+    [Tooltip("Orthographic camera maximum size.")]
     private float maxOrthographicSize = 8f;
 
     [SerializeField, Min(0f)]
@@ -48,6 +50,16 @@ public class PlayerCamera : MonoBehaviour
     private float orthographicZoomVelocity;
     private bool hasInitializedDistance;
     private bool hasInitializedOrthographicSize;
+
+    public float MinimumOrthographicSize => minOrthographicSize;
+    public float MaximumOrthographicSize => maxOrthographicSize;
+
+    public void SetOrthographicSizeRange(float minimumSize, float maximumSize)
+    {
+        minOrthographicSize = Mathf.Max(0.1f, minimumSize);
+        maxOrthographicSize = Mathf.Max(minOrthographicSize, maximumSize);
+        ClampOrthographicZoomState();
+    }
 
     private void Start()
     {
@@ -225,7 +237,7 @@ public class PlayerCamera : MonoBehaviour
         return Mathf.Clamp(size, minSize, maxSize);
     }
 
-    private void OnValidate()
+    private void NormalizeZoomSettings()
     {
         minFollowDistance = Mathf.Max(0.1f, minFollowDistance);
         maxFollowDistance = Mathf.Max(minFollowDistance, maxFollowDistance);
@@ -236,5 +248,25 @@ public class PlayerCamera : MonoBehaviour
         maxOrthographicSize = Mathf.Max(minOrthographicSize, maxOrthographicSize);
         orthographicMouseWheelZoomSpeed = Mathf.Max(0f, orthographicMouseWheelZoomSpeed);
         orthographicPinchZoomSpeed = Mathf.Max(0f, orthographicPinchZoomSpeed);
+    }
+
+    private void ClampOrthographicZoomState()
+    {
+        EnsureCameraCached();
+        if (cachedCamera != null && cachedCamera.orthographic)
+        {
+            cachedCamera.orthographicSize = ClampOrthographicSize(cachedCamera.orthographicSize);
+        }
+
+        if (hasInitializedOrthographicSize || targetOrthographicSize > 0f)
+        {
+            targetOrthographicSize = ClampOrthographicSize(targetOrthographicSize);
+        }
+    }
+
+    private void OnValidate()
+    {
+        NormalizeZoomSettings();
+        ClampOrthographicZoomState();
     }
 }

@@ -21,6 +21,13 @@ public class TerrainDataEditorWindow : EditorWindow
         "expandEditorPreviewRange",
         "chunkGenerationBlocksPerFrame",
         "chunkSurfaceRowsPerFrame",
+        "chunkInstallationRestoresPerFrame",
+        "chunkRestoreBackgroundSimulationIterations",
+        "chunkUnloadsPerFrame",
+        "virtualizeDistantFloorObjects",
+        "floorObjectLiveRadius",
+        "floorObjectVirtualizationInterval",
+        "floorObjectVirtualizationConversionsPerTick",
         "trackingTarget",
         "generateOnStart",
         "seed"

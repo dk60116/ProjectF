@@ -403,6 +403,30 @@ public class InputOutputModule : InstallationObject
         cachedTerrain = null;
     }
 
+    public override void PrepareForPool()
+    {
+        UnregisterRuntimeGridCoordinates();
+        ReleaseEnergyGaugeVisual();
+        runtimeInputEnergyCoordinates.Clear();
+        runtimeInputItemAreas.Clear();
+        runtimeOutputCoordinates.Clear();
+        runtimeGridCoordinates.Clear();
+        runtimeFocusCoordinates.Clear();
+        storedEnergy = 0f;
+        energyGaugeCapacity = 0f;
+        hasActiveCraft = false;
+        waitingForOutput = false;
+        remainingCraftTime = 0f;
+        activeCraftConsumedEnergy = 0f;
+        activeRecipeIndex = -1;
+        activeOutputItemId = -1;
+        activeOutputCount = 0;
+        cachedTerrain = null;
+        cachedInstalledDefinition = null;
+        cachedInstalledDefinitionId = int.MinValue;
+        base.PrepareForPool();
+    }
+
     public static bool TryGetModuleAtRuntimeGridCoordinate(Vector2Int coordinate, out InputOutputModule module)
     {
         module = null;

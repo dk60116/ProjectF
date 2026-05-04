@@ -348,6 +348,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 case ToolCommand.SetDebugToggle:
                     request.Result = SetDebugToggle(request.DebugToggleName, request.DebugToggleValue);
                     break;
+                case ToolCommand.SetCameraSizeRange:
+                    request.Result = SetCameraSizeRange(request.CameraMinSize, request.CameraMaxSize);
+                    break;
                 case ToolCommand.CreateConveyorLine:
                     request.Result = CreateConveyorLine(request.ItemId, request.Count);
                     break;
@@ -471,13 +474,23 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     out int slotIndex,
                     out string debugToggleName,
                     out bool debugToggleValue,
+                    out float cameraMinSize,
+                    out float cameraMaxSize,
                     out string error))
             {
                 writer.WriteLine($"error {error}");
                 return;
             }
 
-            ToolRequest request = new ToolRequest(command, itemId, count, slotIndex, debugToggleName, debugToggleValue);
+            ToolRequest request = new ToolRequest(
+                command,
+                itemId,
+                count,
+                slotIndex,
+                debugToggleName,
+                debugToggleValue,
+                cameraMinSize,
+                cameraMaxSize);
             EnqueueRequest(request);
             if (!request.Completion.Wait(RequestTimeoutMilliseconds))
             {
@@ -499,6 +512,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         out int slotIndex,
         out string debugToggleName,
         out bool debugToggleValue,
+        out float cameraMinSize,
+        out float cameraMaxSize,
         out string error)
     {
         command = ToolCommand.Give;
@@ -507,6 +522,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         slotIndex = 0;
         debugToggleName = string.Empty;
         debugToggleValue = false;
+        cameraMinSize = 0f;
+        cameraMaxSize = 0f;
         error = string.Empty;
 
         if (string.IsNullOrWhiteSpace(line))
@@ -579,6 +596,44 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts.Length == 4
+            && string.Equals(parts[0], "camera", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(parts[1], "size", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.SetCameraSizeRange;
+            itemId = 0;
+            count = 0;
+            if (!TryParseProtocolFloat(parts[2], out cameraMinSize)
+                || !TryParseProtocolFloat(parts[3], out cameraMaxSize)
+                || cameraMinSize <= 0f
+                || cameraMaxSize < cameraMinSize)
+            {
+                error = "camera size usage: camera size <minSize> <maxSize>, maxSize must be >= minSize";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (parts.Length == 3
+            && (string.Equals(parts[0], "camerasize", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "cameraSize", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.SetCameraSizeRange;
+            itemId = 0;
+            count = 0;
+            if (!TryParseProtocolFloat(parts[1], out cameraMinSize)
+                || !TryParseProtocolFloat(parts[2], out cameraMaxSize)
+                || cameraMinSize <= 0f
+                || cameraMaxSize < cameraMinSize)
+            {
+                error = "camera size usage: camerasize <minSize> <maxSize>, maxSize must be >= minSize";
+                return false;
+            }
+
+            return true;
+        }
+
         if (parts.Length >= 1
             && (string.Equals(parts[0], "beltline", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(parts[0], "conveyorline", StringComparison.OrdinalIgnoreCase)))
@@ -617,7 +672,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | camera size <minSize> <maxSize> | ping | status";
             return false;
         }
 
@@ -659,6 +714,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return false;
     }
 
+    private static bool TryParseProtocolFloat(string value, out float result)
+    {
+        return float.TryParse(
+            value,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out result);
+    }
+
     private void EnqueueRequest(ToolRequest request)
     {
         lock (pendingRequestLock)
@@ -697,7 +761,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
         bool currentShowBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
-        string saveSlotTokens = BuildSaveSlotsExtraTokens(FindObjectOfType<SaveManager>());
+        string extraTokens = BuildStatusExtraTokens(
+            FindObjectOfType<SaveManager>(),
+            FindObjectOfType<PlayerCamera>());
         return ToolResult.Status(
             fps,
             frameMs,
@@ -707,7 +773,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             currentShowConveyorSlotDots,
             currentShowSleepAwake,
             currentShowBeltItemLine,
-            saveSlotTokens);
+            extraTokens);
     }
 
     private ToolResult GetSaveSlotsResult()
@@ -787,6 +853,29 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private static string BuildEmptySaveSlotsExtraTokens()
     {
         return $"saveSlots={new string('0', SaveManager.SlotCount)} selectedSlot=1";
+    }
+
+    private static string BuildStatusExtraTokens(SaveManager saveManager, PlayerCamera playerCamera)
+    {
+        string saveSlotTokens = BuildSaveSlotsExtraTokens(saveManager);
+        string cameraSizeTokens = BuildCameraSizeExtraTokens(playerCamera);
+        return string.IsNullOrWhiteSpace(cameraSizeTokens)
+            ? saveSlotTokens
+            : $"{saveSlotTokens} {cameraSizeTokens}";
+    }
+
+    private static string BuildCameraSizeExtraTokens(PlayerCamera playerCamera)
+    {
+        if (playerCamera == null)
+        {
+            return string.Empty;
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "cameraMinSize={0:0.###} cameraMaxSize={1:0.###}",
+            playerCamera.MinimumOrthographicSize,
+            playerCamera.MaximumOrthographicSize);
     }
 
     private void CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts)
@@ -1018,17 +1107,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 break;
             }
 
-            MapObject installedObject = Instantiate(plan.SourcePrefab, terrain.transform);
-            if (!(installedObject is InstallationObject installedInstallation))
+            InstallationObject installedInstallation = terrain.CreateInstallationObject(plan.SourcePrefab, terrain.transform);
+            if (installedInstallation == null)
             {
-                if (installedObject != null)
-                {
-                    Destroy(installedObject.gameObject);
-                }
-
                 break;
             }
 
+            MapObject installedObject = installedInstallation;
             installedObject.transform.SetPositionAndRotation(
                 placementController.GetInstalledObjectWorldPosition(plan.Coordinate, plan.SourcePrefab, plan.QuarterTurns, 0f),
                 placementController.GetInstalledObjectRotation(plan.SourcePrefab, plan.QuarterTurns));
@@ -1908,6 +1993,31 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");
     }
 
+    private ToolResult SetCameraSizeRange(float minimumSize, float maximumSize)
+    {
+        PlayerCamera playerCamera = FindObjectOfType<PlayerCamera>();
+        if (playerCamera == null)
+        {
+            return ToolResult.Error(0, 0, "player camera not found");
+        }
+
+        playerCamera.SetOrthographicSizeRange(minimumSize, maximumSize);
+        string message = string.Format(
+            CultureInfo.InvariantCulture,
+            "camera size {0:0.###}-{1:0.###}",
+            playerCamera.MinimumOrthographicSize,
+            playerCamera.MaximumOrthographicSize);
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            message,
+            BuildCameraSizeExtraTokens(playerCamera));
+    }
+
     private sealed class ConveyorPlacementPlan
     {
         public Vector2Int Coordinate;
@@ -1923,6 +2033,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         Ping,
         Status,
         SetDebugToggle,
+        SetCameraSizeRange,
         CreateConveyorLine,
         SaveSlot,
         LoadSlot,
@@ -1931,7 +2042,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private sealed class ToolRequest
     {
-        public ToolRequest(ToolCommand command, int itemId, int count, int slotIndex, string debugToggleName, bool debugToggleValue)
+        public ToolRequest(
+            ToolCommand command,
+            int itemId,
+            int count,
+            int slotIndex,
+            string debugToggleName,
+            bool debugToggleValue,
+            float cameraMinSize,
+            float cameraMaxSize)
         {
             Command = command;
             ItemId = itemId;
@@ -1939,6 +2058,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             SlotIndex = slotIndex;
             DebugToggleName = debugToggleName;
             DebugToggleValue = debugToggleValue;
+            CameraMinSize = cameraMinSize;
+            CameraMaxSize = cameraMaxSize;
         }
 
         public ToolCommand Command { get; }
@@ -1947,6 +2068,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public int SlotIndex { get; }
         public string DebugToggleName { get; }
         public bool DebugToggleValue { get; }
+        public float CameraMinSize { get; }
+        public float CameraMaxSize { get; }
         public ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
         public ToolResult Result { get; set; }
     }

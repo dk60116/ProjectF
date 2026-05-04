@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class BlockStateStore : MonoBehaviour
+public partial class BlockStateStore : MonoBehaviour
 {
     public sealed class InstallationSaveState
     {
@@ -441,6 +441,7 @@ public class BlockStateStore : MonoBehaviour
         savedStates.Clear();
         savedResourceItemIds.Clear();
         savedFloorObjectStates.Clear();
+        savedConveyorItemStates.Clear();
         savedInstallationStates.Clear();
         savedInstallationAnchorsByCoordinate.Clear();
         liveInstallationStates.Clear();
@@ -455,12 +456,16 @@ public class BlockStateStore : MonoBehaviour
             return;
         }
 
+        SimulateSavedConveyorItems();
+
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
         mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
         mapSaveData.installations ??= new List<InstallationSaveEntry>();
+        mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
         mapSaveData.resources.Clear();
         mapSaveData.floorObjects.Clear();
         mapSaveData.installations.Clear();
+        mapSaveData.conveyorItems.Clear();
 
         foreach (KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair in savedStates)
         {
@@ -484,6 +489,21 @@ public class BlockStateStore : MonoBehaviour
             {
                 coordinate = pair.Key,
                 itemIds = pair.Value.ToSerializedList()
+            });
+        }
+
+        foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
+        {
+            ConveyorItemBlockState state = pair.Value;
+            if (state == null || state.lanes.Count <= 0)
+            {
+                continue;
+            }
+
+            mapSaveData.conveyorItems.Add(new ConveyorItemBlockSaveEntry
+            {
+                coordinate = pair.Key,
+                lanes = CloneConveyorLaneStates(state.lanes)
             });
         }
 
@@ -541,6 +561,20 @@ public class BlockStateStore : MonoBehaviour
                 }
 
                 SetFloorObjects(entry.coordinate, entry.itemIds);
+            }
+        }
+
+        if (mapSaveData.conveyorItems != null)
+        {
+            for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
+            {
+                ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                SetConveyorItems(entry.coordinate, entry.lanes);
             }
         }
 
