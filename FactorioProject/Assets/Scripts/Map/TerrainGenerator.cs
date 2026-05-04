@@ -39,6 +39,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private static readonly ProfilerMarker UnloadChunkRemoveLookupMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.RemoveLookup");
     private static readonly ProfilerMarker UnloadChunkReleaseBlocksMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.ReleaseBlocks");
     private static readonly ProfilerMarker UnloadChunkCleanupInstallationsMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.CleanupInstallations");
+    private static readonly ProfilerMarker UnloadChunkSleepBlocksMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.SleepBlocks");
+    private static readonly ProfilerMarker UnloadChunkSleepInstallationsMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.SleepInstallations");
+    private static readonly ProfilerMarker WakeChunkViewMarker = new ProfilerMarker("TerrainGenerator.WakeChunkView");
     private static readonly ProfilerMarker ApplyChunkSurfaceMarker = new ProfilerMarker("TerrainGenerator.ApplyChunkBiomeSurface");
 
     public static TerrainGenerator Active { get; private set; }
@@ -536,6 +539,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private readonly Dictionary<Vector2Int, Transform> loadedChunks = new Dictionary<Vector2Int, Transform>();
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
+    private readonly Dictionary<Vector2Int, Transform> sleepingChunkViews = new Dictionary<Vector2Int, Transform>();
+    private readonly Dictionary<Vector2Int, InstallationObject> sleepingInstallationViews = new Dictionary<Vector2Int, InstallationObject>();
     private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
     private readonly List<Block> conveyorTickBuffer = new List<Block>();
     private readonly HashSet<Block> activeConveyorDataMotionBlocks = new HashSet<Block>();
@@ -575,6 +580,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Block> conveyorLineTouchedBlocks = new List<Block>();
     private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
     private readonly HashSet<int> conveyorWakeQueuedLineIds = new HashSet<int>();
+    private readonly HashSet<Block> deferredConveyorRuntimeRefreshBlocks = new HashSet<Block>();
     private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> backgroundConveyorDirtyCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> backgroundConveyorWakeCoordinates = new HashSet<Vector2Int>();
@@ -590,6 +596,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
     private bool conveyorLineCacheDirty = true;
+    private int deferredConveyorRuntimeRefreshDepth;
     private float nextConveyorActiveFullScanTime;
     private float nextBackgroundConveyorSimulationTime;
     private Vector2Int currentCenterChunk;
@@ -603,6 +610,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private PortableItemRenderer portableItemRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private TerrainChunkStreamingScheduler chunkStreamingScheduler;
+    private Transform sleepingChunkViewRoot;
+    private Transform sleepingInstallationViewRoot;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
     private readonly List<Vector2Int> starterTreeCacheCandidates = new List<Vector2Int>();
@@ -857,10 +866,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         return new TerrainSaveData
         {
-            seed = seed,
-            chunkSize = Mathf.Max(4, chunkSize),
-            loadRadius = Mathf.Max(0, loadRadius),
-            unloadRadius = Mathf.Max(GetEffectiveLoadRadius() + 1, unloadRadius)
+            seed = seed
         };
     }
 
@@ -893,7 +899,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (terrainSaveData != null)
         {
             seed = terrainSaveData.seed;
-            chunkSize = Mathf.Max(4, terrainSaveData.chunkSize);
+            chunkSize = Mathf.Max(4, chunkSize);
             loadRadius = Mathf.Max(0, loadRadius);
             unloadRadius = Mathf.Max(loadRadius + 1, unloadRadius);
             hasSeedInitialized = true;
@@ -1246,6 +1252,28 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Vector2Int origin = new Vector2Int(chunkCoordinate.x * normalizedChunkSize, chunkCoordinate.y * normalizedChunkSize);
+        if (TryTakeSleepingChunkView(chunkCoordinate, normalizedChunkSize, out Transform sleepingChunk))
+        {
+            IEnumerator wakeRoutine = WakeSleepingChunkViewRoutine(chunkCoordinate, sleepingChunk, origin, allowYield);
+            while (wakeRoutine.MoveNext())
+            {
+                if (allowYield && wakeRoutine.Current != null)
+                {
+                    yield return wakeRoutine.Current;
+                }
+            }
+
+            MarkChunkGenerationComplete(chunkCoordinate);
+
+            if (!IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveUnloadRadius()))
+            {
+                QueueChunkUnload(chunkCoordinate);
+                EnsureChunkUnloadProcessing();
+            }
+
+            yield break;
+        }
+
         GameObject chunkObject = new GameObject($"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})");
         chunkObject.transform.SetParent(transform, false);
         chunkObject.transform.position = new Vector3(origin.x, 0f, origin.y);
@@ -1417,10 +1445,21 @@ public partial class TerrainGenerator : MonoBehaviour
             yield return removeLookupRoutine.Current;
         }
 
-        IEnumerator releaseRoutine = ReleaseChunkBlocksToPoolRoutine(chunkBlocks, allowYield);
-        while (releaseRoutine.MoveNext())
+        if (Application.isPlaying)
         {
-            yield return releaseRoutine.Current;
+            IEnumerator sleepBlocksRoutine = SleepChunkBlocksForStreamingRoutine(chunkBlocks, allowYield);
+            while (sleepBlocksRoutine.MoveNext())
+            {
+                yield return sleepBlocksRoutine.Current;
+            }
+        }
+        else
+        {
+            IEnumerator releaseRoutine = ReleaseChunkBlocksToPoolRoutine(chunkBlocks, allowYield);
+            while (releaseRoutine.MoveNext())
+            {
+                yield return releaseRoutine.Current;
+            }
         }
 
         loadedChunks.Remove(chunkCoordinate);
@@ -1435,7 +1474,14 @@ public partial class TerrainGenerator : MonoBehaviour
             yield return cleanupRoutine.Current;
         }
 
-        DestroyChunkObject(chunkTransform.gameObject);
+        if (Application.isPlaying)
+        {
+            SleepChunkView(chunkCoordinate, chunkTransform);
+        }
+        else
+        {
+            DestroyChunkObject(chunkTransform.gameObject);
+        }
     }
 
     private void ClearLoadedChunks()
@@ -1461,6 +1507,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 DestroyChunkObject(chunkObjects[i].gameObject);
             }
         }
+
+        DestroySleepingViewCaches();
 
         loadedChunks.Clear();
         loadedBlocks.Clear();

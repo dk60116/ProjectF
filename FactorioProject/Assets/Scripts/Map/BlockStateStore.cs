@@ -388,6 +388,41 @@ public partial class BlockStateStore : MonoBehaviour
         return false;
     }
 
+    public bool TryDetachLiveInstallation(Vector2Int anchorCoordinate, out InstallationObject installationObject, out InstallationSaveState state)
+    {
+        installationObject = null;
+        state = null;
+
+        if (!liveInstallationStates.TryGetValue(anchorCoordinate, out LiveInstallationRecord record)
+            || record == null
+            || record.installationObject == null)
+        {
+            if (liveInstallationStates.ContainsKey(anchorCoordinate))
+            {
+                UnregisterLiveInstallation(anchorCoordinate);
+            }
+
+            return false;
+        }
+
+        installationObject = record.installationObject;
+        state = record.state != null ? record.state.Clone() : null;
+        UnregisterLiveCoordinateMappings(record.state);
+        liveInstallationStates.Remove(anchorCoordinate);
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        if (savedInstallationStates.TryGetValue(anchorCoordinate, out InstallationSaveState savedState))
+        {
+            world?.UpsertInstallation(savedState);
+        }
+        else
+        {
+            world?.RemoveInstallation(anchorCoordinate);
+        }
+
+        return true;
+    }
+
     public bool TryGetInstallationAnchorAtCoordinate(Vector2Int worldCoordinate, out Vector2Int anchorCoordinate)
     {
         if (liveInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out anchorCoordinate))

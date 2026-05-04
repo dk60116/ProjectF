@@ -28,7 +28,10 @@ public class PlayerBag : MonoBehaviour
             portableStack = new List<PortableStack>();
         }
 
-        SyncPortableStacksFromChildStackRoots();
+        if (!initialized || portableStack.Count == 0)
+        {
+            SyncPortableStacksFromChildStackRoots();
+        }
 
         if (currentStack == null)
         {
@@ -224,7 +227,7 @@ public class PlayerBag : MonoBehaviour
 
     public void RefreshExternalStackCounts(bool notify = true)
     {
-        if (portableStack == null || portableStack.Count == 0)
+        if (!usesExternalStack || portableStack == null || portableStack.Count == 0)
         {
             return;
         }
@@ -299,6 +302,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = Mathf.Clamp(nextIndex + 1, 0, stack.stack.Count);
+        SynchronizeSlotObjectActivity(index);
         NotifyChanged();
         return true;
     }
@@ -480,22 +484,92 @@ public class PlayerBag : MonoBehaviour
         PortableStack stack = portableStack[index];
         int maxCount = stack != null && stack.stack != null ? stack.stack.Count : 0;
         int clamped = Mathf.Clamp(count, 0, maxCount);
-        if (currentStack[index] == clamped)
-        {
-            return;
-        }
-
+        bool countChanged = currentStack[index] != clamped;
         currentStack[index] = clamped;
         ClampVisualPreservedStackCount(index);
-        if (mergeDuplicates)
-        {
-            TryMergeDuplicateItemStacks();
-        }
+        bool objectStateChanged = SynchronizeSlotObjectActivity(index);
+        bool merged = countChanged && mergeDuplicates && TryMergeDuplicateItemStacks();
 
-        if (notify)
+        if (notify && (countChanged || objectStateChanged || merged))
         {
             NotifyChanged();
         }
+    }
+
+    public bool SetSlotContents(
+        int index,
+        int itemId,
+        int count,
+        bool notify = true,
+        bool mergeDuplicates = true)
+    {
+        EnsureInitialized();
+        if (currentStack == null || portableStack == null)
+        {
+            return false;
+        }
+
+        if (index < 0 || index >= portableStack.Count || index >= currentStack.Count)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        if (stack == null || stack.stack == null)
+        {
+            return false;
+        }
+
+        int clamped = Mathf.Clamp(count, 0, stack.stack.Count);
+        if (clamped > 0 && itemId < 0)
+        {
+            return false;
+        }
+
+        bool changed = currentStack[index] != clamped;
+        currentStack[index] = clamped;
+        if (index < visualPreservedStackCounts.Count && visualPreservedStackCounts[index] != 0)
+        {
+            visualPreservedStackCounts[index] = 0;
+            changed = true;
+        }
+
+        for (int objectIndex = 0; objectIndex < stack.stack.Count; objectIndex++)
+        {
+            PortableObject portableObject = stack.stack[objectIndex];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            bool shouldBeActive = objectIndex < clamped;
+            if (shouldBeActive)
+            {
+                if (portableObject.ItemId != itemId)
+                {
+                    changed = true;
+                }
+
+                if (!portableObject.SetItem(itemId))
+                {
+                    return false;
+                }
+            }
+
+            if (portableObject.gameObject.activeSelf != shouldBeActive)
+            {
+                portableObject.gameObject.SetActive(shouldBeActive);
+                changed = true;
+            }
+        }
+
+        bool merged = mergeDuplicates && TryMergeDuplicateItemStacks();
+        if (notify && (changed || merged))
+        {
+            NotifyChanged();
+        }
+
+        return true;
     }
 
     public bool TryAddObject(int objectId, out PortableObject targetPortableObject)
@@ -665,6 +739,7 @@ public class PlayerBag : MonoBehaviour
             targetPortableObject.gameObject.SetActive(true);
         }
 
+        SynchronizeSlotObjectActivity(stackIndex);
         TryMergeDuplicateItemStacks();
         NotifyChanged();
     }
@@ -726,6 +801,8 @@ public class PlayerBag : MonoBehaviour
             topObject.gameObject.SetActive(false);
         }
 
+        ClampVisualPreservedStackCount(index);
+        SynchronizeSlotObjectActivity(index);
         if (mergeDuplicates)
         {
             TryMergeDuplicateItemStacks();
@@ -783,6 +860,12 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = 0;
+        if (index < visualPreservedStackCounts.Count)
+        {
+            visualPreservedStackCounts[index] = 0;
+        }
+
+        SynchronizeSlotObjectActivity(index);
         TryMergeDuplicateItemStacks();
         NotifyChanged();
         return objectId >= 0 && removedCount > 0;
@@ -919,6 +1002,8 @@ public class PlayerBag : MonoBehaviour
             int preservedCount = Mathf.Clamp(GetVisualPreservedStackCount(index), 0, activeCount);
             visualPreservedStackCounts[index] = Mathf.Clamp(preservedCount + removeCount, 0, activeCount);
             currentStack[index] = occupiedCount - removeCount;
+            ClampVisualPreservedStackCount(index);
+            SynchronizeSlotObjectActivity(index);
             return removeCount;
         }
 
@@ -933,6 +1018,8 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[index] = occupiedCount - removeCount;
+        ClampVisualPreservedStackCount(index);
+        SynchronizeSlotObjectActivity(index);
         return removeCount;
     }
 
@@ -1061,6 +1148,10 @@ public class PlayerBag : MonoBehaviour
 
         currentStack[targetIndex] = targetCount + moveCount;
         currentStack[sourceIndex] = sourceCount - moveCount;
+        ClampVisualPreservedStackCount(targetIndex);
+        ClampVisualPreservedStackCount(sourceIndex);
+        SynchronizeSlotObjectActivity(targetIndex);
+        SynchronizeSlotObjectActivity(sourceIndex);
         return true;
     }
 
@@ -1297,6 +1388,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         visualPreservedStackCounts[index] = 0;
+        SynchronizeSlotObjectActivity(index);
         if (notify)
         {
             NotifyChanged();
@@ -1714,6 +1806,70 @@ public class PlayerBag : MonoBehaviour
         visualPreservedStackCounts[index] = Mathf.Clamp(visualPreservedStackCounts[index], 0, maxPreservedCount);
     }
 
+    private bool SynchronizeSlotObjectActivity(int index)
+    {
+        if (portableStack == null
+            || currentStack == null
+            || index < 0
+            || index >= portableStack.Count
+            || index >= currentStack.Count)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        if (stack == null || stack.stack == null)
+        {
+            return false;
+        }
+
+        bool changed = false;
+        int maxCount = stack.stack.Count;
+        int logicalCount = Mathf.Clamp(currentStack[index], 0, maxCount);
+        if (currentStack[index] != logicalCount)
+        {
+            currentStack[index] = logicalCount;
+            changed = true;
+        }
+
+        int preservedCount = 0;
+        if (index < visualPreservedStackCounts.Count)
+        {
+            int clampedPreservedCount = Mathf.Clamp(
+                visualPreservedStackCounts[index],
+                0,
+                Mathf.Max(0, maxCount - logicalCount));
+            if (visualPreservedStackCounts[index] != clampedPreservedCount)
+            {
+                visualPreservedStackCounts[index] = clampedPreservedCount;
+                changed = true;
+            }
+
+            preservedCount = clampedPreservedCount;
+        }
+
+        int activeLimit = Mathf.Clamp(logicalCount + preservedCount, 0, maxCount);
+        for (int objectIndex = 0; objectIndex < maxCount; objectIndex++)
+        {
+            PortableObject portableObject = stack.stack[objectIndex];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            bool shouldRemainActive = objectIndex < activeLimit;
+            if (shouldRemainActive || !portableObject.gameObject.activeSelf)
+            {
+                continue;
+            }
+
+            portableObject.gameObject.SetActive(false);
+            changed = true;
+        }
+
+        return changed;
+    }
+
     private int CountContiguousActiveObjects(PortableStack stack)
     {
         if (stack == null || stack.stack == null)
@@ -1827,6 +1983,7 @@ public class PlayerBag : MonoBehaviour
         visualPreservedStackCounts[index] = Mathf.Max(0, visualPreservedStackCounts[index] - 1);
         PortableStack stack = portableStack[index];
         currentStack[index] = Mathf.Clamp(currentStack[index] + 1, 0, stack.stack.Count);
+        SynchronizeSlotObjectActivity(index);
         if (notify)
         {
             NotifyChanged();

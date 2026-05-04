@@ -16,6 +16,7 @@ public class PortableObject : MonoBehaviour
     public const float MoveToDuration = 0.3f;
 
     private static readonly HashSet<PortableObject> liveObjects = new HashSet<PortableObject>();
+    public event Action<PortableObject> MoveCancelled;
 
     [SerializeField, ReadOnly]
     private int id;
@@ -25,6 +26,7 @@ public class PortableObject : MonoBehaviour
 
     private MeshRenderer bodyRenderer;
     private PortableItemRenderer portableItemRenderer;
+    private Tween moveTween;
     private Transform cachedTransform;
     private GameObject cachedGameObject;
     private DroppedItemPickupGate cachedPickupGate;
@@ -389,11 +391,14 @@ public class PortableObject : MonoBehaviour
         SetBatchedRendering(false);
         SetSleepAwakeSleeping(false);
         ClearBeltItemLineDebugColor();
+        moveTween?.Kill();
+        moveTween = null;
         CachedTransform.DOKill();
         ResolveBodyRenderer();
         isMovingToTarget = true;
 
-        Sequence sequence = DOTween.Sequence();
+        Sequence sequence = DOTween.Sequence().SetTarget(CachedTransform);
+        moveTween = sequence;
         if (delay > 0f)
         {
             SetBodyRendererVisible(false);
@@ -435,7 +440,12 @@ public class PortableObject : MonoBehaviour
             }).SetEase(Ease.Linear));
         sequence.OnComplete(() =>
         {
-            isMovingToTarget = false;
+            if (moveTween == sequence)
+            {
+                moveTween = null;
+                isMovingToTarget = false;
+            }
+
             CachedTransform.position = targetPositionProvider();
             SetBodyRendererVisible(true);
             if (deactivateOnComplete)
@@ -445,6 +455,25 @@ public class PortableObject : MonoBehaviour
 
             onComplete?.Invoke();
         });
+        sequence.OnKill(() =>
+        {
+            if (moveTween == sequence)
+            {
+                moveTween = null;
+                isMovingToTarget = false;
+                SetBodyRendererVisible(true);
+            }
+        });
+    }
+
+    public void CancelMove()
+    {
+        moveTween?.Kill();
+        moveTween = null;
+        CachedTransform.DOKill();
+        isMovingToTarget = false;
+        SetBodyRendererVisible(true);
+        MoveCancelled?.Invoke(this);
     }
 
     private void SetBodyRendererVisible(bool isVisible)

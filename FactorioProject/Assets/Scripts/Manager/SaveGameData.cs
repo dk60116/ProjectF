@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -18,9 +18,6 @@ public sealed class SaveGameData
 public sealed class TerrainSaveData
 {
     public int seed;
-    public int chunkSize;
-    public int loadRadius;
-    public int unloadRadius;
 }
 
 [Serializable]

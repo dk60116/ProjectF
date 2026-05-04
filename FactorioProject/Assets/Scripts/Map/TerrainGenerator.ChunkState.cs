@@ -21,7 +21,6 @@ public partial class TerrainGenerator
 
         Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
         EnsureResourceStateStore();
-        resourceStateStore?.SimulateSavedConveyorItems(chunkRestoreBackgroundSimulationIterations);
 
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);

@@ -395,8 +395,16 @@ public class Block : BaseObject
         if (wasConveyor || isConveyor)
         {
             InvalidateConveyorRuntimeCachesAround();
-            RefreshConveyorActivityRegistration();
-            RefreshConveyorSlotDotVisuals();
+            TerrainGenerator activeTerrain = TerrainGenerator.Active;
+            if (activeTerrain != null && activeTerrain.IsConveyorRuntimeRefreshDeferred)
+            {
+                activeTerrain.QueueDeferredConveyorRuntimeRefresh(this);
+            }
+            else
+            {
+                RefreshConveyorActivityRegistration();
+                RefreshConveyorSlotDotVisuals();
+            }
         }
     }
 
@@ -2867,7 +2875,7 @@ public class Block : BaseObject
         return false;
     }
 
-    public void RefreshConveyorActivityRegistration(bool queueWake = true)
+    public void RefreshConveyorActivityRegistration(bool queueWake = true, bool refreshDebugVisuals = true)
     {
         TerrainGenerator generator = TerrainGenerator.Active;
         if (generator == null)
@@ -2878,8 +2886,11 @@ public class Block : BaseObject
         generator.SetConveyorDataMotionActive(this, HasActiveVirtualConveyorDataMotion());
         generator.SetConveyorActive(this, HasActiveConveyorMotion(), queueWake);
         generator.SetConveyorItemVisualActive(this, IsConveyorStackingEnabled() && HasAnyConveyorObjects());
-        RefreshSleepAwakeDebugVisuals();
-        RefreshBeltItemLineDebugVisuals();
+        if (refreshDebugVisuals)
+        {
+            RefreshSleepAwakeDebugVisuals();
+            RefreshBeltItemLineDebugVisuals();
+        }
     }
 
     public void RefreshSleepAwakeDebugVisuals(bool forceVirtualRenderRefresh = false)

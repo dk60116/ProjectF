@@ -899,6 +899,7 @@ public partial class BlockStateStore
     {
         if (state == null || state.lanes.Count <= 0)
         {
+            savedConveyorItemStates.Remove(worldCoordinate);
             savedFloorObjectStates.Remove(worldCoordinate);
             ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
             return;
@@ -910,6 +911,7 @@ public partial class BlockStateStore
             Block.ConveyorCellItemUnit);
         if (laneCount <= 0)
         {
+            savedConveyorItemStates.Remove(worldCoordinate);
             savedFloorObjectStates.Remove(worldCoordinate);
             ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
             return;

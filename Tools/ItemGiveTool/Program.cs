@@ -702,14 +702,14 @@ internal sealed class EditorToolForm : Form
     private async Task SendSaveSlotAsync()
     {
         int slotNumber = GetSelectedSaveSlotNumber();
-        await SendCommandAsync($"save {slotNumber}", $"Save Slot {slotNumber}");
+        await SendCommandAsync($"save {slotNumber}", $"Save Slot {slotNumber}", true);
         await RefreshSaveSlotsAsync();
     }
 
     private async Task SendLoadSlotAsync()
     {
         int slotNumber = GetSelectedSaveSlotNumber();
-        await SendCommandAsync($"load {slotNumber}", $"Load Slot {slotNumber}");
+        await SendCommandAsync($"load {slotNumber}", $"Load Slot {slotNumber}", true);
         await RefreshSaveSlotsAsync();
     }
 
@@ -774,7 +774,7 @@ internal sealed class EditorToolForm : Form
                         ? Color.FromArgb(235, 189, 92)
                         : Color.FromArgb(236, 104, 94);
                 UpdateRuntimeStatsFromResponse(response);
-                UpdateSaveSlotsFromResponse(response);
+                UpdateSaveSlotsFromResponse(response, false);
             }
             else
             {
@@ -938,7 +938,7 @@ internal sealed class EditorToolForm : Form
         return Math.Clamp(selectedIndex + 1, 1, SaveSlotCount);
     }
 
-    private void UpdateSaveSlotsFromResponse(string response)
+    private void UpdateSaveSlotsFromResponse(string response, bool applyResponseSelectedSlot = false)
     {
         if (!TryReadProtocolToken(response, "saveSlots", out string saveSlotsToken))
         {
@@ -946,7 +946,8 @@ internal sealed class EditorToolForm : Form
         }
 
         int selectedSlotNumber = GetSelectedSaveSlotNumber();
-        if (TryReadProtocolInt(response, "selectedSlot", out int parsedSelectedSlot))
+        if (applyResponseSelectedSlot
+            && TryReadProtocolInt(response, "selectedSlot", out int parsedSelectedSlot))
         {
             selectedSlotNumber = parsedSelectedSlot;
         }
@@ -990,7 +991,7 @@ internal sealed class EditorToolForm : Form
         }
     }
 
-    private async Task SendCommandAsync(string command, string displayName)
+    private async Task SendCommandAsync(string command, string displayName, bool applyResponseSelectedSlot = false)
     {
         SetBusy(true, $"{displayName} 전송 중...");
         try
@@ -1000,7 +1001,7 @@ internal sealed class EditorToolForm : Form
             string response = await SendProtocolLineAsync(host, port, command);
             AppendLog($"> {command}");
             AppendLog(response);
-            UpdateSaveSlotsFromResponse(response);
+            UpdateSaveSlotsFromResponse(response, applyResponseSelectedSlot);
             statusLabel.Text = response.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
                 ? "성공"
                 : "실패";

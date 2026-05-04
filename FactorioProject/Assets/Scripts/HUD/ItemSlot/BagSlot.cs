@@ -10,6 +10,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 {
     private static BagSlot expandedSlot;
     private static BagSlot hoveredDropSlot;
+    private static readonly Dictionary<PortableObject, PortableMoveVisualState> activePortableMoveVisualStates = new Dictionary<PortableObject, PortableMoveVisualState>();
     private const float DragCancelDistance = 8f;
     private const float CraftingRootHideDelay = 0.12f;
 
@@ -76,6 +77,44 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     public static BagSlot ExpandedSlot => expandedSlot;
 
+    private readonly struct PortableMoveVisualState
+    {
+        private readonly Transform parent;
+        private readonly int siblingIndex;
+        private readonly Vector3 localPosition;
+        private readonly Quaternion localRotation;
+        private readonly Vector3 localScale;
+
+        public PortableMoveVisualState(Transform parent, int siblingIndex, Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
+        {
+            this.parent = parent;
+            this.siblingIndex = siblingIndex;
+            this.localPosition = localPosition;
+            this.localRotation = localRotation;
+            this.localScale = localScale;
+        }
+
+        public void Restore(PortableObject portableObject)
+        {
+            if (portableObject == null)
+            {
+                return;
+            }
+
+            Transform targetTransform = portableObject.transform;
+            targetTransform.SetParent(parent, false);
+            if (parent != null)
+            {
+                int clampedSiblingIndex = Mathf.Clamp(siblingIndex, 0, Mathf.Max(0, parent.childCount - 1));
+                targetTransform.SetSiblingIndex(clampedSiblingIndex);
+            }
+
+            targetTransform.localPosition = localPosition;
+            targetTransform.localRotation = localRotation;
+            targetTransform.localScale = localScale;
+        }
+    }
+
     public static void CloseAnyExpanded(bool immediate = false)
     {
         if (expandedSlot == null)
@@ -114,6 +153,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void OnDestroy()
     {
+        EndDragVisual();
+        DestroyDragGhost();
         UnbindPickupClick();
     }
 
@@ -493,7 +534,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void UpdateDragGhost(PointerEventData eventData)
     {
-        if (dragGhostTransform == null)
+        if (dragGhostTransform == null || eventData == null)
         {
             return;
         }
@@ -510,6 +551,23 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (dragGhostTransform != null)
         {
             dragGhostTransform.gameObject.SetActive(false);
+        }
+    }
+
+    private void DestroyDragGhost()
+    {
+        if (dragGhostTransform == null)
+        {
+            dragGhostImage = null;
+            return;
+        }
+
+        GameObject ghostObject = dragGhostTransform.gameObject;
+        dragGhostTransform = null;
+        dragGhostImage = null;
+        if (ghostObject != null)
+        {
+            Destroy(ghostObject);
         }
     }
 
@@ -1345,56 +1403,30 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
+        CancelPortableMoveVisuals(sourceObjects);
+        CancelPortableMoveVisuals(targetObjects);
+
         List<Vector3> sourcePositions = new List<Vector3>(itemCount);
-        for (int i = 0; i < itemCount; i++)
+        if (!TryCollectPortableObjectPositions(sourceObjects, sourcePositions))
         {
-            PortableObject sourceObject = sourceObjects[i];
-            if (sourceObject == null)
-            {
-                return false;
-            }
-
-            sourcePositions.Add(sourceObject.transform.position);
+            return false;
         }
 
-        for (int i = 0; i < itemCount; i++)
+        List<Vector3> targetAnchorPositions = new List<Vector3>(itemCount);
+        if (!TryCollectPortableObjectPositions(targetObjects, targetAnchorPositions))
         {
-            PortableObject targetObject = targetObjects[i];
-            if (targetObject == null)
-            {
-                return false;
-            }
-
-            targetObject.gameObject.SetActive(false);
-            targetObject.SetItem(itemId);
+            return false;
         }
 
-        for (int i = 0; i < itemCount; i++)
+        if (!sourceBag.SetSlotContents(sourceIndex, itemId, sourceCount - itemCount, false, false)
+            || !targetBag.SetSlotContents(targetIndex, itemId, targetCount + itemCount, false, false))
         {
-            PortableObject sourceObject = sourceObjects[i];
-            if (sourceObject != null)
-            {
-                sourceObject.gameObject.SetActive(false);
-            }
+            return false;
         }
-
-        sourceBag.SetSlotCount(sourceIndex, sourceCount - itemCount, false, false);
-        targetBag.SetSlotCount(targetIndex, targetCount + itemCount, false, false);
 
         int moveIndex = 0;
         float moveInterval = Mathf.Max(0f, transferMoveInterval);
-        for (int i = 0; i < itemCount; i++)
-        {
-            PortableObject targetObject = targetObjects[i];
-            if (targetObject == null)
-            {
-                continue;
-            }
-
-            Vector3 anchorPosition = targetObject.transform.position;
-            AnimatePortableMove(targetObject, sourcePositions[i], anchorPosition, moveIndex * moveInterval);
-            moveIndex++;
-        }
+        AnimatePortableMoves(targetObjects, sourcePositions, targetAnchorPositions, ref moveIndex, moveInterval);
 
         sourceBag.ForceNotifyChanged();
         targetBag.ForceNotifyChanged();
@@ -1446,108 +1478,102 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        List<Vector3> sourcePositions = new List<Vector3>(sourceCount);
-        for (int i = 0; i < sourceCount; i++)
-        {
-            PortableObject sourceObject = sourceObjects[i];
-            if (sourceObject == null)
-            {
-                return false;
-            }
+        CancelPortableMoveVisuals(sourceObjects);
+        CancelPortableMoveVisuals(targetObjects);
+        CancelPortableMoveVisuals(destinationForSource);
+        CancelPortableMoveVisuals(destinationForTarget);
 
-            sourcePositions.Add(sourceObject.transform.position);
+        List<Vector3> sourcePositions = new List<Vector3>(sourceCount);
+        if (!TryCollectPortableObjectPositions(sourceObjects, sourcePositions))
+        {
+            return false;
         }
 
         List<Vector3> targetPositions = new List<Vector3>(targetCount);
-        for (int i = 0; i < targetCount; i++)
+        if (!TryCollectPortableObjectPositions(targetObjects, targetPositions))
         {
-            PortableObject targetObject = targetObjects[i];
-            if (targetObject == null)
-            {
-                return false;
-            }
-
-            targetPositions.Add(targetObject.transform.position);
+            return false;
         }
 
-        for (int i = 0; i < sourceObjects.Count; i++)
+        List<Vector3> sourceAnchorPositions = new List<Vector3>(destinationForSource.Count);
+        if (!TryCollectPortableObjectPositions(destinationForSource, sourceAnchorPositions))
         {
-            PortableObject sourceObject = sourceObjects[i];
-            if (sourceObject != null)
-            {
-                sourceObject.gameObject.SetActive(false);
-            }
+            return false;
         }
 
-        for (int i = 0; i < targetObjects.Count; i++)
+        List<Vector3> targetAnchorPositions = new List<Vector3>(destinationForTarget.Count);
+        if (!TryCollectPortableObjectPositions(destinationForTarget, targetAnchorPositions))
         {
-            PortableObject targetObject = targetObjects[i];
-            if (targetObject != null)
-            {
-                targetObject.gameObject.SetActive(false);
-            }
+            return false;
         }
 
-        for (int i = 0; i < destinationForSource.Count; i++)
+        if (!sourceBag.SetSlotContents(sourceIndex, targetItemId, targetCount, false, false)
+            || !targetBag.SetSlotContents(targetIndex, sourceItemId, sourceCount, false, false))
         {
-            PortableObject destObject = destinationForSource[i];
-            if (destObject == null)
-            {
-                return false;
-            }
-
-            destObject.gameObject.SetActive(false);
-            destObject.SetItem(targetItemId);
+            return false;
         }
-
-        for (int i = 0; i < destinationForTarget.Count; i++)
-        {
-            PortableObject destObject = destinationForTarget[i];
-            if (destObject == null)
-            {
-                return false;
-            }
-
-            destObject.gameObject.SetActive(false);
-            destObject.SetItem(sourceItemId);
-        }
-
-        sourceBag.SetSlotCount(sourceIndex, targetCount, false, false);
-        targetBag.SetSlotCount(targetIndex, sourceCount, false, false);
 
         int moveIndex = 0;
         float moveInterval = Mathf.Max(0f, transferMoveInterval);
-        for (int i = 0; i < destinationForSource.Count; i++)
-        {
-            PortableObject destObject = destinationForSource[i];
-            if (destObject == null)
-            {
-                continue;
-            }
-
-            Vector3 anchorPosition = destObject.transform.position;
-            Vector3 startPosition = targetPositions[Mathf.Min(i, targetPositions.Count - 1)];
-            AnimatePortableMove(destObject, startPosition, anchorPosition, moveIndex * moveInterval);
-            moveIndex++;
-        }
-
-        for (int i = 0; i < destinationForTarget.Count; i++)
-        {
-            PortableObject destObject = destinationForTarget[i];
-            if (destObject == null)
-            {
-                continue;
-            }
-
-            Vector3 anchorPosition = destObject.transform.position;
-            Vector3 startPosition = sourcePositions[Mathf.Min(i, sourcePositions.Count - 1)];
-            AnimatePortableMove(destObject, startPosition, anchorPosition, moveIndex * moveInterval);
-            moveIndex++;
-        }
+        AnimatePortableMoves(destinationForSource, targetPositions, sourceAnchorPositions, ref moveIndex, moveInterval);
+        AnimatePortableMoves(destinationForTarget, sourcePositions, targetAnchorPositions, ref moveIndex, moveInterval);
 
         sourceBag.ForceNotifyChanged();
         targetBag.ForceNotifyChanged();
         return true;
+    }
+
+    private static bool TryCollectPortableObjectPositions(List<PortableObject> portableObjects, List<Vector3> positions)
+    {
+        if (portableObjects == null || positions == null)
+        {
+            return false;
+        }
+
+        positions.Clear();
+        for (int i = 0; i < portableObjects.Count; i++)
+        {
+            PortableObject portableObject = portableObjects[i];
+            if (portableObject == null)
+            {
+                return false;
+            }
+
+            positions.Add(portableObject.transform.position);
+        }
+
+        return true;
+    }
+
+    private void AnimatePortableMoves(
+        List<PortableObject> portableObjects,
+        List<Vector3> startPositions,
+        List<Vector3> anchorPositions,
+        ref int moveIndex,
+        float moveInterval)
+    {
+        if (portableObjects == null
+            || startPositions == null
+            || anchorPositions == null
+            || startPositions.Count == 0
+            || anchorPositions.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < portableObjects.Count; i++)
+        {
+            PortableObject portableObject = portableObjects[i];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            Vector3 startPosition = startPositions[Mathf.Min(i, startPositions.Count - 1)];
+            Vector3 anchorPosition = anchorPositions[Mathf.Min(i, anchorPositions.Count - 1)];
+            AnimatePortableMove(portableObject, startPosition, anchorPosition, moveIndex * moveInterval);
+            moveIndex++;
+        }
     }
 
     private void NotifyCraftingVisibilityChanged(bool isVisible)
@@ -1567,10 +1593,20 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        CancelPortableMoveVisual(portableObject);
         Transform originalParent = portableObject.transform.parent;
+        int originalSiblingIndex = portableObject.transform.GetSiblingIndex();
         Vector3 originalLocalPosition = portableObject.transform.localPosition;
         Quaternion originalLocalRotation = portableObject.transform.localRotation;
         Vector3 originalLocalScale = portableObject.transform.localScale;
+        activePortableMoveVisualStates[portableObject] = new PortableMoveVisualState(
+            originalParent,
+            originalSiblingIndex,
+            originalLocalPosition,
+            originalLocalRotation,
+            originalLocalScale);
+        portableObject.MoveCancelled -= RestorePortableMoveVisual;
+        portableObject.MoveCancelled += RestorePortableMoveVisual;
 
         portableObject.transform.SetParent(null, true);
         portableObject.transform.position = startPosition;
@@ -1586,11 +1622,49 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 return;
             }
 
-            portableObject.transform.SetParent(originalParent, false);
-            portableObject.transform.localPosition = originalLocalPosition;
-            portableObject.transform.localRotation = originalLocalRotation;
-            portableObject.transform.localScale = originalLocalScale;
+            RestorePortableMoveVisual(portableObject);
         }, false);
+    }
+
+    private static void CancelPortableMoveVisual(PortableObject portableObject)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        portableObject.CancelMove();
+        RestorePortableMoveVisual(portableObject);
+    }
+
+    private static void CancelPortableMoveVisuals(List<PortableObject> portableObjects)
+    {
+        if (portableObjects == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < portableObjects.Count; i++)
+        {
+            CancelPortableMoveVisual(portableObjects[i]);
+        }
+    }
+
+    private static void RestorePortableMoveVisual(PortableObject portableObject)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        portableObject.MoveCancelled -= RestorePortableMoveVisual;
+        if (!activePortableMoveVisualStates.TryGetValue(portableObject, out PortableMoveVisualState state))
+        {
+            return;
+        }
+
+        activePortableMoveVisualStates.Remove(portableObject);
+        state.Restore(portableObject);
     }
 
     private void BindButtonClick()

@@ -55,6 +55,91 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private bool IsLoadedRuntimeBlock(Block block)
+    {
+        return block != null
+            && block.gameObject.activeInHierarchy
+            && loadedBlocks.TryGetValue(block.Coordinate, out Block loadedBlock)
+            && loadedBlock == block;
+    }
+
+    public bool IsConveyorRuntimeRefreshDeferred => deferredConveyorRuntimeRefreshDepth > 0;
+
+    private void BeginConveyorRuntimeRefreshBatch()
+    {
+        deferredConveyorRuntimeRefreshDepth++;
+    }
+
+    private void EndConveyorRuntimeRefreshBatch()
+    {
+        if (deferredConveyorRuntimeRefreshDepth <= 0)
+        {
+            deferredConveyorRuntimeRefreshDepth = 0;
+            return;
+        }
+
+        deferredConveyorRuntimeRefreshDepth--;
+        if (deferredConveyorRuntimeRefreshDepth > 0)
+        {
+            return;
+        }
+
+        FlushDeferredConveyorRuntimeRefreshes();
+    }
+
+    public void QueueDeferredConveyorRuntimeRefresh(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        deferredConveyorRuntimeRefreshBlocks.Add(block);
+    }
+
+    private void FlushDeferredConveyorRuntimeRefreshes()
+    {
+        if (deferredConveyorRuntimeRefreshBlocks.Count == 0)
+        {
+            return;
+        }
+
+        conveyorTickBuffer.Clear();
+        foreach (Block block in deferredConveyorRuntimeRefreshBlocks)
+        {
+            if (IsLoadedRuntimeBlock(block))
+            {
+                conveyorTickBuffer.Add(block);
+            }
+        }
+
+        deferredConveyorRuntimeRefreshBlocks.Clear();
+
+        for (int i = 0; i < conveyorTickBuffer.Count; i++)
+        {
+            Block block = conveyorTickBuffer[i];
+            if (block == null || !IsLoadedRuntimeBlock(block))
+            {
+                continue;
+            }
+
+            block.RefreshConveyorActivityRegistration(false, false);
+            block.RefreshConveyorSlotDotVisuals();
+        }
+
+        conveyorTickBuffer.Clear();
+
+        if (GameManager.Instance != null && GameManager.Instance.ShowSleepAwake)
+        {
+            RefreshSleepAwakeRuntimeVisibility();
+        }
+
+        if (GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine)
+        {
+            RefreshBeltItemLineRuntimeVisibility();
+        }
+    }
+
     public void QueueConveyorWake(Block block)
     {
         if (!Application.isPlaying || block == null)
@@ -656,7 +741,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorDataMotionTickBuffer.Clear();
         foreach (Block block in activeConveyorDataMotionBlocks)
         {
-            if (block != null)
+            if (IsLoadedRuntimeBlock(block))
             {
                 conveyorDataMotionTickBuffer.Add(block);
             }
@@ -664,14 +749,15 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (conveyorDataMotionTickBuffer.Count != activeConveyorDataMotionBlocks.Count)
         {
-            activeConveyorDataMotionBlocks.Remove(null);
+            activeConveyorDataMotionBlocks.RemoveWhere(block => !IsLoadedRuntimeBlock(block));
         }
 
         for (int i = 0; i < conveyorDataMotionTickBuffer.Count; i++)
         {
             Block block = conveyorDataMotionTickBuffer[i];
-            if (block == null)
+            if (block == null || !IsLoadedRuntimeBlock(block))
             {
+                activeConveyors.Remove(block);
                 continue;
             }
 
@@ -703,6 +789,11 @@ public partial class TerrainGenerator : MonoBehaviour
             || (activeConveyors.Count == 0
                 && conveyorWakeQueue.Count == 0
                 && conveyorNetworkSleepCheckQueuedIds.Count == 0))
+        {
+            return;
+        }
+
+        if (IsConveyorRuntimeRefreshDeferred)
         {
             return;
         }
@@ -771,7 +862,7 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < sortedActiveConveyors.Count; i++)
         {
             Block block = sortedActiveConveyors[i];
-            if (block != null && block.ShouldTickActiveConveyor())
+            if (IsLoadedRuntimeBlock(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);
             }

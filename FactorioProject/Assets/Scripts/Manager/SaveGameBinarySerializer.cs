@@ -82,7 +82,7 @@ public static class SaveGameBinarySerializer
         {
             version = reader.ReadInt32(),
             savedAtUtcTicks = reader.ReadInt64(),
-            terrain = ReadTerrain(reader),
+            terrain = ReadTerrain(reader, fileVersion),
             map = ReadMap(reader, fileVersion),
             player = ReadPlayer(reader)
         };
@@ -94,20 +94,23 @@ public static class SaveGameBinarySerializer
     {
         terrain ??= new TerrainSaveData();
         writer.Write(terrain.seed);
-        writer.Write(terrain.chunkSize);
-        writer.Write(terrain.loadRadius);
-        writer.Write(terrain.unloadRadius);
     }
 
-    private static TerrainSaveData ReadTerrain(BinaryReader reader)
+    private static TerrainSaveData ReadTerrain(BinaryReader reader, int version)
     {
-        return new TerrainSaveData
+        TerrainSaveData terrain = new TerrainSaveData
         {
-            seed = reader.ReadInt32(),
-            chunkSize = reader.ReadInt32(),
-            loadRadius = reader.ReadInt32(),
-            unloadRadius = reader.ReadInt32()
+            seed = reader.ReadInt32()
         };
+
+        if (version <= 1)
+        {
+            reader.ReadInt32();
+            reader.ReadInt32();
+            reader.ReadInt32();
+        }
+
+        return terrain;
     }
 
     private static void WriteMap(BinaryWriter writer, MapSaveData map)

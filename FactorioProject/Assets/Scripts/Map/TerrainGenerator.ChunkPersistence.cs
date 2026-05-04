@@ -635,15 +635,23 @@ public partial class TerrainGenerator : MonoBehaviour
 
         int restoresSinceYield = 0;
         int restoreBudget = Mathf.Max(1, chunkInstallationRestoresPerFrame);
-        foreach (Vector2Int anchorCoordinate in installationAnchors)
+        BeginConveyorRuntimeRefreshBatch();
+        try
         {
-            RestoreOrBindSavedInstallation(anchorCoordinate);
-            restoresSinceYield++;
-            if (allowYield && restoresSinceYield >= restoreBudget)
+            foreach (Vector2Int anchorCoordinate in installationAnchors)
             {
-                restoresSinceYield = 0;
-                yield return null;
+                RestoreOrBindSavedInstallation(anchorCoordinate);
+                restoresSinceYield++;
+                if (allowYield && restoresSinceYield >= restoreBudget)
+                {
+                    restoresSinceYield = 0;
+                    yield return null;
+                }
             }
+        }
+        finally
+        {
+            EndConveyorRuntimeRefreshBatch();
         }
     }
 
@@ -761,7 +769,17 @@ public partial class TerrainGenerator : MonoBehaviour
             ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, definition, savedState.quarterTurns, 0f)
             : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
 
-        InstallationObject restoredInstallation = CreateInstallationObject(sourcePrefab, transform);
+        bool reusedSleepingView = TryTakeSleepingInstallationView(savedState, out InstallationObject restoredInstallation);
+        if (reusedSleepingView)
+        {
+            restoredInstallation.transform.SetParent(transform, true);
+            restoredInstallation.gameObject.SetActive(false);
+        }
+        else
+        {
+            restoredInstallation = CreateInstallationObject(sourcePrefab, transform);
+        }
+
         if (restoredInstallation == null)
         {
             return false;
@@ -813,6 +831,7 @@ public partial class TerrainGenerator : MonoBehaviour
             restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
         }
 
+        restoredInstallation.gameObject.SetActive(true);
         BindLoadedBlocksToInstallation(restoredInstallation, occupiedCoordinates);
         installationObject = restoredInstallation;
         return true;
@@ -946,6 +965,311 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return chunkBlocks.ToArray();
+    }
+
+    private bool TryTakeSleepingChunkView(Vector2Int chunkCoordinate, int normalizedChunkSize, out Transform chunkTransform)
+    {
+        chunkTransform = null;
+        if (!Application.isPlaying
+            || !sleepingChunkViews.TryGetValue(chunkCoordinate, out Transform cachedChunk)
+            || cachedChunk == null)
+        {
+            sleepingChunkViews.Remove(chunkCoordinate);
+            return false;
+        }
+
+        int expectedCount = Mathf.Max(4, normalizedChunkSize) * Mathf.Max(4, normalizedChunkSize);
+        if (GetDirectChunkBlocks(cachedChunk).Length < expectedCount)
+        {
+            sleepingChunkViews.Remove(chunkCoordinate);
+            DestroyChunkObject(cachedChunk.gameObject);
+            return false;
+        }
+
+        sleepingChunkViews.Remove(chunkCoordinate);
+        chunkTransform = cachedChunk;
+        return true;
+    }
+
+    private IEnumerator WakeSleepingChunkViewRoutine(
+        Vector2Int chunkCoordinate,
+        Transform chunkTransform,
+        Vector2Int origin,
+        bool allowYield)
+    {
+        using (WakeChunkViewMarker.Auto())
+        {
+            if (chunkTransform == null)
+            {
+                yield break;
+            }
+
+            chunkTransform.gameObject.SetActive(false);
+            chunkTransform.SetParent(transform, false);
+            chunkTransform.position = new Vector3(origin.x, 0f, origin.y);
+            chunkTransform.gameObject.name = $"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})";
+            loadedChunks[chunkCoordinate] = chunkTransform;
+        }
+
+        Block[] chunkBlocks = GetDirectChunkBlocks(chunkTransform);
+        int blocksSinceYield = 0;
+        int blockBudget = GetChunkUnloadBlockStepBudget();
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            using (WakeChunkViewMarker.Auto())
+            {
+                Block block = chunkBlocks[i];
+                if (block != null)
+                {
+                    loadedBlocks[block.Coordinate] = block;
+                }
+            }
+
+            if (allowYield && ++blocksSinceYield >= blockBudget)
+            {
+                blocksSinceYield = 0;
+                yield return null;
+            }
+        }
+
+        if (allowYield)
+        {
+            yield return null;
+        }
+
+        IEnumerator installationRestoreRoutine = RestoreChunkInstallationsRoutine(chunkTransform, allowYield);
+        while (installationRestoreRoutine.MoveNext())
+        {
+            yield return installationRestoreRoutine.Current;
+        }
+
+        IEnumerator blockStateRestoreRoutine = RestoreChunkBlockStatesRoutine(chunkTransform, allowYield);
+        while (blockStateRestoreRoutine.MoveNext())
+        {
+            yield return blockStateRestoreRoutine.Current;
+        }
+
+        using (WakeChunkViewMarker.Auto())
+        {
+            chunkTransform.gameObject.SetActive(true);
+            RefreshChunkBlockRuntimeViews(chunkBlocks);
+        }
+    }
+
+    private IEnumerator SleepChunkBlocksForStreamingRoutine(Block[] chunkBlocks, bool allowYield)
+    {
+        using (UnloadChunkSleepBlocksMarker.Auto())
+        {
+            if (!Application.isPlaying || chunkBlocks == null || chunkBlocks.Length <= 0)
+            {
+                yield break;
+            }
+        }
+
+        int blocksSinceYield = 0;
+        int blockBudget = GetChunkUnloadBlockStepBudget();
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            using (UnloadChunkSleepBlocksMarker.Auto())
+            {
+                DetachChunkBlockRuntimeView(chunkBlocks[i]);
+            }
+
+            if (allowYield && ++blocksSinceYield >= blockBudget)
+            {
+                blocksSinceYield = 0;
+                yield return null;
+            }
+        }
+    }
+
+    private void DetachChunkBlockRuntimeView(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        SetConveyorActive(block, false, false);
+        SetConveyorDataMotionActive(block, false);
+        SetConveyorDotVisualActive(block, false);
+        SetConveyorItemVisualActive(block, false);
+        conveyorWakeQueued.Remove(block);
+    }
+
+    private void RefreshChunkBlockRuntimeViews(Block[] chunkBlocks)
+    {
+        if (chunkBlocks == null)
+        {
+            return;
+        }
+
+        bool hasConveyorBlock = false;
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            Block block = chunkBlocks[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            hasConveyorBlock |= block.IsRuntimeConveyor;
+        }
+
+        if (hasConveyorBlock)
+        {
+            MarkConveyorNetworkDirty();
+        }
+
+        for (int i = 0; i < chunkBlocks.Length; i++)
+        {
+            Block block = chunkBlocks[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            block.RefreshConveyorActivityRegistration(false);
+            block.RefreshConveyorSlotDotVisuals();
+        }
+    }
+
+    private void SleepChunkView(Vector2Int chunkCoordinate, Transform chunkTransform)
+    {
+        if (!Application.isPlaying || chunkTransform == null)
+        {
+            return;
+        }
+
+        Transform cacheRoot = EnsureSleepingChunkViewRoot();
+        chunkTransform.SetParent(cacheRoot, true);
+        chunkTransform.gameObject.SetActive(false);
+        sleepingChunkViews[chunkCoordinate] = chunkTransform;
+    }
+
+    private void SleepInstallationView(Vector2Int anchorCoordinate, InstallationObject installationObject)
+    {
+        using (UnloadChunkSleepInstallationsMarker.Auto())
+        {
+            if (!Application.isPlaying || installationObject == null)
+            {
+                return;
+            }
+
+            if (sleepingInstallationViews.TryGetValue(anchorCoordinate, out InstallationObject existingView)
+                && existingView != null
+                && existingView != installationObject)
+            {
+                ReleaseInstallationObject(existingView);
+            }
+
+            UnregisterVirtualConveyorBelt(installationObject as ConveyorBelt, false);
+            Transform cacheRoot = EnsureSleepingInstallationViewRoot();
+            installationObject.transform.SetParent(cacheRoot, true);
+            installationObject.gameObject.SetActive(false);
+            sleepingInstallationViews[anchorCoordinate] = installationObject;
+        }
+    }
+
+    private bool TryTakeSleepingInstallationView(
+        BlockStateStore.InstallationSaveState savedState,
+        out InstallationObject installationObject)
+    {
+        installationObject = null;
+        if (!Application.isPlaying
+            || savedState == null
+            || !sleepingInstallationViews.TryGetValue(savedState.anchorCoordinate, out InstallationObject cachedInstallation)
+            || cachedInstallation == null)
+        {
+            if (savedState != null)
+            {
+                sleepingInstallationViews.Remove(savedState.anchorCoordinate);
+            }
+
+            return false;
+        }
+
+        if (cachedInstallation.ResolveItemId() != savedState.itemId)
+        {
+            sleepingInstallationViews.Remove(savedState.anchorCoordinate);
+            ReleaseInstallationObject(cachedInstallation, ResolveInstallationSourcePrefab(savedState));
+            return false;
+        }
+
+        sleepingInstallationViews.Remove(savedState.anchorCoordinate);
+        installationObject = cachedInstallation;
+        return true;
+    }
+
+    private Transform EnsureSleepingChunkViewRoot()
+    {
+        if (sleepingChunkViewRoot != null)
+        {
+            return sleepingChunkViewRoot;
+        }
+
+        GameObject rootObject = new GameObject("__SleepingChunkViews");
+        if (Application.isPlaying)
+        {
+            rootObject.hideFlags = HideFlags.HideInHierarchy;
+        }
+
+        sleepingChunkViewRoot = rootObject.transform;
+        sleepingChunkViewRoot.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        return sleepingChunkViewRoot;
+    }
+
+    private Transform EnsureSleepingInstallationViewRoot()
+    {
+        if (sleepingInstallationViewRoot != null)
+        {
+            return sleepingInstallationViewRoot;
+        }
+
+        GameObject rootObject = new GameObject("__SleepingInstallationViews");
+        if (Application.isPlaying)
+        {
+            rootObject.hideFlags = HideFlags.HideInHierarchy;
+        }
+
+        sleepingInstallationViewRoot = rootObject.transform;
+        sleepingInstallationViewRoot.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        return sleepingInstallationViewRoot;
+    }
+
+    private void DestroySleepingViewCaches()
+    {
+        foreach (KeyValuePair<Vector2Int, Transform> pair in sleepingChunkViews)
+        {
+            if (pair.Value != null)
+            {
+                DestroyChunkObject(pair.Value.gameObject);
+            }
+        }
+
+        sleepingChunkViews.Clear();
+
+        foreach (KeyValuePair<Vector2Int, InstallationObject> pair in sleepingInstallationViews)
+        {
+            if (pair.Value != null)
+            {
+                ReleaseInstallationObject(pair.Value);
+            }
+        }
+
+        sleepingInstallationViews.Clear();
+
+        if (sleepingChunkViewRoot != null)
+        {
+            DestroyChunkObject(sleepingChunkViewRoot.gameObject);
+            sleepingChunkViewRoot = null;
+        }
+
+        if (sleepingInstallationViewRoot != null)
+        {
+            DestroyChunkObject(sleepingInstallationViewRoot.gameObject);
+            sleepingInstallationViewRoot = null;
+        }
     }
 
     private int GetChunkUnloadBlockStepBudget()
@@ -1095,10 +1419,20 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                resourceStateStore.UnregisterLiveInstallation(anchorCoordinate);
-                if (installationObject != null)
+                if (Application.isPlaying)
                 {
-                    ReleaseInstallationObject(installationObject, ResolveInstallationSourcePrefab(state));
+                    if (resourceStateStore.TryDetachLiveInstallation(anchorCoordinate, out InstallationObject detachedInstallation, out _))
+                    {
+                        SleepInstallationView(anchorCoordinate, detachedInstallation);
+                    }
+                }
+                else
+                {
+                    resourceStateStore.UnregisterLiveInstallation(anchorCoordinate);
+                    if (installationObject != null)
+                    {
+                        ReleaseInstallationObject(installationObject, ResolveInstallationSourcePrefab(state));
+                    }
                 }
             }
 
