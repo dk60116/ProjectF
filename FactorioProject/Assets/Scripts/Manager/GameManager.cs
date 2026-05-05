@@ -233,8 +233,15 @@ public class GameManager : MonoBehaviour
 
         beltItemLineRuntimeStateInitialized = true;
         lastRuntimeShowBeltItemLine = showBeltItemLine;
-        PortableObject.RefreshAllBeltItemLineDebugVisuals();
-        TerrainGenerator.Active?.RefreshBeltItemLineRuntimeVisibility();
+        TerrainGenerator activeTerrain = TerrainGenerator.Active;
+        if (activeTerrain != null)
+        {
+            activeTerrain.RefreshBeltItemLineRuntimeVisibility();
+        }
+        else
+        {
+            PortableObject.RefreshAllBeltItemLineDebugVisuals();
+        }
     }
 
     private void ConfigureRuntimeItemGiveReceiver()

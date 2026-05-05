@@ -549,7 +549,14 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Block> conveyorDataMotionTickBuffer = new List<Block>();
     private readonly List<Block> sortedActiveConveyors = new List<Block>();
     private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
+    private readonly List<Block> activeConveyorDotVisualList = new List<Block>();
     private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
+    private readonly List<Block> pendingConveyorSlotDotRefreshBlocks = new List<Block>();
+    private readonly Matrix4x4[] conveyorSlotDotInstanceMatrices = new Matrix4x4[MaxConveyorSlotDotInstancesPerBatch];
+    private int conveyorSlotDotInstanceMatrixCount;
+    private Mesh conveyorSlotDotInstancedMesh;
+    private Material conveyorSlotDotInstancedMaterial;
+    private int pendingConveyorSlotDotRefreshIndex;
     private bool conveyorSlotDotVisibilityInitialized;
     private bool lastShowConveyorSlotDots;
     private bool beltItemLineVisibilityInitialized;
@@ -557,13 +564,17 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool beltItemLineVisualsDirty;
     private bool beltItemLineDebugCacheDirty = true;
     private bool applyingBeltItemLineRuntimeVisibility;
+    private bool pendingBeltItemLineDebugRefreshAll;
     private readonly Dictionary<BeltItemLineLaneKey, int> beltItemLineDebugRunIds = new Dictionary<BeltItemLineLaneKey, int>();
     private readonly List<BeltItemLineLaneKey> beltItemLineDebugOccupiedLanes = new List<BeltItemLineLaneKey>(512);
     private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugOccupiedLaneSet = new HashSet<BeltItemLineLaneKey>();
     private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugIncomingLanes = new HashSet<BeltItemLineLaneKey>();
     private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugVisitedLanes = new HashSet<BeltItemLineLaneKey>();
+    private readonly List<Block> pendingBeltItemLineDebugRefreshBlocks = new List<Block>(512);
+    private readonly HashSet<Block> pendingBeltItemLineDebugRefreshSet = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
+    private int pendingBeltItemLineDebugRefreshIndex;
     private int conveyorItemVisualBlockSetVersion;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
@@ -704,7 +715,9 @@ public partial class TerrainGenerator : MonoBehaviour
         using (TickConveyorDotsMarker.Auto())
         {
             SyncConveyorSlotDotRuntimeVisibility();
+            TickPendingConveyorSlotDotRefreshes();
             SyncBeltItemLineRuntimeVisibility();
+            TickPendingBeltItemLineDebugRefreshes();
             TickActiveConveyorDotVisuals(Time.deltaTime);
         }
 
@@ -800,14 +813,14 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
-        activeConveyorDotVisuals.Clear();
-        conveyorDotVisualTickBuffer.Clear();
+        ClearConveyorDotVisualState();
         conveyorSlotDotVisibilityInitialized = false;
         lastShowConveyorSlotDots = false;
         beltItemLineVisibilityInitialized = false;
         lastShowBeltItemLine = false;
         beltItemLineVisualsDirty = false;
         ClearBeltItemLineDebugCache();
+        ClearPendingBeltItemLineDebugRefreshes();
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
         conveyorItemVisualBlockSetVersion++;
@@ -1539,14 +1552,14 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
-        activeConveyorDotVisuals.Clear();
-        conveyorDotVisualTickBuffer.Clear();
+        ClearConveyorDotVisualState();
         conveyorSlotDotVisibilityInitialized = false;
         lastShowConveyorSlotDots = false;
         beltItemLineVisibilityInitialized = false;
         lastShowBeltItemLine = false;
         beltItemLineVisualsDirty = false;
         ClearBeltItemLineDebugCache();
+        ClearPendingBeltItemLineDebugRefreshes();
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
         conveyorItemVisualBlockSetVersion++;

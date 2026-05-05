@@ -83,6 +83,9 @@ public class Block : BaseObject
     private readonly List<Transform> conveyorSlotDots = new List<Transform>();
     private readonly List<MeshRenderer> conveyorSlotDotRenderers = new List<MeshRenderer>();
     private readonly List<ConveyorSlotDotSegment> conveyorSlotDotSegments = new List<ConveyorSlotDotSegment>(ConveyorSlotDotPathMaxSegments);
+    private readonly List<ConveyorSlotDotPathCache> conveyorSlotDotPathCaches = new List<ConveyorSlotDotPathCache>();
+    private readonly List<ConveyorLaneKey> conveyorSlotDotOrderedLaneKeys = new List<ConveyorLaneKey>(ConveyorSlotDotPathMaxSegments + 1);
+    private readonly HashSet<ConveyorLaneKey> conveyorSlotDotVisitedLaneKeys = new HashSet<ConveyorLaneKey>();
     private readonly HashSet<ConveyorLaneKey> conveyorMoveVisiting = new HashSet<ConveyorLaneKey>();
     private readonly List<ConveyorLaneMove> conveyorPlannedMoves = new List<ConveyorLaneMove>();
     private readonly HashSet<ConveyorLaneKey> conveyorCanMoveVisiting = new HashSet<ConveyorLaneKey>();
@@ -340,6 +343,43 @@ public class Block : BaseObject
         public readonly float length;
     }
 
+    private sealed class ConveyorSlotDotPathCache
+    {
+        public readonly List<ConveyorSlotDotSegment> Segments = new List<ConveyorSlotDotSegment>(ConveyorSlotDotPathMaxSegments);
+        public bool IsValid;
+        public bool HasPath;
+        public float TotalLength;
+        public float PhaseOffset;
+
+        public void Store(List<ConveyorSlotDotSegment> sourceSegments, float totalLength, float phaseOffset)
+        {
+            Segments.Clear();
+            if (sourceSegments != null)
+            {
+                Segments.AddRange(sourceSegments);
+            }
+
+            IsValid = true;
+            HasPath = Segments.Count > 0 && totalLength > 0.0001f;
+            TotalLength = totalLength;
+            PhaseOffset = phaseOffset;
+        }
+
+        public void StoreMissing()
+        {
+            Segments.Clear();
+            IsValid = true;
+            HasPath = false;
+            TotalLength = 0f;
+            PhaseOffset = 0f;
+        }
+
+        public void Invalidate()
+        {
+            IsValid = false;
+        }
+    }
+
     private void Awake()
     {
         CacheChildReferences();
@@ -354,6 +394,8 @@ public class Block : BaseObject
         {
             return;
         }
+
+        TerrainGenerator.Active?.SetConveyorDotVisualActive(this, false);
 
         if (floorObjectPool == null)
         {
@@ -441,6 +483,7 @@ public class Block : BaseObject
         cachedHasNextConveyorBlock = false;
         conveyorConnectionCacheDirty = true;
         InvalidateConveyorSuccessorCache();
+        InvalidateConveyorSlotDotPathCache();
     }
 
     private void InvalidateConveyorLaneLayoutCache()
@@ -452,12 +495,21 @@ public class Block : BaseObject
         cachedBackColumn1LaneIndex = -1;
         conveyorLaneLayoutCacheDirty = true;
         InvalidateConveyorSuccessorCache();
+        InvalidateConveyorSlotDotPathCache();
         MarkConveyorItemVisualDirty();
     }
 
     private void InvalidateConveyorSuccessorCache()
     {
         conveyorSuccessorCacheDirty = true;
+    }
+
+    private void InvalidateConveyorSlotDotPathCache()
+    {
+        for (int i = 0; i < conveyorSlotDotPathCaches.Count; i++)
+        {
+            conveyorSlotDotPathCaches[i].Invalidate();
+        }
     }
 
     public void PrepareForPool()
@@ -2889,7 +2941,7 @@ public class Block : BaseObject
         if (refreshDebugVisuals)
         {
             RefreshSleepAwakeDebugVisuals();
-            RefreshBeltItemLineDebugVisuals();
+            generator.QueueBeltItemLineDebugVisualRefresh(this);
         }
     }
 
@@ -3060,8 +3112,21 @@ public class Block : BaseObject
             return;
         }
 
-        SetConveyorSlotDotsVisible(true);
-        UpdateConveyorSlotDotPositions();
+        TerrainGenerator terrainGenerator = TerrainGenerator.Active;
+        if (terrainGenerator == null)
+        {
+            return;
+        }
+
+        SetConveyorSlotDotsVisible(false);
+
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            Vector3 worldPosition = EvaluateAnimatedConveyorSlotDotWorldPosition(laneIndex);
+            worldPosition.y += ConveyorSlotDotVerticalOffset;
+            terrainGenerator.AddConveyorSlotDotInstance(worldPosition);
+        }
     }
 
     public bool TryGetInstalledItemAreaCapacity(out int capacity)
@@ -3579,32 +3644,9 @@ public class Block : BaseObject
             return;
         }
 
-        EnsureFloorObjectsInitialized();
-        EnsureConveyorSlotDotRoot();
-
         int laneCount = GetConveyorLaneCount();
-        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
-        {
-            Transform dot = GetOrCreateConveyorSlotDot(laneIndex);
-            if (dot == null)
-            {
-                continue;
-            }
-            dot.gameObject.SetActive(true);
-        }
-
-        for (int laneIndex = laneCount; laneIndex < conveyorSlotDots.Count; laneIndex++)
-        {
-            Transform dot = conveyorSlotDots[laneIndex];
-            if (dot != null)
-            {
-                dot.gameObject.SetActive(false);
-            }
-        }
-
-        SetConveyorSlotDotsVisible(laneCount > 0);
+        SetConveyorSlotDotsVisible(false);
         TerrainGenerator.Active?.SetConveyorDotVisualActive(this, laneCount > 0);
-        UpdateConveyorSlotDotPositions();
     }
 
     private static bool ShouldShowConveyorSlotDots()
@@ -3688,7 +3730,11 @@ public class Block : BaseObject
             return;
         }
 
-        conveyorSlotDotRoot.gameObject.SetActive(visible);
+        GameObject rootObject = conveyorSlotDotRoot.gameObject;
+        if (rootObject.activeSelf != visible)
+        {
+            rootObject.SetActive(visible);
+        }
     }
 
     private static Material ResolveConveyorSlotDotMaterial()
@@ -3734,37 +3780,103 @@ public class Block : BaseObject
 
     private Vector3 EvaluateAnimatedConveyorSlotDotWorldPosition(int laneIndex)
     {
-        if (!TryBuildAnimatedConveyorSlotDotPath(laneIndex, out float totalLength, out float phaseOffset) || totalLength <= 0.0001f)
+        Vector3 laneWorldPosition = GetConveyorLaneWorldPosition(laneIndex);
+        if (!TryGetConveyorSlotDotMotionDirection(laneIndex, laneWorldPosition, out Vector3 motionDirection))
         {
-            return GetConveyorLaneWorldPosition(laneIndex);
+            return laneWorldPosition;
         }
 
-        float travelDistance = Mathf.Repeat(
+        float travelLength = Mathf.Max(GetConveyorLaneHalfExtent() * 1.35f, ConveyorSlotDotDiameter * 2f);
+        float phaseOffset = GetConveyorSlotDotLocalPhaseOffset(laneIndex, motionDirection, travelLength);
+        float travelOffset = Mathf.Repeat(
             (Time.timeSinceLevelLoad * Mathf.Max(GetConveyorSpeed(), 0.01f)) + phaseOffset,
-            totalLength);
+            travelLength) - (travelLength * 0.5f);
 
-        for (int i = 0; i < conveyorSlotDotSegments.Count; i++)
+        return laneWorldPosition + (motionDirection * travelOffset);
+    }
+
+    private bool TryGetConveyorSlotDotMotionDirection(int laneIndex, Vector3 laneWorldPosition, out Vector3 motionDirection)
+    {
+        motionDirection = Vector3.zero;
+
+        if (TryGetConveyorSuccessor(
+                laneIndex,
+                out Block destinationBlock,
+                out int destinationLaneIndex,
+                out bool useCornerMotion)
+            && destinationBlock != null)
         {
-            ConveyorSlotDotSegment segment = conveyorSlotDotSegments[i];
-            if (travelDistance > segment.length && i < conveyorSlotDotSegments.Count - 1)
+            if (useCornerMotion && destinationBlock == this)
             {
-                travelDistance -= segment.length;
-                continue;
+                if (TryGetConveyorCornerLaneTransition(
+                        laneIndex,
+                        out int cornerSourceLaneIndex,
+                        out int cornerDestinationLaneIndex,
+                        out float cornerProgress))
+                {
+                    float previousProgress = Mathf.Clamp01(cornerProgress - 0.05f);
+                    float nextProgress = Mathf.Clamp01(cornerProgress + 0.05f);
+                    Vector3 previousWorldPosition = EvaluateConveyorCornerPathWorldPosition(
+                        cornerSourceLaneIndex,
+                        cornerDestinationLaneIndex,
+                        previousProgress);
+                    Vector3 nextWorldPosition = EvaluateConveyorCornerPathWorldPosition(
+                        cornerSourceLaneIndex,
+                        cornerDestinationLaneIndex,
+                        nextProgress);
+                    motionDirection = nextWorldPosition - previousWorldPosition;
+                }
             }
-
-            float segmentProgress = segment.length <= 0.0001f
-                ? 0f
-                : Mathf.Clamp01(travelDistance / segment.length);
-            return EvaluateConveyorPathSegmentWorldPosition(
-                segment.sourceBlock,
-                segment.sourceLaneIndex,
-                segment.destinationBlock,
-                segment.destinationLaneIndex,
-                segment.useCornerMotion,
-                segmentProgress);
+            else
+            {
+                motionDirection = destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex) - laneWorldPosition;
+            }
         }
 
-        return GetConveyorLaneWorldPosition(laneIndex);
+        if (motionDirection.sqrMagnitude <= 0.0001f
+            && TryGetConveyorPredecessor(
+                laneIndex,
+                out Block sourceBlock,
+                out int sourceLaneIndex,
+                out _)
+            && sourceBlock != null)
+        {
+            motionDirection = laneWorldPosition - sourceBlock.GetConveyorLaneWorldPosition(sourceLaneIndex);
+        }
+
+        if (motionDirection.sqrMagnitude <= 0.0001f
+            && TryGetConveyorFlowDirection(out Vector2Int flowDirection)
+            && flowDirection != Vector2Int.zero)
+        {
+            motionDirection = new Vector3(flowDirection.x, 0f, flowDirection.y);
+        }
+
+        motionDirection.y = 0f;
+        if (motionDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        motionDirection.Normalize();
+        return true;
+    }
+
+    private float GetConveyorSlotDotLocalPhaseOffset(int laneIndex, Vector3 motionDirection, float travelLength)
+    {
+        Vector3 coordinateVector = new Vector3(coordinate.x, 0f, coordinate.y);
+        float blockOffset = Vector3.Dot(coordinateVector, motionDirection) * travelLength;
+        float laneOffset = laneIndex * (travelLength / Mathf.Max(1, GetConveyorLaneCount()));
+        return blockOffset + laneOffset;
+    }
+
+    private ConveyorSlotDotPathCache GetConveyorSlotDotPathCache(int laneIndex)
+    {
+        while (conveyorSlotDotPathCaches.Count <= laneIndex)
+        {
+            conveyorSlotDotPathCaches.Add(new ConveyorSlotDotPathCache());
+        }
+
+        return conveyorSlotDotPathCaches[laneIndex];
     }
 
     private bool TryBuildAnimatedConveyorSlotDotPath(int laneIndex, out float totalLength, out float phaseOffset)
@@ -3778,9 +3890,12 @@ public class Block : BaseObject
             return false;
         }
 
+        conveyorSlotDotOrderedLaneKeys.Clear();
+        conveyorSlotDotVisitedLaneKeys.Clear();
+
         ConveyorLaneKey startLaneKey = new ConveyorLaneKey(this, laneIndex);
-        List<ConveyorLaneKey> orderedLaneKeys = new List<ConveyorLaneKey>(ConveyorSlotDotPathMaxSegments + 1) { startLaneKey };
-        HashSet<ConveyorLaneKey> visitedLaneKeys = new HashSet<ConveyorLaneKey> { startLaneKey };
+        conveyorSlotDotOrderedLaneKeys.Add(startLaneKey);
+        conveyorSlotDotVisitedLaneKeys.Add(startLaneKey);
         ConveyorLaneKey currentLaneKey = startLaneKey;
         bool closedLoop = false;
 
@@ -3798,19 +3913,19 @@ public class Block : BaseObject
             }
 
             ConveyorLaneKey previousLaneKey = new ConveyorLaneKey(previousBlock, previousLaneIndex);
-            if (!visitedLaneKeys.Add(previousLaneKey))
+            if (!conveyorSlotDotVisitedLaneKeys.Add(previousLaneKey))
             {
                 closedLoop = previousLaneKey.Equals(startLaneKey);
                 break;
             }
 
-            orderedLaneKeys.Add(previousLaneKey);
+            conveyorSlotDotOrderedLaneKeys.Add(previousLaneKey);
             currentLaneKey = previousLaneKey;
         }
 
-        orderedLaneKeys.Reverse();
+        conveyorSlotDotOrderedLaneKeys.Reverse();
 
-        if (!TryAppendConveyorSlotDotSegmentsFromLaneSequence(orderedLaneKeys, ref totalLength))
+        if (!TryAppendConveyorSlotDotSegmentsFromLaneSequence(conveyorSlotDotOrderedLaneKeys, ref totalLength))
         {
             return false;
         }
@@ -3819,7 +3934,7 @@ public class Block : BaseObject
 
         if (closedLoop)
         {
-            ConveyorLaneKey orderedStartLaneKey = orderedLaneKeys[0];
+            ConveyorLaneKey orderedStartLaneKey = conveyorSlotDotOrderedLaneKeys[0];
             if (!TryAppendConveyorSlotDotSegment(startLaneKey, orderedStartLaneKey, ref totalLength))
             {
                 return conveyorSlotDotSegments.Count > 0;
@@ -3843,7 +3958,7 @@ public class Block : BaseObject
             }
 
             ConveyorLaneKey nextLaneKey = new ConveyorLaneKey(nextBlock, nextLaneIndex);
-            if (!visitedLaneKeys.Add(nextLaneKey)
+            if (!conveyorSlotDotVisitedLaneKeys.Add(nextLaneKey)
                 || !TryAppendConveyorSlotDotSegment(currentLaneKey, nextLaneKey, ref totalLength))
             {
                 break;
@@ -4659,6 +4774,7 @@ public class Block : BaseObject
         ClearConveyorLaneCycleBlockedSleep(laneIndex);
         portableObject?.SetSleepAwakeSleeping(IsConveyorItemSleepAwakeSleeping(laneIndex));
         MarkConveyorItemVisualDirty();
+        TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
     }
 
     private void ClearConveyorItemAtLane(int laneIndex)
@@ -4690,6 +4806,7 @@ public class Block : BaseObject
         }
 
         MarkConveyorItemVisualDirty();
+        TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
     }
 
     private bool IsConveyorLaneMovementHeld(int laneIndex)

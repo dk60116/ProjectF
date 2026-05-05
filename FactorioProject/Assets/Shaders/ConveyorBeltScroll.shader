@@ -317,10 +317,5 @@ Shader "Custom/ConveyorBeltScroll"
             }
             ENDHLSL
         }
-
-        UsePass "Universal Render Pipeline/Simple Lit/ShadowCaster"
-        UsePass "Universal Render Pipeline/Simple Lit/DepthOnly"
-        UsePass "Universal Render Pipeline/Simple Lit/DepthNormals"
-        UsePass "Universal Render Pipeline/Simple Lit/Meta"
     }
 }

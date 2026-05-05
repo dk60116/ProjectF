@@ -48,16 +48,10 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             return;
         }
 
-        if (ShouldUseNativeRendering(conveyorBelt))
-        {
-            Unregister(conveyorBelt);
-            conveyorBelt.SetVirtualRenderingSuppressed(false);
-            return;
-        }
-
         BeltRenderCache cache = GetOrCreateBeltRenderCache(conveyorBelt);
-        RefreshBeltRenderCache(conveyorBelt, cache);
-        conveyorBelt.SetVirtualRenderingSuppressed(true);
+        bool beltTopOnly = conveyorBelt.IsCornerVariant;
+        RefreshBeltRenderCache(conveyorBelt, cache, beltTopOnly);
+        conveyorBelt.SetVirtualRenderingSuppressed(true, beltTopOnly);
     }
 
     public void Unregister(ConveyorBelt conveyorBelt, bool restoreNativeRenderers = true)
@@ -103,11 +97,11 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         return cache;
     }
 
-    private void RefreshBeltRenderCache(ConveyorBelt conveyorBelt, BeltRenderCache cache)
+    private void RefreshBeltRenderCache(ConveyorBelt conveyorBelt, BeltRenderCache cache, bool beltTopOnly)
     {
         batches.RemoveOwnedEntries(cache.batchEntries);
         scratchRenderData.Clear();
-        conveyorBelt.AppendVirtualRenderData(scratchRenderData);
+        conveyorBelt.AppendVirtualRenderData(scratchRenderData, beltTopOnly);
 
         for (int i = 0; i < scratchRenderData.Count; i++)
         {
@@ -146,11 +140,6 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private void RenderBatches()
     {
         batches.RenderBatches();
-    }
-
-    private static bool ShouldUseNativeRendering(ConveyorBelt conveyorBelt)
-    {
-        return conveyorBelt != null && conveyorBelt.IsCornerVariant;
     }
 
     private static bool HasOddNegativeScale(Matrix4x4 matrix)

@@ -45,6 +45,7 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox randomSeedCheckBox = new CheckBox();
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
+    private readonly CheckBox showBeltItemLineCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
     private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
     private readonly Button applyCameraSizeButton = new Button();
@@ -327,8 +328,16 @@ internal sealed class EditorToolForm : Form
                 showSleepAwakeCheckBox.Checked,
                 "Show SleepAwake");
 
+        StyleDebugCheckBox(showBeltItemLineCheckBox, "Show Belt Item Line");
+        showBeltItemLineCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showBeltItemLine",
+                showBeltItemLineCheckBox.Checked,
+                "Show Belt Item Line");
+
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
+        debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 5);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
@@ -892,6 +901,11 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(showSleepAwakeCheckBox, showSleepAwake);
         }
 
+        if (TryReadProtocolBool(response, "showBeltItemLine", out bool showBeltItemLine))
+        {
+            ApplyRuntimeCheckBoxState(showBeltItemLineCheckBox, showBeltItemLine);
+        }
+
         if (TryReadProtocolFloat(response, "cameraMinSize", out float cameraMinSize)
             && TryReadProtocolFloat(response, "cameraMaxSize", out float cameraMaxSize))
         {
@@ -1215,6 +1229,7 @@ internal sealed class EditorToolForm : Form
         reloadButton.Enabled = !busy;
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
+        showBeltItemLineCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;
         cameraMaxSizeInput.Enabled = !busy;
         applyCameraSizeButton.Enabled = !busy;

@@ -10,6 +10,12 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
+    private const int MaxConveyorSlotDotRefreshesPerFrame = 64;
+    private const int MaxConveyorSlotDotInstancesPerBatch = 1023;
+    private const int MaxBeltItemLineDebugRefreshesPerFrame = 128;
+    private const float ConveyorSlotDotInstancedDiameter = 0.08f;
+    private static readonly Color ConveyorSlotDotInstancedColor = new Color(1f, 0.36f, 0.08f, 1f);
+
     public void SetConveyorActive(Block block, bool isActive, bool queueWake = true)
     {
         if (!Application.isPlaying || block == null)
@@ -180,12 +186,48 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (isActive)
         {
-            activeConveyorDotVisuals.Add(block);
+            if (activeConveyorDotVisuals.Add(block))
+            {
+                activeConveyorDotVisualList.Add(block);
+            }
         }
         else
         {
-            activeConveyorDotVisuals.Remove(block);
+            if (activeConveyorDotVisuals.Remove(block))
+            {
+                RemoveConveyorDotVisualBlock(block);
+            }
         }
+    }
+
+    private void ClearConveyorDotVisualState()
+    {
+        activeConveyorDotVisuals.Clear();
+        activeConveyorDotVisualList.Clear();
+        conveyorDotVisualTickBuffer.Clear();
+        pendingConveyorSlotDotRefreshBlocks.Clear();
+        pendingConveyorSlotDotRefreshIndex = 0;
+    }
+
+    private void RemoveConveyorDotVisualBlock(Block block)
+    {
+        int index = activeConveyorDotVisualList.IndexOf(block);
+        if (index >= 0)
+        {
+            RemoveConveyorDotVisualAt(index);
+        }
+    }
+
+    private void RemoveConveyorDotVisualAt(int index)
+    {
+        int lastIndex = activeConveyorDotVisualList.Count - 1;
+        if (index < 0 || index > lastIndex)
+        {
+            return;
+        }
+
+        activeConveyorDotVisualList[index] = activeConveyorDotVisualList[lastIndex];
+        activeConveyorDotVisualList.RemoveAt(lastIndex);
     }
 
     private void SyncConveyorSlotDotRuntimeVisibility()
@@ -234,25 +276,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ApplyBeltItemLineRuntimeVisibility(bool showBeltItemLine)
     {
+        bool clearLoadedConveyors = beltItemLineVisibilityInitialized
+            && lastShowBeltItemLine
+            && !showBeltItemLine;
+
         beltItemLineVisibilityInitialized = true;
         lastShowBeltItemLine = showBeltItemLine;
         beltItemLineVisualsDirty = false;
         beltItemLineDebugCacheDirty = true;
 
-        applyingBeltItemLineRuntimeVisibility = true;
-        try
-        {
-            foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
-            {
-                pair.Value?.RefreshBeltItemLineDebugVisuals(true);
-            }
-        }
-        finally
-        {
-            applyingBeltItemLineRuntimeVisibility = false;
-        }
-
-        beltItemLineVisualsDirty = false;
+        QueueAllBeltItemLineDebugRefreshes(clearLoadedConveyors);
     }
 
     public bool TryGetBeltItemLineDebugColor(Block block, int laneIndex, out Color32 color)
@@ -298,9 +331,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        foreach (Block block in conveyorItemVisualBlocks)
         {
-            Block block = pair.Value;
             if (block == null || !block.IsRuntimeConveyor)
             {
                 continue;
@@ -396,7 +428,30 @@ public partial class TerrainGenerator : MonoBehaviour
         beltItemLineDebugVisitedLanes.Clear();
     }
 
-    private void InvalidateBeltItemLineDebugVisuals()
+    public void MarkBeltItemLineDebugDirty(Block block)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        InvalidateBeltItemLineDebugVisuals(block);
+    }
+
+    public void QueueBeltItemLineDebugVisualRefresh(Block block)
+    {
+        if (!Application.isPlaying
+            || block == null
+            || GameManager.Instance == null
+            || !GameManager.Instance.ShowBeltItemLine)
+        {
+            return;
+        }
+
+        QueueBeltItemLineDebugRefresh(block);
+    }
+
+    private void InvalidateBeltItemLineDebugVisuals(Block changedBlock = null)
     {
         if (applyingBeltItemLineRuntimeVisibility)
         {
@@ -406,7 +461,99 @@ public partial class TerrainGenerator : MonoBehaviour
         beltItemLineDebugCacheDirty = true;
         if (GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine)
         {
-            beltItemLineVisualsDirty = true;
+            QueueAllBeltItemLineDebugRefreshes();
+            QueueBeltItemLineDebugRefresh(changedBlock);
+        }
+    }
+
+    private void QueueAllBeltItemLineDebugRefreshes(bool includeLoadedConveyors = false)
+    {
+        if (pendingBeltItemLineDebugRefreshAll && !includeLoadedConveyors)
+        {
+            return;
+        }
+
+        pendingBeltItemLineDebugRefreshAll = true;
+        foreach (Block block in conveyorItemVisualBlocks)
+        {
+            QueueBeltItemLineDebugRefresh(block);
+        }
+
+        if (!includeLoadedConveyors)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block != null && block.IsConveyorStackingEnabled())
+            {
+                QueueBeltItemLineDebugRefresh(block);
+            }
+        }
+    }
+
+    private void QueueBeltItemLineDebugRefresh(Block block)
+    {
+        if (block == null || !pendingBeltItemLineDebugRefreshSet.Add(block))
+        {
+            return;
+        }
+
+        pendingBeltItemLineDebugRefreshBlocks.Add(block);
+    }
+
+    private void ClearPendingBeltItemLineDebugRefreshes()
+    {
+        pendingBeltItemLineDebugRefreshBlocks.Clear();
+        pendingBeltItemLineDebugRefreshSet.Clear();
+        pendingBeltItemLineDebugRefreshIndex = 0;
+        pendingBeltItemLineDebugRefreshAll = false;
+    }
+
+    private void TickPendingBeltItemLineDebugRefreshes()
+    {
+        if (pendingBeltItemLineDebugRefreshBlocks.Count == 0)
+        {
+            pendingBeltItemLineDebugRefreshAll = false;
+            return;
+        }
+
+        bool showBeltItemLine = GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine;
+        if (showBeltItemLine)
+        {
+            EnsureBeltItemLineDebugCache();
+        }
+
+        int processedCount = 0;
+        applyingBeltItemLineRuntimeVisibility = true;
+        try
+        {
+            while (processedCount < MaxBeltItemLineDebugRefreshesPerFrame
+                && pendingBeltItemLineDebugRefreshIndex < pendingBeltItemLineDebugRefreshBlocks.Count)
+            {
+                Block block = pendingBeltItemLineDebugRefreshBlocks[pendingBeltItemLineDebugRefreshIndex];
+                pendingBeltItemLineDebugRefreshIndex++;
+                processedCount++;
+                pendingBeltItemLineDebugRefreshSet.Remove(block);
+
+                if (block == null)
+                {
+                    continue;
+                }
+
+                block.RefreshBeltItemLineDebugVisuals();
+            }
+        }
+        finally
+        {
+            applyingBeltItemLineRuntimeVisibility = false;
+        }
+
+        if (pendingBeltItemLineDebugRefreshIndex >= pendingBeltItemLineDebugRefreshBlocks.Count)
+        {
+            ClearPendingBeltItemLineDebugRefreshes();
         }
     }
 
@@ -414,12 +561,75 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         conveyorSlotDotVisibilityInitialized = true;
         lastShowConveyorSlotDots = showConveyorSlotDots;
-        activeConveyorDotVisuals.Clear();
-        conveyorDotVisualTickBuffer.Clear();
+
+        if (!showConveyorSlotDots)
+        {
+            conveyorDotVisualTickBuffer.Clear();
+            conveyorDotVisualTickBuffer.AddRange(activeConveyorDotVisualList);
+
+            for (int i = pendingConveyorSlotDotRefreshIndex; i < pendingConveyorSlotDotRefreshBlocks.Count; i++)
+            {
+                Block block = pendingConveyorSlotDotRefreshBlocks[i];
+                if (block != null && !activeConveyorDotVisuals.Contains(block))
+                {
+                    conveyorDotVisualTickBuffer.Add(block);
+                }
+            }
+
+            for (int i = 0; i < conveyorDotVisualTickBuffer.Count; i++)
+            {
+                Block block = conveyorDotVisualTickBuffer[i];
+                if (block != null)
+                {
+                    block.RefreshConveyorSlotDotVisuals();
+                }
+            }
+
+            ClearConveyorDotVisualState();
+            return;
+        }
+
+        ClearConveyorDotVisualState();
 
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
-            pair.Value?.RefreshConveyorSlotDotVisuals();
+            Block block = pair.Value;
+            if (block != null && block.IsConveyorStackingEnabled())
+            {
+                pendingConveyorSlotDotRefreshBlocks.Add(block);
+            }
+        }
+    }
+
+    private void TickPendingConveyorSlotDotRefreshes()
+    {
+        if (pendingConveyorSlotDotRefreshBlocks.Count == 0
+            || GameManager.Instance == null
+            || !GameManager.Instance.ShowConveyorSlotDots)
+        {
+            return;
+        }
+
+        int processedCount = 0;
+        while (processedCount < MaxConveyorSlotDotRefreshesPerFrame
+            && pendingConveyorSlotDotRefreshIndex < pendingConveyorSlotDotRefreshBlocks.Count)
+        {
+            Block block = pendingConveyorSlotDotRefreshBlocks[pendingConveyorSlotDotRefreshIndex];
+            pendingConveyorSlotDotRefreshIndex++;
+            processedCount++;
+
+            if (block == null || !block.IsConveyorStackingEnabled())
+            {
+                continue;
+            }
+
+            block.RefreshConveyorSlotDotVisuals();
+        }
+
+        if (pendingConveyorSlotDotRefreshIndex >= pendingConveyorSlotDotRefreshBlocks.Count)
+        {
+            pendingConveyorSlotDotRefreshBlocks.Clear();
+            pendingConveyorSlotDotRefreshIndex = 0;
         }
     }
 
@@ -430,14 +640,13 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        InvalidateBeltItemLineDebugVisuals();
-
         if (isActive)
         {
             if (conveyorItemVisualBlocks.Add(block))
             {
                 conveyorItemVisualDirtyBlocks.Add(block);
                 conveyorItemVisualBlockSetVersion++;
+                InvalidateBeltItemLineDebugVisuals(block);
             }
         }
         else
@@ -446,6 +655,7 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 conveyorItemVisualDirtyBlocks.Add(block);
                 conveyorItemVisualBlockSetVersion++;
+                InvalidateBeltItemLineDebugVisuals(block);
             }
         }
     }
@@ -456,8 +666,6 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             return;
         }
-
-        InvalidateBeltItemLineDebugVisuals();
 
         if (conveyorItemVisualBlocks.Contains(block) && block.HasDynamicVirtualConveyorItemVisuals())
         {
@@ -1462,31 +1670,172 @@ public partial class TerrainGenerator : MonoBehaviour
     private void TickActiveConveyorDotVisuals(float deltaTime)
     {
         if (deltaTime <= 0f
-            || activeConveyorDotVisuals.Count == 0
+            || activeConveyorDotVisualList.Count == 0
             || GameManager.Instance == null
             || !GameManager.Instance.ShowConveyorSlotDots)
         {
             return;
         }
 
-        conveyorDotVisualTickBuffer.Clear();
-        foreach (Block block in activeConveyorDotVisuals)
-        {
-            conveyorDotVisualTickBuffer.Add(block);
-        }
+        BeginConveyorSlotDotInstancedRendering();
 
-        for (int i = 0; i < conveyorDotVisualTickBuffer.Count; i++)
+        int index = 0;
+        while (index < activeConveyorDotVisualList.Count)
         {
-            Block block = conveyorDotVisualTickBuffer[i];
-            if (block == null)
+            Block block = activeConveyorDotVisualList[index];
+            if (block == null || !block.IsConveyorStackingEnabled())
             {
+                activeConveyorDotVisuals.Remove(block);
+                RemoveConveyorDotVisualAt(index);
                 continue;
             }
 
             block.TickConveyorSlotDots(deltaTime);
+            index++;
         }
 
-        conveyorDotVisualTickBuffer.Clear();
+        EndConveyorSlotDotInstancedRendering();
+    }
+
+    public void AddConveyorSlotDotInstance(Vector3 worldPosition)
+    {
+        if (conveyorSlotDotInstanceMatrixCount >= MaxConveyorSlotDotInstancesPerBatch)
+        {
+            FlushConveyorSlotDotInstances();
+        }
+
+        conveyorSlotDotInstanceMatrices[conveyorSlotDotInstanceMatrixCount] = Matrix4x4.TRS(
+            worldPosition,
+            Quaternion.identity,
+            new Vector3(ConveyorSlotDotInstancedDiameter, 1f, ConveyorSlotDotInstancedDiameter));
+        conveyorSlotDotInstanceMatrixCount++;
+    }
+
+    private void BeginConveyorSlotDotInstancedRendering()
+    {
+        conveyorSlotDotInstanceMatrixCount = 0;
+    }
+
+    private void EndConveyorSlotDotInstancedRendering()
+    {
+        FlushConveyorSlotDotInstances();
+    }
+
+    private void FlushConveyorSlotDotInstances()
+    {
+        if (conveyorSlotDotInstanceMatrixCount <= 0)
+        {
+            return;
+        }
+
+        EnsureConveyorSlotDotInstancedResources();
+        if (conveyorSlotDotInstancedMesh == null || conveyorSlotDotInstancedMaterial == null)
+        {
+            conveyorSlotDotInstanceMatrixCount = 0;
+            return;
+        }
+
+        Graphics.DrawMeshInstanced(
+            conveyorSlotDotInstancedMesh,
+            0,
+            conveyorSlotDotInstancedMaterial,
+            conveyorSlotDotInstanceMatrices,
+            conveyorSlotDotInstanceMatrixCount,
+            null,
+            UnityEngine.Rendering.ShadowCastingMode.Off,
+            false,
+            gameObject.layer,
+            null,
+            UnityEngine.Rendering.LightProbeUsage.Off,
+            null);
+        conveyorSlotDotInstanceMatrixCount = 0;
+    }
+
+    private void EnsureConveyorSlotDotInstancedResources()
+    {
+        if (conveyorSlotDotInstancedMesh == null)
+        {
+            conveyorSlotDotInstancedMesh = CreateConveyorSlotDotInstancedMesh();
+        }
+
+        if (conveyorSlotDotInstancedMaterial != null)
+        {
+            return;
+        }
+
+        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null)
+        {
+            shader = Shader.Find("Sprites/Default");
+        }
+
+        if (shader == null)
+        {
+            shader = Shader.Find("Standard");
+        }
+
+        if (shader == null)
+        {
+            return;
+        }
+
+        conveyorSlotDotInstancedMaterial = new Material(shader)
+        {
+            enableInstancing = true,
+            hideFlags = HideFlags.DontSave
+        };
+
+        if (conveyorSlotDotInstancedMaterial.HasProperty("_BaseColor"))
+        {
+            conveyorSlotDotInstancedMaterial.SetColor("_BaseColor", ConveyorSlotDotInstancedColor);
+        }
+
+        if (conveyorSlotDotInstancedMaterial.HasProperty("_Color"))
+        {
+            conveyorSlotDotInstancedMaterial.SetColor("_Color", ConveyorSlotDotInstancedColor);
+        }
+
+        if (conveyorSlotDotInstancedMaterial.HasProperty("_Cull"))
+        {
+            conveyorSlotDotInstancedMaterial.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        }
+    }
+
+    private static Mesh CreateConveyorSlotDotInstancedMesh()
+    {
+        const int segmentCount = 16;
+        Vector3[] vertices = new Vector3[segmentCount + 1];
+        Vector3[] normals = new Vector3[segmentCount + 1];
+        int[] triangles = new int[segmentCount * 3];
+
+        vertices[0] = Vector3.zero;
+        normals[0] = Vector3.up;
+        for (int i = 0; i < segmentCount; i++)
+        {
+            float angle = (Mathf.PI * 2f * i) / segmentCount;
+            vertices[i + 1] = new Vector3(Mathf.Cos(angle) * 0.5f, 0f, Mathf.Sin(angle) * 0.5f);
+            normals[i + 1] = Vector3.up;
+        }
+
+        for (int i = 0; i < segmentCount; i++)
+        {
+            int nextIndex = i == segmentCount - 1 ? 1 : i + 2;
+            int triangleIndex = i * 3;
+            triangles[triangleIndex] = 0;
+            triangles[triangleIndex + 1] = nextIndex;
+            triangles[triangleIndex + 2] = i + 1;
+        }
+
+        Mesh mesh = new Mesh
+        {
+            name = "Conveyor Slot Dot Instanced Mesh",
+            hideFlags = HideFlags.DontSave
+        };
+        mesh.vertices = vertices;
+        mesh.normals = normals;
+        mesh.triangles = triangles;
+        mesh.RecalculateBounds();
+        return mesh;
     }
 
     private static int CompareActiveConveyorTickOrder(Block left, Block right)

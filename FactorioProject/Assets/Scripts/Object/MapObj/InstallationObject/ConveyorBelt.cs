@@ -32,6 +32,7 @@ public class ConveyorBelt : InstallationObject
     private readonly List<Material> sharedMaterialBuffer = new List<Material>(4);
     private float lastAppliedUvScrollY = float.NaN;
     private bool virtualRenderingSuppressed;
+    private bool virtualRenderingSuppressBeltTopOnly;
 
     public float ConveyorSpeed => Mathf.Max(0f, conveyorSpeed);
     public ConveyorBelt StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
@@ -189,6 +190,7 @@ public class ConveyorBelt : InstallationObject
     {
         TerrainGenerator.Active?.UnregisterVirtualConveyorBelt(this, false);
         virtualRenderingSuppressed = false;
+        virtualRenderingSuppressBeltTopOnly = false;
         base.OnDisable();
     }
 
@@ -218,7 +220,7 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
-    public void AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results)
+    public void AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results, bool beltTopOnly = false)
     {
         if (results == null)
         {
@@ -232,6 +234,11 @@ public class ConveyorBelt : InstallationObject
         {
             MeshRenderer renderer = cachedRenderers[i];
             if (renderer == null)
+            {
+                continue;
+            }
+
+            if (beltTopOnly && renderer != beltTopRenderer)
             {
                 continue;
             }
@@ -273,10 +280,11 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
-    public void SetVirtualRenderingSuppressed(bool isSuppressed)
+    public void SetVirtualRenderingSuppressed(bool isSuppressed, bool beltTopOnly = false)
     {
         virtualRenderingSuppressed = isSuppressed;
-        SetNativeRenderersEnabled(!isSuppressed);
+        virtualRenderingSuppressBeltTopOnly = isSuppressed && beltTopOnly;
+        ApplyVirtualRenderingSuppression();
     }
 
     private void ResolveBeltTopRenderer()
@@ -356,7 +364,7 @@ public class ConveyorBelt : InstallationObject
             renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
         }
 
-        SetNativeRenderersEnabled(!virtualRenderingSuppressed);
+        ApplyVirtualRenderingSuppression();
     }
 
     private void EnsureRendererCache()
@@ -375,6 +383,29 @@ public class ConveyorBelt : InstallationObject
                     ? cachedRenderers[i].GetComponent<MeshFilter>()
                     : null;
             }
+        }
+    }
+
+    private void ApplyVirtualRenderingSuppression()
+    {
+        if (!virtualRenderingSuppressed)
+        {
+            SetNativeRenderersEnabled(true);
+            return;
+        }
+
+        EnsureRendererCache();
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.enabled = virtualRenderingSuppressBeltTopOnly
+                ? renderer != beltTopRenderer
+                : false;
         }
     }
 
