@@ -69,6 +69,13 @@ public partial class TerrainGenerator : MonoBehaviour
             && loadedBlock == block;
     }
 
+    private bool IsLoadedBlockReference(Block block)
+    {
+        return block != null
+            && loadedBlocks.TryGetValue(block.Coordinate, out Block loadedBlock)
+            && loadedBlock == block;
+    }
+
     public bool IsConveyorRuntimeRefreshDeferred => deferredConveyorRuntimeRefreshDepth > 0;
 
     private void BeginConveyorRuntimeRefreshBatch()
@@ -91,6 +98,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         FlushDeferredConveyorRuntimeRefreshes();
+        FlushDeferredConveyorNetworkWakes();
     }
 
     public void QueueDeferredConveyorRuntimeRefresh(Block block)
@@ -101,6 +109,16 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         deferredConveyorRuntimeRefreshBlocks.Add(block);
+    }
+
+    private void QueueDeferredConveyorNetworkWake(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        deferredConveyorNetworkWakeBlocks.Add(block);
     }
 
     private void FlushDeferredConveyorRuntimeRefreshes()
@@ -144,6 +162,54 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             RefreshBeltItemLineRuntimeVisibility();
         }
+    }
+
+    private void FlushDeferredConveyorNetworkWakes()
+    {
+        if (deferredConveyorNetworkWakeBlocks.Count == 0)
+        {
+            return;
+        }
+
+        conveyorTickBuffer.Clear();
+        foreach (Block block in deferredConveyorNetworkWakeBlocks)
+        {
+            if (IsLoadedBlockReference(block))
+            {
+                conveyorTickBuffer.Add(block);
+            }
+        }
+
+        deferredConveyorNetworkWakeBlocks.Clear();
+        if (conveyorTickBuffer.Count == 0)
+        {
+            return;
+        }
+
+        EnsureConveyorNetworkCache();
+        for (int i = 0; i < conveyorTickBuffer.Count; i++)
+        {
+            Block block = conveyorTickBuffer[i];
+            if (block == null || !IsLoadedBlockReference(block))
+            {
+                continue;
+            }
+
+            if (conveyorNetworkIds.TryGetValue(block, out int networkId))
+            {
+                conveyorNetworkRetryTimes.Remove(networkId);
+                bool wasSleeping = conveyorNetworkSleepingIds.Remove(networkId);
+                conveyorNetworkSleepCheckQueuedIds.Remove(networkId);
+                if (wasSleeping)
+                {
+                    RefreshSleepAwakeDebugVisualsForNetwork(networkId);
+                }
+            }
+
+            QueueConveyorWake(block);
+        }
+
+        conveyorTickBuffer.Clear();
     }
 
     public void QueueConveyorWake(Block block)
@@ -783,6 +849,11 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (IsConveyorRuntimeRefreshDeferred)
+        {
+            return false;
+        }
+
         EnsureConveyorNetworkCache();
         return conveyorNetworkIds.TryGetValue(block, out int networkId)
             && (conveyorNetworkSleepingIds.Contains(networkId)
@@ -798,6 +869,11 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (IsConveyorRuntimeRefreshDeferred)
+        {
+            return false;
+        }
+
         EnsureConveyorNetworkCache();
         return conveyorNetworkIds.TryGetValue(block, out int networkId)
             && conveyorNetworkSleepingIds.Contains(networkId);
@@ -806,6 +882,11 @@ public partial class TerrainGenerator : MonoBehaviour
     public void DelayConveyorNetwork(Block block, float delay)
     {
         if (block == null)
+        {
+            return;
+        }
+
+        if (IsConveyorRuntimeRefreshDeferred)
         {
             return;
         }
@@ -831,6 +912,12 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        if (IsConveyorRuntimeRefreshDeferred)
+        {
+            QueueDeferredConveyorNetworkWake(block);
+            return;
+        }
+
         EnsureConveyorNetworkCache();
         if (conveyorNetworkIds.TryGetValue(block, out int networkId))
         {
@@ -849,6 +936,11 @@ public partial class TerrainGenerator : MonoBehaviour
     public void QueueConveyorNetworkSleepCheck(Block block)
     {
         if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (IsConveyorRuntimeRefreshDeferred)
         {
             return;
         }

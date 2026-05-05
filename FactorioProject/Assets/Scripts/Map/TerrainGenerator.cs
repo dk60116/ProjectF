@@ -594,6 +594,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
     private readonly HashSet<int> conveyorWakeQueuedLineIds = new HashSet<int>();
     private readonly HashSet<Block> deferredConveyorRuntimeRefreshBlocks = new HashSet<Block>();
+    private readonly HashSet<Block> deferredConveyorNetworkWakeBlocks = new HashSet<Block>();
     private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> backgroundConveyorDirtyCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> backgroundConveyorWakeCoordinates = new HashSet<Vector2Int>();
@@ -810,6 +811,9 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorWakeQueue.Clear();
         conveyorWakeQueued.Clear();
         conveyorWakeQueuedLineIds.Clear();
+        deferredConveyorRuntimeRefreshBlocks.Clear();
+        deferredConveyorNetworkWakeBlocks.Clear();
+        deferredConveyorRuntimeRefreshDepth = 0;
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
@@ -1549,6 +1553,9 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorWakeQueue.Clear();
         conveyorWakeQueued.Clear();
         conveyorWakeQueuedLineIds.Clear();
+        deferredConveyorRuntimeRefreshBlocks.Clear();
+        deferredConveyorNetworkWakeBlocks.Clear();
+        deferredConveyorRuntimeRefreshDepth = 0;
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;

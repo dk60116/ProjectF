@@ -2935,6 +2935,12 @@ public class Block : BaseObject
             return;
         }
 
+        if (generator.IsConveyorRuntimeRefreshDeferred)
+        {
+            generator.QueueDeferredConveyorRuntimeRefresh(this);
+            return;
+        }
+
         generator.SetConveyorDataMotionActive(this, HasActiveVirtualConveyorDataMotion());
         generator.SetConveyorActive(this, HasActiveConveyorMotion(), queueWake);
         generator.SetConveyorItemVisualActive(this, IsConveyorStackingEnabled() && HasAnyConveyorObjects());

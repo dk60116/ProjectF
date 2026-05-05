@@ -24,14 +24,22 @@ public partial class TerrainGenerator
 
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        BeginConveyorRuntimeRefreshBatch();
+        try
         {
-            RestoreBlockState(chunkBlocks[i]);
-            if (allowYield && ++blocksSinceYield >= blockBudget)
+            for (int i = 0; i < chunkBlocks.Length; i++)
             {
-                blocksSinceYield = 0;
-                yield return null;
+                RestoreBlockState(chunkBlocks[i]);
+                if (allowYield && ++blocksSinceYield >= blockBudget)
+                {
+                    blocksSinceYield = 0;
+                    yield return null;
+                }
             }
+        }
+        finally
+        {
+            EndConveyorRuntimeRefreshBatch();
         }
     }
 
