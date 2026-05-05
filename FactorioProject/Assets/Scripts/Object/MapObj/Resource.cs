@@ -1653,9 +1653,17 @@ public class ResourceBatchRenderer : MonoBehaviour
                     continue;
                 }
 
-                int renderPassCount = Mathf.Max(mesh.subMeshCount, materials.Length);
-                for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+                int materialCount = materials != null ? materials.Length : 0;
+                if (materialCount <= 0)
                 {
+                    continue;
+                }
+
+                int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
+                int renderPassCount = Mathf.Max(subMeshCount, materialCount);
+                for (int passIndex = 0; passIndex < renderPassCount; passIndex++)
+                {
+                    int materialIndex = Mathf.Min(passIndex, materialCount - 1);
                     Material material = materials[materialIndex];
                     if (material == null)
                     {
@@ -1667,31 +1675,10 @@ public class ResourceBatchRenderer : MonoBehaviour
                         material.enableInstancing = true;
                     }
 
-                    int subMeshIndex = Mathf.Min(materialIndex, mesh.subMeshCount - 1);
+                    int subMeshIndex = Mathf.Min(passIndex, subMeshCount - 1);
                     AddBatchMatrix(
                         mesh,
                         material,
-                        subMeshIndex,
-                        localToWorldMatrix,
-                        worldPosition,
-                        layer,
-                        shadowCastingMode,
-                        receiveShadows,
-                        useGlobalBatch);
-                }
-
-                for (int passIndex = materials.Length; passIndex < renderPassCount; passIndex++)
-                {
-                    Material fallbackMaterial = materials[materials.Length - 1];
-                    if (fallbackMaterial == null)
-                    {
-                        continue;
-                    }
-
-                    int subMeshIndex = Mathf.Min(passIndex, mesh.subMeshCount - 1);
-                    AddBatchMatrix(
-                        mesh,
-                        fallbackMaterial,
                         subMeshIndex,
                         localToWorldMatrix,
                         worldPosition,

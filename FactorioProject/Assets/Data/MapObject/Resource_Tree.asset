@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e171f0888b7f55a4e92abfc0e01088f1, type: 3}
   m_Name: Resource_Tree
   m_EditorClassIdentifier: 
-  resourceName: Tree_NoneLeaf
+  resourceName: Tree
   prefab: {fileID: 5596077993400562758, guid: 9cd3537bce10e37418fc097fe29cef7f, type: 3}
   harvestMode: 2
   defaultResourceCount: 1

@@ -12,12 +12,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_1_Coal
   m_EditorClassIdentifier: 
-  itemName: Coar
+  itemName: Robot arm
   id: 1
-  mapObject: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
-  portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
-  portableMat: {fileID: 2100000, guid: c794b4c8f412a824999b84bf29af69ff, type: 2}
-  icon: {fileID: 21300000, guid: 3848f0c230d2b994aad0acd59d1bd901, type: 3}
+  mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
+  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  icon: {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
   interactionButtonList: []
   size: 10
   itemFilter: 0

@@ -92,22 +92,6 @@ PrefabInstance:
       propertyPath: m_Name
       value: Tree
       objectReference: {fileID: 0}
-    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: definition
-      value: 
-      objectReference: {fileID: 11400000, guid: 80276c4a24ae3374aba9f63d5130db06, type: 2}
-    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: itemDefinition
-      value: 
-      objectReference: {fileID: 0}
-    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: resourceStatus.getCount
-      value: 4
-      objectReference: {fileID: 0}
-    - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: resourceStatus.outputId
-      value: 5
-      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -148,9 +132,9 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 2
-  definition: {fileID: 11400000, guid: 80276c4a24ae3374aba9f63d5130db06, type: 2}
+  definition: {fileID: 11400000, guid: f01734a3267e50745b36764f463c62d7, type: 2}
   resourceStatus:
-    outputId: 5
+    outputId: 0
     outputItemName: Log
     resourceCount: 1
     getCount: 4

@@ -9,8 +9,9 @@ public enum InstallationMapFilter
     None = 0,
     Ground = 1 << 0,
     Water = 1 << 1,
-    Resource = 1 << 2,
-    ItemArea = 1 << 3
+    Ore = 1 << 2,
+    ItemArea = 1 << 3,
+    Tree = 1 << 4
 }
 
 public enum InstallationFacingDirection

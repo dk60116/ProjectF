@@ -116,8 +116,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: 
-  objId: 1
-  itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
+  objId: 21
+  itemDefinition: {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -126,9 +126,9 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 1
-  definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
+  definition: {fileID: 11400000, guid: 261c163cbac37f741ba53b8eaf059547, type: 2}
   resourceStatus:
-    outputId: 1
+    outputId: 21
     outputItemName: Coal
     resourceCount: 1
     getCount: 1

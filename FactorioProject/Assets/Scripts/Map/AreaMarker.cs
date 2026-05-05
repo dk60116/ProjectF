@@ -29,6 +29,8 @@ public readonly struct InputOutputModuleItemAreaBinding
 
 public class AreaMarker : MonoBehaviour
 {
+    private const string OverlayShaderName = "Custom/MapFocusOverlay";
+
     [SerializeField]
     private SpriteRenderer icon;
 
@@ -36,11 +38,17 @@ public class AreaMarker : MonoBehaviour
     private Color originalIconColor;
     private bool hasCapturedOriginalIconLocalRotation;
     private Quaternion originalIconLocalRotation;
+    private bool hasCapturedOriginalRendererState;
+    private SpriteRenderer[] capturedSpriteRenderers;
+    private int[] originalSortingOrders;
+    private Material[] originalSharedMaterials;
+    private static Material overlayMaterial;
 
     private void Awake()
     {
         CaptureOriginalIconColor();
         CaptureOriginalIconLocalRotation();
+        CaptureOriginalRendererState();
     }
 
     public void SetIcon(Sprite sprite, float iconRotationZ = 0f)
@@ -58,6 +66,47 @@ public class AreaMarker : MonoBehaviour
         icon.enabled = sprite != null;
     }
 
+    public void SetSortingOrderOffset(int sortingOrderOffset)
+    {
+        CaptureOriginalRendererState();
+        if (capturedSpriteRenderers == null || originalSortingOrders == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSortingOrders.Length; i++)
+        {
+            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
+            if (spriteRenderer != null)
+            {
+                spriteRenderer.sortingOrder = originalSortingOrders[i] + sortingOrderOffset;
+            }
+        }
+    }
+
+    public void SetRenderOnTop(bool renderOnTop)
+    {
+        CaptureOriginalRendererState();
+        if (capturedSpriteRenderers == null || originalSharedMaterials == null)
+        {
+            return;
+        }
+
+        Material renderOnTopMaterial = renderOnTop ? ResolveOverlayMaterial() : null;
+        for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSharedMaterials.Length; i++)
+        {
+            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
+            if (spriteRenderer == null)
+            {
+                continue;
+            }
+
+            spriteRenderer.sharedMaterial = renderOnTop && renderOnTopMaterial != null
+                ? renderOnTopMaterial
+                : originalSharedMaterials[i];
+        }
+    }
+
     public void ResetVisuals()
     {
         if (icon == null)
@@ -71,6 +120,8 @@ public class AreaMarker : MonoBehaviour
         icon.transform.localRotation = originalIconLocalRotation;
         PreserveOriginalIconAlpha();
         icon.enabled = false;
+        ResetRendererSorting();
+        SetRenderOnTop(false);
     }
 
     private void CaptureOriginalIconColor()
@@ -105,6 +156,69 @@ public class AreaMarker : MonoBehaviour
         Color iconColor = icon.color;
         iconColor.a = originalIconColor.a;
         icon.color = iconColor;
+    }
+
+    private void CaptureOriginalRendererState()
+    {
+        if (hasCapturedOriginalRendererState)
+        {
+            return;
+        }
+
+        capturedSpriteRenderers = GetComponentsInChildren<SpriteRenderer>(true);
+        originalSortingOrders = new int[capturedSpriteRenderers.Length];
+        originalSharedMaterials = new Material[capturedSpriteRenderers.Length];
+        for (int i = 0; i < capturedSpriteRenderers.Length; i++)
+        {
+            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
+            originalSortingOrders[i] = spriteRenderer != null
+                ? spriteRenderer.sortingOrder
+                : 0;
+            originalSharedMaterials[i] = spriteRenderer != null
+                ? spriteRenderer.sharedMaterial
+                : null;
+        }
+
+        hasCapturedOriginalRendererState = true;
+    }
+
+    private void ResetRendererSorting()
+    {
+        CaptureOriginalRendererState();
+        if (capturedSpriteRenderers == null || originalSortingOrders == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSortingOrders.Length; i++)
+        {
+            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
+            if (spriteRenderer != null)
+            {
+                spriteRenderer.sortingOrder = originalSortingOrders[i];
+            }
+        }
+    }
+
+    private static Material ResolveOverlayMaterial()
+    {
+        if (overlayMaterial != null)
+        {
+            return overlayMaterial;
+        }
+
+        Shader overlayShader = Shader.Find(OverlayShaderName);
+        if (overlayShader == null)
+        {
+            return null;
+        }
+
+        overlayMaterial = new Material(overlayShader)
+        {
+            name = "AreaMarkerOverlay_Runtime",
+            hideFlags = HideFlags.HideAndDontSave
+        };
+        return overlayMaterial;
     }
 }
 
@@ -216,11 +330,22 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 
     private AreaMarkerPool areaMarkerPool;
     private bool areMarkersVisible = true;
+    private bool forceMarkerVisibility;
+    private int markerSortingOrderOffset;
+    private bool renderMarkersOnTop;
 
-    public void Configure(AreaMarkerPool pool, IReadOnlyList<AreaMarkerSpawnRequest> markerRequests)
+    public void Configure(
+        AreaMarkerPool pool,
+        IReadOnlyList<AreaMarkerSpawnRequest> markerRequests,
+        bool forceVisible = false,
+        int sortingOrderOffset = 0,
+        bool renderOnTop = false)
     {
-        areaMarkerPool = pool;
         ReleaseMarkers();
+        areaMarkerPool = pool;
+        forceMarkerVisibility = forceVisible;
+        markerSortingOrderOffset = sortingOrderOffset;
+        renderMarkersOnTop = renderOnTop;
 
         if (areaMarkerPool == null || markerRequests == null || markerRequests.Count <= 0)
         {
@@ -241,6 +366,8 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
             marker.transform.rotation = Quaternion.identity;
             marker.transform.localScale = Vector3.one;
             marker.SetIcon(request.Icon, request.IconRotationZ);
+            marker.SetSortingOrderOffset(markerSortingOrderOffset);
+            marker.SetRenderOnTop(renderMarkersOnTop);
             activeMarkers.Add(marker);
         }
 
@@ -333,6 +460,11 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         }
 
         if (visibleRange <= 0f)
+        {
+            return true;
+        }
+
+        if (forceMarkerVisibility)
         {
             return true;
         }

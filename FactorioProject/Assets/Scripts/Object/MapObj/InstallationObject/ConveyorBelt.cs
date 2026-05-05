@@ -253,27 +253,35 @@ public class ConveyorBelt : InstallationObject
             sharedMaterialBuffer.Clear();
             renderer.GetSharedMaterials(sharedMaterialBuffer);
             int materialCount = sharedMaterialBuffer.Count;
+            if (materialCount <= 0)
+            {
+                continue;
+            }
+
             int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
-            int entryCount = Mathf.Min(materialCount, subMeshCount);
+            int entryCount = Mathf.Max(materialCount, subMeshCount);
             bool hasUvScroll = renderer == beltTopRenderer;
             float uvScrollY = hasUvScroll ? -ConveyorSpeed * 0.75f : 0f;
             Matrix4x4 matrix = renderer.localToWorldMatrix;
             int layer = renderer.gameObject.layer;
 
-            for (int materialIndex = 0; materialIndex < entryCount; materialIndex++)
+            for (int passIndex = 0; passIndex < entryCount; passIndex++)
             {
+                int materialIndex = Mathf.Min(passIndex, materialCount - 1);
                 Material material = sharedMaterialBuffer[materialIndex];
                 if (material == null)
                 {
                     continue;
                 }
 
+                int subMeshIndex = Mathf.Min(passIndex, subMeshCount - 1);
+
                 results.Add(new VirtualConveyorBeltRenderData(
                     mesh,
                     material,
                     matrix,
                     layer,
-                    materialIndex,
+                    subMeshIndex,
                     hasUvScroll,
                     uvScrollY));
             }

@@ -52,6 +52,11 @@ public class SaveManager : MonoBehaviour
         LoadSlot(SelectedSlotIndex);
     }
 
+    public bool ResetSelectedSlot()
+    {
+        return ResetSlot(SelectedSlotIndex);
+    }
+
     public bool SaveSlot(int slotIndex)
     {
         slotIndex = NormalizeSlotIndex(slotIndex);
@@ -120,6 +125,38 @@ public class SaveManager : MonoBehaviour
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {exception}");
             return false;
         }
+    }
+
+    public bool ResetSlot(int slotIndex)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        SelectedSlotIndex = slotIndex;
+
+        string path = GetSlotPath(slotIndex);
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 파일 삭제 완료: {path}");
+            }
+            else
+            {
+                Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 파일이 없어 삭제를 건너뜁니다: {path}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 리셋 실패: {exception}");
+            return false;
+        }
+
+        if (Application.isPlaying)
+        {
+            StartNewMap(slotIndex);
+        }
+
+        return true;
     }
 
     public void StartNewMap(int slotIndex)

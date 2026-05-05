@@ -480,6 +480,11 @@ public class ItemDataEditorWindow : EditorWindow
             LoadItemData();
         }
 
+        if (GUILayout.Button("Rebuild", GUILayout.Width(80f)))
+        {
+            RebuildItemData();
+        }
+
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
         GUILayout.BeginHorizontal();
@@ -730,6 +735,62 @@ public class ItemDataEditorWindow : EditorWindow
         return (installationObject.MapFilter & InstallationMapFilter.ItemArea) != 0;
     }
 
+    private static InstallationMapFilter NormalizeInstallationMapFilter(InstallationMapFilter filter)
+    {
+        return filter == InstallationMapFilter.None ? InstallationMapFilter.Ground : filter;
+    }
+
+    private static bool TryParseInstallationMapFilter(string mapFilter, out InstallationMapFilter parsedFilter)
+    {
+        parsedFilter = InstallationMapFilter.None;
+        if (string.IsNullOrWhiteSpace(mapFilter))
+        {
+            return false;
+        }
+
+        if (Enum.TryParse(mapFilter, true, out parsedFilter))
+        {
+            parsedFilter = NormalizeInstallationMapFilter(parsedFilter);
+            return true;
+        }
+
+        string[] tokens = mapFilter.Split(new[] { ',', '|' }, StringSplitOptions.RemoveEmptyEntries);
+        InstallationMapFilter combinedFilter = InstallationMapFilter.None;
+        bool parsedAny = false;
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            string token = tokens[i].Trim();
+            if (token.Length <= 0)
+            {
+                continue;
+            }
+
+            if (string.Equals(token, "Resource", StringComparison.OrdinalIgnoreCase))
+            {
+                combinedFilter |= InstallationMapFilter.Ore;
+                parsedAny = true;
+                continue;
+            }
+
+            if (!Enum.TryParse(token, true, out InstallationMapFilter tokenFilter))
+            {
+                parsedFilter = InstallationMapFilter.None;
+                return false;
+            }
+
+            combinedFilter |= tokenFilter;
+            parsedAny = true;
+        }
+
+        if (!parsedAny)
+        {
+            return false;
+        }
+
+        parsedFilter = NormalizeInstallationMapFilter(combinedFilter);
+        return true;
+    }
+
     private void DrawMapObjectFields(MapObject mapObject, List<ItemDefinition> definitions)
     {
         if (mapObject == null)
@@ -792,18 +853,12 @@ public class ItemDataEditorWindow : EditorWindow
             SerializedProperty mapFilterProperty = mapObjectSerializedObject.FindProperty("mapFilter");
             if (mapFilterProperty != null)
             {
-                InstallationMapFilter currentFilter = (InstallationMapFilter)mapFilterProperty.intValue;
-                if (currentFilter == InstallationMapFilter.None)
-                {
-                    currentFilter = InstallationMapFilter.Ground;
-                }
+                InstallationMapFilter currentFilter = NormalizeInstallationMapFilter(
+                    (InstallationMapFilter)mapFilterProperty.intValue);
 
                 EditorGUI.BeginChangeCheck();
                 InstallationMapFilter nextFilter = (InstallationMapFilter)EditorGUILayout.EnumFlagsField("Map Filter", currentFilter);
-                if (nextFilter == InstallationMapFilter.None)
-                {
-                    nextFilter = InstallationMapFilter.Ground;
-                }
+                nextFilter = NormalizeInstallationMapFilter(nextFilter);
 
                 if (EditorGUI.EndChangeCheck())
                 {
@@ -1532,6 +1587,28 @@ public class ItemDataEditorWindow : EditorWindow
         Repaint();
     }
 
+    private void RebuildItemData()
+    {
+        ItemManager itemManager = FindItemManager();
+        if (itemManager == null)
+        {
+            EditorUtility.DisplayDialog("Item Data", "씬에서 ItemManager를 찾을 수 없습니다.", "OK");
+            EnsureSelection();
+            Repaint();
+            return;
+        }
+
+        Undo.RecordObject(itemManager, "Rebuild Item Data");
+        itemManager.RebuildItemDefinitionsFromAssets();
+        itemManager.ApplyItemIdsToPrefabs();
+        EditorUtility.SetDirty(itemManager);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        EnsureSelection(GetDefinitions(itemManager));
+        ShowNotification(new GUIContent("Item Data rebuilt."));
+        Repaint();
+    }
+
     private void ExportJson()
     {
         ItemManager itemManager = FindItemManager();
@@ -1981,14 +2058,14 @@ public class ItemDataEditorWindow : EditorWindow
             if (mapFilterProperty != null)
             {
                 if (!string.IsNullOrWhiteSpace(entry.mapFilter)
-                    && Enum.TryParse(entry.mapFilter, true, out InstallationMapFilter parsedFilter))
+                    && TryParseInstallationMapFilter(entry.mapFilter, out InstallationMapFilter parsedFilter))
                 {
-                    mapFilterProperty.intValue = (int)(parsedFilter == InstallationMapFilter.None ? InstallationMapFilter.Ground : parsedFilter);
+                    mapFilterProperty.intValue = (int)parsedFilter;
                 }
                 else if (entry.mapFilterValue >= 0)
                 {
                     InstallationMapFilter parsedFilterValue = (InstallationMapFilter)entry.mapFilterValue;
-                    mapFilterProperty.intValue = (int)(parsedFilterValue == InstallationMapFilter.None ? InstallationMapFilter.Ground : parsedFilterValue);
+                    mapFilterProperty.intValue = (int)NormalizeInstallationMapFilter(parsedFilterValue);
                 }
             }
         }

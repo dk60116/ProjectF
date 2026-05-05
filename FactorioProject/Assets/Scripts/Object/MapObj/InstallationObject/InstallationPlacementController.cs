@@ -10,6 +10,7 @@ public class InstallationPlacementController : MonoBehaviour
 {
     private const string InstallGridOverlayShaderName = "Custom/InstallGridOverlay";
     private const int ConveyorStackStateSentinel = -1000000002;
+    private const int InstallPreviewAreaMarkerSortingOrderOffset = 6000;
 
     [SerializeField]
     private Button installButton;
@@ -2783,35 +2784,71 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ConfigureInstalledInputOutputMarkers(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
     {
-        if (!TryGetInputOutputModule(installedObject, out _))
+        ConfigureInputOutputMarkers(installedObject, anchorCoordinate, quarterTurns, false);
+    }
+
+    private void RefreshInstallPreviewAreaMarkers(MapObject preview)
+    {
+        if (preview == null)
         {
+            return;
+        }
+
+        if (!TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
+        {
+            ClearInputOutputMarkers(preview);
+            return;
+        }
+
+        ConfigureInputOutputMarkers(preview, anchorCoordinate, GetPreviewQuarterTurns(preview), true);
+    }
+
+    private static void ClearInputOutputMarkers(MapObject mapObject)
+    {
+        InputOutputModuleAreaMarkerController markerController =
+            mapObject != null ? mapObject.GetComponent<InputOutputModuleAreaMarkerController>() : null;
+        if (markerController != null)
+        {
+            markerController.Configure(null, null);
+        }
+    }
+
+    private void ConfigureInputOutputMarkers(
+        MapObject mapObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        bool isInstallPreview)
+    {
+        if (!TryGetInputOutputModule(mapObject, out _))
+        {
+            ClearInputOutputMarkers(mapObject);
             return;
         }
 
         List<AreaMarkerSpawnRequest> markerRequests = new List<AreaMarkerSpawnRequest>();
         List<Vector3> primaryObjectWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            installedObject,
+            mapObject,
             quarterTurns,
             InputOutputModule.RectGridBlockType.Object);
         Vector3 primaryObjectWorldPosition = primaryObjectWorldPositions.Count > 0
             ? primaryObjectWorldPositions[0]
-            : installedObject.transform.position;
+            : mapObject.transform.position;
         Sprite arrowIcon = ResolveArrowMarkerIcon();
 
         List<Vector3> inputEnergyWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            installedObject,
+            mapObject,
             quarterTurns,
             InputOutputModule.RectGridBlockType.InputEnergy);
         AddAreaMarkerRequests(
             markerRequests,
             inputEnergyWorldPositions,
-            ResolveInputEnergyMarkerIcon(installedObject));
+            ResolveInputEnergyMarkerIcon(mapObject));
 
         List<Vector3> inputItemWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            installedObject,
+            mapObject,
             quarterTurns,
             InputOutputModule.RectGridBlockType.InputItem);
         AddDirectionalAreaMarkerRequests(
@@ -2823,7 +2860,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         List<Vector3> outputWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            installedObject,
+            mapObject,
             quarterTurns,
             InputOutputModule.RectGridBlockType.Output);
         AddDirectionalAreaMarkerRequests(
@@ -2835,22 +2872,30 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (markerRequests.Count <= 0)
         {
+            ClearInputOutputMarkers(mapObject);
             return;
         }
 
         AreaMarkerPool pool = ResolveAreaMarkerPool();
         if (pool == null)
         {
+            ClearInputOutputMarkers(mapObject);
             return;
         }
 
-        InputOutputModuleAreaMarkerController markerController = installedObject.GetComponent<InputOutputModuleAreaMarkerController>();
+        InputOutputModuleAreaMarkerController markerController = mapObject.GetComponent<InputOutputModuleAreaMarkerController>();
         if (markerController == null)
         {
-            markerController = installedObject.gameObject.AddComponent<InputOutputModuleAreaMarkerController>();
+            markerController = mapObject.gameObject.AddComponent<InputOutputModuleAreaMarkerController>();
         }
 
-        markerController.Configure(pool, markerRequests);
+        markerController.enabled = true;
+        markerController.Configure(
+            pool,
+            markerRequests,
+            isInstallPreview,
+            isInstallPreview ? InstallPreviewAreaMarkerSortingOrderOffset : 0,
+            true);
     }
 
     private void ConfigureInstalledInputOutputEnergyAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -4906,6 +4951,7 @@ public class InstallationPlacementController : MonoBehaviour
             previewPointerOriginPreview = replacementPreview;
         }
 
+        ClearInputOutputMarkers(currentPreview);
         if (Application.isPlaying)
         {
             Destroy(currentPreview.gameObject);
@@ -5565,6 +5611,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             movedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
         }
+
+        RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RefreshConveyorVariantsAroundActivePreview(
             hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null,
             previousConveyorChange);
@@ -6639,6 +6687,7 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewVerticalOffset);
         }
 
+        RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RememberLastBlueprintRotation(activeInstallDefinition, installPreviewQuarterTurns);
         RefreshConveyorVariantsAroundActivePreview(
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null,
@@ -7017,6 +7066,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             selectedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
         }
+
+        RefreshInstallPreviewAreaMarkers(activeInstallPreview);
     }
 
     private int GetPreviewQuarterTurns(MapObject preview)
@@ -7446,6 +7497,7 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewQuarterTurns = 0;
         }
 
+        ClearInputOutputMarkers(preview);
         if (Application.isPlaying)
         {
             Destroy(preview.gameObject);
@@ -7503,6 +7555,7 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewQuarterTurns = 0;
             }
 
+            ClearInputOutputMarkers(preview);
             if (Application.isPlaying)
             {
                 Destroy(preview.gameObject);
@@ -8108,20 +8161,21 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (IsRectGridAreaBlockType(rectGridBlockType))
         {
-            return block.Type == Block.BlockType.Ground
-                && (occupyingObject == null || occupyingObject is BoxObject);
+            return CanPlaceRectGridAreaBlock(block, occupyingObject, isInputOutputAreaBlock);
         }
 
         if (isInputOutputAreaBlock)
         {
-            return installationObject is BoxObject
-                && block.Type == Block.BlockType.Ground
-                && (occupyingObject == null || occupyingObject is InputOutputModule);
+            return CanPlaceBoxOnInputOutputAreaBlock(
+                installationObject,
+                block,
+                occupyingObject,
+                isInputOutputItemAreaBlock);
         }
 
         if (occupyingObject is Resource resource)
         {
-            return resource.CanHarvest && (allowedFilter & InstallationMapFilter.Resource) != 0;
+            return IsResourceAllowedByMapFilter(resource, allowedFilter);
         }
 
         if (occupyingObject != null)
@@ -8134,6 +8188,64 @@ public class InstallationPlacementController : MonoBehaviour
             Block.BlockType.Ground => (allowedFilter & InstallationMapFilter.Ground) != 0,
             _ => false
         };
+    }
+
+    private static bool CanPlaceRectGridAreaBlock(
+        Block block,
+        MapObject occupyingObject,
+        bool hasExistingInputOutputAreaBlock)
+    {
+        if (block == null || block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        if (hasExistingInputOutputAreaBlock)
+        {
+            return false;
+        }
+
+        if (occupyingObject == null || occupyingObject is BoxObject)
+        {
+            return true;
+        }
+
+        return occupyingObject is Resource resource
+            && IsResourceAllowedByMapFilter(resource, InstallationMapFilter.Ore);
+    }
+
+    private static bool CanPlaceBoxOnInputOutputAreaBlock(
+        InstallationObject installationObject,
+        Block block,
+        MapObject occupyingObject,
+        bool isInputOutputItemAreaBlock)
+    {
+        if (!(installationObject is BoxObject) || block == null || block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        if (occupyingObject == null || occupyingObject is InputOutputModule)
+        {
+            return true;
+        }
+
+        return isInputOutputItemAreaBlock
+            && occupyingObject is Resource resource
+            && IsResourceAllowedByMapFilter(resource, InstallationMapFilter.Ore);
+    }
+
+    private static bool IsResourceAllowedByMapFilter(Resource resource, InstallationMapFilter allowedFilter)
+    {
+        if (resource == null || !resource.CanHarvest)
+        {
+            return false;
+        }
+
+        InstallationMapFilter resourceFilter = resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
+            ? InstallationMapFilter.Tree
+            : InstallationMapFilter.Ore;
+        return (allowedFilter & resourceFilter) != 0;
     }
 
     private static bool IsRectGridAreaBlockType(InputOutputModule.RectGridBlockType blockType)
@@ -8626,6 +8738,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            ClearInputOutputMarkers(preview);
             if (Application.isPlaying)
             {
                 Destroy(preview.gameObject);

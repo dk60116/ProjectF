@@ -717,12 +717,12 @@ MonoBehaviour:
     portableMat: {fileID: 2100000, guid: 2cbb04f1f01402c42bf511527a7bd2ed, type: 2}
     icon: {fileID: 21300000, guid: f4af5822352a54540ac028e707e6979a, type: 3}
     size: 0
-  - name: Coar
+  - name: Robot arm
     id: 1
     prefab: {fileID: 0}
-    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
-    portableMat: {fileID: 2100000, guid: c794b4c8f412a824999b84bf29af69ff, type: 2}
-    icon: {fileID: 21300000, guid: 3848f0c230d2b994aad0acd59d1bd901, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
     size: 10
   - name: Stone
     id: 2
@@ -855,7 +855,14 @@ MonoBehaviour:
     prefab: {fileID: 0}
     portableMesh: {fileID: 0}
     portableMat: {fileID: 0}
-    icon: {fileID: 21300000, guid: 0bd95ca2de49cd14d83ea614f3342a1d, type: 3}
+    icon: {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
+    size: 0
+  - name: Coal
+    id: 21
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: c794b4c8f412a824999b84bf29af69ff, type: 2}
+    icon: {fileID: 21300000, guid: 3848f0c230d2b994aad0acd59d1bd901, type: 3}
     size: 0
   itemDefinitions:
   - {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
@@ -879,6 +886,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
   - {fileID: 11400000, guid: 771a4a8c595dbe74b9187ca84001cfcb, type: 2}
   - {fileID: 11400000, guid: ee57335a932a96a49963ace76adef614, type: 2}
+  - {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
   autoMigrateDefinitions: 1
 --- !u!1 &314944523
 GameObject:
