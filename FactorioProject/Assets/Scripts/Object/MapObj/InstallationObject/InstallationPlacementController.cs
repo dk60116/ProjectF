@@ -182,6 +182,14 @@ public class InstallationPlacementController : MonoBehaviour
         public Quaternion rotation = Quaternion.identity;
     }
 
+    private sealed class InstallPreviewPlacementReservation
+    {
+        public MapObject sourcePrefab;
+        public Vector2Int anchorCoordinate;
+        public int quarterTurns;
+        public List<Vector2Int> footprintCoordinates = new List<Vector2Int>();
+    }
+
     private sealed class InstallPreviewItemReservation
     {
         public int itemId = -1;
@@ -2486,7 +2494,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         List<MapObject> previewsToPlace = new List<MapObject>(installPreviewInstances);
         List<InstallPreviewPlacementPlan> placementPlans = new List<InstallPreviewPlacementPlan>(previewsToPlace.Count);
-        HashSet<Vector2Int> reservedFootprintCoordinates = new HashSet<Vector2Int>();
+        List<InstallPreviewPlacementReservation> reservedFootprintReservations =
+            new List<InstallPreviewPlacementReservation>();
         List<MapObject> placedPreviews = new List<MapObject>(previewsToPlace.Count);
         List<Vector2Int> placedAnchorCoordinates = new List<Vector2Int>(previewsToPlace.Count);
         List<MapObject> placedObjects = new List<MapObject>(previewsToPlace.Count);
@@ -2499,14 +2508,14 @@ public class InstallationPlacementController : MonoBehaviour
         {
             if (TryCreateInstallPreviewPlacementPlan(
                     previewsToPlace[i],
-                    reservedFootprintCoordinates,
+                    reservedFootprintReservations,
                     out InstallPreviewPlacementPlan placementPlan))
             {
                 placementPlans.Add(placementPlan);
             }
             else if (TryCreateStraightConveyorPlacementPlan(
                          previewsToPlace[i],
-                         reservedFootprintCoordinates,
+                         reservedFootprintReservations,
                          out placementPlan))
             {
                 placementPlans.Add(placementPlan);
@@ -2617,7 +2626,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TryCreateInstallPreviewPlacementPlan(
         MapObject preview,
-        HashSet<Vector2Int> reservedFootprintCoordinates,
+        List<InstallPreviewPlacementReservation> reservedFootprintReservations,
         out InstallPreviewPlacementPlan placementPlan)
     {
         placementPlan = null;
@@ -2677,34 +2686,25 @@ public class InstallationPlacementController : MonoBehaviour
             preview.transform.rotation,
             previewQuarterTurns);
 
-        if (!TryGetFootprintBlocks(
+        if (!TryFindPlaceablePlacementPlanFootprint(
                 anchorBlock.Coordinate,
                 sourcePrefab,
-                resolvedQuarterTurns,
                 preview,
+                resolvedQuarterTurns,
+                reservedFootprintReservations,
+                out resolvedQuarterTurns,
                 out List<Block> footprintBlocks,
-                true)
-            || footprintBlocks.Count <= 0)
+                out List<Vector2Int> footprintCoordinates))
         {
             return false;
         }
 
-        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorBlock.Coordinate, sourcePrefab, resolvedQuarterTurns);
-        for (int i = 0; i < footprintCoordinates.Count; i++)
-        {
-            if (reservedFootprintCoordinates != null && reservedFootprintCoordinates.Contains(footprintCoordinates[i]))
-            {
-                return false;
-            }
-        }
-
-        if (reservedFootprintCoordinates != null)
-        {
-            for (int i = 0; i < footprintCoordinates.Count; i++)
-            {
-                reservedFootprintCoordinates.Add(footprintCoordinates[i]);
-            }
-        }
+        AddReservedPlacementFootprint(
+            reservedFootprintReservations,
+            sourcePrefab,
+            anchorBlock.Coordinate,
+            resolvedQuarterTurns,
+            footprintCoordinates);
 
         placementPlan = new InstallPreviewPlacementPlan
         {
@@ -2713,15 +2713,15 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePrefab = sourcePrefab,
             quarterTurns = resolvedQuarterTurns,
             footprintBlocks = footprintBlocks,
-            position = preview.transform.position,
-            rotation = preview.transform.rotation
+            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, installPreviewVerticalOffset),
+            rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns)
         };
         return true;
     }
 
     private bool TryCreateStraightConveyorPlacementPlan(
         MapObject preview,
-        HashSet<Vector2Int> reservedFootprintCoordinates,
+        List<InstallPreviewPlacementReservation> reservedFootprintReservations,
         out InstallPreviewPlacementPlan placementPlan)
     {
         placementPlan = null;
@@ -2740,34 +2740,25 @@ public class InstallationPlacementController : MonoBehaviour
             preview.transform.rotation,
             previewQuarterTurns);
 
-        if (!TryGetFootprintBlocks(
+        if (!TryFindPlaceablePlacementPlanFootprint(
                 anchorBlock.Coordinate,
                 sourcePrefab,
-                resolvedQuarterTurns,
                 preview,
+                resolvedQuarterTurns,
+                reservedFootprintReservations,
+                out resolvedQuarterTurns,
                 out List<Block> footprintBlocks,
-                true)
-            || footprintBlocks.Count <= 0)
+                out List<Vector2Int> footprintCoordinates))
         {
             return false;
         }
 
-        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorBlock.Coordinate, sourcePrefab, resolvedQuarterTurns);
-        for (int i = 0; i < footprintCoordinates.Count; i++)
-        {
-            if (reservedFootprintCoordinates != null && reservedFootprintCoordinates.Contains(footprintCoordinates[i]))
-            {
-                return false;
-            }
-        }
-
-        if (reservedFootprintCoordinates != null)
-        {
-            for (int i = 0; i < footprintCoordinates.Count; i++)
-            {
-                reservedFootprintCoordinates.Add(footprintCoordinates[i]);
-            }
-        }
+        AddReservedPlacementFootprint(
+            reservedFootprintReservations,
+            sourcePrefab,
+            anchorBlock.Coordinate,
+            resolvedQuarterTurns,
+            footprintCoordinates);
 
         placementPlan = new InstallPreviewPlacementPlan
         {
@@ -2776,10 +2767,146 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePrefab = sourcePrefab,
             quarterTurns = resolvedQuarterTurns,
             footprintBlocks = footprintBlocks,
-            position = preview.transform.position,
-            rotation = preview.transform.rotation
+            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, installPreviewVerticalOffset),
+            rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns)
         };
         return true;
+    }
+
+    private bool TryFindPlaceablePlacementPlanFootprint(
+        Vector2Int anchorCoordinate,
+        MapObject sourcePrefab,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        List<InstallPreviewPlacementReservation> reservedFootprintReservations,
+        out int resolvedQuarterTurns,
+        out List<Block> footprintBlocks,
+        out List<Vector2Int> footprintCoordinates)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        footprintBlocks = null;
+        footprintCoordinates = null;
+
+        if (sourcePrefab == null)
+        {
+            return false;
+        }
+
+        for (int offset = 0; offset < 4; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurns(resolvedQuarterTurns + offset);
+            if (!TryGetFootprintBlocks(
+                    anchorCoordinate,
+                    sourcePrefab,
+                    candidateQuarterTurns,
+                    previewToIgnore,
+                    out List<Block> candidateFootprintBlocks,
+                    true)
+                || candidateFootprintBlocks == null
+                || candidateFootprintBlocks.Count <= 0)
+            {
+                continue;
+            }
+
+            List<Vector2Int> candidateFootprintCoordinates = GetFootprintCoordinates(
+                anchorCoordinate,
+                sourcePrefab,
+                candidateQuarterTurns);
+            if (CoordinatesOverlapReserved(
+                    anchorCoordinate,
+                    sourcePrefab,
+                    candidateQuarterTurns,
+                    candidateFootprintCoordinates,
+                    reservedFootprintReservations))
+            {
+                continue;
+            }
+
+            resolvedQuarterTurns = candidateQuarterTurns;
+            footprintBlocks = candidateFootprintBlocks;
+            footprintCoordinates = candidateFootprintCoordinates;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void AddReservedPlacementFootprint(
+        List<InstallPreviewPlacementReservation> reservations,
+        MapObject sourcePrefab,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        IReadOnlyList<Vector2Int> footprintCoordinates)
+    {
+        if (reservations == null
+            || sourcePrefab == null
+            || footprintCoordinates == null
+            || footprintCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        reservations.Add(new InstallPreviewPlacementReservation
+        {
+            sourcePrefab = sourcePrefab,
+            anchorCoordinate = anchorCoordinate,
+            quarterTurns = NormalizePlacementQuarterTurns(quarterTurns),
+            footprintCoordinates = new List<Vector2Int>(footprintCoordinates)
+        });
+    }
+
+    private bool CoordinatesOverlapReserved(
+        Vector2Int anchorCoordinate,
+        MapObject sourcePrefab,
+        int quarterTurns,
+        IReadOnlyList<Vector2Int> coordinates,
+        IReadOnlyList<InstallPreviewPlacementReservation> reservedFootprintReservations)
+    {
+        if (coordinates == null
+            || reservedFootprintReservations == null
+            || reservedFootprintReservations.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            for (int reservationIndex = 0; reservationIndex < reservedFootprintReservations.Count; reservationIndex++)
+            {
+                InstallPreviewPlacementReservation reservation = reservedFootprintReservations[reservationIndex];
+                if (reservation == null
+                    || reservation.footprintCoordinates == null
+                    || !reservation.footprintCoordinates.Contains(coordinate))
+                {
+                    continue;
+                }
+
+                if (!CanOverlapCompatiblePlacementItemAreas(
+                        coordinate,
+                        sourcePrefab,
+                        GetRectGridBlockTypeAtCoordinate(
+                            anchorCoordinate,
+                            sourcePrefab,
+                            quarterTurns,
+                            coordinate),
+                        anchorCoordinate,
+                        quarterTurns,
+                        reservation.sourcePrefab,
+                        GetRectGridBlockTypeAtCoordinate(
+                            reservation.anchorCoordinate,
+                            reservation.sourcePrefab,
+                            reservation.quarterTurns,
+                            coordinate),
+                        reservation.anchorCoordinate,
+                        reservation.quarterTurns))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void ConfigureInstalledInputOutputMarkers(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -2895,7 +3022,7 @@ public class InstallationPlacementController : MonoBehaviour
             markerRequests,
             isInstallPreview,
             isInstallPreview ? InstallPreviewAreaMarkerSortingOrderOffset : 0,
-            true);
+            false);
     }
 
     private void ConfigureInstalledInputOutputEnergyAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -5316,6 +5443,22 @@ public class InstallationPlacementController : MonoBehaviour
         return inputOutputModule != null;
     }
 
+    private bool TryGetMiningMachine(MapObject footprintSource, out MiningMachine miningMachine)
+    {
+        miningMachine = footprintSource as MiningMachine;
+        if (miningMachine == null && footprintSource != null)
+        {
+            miningMachine = footprintSource.GetComponent<MiningMachine>();
+        }
+
+        if (miningMachine == null && footprintSource != null)
+        {
+            miningMachine = footprintSource.GetComponentInChildren<MiningMachine>(true);
+        }
+
+        return miningMachine != null;
+    }
+
     private List<Vector3> GetRectGridBlockWorldPositions(
         Vector2Int anchorCoordinate,
         MapObject footprintSource,
@@ -5335,7 +5478,13 @@ public class InstallationPlacementController : MonoBehaviour
         {
             if (terrain != null && terrain.TryGetLoadedBlock(coordinates[i], out Block block) && block != null)
             {
-                worldPositions.Add(block.transform.position);
+                Vector3 markerPosition = block.transform.position;
+                if (TryGetMiningResourceMarkerSurfaceY(block, out float markerSurfaceY))
+                {
+                    markerPosition.y = Mathf.Max(markerPosition.y, markerSurfaceY);
+                }
+
+                worldPositions.Add(markerPosition);
                 continue;
             }
 
@@ -5343,6 +5492,45 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return worldPositions;
+    }
+
+    private static bool TryGetMiningResourceMarkerSurfaceY(Block block, out float surfaceY)
+    {
+        surfaceY = 0f;
+        Resource resource = block != null ? block.Resource : null;
+        if (resource == null || resource.ResolvedHarvestMode != Resource.HarvestMode.Mining)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = resource.GetComponentsInChildren<Renderer>(true);
+        bool foundRenderer = false;
+        Bounds bounds = default;
+        if (renderers != null)
+        {
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer rendererComponent = renderers[i];
+                if (rendererComponent == null)
+                {
+                    continue;
+                }
+
+                if (!foundRenderer)
+                {
+                    bounds = rendererComponent.bounds;
+                    foundRenderer = true;
+                    continue;
+                }
+
+                bounds.Encapsulate(rendererComponent.bounds);
+            }
+        }
+
+        surfaceY = foundRenderer
+            ? bounds.max.y
+            : Mathf.Max(block.transform.position.y, resource.transform.position.y);
+        return true;
     }
 
     private bool TryGetRectGridBlockCoordinates(
@@ -7849,6 +8037,50 @@ public class InstallationPlacementController : MonoBehaviour
         return preview != null && installPreviewAnchorCoordinates.TryGetValue(preview, out anchorCoordinate);
     }
 
+    private MapObject ResolveInstallPreviewFootprintSource(MapObject preview)
+    {
+        if (preview != null
+            && installPreviewSourcePrefabsByPreview.TryGetValue(preview, out MapObject sourcePrefab)
+            && sourcePrefab != null)
+        {
+            return sourcePrefab;
+        }
+
+        return preview;
+    }
+
+    private bool CanOverlapCompatibleInstallPreview(
+        Vector2Int coordinate,
+        MapObject candidateFootprintSource,
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        Vector2Int candidateAnchorCoordinate,
+        int candidateQuarterTurns,
+        MapObject existingPreview)
+    {
+        if (existingPreview == null
+            || !TryGetPreviewAnchorCoordinate(existingPreview, out Vector2Int existingAnchorCoordinate))
+        {
+            return false;
+        }
+
+        MapObject existingFootprintSource = ResolveInstallPreviewFootprintSource(existingPreview);
+        int existingQuarterTurns = GetPreviewQuarterTurns(existingPreview);
+        return CanOverlapCompatiblePlacementItemAreas(
+            coordinate,
+            candidateFootprintSource,
+            candidateBlockType,
+            candidateAnchorCoordinate,
+            candidateQuarterTurns,
+            existingFootprintSource,
+            GetRectGridBlockTypeAtCoordinate(
+                existingAnchorCoordinate,
+                existingFootprintSource,
+                existingQuarterTurns,
+                coordinate),
+            existingAnchorCoordinate,
+            existingQuarterTurns);
+    }
+
     private Vector2Int GetFootprintSize(MapObject footprintSource, int quarterTurns)
     {
         List<Vector2Int> offsets = GetFootprintLocalOffsets(footprintSource, quarterTurns);
@@ -8047,7 +8279,12 @@ public class InstallationPlacementController : MonoBehaviour
                 quarterTurns,
                 coordinate,
                 out InputOutputModule.RectGridBlockType rectGridBlockType);
-            if (!CanPlacePreviewOnTargetBlockType(footprintBlock, footprintSource, rectGridBlockType))
+            if (!CanPlacePreviewOnTargetBlockType(
+                    footprintBlock,
+                    footprintSource,
+                    rectGridBlockType,
+                    anchorCoordinate,
+                    quarterTurns))
             {
                 return false;
             }
@@ -8055,7 +8292,14 @@ public class InstallationPlacementController : MonoBehaviour
             if (!ignoreOtherPreviews
                 && TryGetInstallPreviewAtCoordinate(coordinate, out MapObject existingPreview)
                 && existingPreview != null
-                && existingPreview != previewToIgnore)
+                && existingPreview != previewToIgnore
+                && !CanOverlapCompatibleInstallPreview(
+                    coordinate,
+                    footprintSource,
+                    rectGridBlockType,
+                    anchorCoordinate,
+                    quarterTurns,
+                    existingPreview))
             {
                 return false;
             }
@@ -8107,6 +8351,22 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private InputOutputModule.RectGridBlockType GetRectGridBlockTypeAtCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        Vector2Int coordinate)
+    {
+        return TryGetRectGridFootprintBlockType(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            ? blockType
+            : InputOutputModule.RectGridBlockType.None;
+    }
+
     private bool ShouldBindInstalledObjectToBlock(
         Block block,
         Vector2Int anchorCoordinate,
@@ -8136,7 +8396,9 @@ public class InstallationPlacementController : MonoBehaviour
     private bool CanPlacePreviewOnTargetBlockType(
         Block block,
         MapObject footprintSource,
-        InputOutputModule.RectGridBlockType rectGridBlockType = InputOutputModule.RectGridBlockType.None)
+        InputOutputModule.RectGridBlockType rectGridBlockType = InputOutputModule.RectGridBlockType.None,
+        Vector2Int? anchorCoordinate = null,
+        int quarterTurns = 0)
     {
         if (block == null)
         {
@@ -8161,7 +8423,16 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (IsRectGridAreaBlockType(rectGridBlockType))
         {
-            return CanPlaceRectGridAreaBlock(block, occupyingObject, isInputOutputAreaBlock);
+            return CanPlaceRectGridAreaBlock(
+                block,
+                occupyingObject,
+                footprintSource,
+                rectGridBlockType,
+                anchorCoordinate ?? block.Coordinate,
+                quarterTurns,
+                isInputOutputEnergyAreaBlock,
+                isInputOutputItemAreaBlock,
+                isInputOutputOutputAreaBlock);
         }
 
         if (isInputOutputAreaBlock)
@@ -8190,17 +8461,36 @@ public class InstallationPlacementController : MonoBehaviour
         };
     }
 
-    private static bool CanPlaceRectGridAreaBlock(
+    private bool CanPlaceRectGridAreaBlock(
         Block block,
         MapObject occupyingObject,
-        bool hasExistingInputOutputAreaBlock)
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        bool hasExistingInputOutputEnergyAreaBlock,
+        bool hasExistingInputOutputItemAreaBlock,
+        bool hasExistingInputOutputOutputAreaBlock)
     {
         if (block == null || block.Type != Block.BlockType.Ground)
         {
             return false;
         }
 
-        if (hasExistingInputOutputAreaBlock)
+        bool hasExistingInputOutputAreaBlock =
+            hasExistingInputOutputEnergyAreaBlock
+            || hasExistingInputOutputItemAreaBlock
+            || hasExistingInputOutputOutputAreaBlock;
+        if (hasExistingInputOutputAreaBlock
+            && !CanOverlapCompatibleItemArea(
+                block.Coordinate,
+                footprintSource,
+                rectGridBlockType,
+                anchorCoordinate,
+                quarterTurns,
+                hasExistingInputOutputEnergyAreaBlock,
+                hasExistingInputOutputItemAreaBlock,
+                hasExistingInputOutputOutputAreaBlock))
         {
             return false;
         }
@@ -8212,6 +8502,392 @@ public class InstallationPlacementController : MonoBehaviour
 
         return occupyingObject is Resource resource
             && IsResourceAllowedByMapFilter(resource, InstallationMapFilter.Ore);
+    }
+
+    private bool CanOverlapCompatibleItemArea(
+        Vector2Int coordinate,
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        bool hasExistingInputOutputEnergyAreaBlock,
+        bool hasExistingInputOutputItemAreaBlock,
+        bool hasExistingInputOutputOutputAreaBlock)
+    {
+        switch (rectGridBlockType)
+        {
+            case InputOutputModule.RectGridBlockType.InputItem:
+                return hasExistingInputOutputOutputAreaBlock
+                    && CandidateInputItemsMatchExistingOutput(
+                        coordinate,
+                        footprintSource,
+                        anchorCoordinate,
+                        quarterTurns);
+
+            case InputOutputModule.RectGridBlockType.InputEnergy:
+                return hasExistingInputOutputOutputAreaBlock
+                    && CandidateInputEnergyMatchesExistingOutput(coordinate, footprintSource);
+
+            case InputOutputModule.RectGridBlockType.Output:
+                return CandidateOutputMatchesExistingInputAreas(
+                    coordinate,
+                    footprintSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    hasExistingInputOutputItemAreaBlock,
+                    hasExistingInputOutputEnergyAreaBlock);
+
+            default:
+                return false;
+        }
+    }
+
+    private bool CandidateInputItemsMatchExistingOutput(
+        Vector2Int coordinate,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        HashSet<int> candidateInputItemIds = new HashSet<int>();
+        HashSet<int> existingOutputItemIds = new HashSet<int>();
+        return TryGetCandidateInputItemIdsAtCoordinate(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                coordinate,
+                candidateInputItemIds)
+            && TryGetExistingOutputItemIdsAtCoordinate(coordinate, existingOutputItemIds)
+            && HasSharedItemId(candidateInputItemIds, existingOutputItemIds);
+    }
+
+    private bool CandidateInputEnergyMatchesExistingOutput(Vector2Int coordinate, MapObject footprintSource)
+    {
+        HashSet<ItemDefinition.EnergyType> candidateInputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+        HashSet<int> existingOutputItemIds = new HashSet<int>();
+        return TryGetCandidateInputEnergyTypes(footprintSource, candidateInputEnergyTypes)
+            && TryGetExistingOutputItemIdsAtCoordinate(coordinate, existingOutputItemIds)
+            && HasOutputItemWithEnergyType(existingOutputItemIds, candidateInputEnergyTypes);
+    }
+
+    private bool CandidateOutputMatchesExistingInputAreas(
+        Vector2Int coordinate,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        bool hasExistingInputOutputItemAreaBlock,
+        bool hasExistingInputOutputEnergyAreaBlock)
+    {
+        if (!hasExistingInputOutputItemAreaBlock && !hasExistingInputOutputEnergyAreaBlock)
+        {
+            return false;
+        }
+
+        HashSet<int> candidateOutputItemIds = new HashSet<int>();
+        if (!TryGetCandidateOutputItemIds(anchorCoordinate, footprintSource, candidateOutputItemIds))
+        {
+            return false;
+        }
+
+        return (hasExistingInputOutputItemAreaBlock
+                && ExistingInputItemsMatchOutput(coordinate, candidateOutputItemIds))
+            || (hasExistingInputOutputEnergyAreaBlock
+                && ExistingInputEnergyMatchesOutput(coordinate, candidateOutputItemIds));
+    }
+
+    private static bool ExistingInputItemsMatchOutput(Vector2Int coordinate, ISet<int> outputItemIds)
+    {
+        HashSet<int> existingInputItemIds = new HashSet<int>();
+        return TryGetExistingInputItemIdsAtCoordinate(coordinate, existingInputItemIds)
+            && HasSharedItemId(outputItemIds, existingInputItemIds);
+    }
+
+    private static bool ExistingInputEnergyMatchesOutput(Vector2Int coordinate, ISet<int> outputItemIds)
+    {
+        HashSet<ItemDefinition.EnergyType> existingInputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+        return TryGetExistingInputEnergyTypesAtCoordinate(coordinate, existingInputEnergyTypes)
+            && HasOutputItemWithEnergyType(outputItemIds, existingInputEnergyTypes);
+    }
+
+    private bool CanOverlapCompatiblePlacementItemAreas(
+        Vector2Int coordinate,
+        MapObject candidateFootprintSource,
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        Vector2Int candidateAnchorCoordinate,
+        int candidateQuarterTurns,
+        MapObject existingFootprintSource,
+        InputOutputModule.RectGridBlockType existingBlockType,
+        Vector2Int existingAnchorCoordinate,
+        int existingQuarterTurns)
+    {
+        if (candidateBlockType == InputOutputModule.RectGridBlockType.Output)
+        {
+            HashSet<int> candidateOutputItemIds = new HashSet<int>();
+            if (!TryGetCandidateOutputItemIds(
+                    candidateAnchorCoordinate,
+                    candidateFootprintSource,
+                    candidateOutputItemIds))
+            {
+                return false;
+            }
+
+            return PlacementInputAreaMatchesOutput(
+                coordinate,
+                existingFootprintSource,
+                existingBlockType,
+                existingAnchorCoordinate,
+                existingQuarterTurns,
+                candidateOutputItemIds);
+        }
+
+        if (existingBlockType != InputOutputModule.RectGridBlockType.Output)
+        {
+            return false;
+        }
+
+        HashSet<int> existingOutputItemIds = new HashSet<int>();
+        if (!TryGetCandidateOutputItemIds(
+                existingAnchorCoordinate,
+                existingFootprintSource,
+                existingOutputItemIds))
+        {
+            return false;
+        }
+
+        return PlacementInputAreaMatchesOutput(
+            coordinate,
+            candidateFootprintSource,
+            candidateBlockType,
+            candidateAnchorCoordinate,
+            candidateQuarterTurns,
+            existingOutputItemIds);
+    }
+
+    private bool PlacementInputAreaMatchesOutput(
+        Vector2Int coordinate,
+        MapObject inputFootprintSource,
+        InputOutputModule.RectGridBlockType inputBlockType,
+        Vector2Int inputAnchorCoordinate,
+        int inputQuarterTurns,
+        ISet<int> outputItemIds)
+    {
+        if (inputBlockType == InputOutputModule.RectGridBlockType.InputItem)
+        {
+            HashSet<int> inputItemIds = new HashSet<int>();
+            return TryGetCandidateInputItemIdsAtCoordinate(
+                    inputAnchorCoordinate,
+                    inputFootprintSource,
+                    inputQuarterTurns,
+                    coordinate,
+                    inputItemIds)
+                && HasSharedItemId(outputItemIds, inputItemIds);
+        }
+
+        if (inputBlockType == InputOutputModule.RectGridBlockType.InputEnergy)
+        {
+            HashSet<ItemDefinition.EnergyType> inputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+            return TryGetCandidateInputEnergyTypes(inputFootprintSource, inputEnergyTypes)
+                && HasOutputItemWithEnergyType(outputItemIds, inputEnergyTypes);
+        }
+
+        return false;
+    }
+
+    private bool TryGetCandidateInputItemIdsAtCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        Vector2Int coordinate,
+        ISet<int> inputItemIds)
+    {
+        if (inputItemIds == null
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetOrderedInputItemAreaBindings(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                inputOutputModule,
+                out List<InputOutputModuleItemAreaBinding> bindings))
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int i = 0; i < bindings.Count; i++)
+        {
+            InputOutputModuleItemAreaBinding binding = bindings[i];
+            if (binding.Coordinate != coordinate || binding.ItemId < 0)
+            {
+                continue;
+            }
+
+            inputItemIds.Add(binding.ItemId);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    private bool TryGetCandidateOutputItemIds(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        IReadOnlyList<InputOutputModule.ItemIoEntry> outputList = inputOutputModule.OutputList;
+        if (outputList != null)
+        {
+            for (int i = 0; i < outputList.Count; i++)
+            {
+                ItemDefinition itemDefinition = outputList[i].itemDefinition;
+                if (itemDefinition == null || itemDefinition.id < 0)
+                {
+                    continue;
+                }
+
+                outputItemIds.Add(itemDefinition.id);
+                foundAny = true;
+            }
+        }
+
+        if (TryGetMiningMachine(footprintSource, out MiningMachine miningMachine))
+        {
+            foundAny |= miningMachine.TryAppendPlacementOutputItemIds(
+                ResolveInstallPreviewTerrain(),
+                anchorCoordinate,
+                outputItemIds);
+        }
+
+        return foundAny;
+    }
+
+    private bool TryGetCandidateInputEnergyTypes(
+        MapObject footprintSource,
+        ISet<ItemDefinition.EnergyType> energyTypes)
+    {
+        if (energyTypes == null)
+        {
+            return false;
+        }
+
+        ItemDefinition installationDefinition = ResolveItemDefinition(footprintSource);
+        if (installationDefinition == null
+            || installationDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        {
+            return false;
+        }
+
+        energyTypes.Add(installationDefinition.useEnergyType);
+        return true;
+    }
+
+    private static bool TryGetExistingOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
+    {
+        return InputOutputModule.TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, outputItemIds);
+    }
+
+    private static bool TryGetExistingInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    {
+        if (inputItemIds == null)
+        {
+            return false;
+        }
+
+        bool foundAny = InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, inputItemIds);
+        foundAny |= InputOutputModule.TryGetInputItemIdsAtRuntimeGridCoordinate(coordinate, inputItemIds);
+        return foundAny;
+    }
+
+    private static bool TryGetExistingInputEnergyTypesAtCoordinate(
+        Vector2Int coordinate,
+        ISet<ItemDefinition.EnergyType> energyTypes)
+    {
+        if (energyTypes == null)
+        {
+            return false;
+        }
+
+        bool foundAny = InputOutputModuleEnergyAreaController.TryGetAcceptedEnergyTypes(coordinate, energyTypes);
+        foundAny |= InputOutputModule.TryGetInputEnergyTypesAtRuntimeGridCoordinate(coordinate, energyTypes);
+        return foundAny;
+    }
+
+    private static bool HasSharedItemId(ISet<int> leftItemIds, ISet<int> rightItemIds)
+    {
+        if (leftItemIds == null || rightItemIds == null || leftItemIds.Count <= 0 || rightItemIds.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (int itemId in leftItemIds)
+        {
+            if (itemId >= 0 && rightItemIds.Contains(itemId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasOutputItemWithEnergyType(
+        ISet<int> outputItemIds,
+        ISet<ItemDefinition.EnergyType> acceptedEnergyTypes)
+    {
+        if (outputItemIds == null
+            || acceptedEnergyTypes == null
+            || outputItemIds.Count <= 0
+            || acceptedEnergyTypes.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (int outputItemId in outputItemIds)
+        {
+            ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
+            if (outputDefinition == null
+                || outputDefinition.energyType == ItemDefinition.EnergyType.None
+                || outputDefinition.energyAmount <= 0)
+            {
+                continue;
+            }
+
+            if (acceptedEnergyTypes.Contains(outputDefinition.energyType))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static ItemDefinition ResolveItemDefinition(int itemId)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
     }
 
     private static bool CanPlaceBoxOnInputOutputAreaBlock(

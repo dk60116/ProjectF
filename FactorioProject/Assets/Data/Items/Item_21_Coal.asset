@@ -22,8 +22,8 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   capacity: 10
-  energyType: 0
-  energyAmount: 0
+  energyType: 1
+  energyAmount: 10
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

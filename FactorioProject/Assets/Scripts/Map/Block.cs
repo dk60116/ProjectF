@@ -652,6 +652,11 @@ public class Block : BaseObject
             return true;
         }
 
+        if (itemId >= 0 && !InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(coordinate, itemId))
+        {
+            return false;
+        }
+
         CleanupPortableStack(inputAreaCenterStack);
         if (itemId >= 0 && !IsStackCompatible(inputAreaCenterStack, itemId))
         {
@@ -894,6 +899,11 @@ public class Block : BaseObject
         EnsureFloorObjectsInitialized();
 
         if (objectId < 0 || !ResolveFloorObjectPool())
+        {
+            return false;
+        }
+
+        if (!InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(coordinate, objectId))
         {
             return false;
         }

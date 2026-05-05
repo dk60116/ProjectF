@@ -25,5 +25,5 @@ MonoBehaviour:
   energyType: 0
   energyAmount: 0
   useEnergyType: 1
-  useEnergyAmount: 1
-  completeEnergy: 0
+  useEnergyAmount: 0.1
+  completeEnergy: 0.5

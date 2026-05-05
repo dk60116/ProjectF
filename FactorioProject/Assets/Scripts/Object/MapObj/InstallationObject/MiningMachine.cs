@@ -1,9 +1,27 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class MiningMachine : InputOutputModule
 {
     [SerializeField]
     private Transform drill;
+
+    public bool TryAppendPlacementOutputItemIds(
+        TerrainGenerator terrain,
+        Vector2Int anchorCoordinate,
+        ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null
+            || !TryResolveMiningResource(terrain, anchorCoordinate, out Resource resource)
+            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
+            || outputItemId < 0)
+        {
+            return false;
+        }
+
+        outputItemIds.Add(outputItemId);
+        return true;
+    }
 
     protected override void TryStartNextCraft()
     {
@@ -67,10 +85,52 @@ public class MiningMachine : InputOutputModule
         return true;
     }
 
+    protected override bool AppendOutputItemIds(ISet<int> outputItemIds)
+    {
+        bool foundAny = base.AppendOutputItemIds(outputItemIds);
+        if (outputItemIds == null
+            || !TryResolveMiningResource(out Resource resource)
+            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
+            || outputItemId < 0)
+        {
+            return foundAny;
+        }
+
+        outputItemIds.Add(outputItemId);
+        return true;
+    }
+
     private bool TryResolveMiningResource(out Resource resource)
     {
         resource = null;
         if (!TryGetLoadedBlock(RuntimeAnchorCoordinate, out Block block) || block == null)
+        {
+            return false;
+        }
+
+        return TryResolveMiningResource(block, out resource);
+    }
+
+    private static bool TryResolveMiningResource(
+        TerrainGenerator terrain,
+        Vector2Int anchorCoordinate,
+        out Resource resource)
+    {
+        resource = null;
+        if (terrain == null
+            || !terrain.TryGetLoadedBlock(anchorCoordinate, out Block block)
+            || block == null)
+        {
+            return false;
+        }
+
+        return TryResolveMiningResource(block, out resource);
+    }
+
+    private static bool TryResolveMiningResource(Block block, out Resource resource)
+    {
+        resource = null;
+        if (block == null)
         {
             return false;
         }

@@ -239,6 +239,12 @@ public class FilterSelectUI : MonoBehaviour
         for (int i = 0; i < occupiedCoordinates.Count; i++)
         {
             Vector2Int coordinate = occupiedCoordinates[i];
+            if (InputOutputModule.TryGetRuntimeIoOverlapAllowedItemIds(coordinate, allowedItemIds))
+            {
+                isAreaScoped = true;
+                continue;
+            }
+
             isAreaScoped |= InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, allowedItemIds);
             isAreaScoped |= InputOutputModuleEnergyAreaController.TryGetAcceptedEnergyTypes(coordinate, allowedEnergyTypes);
             isAreaScoped |= InputOutputModule.TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, allowedItemIds);

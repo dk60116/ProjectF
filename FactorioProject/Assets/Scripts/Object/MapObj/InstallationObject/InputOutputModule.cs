@@ -5,6 +5,13 @@ public class InputOutputModule : InstallationObject
 {
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeGridCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
+    private static readonly HashSet<InputOutputModule> activeRuntimeModules
+        = new HashSet<InputOutputModule>();
+
+    private delegate bool RuntimeCoordinateValueCollector<T>(
+        InputOutputModule module,
+        Vector2Int coordinate,
+        ISet<T> values);
 
     public enum SlotLayoutType
     {
@@ -479,32 +486,109 @@ public class InputOutputModule : InstallationObject
 
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
-        if (outputItemIds == null)
+        return TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIds);
+    }
+
+    public static bool TryGetInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    {
+        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIds);
+    }
+
+    public static bool TryGetInputEnergyTypesAtRuntimeGridCoordinate(
+        Vector2Int coordinate,
+        ISet<ItemDefinition.EnergyType> energyTypes)
+    {
+        return TryGetRuntimeCoordinateValues(coordinate, energyTypes, TryAppendRuntimeInputEnergyTypes);
+    }
+
+    private static bool TryGetRuntimeCoordinateValues<T>(
+        Vector2Int coordinate,
+        ISet<T> values,
+        RuntimeCoordinateValueCollector<T> collectValues)
+    {
+        if (values == null || collectValues == null)
         {
             return false;
         }
 
-        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-            || modules == null
-            || modules.Count <= 0)
+        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
+        bool foundAny = false;
+        if (registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            && modules != null
+            && modules.Count > 0)
+        {
+            foundAny |= AppendRuntimeCoordinateValues(
+                modules,
+                coordinate,
+                values,
+                visitedModules,
+                collectValues);
+        }
+
+        foundAny |= AppendRuntimeCoordinateValues(
+            activeRuntimeModules,
+            coordinate,
+            values,
+            visitedModules,
+            collectValues);
+        return foundAny;
+    }
+
+    private static bool AppendRuntimeCoordinateValues<T>(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ISet<T> values,
+        ISet<InputOutputModule> visitedModules,
+        RuntimeCoordinateValueCollector<T> collectValues)
+    {
+        if (modules == null || values == null || collectValues == null)
         {
             return false;
         }
 
         bool foundAny = false;
-        foreach (InputOutputModule candidate in modules)
+        foreach (InputOutputModule module in modules)
         {
-            if (candidate == null
-                || !candidate.gameObject.activeInHierarchy
-                || !candidate.ContainsRuntimeOutputCoordinate(coordinate))
+            if (module == null
+                || !module.gameObject.activeInHierarchy
+                || (visitedModules != null && !visitedModules.Add(module)))
             {
                 continue;
             }
 
-            foundAny |= candidate.AppendOutputItemIds(outputItemIds);
+            foundAny |= collectValues(module, coordinate, values);
         }
 
         return foundAny;
+    }
+
+    private static bool TryAppendRuntimeOutputItemIds(
+        InputOutputModule module,
+        Vector2Int coordinate,
+        ISet<int> outputItemIds)
+    {
+        if (module == null || !module.ContainsRuntimeOutputCoordinate(coordinate))
+        {
+            return false;
+        }
+
+        return module.AppendOutputItemIds(outputItemIds);
+    }
+
+    private static bool TryAppendRuntimeInputItemIds(
+        InputOutputModule module,
+        Vector2Int coordinate,
+        ISet<int> inputItemIds)
+    {
+        return module != null && module.AppendRuntimeInputItemIdsAtCoordinate(coordinate, inputItemIds);
+    }
+
+    private static bool TryAppendRuntimeInputEnergyTypes(
+        InputOutputModule module,
+        Vector2Int coordinate,
+        ISet<ItemDefinition.EnergyType> energyTypes)
+    {
+        return module != null && module.AppendRuntimeInputEnergyTypesAtCoordinate(coordinate, energyTypes);
     }
 
     public static bool RuntimeOutputCoordinateProducesItemId(Vector2Int coordinate, int itemId)
@@ -514,29 +598,87 @@ public class InputOutputModule : InstallationObject
             return false;
         }
 
-        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-            || modules == null
-            || modules.Count <= 0)
+        HashSet<int> outputItemIds = new HashSet<int>();
+        return TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, outputItemIds)
+            && outputItemIds.Contains(itemId)
+            && CanAddItemToRuntimeIoOverlapCoordinate(coordinate, itemId);
+    }
+
+    public static bool CanAddItemToRuntimeIoOverlapCoordinate(Vector2Int coordinate, int itemId)
+    {
+        if (itemId < 0)
         {
             return false;
         }
 
-        foreach (InputOutputModule candidate in modules)
+        HashSet<int> allowedItemIds = new HashSet<int>();
+        return !TryGetRuntimeIoOverlapAllowedItemIds(coordinate, allowedItemIds)
+            || allowedItemIds.Contains(itemId);
+    }
+
+    public static bool TryGetRuntimeIoOverlapAllowedItemIds(Vector2Int coordinate, ISet<int> allowedItemIds)
+    {
+        if (allowedItemIds == null)
         {
-            if (candidate == null
-                || !candidate.gameObject.activeInHierarchy
-                || !candidate.ContainsRuntimeOutputCoordinate(coordinate))
+            return false;
+        }
+
+        HashSet<int> outputItemIds = new HashSet<int>();
+        if (!TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, outputItemIds)
+            || outputItemIds.Count <= 0)
+        {
+            return false;
+        }
+
+        HashSet<int> inputItemIds = new HashSet<int>();
+        bool hasInputItemArea = InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, inputItemIds);
+        hasInputItemArea |= TryGetInputItemIdsAtRuntimeGridCoordinate(coordinate, inputItemIds);
+
+        HashSet<ItemDefinition.EnergyType> inputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+        bool hasInputEnergyArea = InputOutputModuleEnergyAreaController.TryGetAcceptedEnergyTypes(coordinate, inputEnergyTypes);
+        hasInputEnergyArea |= TryGetInputEnergyTypesAtRuntimeGridCoordinate(coordinate, inputEnergyTypes);
+
+        if (!hasInputItemArea && !hasInputEnergyArea)
+        {
+            return false;
+        }
+
+        foreach (int outputItemId in outputItemIds)
+        {
+            if (outputItemId < 0)
             {
                 continue;
             }
 
-            if (candidate.HasOutputItemId(itemId))
+            if (hasInputItemArea && inputItemIds.Contains(outputItemId))
             {
-                return true;
+                allowedItemIds.Add(outputItemId);
+                continue;
+            }
+
+            if (hasInputEnergyArea && OutputItemMatchesEnergyTypes(outputItemId, inputEnergyTypes))
+            {
+                allowedItemIds.Add(outputItemId);
             }
         }
 
-        return false;
+        return true;
+    }
+
+    private static bool OutputItemMatchesEnergyTypes(
+        int outputItemId,
+        ISet<ItemDefinition.EnergyType> energyTypes)
+    {
+        if (outputItemId < 0 || energyTypes == null || energyTypes.Count <= 0)
+        {
+            return false;
+        }
+
+        ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
+        return outputDefinition != null
+            && outputDefinition.energyType != ItemDefinition.EnergyType.None
+            && outputDefinition.energyAmount > 0
+            && energyTypes.Contains(outputDefinition.energyType);
     }
 
     public bool ContainsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType blockType)
@@ -641,6 +783,51 @@ public class InputOutputModule : InstallationObject
         return foundAny;
     }
 
+    private bool AppendRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    {
+        if (inputItemIds == null || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea inputArea = runtimeInputItemAreas[i];
+            if (inputArea.coordinate != coordinate || inputArea.itemId < 0)
+            {
+                continue;
+            }
+
+            inputItemIds.Add(inputArea.itemId);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    private bool AppendRuntimeInputEnergyTypesAtCoordinate(
+        Vector2Int coordinate,
+        ISet<ItemDefinition.EnergyType> energyTypes)
+    {
+        if (energyTypes == null
+            || runtimeInputEnergyCoordinates == null
+            || runtimeInputEnergyCoordinates.Count <= 0
+            || !ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.InputEnergy))
+        {
+            return false;
+        }
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null || installedDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        {
+            return false;
+        }
+
+        energyTypes.Add(installedDefinition.useEnergyType);
+        return true;
+    }
+
     private void Update()
     {
         if (!Application.isPlaying)
@@ -664,12 +851,14 @@ public class InputOutputModule : InstallationObject
     protected override void OnEnable()
     {
         base.OnEnable();
+        activeRuntimeModules.Add(this);
         RegisterRuntimeGridCoordinates();
     }
 
     protected override void OnDisable()
     {
         UnregisterRuntimeGridCoordinates();
+        activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
         base.OnDisable();
     }
@@ -677,6 +866,7 @@ public class InputOutputModule : InstallationObject
     private void OnDestroy()
     {
         UnregisterRuntimeGridCoordinates();
+        activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
     }
 
@@ -748,7 +938,7 @@ public class InputOutputModule : InstallationObject
         return false;
     }
 
-    private bool AppendOutputItemIds(ISet<int> outputItemIds)
+    protected virtual bool AppendOutputItemIds(ISet<int> outputItemIds)
     {
         if (outputItemIds == null)
         {

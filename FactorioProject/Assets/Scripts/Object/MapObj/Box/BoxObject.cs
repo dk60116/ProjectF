@@ -657,6 +657,12 @@ public class BoxObject : InstallationObject
         for (int i = 0; i < occupiedCoordinates.Count; i++)
         {
             Vector2Int coordinate = occupiedCoordinates[i];
+            if (InputOutputModule.TryGetRuntimeIoOverlapAllowedItemIds(coordinate, acceptedItemIds))
+            {
+                foundAny = true;
+                continue;
+            }
+
             foundAny |= InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, acceptedItemIds);
 
             if (InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
