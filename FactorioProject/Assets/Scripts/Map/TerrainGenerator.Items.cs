@@ -477,7 +477,6 @@ public partial class TerrainGenerator : MonoBehaviour
         Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
         if (block.TryPickupOneInputAreaCenterObjectToHand(player, anchorPosition, 999f))
         {
-            NotifyAreaManualPickup(coordinate);
             return true;
         }
 
@@ -536,7 +535,6 @@ public partial class TerrainGenerator : MonoBehaviour
         Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
         if (block.TryPickupOneInputAreaCenterObjectToBag(player, anchorPosition, 999f, preferredSlotIndex, preferredItemId))
         {
-            NotifyAreaManualPickup(coordinate);
             return true;
         }
 
@@ -709,12 +707,6 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         EnsureResourceStateStore();
         resourceStateStore?.RemoveInstallation(anchorCoordinate);
-    }
-
-    private static void NotifyAreaManualPickup(Vector2Int coordinate)
-    {
-        InputOutputModuleEnergyAreaController.NotifyManualPickupAtCoordinate(coordinate);
-        InputOutputModuleItemAreaController.NotifyManualPickupAtCoordinate(coordinate);
     }
 
     public bool TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate)

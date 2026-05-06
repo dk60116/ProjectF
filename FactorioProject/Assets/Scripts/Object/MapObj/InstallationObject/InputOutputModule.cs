@@ -458,6 +458,32 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
+    public static bool TryGetModuleAtRuntimeAreaCoordinate(Vector2Int coordinate, out InputOutputModule module)
+    {
+        module = null;
+        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.ContainsRuntimeAreaCoordinate(coordinate))
+            {
+                continue;
+            }
+
+            module = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
     public static bool CoordinateIsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType blockType)
     {
         if (blockType == RectGridBlockType.None
@@ -925,20 +951,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate)
     {
-        if (runtimeOutputCoordinates == null || runtimeOutputCoordinates.Count <= 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
-        {
-            if (runtimeOutputCoordinates[i] == coordinate)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return ContainsCoordinate(runtimeOutputCoordinates, coordinate);
     }
 
     protected virtual bool AppendOutputItemIds(ISet<int> outputItemIds)
@@ -2316,6 +2329,36 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
+    private bool ContainsRuntimeAreaCoordinate(Vector2Int coordinate)
+    {
+        return ContainsRuntimeInputItemAreaCoordinate(coordinate)
+            || ContainsRuntimeInputEnergyCoordinate(coordinate)
+            || ContainsRuntimeOutputCoordinate(coordinate);
+    }
+
+    private bool ContainsRuntimeInputItemAreaCoordinate(Vector2Int coordinate)
+    {
+        if (runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            if (runtimeInputItemAreas[i].coordinate == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ContainsRuntimeInputEnergyCoordinate(Vector2Int coordinate)
+    {
+        return ContainsCoordinate(runtimeInputEnergyCoordinates, coordinate);
+    }
+
     private static void AddUniqueCoordinates(IReadOnlyList<Vector2Int> source, List<Vector2Int> target)
     {
         if (source == null || target == null)
@@ -2331,6 +2374,24 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                 target.Add(coordinate);
             }
         }
+    }
+
+    private static bool ContainsCoordinate(IReadOnlyList<Vector2Int> coordinates, Vector2Int coordinate)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (coordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RegisterRuntimeGridCoordinates()

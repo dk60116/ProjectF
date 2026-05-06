@@ -27,15 +27,6 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private float harvestStartDelay = 0.5f;
 
-    [SerializeField, Min(0.1f)]
-    private float autoPickupRadius = 0.5f;
-
-    [SerializeField, Min(0.5f)]
-    private float autoPickupScanRadius = 3f;
-
-    [SerializeField, Min(0f)]
-    private float autoPickupInterval = 0.1f;
-
     [SerializeField, Min(0.01f)]
     private float rotationInterpolationSpeed = 12f;
 
@@ -59,7 +50,6 @@ public class PlayerController : MonoBehaviour
     private const float MoveSweepBuffer = 0.01f;
     private const float ConveyorCarrySweepBuffer = 0f;
     private float stationaryHarvestTimer;
-    private float autoPickupTimer;
     private TerrainGenerator cachedTerrainGenerator;
     private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
     private bool wasInstallationPlacementActive;
@@ -204,8 +194,6 @@ public class PlayerController : MonoBehaviour
         bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
         ResolveCompletedPick(finishedPickThisFrame);
         RefreshInteractionFocus(hasMovement);
-
-        UpdateAutoPickup();
     }
 
     private void FixedUpdate()
@@ -618,7 +606,6 @@ public class PlayerController : MonoBehaviour
         pendingFacingDirection = Vector3.zero;
         hasPendingFacingDirection = false;
         stationaryHarvestTimer = 0f;
-        autoPickupTimer = 0f;
 
         if (joystick != null)
         {
@@ -1103,8 +1090,7 @@ public class PlayerController : MonoBehaviour
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
 
-        if (!InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(playerCoordinate, out InputOutputModule inputOutputModule)
-            || inputOutputModule == null)
+        if (!TryResolveStandingInputOutputModule(playerCoordinate, results, out InputOutputModule inputOutputModule))
         {
             return false;
         }
@@ -1112,7 +1098,7 @@ public class PlayerController : MonoBehaviour
         IReadOnlyList<Vector2Int> focusCoordinates = inputOutputModule.RuntimeFocusCoordinates;
         if (focusCoordinates == null || focusCoordinates.Count <= 0)
         {
-            return false;
+            return results.Count > 0;
         }
 
         if (inputOutputModule.FocusMode == MapObject.MultiFocusMode.NearOne)
@@ -1142,7 +1128,7 @@ public class PlayerController : MonoBehaviour
                 TrySetInteractionFocusCandidate(ref nearestFocusCandidate, nearestScore, nearestBlock);
             }
 
-            return false;
+            return results.Count > 0;
         }
 
         for (int i = 0; i < focusCoordinates.Count; i++)
@@ -1159,6 +1145,22 @@ public class PlayerController : MonoBehaviour
         }
 
         return results.Count > 0;
+    }
+
+    private bool TryResolveStandingInputOutputModule(
+        Vector2Int playerCoordinate,
+        List<Block> focusBlocks,
+        out InputOutputModule inputOutputModule)
+    {
+        if (InputOutputModule.TryGetModuleAtRuntimeAreaCoordinate(playerCoordinate, out inputOutputModule)
+            && inputOutputModule != null)
+        {
+            TryAppendFocusBlock(focusBlocks, playerCoordinate);
+            return true;
+        }
+
+        return InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(playerCoordinate, out inputOutputModule)
+            && inputOutputModule != null;
     }
 
     private void FindNearbyWorkableBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)
@@ -1932,65 +1934,4 @@ public class PlayerController : MonoBehaviour
         return input.sqrMagnitude > 1f ? input.normalized : input;
     }
 
-    private void UpdateAutoPickup()
-    {
-        if (player == null || autoPickupRadius <= 0f)
-        {
-            return;
-        }
-
-        player.UpdateDropExitGate(player.transform.position);
-        if (player.IsDropExitPending)
-        {
-            return;
-        }
-
-        autoPickupTimer -= Time.deltaTime;
-        if (autoPickupTimer > 0f)
-        {
-            return;
-        }
-
-        autoPickupTimer = Mathf.Max(0f, autoPickupInterval);
-
-        if (ResolveTerrainGenerator() == null)
-        {
-            return;
-        }
-
-        Vector3 playerPosition = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
-        Vector2Int center = new Vector2Int(Mathf.RoundToInt(playerPosition.x), Mathf.RoundToInt(playerPosition.z));
-        int radius = Mathf.Max(1, Mathf.CeilToInt(autoPickupScanRadius));
-        float scanRadiusSqr = autoPickupScanRadius * autoPickupScanRadius;
-
-        for (int offsetY = -radius; offsetY <= radius; offsetY++)
-        {
-            for (int offsetX = -radius; offsetX <= radius; offsetX++)
-            {
-                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
-                Vector3 blockCenter = new Vector3(coordinate.x, playerPosition.y, coordinate.y);
-                Vector3 offset = blockCenter - playerPosition;
-                offset.y = 0f;
-                if (offset.sqrMagnitude > scanRadiusSqr)
-                {
-                    continue;
-                }
-
-                if (!cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
-                {
-                    continue;
-                }
-
-                if (block.Type != Block.BlockType.Ground)
-                {
-                    continue;
-                }
-
-                if (block.TryAutoPickupFloorObjects(player, playerPosition, autoPickupRadius))
-                {
-                    return;
-                }
-            }
-        }
-    }
 }
