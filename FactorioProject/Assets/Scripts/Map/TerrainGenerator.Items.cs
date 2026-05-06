@@ -437,13 +437,19 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool TryPickupOneItemToHandAtCoordinate(Player player, Vector2Int coordinate)
     {
+        return TryPickupOneItemToHandAtCoordinate(player, coordinate, true);
+    }
+
+    public bool TryPickupOneItemToHandAtCoordinate(Player player, Vector2Int coordinate, bool allowFocusedConveyorPickup)
+    {
         if (player == null)
         {
             return false;
         }
 
         Vector3 playerPosition = player.transform.position;
-        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+        if (allowFocusedConveyorPickup
+            && TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
             && focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, playerPosition, 999f))
         {
@@ -490,13 +496,19 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate, int preferredSlotIndex, int preferredItemId)
     {
+        return TryPickupOneItemToBagAtCoordinate(player, coordinate, preferredSlotIndex, preferredItemId, true);
+    }
+
+    public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate, int preferredSlotIndex, int preferredItemId, bool allowFocusedConveyorPickup)
+    {
         if (player == null)
         {
             return false;
         }
 
         Vector3 playerPosition = player.transform.position;
-        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+        if (allowFocusedConveyorPickup
+            && TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
             && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, playerPosition, 999f, preferredSlotIndex, preferredItemId))
         {
@@ -951,12 +963,18 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool TryPickupOneItemToHand(Player player, Vector3 pickupOrigin, int radius, float pickupRadius)
     {
+        return TryPickupOneItemToHand(player, pickupOrigin, radius, pickupRadius, true);
+    }
+
+    public bool TryPickupOneItemToHand(Player player, Vector3 pickupOrigin, int radius, float pickupRadius, bool allowFocusedConveyorPickup)
+    {
         if (player == null || radius < 0 || pickupRadius <= 0f)
         {
             return false;
         }
 
-        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+        if (allowFocusedConveyorPickup
+            && TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
             && focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, pickupOrigin, pickupRadius))
         {
@@ -1010,12 +1028,18 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool TryPickupOneItemToBag(Player player, Vector3 pickupOrigin, int radius, float pickupRadius, int preferredSlotIndex, int preferredItemId)
     {
+        return TryPickupOneItemToBag(player, pickupOrigin, radius, pickupRadius, preferredSlotIndex, preferredItemId, true);
+    }
+
+    public bool TryPickupOneItemToBag(Player player, Vector3 pickupOrigin, int radius, float pickupRadius, int preferredSlotIndex, int preferredItemId, bool allowFocusedConveyorPickup)
+    {
         if (player == null || radius < 0 || pickupRadius <= 0f)
         {
             return false;
         }
 
-        if (TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
+        if (allowFocusedConveyorPickup
+            && TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
             && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
         {

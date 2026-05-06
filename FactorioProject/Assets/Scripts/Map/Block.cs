@@ -5195,6 +5195,11 @@ public class Block : BaseObject
             return false;
         }
 
+        if (CanRetryConveyorLaneMove(laneIndex, true))
+        {
+            return false;
+        }
+
         conveyorLaneBlockedSleepStates[laneIndex] = true;
         nextConveyorLaneMoveAttemptTimes[laneIndex] = 0f;
         return true;
@@ -5249,7 +5254,7 @@ public class Block : BaseObject
         {
             bool laneBlockedSleep = IsConveyorLaneBlockedSleep(laneIndex);
             bool cycleBlockedSleep = IsConveyorLaneCycleBlockedSleep(laneIndex);
-            if ((!laneBlockedSleep && !cycleBlockedSleep) || !CanMoveConveyorLane(laneIndex, true))
+            if ((!laneBlockedSleep && !cycleBlockedSleep) || !CanRetryConveyorLaneMove(laneIndex, true))
             {
                 continue;
             }
@@ -6683,18 +6688,6 @@ public class Block : BaseObject
             return false;
         }
 
-        if (sourceLaneIndex == 0)
-        {
-            pairedSourceLaneIndex = 1;
-            return IsValidConveyorLaneIndex(pairedSourceLaneIndex);
-        }
-
-        if (sourceLaneIndex == 1)
-        {
-            pairedSourceLaneIndex = 0;
-            return IsValidConveyorLaneIndex(pairedSourceLaneIndex);
-        }
-
         if (!TryGetConveyorSuccessor(
                 sourceLaneIndex,
                 out Block destinationBlock,
@@ -6857,6 +6850,17 @@ public class Block : BaseObject
         conveyorCanMoveVisiting.Clear();
         conveyorCanMovePlannedMoves.Clear();
         return canMove;
+    }
+
+    private bool CanRetryConveyorLaneMove(int sourceLaneIndex, bool ignoreMoveAttemptThrottle = false)
+    {
+        if (TryGetCornerPairedMoveSourceLane(sourceLaneIndex, out int pairedSourceLaneIndex)
+            && ShouldHoldConveyorLaneForPairedMove(sourceLaneIndex, pairedSourceLaneIndex, ignoreMoveAttemptThrottle))
+        {
+            return false;
+        }
+
+        return CanMoveConveyorLane(sourceLaneIndex, ignoreMoveAttemptThrottle);
     }
 
     private bool CanMoveConveyorLaneDirect(int sourceLaneIndex)

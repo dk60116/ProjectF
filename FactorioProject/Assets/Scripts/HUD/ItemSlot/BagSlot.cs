@@ -13,6 +13,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private static readonly Dictionary<PortableObject, PortableMoveVisualState> activePortableMoveVisualStates = new Dictionary<PortableObject, PortableMoveVisualState>();
     private const float DragCancelDistance = 8f;
     private const float CraftingRootHideDelay = 0.12f;
+    private const int CraftingInnerRingSlotLimit = 5;
+    private const float CraftingOuterRingSlotPadding = 0.9f;
 
     [SerializeField, Range(0.1f, 1f)]
     private float draggingSlotAlpha = 0.6f;
@@ -465,6 +467,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             }
         }
 
+        RefreshCraftingSlotReferences();
+
         if (button == null)
         {
             button = GetComponent<Button>();
@@ -588,9 +592,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         List<CraftingSlot> visibleSlots = GetOrderedCraftingSlots(true);
         List<CraftingSlot> allSlots = GetOrderedCraftingSlots(false);
-        Vector2 center = Vector2.zero;
         int slotCount = visibleSlots.Count;
-        int spacingSlotCount = allSlots.Count;
 
         if (slotCount == 0)
         {
@@ -601,24 +603,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        List<Vector2> targetPositions = new List<Vector2>(slotCount);
-        int visibleIndex = 0;
-        float startAngle = 90f;
-        float step = spacingSlotCount > 1 ? craftingArcAngle / (spacingSlotCount - 1) : 0f;
-        int directionSign = GetCraftingDirectionSign();
-
-        for (int i = 0; i < visibleSlots.Count; i++)
-        {
-            float angle = startAngle + (step * visibleIndex * directionSign);
-            float radians = angle * Mathf.Deg2Rad;
-            Vector2 offset = new Vector2(
-                Mathf.Cos(radians) * craftingRadius,
-                Mathf.Sin(radians) * craftingRadius);
-
-            targetPositions.Add(center + offset);
-            visibleIndex++;
-        }
-
+        List<Vector2> targetPositions = BuildCraftingTargetPositions(slotCount, allSlots.Count);
         if (targetPositions.Count == 0)
         {
             return;
@@ -630,7 +615,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         float longestExpandDuration = GetLongestCraftingSlotExpandDuration(visibleSlots);
         craftingExpandAnimationUntilTime = Time.unscaledTime + latestDelay + longestExpandDuration;
 
-        visibleIndex = 0;
         for (int i = 0; i < visibleSlots.Count; i++)
         {
             CraftingSlot craftingSlot = visibleSlots[i];
@@ -657,9 +641,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
             craftingSlot.Show(
                 startPosition,
-                targetPositions[visibleIndex],
-                visibleIndex * expandStepDelay);
-            visibleIndex++;
+                targetPositions[i],
+                i * expandStepDelay);
         }
 
         bool wasExpanded = isCraftingExpanded;
@@ -991,7 +974,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         List<CraftingSlot> visibleSlots = GetOrderedCraftingSlots(true);
         List<CraftingSlot> allSlots = GetOrderedCraftingSlots(false);
         int slotCount = visibleSlots.Count;
-        int spacingSlotCount = allSlots.Count;
 
         if (slotCount == 0)
         {
@@ -999,10 +981,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        Vector2 center = Vector2.zero;
-        float startAngle = 90f;
-        float step = spacingSlotCount > 1 ? craftingArcAngle / (spacingSlotCount - 1) : 0f;
-        int directionSign = GetCraftingDirectionSign();
+        List<Vector2> targetPositions = BuildCraftingTargetPositions(slotCount, allSlots.Count);
 
         for (int i = 0; i < visibleSlots.Count; i++)
         {
@@ -1011,12 +990,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             {
                 continue;
             }
-
-            float angle = startAngle + (step * i * directionSign);
-            float radians = angle * Mathf.Deg2Rad;
-            Vector2 targetPosition = center + new Vector2(
-                Mathf.Cos(radians) * craftingRadius,
-                Mathf.Sin(radians) * craftingRadius);
 
             if (!craftingSlot.gameObject.activeSelf)
             {
@@ -1037,7 +1010,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 craftingRect.localRotation = Quaternion.identity;
             }
 
-            craftingSlot.ShowImmediate(targetPosition);
+            craftingSlot.ShowImmediate(targetPositions[i]);
         }
     }
 
@@ -1158,6 +1131,119 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return results;
     }
 
+    private void RefreshCraftingSlotReferences()
+    {
+        if (craftingRoot == null)
+        {
+            return;
+        }
+
+        if (craftingSlots == null)
+        {
+            craftingSlots = new List<CraftingSlot>();
+        }
+
+        for (int i = craftingSlots.Count - 1; i >= 0; i--)
+        {
+            if (craftingSlots[i] == null)
+            {
+                craftingSlots.RemoveAt(i);
+            }
+        }
+
+        CraftingSlot[] rootSlots = craftingRoot.GetComponentsInChildren<CraftingSlot>(true);
+        for (int i = 0; i < rootSlots.Length; i++)
+        {
+            CraftingSlot craftingSlot = rootSlots[i];
+            if (craftingSlot == null || craftingSlots.Contains(craftingSlot))
+            {
+                continue;
+            }
+
+            craftingSlots.Add(craftingSlot);
+        }
+
+        craftingSlots.Sort((left, right) => GetCraftingSlotSortKey(left).CompareTo(GetCraftingSlotSortKey(right)));
+    }
+
+    private List<Vector2> BuildCraftingTargetPositions(int visibleSlotCount, int totalSlotCount)
+    {
+        List<Vector2> positions = new List<Vector2>(Mathf.Max(0, visibleSlotCount));
+        if (visibleSlotCount <= 0)
+        {
+            return positions;
+        }
+
+        int spacingSlotCount = Mathf.Max(visibleSlotCount, totalSlotCount);
+        int innerSlotCount = Mathf.Min(CraftingInnerRingSlotLimit, spacingSlotCount);
+        int outerSlotCount = Mathf.Max(0, spacingSlotCount - innerSlotCount);
+        int directionSign = GetCraftingDirectionSign();
+
+        for (int i = 0; i < visibleSlotCount; i++)
+        {
+            positions.Add(GetCraftingTargetPosition(i, innerSlotCount, outerSlotCount, directionSign));
+        }
+
+        return positions;
+    }
+
+    private Vector2 GetCraftingTargetPosition(int slotIndex, int innerSlotCount, int outerSlotCount, int directionSign)
+    {
+        if (slotIndex < innerSlotCount || outerSlotCount <= 0)
+        {
+            float innerStep = innerSlotCount > 1 ? craftingArcAngle / (innerSlotCount - 1) : 0f;
+            float innerAngle = 90f + (innerStep * slotIndex * directionSign);
+            return GetCraftingOffset(innerAngle, craftingRadius);
+        }
+
+        int outerIndex = slotIndex - innerSlotCount;
+        float innerRingStep = innerSlotCount > 1 ? craftingArcAngle / (innerSlotCount - 1) : 0f;
+        float outerAngleOffset = outerSlotCount == innerSlotCount - 1 && innerRingStep > 0f
+            ? innerRingStep * (outerIndex + 0.5f)
+            : craftingArcAngle / (outerSlotCount + 1) * (outerIndex + 1);
+        float outerAngle = 90f + (outerAngleOffset * directionSign);
+        return GetCraftingOffset(outerAngle, GetCraftingOuterRingRadius());
+    }
+
+    private Vector2 GetCraftingOffset(float angle, float radius)
+    {
+        float radians = angle * Mathf.Deg2Rad;
+        return new Vector2(
+            Mathf.Cos(radians) * radius,
+            Mathf.Sin(radians) * radius);
+    }
+
+    private float GetCraftingOuterRingRadius()
+    {
+        float slotDiameter = ResolveCraftingSlotDiameter();
+        return Mathf.Max(craftingRadius, craftingRadius + (slotDiameter * CraftingOuterRingSlotPadding));
+    }
+
+    private float ResolveCraftingSlotDiameter()
+    {
+        if (craftingSlots != null)
+        {
+            for (int i = 0; i < craftingSlots.Count; i++)
+            {
+                CraftingSlot craftingSlot = craftingSlots[i];
+                RectTransform slotRect = craftingSlot != null ? craftingSlot.transform as RectTransform : null;
+                if (slotRect == null)
+                {
+                    continue;
+                }
+
+                Vector2 size = slotRect.rect.size;
+                float diameter = Mathf.Max(size.x, size.y);
+                if (diameter > 0f)
+                {
+                    return diameter;
+                }
+            }
+        }
+
+        return rectTransform != null ? Mathf.Max(rectTransform.rect.width, rectTransform.rect.height) : 100f;
+    }
+
     private static int GetCraftingSlotSortKey(CraftingSlot craftingSlot)
     {
         if (craftingSlot == null)
@@ -1168,6 +1254,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         string slotName = craftingSlot.name;
         if (!string.IsNullOrWhiteSpace(slotName))
         {
+            if (slotName.Equals("CraftingSlot", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
             int openIndex = slotName.LastIndexOf('(');
             int closeIndex = slotName.LastIndexOf(')');
             if (openIndex >= 0 && closeIndex > openIndex)
@@ -1754,24 +1845,24 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        if (IsFocusedConveyorPickup(player))
+        bool hasFocusedConveyor = TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock);
+        if (hasFocusedConveyor
+            && TryPickupFocusedConveyorItem(player, focusedConveyorBlock))
         {
-            if (TryHandleSinglePickup(player, terrain))
-            {
-                suppressCraftingToggleFrame = Time.frameCount;
-            }
-
+            StopPickupRoutine();
+            suppressCraftingToggleFrame = Time.frameCount;
             return;
         }
 
         StopPickupRoutine();
-        if (!TryPickupOneItemForClick(player, terrain))
+        bool allowFocusedConveyorPickup = !hasFocusedConveyor;
+        if (!TryPickupOneItemForClick(player, terrain, allowFocusedConveyorPickup))
         {
             return;
         }
 
         suppressCraftingToggleFrame = Time.frameCount;
-        pickupRoutine = StartCoroutine(PickupRoutine(player, terrain, true));
+        pickupRoutine = StartCoroutine(PickupRoutine(player, terrain, true, allowFocusedConveyorPickup));
     }
 
     private void StopPickupRoutine()
@@ -1785,7 +1876,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         pickupRoutine = null;
     }
 
-    private IEnumerator PickupRoutine(Player player, TerrainGenerator terrain, bool delayBeforeFirstPickup = false)
+    private IEnumerator PickupRoutine(Player player, TerrainGenerator terrain, bool delayBeforeFirstPickup = false, bool allowFocusedConveyorPickup = true)
     {
         int radius = Mathf.Max(0, pickupRadius);
         float interval = Mathf.Max(0.01f, pickupInterval);
@@ -1805,17 +1896,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             Vector3 pickupOrigin = ResolvePickupOrigin(player);
             Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
 
-            bool picked = TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate);
+            bool picked = TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate, allowFocusedConveyorPickup);
             if (!picked)
             {
-                picked = TryPickupOneItem(terrain, player, pickupOrigin, radius, pickupRadius);
+                picked = TryPickupOneItem(terrain, player, pickupOrigin, radius, pickupRadius, allowFocusedConveyorPickup);
             }
 
             if (!picked)
             {
                 if (AllowDropTargetFallback && player.IsDropExitPending && player.TryGetLastDropTarget(out Vector2Int dropTarget))
                 {
-                    picked = TryPickupOneItemAtCoordinate(terrain, player, dropTarget);
+                    picked = TryPickupOneItemAtCoordinate(terrain, player, dropTarget, allowFocusedConveyorPickup);
                     if (!picked)
                     {
                         player.ClearLastDropTarget();
@@ -1834,7 +1925,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         pickupRoutine = null;
     }
 
-    private bool TryPickupOneItemForClick(Player player, TerrainGenerator terrain)
+    private bool TryPickupOneItemForClick(Player player, TerrainGenerator terrain, bool allowFocusedConveyorPickup = true)
     {
         if (player == null || terrain == null)
         {
@@ -1844,12 +1935,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         Vector3 pickupOrigin = ResolvePickupOrigin(player);
         Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
 
-        if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate))
+        if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate, allowFocusedConveyorPickup))
         {
             return true;
         }
 
-        if (TryPickupOneItem(terrain, player, pickupOrigin, Mathf.Max(0, pickupRadius), pickupRadius))
+        if (TryPickupOneItem(terrain, player, pickupOrigin, Mathf.Max(0, pickupRadius), pickupRadius, allowFocusedConveyorPickup))
         {
             return true;
         }
@@ -1859,7 +1950,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        if (TryPickupOneItemAtCoordinate(terrain, player, dropTarget))
+        if (TryPickupOneItemAtCoordinate(terrain, player, dropTarget, allowFocusedConveyorPickup))
         {
             return true;
         }
@@ -1872,7 +1963,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     protected virtual bool AllowDropTargetFallback => true;
 
-    protected virtual bool TryPickupOneItem(TerrainGenerator terrain, Player player, Vector3 pickupOrigin, int radius, float pickupRange)
+    protected virtual bool TryPickupOneItem(TerrainGenerator terrain, Player player, Vector3 pickupOrigin, int radius, float pickupRange, bool allowFocusedConveyorPickup = true)
     {
         if (terrain == null)
         {
@@ -1891,10 +1982,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             radius,
             pickupRange,
             targetSlotIndex,
-            GetPreferredPickupItemId());
+            GetPreferredPickupItemId(),
+            allowFocusedConveyorPickup);
     }
 
-    protected virtual bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate)
+    protected virtual bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate, bool allowFocusedConveyorPickup = true)
     {
         if (terrain == null)
         {
@@ -1911,7 +2003,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             player,
             coordinate,
             targetSlotIndex,
-            GetPreferredPickupItemId());
+            GetPreferredPickupItemId(),
+            allowFocusedConveyorPickup);
     }
 
     protected virtual int GetPickupSlotIndex()
@@ -1934,26 +2027,30 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return boundBag.GetSlotItemId(slotIndex);
     }
 
-    private bool TryHandleSinglePickup(Player player, TerrainGenerator terrain)
+    protected virtual bool TryPickupFocusedConveyorItem(Player player, Block focusedConveyorBlock)
     {
-        if (player == null || terrain == null)
+        if (player == null || focusedConveyorBlock == null)
         {
             return false;
         }
 
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
-
-        if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate))
+        int targetSlotIndex = GetPickupSlotIndex();
+        if (targetSlotIndex < 0)
         {
-            return true;
+            return false;
         }
 
-        return TryPickupOneItem(terrain, player, pickupOrigin, Mathf.Max(0, pickupRadius), pickupRadius);
+        return focusedConveyorBlock.TryPickupOneConveyorObjectToBag(
+            player,
+            player.transform.position,
+            999f,
+            targetSlotIndex,
+            GetPreferredPickupItemId());
     }
 
-    private static bool IsFocusedConveyorPickup(Player player)
+    private static bool TryGetFocusedConveyorBlock(Player player, out Block focusedConveyorBlock)
     {
+        focusedConveyorBlock = null;
         if (player == null)
         {
             return false;
@@ -1961,7 +2058,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         PlayerController playerController = player.GetComponent<PlayerController>();
         return playerController != null
-            && playerController.TryGetFocusedConveyorBelt(out _, out _);
+            && playerController.TryGetFocusedConveyorBelt(out _, out focusedConveyorBlock)
+            && focusedConveyorBlock != null;
     }
 
     private bool TryHandleFocusedRobotArmPickup(Player player, out bool blockOtherPickup)

@@ -370,6 +370,7 @@ public class ItemDataEditorWindow : EditorWindow
             EditorUtility.SetDirty(definition);
         }
 
+        ApplyDefinitionOrderToItemManager(itemManager, definitions);
         SyncItemManagerItemSets(itemManager, definitions);
         itemManager.ApplyItemIdsToPrefabs();
         EditorUtility.SetDirty(itemManager);
@@ -383,6 +384,55 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         Repaint();
+    }
+
+    private static void ApplyDefinitionOrderToItemManager(ItemManager itemManager, List<ItemDefinition> orderedDefinitions)
+    {
+        if (itemManager == null || orderedDefinitions == null)
+        {
+            return;
+        }
+
+        SerializedObject serializedManager = new SerializedObject(itemManager);
+        SerializedProperty definitionsProperty = serializedManager.FindProperty("itemDefinitions");
+        if (definitionsProperty != null && definitionsProperty.isArray)
+        {
+            definitionsProperty.arraySize = 0;
+            int writeIndex = 0;
+            for (int i = 0; i < orderedDefinitions.Count; i++)
+            {
+                ItemDefinition definition = orderedDefinitions[i];
+                if (definition == null)
+                {
+                    continue;
+                }
+
+                definitionsProperty.InsertArrayElementAtIndex(writeIndex);
+                definitionsProperty.GetArrayElementAtIndex(writeIndex).objectReferenceValue = definition;
+                writeIndex++;
+            }
+
+            serializedManager.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(itemManager);
+            return;
+        }
+
+        List<ItemDefinition> targetDefinitions = itemManager.ItemDefinitions;
+        if (targetDefinitions == null)
+        {
+            return;
+        }
+
+        targetDefinitions.Clear();
+        for (int i = 0; i < orderedDefinitions.Count; i++)
+        {
+            if (orderedDefinitions[i] != null)
+            {
+                targetDefinitions.Add(orderedDefinitions[i]);
+            }
+        }
+
+        EditorUtility.SetDirty(itemManager);
     }
 
     private static void SyncItemManagerItemSets(ItemManager itemManager, List<ItemDefinition> definitions)
@@ -1695,6 +1745,15 @@ public class ItemDataEditorWindow : EditorWindow
             appliedCount++;
         }
 
+        if (appliedCount > 0)
+        {
+            SortDefinitionsById(definitions);
+            ApplyDefinitionOrderToItemManager(itemManager, definitions);
+            SyncItemManagerItemSets(itemManager, definitions);
+            itemManager.ApplyItemIdsToPrefabs();
+            EditorUtility.SetDirty(itemManager);
+        }
+
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         EnsureSelection(GetDefinitions(itemManager));
@@ -1879,6 +1938,40 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         return new List<ItemDataJsonEntry>();
+    }
+
+    private static void SortDefinitionsById(List<ItemDefinition> definitions)
+    {
+        if (definitions == null || definitions.Count <= 1)
+        {
+            return;
+        }
+
+        definitions.Sort((left, right) =>
+        {
+            if (left == null && right == null)
+            {
+                return 0;
+            }
+
+            if (left == null)
+            {
+                return 1;
+            }
+
+            if (right == null)
+            {
+                return -1;
+            }
+
+            int idCompare = left.id.CompareTo(right.id);
+            if (idCompare != 0)
+            {
+                return idCompare;
+            }
+
+            return string.Compare(GetDefinitionDisplayName(left), GetDefinitionDisplayName(right), StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static ItemDefinition ResolveDefinitionForJsonEntry(List<ItemDefinition> definitions, ItemDataJsonEntry entry)
@@ -2573,7 +2666,7 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        results.Sort((left, right) => left.id.CompareTo(right.id));
+        SortDefinitionsById(results);
         return results;
     }
 

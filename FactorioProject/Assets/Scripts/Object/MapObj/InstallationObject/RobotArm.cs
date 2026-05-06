@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 
 public class RobotArm : InstallationObject, IMapObjectUpdateTick
@@ -61,6 +62,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     [SerializeField]
     private PortableObject handItem;
 
+    [SerializeField]
+    private bool useInstancedRendering = true;
+
     [SerializeField, Min(0.01f)]
     private float pickupInterval = 0.1f;
 
@@ -93,6 +97,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private MaterialPropertyBlock sleepAwakePropertyBlock;
     private bool sleepAwakeVisualStateInitialized;
     private bool lastSleepAwakeDarkTint;
+    private RobotArmRenderBatcher renderBatcher;
+    private RobotArmInstancedRenderPart[] instancedRenderParts;
+    private bool instancedRenderingActive;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -116,10 +123,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         RefreshHandItemVisual();
         RefreshRuntimeSleepState(true);
+        EnsureInstancedRenderingRegistered();
     }
 
     protected override void OnDisable()
     {
+        UnregisterInstancedRendering();
         SetUpdateTickRegistered(false);
         UnregisterActiveRobotArm(this);
         runtimeSleeping = false;
@@ -140,6 +149,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         state = RobotArmState.WaitingForPickup;
         hasRuntimeStateInitialized = false;
         runtimeSleeping = false;
+        UnregisterInstancedRendering();
         SetUpdateTickRegistered(false);
         SetBodyLocalRotation(inputBodyLocalRotation);
         RefreshSleepAwakeVisual(true);
@@ -491,6 +501,196 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return runtimeSleeping
                && GameManager.Instance != null
                && GameManager.Instance.ShowSleepAwake;
+    }
+
+    internal void AppendInstancedRenderData(VirtualRenderBatchCollection batches, float batchCellSize)
+    {
+        if (!instancedRenderingActive || batches == null || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        EnsureInstancedRenderParts();
+        if (instancedRenderParts == null || instancedRenderParts.Length <= 0)
+        {
+            return;
+        }
+
+        bool useSleepTint = ShouldUseSleepAwakeDarkTint();
+        float safeCellSize = Mathf.Max(1f, batchCellSize);
+        Vector3 cellPosition = transform.position;
+        int cellX = Mathf.FloorToInt(cellPosition.x / safeCellSize);
+        int cellZ = Mathf.FloorToInt(cellPosition.z / safeCellSize);
+
+        for (int partIndex = 0; partIndex < instancedRenderParts.Length; partIndex++)
+        {
+            RobotArmInstancedRenderPart part = instancedRenderParts[partIndex];
+            if (!part.IsValid)
+            {
+                continue;
+            }
+
+            Mesh mesh = part.MeshFilter.sharedMesh;
+            Material[] materials = part.SharedMaterials;
+            int submeshCount = mesh.subMeshCount;
+            int materialCount = Mathf.Min(materials.Length, submeshCount);
+            for (int materialIndex = 0; materialIndex < materialCount; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (!material.enableInstancing)
+                {
+                    material.enableInstancing = true;
+                }
+
+                VirtualRenderBatchKey key = new VirtualRenderBatchKey(
+                    mesh,
+                    material,
+                    part.Renderer.gameObject.layer,
+                    materialIndex,
+                    part.Renderer.shadowCastingMode,
+                    part.Renderer.receiveShadows,
+                    false,
+                    0,
+                    useSleepTint,
+                    false,
+                    default,
+                    0,
+                    cellX,
+                    cellZ);
+                batches.AddMatrix(key, part.Transform.localToWorldMatrix);
+            }
+        }
+    }
+
+    private void EnsureInstancedRenderingRegistered()
+    {
+        if (!Application.isPlaying || !useInstancedRendering)
+        {
+            SetInstancedRenderingActive(false);
+            return;
+        }
+
+        if (renderBatcher == null)
+        {
+            TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+            GameObject host = terrainGenerator != null ? terrainGenerator.gameObject : null;
+            renderBatcher = RobotArmRenderBatcher.EnsureFor(host);
+        }
+
+        if (renderBatcher == null)
+        {
+            SetInstancedRenderingActive(false);
+            return;
+        }
+
+        EnsureInstancedRenderParts();
+        renderBatcher.Register(this);
+        SetInstancedRenderingActive(true);
+    }
+
+    private void UnregisterInstancedRendering()
+    {
+        if (renderBatcher != null)
+        {
+            renderBatcher.Unregister(this);
+            renderBatcher = null;
+        }
+
+        SetInstancedRenderingActive(false);
+    }
+
+    private void SetInstancedRenderingActive(bool active)
+    {
+        if (instancedRenderingActive == active)
+        {
+            return;
+        }
+
+        EnsureInstancedRenderParts();
+        instancedRenderingActive = active;
+        SetInstancedSourceRenderersEnabled(!instancedRenderingActive);
+        RefreshSleepAwakeVisual(true);
+    }
+
+    private void SetInstancedSourceRenderersEnabled(bool enabled)
+    {
+        if (instancedRenderParts == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < instancedRenderParts.Length; i++)
+        {
+            RobotArmInstancedRenderPart part = instancedRenderParts[i];
+            if (part.Renderer == null)
+            {
+                continue;
+            }
+
+            part.Renderer.enabled = enabled && part.OriginalRendererEnabled;
+        }
+    }
+
+    private void EnsureInstancedRenderParts()
+    {
+        if (instancedRenderParts != null)
+        {
+            return;
+        }
+
+        MeshRenderer[] renderers = GetComponentsInChildren<MeshRenderer>(true);
+        Transform handRoot = handItem != null ? handItem.transform : null;
+        List<RobotArmInstancedRenderPart> parts = new List<RobotArmInstancedRenderPart>(renderers.Length);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            MeshRenderer targetRenderer = renderers[i];
+            if (targetRenderer == null)
+            {
+                continue;
+            }
+
+            Transform targetTransform = targetRenderer.transform;
+            if ((handRoot != null && targetTransform.IsChildOf(handRoot))
+                || targetRenderer.GetComponentInParent<PortableObject>() != null)
+            {
+                continue;
+            }
+
+            MeshFilter meshFilter = targetRenderer.GetComponent<MeshFilter>();
+            if (meshFilter == null || meshFilter.sharedMesh == null)
+            {
+                continue;
+            }
+
+            Material[] materials = targetRenderer.sharedMaterials;
+            if (materials == null || materials.Length <= 0)
+            {
+                continue;
+            }
+
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                if (material != null && !material.enableInstancing)
+                {
+                    material.enableInstancing = true;
+                }
+            }
+
+            parts.Add(new RobotArmInstancedRenderPart(
+                targetRenderer,
+                meshFilter,
+                targetTransform,
+                materials,
+                targetRenderer.enabled));
+        }
+
+        instancedRenderParts = parts.ToArray();
     }
 
     private void EnsureSleepAwakeRenderers()
@@ -866,7 +1066,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
+        if (HasBlockingDropMapObject(dropBlock))
+        {
+            return false;
+        }
+
         int itemId = heldItemId;
+        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
         if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
             && boxObject.TryPutOneContainedObjectInstant(itemId, out _))
         {
@@ -875,7 +1081,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         if (dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
                 itemId,
-                GetPickupReferencePosition(dropBlock, dropCoordinate),
+                dropReferenceWorldPosition,
                 Vector3.zero,
                 0f,
                 out _,
@@ -909,14 +1115,20 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
+        if (HasBlockingDropMapObject(dropBlock))
+        {
+            return false;
+        }
+
         int itemId = heldItemId;
+        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
         if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
             && boxObject.CanPutOneContainedObject(itemId))
         {
             return true;
         }
 
-        if (dropBlock.CanAddConveyorObjectAtPlacement(itemId, GetPickupReferencePosition(dropBlock, dropCoordinate)))
+        if (dropBlock.CanAddConveyorObjectAtPlacement(itemId, dropReferenceWorldPosition))
         {
             return true;
         }
@@ -1004,6 +1216,16 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return new Vector3(pickupCoordinate.x, 0f, pickupCoordinate.y);
     }
 
+    private Vector3 GetDropReferencePosition(Block dropBlock, Vector2Int dropCoordinate)
+    {
+        if (handItem != null || body != null)
+        {
+            return GetHandWorldPosition();
+        }
+
+        return GetPickupReferencePosition(dropBlock, dropCoordinate);
+    }
+
     private static bool CoordinateAcceptsInputAreaObject(Vector2Int coordinate)
     {
         return InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
@@ -1018,6 +1240,25 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return CoordinateAcceptsInputAreaObject(coordinate) || dropBlock.MapObject == null;
+    }
+
+    private static bool HasBlockingDropMapObject(Block dropBlock)
+    {
+        MapObject mapObject = dropBlock != null ? dropBlock.MapObject : null;
+        return mapObject != null
+               && !IsOreMapObject(mapObject)
+               && !IsConveyorBeltMapObject(mapObject);
+    }
+
+    private static bool IsOreMapObject(MapObject mapObject)
+    {
+        return mapObject is Resource resource
+               && resource.ResolvedHarvestMode == Resource.HarvestMode.Mining;
+    }
+
+    private static bool IsConveyorBeltMapObject(MapObject mapObject)
+    {
+        return mapObject is ConveyorBelt;
     }
 
     private static bool TryGetBoxObject(Block pickupBlock, out BoxObject boxObject)
@@ -1139,10 +1380,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        handItem.SetBatchedRendering(false);
+        handItem.SetBatchedRendering(true);
         if (handItem.SetItem(heldItemId))
         {
             handItem.SetCachedActive(true);
+            handItem.MarkBatchedRenderDataDirty();
         }
         else
         {
@@ -1152,10 +1394,18 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private void RefreshHeldItemVisualIfNeeded()
     {
-        if (heldItemId >= 0 && handItem != null && !handItem.gameObject.activeSelf)
+        if (heldItemId < 0 || handItem == null)
+        {
+            return;
+        }
+
+        if (!handItem.gameObject.activeSelf)
         {
             RefreshHandItemVisual();
+            return;
         }
+
+        handItem.MarkBatchedRenderDataDirty();
     }
 
     private Vector3 GetHandWorldPosition()
@@ -1202,10 +1452,15 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         Quaternion currentRotation = body.localRotation;
-        body.localRotation = Quaternion.RotateTowards(
+        Quaternion nextRotation = Quaternion.RotateTowards(
             currentRotation,
             targetLocalRotation,
             Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond) * deltaTime);
+        if (Quaternion.Angle(currentRotation, nextRotation) > 0.001f)
+        {
+            body.localRotation = nextRotation;
+            MarkHandItemRenderDataDirty();
+        }
 
         return Quaternion.Angle(body.localRotation, targetLocalRotation) <= 0.1f;
     }
@@ -1215,6 +1470,15 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         if (body != null)
         {
             body.localRotation = targetLocalRotation;
+            MarkHandItemRenderDataDirty();
+        }
+    }
+
+    private void MarkHandItemRenderDataDirty()
+    {
+        if (heldItemId >= 0 && handItem != null)
+        {
+            handItem.MarkBatchedRenderDataDirty();
         }
     }
 
@@ -1265,5 +1529,36 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return cachedAnimator;
+    }
+
+    private sealed class RobotArmInstancedRenderPart
+    {
+        public readonly MeshRenderer Renderer;
+        public readonly MeshFilter MeshFilter;
+        public readonly Transform Transform;
+        public readonly Material[] SharedMaterials;
+        public readonly bool OriginalRendererEnabled;
+
+        public RobotArmInstancedRenderPart(
+            MeshRenderer renderer,
+            MeshFilter meshFilter,
+            Transform transform,
+            Material[] sharedMaterials,
+            bool originalRendererEnabled)
+        {
+            Renderer = renderer;
+            MeshFilter = meshFilter;
+            Transform = transform;
+            SharedMaterials = sharedMaterials;
+            OriginalRendererEnabled = originalRendererEnabled;
+        }
+
+        public bool IsValid =>
+            Renderer != null
+            && MeshFilter != null
+            && MeshFilter.sharedMesh != null
+            && Transform != null
+            && SharedMaterials != null
+            && SharedMaterials.Length > 0;
     }
 }

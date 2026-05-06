@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_0_Pickaxe
   m_EditorClassIdentifier: 
   itemName: Pickaxe
-  id: 14
+  id: 18
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: b5c4177a92ceccc49ae55f60ecca939c, type: 2}
   portableMat: {fileID: 0}

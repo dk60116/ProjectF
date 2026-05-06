@@ -206,6 +206,11 @@ public class PortableObject : MonoBehaviour
         MarkPortableItemRenderDataDirty();
     }
 
+    public void MarkBatchedRenderDataDirty()
+    {
+        MarkPortableItemRenderDataDirty();
+    }
+
     private void MarkPortableItemRenderDataDirty()
     {
         if (useBatchedRendering)
