@@ -209,6 +209,7 @@ public static class SaveGameBinarySerializer
         writer.Write(state.conveyorVariantKind);
         WriteVector2IntList(writer, state.occupiedCoordinates);
         WriteInputOutputState(writer, state.inputOutputState);
+        WriteRobotArmState(writer, state.robotArmState);
         writer.Write(state.lastBackgroundSimulationTicks);
         writer.Write(state.boxIsOpen.HasValue);
         if (state.boxIsOpen.HasValue)
@@ -236,6 +237,7 @@ public static class SaveGameBinarySerializer
             conveyorVariantKind = reader.ReadInt32(),
             occupiedCoordinates = ReadVector2IntList(reader),
             inputOutputState = ReadInputOutputState(reader, version),
+            robotArmState = version >= 3 ? ReadRobotArmState(reader) : null,
             lastBackgroundSimulationTicks = reader.ReadInt64()
         };
 
@@ -296,6 +298,42 @@ public static class SaveGameBinarySerializer
             activeRecipeIndex = reader.ReadInt32(),
             activeOutputItemId = reader.ReadInt32(),
             activeOutputCount = reader.ReadInt32()
+        };
+    }
+
+    private static void WriteRobotArmState(BinaryWriter writer, RobotArm.PersistentState state)
+    {
+        writer.Write(state != null);
+        if (state == null)
+        {
+            return;
+        }
+
+        writer.Write(state.heldItemId);
+        writer.Write((int)state.state);
+        writer.Write(state.pickupTimer);
+        writer.Write(state.dropRetryTimer);
+        writer.Write(state.actionTurnTimer);
+        writer.Write(state.turnTimer);
+        writer.Write(state.waitingForDropRetry);
+    }
+
+    private static RobotArm.PersistentState ReadRobotArmState(BinaryReader reader)
+    {
+        if (!reader.ReadBoolean())
+        {
+            return null;
+        }
+
+        return new RobotArm.PersistentState
+        {
+            heldItemId = reader.ReadInt32(),
+            state = (RobotArm.RobotArmState)reader.ReadInt32(),
+            pickupTimer = reader.ReadSingle(),
+            dropRetryTimer = reader.ReadSingle(),
+            actionTurnTimer = reader.ReadSingle(),
+            turnTimer = reader.ReadSingle(),
+            waitingForDropRetry = reader.ReadBoolean()
         };
     }
 

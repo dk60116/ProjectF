@@ -1,19 +1,1269 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
-public class RobotArm : InstallationObject
+public class RobotArm : InstallationObject, IMapObjectUpdateTick
 {
+    private static readonly int PickTriggerHash = Animator.StringToHash("tPick");
+    private static readonly int DropTriggerHash = Animator.StringToHash("tDrop");
+    private static readonly List<RobotArm> ActiveRobotArms = new List<RobotArm>();
+
+    public enum RobotArmState
+    {
+        WaitingForPickup,
+        WaitingBeforePickupTake,
+        WaitingAfterPickupTake,
+        TurningToDrop,
+        WaitingForDrop,
+        WaitingBeforeDropPlace,
+        WaitingAfterDropPlace,
+        TurningToPickup
+    }
+
+    private enum RobotArmPickupSource
+    {
+        None,
+        Floor,
+        Box,
+        Conveyor,
+        InputArea
+    }
+
+    [System.Serializable]
+    public sealed class PersistentState
+    {
+        public int heldItemId = -1;
+        public RobotArmState state = RobotArmState.WaitingForPickup;
+        public float pickupTimer;
+        public float dropRetryTimer;
+        public float actionTurnTimer;
+        public float turnTimer;
+        public bool waitingForDropRetry;
+
+        public PersistentState Clone()
+        {
+            return new PersistentState
+            {
+                heldItemId = heldItemId,
+                state = state,
+                pickupTimer = pickupTimer,
+                dropRetryTimer = dropRetryTimer,
+                actionTurnTimer = actionTurnTimer,
+                turnTimer = turnTimer,
+                waitingForDropRetry = waitingForDropRetry
+            };
+        }
+    }
+
     [SerializeField]
     private Transform body;
 
-    void Start()
+    [SerializeField]
+    private PortableObject handItem;
+
+    [SerializeField, Min(0.01f)]
+    private float pickupInterval = 0.1f;
+
+    [SerializeField, Min(1f)]
+    private float bodyTurnSpeedDegreesPerSecond = 540f;
+
+    [SerializeField, Min(0.01f)]
+    private float dropRetryInterval = 0.1f;
+
+    [SerializeField, Min(0f), Tooltip("Delay between action timing and the actual pickup/drop.")]
+    [FormerlySerializedAs("postActionTurnDelay")]
+    private float actionTurnDelay = 0.1f;
+
+    [SerializeField, HideInInspector]
+    private int heldItemId = -1;
+
+    private TerrainGenerator cachedTerrainGenerator;
+    private float pickupTimer;
+    private float dropRetryTimer;
+    private float actionTurnTimer;
+    private bool waitingForDropRetry;
+    private RobotArmState state;
+    private Quaternion inputBodyLocalRotation;
+    private bool hasInputBodyLocalRotation;
+    private bool hasRuntimeStateInitialized;
+    private bool runtimeSleeping;
+    private bool updateTickRegistered;
+    private Animator cachedAnimator;
+    private Renderer[] sleepAwakeRenderers;
+    private MaterialPropertyBlock sleepAwakePropertyBlock;
+    private bool sleepAwakeVisualStateInitialized;
+    private bool lastSleepAwakeDarkTint;
+
+    public bool HasHeldItem => heldItemId >= 0;
+    public int HeldItemId => heldItemId;
+    public bool CanTakeHeldItemFromSlot => CanTakeHeldItemFromSlotInternal();
+    public bool IsRuntimeSleeping => runtimeSleeping;
+    public float PickupIntervalSeconds => Mathf.Max(0.01f, pickupInterval);
+    public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
+    public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
+    public float BackgroundTurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
+
+    protected override void OnEnable()
     {
-        
+        base.OnEnable();
+        RegisterActiveRobotArm(this);
+        EnsureBodyRotationCache();
+        EnsureRuntimeStateInitialized();
+        if (heldItemId < 0 && state == RobotArmState.WaitingForPickup)
+        {
+            SetBodyLocalRotation(inputBodyLocalRotation);
+        }
+
+        RefreshHandItemVisual();
+        RefreshRuntimeSleepState(true);
     }
 
-    void Update()
+    protected override void OnDisable()
     {
-        
+        SetUpdateTickRegistered(false);
+        UnregisterActiveRobotArm(this);
+        runtimeSleeping = false;
+        handItem?.SetSleepAwakeSleeping(false);
+        RefreshSleepAwakeVisual(true);
+        base.OnDisable();
+    }
+
+    public override void PrepareForPool()
+    {
+        EnsureBodyRotationCache();
+        ClearHeldItem();
+        cachedTerrainGenerator = null;
+        pickupTimer = 0f;
+        dropRetryTimer = 0f;
+        actionTurnTimer = 0f;
+        waitingForDropRetry = false;
+        state = RobotArmState.WaitingForPickup;
+        hasRuntimeStateInitialized = false;
+        runtimeSleeping = false;
+        SetUpdateTickRegistered(false);
+        SetBodyLocalRotation(inputBodyLocalRotation);
+        RefreshSleepAwakeVisual(true);
+        base.PrepareForPool();
+    }
+
+    public PersistentState CapturePersistentState()
+    {
+        EnsureBodyRotationCache();
+        EnsureRuntimeStateInitialized();
+        return new PersistentState
+        {
+            heldItemId = heldItemId,
+            state = state,
+            pickupTimer = Mathf.Max(0f, pickupTimer),
+            dropRetryTimer = Mathf.Max(0f, dropRetryTimer),
+            actionTurnTimer = Mathf.Max(0f, actionTurnTimer),
+            turnTimer = IsTurningState(state) ? BackgroundTurnDurationSeconds : 0f,
+            waitingForDropRetry = waitingForDropRetry
+        };
+    }
+
+    public void ApplyPersistentState(PersistentState persistentState)
+    {
+        EnsureBodyRotationCache();
+        if (persistentState == null)
+        {
+            heldItemId = -1;
+            pickupTimer = 0f;
+            dropRetryTimer = 0f;
+            actionTurnTimer = 0f;
+            waitingForDropRetry = false;
+            state = RobotArmState.WaitingForPickup;
+            hasRuntimeStateInitialized = true;
+            SetBodyLocalRotation(inputBodyLocalRotation);
+            RefreshHandItemVisual();
+            RefreshRuntimeSleepState(true);
+            return;
+        }
+
+        heldItemId = persistentState.heldItemId;
+        state = persistentState.state;
+        pickupTimer = Mathf.Max(0f, persistentState.pickupTimer);
+        dropRetryTimer = Mathf.Max(0f, persistentState.dropRetryTimer);
+        actionTurnTimer = Mathf.Max(0f, persistentState.actionTurnTimer);
+        waitingForDropRetry = persistentState.waitingForDropRetry;
+        NormalizeRuntimeState();
+        hasRuntimeStateInitialized = true;
+
+        if (heldItemId < 0 && state == RobotArmState.WaitingForPickup)
+        {
+            SetBodyLocalRotation(inputBodyLocalRotation);
+        }
+
+        RefreshHandItemVisual();
+        RefreshRuntimeSleepState(true);
+    }
+
+    public void ManagedUpdateTick(float deltaTime)
+    {
+        EnsureBodyRotationCache();
+        RefreshHeldItemVisualIfNeeded();
+        if (RefreshRuntimeSleepState())
+        {
+            return;
+        }
+
+        switch (state)
+        {
+            case RobotArmState.WaitingForPickup:
+                TickPickup(deltaTime);
+                break;
+            case RobotArmState.WaitingBeforePickupTake:
+                TickWaitBeforePickupTake(deltaTime);
+                break;
+            case RobotArmState.WaitingAfterPickupTake:
+                TickWaitAfterPickupTake(deltaTime);
+                break;
+            case RobotArmState.TurningToDrop:
+                TickTurnToDrop(deltaTime);
+                break;
+            case RobotArmState.WaitingForDrop:
+                TickDrop(deltaTime);
+                break;
+            case RobotArmState.WaitingBeforeDropPlace:
+                TickWaitBeforeDropPlace(deltaTime);
+                break;
+            case RobotArmState.WaitingAfterDropPlace:
+                TickWaitAfterDropPlace(deltaTime);
+                break;
+            case RobotArmState.TurningToPickup:
+                TickTurnToPickup(deltaTime);
+                break;
+        }
+    }
+
+    public static void WakeAroundCoordinate(Vector2Int coordinate)
+    {
+        for (int i = ActiveRobotArms.Count - 1; i >= 0; i--)
+        {
+            RobotArm robotArm = ActiveRobotArms[i];
+            if (robotArm == null)
+            {
+                ActiveRobotArms.RemoveAt(i);
+                continue;
+            }
+
+            if (!robotArm.isActiveAndEnabled || !robotArm.IsCoordinateInsideRuntimeSleepWakeRange(coordinate))
+            {
+                continue;
+            }
+
+            robotArm.WakeRuntimeSleep();
+        }
+    }
+
+    public static void RefreshAllSleepAwakeDebugVisuals()
+    {
+        for (int i = ActiveRobotArms.Count - 1; i >= 0; i--)
+        {
+            RobotArm robotArm = ActiveRobotArms[i];
+            if (robotArm == null)
+            {
+                ActiveRobotArms.RemoveAt(i);
+                continue;
+            }
+
+            robotArm.RefreshSleepAwakeVisual(true);
+        }
+    }
+
+    private static void RegisterActiveRobotArm(RobotArm robotArm)
+    {
+        if (robotArm == null || ActiveRobotArms.Contains(robotArm))
+        {
+            return;
+        }
+
+        ActiveRobotArms.Add(robotArm);
+    }
+
+    private static void UnregisterActiveRobotArm(RobotArm robotArm)
+    {
+        if (robotArm == null)
+        {
+            return;
+        }
+
+        ActiveRobotArms.Remove(robotArm);
+    }
+
+    private bool RefreshRuntimeSleepState(bool force = false)
+    {
+        bool shouldSleep = ShouldRuntimeSleep();
+        SetRuntimeSleeping(shouldSleep, force);
+        return shouldSleep;
+    }
+
+    private bool ShouldRuntimeSleep()
+    {
+        if (!Application.isPlaying
+            || !isActiveAndEnabled
+            || heldItemId >= 0
+            || state != RobotArmState.WaitingForPickup
+            || !HasPlacementRuntime())
+        {
+            return false;
+        }
+
+        return !HasNearbyRuntimeInteractionTarget();
+    }
+
+    private bool HasNearbyRuntimeInteractionTarget()
+    {
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (terrainGenerator == null || RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count <= 0)
+        {
+            return true;
+        }
+
+        for (int occupiedIndex = 0; occupiedIndex < RuntimeOccupiedCoordinates.Count; occupiedIndex++)
+        {
+            Vector2Int occupiedCoordinate = RuntimeOccupiedCoordinates[occupiedIndex];
+            for (int x = occupiedCoordinate.x - 1; x <= occupiedCoordinate.x + 1; x++)
+            {
+                for (int y = occupiedCoordinate.y - 1; y <= occupiedCoordinate.y + 1; y++)
+                {
+                    Vector2Int coordinate = new Vector2Int(x, y);
+                    if (IsOwnRuntimeCoordinate(coordinate))
+                    {
+                        continue;
+                    }
+
+                    if (!terrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+                    {
+                        continue;
+                    }
+
+                    if (BlockHasRuntimeInteractionTarget(block, coordinate))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool BlockHasRuntimeInteractionTarget(Block block, Vector2Int coordinate)
+    {
+        if (block == null)
+        {
+            return false;
+        }
+
+        MapObject blockObject = block.MapObject;
+        if (blockObject != null && blockObject != this)
+        {
+            return true;
+        }
+
+        if (CoordinateAcceptsInputAreaObject(coordinate) || block.GetInputAreaCenterItemId() >= 0)
+        {
+            return true;
+        }
+
+        Vector3 referenceWorldPosition = transform.position;
+        return block.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, out _)
+               || block.TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, out _);
+    }
+
+    private bool IsOwnRuntimeCoordinate(Vector2Int coordinate)
+    {
+        if (RuntimeOccupiedCoordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < RuntimeOccupiedCoordinates.Count; i++)
+        {
+            if (RuntimeOccupiedCoordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsCoordinateInsideRuntimeSleepWakeRange(Vector2Int coordinate)
+    {
+        if (RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < RuntimeOccupiedCoordinates.Count; i++)
+        {
+            Vector2Int occupiedCoordinate = RuntimeOccupiedCoordinates[i];
+            if (Mathf.Abs(coordinate.x - occupiedCoordinate.x) <= 1
+                && Mathf.Abs(coordinate.y - occupiedCoordinate.y) <= 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void WakeRuntimeSleep()
+    {
+        pickupTimer = 0f;
+        SetRuntimeSleeping(false, true);
+    }
+
+    private void SetRuntimeSleeping(bool sleeping, bool force = false)
+    {
+        if (!force && runtimeSleeping == sleeping)
+        {
+            RefreshSleepAwakeVisual();
+            return;
+        }
+
+        runtimeSleeping = sleeping;
+        SetUpdateTickRegistered(!runtimeSleeping && isActiveAndEnabled);
+        handItem?.SetSleepAwakeSleeping(runtimeSleeping);
+        RefreshSleepAwakeVisual(true);
+    }
+
+    private void SetUpdateTickRegistered(bool registered)
+    {
+        if (updateTickRegistered == registered)
+        {
+            return;
+        }
+
+        updateTickRegistered = registered;
+        if (registered)
+        {
+            MapObjectTickManager.RegisterUpdateTick(this);
+        }
+        else
+        {
+            MapObjectTickManager.UnregisterUpdateTick(this);
+        }
+    }
+
+    private void RefreshSleepAwakeVisual(bool force = false)
+    {
+        EnsureSleepAwakeRenderers();
+        bool useDarkTint = ShouldUseSleepAwakeDarkTint();
+        if (!force && sleepAwakeVisualStateInitialized && lastSleepAwakeDarkTint == useDarkTint)
+        {
+            return;
+        }
+
+        sleepAwakeVisualStateInitialized = true;
+        lastSleepAwakeDarkTint = useDarkTint;
+
+        if (sleepAwakeRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < sleepAwakeRenderers.Length; i++)
+        {
+            Renderer targetRenderer = sleepAwakeRenderers[i];
+            if (targetRenderer == null)
+            {
+                continue;
+            }
+
+            if (!useDarkTint)
+            {
+                targetRenderer.SetPropertyBlock(null);
+                continue;
+            }
+
+            sleepAwakePropertyBlock ??= new MaterialPropertyBlock();
+            sleepAwakePropertyBlock.Clear();
+            SleepAwakeDebugVisual.ApplySleepingColor(sleepAwakePropertyBlock, targetRenderer.sharedMaterial);
+            targetRenderer.SetPropertyBlock(sleepAwakePropertyBlock);
+        }
+    }
+
+    private bool ShouldUseSleepAwakeDarkTint()
+    {
+        return runtimeSleeping
+               && GameManager.Instance != null
+               && GameManager.Instance.ShowSleepAwake;
+    }
+
+    private void EnsureSleepAwakeRenderers()
+    {
+        if (sleepAwakeRenderers != null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        if (handItem == null)
+        {
+            sleepAwakeRenderers = renderers;
+            return;
+        }
+
+        Transform handRoot = handItem.transform;
+        List<Renderer> filteredRenderers = new List<Renderer>(renderers.Length);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer targetRenderer = renderers[i];
+            if (targetRenderer == null
+                || (handRoot != null && targetRenderer.transform.IsChildOf(handRoot)))
+            {
+                continue;
+            }
+
+            filteredRenderers.Add(targetRenderer);
+        }
+
+        sleepAwakeRenderers = filteredRenderers.ToArray();
+    }
+
+    private void TickPickup(float deltaTime)
+    {
+        if (heldItemId >= 0)
+        {
+            state = RobotArmState.TurningToDrop;
+            return;
+        }
+
+        if (!HasPlacementRuntime())
+        {
+            return;
+        }
+
+        RotateBodyToward(inputBodyLocalRotation, deltaTime);
+        if (pickupTimer > 0f)
+        {
+            pickupTimer -= deltaTime;
+            return;
+        }
+
+        if (CanPickupOneItem())
+        {
+            PlayPickAnimation();
+            state = RobotArmState.WaitingBeforePickupTake;
+            actionTurnTimer = actionTurnDelay;
+            return;
+        }
+
+        pickupTimer = pickupInterval;
+    }
+
+    private void TickWaitBeforePickupTake(float deltaTime)
+    {
+        if (heldItemId >= 0)
+        {
+            state = RobotArmState.TurningToDrop;
+            return;
+        }
+
+        if (actionTurnTimer > 0f)
+        {
+            actionTurnTimer -= deltaTime;
+            return;
+        }
+
+        if (TryPickupOneItem(out int pickedItemId))
+        {
+            SetHeldItem(pickedItemId);
+            dropRetryTimer = 0f;
+            waitingForDropRetry = false;
+            state = RobotArmState.WaitingAfterPickupTake;
+            actionTurnTimer = actionTurnDelay;
+            return;
+        }
+
+        state = RobotArmState.WaitingForPickup;
+        pickupTimer = pickupInterval;
+    }
+
+    private void TickWaitAfterPickupTake(float deltaTime)
+    {
+        if (heldItemId < 0)
+        {
+            state = RobotArmState.WaitingForPickup;
+            pickupTimer = pickupInterval;
+            return;
+        }
+
+        if (actionTurnTimer > 0f)
+        {
+            actionTurnTimer -= deltaTime;
+            return;
+        }
+
+        state = RobotArmState.TurningToDrop;
+    }
+
+    private void TickTurnToDrop(float deltaTime)
+    {
+        if (heldItemId < 0)
+        {
+            waitingForDropRetry = false;
+            dropRetryTimer = 0f;
+            state = RobotArmState.TurningToPickup;
+            return;
+        }
+
+        if (RotateBodyToward(GetOutputBodyLocalRotation(), deltaTime))
+        {
+            state = RobotArmState.WaitingForDrop;
+            waitingForDropRetry = false;
+            dropRetryTimer = 0f;
+        }
+    }
+
+    private void TickDrop(float deltaTime)
+    {
+        if (heldItemId < 0)
+        {
+            waitingForDropRetry = false;
+            dropRetryTimer = 0f;
+            state = RobotArmState.TurningToPickup;
+            return;
+        }
+
+        if (dropRetryTimer > 0f)
+        {
+            dropRetryTimer -= deltaTime;
+            return;
+        }
+
+        waitingForDropRetry = false;
+        if (CanPlaceHeldItem())
+        {
+            PlayDropAnimation();
+            state = RobotArmState.WaitingBeforeDropPlace;
+            actionTurnTimer = actionTurnDelay;
+            return;
+        }
+
+        BeginDropRetryDelay();
+    }
+
+    private void TickWaitBeforeDropPlace(float deltaTime)
+    {
+        if (heldItemId < 0)
+        {
+            waitingForDropRetry = false;
+            dropRetryTimer = 0f;
+            state = RobotArmState.TurningToPickup;
+            return;
+        }
+
+        if (actionTurnTimer > 0f)
+        {
+            actionTurnTimer -= deltaTime;
+            return;
+        }
+
+        if (TryPlaceHeldItem())
+        {
+            dropRetryTimer = 0f;
+            ClearHeldItem();
+            state = RobotArmState.WaitingAfterDropPlace;
+            actionTurnTimer = actionTurnDelay;
+            return;
+        }
+
+        BeginDropRetryDelay();
+        state = RobotArmState.WaitingForDrop;
+    }
+
+    private void TickWaitAfterDropPlace(float deltaTime)
+    {
+        if (heldItemId >= 0)
+        {
+            state = RobotArmState.TurningToDrop;
+            return;
+        }
+
+        if (actionTurnTimer > 0f)
+        {
+            actionTurnTimer -= deltaTime;
+            return;
+        }
+
+        state = RobotArmState.TurningToPickup;
+    }
+
+    private void TickTurnToPickup(float deltaTime)
+    {
+        if (RotateBodyToward(inputBodyLocalRotation, deltaTime))
+        {
+            state = RobotArmState.WaitingForPickup;
+            pickupTimer = pickupInterval;
+        }
+    }
+
+    private bool TryPickupOneItem(out int pickedItemId)
+    {
+        pickedItemId = -1;
+        if (!TryResolvePickupCandidate(
+                out Block pickupBlock,
+                out BoxObject boxObject,
+                out RobotArmPickupSource pickupSource,
+                out Vector3 referenceWorldPosition))
+        {
+            return false;
+        }
+
+        return pickupSource switch
+        {
+            RobotArmPickupSource.Floor => pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId),
+            RobotArmPickupSource.Box => boxObject != null && boxObject.TryTakeOneContainedObject(AcceptsPickupItem, out pickedItemId),
+            RobotArmPickupSource.Conveyor => pickupBlock.TryTakeOneConveyorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId),
+            RobotArmPickupSource.InputArea => TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId),
+            _ => false
+        };
+    }
+
+    private bool CanPickupOneItem()
+    {
+        return TryResolvePickupCandidate(out _, out _, out _, out _);
+    }
+
+    private bool TryResolvePickupCandidate(
+        out Block pickupBlock,
+        out BoxObject boxObject,
+        out RobotArmPickupSource pickupSource,
+        out Vector3 referenceWorldPosition)
+    {
+        pickupBlock = null;
+        boxObject = null;
+        pickupSource = RobotArmPickupSource.None;
+        referenceWorldPosition = GetHandWorldPosition();
+
+        if (!TryResolvePickupCoordinate(out Vector2Int pickupCoordinate))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out pickupBlock) || pickupBlock == null)
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+
+        if (pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out Vector3 candidateWorldPosition))
+        {
+            TryChoosePickupSource(RobotArmPickupSource.Floor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+        }
+
+        if (TryGetBoxObject(pickupBlock, out BoxObject candidateBoxObject))
+        {
+            boxObject = candidateBoxObject;
+            if (candidateBoxObject.TryGetContainedObjectTopItemId(out int containedItemId)
+                && AcceptsPickupItem(containedItemId)
+                && candidateBoxObject.TryGetContainedObjectTopWorldPosition(out candidateWorldPosition))
+            {
+                TryChoosePickupSource(RobotArmPickupSource.Box, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+            }
+        }
+
+        if (pickupBlock.TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out candidateWorldPosition))
+        {
+            TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+        }
+
+        int inputAreaItemId = pickupBlock.GetInputAreaCenterItemId();
+        if (AcceptsPickupItem(inputAreaItemId)
+            && pickupBlock.TryGetInputAreaCenterTopWorldPosition(-1, out candidateWorldPosition))
+        {
+            TryChoosePickupSource(RobotArmPickupSource.InputArea, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+        }
+
+        return pickupSource != RobotArmPickupSource.None;
+    }
+
+    private static void TryChoosePickupSource(
+        RobotArmPickupSource candidateSource,
+        Vector3 candidateWorldPosition,
+        Vector3 referenceWorldPosition,
+        ref RobotArmPickupSource bestSource,
+        ref float bestDistanceSqr)
+    {
+        Vector3 offset = candidateWorldPosition - referenceWorldPosition;
+        offset.y = 0f;
+        float distanceSqr = offset.sqrMagnitude;
+        if (bestSource != RobotArmPickupSource.None && distanceSqr >= bestDistanceSqr)
+        {
+            return;
+        }
+
+        bestSource = candidateSource;
+        bestDistanceSqr = distanceSqr;
+    }
+
+    private bool TryTakeFilteredInputAreaItem(Block pickupBlock, out int pickedItemId)
+    {
+        pickedItemId = -1;
+        if (pickupBlock == null)
+        {
+            return false;
+        }
+
+        int itemId = pickupBlock.GetInputAreaCenterItemId();
+        return AcceptsPickupItem(itemId)
+               && pickupBlock.TryConsumeOneInputAreaCenterObject(itemId, out pickedItemId);
+    }
+
+    private bool AcceptsPickupItem(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        return IsItemFilterEnabled(itemId, ResolveFilterBitCount(itemId));
+    }
+
+    private int ResolveFilterBitCount(int fallbackItemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        List<ItemDefinition> definitions = itemManager != null ? itemManager.ItemDefinitions : null;
+        if (definitions == null || definitions.Count <= 0)
+        {
+            return Mathf.Max(1, fallbackItemId + 1);
+        }
+
+        int maxItemId = fallbackItemId;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            if (definition.id > maxItemId)
+            {
+                maxItemId = definition.id;
+            }
+        }
+
+        return Mathf.Max(1, maxItemId + 1);
+    }
+
+    private bool TryPlaceHeldItem()
+    {
+        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock) || dropBlock == null)
+        {
+            return false;
+        }
+
+        int itemId = heldItemId;
+        if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
+            && boxObject.TryPutOneContainedObjectInstant(itemId, out _))
+        {
+            return true;
+        }
+
+        if (dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
+                itemId,
+                GetPickupReferencePosition(dropBlock, dropCoordinate),
+                Vector3.zero,
+                0f,
+                out _,
+                null,
+                null,
+                0f,
+                false))
+        {
+            return true;
+        }
+
+        if (CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
+            && dropBlock.TryAddInputAreaCenterObject(itemId, out _, true))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool CanPlaceHeldItem()
+    {
+        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock) || dropBlock == null)
+        {
+            return false;
+        }
+
+        int itemId = heldItemId;
+        if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
+            && boxObject.CanPutOneContainedObject(itemId))
+        {
+            return true;
+        }
+
+        if (dropBlock.CanAddConveyorObjectAtPlacement(itemId, GetPickupReferencePosition(dropBlock, dropCoordinate)))
+        {
+            return true;
+        }
+
+        return CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
+               && dropBlock.CanAddInputAreaCenterObjects(1, itemId);
+    }
+
+    private bool TryResolvePickupCoordinate(out Vector2Int pickupCoordinate)
+    {
+        return TryResolveInteractionCoordinate(true, out pickupCoordinate);
+    }
+
+    private bool TryResolveDropCoordinate(out Vector2Int dropCoordinate)
+    {
+        return TryResolveInteractionCoordinate(false, out dropCoordinate);
+    }
+
+    private bool TryResolveInteractionCoordinate(bool inputSide, out Vector2Int interactionCoordinate)
+    {
+        interactionCoordinate = default;
+
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _) || RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count == 0)
+        {
+            return false;
+        }
+
+        if (!TryResolveFlowDirection(out Vector2Int flowDirection))
+        {
+            return false;
+        }
+
+        Vector2Int edgeCoordinate = anchorCoordinate;
+        int bestProjection = inputSide ? int.MaxValue : int.MinValue;
+        for (int i = 0; i < RuntimeOccupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = RuntimeOccupiedCoordinates[i];
+            int projection = coordinate.x * flowDirection.x + coordinate.y * flowDirection.y;
+            bool betterProjection = inputSide ? projection < bestProjection : projection > bestProjection;
+            if (betterProjection)
+            {
+                bestProjection = projection;
+                edgeCoordinate = coordinate;
+            }
+        }
+
+        interactionCoordinate = inputSide ? edgeCoordinate - flowDirection : edgeCoordinate + flowDirection;
+        return true;
+    }
+
+    private bool TryResolveFlowDirection(out Vector2Int flowDirection)
+    {
+        Vector3 forward = transform.rotation * Vector3.forward;
+        Vector2 flatForward = new Vector2(forward.x, forward.z);
+        if (flatForward.sqrMagnitude < 0.0001f)
+        {
+            flowDirection = Vector2Int.up;
+            return true;
+        }
+
+        flatForward.Normalize();
+        flowDirection = Mathf.Abs(flatForward.x) >= Mathf.Abs(flatForward.y)
+            ? new Vector2Int(flatForward.x >= 0f ? 1 : -1, 0)
+            : new Vector2Int(0, flatForward.y >= 0f ? 1 : -1);
+        return true;
+    }
+
+    private TerrainGenerator ResolveTerrainGenerator()
+    {
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = TerrainGenerator.ResolveActive();
+        }
+
+        return cachedTerrainGenerator;
+    }
+
+    private static Vector3 GetPickupReferencePosition(Block pickupBlock, Vector2Int pickupCoordinate)
+    {
+        if (pickupBlock != null)
+        {
+            return pickupBlock.transform.position;
+        }
+
+        return new Vector3(pickupCoordinate.x, 0f, pickupCoordinate.y);
+    }
+
+    private static bool CoordinateAcceptsInputAreaObject(Vector2Int coordinate)
+    {
+        return InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
+               || InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate);
+    }
+
+    private static bool CanPlaceSingleLineDrop(Block dropBlock, Vector2Int coordinate)
+    {
+        if (dropBlock == null)
+        {
+            return false;
+        }
+
+        return CoordinateAcceptsInputAreaObject(coordinate) || dropBlock.MapObject == null;
+    }
+
+    private static bool TryGetBoxObject(Block pickupBlock, out BoxObject boxObject)
+    {
+        boxObject = null;
+        if (pickupBlock == null || pickupBlock.MapObject == null)
+        {
+            return false;
+        }
+
+        boxObject = pickupBlock.MapObject as BoxObject;
+        if (boxObject != null)
+        {
+            return true;
+        }
+
+        return pickupBlock.MapObject.TryGetComponent(out boxObject);
+    }
+
+    public bool TryTakeHeldItemToBag(PlayerBag targetBag, int targetSlotIndex)
+    {
+        if (targetBag == null || targetSlotIndex < 0 || !CanTakeHeldItemFromSlotInternal())
+        {
+            return false;
+        }
+
+        int itemId = heldItemId;
+        if (!targetBag.TryAddObject(targetSlotIndex, itemId, out _))
+        {
+            return false;
+        }
+
+        ClearHeldItem();
+        dropRetryTimer = 0f;
+        actionTurnTimer = 0f;
+        waitingForDropRetry = false;
+        state = RobotArmState.TurningToPickup;
+        return true;
+    }
+
+    private bool CanTakeHeldItemFromSlotInternal()
+    {
+        return heldItemId >= 0 && state == RobotArmState.WaitingForDrop;
+    }
+
+    private void EnsureRuntimeStateInitialized()
+    {
+        if (hasRuntimeStateInitialized)
+        {
+            return;
+        }
+
+        NormalizeRuntimeState();
+        hasRuntimeStateInitialized = true;
+    }
+
+    private void NormalizeRuntimeState()
+    {
+        pickupTimer = Mathf.Max(0f, pickupTimer);
+        dropRetryTimer = Mathf.Max(0f, dropRetryTimer);
+        actionTurnTimer = Mathf.Max(0f, actionTurnTimer);
+
+        if (!System.Enum.IsDefined(typeof(RobotArmState), state))
+        {
+            state = RobotArmState.WaitingForPickup;
+        }
+
+        if (heldItemId < 0)
+        {
+            waitingForDropRetry = false;
+            dropRetryTimer = 0f;
+            if (state == RobotArmState.WaitingForDrop
+                || state == RobotArmState.WaitingBeforeDropPlace
+                || state == RobotArmState.TurningToDrop)
+            {
+                state = RobotArmState.TurningToPickup;
+            }
+
+            return;
+        }
+
+        if (state == RobotArmState.WaitingForPickup
+            || state == RobotArmState.WaitingBeforePickupTake
+            || state == RobotArmState.WaitingAfterDropPlace
+            || state == RobotArmState.TurningToPickup)
+        {
+            state = RobotArmState.TurningToDrop;
+        }
+    }
+
+    private static bool IsTurningState(RobotArmState robotArmState)
+    {
+        return robotArmState == RobotArmState.TurningToDrop
+               || robotArmState == RobotArmState.TurningToPickup;
+    }
+
+    private void SetHeldItem(int itemId)
+    {
+        heldItemId = itemId;
+        RefreshHandItemVisual();
+    }
+
+    private void ClearHeldItem()
+    {
+        heldItemId = -1;
+        RefreshHandItemVisual();
+    }
+
+    private void RefreshHandItemVisual()
+    {
+        if (handItem == null)
+        {
+            return;
+        }
+
+        if (heldItemId < 0)
+        {
+            handItem.SetCachedActive(false);
+            return;
+        }
+
+        handItem.SetBatchedRendering(false);
+        if (handItem.SetItem(heldItemId))
+        {
+            handItem.SetCachedActive(true);
+        }
+        else
+        {
+            handItem.SetCachedActive(false);
+        }
+    }
+
+    private void RefreshHeldItemVisualIfNeeded()
+    {
+        if (heldItemId >= 0 && handItem != null && !handItem.gameObject.activeSelf)
+        {
+            RefreshHandItemVisual();
+        }
+    }
+
+    private Vector3 GetHandWorldPosition()
+    {
+        if (handItem != null)
+        {
+            return handItem.transform.position;
+        }
+
+        if (body != null)
+        {
+            return body.position;
+        }
+
+        return transform.position;
+    }
+
+    private bool HasPlacementRuntime()
+    {
+        return TryGetPlacementRuntime(out _, out _) && RuntimeOccupiedCoordinates != null && RuntimeOccupiedCoordinates.Count > 0;
+    }
+
+    private void EnsureBodyRotationCache()
+    {
+        if (hasInputBodyLocalRotation)
+        {
+            return;
+        }
+
+        inputBodyLocalRotation = body != null ? body.localRotation : Quaternion.identity;
+        hasInputBodyLocalRotation = true;
+    }
+
+    private Quaternion GetOutputBodyLocalRotation()
+    {
+        return inputBodyLocalRotation * Quaternion.Euler(0f, 180f, 0f);
+    }
+
+    private bool RotateBodyToward(Quaternion targetLocalRotation, float deltaTime)
+    {
+        if (body == null)
+        {
+            return true;
+        }
+
+        Quaternion currentRotation = body.localRotation;
+        body.localRotation = Quaternion.RotateTowards(
+            currentRotation,
+            targetLocalRotation,
+            Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond) * deltaTime);
+
+        return Quaternion.Angle(body.localRotation, targetLocalRotation) <= 0.1f;
+    }
+
+    private void SetBodyLocalRotation(Quaternion targetLocalRotation)
+    {
+        if (body != null)
+        {
+            body.localRotation = targetLocalRotation;
+        }
+    }
+
+    private void BeginDropRetryDelay()
+    {
+        if (waitingForDropRetry)
+        {
+            return;
+        }
+
+        dropRetryTimer = dropRetryInterval;
+        waitingForDropRetry = true;
+    }
+
+    private void PlayPickAnimation()
+    {
+        Animator targetAnimator = ResolveAnimator();
+        if (targetAnimator == null)
+        {
+            return;
+        }
+
+        targetAnimator.ResetTrigger(PickTriggerHash);
+        targetAnimator.SetTrigger(PickTriggerHash);
+    }
+
+    private void PlayDropAnimation()
+    {
+        Animator targetAnimator = ResolveAnimator();
+        if (targetAnimator == null)
+        {
+            return;
+        }
+
+        targetAnimator.ResetTrigger(DropTriggerHash);
+        targetAnimator.SetTrigger(DropTriggerHash);
+    }
+
+    private Animator ResolveAnimator()
+    {
+        if (cachedAnimator == null)
+        {
+            cachedAnimator = GetComponent<Animator>();
+            if (cachedAnimator == null)
+            {
+                cachedAnimator = GetComponentInChildren<Animator>(true);
+            }
+        }
+
+        return cachedAnimator;
     }
 }

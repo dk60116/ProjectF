@@ -6,7 +6,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class BoxObject : InstallationObject
+public class BoxObject : InstallationObject, IMapObjectLateTick
 {
     private static readonly HashSet<BoxObject> ActiveInstances = new HashSet<BoxObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
@@ -108,10 +108,12 @@ public class BoxObject : InstallationObject
         SyncContainedStackVisibility(true);
         SyncItemIcon(true);
         SyncCountText(true);
+        MapObjectTickManager.RegisterLateTick(this);
     }
 
     protected override void OnDisable()
     {
+        MapObjectTickManager.UnregisterLateTick(this);
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
         hinge?.DOKill();
@@ -122,7 +124,7 @@ public class BoxObject : InstallationObject
         base.OnDisable();
     }
 
-    private void LateUpdate()
+    public void ManagedLateUpdateTick(float deltaTime)
     {
         SyncContainedStackVisibility();
         SyncItemIcon();
@@ -199,6 +201,110 @@ public class BoxObject : InstallationObject
         }
 
         return contentBlock.TryPickupOneInputAreaCenterObjectToHand(player, playerPosition, pickupRadius);
+    }
+
+    public bool TryTakeOneContainedObject(out int takenItemId, bool requireOpen = false)
+    {
+        return TryTakeOneContainedObject(null, out takenItemId, requireOpen);
+    }
+
+    public bool TryTakeOneContainedObject(System.Predicate<int> itemFilter, out int takenItemId, bool requireOpen = false)
+    {
+        takenItemId = -1;
+        if (requireOpen && !isOpen)
+        {
+            return false;
+        }
+
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        int itemId = contentBlock.GetInputAreaCenterItemId();
+        if (itemId < 0 || (itemFilter != null && !itemFilter(itemId)))
+        {
+            return false;
+        }
+
+        return contentBlock.TryConsumeOneInputAreaCenterObject(itemId, out takenItemId);
+    }
+
+    public bool TryGetContainedObjectTopWorldPosition(out Vector3 worldPosition)
+    {
+        worldPosition = transform.position;
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        return contentBlock.GetInputAreaCenterItemId() >= 0
+               && contentBlock.TryGetInputAreaCenterTopWorldPosition(-1, out worldPosition);
+    }
+
+    public bool TryGetContainedObjectTopItemId(out int itemId)
+    {
+        itemId = -1;
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        itemId = contentBlock.GetInputAreaCenterItemId();
+        return itemId >= 0;
+    }
+
+    public bool TryPutOneContainedObject(
+        int itemId,
+        Vector3 startWorldPosition,
+        float delay,
+        out PortableObject targetPortableObject,
+        bool useJumpArc = true)
+    {
+        targetPortableObject = null;
+        if (itemId < 0 || !AcceptsItem(itemId))
+        {
+            return false;
+        }
+
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        return contentBlock.TryAddInputAreaCenterObjectAnimated(
+            itemId,
+            startWorldPosition,
+            delay,
+            out targetPortableObject,
+            null,
+            null,
+            useJumpArc);
+    }
+
+    public bool CanPutOneContainedObject(int itemId)
+    {
+        if (itemId < 0 || !AcceptsItem(itemId))
+        {
+            return false;
+        }
+
+        return TryGetContentBlock(out Block contentBlock)
+               && contentBlock != null
+               && contentBlock.CanAddInputAreaCenterObjects(1, itemId);
+    }
+
+    public bool TryPutOneContainedObjectInstant(int itemId, out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+        if (itemId < 0 || !AcceptsItem(itemId))
+        {
+            return false;
+        }
+
+        return TryGetContentBlock(out Block contentBlock)
+               && contentBlock != null
+               && contentBlock.TryAddInputAreaCenterObject(itemId, out targetPortableObject, true);
     }
 
     public bool AcceptsItem(int itemId)

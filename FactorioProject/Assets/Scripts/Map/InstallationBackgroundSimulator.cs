@@ -5,6 +5,7 @@ using UnityEngine;
 public class InstallationBackgroundSimulator : MonoBehaviour
 {
     private const int InputAreaCenterStackStateSentinel = -1000000001;
+    private const int ConveyorStackStateSentinel = -1000000002;
 
     [SerializeField, Min(1)]
     private int maxCraftIterationsPerSimulation = 256;
@@ -15,6 +16,8 @@ public class InstallationBackgroundSimulator : MonoBehaviour
     {
         public readonly List<int> floorItems = new List<int>();
         public readonly List<int> centerItems = new List<int>();
+        public readonly List<int> conveyorLaneItems = new List<int>();
+        public bool hasConveyorStack;
 
         public static SavedBlockInventory FromSerialized(IReadOnlyList<int> itemIds)
         {
@@ -43,6 +46,28 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                     continue;
                 }
 
+                if (itemId == ConveyorStackStateSentinel)
+                {
+                    if (i + 1 >= itemIds.Count)
+                    {
+                        break;
+                    }
+
+                    inventory.hasConveyorStack = true;
+                    int laneCount = Mathf.Max(0, itemIds[++i]);
+                    for (int laneIndex = 0; laneIndex < laneCount && i + 1 < itemIds.Count; laneIndex++)
+                    {
+                        inventory.conveyorLaneItems.Add(itemIds[++i]);
+                    }
+
+                    continue;
+                }
+
+                if (itemId < 0)
+                {
+                    continue;
+                }
+
                 inventory.floorItems.Add(itemId);
             }
 
@@ -51,8 +76,15 @@ public class InstallationBackgroundSimulator : MonoBehaviour
 
         public List<int> ToSerialized()
         {
-            List<int> itemIds = new List<int>(floorItems.Count + centerItems.Count + 2);
+            List<int> itemIds = new List<int>(floorItems.Count + centerItems.Count + conveyorLaneItems.Count + 4);
             itemIds.AddRange(floorItems);
+
+            if (hasConveyorStack)
+            {
+                itemIds.Add(ConveyorStackStateSentinel);
+                itemIds.Add(conveyorLaneItems.Count);
+                itemIds.AddRange(conveyorLaneItems);
+            }
 
             if (centerItems.Count > 0)
             {
@@ -63,6 +95,23 @@ public class InstallationBackgroundSimulator : MonoBehaviour
 
             return itemIds;
         }
+    }
+
+    private enum BackgroundRobotArmPickupSource
+    {
+        None,
+        Floor,
+        Box,
+        Conveyor,
+        InputArea
+    }
+
+    private struct BackgroundRobotArmPickupCandidate
+    {
+        public BackgroundRobotArmPickupSource source;
+        public Vector2Int coordinate;
+        public int itemId;
+        public Vector3 worldPosition;
     }
 
     public void SimulateSavedInstallation(Vector2Int anchorCoordinate, int maxIterationsOverride = -1)
@@ -78,7 +127,18 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
 
         if (!stateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState)
-            || installationState?.inputOutputState == null)
+            || installationState == null)
+        {
+            return;
+        }
+
+        if (installationState.robotArmState != null)
+        {
+            SimulateSavedRobotArm(stateStore, installationState, maxIterationsOverride);
+            return;
+        }
+
+        if (installationState.inputOutputState == null)
         {
             return;
         }
@@ -154,6 +214,857 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
 
         stateStore.UpdateInstallationState(installationState);
+    }
+
+    private void SimulateSavedRobotArm(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        int maxIterationsOverride)
+    {
+        if (stateStore == null || installationState == null)
+        {
+            return;
+        }
+
+        long nowTicks = DateTime.UtcNow.Ticks;
+        if (installationState.lastBackgroundSimulationTicks <= 0)
+        {
+            installationState.lastBackgroundSimulationTicks = nowTicks;
+            stateStore.UpdateInstallationState(installationState);
+            return;
+        }
+
+        double elapsedSeconds = TimeSpan.FromTicks(Math.Max(0L, nowTicks - installationState.lastBackgroundSimulationTicks)).TotalSeconds;
+        if (elapsedSeconds <= 0.0001d)
+        {
+            installationState.lastBackgroundSimulationTicks = nowTicks;
+            stateStore.UpdateInstallationState(installationState);
+            return;
+        }
+
+        if (!TryResolveTemplateRobotArm(installationState.itemId, out _, out RobotArm templateRobotArm))
+        {
+            installationState.lastBackgroundSimulationTicks = nowTicks;
+            stateStore.UpdateInstallationState(installationState);
+            return;
+        }
+
+        RobotArm.PersistentState robotState = installationState.robotArmState ?? new RobotArm.PersistentState();
+        NormalizeSavedRobotArmState(robotState);
+
+        double remainingElapsed = elapsedSeconds;
+        double simulatedSeconds = 0d;
+        bool blockedOrIdle = false;
+        int iterationCount = 0;
+        int iterationLimit = maxIterationsOverride > 0
+            ? maxIterationsOverride
+            : Mathf.Max(1, maxCraftIterationsPerSimulation);
+
+        while (remainingElapsed > 0.0001d && iterationCount < iterationLimit)
+        {
+            iterationCount++;
+            if (!AdvanceSavedRobotArm(
+                    stateStore,
+                    installationState,
+                    robotState,
+                    templateRobotArm,
+                    ref remainingElapsed,
+                    ref simulatedSeconds,
+                    out bool blocked))
+            {
+                blockedOrIdle = blocked;
+                break;
+            }
+        }
+
+        installationState.robotArmState = robotState;
+        bool hitIterationLimit = iterationCount >= iterationLimit && remainingElapsed > 0.0001d && !blockedOrIdle;
+        if (hitIterationLimit)
+        {
+            installationState.lastBackgroundSimulationTicks += TimeSpan.FromSeconds(simulatedSeconds).Ticks;
+        }
+        else
+        {
+            installationState.lastBackgroundSimulationTicks = nowTicks;
+        }
+
+        stateStore.UpdateInstallationState(installationState);
+    }
+
+    private bool AdvanceSavedRobotArm(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm.PersistentState robotState,
+        RobotArm templateRobotArm,
+        ref double remainingElapsed,
+        ref double simulatedSeconds,
+        out bool blocked)
+    {
+        blocked = false;
+        if (stateStore == null || installationState == null || robotState == null || templateRobotArm == null)
+        {
+            blocked = true;
+            return false;
+        }
+
+        switch (robotState.state)
+        {
+            case RobotArm.RobotArmState.WaitingForPickup:
+                if (robotState.heldItemId >= 0)
+                {
+                    BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToDrop, templateRobotArm);
+                    return true;
+                }
+
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.pickupTimer))
+                {
+                    return false;
+                }
+
+                if (!CanPickupSavedRobotArmItem(stateStore, installationState, templateRobotArm))
+                {
+                    robotState.pickupTimer = templateRobotArm.PickupIntervalSeconds;
+                    blocked = true;
+                    return false;
+                }
+
+                robotState.state = RobotArm.RobotArmState.WaitingBeforePickupTake;
+                robotState.actionTurnTimer = templateRobotArm.ActionTurnDelaySeconds;
+                return true;
+
+            case RobotArm.RobotArmState.WaitingBeforePickupTake:
+                if (robotState.heldItemId >= 0)
+                {
+                    BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToDrop, templateRobotArm);
+                    return true;
+                }
+
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.actionTurnTimer))
+                {
+                    return false;
+                }
+
+                if (TryPickupSavedRobotArmItem(stateStore, installationState, templateRobotArm, out int pickedItemId))
+                {
+                    robotState.heldItemId = pickedItemId;
+                    robotState.dropRetryTimer = 0f;
+                    robotState.waitingForDropRetry = false;
+                    robotState.state = RobotArm.RobotArmState.WaitingAfterPickupTake;
+                    robotState.actionTurnTimer = templateRobotArm.ActionTurnDelaySeconds;
+                    return true;
+                }
+
+                robotState.state = RobotArm.RobotArmState.WaitingForPickup;
+                robotState.pickupTimer = templateRobotArm.PickupIntervalSeconds;
+                blocked = true;
+                return false;
+
+            case RobotArm.RobotArmState.WaitingAfterPickupTake:
+                if (robotState.heldItemId < 0)
+                {
+                    robotState.state = RobotArm.RobotArmState.WaitingForPickup;
+                    robotState.pickupTimer = templateRobotArm.PickupIntervalSeconds;
+                    return true;
+                }
+
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.actionTurnTimer))
+                {
+                    return false;
+                }
+
+                BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToDrop, templateRobotArm);
+                return true;
+
+            case RobotArm.RobotArmState.TurningToDrop:
+                if (robotState.heldItemId < 0)
+                {
+                    BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToPickup, templateRobotArm);
+                    return true;
+                }
+
+                EnsureSavedRobotArmTurnTimer(robotState, templateRobotArm);
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.turnTimer))
+                {
+                    return false;
+                }
+
+                robotState.state = RobotArm.RobotArmState.WaitingForDrop;
+                robotState.waitingForDropRetry = false;
+                robotState.dropRetryTimer = 0f;
+                return true;
+
+            case RobotArm.RobotArmState.WaitingForDrop:
+                if (robotState.heldItemId < 0)
+                {
+                    BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToPickup, templateRobotArm);
+                    return true;
+                }
+
+                if (robotState.waitingForDropRetry
+                    && !ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.dropRetryTimer))
+                {
+                    return false;
+                }
+
+                robotState.waitingForDropRetry = false;
+                if (!CanPlaceSavedRobotArmHeldItem(stateStore, installationState, templateRobotArm, robotState.heldItemId))
+                {
+                    BeginSavedRobotArmDropRetry(robotState, templateRobotArm);
+                    blocked = true;
+                    return false;
+                }
+
+                robotState.state = RobotArm.RobotArmState.WaitingBeforeDropPlace;
+                robotState.actionTurnTimer = templateRobotArm.ActionTurnDelaySeconds;
+                return true;
+
+            case RobotArm.RobotArmState.WaitingBeforeDropPlace:
+                if (robotState.heldItemId < 0)
+                {
+                    BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToPickup, templateRobotArm);
+                    return true;
+                }
+
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.actionTurnTimer))
+                {
+                    return false;
+                }
+
+                if (TryPlaceSavedRobotArmHeldItem(stateStore, installationState, templateRobotArm, robotState.heldItemId))
+                {
+                    robotState.heldItemId = -1;
+                    robotState.dropRetryTimer = 0f;
+                    robotState.waitingForDropRetry = false;
+                    robotState.state = RobotArm.RobotArmState.WaitingAfterDropPlace;
+                    robotState.actionTurnTimer = templateRobotArm.ActionTurnDelaySeconds;
+                    return true;
+                }
+
+                BeginSavedRobotArmDropRetry(robotState, templateRobotArm);
+                blocked = true;
+                return false;
+
+            case RobotArm.RobotArmState.WaitingAfterDropPlace:
+                if (robotState.heldItemId >= 0)
+                {
+                    BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToDrop, templateRobotArm);
+                    return true;
+                }
+
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.actionTurnTimer))
+                {
+                    return false;
+                }
+
+                BeginSavedRobotArmTurn(robotState, RobotArm.RobotArmState.TurningToPickup, templateRobotArm);
+                return true;
+
+            case RobotArm.RobotArmState.TurningToPickup:
+                EnsureSavedRobotArmTurnTimer(robotState, templateRobotArm);
+                if (!ConsumeSavedRobotArmTimer(ref remainingElapsed, ref simulatedSeconds, ref robotState.turnTimer))
+                {
+                    return false;
+                }
+
+                robotState.state = RobotArm.RobotArmState.WaitingForPickup;
+                robotState.pickupTimer = templateRobotArm.PickupIntervalSeconds;
+                return true;
+
+            default:
+                NormalizeSavedRobotArmState(robotState);
+                return true;
+        }
+    }
+
+    private static bool ConsumeSavedRobotArmTimer(ref double remainingElapsed, ref double simulatedSeconds, ref float timer)
+    {
+        timer = Mathf.Max(0f, timer);
+        if (timer <= 0.0001f)
+        {
+            timer = 0f;
+            return true;
+        }
+
+        double delta = Math.Min(remainingElapsed, timer);
+        if (delta <= 0.0001d)
+        {
+            return false;
+        }
+
+        timer = Mathf.Max(0f, timer - (float)delta);
+        remainingElapsed = Math.Max(0d, remainingElapsed - delta);
+        simulatedSeconds += delta;
+        return timer <= 0.0001f;
+    }
+
+    private static void BeginSavedRobotArmTurn(
+        RobotArm.PersistentState robotState,
+        RobotArm.RobotArmState targetState,
+        RobotArm templateRobotArm)
+    {
+        robotState.state = targetState;
+        robotState.turnTimer = ResolveSavedRobotArmTurnDuration(templateRobotArm);
+    }
+
+    private static void EnsureSavedRobotArmTurnTimer(RobotArm.PersistentState robotState, RobotArm templateRobotArm)
+    {
+        if (robotState.turnTimer <= 0.0001f)
+        {
+            robotState.turnTimer = ResolveSavedRobotArmTurnDuration(templateRobotArm);
+        }
+    }
+
+    private static float ResolveSavedRobotArmTurnDuration(RobotArm templateRobotArm)
+    {
+        return templateRobotArm != null
+            ? Mathf.Max(0.0001f, templateRobotArm.BackgroundTurnDurationSeconds)
+            : 0.3333f;
+    }
+
+    private static void BeginSavedRobotArmDropRetry(RobotArm.PersistentState robotState, RobotArm templateRobotArm)
+    {
+        robotState.state = RobotArm.RobotArmState.WaitingForDrop;
+        robotState.dropRetryTimer = templateRobotArm != null ? templateRobotArm.DropRetryIntervalSeconds : 0.1f;
+        robotState.waitingForDropRetry = true;
+    }
+
+    private static void NormalizeSavedRobotArmState(RobotArm.PersistentState robotState)
+    {
+        if (robotState == null)
+        {
+            return;
+        }
+
+        if (!Enum.IsDefined(typeof(RobotArm.RobotArmState), robotState.state))
+        {
+            robotState.state = RobotArm.RobotArmState.WaitingForPickup;
+        }
+
+        robotState.pickupTimer = Mathf.Max(0f, robotState.pickupTimer);
+        robotState.dropRetryTimer = Mathf.Max(0f, robotState.dropRetryTimer);
+        robotState.actionTurnTimer = Mathf.Max(0f, robotState.actionTurnTimer);
+        robotState.turnTimer = Mathf.Max(0f, robotState.turnTimer);
+
+        if (robotState.heldItemId < 0)
+        {
+            robotState.waitingForDropRetry = false;
+            robotState.dropRetryTimer = 0f;
+            if (robotState.state == RobotArm.RobotArmState.WaitingForDrop
+                || robotState.state == RobotArm.RobotArmState.WaitingBeforeDropPlace
+                || robotState.state == RobotArm.RobotArmState.TurningToDrop)
+            {
+                robotState.state = RobotArm.RobotArmState.TurningToPickup;
+            }
+
+            return;
+        }
+
+        if (robotState.state == RobotArm.RobotArmState.WaitingForPickup
+            || robotState.state == RobotArm.RobotArmState.WaitingBeforePickupTake
+            || robotState.state == RobotArm.RobotArmState.WaitingAfterDropPlace
+            || robotState.state == RobotArm.RobotArmState.TurningToPickup)
+        {
+            robotState.state = RobotArm.RobotArmState.TurningToDrop;
+        }
+    }
+
+    private bool CanPickupSavedRobotArmItem(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm)
+    {
+        return TryResolveSavedRobotArmPickupCandidate(
+            stateStore,
+            installationState,
+            templateRobotArm,
+            out _);
+    }
+
+    private bool TryPickupSavedRobotArmItem(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm,
+        out int pickedItemId)
+    {
+        pickedItemId = -1;
+        if (!TryResolveSavedRobotArmPickupCandidate(
+                stateStore,
+                installationState,
+                templateRobotArm,
+                out BackgroundRobotArmPickupCandidate candidate))
+        {
+            return false;
+        }
+
+        Predicate<int> exactItemFilter = itemId => itemId == candidate.itemId
+                                                    && SavedInstallationAcceptsItem(installationState, itemId);
+        switch (candidate.source)
+        {
+            case BackgroundRobotArmPickupSource.Floor:
+                return TryTakeSavedFloorItem(stateStore, candidate.coordinate, exactItemFilter, out pickedItemId);
+            case BackgroundRobotArmPickupSource.Box:
+            case BackgroundRobotArmPickupSource.InputArea:
+                return TryTakeSavedCenterTopItem(stateStore, candidate.coordinate, exactItemFilter, out pickedItemId);
+            case BackgroundRobotArmPickupSource.Conveyor:
+                return stateStore != null
+                       && stateStore.TryTakeSavedConveyorItem(
+                           candidate.coordinate,
+                           exactItemFilter,
+                           candidate.worldPosition,
+                           out pickedItemId);
+            default:
+                return false;
+        }
+    }
+
+    private bool TryResolveSavedRobotArmPickupCandidate(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm,
+        out BackgroundRobotArmPickupCandidate result)
+    {
+        result = default;
+        if (stateStore == null
+            || installationState == null
+            || !TryResolveRobotArmInteractionCoordinate(installationState, templateRobotArm, true, out Vector2Int pickupCoordinate))
+        {
+            return false;
+        }
+
+        Vector3 referenceWorldPosition = GetSavedCoordinateWorldPosition(pickupCoordinate);
+        Predicate<int> itemFilter = itemId => SavedInstallationAcceptsItem(installationState, itemId);
+        bool hasCandidate = false;
+
+        SavedBlockInventory inventory = LoadBlockInventory(stateStore, pickupCoordinate);
+        if (TryPeekSavedFloorItem(inventory, itemFilter, out int floorItemId))
+        {
+            TryChooseBackgroundRobotArmPickupCandidate(
+                new BackgroundRobotArmPickupCandidate
+                {
+                    source = BackgroundRobotArmPickupSource.Floor,
+                    coordinate = pickupCoordinate,
+                    itemId = floorItemId,
+                    worldPosition = GetSavedCoordinateWorldPosition(pickupCoordinate)
+                },
+                referenceWorldPosition,
+                ref result,
+                ref hasCandidate);
+        }
+
+        bool hasBox = TryResolveSavedBoxAtCoordinate(stateStore, pickupCoordinate, out _, out _);
+        if (hasBox && TryPeekSavedCenterTopItem(inventory, itemFilter, out int boxItemId))
+        {
+            TryChooseBackgroundRobotArmPickupCandidate(
+                new BackgroundRobotArmPickupCandidate
+                {
+                    source = BackgroundRobotArmPickupSource.Box,
+                    coordinate = pickupCoordinate,
+                    itemId = boxItemId,
+                    worldPosition = GetSavedCoordinateWorldPosition(pickupCoordinate)
+                },
+                referenceWorldPosition,
+                ref result,
+                ref hasCandidate);
+        }
+
+        if (stateStore.TryPeekSavedConveyorItem(
+                pickupCoordinate,
+                itemFilter,
+                referenceWorldPosition,
+                out int conveyorItemId,
+                out Vector3 conveyorWorldPosition))
+        {
+            TryChooseBackgroundRobotArmPickupCandidate(
+                new BackgroundRobotArmPickupCandidate
+                {
+                    source = BackgroundRobotArmPickupSource.Conveyor,
+                    coordinate = pickupCoordinate,
+                    itemId = conveyorItemId,
+                    worldPosition = conveyorWorldPosition
+                },
+                referenceWorldPosition,
+                ref result,
+                ref hasCandidate);
+        }
+
+        if (!hasBox && TryPeekSavedCenterTopItem(inventory, itemFilter, out int inputAreaItemId))
+        {
+            TryChooseBackgroundRobotArmPickupCandidate(
+                new BackgroundRobotArmPickupCandidate
+                {
+                    source = BackgroundRobotArmPickupSource.InputArea,
+                    coordinate = pickupCoordinate,
+                    itemId = inputAreaItemId,
+                    worldPosition = GetSavedCoordinateWorldPosition(pickupCoordinate)
+                },
+                referenceWorldPosition,
+                ref result,
+                ref hasCandidate);
+        }
+
+        return hasCandidate;
+    }
+
+    private static void TryChooseBackgroundRobotArmPickupCandidate(
+        BackgroundRobotArmPickupCandidate candidate,
+        Vector3 referenceWorldPosition,
+        ref BackgroundRobotArmPickupCandidate bestCandidate,
+        ref bool hasBestCandidate)
+    {
+        Vector3 offset = candidate.worldPosition - referenceWorldPosition;
+        offset.y = 0f;
+        float candidateDistanceSqr = offset.sqrMagnitude;
+
+        if (hasBestCandidate)
+        {
+            Vector3 bestOffset = bestCandidate.worldPosition - referenceWorldPosition;
+            bestOffset.y = 0f;
+            if (candidateDistanceSqr >= bestOffset.sqrMagnitude)
+            {
+                return;
+            }
+        }
+
+        bestCandidate = candidate;
+        hasBestCandidate = true;
+    }
+
+    private bool CanPlaceSavedRobotArmHeldItem(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm,
+        int itemId)
+    {
+        return TryPlaceSavedRobotArmHeldItemInternal(
+            stateStore,
+            installationState,
+            templateRobotArm,
+            itemId,
+            false);
+    }
+
+    private bool TryPlaceSavedRobotArmHeldItem(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm,
+        int itemId)
+    {
+        return TryPlaceSavedRobotArmHeldItemInternal(
+            stateStore,
+            installationState,
+            templateRobotArm,
+            itemId,
+            true);
+    }
+
+    private bool TryPlaceSavedRobotArmHeldItemInternal(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm,
+        int itemId,
+        bool mutate)
+    {
+        if (stateStore == null
+            || installationState == null
+            || itemId < 0
+            || !TryResolveRobotArmInteractionCoordinate(installationState, templateRobotArm, false, out Vector2Int dropCoordinate))
+        {
+            return false;
+        }
+
+        if (TryResolveSavedBoxAtCoordinate(stateStore, dropCoordinate, out BlockStateStore.InstallationSaveState boxState, out ItemDefinition boxDefinition))
+        {
+            return mutate
+                ? TryAddSavedBoxItem(stateStore, dropCoordinate, boxState, boxDefinition, itemId)
+                : CanAddSavedBoxItem(stateStore, dropCoordinate, boxState, boxDefinition, itemId);
+        }
+
+        Vector3 referenceWorldPosition = GetSavedCoordinateWorldPosition(dropCoordinate);
+        if (mutate)
+        {
+            if (stateStore.TryAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition))
+            {
+                return true;
+            }
+        }
+        else if (stateStore.CanAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition))
+        {
+            return true;
+        }
+
+        if (!CanPlaceSavedSingleLineDrop(stateStore, dropCoordinate)
+            || !InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(dropCoordinate, itemId))
+        {
+            return false;
+        }
+
+        int capacity = ResolveBlockCenterCapacity(stateStore, dropCoordinate, 10);
+        if (mutate)
+        {
+            return AddCenterItems(stateStore, dropCoordinate, itemId, 1, capacity);
+        }
+
+        return CanAddCenterItems(LoadBlockInventory(stateStore, dropCoordinate), itemId, 1, capacity);
+    }
+
+    private static bool CanAddSavedBoxItem(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        BlockStateStore.InstallationSaveState boxState,
+        ItemDefinition boxDefinition,
+        int itemId)
+    {
+        if (!SavedInstallationAcceptsItem(boxState, itemId))
+        {
+            return false;
+        }
+
+        int capacity = boxDefinition != null && boxDefinition.capacity > 0 ? boxDefinition.capacity : 10;
+        return CanAddCenterItems(LoadBlockInventory(stateStore, coordinate), itemId, 1, capacity);
+    }
+
+    private static bool TryAddSavedBoxItem(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        BlockStateStore.InstallationSaveState boxState,
+        ItemDefinition boxDefinition,
+        int itemId)
+    {
+        if (!SavedInstallationAcceptsItem(boxState, itemId))
+        {
+            return false;
+        }
+
+        int capacity = boxDefinition != null && boxDefinition.capacity > 0 ? boxDefinition.capacity : 10;
+        return AddCenterItems(stateStore, coordinate, itemId, 1, capacity);
+    }
+
+    private static bool CanPlaceSavedSingleLineDrop(BlockStateStore stateStore, Vector2Int coordinate)
+    {
+        return CoordinateAcceptsInputAreaObject(coordinate)
+               || stateStore == null
+               || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out _);
+    }
+
+    private static bool TryPeekSavedFloorItem(
+        SavedBlockInventory inventory,
+        Predicate<int> itemFilter,
+        out int itemId)
+    {
+        itemId = -1;
+        int itemIndex = FindSavedFloorItemIndex(inventory, itemFilter);
+        if (itemIndex < 0)
+        {
+            return false;
+        }
+
+        itemId = inventory.floorItems[itemIndex];
+        return true;
+    }
+
+    private static bool TryTakeSavedFloorItem(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        Predicate<int> itemFilter,
+        out int itemId)
+    {
+        itemId = -1;
+        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
+        int itemIndex = FindSavedFloorItemIndex(inventory, itemFilter);
+        if (itemIndex < 0)
+        {
+            return false;
+        }
+
+        itemId = inventory.floorItems[itemIndex];
+        inventory.floorItems.RemoveAt(itemIndex);
+        SaveBlockInventory(stateStore, coordinate, inventory);
+        return true;
+    }
+
+    private static int FindSavedFloorItemIndex(SavedBlockInventory inventory, Predicate<int> itemFilter)
+    {
+        if (inventory == null || inventory.floorItems.Count <= 0)
+        {
+            return -1;
+        }
+
+        for (int i = inventory.floorItems.Count - 1; i >= 0; i--)
+        {
+            int itemId = inventory.floorItems[i];
+            if (itemId >= 0 && (itemFilter == null || itemFilter(itemId)))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool TryPeekSavedCenterTopItem(
+        SavedBlockInventory inventory,
+        Predicate<int> itemFilter,
+        out int itemId)
+    {
+        itemId = GetCenterTopItemId(inventory);
+        return itemId >= 0 && (itemFilter == null || itemFilter(itemId));
+    }
+
+    private static bool TryTakeSavedCenterTopItem(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        Predicate<int> itemFilter,
+        out int itemId)
+    {
+        itemId = -1;
+        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
+        if (!TryPeekSavedCenterTopItem(inventory, itemFilter, out itemId))
+        {
+            return false;
+        }
+
+        inventory.centerItems.RemoveAt(inventory.centerItems.Count - 1);
+        SaveBlockInventory(stateStore, coordinate, inventory);
+        return true;
+    }
+
+    private static bool TryResolveRobotArmInteractionCoordinate(
+        BlockStateStore.InstallationSaveState installationState,
+        RobotArm templateRobotArm,
+        bool inputSide,
+        out Vector2Int interactionCoordinate)
+    {
+        interactionCoordinate = default;
+        if (installationState == null)
+        {
+            return false;
+        }
+
+        Quaternion rotation = ResolveSavedInstallationRotation(templateRobotArm, installationState.quarterTurns);
+        if (!TryResolveFlowDirection(rotation, out Vector2Int flowDirection))
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = installationState.occupiedCoordinates;
+        Vector2Int edgeCoordinate = installationState.anchorCoordinate;
+        int bestProjection = inputSide ? int.MaxValue : int.MinValue;
+        if (occupiedCoordinates != null && occupiedCoordinates.Count > 0)
+        {
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                Vector2Int coordinate = occupiedCoordinates[i];
+                int projection = coordinate.x * flowDirection.x + coordinate.y * flowDirection.y;
+                bool betterProjection = inputSide ? projection < bestProjection : projection > bestProjection;
+                if (!betterProjection)
+                {
+                    continue;
+                }
+
+                bestProjection = projection;
+                edgeCoordinate = coordinate;
+            }
+        }
+
+        interactionCoordinate = inputSide ? edgeCoordinate - flowDirection : edgeCoordinate + flowDirection;
+        return true;
+    }
+
+    private static Quaternion ResolveSavedInstallationRotation(MapObject sourcePrefab, int quarterTurns)
+    {
+        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        return sourcePrefab != null
+            ? sourcePrefab.transform.rotation * Quaternion.Euler(0f, normalizedQuarterTurns * 90f, 0f)
+            : Quaternion.Euler(0f, normalizedQuarterTurns * 90f, 0f);
+    }
+
+    private static bool TryResolveFlowDirection(Quaternion rotation, out Vector2Int flowDirection)
+    {
+        Vector3 forward = rotation * Vector3.forward;
+        Vector2 flatForward = new Vector2(forward.x, forward.z);
+        if (flatForward.sqrMagnitude < 0.0001f)
+        {
+            flowDirection = Vector2Int.up;
+            return true;
+        }
+
+        flatForward.Normalize();
+        flowDirection = Mathf.Abs(flatForward.x) >= Mathf.Abs(flatForward.y)
+            ? new Vector2Int(flatForward.x >= 0f ? 1 : -1, 0)
+            : new Vector2Int(0, flatForward.y >= 0f ? 1 : -1);
+        return true;
+    }
+
+    private static Vector3 GetSavedCoordinateWorldPosition(Vector2Int coordinate)
+    {
+        return new Vector3(coordinate.x, 0.2f, coordinate.y);
+    }
+
+    private static bool CoordinateAcceptsInputAreaObject(Vector2Int coordinate)
+    {
+        return InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
+               || InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate);
+    }
+
+    private static bool TryResolveSavedBoxAtCoordinate(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        out BlockStateStore.InstallationSaveState boxState,
+        out ItemDefinition boxDefinition)
+    {
+        boxState = null;
+        boxDefinition = null;
+        if (stateStore == null
+            || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
+            || !stateStore.TryGetInstallationState(anchorCoordinate, out boxState)
+            || boxState == null)
+        {
+            return false;
+        }
+
+        boxDefinition = ResolveItemDefinition(boxState.itemId);
+        return TryResolveMapObjectComponent(boxDefinition, out BoxObject _);
+    }
+
+    private static bool TryResolveTemplateRobotArm(int itemId, out ItemDefinition installedDefinition, out RobotArm templateRobotArm)
+    {
+        installedDefinition = ResolveItemDefinition(itemId);
+        return TryResolveMapObjectComponent(installedDefinition, out templateRobotArm);
+    }
+
+    private static bool TryResolveMapObjectComponent<T>(ItemDefinition definition, out T component) where T : Component
+    {
+        component = null;
+        if (definition == null || definition.mapObject == null)
+        {
+            return false;
+        }
+
+        component = definition.mapObject as T;
+        return component != null || definition.mapObject.TryGetComponent(out component);
+    }
+
+    private static bool SavedInstallationAcceptsItem(BlockStateStore.InstallationSaveState installationState, int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (installationState == null || !installationState.itemFilterMaskInitialized)
+        {
+            return true;
+        }
+
+        List<ulong> words = installationState.itemFilterMaskWords;
+        int wordIndex = itemId >> 6;
+        if (words == null || wordIndex < 0 || wordIndex >= words.Count)
+        {
+            return true;
+        }
+
+        ulong bitMask = 1UL << (itemId & 63);
+        return (words[wordIndex] & bitMask) != 0UL;
     }
 
     private bool AdvanceActiveCraft(

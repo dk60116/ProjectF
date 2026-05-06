@@ -24,6 +24,9 @@ public enum InstallationFacingDirection
 
 public class InstallationObject : MapObject
 {
+    [SerializeField]
+    private Animator animator;
+
     private static readonly HashSet<InstallationObject> ActiveInstances = new HashSet<InstallationObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;

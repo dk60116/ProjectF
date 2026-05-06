@@ -13,6 +13,7 @@ public partial class BlockStateStore : MonoBehaviour
         public int conveyorVariantKind = -1;
         public List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
         public InputOutputModule.PersistentState inputOutputState;
+        public RobotArm.PersistentState robotArmState;
         public long lastBackgroundSimulationTicks;
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
@@ -29,6 +30,7 @@ public partial class BlockStateStore : MonoBehaviour
                 conveyorVariantKind = conveyorVariantKind,
                 occupiedCoordinates = new List<Vector2Int>(occupiedCoordinates ?? new List<Vector2Int>()),
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
+                robotArmState = robotArmState != null ? robotArmState.Clone() : null,
                 lastBackgroundSimulationTicks = lastBackgroundSimulationTicks,
                 boxIsOpen = boxIsOpen,
                 itemFilterMaskInitialized = itemFilterMaskInitialized,
@@ -662,6 +664,11 @@ public partial class BlockStateStore : MonoBehaviour
         if (installationObject is InputOutputModule inputOutputModule)
         {
             state.inputOutputState = inputOutputModule.CapturePersistentState();
+        }
+
+        if (installationObject is RobotArm robotArm)
+        {
+            state.robotArmState = robotArm.CapturePersistentState();
         }
 
         if (installationObject is BoxObject boxObject)

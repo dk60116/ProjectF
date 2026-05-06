@@ -319,6 +319,8 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             pair.Value?.RefreshSleepAwakeDebugVisuals(true);
         }
+
+        RobotArm.RefreshAllSleepAwakeDebugVisuals();
     }
 
     private void SyncBeltItemLineRuntimeVisibility()

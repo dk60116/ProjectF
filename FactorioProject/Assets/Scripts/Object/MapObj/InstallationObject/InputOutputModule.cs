@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class InputOutputModule : InstallationObject
+public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 {
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeGridCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
@@ -828,7 +828,7 @@ public class InputOutputModule : InstallationObject
         return true;
     }
 
-    private void Update()
+    public void ManagedUpdateTick(float deltaTime)
     {
         if (!Application.isPlaying)
         {
@@ -838,7 +838,7 @@ public class InputOutputModule : InstallationObject
         EnsurePairData();
         if (hasActiveCraft)
         {
-            UpdateActiveCraft();
+            UpdateActiveCraft(deltaTime);
         }
         else
         {
@@ -853,10 +853,12 @@ public class InputOutputModule : InstallationObject
         base.OnEnable();
         activeRuntimeModules.Add(this);
         RegisterRuntimeGridCoordinates();
+        MapObjectTickManager.RegisterUpdateTick(this);
     }
 
     protected override void OnDisable()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         UnregisterRuntimeGridCoordinates();
         activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
@@ -865,6 +867,7 @@ public class InputOutputModule : InstallationObject
 
     private void OnDestroy()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         UnregisterRuntimeGridCoordinates();
         activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
@@ -1492,7 +1495,7 @@ public class InputOutputModule : InstallationObject
         return mapSizeX * mapSizeY;
     }
 
-    private void UpdateActiveCraft()
+    private void UpdateActiveCraft(float deltaTime)
     {
         if (!hasActiveCraft)
         {
@@ -1508,7 +1511,7 @@ public class InputOutputModule : InstallationObject
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (RequiresOperationalEnergy(installedDefinition))
         {
-            if (!TryConsumeOperatingEnergy(Time.deltaTime, out float consumedEnergy))
+            if (!TryConsumeOperatingEnergy(deltaTime, out float consumedEnergy))
             {
                 return;
             }
@@ -1522,7 +1525,7 @@ public class InputOutputModule : InstallationObject
         }
         else
         {
-            remainingCraftTime = Mathf.Max(0f, remainingCraftTime - Time.deltaTime);
+            remainingCraftTime = Mathf.Max(0f, remainingCraftTime - deltaTime);
             if (remainingCraftTime > 0f)
             {
                 return;

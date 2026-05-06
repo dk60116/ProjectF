@@ -29,7 +29,10 @@ public readonly struct InputOutputModuleItemAreaBinding
 
 public class AreaMarker : MonoBehaviour
 {
-    private const string OverlayShaderName = "Custom/MapFocusOverlay";
+    private const string LateRenderShaderName = "Custom/MapFocusOverlay";
+    private const string LateRenderMaterialResourcePath = "Materials/AreaMarkerLateRender";
+    private const string LateRenderFallbackMaterialName = "AreaMarkerLateRender_Runtime";
+    private const int LateRenderQueue = 5000;
 
     [SerializeField]
     private SpriteRenderer icon;
@@ -42,7 +45,7 @@ public class AreaMarker : MonoBehaviour
     private SpriteRenderer[] capturedSpriteRenderers;
     private int[] originalSortingOrders;
     private Material[] originalSharedMaterials;
-    private static Material overlayMaterial;
+    private static Material lateRenderMaterial;
 
     private void Awake()
     {
@@ -92,7 +95,7 @@ public class AreaMarker : MonoBehaviour
             return;
         }
 
-        Material renderOnTopMaterial = renderOnTop ? ResolveOverlayMaterial() : null;
+        Material renderOnTopMaterial = renderOnTop ? ResolveLateRenderMaterial() : null;
         for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSharedMaterials.Length; i++)
         {
             SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
@@ -200,25 +203,32 @@ public class AreaMarker : MonoBehaviour
         }
     }
 
-    private static Material ResolveOverlayMaterial()
+    private static Material ResolveLateRenderMaterial()
     {
-        if (overlayMaterial != null)
+        if (lateRenderMaterial != null)
         {
-            return overlayMaterial;
+            return lateRenderMaterial;
         }
 
-        Shader overlayShader = Shader.Find(OverlayShaderName);
-        if (overlayShader == null)
+        lateRenderMaterial = Resources.Load<Material>(LateRenderMaterialResourcePath);
+        if (lateRenderMaterial != null)
+        {
+            return lateRenderMaterial;
+        }
+
+        Shader lateRenderShader = Shader.Find(LateRenderShaderName);
+        if (lateRenderShader == null)
         {
             return null;
         }
 
-        overlayMaterial = new Material(overlayShader)
+        lateRenderMaterial = new Material(lateRenderShader)
         {
-            name = "AreaMarkerOverlay_Runtime",
-            hideFlags = HideFlags.HideAndDontSave
+            name = LateRenderFallbackMaterialName,
+            hideFlags = HideFlags.HideAndDontSave,
+            renderQueue = LateRenderQueue
         };
-        return overlayMaterial;
+        return lateRenderMaterial;
     }
 }
 

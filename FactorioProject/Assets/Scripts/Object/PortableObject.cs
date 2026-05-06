@@ -364,7 +364,7 @@ public class PortableObject : MonoBehaviour
         MoveTo(() => target != null ? target.position : WorldPosition, 0f, null, onComplete, true);
     }
 
-    public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true)
+    public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true)
     {
         if (target == null)
         {
@@ -372,15 +372,15 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        MoveTo(() => target != null ? target.position : WorldPosition, delay, startPositionProvider, onComplete, deactivateOnComplete);
+        MoveTo(() => target != null ? target.position : WorldPosition, delay, startPositionProvider, onComplete, deactivateOnComplete, useJumpArc);
     }
 
-    public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null, bool deactivateOnComplete = true)
+    public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true)
     {
-        MoveTo(() => targetPosition, delay, null, onComplete, deactivateOnComplete);
+        MoveTo(() => targetPosition, delay, null, onComplete, deactivateOnComplete, useJumpArc);
     }
 
-    public void MoveTo(Func<Vector3> targetPositionProvider, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true)
+    public void MoveTo(Func<Vector3> targetPositionProvider, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true)
     {
         if (targetPositionProvider == null)
         {
@@ -435,7 +435,7 @@ public class PortableObject : MonoBehaviour
                 Vector3 currentStartPosition = startPositionProvider != null ? startPositionProvider() : launchStartPosition;
                 Vector3 currentTargetPosition = targetPositionProvider();
                 Vector3 horizontalPosition = Vector3.Lerp(currentStartPosition, currentTargetPosition, t);
-                float verticalOffset = 4f * jumpPower * t * (1f - t);
+                float verticalOffset = useJumpArc ? 4f * jumpPower * t * (1f - t) : 0f;
                 CachedTransform.position = horizontalPosition + (Vector3.up * verticalOffset);
             }).SetEase(Ease.Linear));
         sequence.OnComplete(() =>

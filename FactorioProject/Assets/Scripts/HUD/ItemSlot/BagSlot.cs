@@ -1734,6 +1734,20 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        if (TryHandleFocusedRobotArmPickup(player, out bool blockPickup))
+        {
+            StopPickupRoutine();
+            suppressCraftingToggleFrame = Time.frameCount;
+            return;
+        }
+
+        if (blockPickup)
+        {
+            StopPickupRoutine();
+            suppressCraftingToggleFrame = Time.frameCount;
+            return;
+        }
+
         TerrainGenerator terrain = ResolveTerrain();
         if (terrain == null)
         {
@@ -1948,6 +1962,32 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         PlayerController playerController = player.GetComponent<PlayerController>();
         return playerController != null
             && playerController.TryGetFocusedConveyorBelt(out _, out _);
+    }
+
+    private bool TryHandleFocusedRobotArmPickup(Player player, out bool blockOtherPickup)
+    {
+        blockOtherPickup = false;
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null
+            || !playerController.TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
+            || focusedRobotArm == null
+            || !focusedRobotArm.HasHeldItem)
+        {
+            return false;
+        }
+
+        blockOtherPickup = true;
+        if (!focusedRobotArm.CanTakeHeldItemFromSlot || boundBag == null || slotIndex < 0)
+        {
+            return false;
+        }
+
+        return focusedRobotArm.TryTakeHeldItemToBag(boundBag, slotIndex);
     }
 
     private static Player ResolvePlayer()

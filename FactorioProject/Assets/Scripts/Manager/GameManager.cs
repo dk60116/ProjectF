@@ -214,6 +214,7 @@ public class GameManager : MonoBehaviour
         sleepAwakeRuntimeStateInitialized = true;
         lastRuntimeShowSleepAwake = showSleepAwake;
         PortableObject.RefreshAllSleepAwakeVisuals();
+        RobotArm.RefreshAllSleepAwakeDebugVisuals();
         TerrainGenerator.Active?.RefreshSleepAwakeRuntimeVisibility();
     }
 

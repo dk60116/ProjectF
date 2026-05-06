@@ -130,6 +130,95 @@ public partial class BlockStateStore
         return false;
     }
 
+    public bool TryPeekSavedConveyorItem(
+        Vector2Int worldCoordinate,
+        Predicate<int> itemFilter,
+        Vector3 referenceWorldPosition,
+        out int itemId,
+        out Vector3 itemWorldPosition)
+    {
+        itemId = -1;
+        itemWorldPosition = default;
+        if (!TryFindSavedConveyorItemLane(
+                worldCoordinate,
+                itemFilter,
+                referenceWorldPosition,
+                out _,
+                out ConveyorItemLaneSaveState lane,
+                out _,
+                out itemWorldPosition))
+        {
+            return false;
+        }
+
+        itemId = lane.itemId;
+        return true;
+    }
+
+    public bool TryTakeSavedConveyorItem(
+        Vector2Int worldCoordinate,
+        Predicate<int> itemFilter,
+        Vector3 referenceWorldPosition,
+        out int itemId)
+    {
+        itemId = -1;
+        if (!TryFindSavedConveyorItemLane(
+                worldCoordinate,
+                itemFilter,
+                referenceWorldPosition,
+                out ConveyorItemBlockState state,
+                out ConveyorItemLaneSaveState lane,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        itemId = lane.itemId;
+        state.lanes.Remove(lane);
+        SyncConveyorFloorObjects(worldCoordinate, state);
+        return true;
+    }
+
+    public bool CanAddSavedConveyorItem(
+        Vector2Int worldCoordinate,
+        int itemId,
+        Vector3 referenceWorldPosition)
+    {
+        return itemId >= 0
+               && TryFindSavedConveyorPlacementLane(worldCoordinate, referenceWorldPosition, out _, out _, out _);
+    }
+
+    public bool TryAddSavedConveyorItem(
+        Vector2Int worldCoordinate,
+        int itemId,
+        Vector3 referenceWorldPosition)
+    {
+        if (itemId < 0
+            || !TryFindSavedConveyorPlacementLane(
+                worldCoordinate,
+                referenceWorldPosition,
+                out ConveyorItemBlockState state,
+                out int laneIndex,
+                out _))
+        {
+            return false;
+        }
+
+        ConveyorItemLaneSaveState lane = new ConveyorItemLaneSaveState
+        {
+            laneIndex = laneIndex,
+            itemId = itemId
+        };
+        SetSavedConveyorLaneSettled(lane, worldCoordinate);
+        state.lanes.Add(lane);
+        state.laneCount = Mathf.Max(state.laneCount, laneIndex + 1);
+        state.lastBackgroundSimulationTicks = DateTime.UtcNow.Ticks;
+        savedConveyorItemStates[worldCoordinate] = state;
+        SyncConveyorFloorObjects(worldCoordinate, state);
+        return true;
+    }
+
     public bool CanAcceptVirtualConveyorItemHandoff(
         Vector2Int sourceCoordinate,
         Vector2Int flowDirection,
@@ -584,6 +673,98 @@ public partial class BlockStateStore
         return true;
     }
 
+    private bool TryFindSavedConveyorItemLane(
+        Vector2Int worldCoordinate,
+        Predicate<int> itemFilter,
+        Vector3 referenceWorldPosition,
+        out ConveyorItemBlockState state,
+        out ConveyorItemLaneSaveState lane,
+        out int laneIndex,
+        out Vector3 laneWorldPosition)
+    {
+        state = null;
+        lane = null;
+        laneIndex = -1;
+        laneWorldPosition = default;
+        if (!TryEnsureConveyorItemState(worldCoordinate, out state)
+            || state == null
+            || state.lanes.Count <= 0)
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        for (int i = 0; i < state.lanes.Count; i++)
+        {
+            ConveyorItemLaneSaveState candidate = state.lanes[i];
+            if (candidate == null
+                || candidate.itemId < 0
+                || candidate.laneIndex < 0
+                || (itemFilter != null && !itemFilter(candidate.itemId)))
+            {
+                continue;
+            }
+
+            Vector3 candidateWorldPosition = ResolveSavedConveyorLaneWorldPosition(worldCoordinate, candidate, candidate.laneIndex);
+            Vector3 offset = candidateWorldPosition - referenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (lane != null && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            lane = candidate;
+            laneIndex = candidate.laneIndex;
+            laneWorldPosition = candidateWorldPosition;
+            bestDistanceSqr = distanceSqr;
+        }
+
+        return lane != null;
+    }
+
+    private bool TryFindSavedConveyorPlacementLane(
+        Vector2Int worldCoordinate,
+        Vector3 referenceWorldPosition,
+        out ConveyorItemBlockState state,
+        out int laneIndex,
+        out Vector3 laneWorldPosition)
+    {
+        state = null;
+        laneIndex = -1;
+        laneWorldPosition = default;
+        if (!TryEnsureConveyorItemState(worldCoordinate, out state)
+            || state == null
+            || state.laneCount <= 0)
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        for (int candidateLaneIndex = 0; candidateLaneIndex < state.laneCount; candidateLaneIndex++)
+        {
+            if (GetSavedConveyorLaneItemId(state, candidateLaneIndex) >= 0)
+            {
+                continue;
+            }
+
+            Vector3 candidateWorldPosition = ResolveSavedConveyorLaneWorldPosition(worldCoordinate, null, candidateLaneIndex);
+            Vector3 offset = candidateWorldPosition - referenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (laneIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            laneIndex = candidateLaneIndex;
+            laneWorldPosition = candidateWorldPosition;
+            bestDistanceSqr = distanceSqr;
+        }
+
+        return laneIndex >= 0;
+    }
+
     private bool TryCreateVirtualConveyorItemState(Vector2Int worldCoordinate, out ConveyorItemBlockState state)
     {
         state = new ConveyorItemBlockState
@@ -978,6 +1159,20 @@ public partial class BlockStateStore
 
         ClearSavedConveyorMotion(lane);
         lane.visualWorldPosition = new Vector3(coordinate.x, 0.2f, coordinate.y);
+    }
+
+    private static Vector3 ResolveSavedConveyorLaneWorldPosition(
+        Vector2Int coordinate,
+        ConveyorItemLaneSaveState lane,
+        int laneIndex)
+    {
+        if (lane != null && lane.visualWorldPosition != default)
+        {
+            return lane.visualWorldPosition;
+        }
+
+        float lateralOffset = laneIndex % 2 == 0 ? -0.12f : 0.12f;
+        return new Vector3(coordinate.x + lateralOffset, 0.2f, coordinate.y);
     }
 
     private static void ClearSavedConveyorMotion(ConveyorItemLaneSaveState lane)

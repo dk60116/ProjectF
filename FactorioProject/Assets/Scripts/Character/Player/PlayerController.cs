@@ -975,6 +975,40 @@ public class PlayerController : MonoBehaviour
         return focusedConveyorBelt != null && focusedBlock != null;
     }
 
+    public bool TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
+    {
+        focusedRobotArm = null;
+        if (currentFocusedBlocks.Count == 0 || player == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float nearestDistanceSqr = float.MaxValue;
+
+        foreach (Block block in currentFocusedBlocks)
+        {
+            if (block == null
+                || !TryResolveRobotArm(block.MapObject, out RobotArm robotArm)
+                || robotArm == null
+                || !robotArm.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(robotArm, block, origin);
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            focusedRobotArm = robotArm;
+        }
+
+        return focusedRobotArm != null;
+    }
+
     public bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
     {
         focusedMapObject = null;
@@ -1001,7 +1035,9 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            if (!IsItemFilterEnabled(mapObject.ResolveItemId(), definitions))
+            bool supportsItemFilter = IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
+                                      || TryResolveRobotArm(mapObject, out _);
+            if (!supportsItemFilter)
             {
                 continue;
             }
@@ -1017,6 +1053,29 @@ public class PlayerController : MonoBehaviour
         }
 
         return focusedMapObject != null;
+    }
+
+    private static bool TryResolveRobotArm(MapObject mapObject, out RobotArm robotArm)
+    {
+        robotArm = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        robotArm = mapObject as RobotArm;
+        if (robotArm != null)
+        {
+            return true;
+        }
+
+        if (mapObject.TryGetComponent(out robotArm) && robotArm != null)
+        {
+            return true;
+        }
+
+        robotArm = mapObject.GetComponentInChildren<RobotArm>(true);
+        return robotArm != null;
     }
 
     private bool FindCurrentInputOutputModuleFocusBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)

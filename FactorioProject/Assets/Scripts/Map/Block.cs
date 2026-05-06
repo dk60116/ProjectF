@@ -448,6 +448,8 @@ public class Block : BaseObject
                 RefreshConveyorSlotDotVisuals();
             }
         }
+
+        RobotArm.WakeAroundCoordinate(coordinate);
     }
 
     private void InvalidateConveyorRuntimeCaches()
@@ -634,6 +636,7 @@ public class Block : BaseObject
             portableObject.SetBatchedRendering(true);
             stack.Add(portableObject);
             targetPortableObject = portableObject;
+            RobotArm.WakeAroundCoordinate(coordinate);
             return true;
         }
 
@@ -798,7 +801,13 @@ public class Block : BaseObject
         consumedItemId = itemId;
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleaseFloorObject(topObject);
+        RobotArm.WakeAroundCoordinate(coordinate);
         return true;
+    }
+
+    public bool TryTakeOneInputAreaCenterObject(out int takenItemId)
+    {
+        return TryConsumeOneInputAreaCenterObject(-1, out takenItemId);
     }
 
     public bool TryConsumeOneInputAreaCenterObjectAnimated(
@@ -893,7 +902,7 @@ public class Block : BaseObject
         return consumed;
     }
 
-    public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null)
+    public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, bool useJumpArc = true)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -934,6 +943,7 @@ public class Block : BaseObject
         Vector3 finalLocalPosition = new Vector3(0f, objectIndex * InputAreaCenterVerticalSpacing, 0f);
         Vector3 finalWorldPosition = inputAreaCenterAnchor.TransformPoint(finalLocalPosition);
         inputAreaCenterStack.Add(portableObject);
+        RobotArm.WakeAroundCoordinate(coordinate);
         DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
 
         portableObject.MoveTo(() => inputAreaCenterAnchor != null ? inputAreaCenterAnchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
@@ -947,7 +957,7 @@ public class Block : BaseObject
             ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
             gate?.MarkSettled();
             onComplete?.Invoke();
-        }, false);
+        }, false, useJumpArc);
 
         targetPortableObject = portableObject;
         return true;
@@ -1158,6 +1168,7 @@ public class Block : BaseObject
             Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
             Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
             stack.Add(portableObject);
+            RobotArm.WakeAroundCoordinate(coordinate);
             DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
 
             portableObject.MoveTo(() => anchor != null ? anchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
@@ -1391,7 +1402,8 @@ public class Block : BaseObject
         out PortableObject targetPortableObject,
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
-        float movementReleaseDelay = 0f)
+        float movementReleaseDelay = 0f,
+        bool useJumpArc = true)
     {
         return TryAddConveyorObjectAnimatedWithPlacementReference(
             objectId,
@@ -1401,7 +1413,19 @@ public class Block : BaseObject
             out targetPortableObject,
             onComplete,
             startWorldPositionProvider,
-            movementReleaseDelay);
+            movementReleaseDelay,
+            useJumpArc);
+    }
+
+    public bool CanAddConveyorObjectAtPlacement(int objectId, Vector3 placementReferenceWorldPosition)
+    {
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+
+        return objectId >= 0
+               && IsConveyorStackingEnabled()
+               && (ShouldUseVirtualConveyorItemRendering() || ResolveFloorObjectPool())
+               && TryGetBestConveyorPlacementLaneIndex(placementReferenceWorldPosition, out _);
     }
 
     public bool TryAddConveyorObjectAnimatedNearConnected(
@@ -1413,7 +1437,8 @@ public class Block : BaseObject
         out Block targetBlock,
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
-        float movementReleaseDelay = 0f)
+        float movementReleaseDelay = 0f,
+        bool useJumpArc = true)
     {
         targetPortableObject = null;
         targetBlock = null;
@@ -1426,7 +1451,8 @@ public class Block : BaseObject
                 out targetPortableObject,
                 onComplete,
                 startWorldPositionProvider,
-                movementReleaseDelay))
+                movementReleaseDelay,
+                useJumpArc))
         {
             targetBlock = this;
             return true;
@@ -1445,7 +1471,8 @@ public class Block : BaseObject
                 out targetPortableObject,
                 onComplete,
                 startWorldPositionProvider,
-                movementReleaseDelay))
+                movementReleaseDelay,
+                useJumpArc))
         {
             return false;
         }
@@ -1462,7 +1489,8 @@ public class Block : BaseObject
         out PortableObject targetPortableObject,
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
-        float movementReleaseDelay = 0f)
+        float movementReleaseDelay = 0f,
+        bool useJumpArc = true)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -1487,6 +1515,7 @@ public class Block : BaseObject
         if (useVirtualDataSlot)
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
+            RobotArm.WakeAroundCoordinate(coordinate);
             HoldConveyorLaneMovement(laneIndex, movementReleaseDelay);
             WakeConveyorMoveAttempts();
             RefreshConveyorActivityRegistration();
@@ -1508,6 +1537,7 @@ public class Block : BaseObject
         portableObject.transform.localScale = Vector3.one;
         portableObject.gameObject.SetActive(true);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
+        RobotArm.WakeAroundCoordinate(coordinate);
         HoldConveyorLaneMovement(laneIndex, movementReleaseDelay);
         WakeConveyorMoveAttempts();
         RefreshConveyorActivityRegistration();
@@ -1547,7 +1577,7 @@ public class Block : BaseObject
             WakeConveyorMoveAttempts();
             RefreshConveyorActivityRegistration();
             onComplete?.Invoke();
-        }, false);
+        }, false, useJumpArc);
 
         targetPortableObject = portableObject;
         return true;
@@ -1745,6 +1775,92 @@ public class Block : BaseObject
             ReleaseFloorObjectToHand(targetObject, handTarget);
         }
 
+        return true;
+    }
+
+    public bool TryTakeOneConveyorObject(Vector3 referenceWorldPosition, out int takenItemId)
+    {
+        return TryTakeOneConveyorObject(referenceWorldPosition, null, out takenItemId);
+    }
+
+    public bool TryTakeOneConveyorObject(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out int takenItemId)
+    {
+        takenItemId = -1;
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+
+        if (!IsConveyorStackingEnabled() || !TryGetClosestConveyorItemLane(referenceWorldPosition, itemFilter, out int laneIndex))
+        {
+            return false;
+        }
+
+        PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
+        int itemId = GetConveyorItemIdAtLane(laneIndex);
+        if (itemId < 0)
+        {
+            ClearConveyorItemAtLane(laneIndex);
+            WakeConveyorMoveAttemptsAround();
+            ReleaseFloorObject(portableObject);
+            return false;
+        }
+
+        portableObject = MaterializeConveyorObjectForTransfer(portableObject, itemId, laneIndex);
+        ClearConveyorItemAtLane(laneIndex);
+        RobotArm.WakeAroundCoordinate(coordinate);
+        WakeConveyorMoveAttemptsAround();
+        ReleaseFloorObject(portableObject);
+        takenItemId = itemId;
+        return true;
+    }
+
+    public bool TryGetClosestConveyorObjectWorldPosition(Vector3 referenceWorldPosition, out Vector3 worldPosition)
+    {
+        return TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, null, out worldPosition);
+    }
+
+    public bool TryGetClosestConveyorObjectWorldPosition(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out Vector3 worldPosition)
+    {
+        worldPosition = transform.position;
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        int bestLaneIndex = -1;
+        float bestDistanceSqr = float.MaxValue;
+        Vector3 bestWorldPosition = worldPosition;
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            int itemId = GetConveyorItemIdAtLane(laneIndex);
+            if (itemId < 0 || (itemFilter != null && !itemFilter(itemId)))
+            {
+                continue;
+            }
+
+            Vector3 candidateWorldPosition = GetConveyorItemVisualWorldPosition(laneIndex);
+            Vector3 offset = candidateWorldPosition - referenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            bestLaneIndex = laneIndex;
+            bestDistanceSqr = distanceSqr;
+            bestWorldPosition = candidateWorldPosition;
+        }
+
+        if (bestLaneIndex < 0)
+        {
+            return false;
+        }
+
+        worldPosition = bestWorldPosition;
         return true;
     }
 
@@ -3256,7 +3372,67 @@ public class Block : BaseObject
             pickedAny = true;
         }
 
+        if (TryAutoPickupInputAreaCenterObject(player, playerPosition, pickupRadius))
+        {
+            pickedAny = true;
+        }
+
         return pickedAny;
+    }
+
+    private bool TryAutoPickupInputAreaCenterObject(Player player, Vector3 playerPosition, float pickupRadius)
+    {
+        if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
+        {
+            return false;
+        }
+
+        EnsureInputAreaCenterAnchorInitialized();
+        if (inputAreaCenterAnchor == null)
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+        UpdatePickupGates(inputAreaCenterStack, gateOriginPosition);
+
+        PortableObject topObject = GetTopPortableObject(inputAreaCenterStack);
+        if (topObject == null)
+        {
+            return false;
+        }
+
+        Vector3 offset = inputAreaCenterAnchor.position - playerPosition;
+        offset.y = 0f;
+        float distanceSqr = offset.sqrMagnitude;
+        if (distanceSqr > pickupRadiusSqr)
+        {
+            return false;
+        }
+
+        DroppedItemPickupGate topGate = topObject.GetComponent<DroppedItemPickupGate>();
+        if (topGate != null && !topGate.CanPickup(distanceSqr, pickupRadiusSqr))
+        {
+            return false;
+        }
+
+        int itemId = topObject.ItemId;
+        if (itemId < 0)
+        {
+            inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
+            ReleaseFloorObject(topObject);
+            return false;
+        }
+
+        if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, -1, out PortableObject storageTarget, out bool addedToHand))
+        {
+            return false;
+        }
+
+        inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
+        ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
+        return true;
     }
 
     public bool TryPickupOneFloorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius)
@@ -3441,6 +3617,152 @@ public class Block : BaseObject
         }
 
         return TryPickupOneInputAreaCenterObjectToHand(player, playerPosition, pickupRadius);
+    }
+
+    public bool TryTakeOneFloorObject(out int takenItemId)
+    {
+        takenItemId = -1;
+        EnsureFloorObjectsInitialized();
+
+        if (floorObjects == null || floorObjects.Count == 0)
+        {
+            return false;
+        }
+
+        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        {
+            List<PortableObject> stack = stackIndex < floorStacks.Count ? floorStacks[stackIndex] : null;
+            while (stack != null && stack.Count > 0)
+            {
+                PortableObject portableObject = stack[stack.Count - 1];
+                stack.RemoveAt(stack.Count - 1);
+                if (portableObject == null)
+                {
+                    continue;
+                }
+
+                int itemId = portableObject.ItemId;
+                ReleaseFloorObject(portableObject);
+                if (itemId < 0)
+                {
+                    continue;
+                }
+
+                takenItemId = itemId;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryGetClosestFloorObjectWorldPosition(Vector3 referenceWorldPosition, out Vector3 worldPosition)
+    {
+        return TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, null, out worldPosition);
+    }
+
+    public bool TryGetClosestFloorObjectWorldPosition(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out Vector3 worldPosition)
+    {
+        worldPosition = transform.position;
+        return TryFindClosestFloorObject(referenceWorldPosition, itemFilter, out _, out _, out worldPosition);
+    }
+
+    public bool TryTakeClosestFloorObject(Vector3 referenceWorldPosition, out int takenItemId)
+    {
+        return TryTakeClosestFloorObject(referenceWorldPosition, null, out takenItemId);
+    }
+
+    public bool TryTakeClosestFloorObject(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out int takenItemId)
+    {
+        takenItemId = -1;
+        if (!TryFindClosestFloorObject(referenceWorldPosition, itemFilter, out int stackIndex, out PortableObject portableObject, out _)
+            || portableObject == null
+            || stackIndex < 0
+            || stackIndex >= floorStacks.Count)
+        {
+            return false;
+        }
+
+        List<PortableObject> stack = floorStacks[stackIndex];
+        if (stack == null || stack.Count <= 0 || stack[stack.Count - 1] != portableObject)
+        {
+            return false;
+        }
+
+        int itemId = portableObject.ItemId;
+        stack.RemoveAt(stack.Count - 1);
+        ReleaseFloorObject(portableObject);
+        RobotArm.WakeAroundCoordinate(coordinate);
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        takenItemId = itemId;
+        return true;
+    }
+
+    private bool TryFindClosestFloorObject(
+        Vector3 referenceWorldPosition,
+        Predicate<int> itemFilter,
+        out int bestStackIndex,
+        out PortableObject bestPortableObject,
+        out Vector3 bestWorldPosition)
+    {
+        bestStackIndex = -1;
+        bestPortableObject = null;
+        bestWorldPosition = transform.position;
+        EnsureFloorObjectsInitialized();
+
+        if (floorObjects == null || floorObjects.Count == 0)
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        {
+            List<PortableObject> stack = stackIndex < floorStacks.Count ? floorStacks[stackIndex] : null;
+            while (stack != null && stack.Count > 0)
+            {
+                PortableObject portableObject = stack[stack.Count - 1];
+                if (portableObject == null)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                    continue;
+                }
+
+                int itemId = portableObject.ItemId;
+                if (itemId < 0)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                    ReleaseFloorObject(portableObject);
+                    continue;
+                }
+
+                if (itemFilter != null && !itemFilter(itemId))
+                {
+                    break;
+                }
+
+                Vector3 worldPosition = portableObject.transform.position;
+                Vector3 offset = worldPosition - referenceWorldPosition;
+                offset.y = 0f;
+                float distanceSqr = offset.sqrMagnitude;
+                if (bestStackIndex >= 0 && distanceSqr >= bestDistanceSqr)
+                {
+                    break;
+                }
+
+                bestStackIndex = stackIndex;
+                bestPortableObject = portableObject;
+                bestWorldPosition = worldPosition;
+                bestDistanceSqr = distanceSqr;
+                break;
+            }
+        }
+
+        return bestStackIndex >= 0;
     }
 
     public int TransferFloorObjectsToHand(Player player)
@@ -4867,6 +5189,7 @@ public class Block : BaseObject
             || laneIndex >= conveyorLaneBlockedSleepStates.Length
             || conveyorLaneBlockedSleepStates[laneIndex]
             || !HasConveyorItemAtLane(laneIndex)
+            || WasConveyorItemMovedThisFrame(laneIndex)
             || !IsConveyorItemSettledAtLane(laneIndex))
         {
             return false;
@@ -4899,6 +5222,7 @@ public class Block : BaseObject
             || conveyorLaneCycleBlockedSleepStates[laneIndex]
             || HasConveyorMotionStates()
             || !HasConveyorItemAtLane(laneIndex)
+            || WasConveyorItemMovedThisFrame(laneIndex)
             || !IsConveyorItemSettledAtLane(laneIndex))
         {
             return false;
@@ -5026,12 +5350,18 @@ public class Block : BaseObject
 
     private bool TryGetClosestConveyorItemLane(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
+        return TryGetClosestConveyorItemLane(referenceWorldPosition, null, out bestLaneIndex);
+    }
+
+    private bool TryGetClosestConveyorItemLane(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out int bestLaneIndex)
+    {
         bestLaneIndex = -1;
         float bestDistanceSqr = float.MaxValue;
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
-            if (!HasConveyorItemAtLane(laneIndex))
+            int itemId = GetConveyorItemIdAtLane(laneIndex);
+            if (itemId < 0 || (itemFilter != null && !itemFilter(itemId)))
             {
                 continue;
             }
@@ -9525,12 +9855,17 @@ public class Block : BaseObject
         return validCount > 0 ? totalRadius / validCount : 0f;
     }
 
-    public bool TryAddInputAreaCenterObject(int objectId, out PortableObject targetPortableObject)
+    public bool TryAddInputAreaCenterObject(int objectId, out PortableObject targetPortableObject, bool enforceIoOverlapFilter = false)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
         if (objectId < 0 || !ResolveFloorObjectPool())
+        {
+            return false;
+        }
+
+        if (enforceIoOverlapFilter && !InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(coordinate, objectId))
         {
             return false;
         }
@@ -9552,7 +9887,9 @@ public class Block : BaseObject
         portableObject.SetItem(objectId);
         int objectIndex = inputAreaCenterStack.Count;
         inputAreaCenterStack.Add(portableObject);
+        RobotArm.WakeAroundCoordinate(coordinate);
         ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
+        portableObject.GetOrAddPickupGate()?.MarkSettled();
         targetPortableObject = portableObject;
         return true;
     }
