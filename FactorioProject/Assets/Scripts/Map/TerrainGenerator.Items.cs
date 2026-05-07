@@ -298,7 +298,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return droppedCount > 0;
         }
 
-        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, itemCount, out Block focusedBoxBlock))
+        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock))
         {
             dropCoordinate = focusedBoxBlock.Coordinate;
             for (int i = 0; i < itemCount; i++)
@@ -321,7 +321,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return true;
         }
 
-        if (TryResolveInputAreaDropBlock(dropCoordinate, itemId, itemCount, out Block inputAreaBlock))
+        if (TryResolveInputAreaDropBlock(dropCoordinate, itemId, 1, out Block inputAreaBlock))
         {
             dropCoordinate = inputAreaBlock.Coordinate;
             for (int i = 0; i < itemCount; i++)
@@ -447,18 +447,32 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        Vector3 playerPosition = player.transform.position;
+        return TryPickupOneItemToHandAtCoordinate(
+            player,
+            coordinate,
+            player.transform.position,
+            999f,
+            allowFocusedConveyorPickup);
+    }
+
+    public bool TryPickupOneItemToHandAtCoordinate(Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRadius, bool allowFocusedConveyorPickup)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
         if (allowFocusedConveyorPickup
             && TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
-            && focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, playerPosition, 999f))
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, pickupOrigin, pickupRadius))
         {
             return true;
         }
 
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
-            && focusedBoxObject.TryPickupContainedObjectToHand(player, playerPosition, 999f))
+            && focusedBoxObject.TryPickupContainedObjectToHand(player, pickupOrigin, pickupRadius))
         {
             return true;
         }
@@ -474,13 +488,12 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
-        if (block.TryPickupOneInputAreaCenterObjectToHand(player, anchorPosition, 999f))
+        if (block.TryPickupOneInputAreaCenterObjectToHand(player, pickupOrigin, pickupRadius))
         {
             return true;
         }
 
-        return block.TryPickupOneFloorObjectToHand(player, anchorPosition, 999f);
+        return block.TryPickupOneFloorObjectToHand(player, pickupOrigin, pickupRadius);
     }
 
     public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate)
@@ -505,18 +518,34 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        Vector3 playerPosition = player.transform.position;
+        return TryPickupOneItemToBagAtCoordinate(
+            player,
+            coordinate,
+            player.transform.position,
+            999f,
+            preferredSlotIndex,
+            preferredItemId,
+            allowFocusedConveyorPickup);
+    }
+
+    public bool TryPickupOneItemToBagAtCoordinate(Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRadius, int preferredSlotIndex, int preferredItemId, bool allowFocusedConveyorPickup)
+    {
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
         if (allowFocusedConveyorPickup
             && TryGetFocusedConveyorBeltBlock(player, out _, out Block focusedConveyorBlock)
             && focusedConveyorBlock != null
-            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, playerPosition, 999f, preferredSlotIndex, preferredItemId))
+            && focusedConveyorBlock.TryPickupOneConveyorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
 
         if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject)
             && focusedBoxObject != null
-            && focusedBoxObject.TryPickupContainedObjectToBag(player, playerPosition, 999f, preferredSlotIndex, preferredItemId))
+            && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
@@ -532,13 +561,12 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        Vector3 anchorPosition = new Vector3(coordinate.x, player.transform.position.y, coordinate.y);
-        if (block.TryPickupOneInputAreaCenterObjectToBag(player, anchorPosition, 999f, preferredSlotIndex, preferredItemId))
+        if (block.TryPickupOneInputAreaCenterObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
         {
             return true;
         }
 
-        return block.TryPickupOneFloorObjectToBag(player, anchorPosition, 999f, preferredSlotIndex, preferredItemId);
+        return block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId);
     }
 
     public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)

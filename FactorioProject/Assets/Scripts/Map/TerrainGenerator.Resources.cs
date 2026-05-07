@@ -100,13 +100,13 @@ public partial class TerrainGenerator : MonoBehaviour
             return 1;
         }
 
-        if (TryGetMatchingResourceEntry(prefab, oreResources, out ResourceEntry oreEntry))
+        if (TryGetMatchingResourceEntry(prefab, oreResources, out ResourceEntry oreEntry, out int oreEntryIndex))
         {
             bool isStarterOre = generateStarterResourcePatches
                                 && oreEntry.useStarterPatch
                                 && IsInsideStarterPatch(
                                     worldCoordinate,
-                                    GetStarterPatchCenter(oreEntry, Mathf.Max(startSafeZoneRadius + 2, starterPatchDistanceFromCenter)),
+                                    GetStarterPatchCenter(oreEntry, oreEntryIndex),
                                     Mathf.Max(2, starterPatchHalfSize * 2),
                                     oreEntry.salt + 4000);
 
@@ -115,7 +115,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return GetDeterministicRandomRange(worldCoordinate, prefab, minCount, maxCount);
         }
 
-        if (TryGetMatchingResourceEntry(prefab, treeResources, out ResourceEntry treeEntry))
+        if (TryGetMatchingResourceEntry(prefab, treeResources, out ResourceEntry treeEntry, out _))
         {
             return GetDeterministicRandomRange(worldCoordinate, prefab, treeEntry.minResourceCount, treeEntry.maxResourceCount);
         }
@@ -142,18 +142,24 @@ public partial class TerrainGenerator : MonoBehaviour
         return false;
     }
 
-    private static bool TryGetMatchingResourceEntry(Resource prefab, List<ResourceEntry> entries, out ResourceEntry entry)
+    private static bool TryGetMatchingResourceEntry(
+        Resource prefab,
+        List<ResourceEntry> entries,
+        out ResourceEntry entry,
+        out int entryIndex)
     {
         for (int i = 0; i < entries.Count; i++)
         {
             if (entries[i].Prefab == prefab)
             {
                 entry = entries[i];
+                entryIndex = i;
                 return true;
             }
         }
 
         entry = default;
+        entryIndex = -1;
         return false;
     }
 
@@ -209,8 +215,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            int distance = Mathf.Max(startSafeZoneRadius + 2, starterPatchDistanceFromCenter);
-            Vector2Int starterCenter = GetStarterPatchCenter(entry, distance);
+            Vector2Int starterCenter = GetStarterPatchCenter(entry, i);
             if (IsInsideStarterPatch(worldCoordinate, starterCenter, patchSize, entry.salt + 4000))
             {
                 prefab = entry.Prefab;
@@ -670,8 +675,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool IsInsideAnyStarterPatch(Vector2Int worldCoordinate)
     {
         int patchSize = Mathf.Max(2, starterPatchHalfSize * 2);
-        int distance = Mathf.Max(startSafeZoneRadius + 2, starterPatchDistanceFromCenter);
-
         for (int i = 0; i < oreResources.Count; i++)
         {
             ResourceEntry entry = oreResources[i];
@@ -680,7 +683,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            if (IsInsideStarterPatch(worldCoordinate, GetStarterPatchCenter(entry, distance), patchSize, entry.salt + 4000))
+            if (IsInsideStarterPatch(worldCoordinate, GetStarterPatchCenter(entry, i), patchSize, entry.salt + 4000))
             {
                 return true;
             }
@@ -1098,17 +1101,79 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 #endif
 
-    private static Vector2Int GetStarterPatchCenter(ResourceEntry entry, int distance)
+    private Vector2Int GetStarterPatchCenter(ResourceEntry entry, int entryIndex)
     {
-        Vector2Int direction = entry.starterDirection;
-        if (direction == Vector2Int.zero)
+        int starterPatchCount = Mathf.Max(1, CountStarterPatchResources());
+        int starterPatchOrdinal = Mathf.Clamp(GetStarterPatchOrdinal(entryIndex), 0, starterPatchCount - 1);
+        float angleStep = (Mathf.PI * 2f) / starterPatchCount;
+        float baseAngle = Hash01(starterPatchCount, 0, 5291) * Mathf.PI * 2f;
+        float angleJitter = Mathf.Lerp(-angleStep * 0.18f, angleStep * 0.18f, Hash01(entry.salt, starterPatchOrdinal, 5323));
+        float angle = baseAngle + (starterPatchOrdinal * angleStep) + angleJitter;
+        float distance = GetStarterPatchDistanceFromCenter(entry, starterPatchOrdinal);
+
+        Vector2 offset = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * distance;
+        Vector2Int center = new Vector2Int(Mathf.RoundToInt(offset.x), Mathf.RoundToInt(offset.y));
+        if (center == Vector2Int.zero)
         {
-            return Vector2Int.zero;
+            center = Vector2Int.RoundToInt(offset.normalized * Mathf.Max(1f, distance));
         }
 
-        direction.x = Mathf.Clamp(direction.x, -1, 1);
-        direction.y = Mathf.Clamp(direction.y, -1, 1);
-        return new Vector2Int(direction.x * distance, direction.y * distance);
+        return center;
+    }
+
+    private float GetStarterPatchDistanceFromCenter(ResourceEntry entry, int starterPatchOrdinal)
+    {
+        int baseDistance = Mathf.Max(startSafeZoneRadius + 2, starterPatchDistanceFromCenter * 2);
+        float distanceJitter = Mathf.Lerp(0.86f, 1.18f, Hash01(entry.salt, starterPatchOrdinal, 5381));
+        return Mathf.Max(startSafeZoneRadius + starterPatchHalfSize + 2f, baseDistance * distanceJitter);
+    }
+
+    private int CountStarterPatchResources()
+    {
+        int count = 0;
+        if (oreResources == null)
+        {
+            return count;
+        }
+
+        for (int i = 0; i < oreResources.Count; i++)
+        {
+            ResourceEntry entry = oreResources[i];
+            if (entry.useStarterPatch && entry.Prefab != null)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private int GetStarterPatchOrdinal(int entryIndex)
+    {
+        if (oreResources == null || entryIndex < 0)
+        {
+            return 0;
+        }
+
+        int ordinal = 0;
+        int lastIndex = Mathf.Min(entryIndex, oreResources.Count - 1);
+        for (int i = 0; i <= lastIndex; i++)
+        {
+            ResourceEntry entry = oreResources[i];
+            if (!entry.useStarterPatch || entry.Prefab == null)
+            {
+                continue;
+            }
+
+            if (i == entryIndex)
+            {
+                return ordinal;
+            }
+
+            ordinal++;
+        }
+
+        return ordinal;
     }
 
     private bool HasCandidateWaterSquareSupport(Vector2Int worldCoordinate)

@@ -1079,9 +1079,25 @@ public partial class TerrainGenerator : MonoBehaviour
         MarkConveyorNetworkDirty();
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
-            pair.Value?.RefreshConveyorActivityRegistration(false);
-            pair.Value?.RefreshConveyorSlotDotVisuals();
+            RefreshRestoredBlockRuntimeRegistration(pair.Value);
         }
+    }
+
+    private static void RefreshRestoredBlockRuntimeRegistration(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        bool shouldWakeConveyor = block.IsRuntimeConveyor && block.GetRuntimeConveyorItemCount() > 0;
+        if (shouldWakeConveyor)
+        {
+            block.WakeConveyorMoveAttemptsAround();
+        }
+
+        block.RefreshConveyorActivityRegistration(shouldWakeConveyor);
+        block.RefreshConveyorSlotDotVisuals();
     }
 
     public void CopyConveyorItemVisualBlocks(List<Block> results)

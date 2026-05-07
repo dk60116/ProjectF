@@ -601,20 +601,6 @@ public partial class BlockStateStore : MonoBehaviour
             }
         }
 
-        if (mapSaveData.conveyorItems != null)
-        {
-            for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
-            {
-                ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
-                if (entry == null)
-                {
-                    continue;
-                }
-
-                SetConveyorItems(entry.coordinate, entry.lanes);
-            }
-        }
-
         if (mapSaveData.installations != null)
         {
             for (int i = 0; i < mapSaveData.installations.Count; i++)
@@ -626,6 +612,20 @@ public partial class BlockStateStore : MonoBehaviour
                 }
 
                 StoreInstallationState(entry.state);
+            }
+        }
+
+        if (mapSaveData.conveyorItems != null)
+        {
+            for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
+            {
+                ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                SetConveyorItems(entry.coordinate, entry.lanes);
             }
         }
     }

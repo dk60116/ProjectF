@@ -584,6 +584,7 @@ MonoBehaviour:
   multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
+  animator: {fileID: 0}
   mapFilter: 9
   installationFocusRadius: 1
   installedDirection: 0

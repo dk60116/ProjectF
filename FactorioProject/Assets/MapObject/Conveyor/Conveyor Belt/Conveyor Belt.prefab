@@ -322,7 +322,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: 
-  objId: 16
+  objId: 19
   itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -331,6 +331,7 @@ MonoBehaviour:
   multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
+  animator: {fileID: 0}
   mapFilter: 5
   installationFocusRadius: 1
   installedDirection: 0

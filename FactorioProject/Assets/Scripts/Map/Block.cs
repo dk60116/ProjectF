@@ -1640,15 +1640,16 @@ public class Block : BaseObject
         return false;
     }
 
-    public bool TryPickupOneConveyorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex = -1, int preferredItemId = -1)
+    public bool TryPickupOneConveyorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex = -1, int preferredItemId = -1, int maxPickupCount = int.MaxValue)
     {
-        if (player == null || pickupRadius <= 0f)
+        if (player == null || pickupRadius <= 0f || maxPickupCount <= 0)
         {
             return false;
         }
 
         bool pickedAny = false;
-        for (int i = 0; i < ConveyorCellItemUnit; i++)
+        int pickupLimit = Mathf.Min(ConveyorCellItemUnit, maxPickupCount);
+        for (int i = 0; i < pickupLimit; i++)
         {
             if (!TryPickupSingleConveyorObjectToBag(player, playerPosition, pickupRadius, preferredSlotIndex, preferredItemId))
             {
@@ -1659,6 +1660,67 @@ public class Block : BaseObject
         }
 
         return pickedAny;
+    }
+
+    public bool TryPreviewPickupOneConveyorObject(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId)
+    {
+        return TryPreviewPickupConveyorObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out _);
+    }
+
+    public bool TryPreviewPickupConveyorObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
+    {
+        previewItemId = -1;
+        previewPickupCount = 0;
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+        int laneIndex = FindBestConveyorPickupLaneIndex(playerPosition, pickupRadiusSqr, gateOriginPosition, true, preferredItemId);
+        if (laneIndex < 0)
+        {
+            return false;
+        }
+
+        previewItemId = GetConveyorItemIdAtLane(laneIndex);
+        if (previewItemId < 0)
+        {
+            return false;
+        }
+
+        int laneCount = GetConveyorLaneCount();
+        for (int previewLaneIndex = 0; previewLaneIndex < laneCount && previewPickupCount < ConveyorCellItemUnit; previewLaneIndex++)
+        {
+            if (TryGetConveyorPickupLaneCandidate(
+                    previewLaneIndex,
+                    playerPosition,
+                    pickupRadiusSqr,
+                    gateOriginPosition,
+                    true,
+                    previewItemId,
+                    out _,
+                    out _))
+            {
+                previewPickupCount++;
+            }
+        }
+
+        return previewPickupCount > 0;
     }
 
     private bool TryPickupSingleConveyorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId)
@@ -1709,15 +1771,16 @@ public class Block : BaseObject
         return true;
     }
 
-    public bool TryPickupOneConveyorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
+    public bool TryPickupOneConveyorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius, int maxPickupCount = int.MaxValue)
     {
-        if (player == null || pickupRadius <= 0f)
+        if (player == null || pickupRadius <= 0f || maxPickupCount <= 0)
         {
             return false;
         }
 
         bool pickedAny = false;
-        for (int i = 0; i < ConveyorCellItemUnit; i++)
+        int pickupLimit = Mathf.Min(ConveyorCellItemUnit, maxPickupCount);
+        for (int i = 0; i < pickupLimit; i++)
         {
             if (!TryPickupSingleConveyorObjectToHand(player, playerPosition, pickupRadius))
             {
@@ -3382,6 +3445,146 @@ public class Block : BaseObject
         }
 
         return TryPickupOneInputAreaCenterObjectToBag(player, playerPosition, pickupRadius, preferredSlotIndex, preferredItemId);
+    }
+
+    public bool TryPreviewPickupOneFloorObject(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId)
+    {
+        return TryPreviewPickupFloorObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out _);
+    }
+
+    public bool TryPreviewPickupFloorObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
+    {
+        previewItemId = -1;
+        previewPickupCount = 0;
+        if (player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+
+        if (TryPreviewPickupFloorStackObjects(
+                player,
+                playerPosition,
+                pickupRadius,
+                preferredItemId,
+                out previewItemId,
+                out previewPickupCount))
+        {
+            return true;
+        }
+
+        return TryPreviewPickupInputAreaCenterObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount);
+    }
+
+    private bool TryPreviewPickupFloorStackObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
+    {
+        previewItemId = -1;
+        previewPickupCount = 0;
+        if (player == null || pickupRadius <= 0f || floorObjects == null || floorObjects.Count == 0)
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+        int resolvedItemId = -1;
+
+        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        {
+            Transform anchor = floorObjects[stackIndex];
+            if (anchor == null || floorStacks == null || stackIndex >= floorStacks.Count)
+            {
+                continue;
+            }
+
+            List<PortableObject> stack = floorStacks[stackIndex];
+            CleanupPortableStack(stack);
+            if (stack == null || stack.Count == 0)
+            {
+                continue;
+            }
+
+            PortableObject topObject = stack[stack.Count - 1];
+            if (topObject == null)
+            {
+                continue;
+            }
+
+            Vector3 offset = anchor.position - playerPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+
+            for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+            {
+                PortableObject gatedObject = stack[objectIndex];
+                if (gatedObject == null)
+                {
+                    continue;
+                }
+
+                DroppedItemPickupGate gate = gatedObject.GetComponent<DroppedItemPickupGate>();
+                if (gate != null)
+                {
+                    gate.UpdateExitState(gateOriginPosition);
+                }
+            }
+
+            if (distanceSqr > pickupRadiusSqr)
+            {
+                continue;
+            }
+
+            DroppedItemPickupGate topGate = topObject.GetComponent<DroppedItemPickupGate>();
+            if (topGate != null && !topGate.CanManualPickup(distanceSqr, pickupRadiusSqr))
+            {
+                continue;
+            }
+
+            int itemId = topObject.ItemId;
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            if (preferredItemId >= 0 && itemId != preferredItemId)
+            {
+                continue;
+            }
+
+            if (resolvedItemId >= 0 && itemId != resolvedItemId)
+            {
+                continue;
+            }
+
+            int stackPickupCount = CountManualPickupStackObjectsFromTop(stack, itemId, distanceSqr, pickupRadiusSqr);
+            if (stackPickupCount <= 0)
+            {
+                continue;
+            }
+
+            if (resolvedItemId < 0)
+            {
+                resolvedItemId = itemId;
+                previewItemId = itemId;
+            }
+
+            previewPickupCount += stackPickupCount;
+        }
+
+        return previewPickupCount > 0;
     }
 
     public bool TryPickupOneFloorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
@@ -5317,59 +5520,18 @@ public class Block : BaseObject
 
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
-            PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
-            int itemId = GetConveyorItemIdAtLane(laneIndex);
-            Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
-            if (itemId < 0 || anchor == null)
+            if (!TryGetConveyorPickupLaneCandidate(
+                    laneIndex,
+                    playerPosition,
+                    pickupRadiusSqr,
+                    gateOriginPosition,
+                    manualPickup,
+                    preferredItemId,
+                    out _,
+                    out float distanceSqr)
+                || distanceSqr >= bestDistanceSqr)
             {
                 continue;
-            }
-
-            if (preferredItemId >= 0 && itemId != preferredItemId)
-            {
-                continue;
-            }
-
-            DroppedItemPickupGate gate = portableObject != null ? portableObject.GetComponent<DroppedItemPickupGate>() : null;
-            if (gate != null)
-            {
-                gate.UpdateExitState(gateOriginPosition);
-            }
-            else
-            {
-                ConveyorPickupGateState gateState = GetConveyorPickupGateStateAtLane(laneIndex);
-                gateState.UpdateExitState(gateOriginPosition, GetConveyorItemVisualWorldPosition(laneIndex));
-                SetConveyorPickupGateStateAtLane(laneIndex, gateState);
-            }
-
-            Vector3 offset = GetConveyorItemVisualWorldPosition(laneIndex) - playerPosition;
-            offset.y = 0f;
-            float distanceSqr = offset.sqrMagnitude;
-            if (distanceSqr > pickupRadiusSqr || distanceSqr >= bestDistanceSqr)
-            {
-                continue;
-            }
-
-            if (gate != null)
-            {
-                bool canPickup = manualPickup
-                    ? gate.CanManualPickup(distanceSqr, pickupRadiusSqr)
-                    : gate.CanPickup(distanceSqr, pickupRadiusSqr);
-                if (!canPickup)
-                {
-                    continue;
-                }
-            }
-            else
-            {
-                ConveyorPickupGateState gateState = GetConveyorPickupGateStateAtLane(laneIndex);
-                bool canPickup = manualPickup
-                    ? gateState.CanManualPickup(distanceSqr, pickupRadiusSqr)
-                    : gateState.CanPickup(distanceSqr, pickupRadiusSqr);
-                if (!canPickup)
-                {
-                    continue;
-                }
             }
 
             bestDistanceSqr = distanceSqr;
@@ -5377,6 +5539,66 @@ public class Block : BaseObject
         }
 
         return bestLaneIndex;
+    }
+
+    private bool TryGetConveyorPickupLaneCandidate(
+        int laneIndex,
+        Vector3 playerPosition,
+        float pickupRadiusSqr,
+        Vector3 gateOriginPosition,
+        bool manualPickup,
+        int preferredItemId,
+        out int itemId,
+        out float distanceSqr)
+    {
+        itemId = -1;
+        distanceSqr = float.MaxValue;
+
+        PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
+        itemId = GetConveyorItemIdAtLane(laneIndex);
+        Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
+        if (itemId < 0 || anchor == null)
+        {
+            return false;
+        }
+
+        if (preferredItemId >= 0 && itemId != preferredItemId)
+        {
+            return false;
+        }
+
+        Vector3 itemWorldPosition = GetConveyorItemVisualWorldPosition(laneIndex);
+        DroppedItemPickupGate gate = portableObject != null ? portableObject.GetComponent<DroppedItemPickupGate>() : null;
+        if (gate != null)
+        {
+            gate.UpdateExitState(gateOriginPosition);
+        }
+        else
+        {
+            ConveyorPickupGateState gateState = GetConveyorPickupGateStateAtLane(laneIndex);
+            gateState.UpdateExitState(gateOriginPosition, itemWorldPosition);
+            SetConveyorPickupGateStateAtLane(laneIndex, gateState);
+        }
+
+        Vector3 offset = itemWorldPosition - playerPosition;
+        offset.y = 0f;
+        distanceSqr = offset.sqrMagnitude;
+        if (distanceSqr > pickupRadiusSqr)
+        {
+            return false;
+        }
+
+        if (gate != null)
+        {
+            return manualPickup
+                ? gate.CanManualPickup(distanceSqr, pickupRadiusSqr)
+                : gate.CanPickup(distanceSqr, pickupRadiusSqr);
+        }
+
+        ConveyorPickupGateState candidateGateState = GetConveyorPickupGateStateAtLane(laneIndex);
+        return manualPickup
+            ? candidateGateState.CanManualPickup(distanceSqr, pickupRadiusSqr)
+            : candidateGateState.CanPickup(distanceSqr, pickupRadiusSqr);
     }
 
     private void UpdateConveyorObjects(float deltaTime)
@@ -9810,6 +10032,78 @@ public class Block : BaseObject
         return true;
     }
 
+    public bool TryPreviewPickupOneInputAreaCenterObject(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId)
+    {
+        return TryPreviewPickupInputAreaCenterObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out _);
+    }
+
+    public bool TryPreviewPickupInputAreaCenterObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
+    {
+        previewItemId = -1;
+        previewPickupCount = 0;
+        if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
+        {
+            return false;
+        }
+
+        CleanupPortableStack(inputAreaCenterStack);
+        if (inputAreaCenterStack.Count == 0)
+        {
+            return false;
+        }
+
+        EnsureInputAreaCenterAnchorInitialized();
+        if (inputAreaCenterAnchor == null)
+        {
+            return false;
+        }
+
+        float pickupRadiusSqr = pickupRadius * pickupRadius;
+        Vector3 gateOriginPosition = player.transform.position;
+        UpdatePickupGates(inputAreaCenterStack, gateOriginPosition);
+
+        PortableObject topObject = GetTopPortableObject(inputAreaCenterStack);
+        if (topObject == null)
+        {
+            return false;
+        }
+
+        Vector3 offset = inputAreaCenterAnchor.position - playerPosition;
+        offset.y = 0f;
+        float distanceSqr = offset.sqrMagnitude;
+        if (distanceSqr > pickupRadiusSqr)
+        {
+            return false;
+        }
+
+        DroppedItemPickupGate topGate = topObject.GetComponent<DroppedItemPickupGate>();
+        if (topGate != null && !topGate.CanManualPickup(distanceSqr, pickupRadiusSqr))
+        {
+            return false;
+        }
+
+        int itemId = topObject.ItemId;
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (preferredItemId >= 0 && itemId != preferredItemId)
+        {
+            return false;
+        }
+
+        previewItemId = itemId;
+        previewPickupCount = CountManualPickupStackObjectsFromTop(inputAreaCenterStack, itemId, distanceSqr, pickupRadiusSqr);
+        return previewPickupCount > 0;
+    }
+
     public bool TryPickupOneInputAreaCenterObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
     {
         if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
@@ -9950,6 +10244,39 @@ public class Block : BaseObject
     {
         CleanupPortableStack(stack);
         return stack != null && stack.Count > 0 ? stack[stack.Count - 1] : null;
+    }
+
+    private static int CountManualPickupStackObjectsFromTop(List<PortableObject> stack, int itemId, float distanceSqr, float pickupRadiusSqr)
+    {
+        if (stack == null || itemId < 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int objectIndex = stack.Count - 1; objectIndex >= 0; objectIndex--)
+        {
+            PortableObject portableObject = stack[objectIndex];
+            if (portableObject == null)
+            {
+                continue;
+            }
+
+            if (portableObject.ItemId != itemId)
+            {
+                break;
+            }
+
+            DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
+            if (gate != null && !gate.CanManualPickup(distanceSqr, pickupRadiusSqr))
+            {
+                break;
+            }
+
+            count++;
+        }
+
+        return count;
     }
 
     private static void CleanupPortableStack(List<PortableObject> stack)

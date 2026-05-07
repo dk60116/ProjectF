@@ -333,7 +333,7 @@ MonoBehaviour:
   craftingExpandStepDelay: 0.04
   requiredCraftingMapObjectRange: 2
   enablePickupOnClick: 1
-  pickupRadius: 2
+  pickupRange: 0.5
   pickupInterval: 0.1
   pickupButton: {fileID: 0}
   craftingSlots:

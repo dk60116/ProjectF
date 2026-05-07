@@ -10,20 +10,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_13_WoodenBox
+  m_Name: Item_22_Wooden Fence
   m_EditorClassIdentifier: 
-  itemName: WoodenBox
-  id: 6
-  mapObject: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
+  itemName: Wooden Fence
+  id: 22
+  mapObject: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
-  icon: {fileID: 21300000, guid: 0bd95ca2de49cd14d83ea614f3342a1d, type: 3}
-  interactionButtonList:
-  - {fileID: 21300000, guid: 409f7c1bb6dbd754d9d62c83be11e03e, type: 3}
-  - {fileID: 21300000, guid: 72a1ce6a9d343d3429777b5ee6e1c0e8, type: 3}
+  icon: {fileID: 21300000, guid: dac4f30093e209d408e04e1efeec296b, type: 3}
+  interactionButtonList: []
   size: 0
-  itemFilter: 1
-  capacity: 20
+  itemFilter: 0
+  capacity: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

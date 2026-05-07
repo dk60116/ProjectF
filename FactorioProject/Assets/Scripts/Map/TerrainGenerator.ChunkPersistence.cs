@@ -1134,8 +1134,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            block.RefreshConveyorActivityRegistration(false);
-            block.RefreshConveyorSlotDotVisuals();
+            RefreshRestoredBlockRuntimeRegistration(block);
         }
     }
 

@@ -203,6 +203,40 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         return contentBlock.TryPickupOneInputAreaCenterObjectToHand(player, playerPosition, pickupRadius);
     }
 
+    public bool TryPreviewContainedObjectPickup(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId)
+    {
+        return TryPreviewContainedObjectPickup(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out _);
+    }
+
+    public bool TryPreviewContainedObjectPickup(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
+    {
+        previewItemId = -1;
+        previewPickupCount = 0;
+        if (!isOpen || player == null || pickupRadius <= 0f)
+        {
+            return false;
+        }
+
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        return contentBlock.TryPreviewPickupInputAreaCenterObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount);
+    }
+
     public bool TryTakeOneContainedObject(out int takenItemId, bool requireOpen = false)
     {
         return TryTakeOneContainedObject(null, out takenItemId, requireOpen);

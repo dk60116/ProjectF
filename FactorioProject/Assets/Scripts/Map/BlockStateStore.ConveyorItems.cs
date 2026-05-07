@@ -321,6 +321,7 @@ public partial class BlockStateStore
             Mathf.Max(state.laneCount, GetMaxConveyorLaneIndex(state) + 1),
             0,
             Block.ConveyorCellItemUnit);
+        TryPopulateVirtualConveyorItemState(worldCoordinate, state);
         state.lastBackgroundSimulationTicks = DateTime.UtcNow.Ticks;
         savedConveyorItemStates[worldCoordinate] = state;
         SyncConveyorFloorObjects(worldCoordinate, state);

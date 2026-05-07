@@ -104,6 +104,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
     public bool CanTakeHeldItemFromSlot => CanTakeHeldItemFromSlotInternal();
+    public Vector3 HeldItemWorldPosition => GetHandWorldPosition();
     public bool IsRuntimeSleeping => runtimeSleeping;
     public float PickupIntervalSeconds => Mathf.Max(0.01f, pickupInterval);
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
@@ -312,14 +313,42 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     {
         if (!Application.isPlaying
             || !isActiveAndEnabled
-            || heldItemId >= 0
-            || state != RobotArmState.WaitingForPickup
             || !HasPlacementRuntime())
         {
             return false;
         }
 
+        if (heldItemId >= 0)
+        {
+            return ShouldRuntimeSleepWithHeldItem();
+        }
+
+        if (state != RobotArmState.WaitingForPickup)
+        {
+            return false;
+        }
+
         return !HasNearbyRuntimeInteractionTarget();
+    }
+
+    private bool ShouldRuntimeSleepWithHeldItem()
+    {
+        if (state != RobotArmState.WaitingForDrop)
+        {
+            return false;
+        }
+
+        if (!TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
+        {
+            return false;
+        }
+
+        if (IsConveyorBeltMapObject(dropBlock.MapObject))
+        {
+            return false;
+        }
+
+        return !CanPlaceHeldItem(dropBlock, dropCoordinate);
     }
 
     private bool HasNearbyRuntimeInteractionTarget()
@@ -423,6 +452,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private void WakeRuntimeSleep()
     {
         pickupTimer = 0f;
+        dropRetryTimer = 0f;
+        waitingForDropRetry = false;
         SetRuntimeSleeping(false, true);
     }
 
@@ -1055,13 +1086,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool TryPlaceHeldItem()
     {
-        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
-        {
-            return false;
-        }
-
-        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock) || dropBlock == null)
+        if (heldItemId < 0 || !TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
         {
             return false;
         }
@@ -1104,17 +1129,16 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool CanPlaceHeldItem()
     {
-        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
+        if (heldItemId < 0 || !TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
         {
             return false;
         }
 
-        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock) || dropBlock == null)
-        {
-            return false;
-        }
+        return CanPlaceHeldItem(dropBlock, dropCoordinate);
+    }
 
+    private bool CanPlaceHeldItem(Block dropBlock, Vector2Int dropCoordinate)
+    {
         if (HasBlockingDropMapObject(dropBlock))
         {
             return false;
@@ -1135,6 +1159,20 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         return CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
                && dropBlock.CanAddInputAreaCenterObjects(1, itemId);
+    }
+
+    private bool TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock)
+    {
+        dropBlock = null;
+        if (!TryResolveDropCoordinate(out dropCoordinate))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        return terrainGenerator != null
+               && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
+               && dropBlock != null;
     }
 
     private bool TryResolvePickupCoordinate(out Vector2Int pickupCoordinate)
@@ -1296,6 +1334,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         actionTurnTimer = 0f;
         waitingForDropRetry = false;
         state = RobotArmState.TurningToPickup;
+        WakeRuntimeSleep();
         return true;
     }
 

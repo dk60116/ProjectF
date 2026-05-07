@@ -1290,8 +1290,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 ? line.backColumn0LaneIndices[i]
                 : line.backColumn1LaneIndices[i];
 
-            if (!ShouldHoldStraightConveyorLineColumnForPairedMove(line, i, columnIndex, true)
-                && i < line.blocks.Count - 1
+            if (i < line.blocks.Count - 1
                 && block.TryMoveStraightConveyorDataLaneToCached(
                     line.blocks[i + 1],
                     frontLaneIndex,
@@ -1306,8 +1305,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 MarkConveyorLineBlockTouched(line.blocks[i + 1]);
                 movedAny = true;
             }
-            else if (!ShouldHoldStraightConveyorLineColumnForPairedMove(line, i, columnIndex, true)
-                && i == line.blocks.Count - 1
+            else if (i == line.blocks.Count - 1
                 && HasNonLineConveyorSuccessor(block)
                 && block.TryAdvanceStraightConveyorLineBoundaryLane(frontLaneIndex))
             {
@@ -1315,8 +1313,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 movedAny = true;
             }
 
-            if (!ShouldHoldStraightConveyorLineColumnForPairedMove(line, i, columnIndex, false)
-                && block.TryMoveStraightConveyorDataLaneToCached(
+            if (block.TryMoveStraightConveyorDataLaneToCached(
                     block,
                     backLaneIndex,
                     frontLaneIndex,
@@ -1330,93 +1327,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return movedAny;
-    }
-
-    private static bool ShouldHoldStraightConveyorLineColumnForPairedMove(
-        ConveyorLine line,
-        int blockIndex,
-        int columnIndex,
-        bool useFrontLane)
-    {
-        if (line == null
-            || blockIndex < 0
-            || blockIndex >= line.blocks.Count)
-        {
-            return false;
-        }
-
-        Block block = line.blocks[blockIndex];
-        if (block == null)
-        {
-            return false;
-        }
-
-        int pairedColumnIndex = columnIndex == 0 ? 1 : 0;
-        int pairedLaneIndex;
-        if (useFrontLane)
-        {
-            pairedLaneIndex = pairedColumnIndex == 0
-                ? line.frontColumn0LaneIndices[blockIndex]
-                : line.frontColumn1LaneIndices[blockIndex];
-        }
-        else
-        {
-            pairedLaneIndex = pairedColumnIndex == 0
-                ? line.backColumn0LaneIndices[blockIndex]
-                : line.backColumn1LaneIndices[blockIndex];
-        }
-
-        return block.HasStraightConveyorDataItemAtLane(pairedLaneIndex)
-            && !CanMoveStraightConveyorLineColumn(line, blockIndex, pairedColumnIndex, useFrontLane);
-    }
-
-    private static bool CanMoveStraightConveyorLineColumn(
-        ConveyorLine line,
-        int blockIndex,
-        int columnIndex,
-        bool useFrontLane)
-    {
-        if (line == null
-            || blockIndex < 0
-            || blockIndex >= line.blocks.Count)
-        {
-            return false;
-        }
-
-        Block block = line.blocks[blockIndex];
-        if (block == null)
-        {
-            return false;
-        }
-
-        int frontLaneIndex = columnIndex == 0
-            ? line.frontColumn0LaneIndices[blockIndex]
-            : line.frontColumn1LaneIndices[blockIndex];
-        int backLaneIndex = columnIndex == 0
-            ? line.backColumn0LaneIndices[blockIndex]
-            : line.backColumn1LaneIndices[blockIndex];
-
-        if (useFrontLane)
-        {
-            if (blockIndex < line.blocks.Count - 1)
-            {
-                int destinationLaneIndex = columnIndex == 0
-                    ? line.backColumn0LaneIndices[blockIndex + 1]
-                    : line.backColumn1LaneIndices[blockIndex + 1];
-                return block.CanMoveStraightConveyorDataLaneToCached(
-                    line.blocks[blockIndex + 1],
-                    frontLaneIndex,
-                    destinationLaneIndex);
-            }
-
-            return HasNonLineConveyorSuccessor(block)
-                && block.CanAdvanceStraightConveyorLineBoundaryLane(frontLaneIndex);
-        }
-
-        return block.CanMoveStraightConveyorDataLaneToCached(
-            block,
-            backLaneIndex,
-            frontLaneIndex);
     }
 
     private static bool HasNonLineConveyorSuccessor(Block block)
