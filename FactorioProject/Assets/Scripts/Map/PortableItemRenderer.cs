@@ -44,6 +44,9 @@ public sealed class PortableItemRenderer : MonoBehaviour
     [SerializeField, Min(1f)]
     private float portableObjectBatchCellSize = 8f;
 
+    [SerializeField, Min(1f)]
+    private float virtualConveyorItemBatchCellSize = 8f;
+
     private readonly HashSet<PortableObject> registeredPortableObjects = new HashSet<PortableObject>();
     private readonly VirtualRenderBatchCollection portableObjectBatches = new VirtualRenderBatchCollection();
     private readonly List<PortableObject> portableObjectCleanupBuffer = new List<PortableObject>();
@@ -54,6 +57,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private readonly List<Block> dirtyVirtualConveyorRenderBlocks = new List<Block>(256);
     private readonly List<VirtualConveyorItemRenderData> scratchVirtualConveyorRenderItems =
         new List<VirtualConveyorItemRenderData>(8);
+    private readonly Plane[] dynamicVirtualConveyorRenderFrustumPlanes = new Plane[6];
     private readonly VirtualRenderBatchCollection virtualConveyorBatches = new VirtualRenderBatchCollection();
     private readonly VirtualRenderBatchCollection dynamicVirtualConveyorBatches = new VirtualRenderBatchCollection();
     private readonly Dictionary<Block, BlockRenderCache> virtualConveyorBlockRenderCaches =
@@ -488,6 +492,12 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private void RebuildDynamicVirtualConveyorBatches()
     {
         dynamicVirtualConveyorBatches.ClearActiveMatrices();
+        Camera renderCamera = Camera.main;
+        bool canCullDynamicBlocks = renderCamera != null;
+        if (canCullDynamicBlocks)
+        {
+            GeometryUtility.CalculateFrustumPlanes(renderCamera, dynamicVirtualConveyorRenderFrustumPlanes);
+        }
 
         for (int i = 0; i < activeVirtualConveyorRenderBlocks.Count; i++)
         {
@@ -498,6 +508,11 @@ public sealed class PortableItemRenderer : MonoBehaviour
             }
 
             RemoveVirtualConveyorBlockRenderCache(block);
+            if (canCullDynamicBlocks && !ShouldRenderDynamicVirtualConveyorBlock(block, renderCamera))
+            {
+                continue;
+            }
+
             scratchVirtualConveyorRenderItems.Clear();
             block.AppendVirtualConveyorItemRenderData(scratchVirtualConveyorRenderItems);
             for (int itemIndex = 0; itemIndex < scratchVirtualConveyorRenderItems.Count; itemIndex++)
@@ -507,6 +522,18 @@ public sealed class PortableItemRenderer : MonoBehaviour
         }
 
         scratchVirtualConveyorRenderItems.Clear();
+    }
+
+    private bool ShouldRenderDynamicVirtualConveyorBlock(Block block, Camera renderCamera)
+    {
+        if (block == null || renderCamera == null || !IsLayerVisibleToCamera(renderCamera, block.gameObject.layer))
+        {
+            return false;
+        }
+
+        float boundsSize = Mathf.Max(4f, virtualConveyorItemBatchCellSize);
+        Bounds bounds = new Bounds(block.transform.position + Vector3.up, new Vector3(boundsSize, boundsSize, boundsSize));
+        return GeometryUtility.TestPlanesAABB(dynamicVirtualConveyorRenderFrustumPlanes, bounds);
     }
 
     private void AddDynamicVirtualConveyorRenderItem(VirtualConveyorItemRenderData renderData)
@@ -541,20 +568,41 @@ public sealed class PortableItemRenderer : MonoBehaviour
             material.enableInstancing = true;
         }
 
+        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
         key = new VirtualRenderBatchKey(
             mesh,
             material,
             renderData.Layer,
             0,
-            ShadowCastingMode.On,
-            true,
+            ShadowCastingMode.Off,
+            false,
             false,
             0,
             renderData.UseSleepAwakeDarkTint,
             renderData.UseBeltItemLineDebugColor,
             renderData.BeltItemLineDebugColor,
-            renderData.ItemId);
+            renderData.ItemId,
+            GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize),
+            GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize));
         return true;
+    }
+
+    private static Vector3 ExtractWorldPosition(Matrix4x4 matrix)
+    {
+        return new Vector3(matrix.m03, matrix.m13, matrix.m23);
+    }
+
+    private static int GetBatchCell(float worldCoordinate, float cellSize)
+    {
+        return Mathf.FloorToInt(worldCoordinate / Mathf.Max(1f, cellSize));
+    }
+
+    private static bool IsLayerVisibleToCamera(Camera camera, int layer)
+    {
+        return camera == null
+            || layer < 0
+            || layer > 31
+            || (camera.cullingMask & (1 << layer)) != 0;
     }
 
     private sealed class BlockRenderCache : IVirtualRenderBatchOwner

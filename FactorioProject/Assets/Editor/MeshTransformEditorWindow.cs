@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Globalization;
@@ -12,6 +13,20 @@ public class MeshTransformEditorWindow : EditorWindow
     private const float PreviewHeight = 260f;
     private const float PivotCenterPickRadius = 10f;
     private const float PivotAxisPickRadius = 7f;
+    private const string UniversalPipelineShaderTag = "UniversalPipeline";
+    private const string LegacyLightweightPipelineShaderTag = "LightweightPipeline";
+    private const string HdPipelineShaderTag = "HDRenderPipeline";
+    private static readonly Color MissingMaterialPreviewColor = Color.white;
+    private static readonly string[] MissingMaterialPreviewShaderNames =
+    {
+        "Custom/ToonCharacter",
+        "Universal Render Pipeline/Unlit",
+        "Universal Render Pipeline/Lit",
+        "Unlit/Color",
+        "Legacy Shaders/Diffuse",
+        "Standard",
+        "Hidden/Internal-Colored"
+    };
 
     private enum PivotDragMode
     {
@@ -690,7 +705,7 @@ public class MeshTransformEditorWindow : EditorWindow
         {
             AssetDatabase.ImportAsset(outputPath, ImportAssetOptions.ForceUpdate);
             AssetDatabase.Refresh();
-            Object exportedObject = AssetDatabase.LoadAssetAtPath<GameObject>(outputPath);
+            UnityEngine.Object exportedObject = AssetDatabase.LoadAssetAtPath<GameObject>(outputPath);
             if (exportedObject != null)
             {
                 EditorGUIUtility.PingObject(exportedObject);
@@ -811,7 +826,7 @@ public class MeshTransformEditorWindow : EditorWindow
         }
 
         int meshAssetCount = 0;
-        Object[] assets = AssetDatabase.LoadAllAssetsAtPath(sourcePath);
+        UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath(sourcePath);
         for (int i = 0; i < assets.Length; i++)
         {
             if (assets[i] is Mesh)
@@ -1333,22 +1348,49 @@ public class MeshTransformEditorWindow : EditorWindow
         previewRenderer.lights[1].transform.rotation = Quaternion.Euler(340f, 218f, 177f);
         previewRenderer.ambientColor = new Color(0.42f, 0.42f, 0.42f, 1f);
 
-        Shader previewShader = Shader.Find("Standard");
+        Shader previewShader = FindMissingMaterialPreviewShader();
         if (previewShader == null)
         {
-            previewShader = Shader.Find("Universal Render Pipeline/Lit");
-        }
-
-        if (previewShader == null)
-        {
-            previewShader = Shader.Find("Legacy Shaders/Diffuse");
+            return;
         }
 
         previewMaterial = new Material(previewShader)
         {
             hideFlags = HideFlags.HideAndDontSave,
-            color = new Color(0.78f, 0.82f, 0.88f, 1f)
         };
+        ApplyMaterialColor(previewMaterial, MissingMaterialPreviewColor);
+    }
+
+    private static Shader FindMissingMaterialPreviewShader()
+    {
+        for (int i = 0; i < MissingMaterialPreviewShaderNames.Length; i++)
+        {
+            Shader shader = Shader.Find(MissingMaterialPreviewShaderNames[i]);
+            if (shader != null && shader.isSupported)
+            {
+                return shader;
+            }
+        }
+
+        return null;
+    }
+
+    private static void ApplyMaterialColor(Material material, Color color)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        if (material.HasProperty("_BaseColor"))
+        {
+            material.SetColor("_BaseColor", color);
+        }
+
+        if (material.HasProperty("_Color"))
+        {
+            material.SetColor("_Color", color);
+        }
     }
 
     private void DisposePreviewResources()
@@ -1457,7 +1499,7 @@ public class MeshTransformEditorWindow : EditorWindow
                 previewRenderer.DrawMesh(previewMesh, Matrix4x4.identity, material, subMeshIndex);
             }
 
-            previewRenderer.Render();
+            previewRenderer.Render(true, true);
             Texture previewTexture = previewRenderer.EndPreview();
             GUI.DrawTexture(previewRect, previewTexture, ScaleMode.StretchToFill, false);
         }
@@ -1512,13 +1554,90 @@ public class MeshTransformEditorWindow : EditorWindow
         if (previewMaterials != null && previewMaterials.Length > 0)
         {
             int materialIndex = Mathf.Min(passIndex, previewMaterials.Length - 1);
-            if (previewMaterials[materialIndex] != null)
+            if (IsUsablePreviewMaterial(previewMaterials[materialIndex]))
             {
                 return previewMaterials[materialIndex];
             }
         }
 
         return previewMaterial;
+    }
+
+    private static bool IsUsablePreviewMaterial(Material material)
+    {
+        if (material == null)
+        {
+            return false;
+        }
+
+        return IsUsablePreviewShader(material.shader, material.GetTag("RenderPipeline", false, string.Empty));
+    }
+
+    private static bool IsUsablePreviewShader(Shader shader, string shaderPipelineTag)
+    {
+        if (shader == null || !shader.isSupported)
+        {
+            return false;
+        }
+
+        string shaderName = shader.name;
+        if (string.IsNullOrWhiteSpace(shaderName) || shaderName.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return false;
+        }
+
+        return IsShaderCompatibleWithActiveRenderPipeline(shader, shaderPipelineTag);
+    }
+
+    private static bool IsShaderCompatibleWithActiveRenderPipeline(Shader shader, string shaderPipelineTag)
+    {
+        UnityEngine.Rendering.RenderPipelineAsset renderPipeline = GetConfiguredRenderPipeline();
+        if (renderPipeline == null)
+        {
+            return string.IsNullOrWhiteSpace(shaderPipelineTag);
+        }
+
+        string renderPipelineTypeName = renderPipeline.GetType().FullName ?? string.Empty;
+        string shaderName = shader.name ?? string.Empty;
+        if (renderPipelineTypeName.IndexOf("Universal", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return IsUniversalRenderPipelineShader(shaderPipelineTag, shaderName);
+        }
+
+        if (renderPipelineTypeName.IndexOf("HDRenderPipeline", StringComparison.OrdinalIgnoreCase) >= 0
+            || renderPipelineTypeName.IndexOf("HighDefinition", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return string.Equals(shaderPipelineTag, HdPipelineShaderTag, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !string.IsNullOrWhiteSpace(shaderPipelineTag);
+    }
+
+    private static UnityEngine.Rendering.RenderPipelineAsset GetConfiguredRenderPipeline()
+    {
+        if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null)
+        {
+            return UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+        }
+
+        if (UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset != null)
+        {
+            return UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset;
+        }
+
+        return QualitySettings.renderPipeline;
+    }
+
+    private static bool IsUniversalRenderPipelineShader(string shaderPipelineTag, string shaderName)
+    {
+        if (string.Equals(shaderPipelineTag, UniversalPipelineShaderTag, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(shaderPipelineTag, LegacyLightweightPipelineShaderTag, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(shaderName)
+            && shaderName.StartsWith("Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Mesh CreateCombinedModelPreviewMesh(GameObject modelRoot, out Material[] materials)

@@ -130,12 +130,14 @@ public struct VirtualRenderBatchEntry
 public sealed class VirtualRenderBatchCollection
 {
     private const int MaxInstancesPerDraw = 1023;
+    private const float MinimumWorldBoundsSize = 0.25f;
 
     private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
 
     private readonly Dictionary<VirtualRenderBatchKey, BatchRenderCache> batchesByKey = new Dictionary<VirtualRenderBatchKey, BatchRenderCache>();
     private readonly List<VirtualRenderBatchKey> activeBatchKeys = new List<VirtualRenderBatchKey>();
+    private readonly Plane[] renderFrustumPlanes = new Plane[6];
 
     public int ActiveBatchCount => activeBatchKeys.Count;
 
@@ -154,6 +156,7 @@ public sealed class VirtualRenderBatchCollection
             {
                 batchCache.Matrices.Clear();
                 batchCache.Owners.Clear();
+                batchCache.ClearBounds();
             }
         }
 
@@ -169,6 +172,7 @@ public sealed class VirtualRenderBatchCollection
         }
 
         batchCache.Matrices.Add(matrix);
+        AddMatrixBounds(key, batchCache, matrix);
     }
 
     public void AddOwnedMatrix(
@@ -182,12 +186,18 @@ public sealed class VirtualRenderBatchCollection
             return;
         }
 
-        BatchRenderCache batchCache = GetOrCreateBatchCache(key, out _);
+        BatchRenderCache batchCache = GetOrCreateBatchCache(key, out bool created);
+        if (!created && batchCache.Matrices.Count == 0)
+        {
+            activeBatchKeys.Add(key);
+        }
+
         int entryIndex = ownerEntries.Count;
         int matrixIndex = batchCache.Matrices.Count;
         ownerEntries.Add(new VirtualRenderBatchEntry(key, matrixIndex));
         batchCache.Matrices.Add(matrix);
         batchCache.Owners.Add(new MatrixOwner(owner, entryIndex));
+        AddMatrixBounds(key, batchCache, matrix);
     }
 
     public void RemoveOwnedEntries(List<VirtualRenderBatchEntry> ownerEntries)
@@ -207,10 +217,25 @@ public sealed class VirtualRenderBatchCollection
 
     public void RenderBatches()
     {
+        Camera renderCamera = Camera.main;
+        bool canFrustumCull = renderCamera != null;
+        if (canFrustumCull)
+        {
+            GeometryUtility.CalculateFrustumPlanes(renderCamera, renderFrustumPlanes);
+        }
+
         for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
         {
             VirtualRenderBatchKey key = activeBatchKeys[batchIndex];
             if (!batchesByKey.TryGetValue(key, out BatchRenderCache batchCache) || batchCache.Matrices.Count <= 0)
+            {
+                continue;
+            }
+
+            Bounds worldBounds = ResolveWorldBounds(key, batchCache);
+            if (canFrustumCull
+                && (!IsLayerVisibleToCamera(renderCamera, key.Layer)
+                    || !GeometryUtility.TestPlanesAABB(renderFrustumPlanes, worldBounds)))
             {
                 continue;
             }
@@ -220,6 +245,7 @@ public sealed class VirtualRenderBatchCollection
                 layer = key.Layer,
                 shadowCastingMode = key.ShadowCastingMode,
                 receiveShadows = key.ReceiveShadows,
+                worldBounds = worldBounds,
                 matProps = ResolveBatchPropertyBlock(key, batchCache)
             };
 
@@ -307,6 +333,10 @@ public sealed class VirtualRenderBatchCollection
             batchesByKey.Remove(entry.BatchKey);
             activeBatchKeys.Remove(entry.BatchKey);
         }
+        else
+        {
+            batchCache.MarkBoundsDirty();
+        }
     }
 
     private MaterialPropertyBlock ResolveBatchPropertyBlock(VirtualRenderBatchKey key, BatchRenderCache batchCache)
@@ -346,11 +376,104 @@ public sealed class VirtualRenderBatchCollection
         return batchCache.PropertyBlock;
     }
 
+    private Bounds ResolveWorldBounds(VirtualRenderBatchKey key, BatchRenderCache batchCache)
+    {
+        if (!batchCache.HasBounds || batchCache.BoundsDirty)
+        {
+            RebuildWorldBounds(key, batchCache);
+        }
+
+        return batchCache.WorldBounds;
+    }
+
+    private void RebuildWorldBounds(VirtualRenderBatchKey key, BatchRenderCache batchCache)
+    {
+        batchCache.ClearBounds();
+        for (int i = 0; i < batchCache.Matrices.Count; i++)
+        {
+            AddMatrixBounds(key, batchCache, batchCache.Matrices[i]);
+        }
+    }
+
+    private static void AddMatrixBounds(
+        VirtualRenderBatchKey key,
+        BatchRenderCache batchCache,
+        Matrix4x4 matrix)
+    {
+        if (batchCache.BoundsDirty)
+        {
+            return;
+        }
+
+        Bounds bounds = CalculateWorldBounds(key.Mesh, matrix);
+        batchCache.EncapsulateBounds(bounds);
+    }
+
+    private static Bounds CalculateWorldBounds(Mesh mesh, Matrix4x4 matrix)
+    {
+        Bounds localBounds = mesh != null
+            ? mesh.bounds
+            : new Bounds(Vector3.zero, Vector3.one);
+
+        Vector3 center = matrix.MultiplyPoint3x4(localBounds.center);
+        Vector3 localExtents = localBounds.extents;
+        Vector3 axisX = matrix.MultiplyVector(new Vector3(localExtents.x, 0f, 0f));
+        Vector3 axisY = matrix.MultiplyVector(new Vector3(0f, localExtents.y, 0f));
+        Vector3 axisZ = matrix.MultiplyVector(new Vector3(0f, 0f, localExtents.z));
+        Vector3 worldExtents = new Vector3(
+            Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
+            Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
+            Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z));
+
+        Bounds worldBounds = new Bounds(center, worldExtents * 2f);
+        if (worldBounds.size.sqrMagnitude < MinimumWorldBoundsSize * MinimumWorldBoundsSize)
+        {
+            worldBounds.Expand(MinimumWorldBoundsSize);
+        }
+
+        return worldBounds;
+    }
+
+    private static bool IsLayerVisibleToCamera(Camera camera, int layer)
+    {
+        return camera == null
+            || layer < 0
+            || layer > 31
+            || (camera.cullingMask & (1 << layer)) != 0;
+    }
+
     private sealed class BatchRenderCache
     {
         public readonly List<Matrix4x4> Matrices = new List<Matrix4x4>(64);
         public readonly List<MatrixOwner> Owners = new List<MatrixOwner>(64);
         public MaterialPropertyBlock PropertyBlock;
+        public Bounds WorldBounds;
+        public bool HasBounds;
+        public bool BoundsDirty;
+
+        public void EncapsulateBounds(Bounds bounds)
+        {
+            if (!HasBounds)
+            {
+                WorldBounds = bounds;
+                HasBounds = true;
+                return;
+            }
+
+            WorldBounds.Encapsulate(bounds);
+        }
+
+        public void ClearBounds()
+        {
+            WorldBounds = default;
+            HasBounds = false;
+            BoundsDirty = false;
+        }
+
+        public void MarkBoundsDirty()
+        {
+            BoundsDirty = true;
+        }
     }
 
     private readonly struct MatrixOwner

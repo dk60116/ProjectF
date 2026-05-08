@@ -712,7 +712,13 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         MapObject sourcePrefab = null;
-        if (definition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
+        if (definition.mapObject is Fence fencePrototype && savedState.conveyorVariantKind >= 0)
+        {
+            sourcePrefab = InstallationPlacementController.ResolveFenceVariantPrefab(
+                fencePrototype,
+                savedState.conveyorVariantKind);
+        }
+        else if (definition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
         {
             sourcePrefab = savedState.conveyorVariantKind switch
             {

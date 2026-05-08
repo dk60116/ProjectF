@@ -27,3 +27,4 @@ MonoBehaviour:
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0
+  craftingDurationSeconds: 2

@@ -369,7 +369,7 @@ public class PortableObject : MonoBehaviour
         MoveTo(() => target != null ? target.position : WorldPosition, 0f, null, onComplete, true);
     }
 
-    public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true)
+    public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true, float moveDuration = MoveToDuration)
     {
         if (target == null)
         {
@@ -377,15 +377,15 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        MoveTo(() => target != null ? target.position : WorldPosition, delay, startPositionProvider, onComplete, deactivateOnComplete, useJumpArc);
+        MoveTo(() => target != null ? target.position : WorldPosition, delay, startPositionProvider, onComplete, deactivateOnComplete, useJumpArc, moveDuration);
     }
 
-    public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true)
+    public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true, float moveDuration = MoveToDuration)
     {
-        MoveTo(() => targetPosition, delay, null, onComplete, deactivateOnComplete, useJumpArc);
+        MoveTo(() => targetPosition, delay, null, onComplete, deactivateOnComplete, useJumpArc, moveDuration);
     }
 
-    public void MoveTo(Func<Vector3> targetPositionProvider, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true)
+    public void MoveTo(Func<Vector3> targetPositionProvider, float delay = 0f, Func<Vector3> startPositionProvider = null, Action onComplete = null, bool deactivateOnComplete = true, bool useJumpArc = true, float moveDuration = MoveToDuration)
     {
         if (targetPositionProvider == null)
         {
@@ -434,8 +434,9 @@ public class PortableObject : MonoBehaviour
         });
 
         const float jumpPower = 1f;
+        float safeMoveDuration = Mathf.Max(0.001f, moveDuration);
         sequence.Append(
-            DOVirtual.Float(0f, 1f, MoveToDuration, t =>
+            DOVirtual.Float(0f, 1f, safeMoveDuration, t =>
             {
                 Vector3 currentStartPosition = startPositionProvider != null ? startPositionProvider() : launchStartPosition;
                 Vector3 currentTargetPosition = targetPositionProvider();
@@ -489,7 +490,13 @@ public class PortableObject : MonoBehaviour
             return;
         }
 
-        bodyRenderer.enabled = isVisible;
+        if (!isVisible)
+        {
+            bodyRenderer.enabled = false;
+            return;
+        }
+
+        UpdateRendererVisibility();
     }
 
     private void OnEnable()

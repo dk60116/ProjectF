@@ -11,8 +11,18 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private static BagSlot expandedSlot;
     private static BagSlot hoveredDropSlot;
     private static readonly Dictionary<PortableObject, PortableMoveVisualState> activePortableMoveVisualStates = new Dictionary<PortableObject, PortableMoveVisualState>();
+    private static readonly List<RaycastResult> itemSlotRaycastResults = new List<RaycastResult>();
+    private static readonly List<ItemSlot> itemSlotParentBuffer = new List<ItemSlot>();
+    private static readonly List<BagSlot> bagSlotParentBuffer = new List<BagSlot>();
+    private static readonly Vector3[] itemSlotWorldCorners = new Vector3[4];
+    private static BagSlot automaticPickupPreviewSlot;
+    private static InstallationPlacementController cachedDropFocusPlacementController;
+    private static int automaticPickupPreviewFrame = -1;
+    private static int automaticPickupPreviewPriority = int.MaxValue;
+    private static float pickupPreviewSuppressedUntilTime;
     private const float DragCancelDistance = 8f;
     private const float CraftingRootHideDelay = 0.12f;
+    private const float PickupPreviewSuppressAfterPickupDuration = 0.12f;
     private const int CraftingInnerRingSlotLimit = 5;
     private const float CraftingOuterRingSlotPadding = 0.9f;
     private const float FocusedPickupRange = 999f;
@@ -123,6 +133,26 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
     }
 
+    private readonly struct PortableMoveAnchor
+    {
+        private readonly Transform parent;
+        private readonly Vector3 localPosition;
+        private readonly Vector3 worldPosition;
+
+        public PortableMoveAnchor(PortableObject portableObject)
+        {
+            Transform targetTransform = portableObject != null ? portableObject.transform : null;
+            parent = targetTransform != null ? targetTransform.parent : null;
+            localPosition = targetTransform != null ? targetTransform.localPosition : Vector3.zero;
+            worldPosition = targetTransform != null ? targetTransform.position : Vector3.zero;
+        }
+
+        public Vector3 ResolveWorldPosition()
+        {
+            return parent != null ? parent.TransformPoint(localPosition) : worldPosition;
+        }
+    }
+
     public static void CloseAnyExpanded(bool immediate = false)
     {
         if (expandedSlot == null)
@@ -149,6 +179,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             hoveredDropSlot = null;
         }
 
+        ReleaseAutomaticPickupPreviewSlot();
         EndDragVisual();
         ClearPickupPreview();
         CollapseCraftingSlots(true);
@@ -162,6 +193,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void OnDestroy()
     {
+        ReleaseAutomaticPickupPreviewSlot();
         EndDragVisual();
         DestroyDragGhost();
         UnbindPickupClick();
@@ -197,6 +229,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (visible && !gameObject.activeSelf)
         {
             gameObject.SetActive(true);
+        }
+
+        if (!visible)
+        {
+            ReleaseAutomaticPickupPreviewSlot();
+            ClearPickupPreview();
         }
 
         bool canInteract = visible && !IsInventoryUiLocked();
@@ -272,10 +310,28 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 return;
             }
 
+            if (!boundBag.TryRemoveItemsAtSlot(
+                    slotIndex,
+                    conveyorDropCount,
+                    out int removedItemId,
+                    out int conveyorRemovedCount,
+                    out startWorldPosition,
+                    false)
+                || conveyorRemovedCount <= 0)
+            {
+                return;
+            }
+
+            if (removedItemId != conveyorItemId)
+            {
+                RestoreItemsToSlot(removedItemId, conveyorRemovedCount);
+                return;
+            }
+
             bool conveyorDropped = terrainGenerator.TryAddDroppedItemStackAtPlayerBlock(
                 dropOrigin,
                 conveyorItemId,
-                conveyorDropCount,
+                conveyorRemovedCount,
                 startWorldPosition,
                 startWorldPositionProvider,
                 0.1f,
@@ -284,18 +340,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
             if (!conveyorDropped || conveyorDroppedCount <= 0)
             {
+                RestoreItemsToSlot(conveyorItemId, conveyorRemovedCount);
                 return;
             }
 
-            if (!boundBag.TryRemoveItemsAtSlot(slotIndex, conveyorDroppedCount, out int removedItemId, out int conveyorRemovedCount, out _, false)
-                || removedItemId != conveyorItemId
-                || conveyorRemovedCount <= 0)
+            int conveyorRemainingCount = Mathf.Max(0, conveyorRemovedCount - conveyorDroppedCount);
+            if (conveyorRemainingCount > 0)
             {
-                return;
+                RestoreItemsToSlot(conveyorItemId, conveyorRemainingCount);
             }
 
             player.MarkDropExitGate(dropOrigin, 0.5f);
             player.SetLastDropTarget(conveyorDropCoordinate);
+            SuppressPickupPreviewAfterDrop(player);
             return;
         }
 
@@ -330,17 +387,28 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         {
             player.MarkDropExitGate(dropOrigin, 0.5f);
             player.SetLastDropTarget(dropCoordinate);
+            SuppressPickupPreviewAfterDrop(player);
         }
 
         int remainingCount = Mathf.Max(0, removedCount - droppedCount);
         if (remainingCount > 0)
         {
-            for (int i = 0; i < remainingCount; i++)
+            RestoreItemsToSlot(itemId, remainingCount);
+        }
+    }
+
+    private void RestoreItemsToSlot(int itemId, int count)
+    {
+        if (boundBag == null || slotIndex < 0 || itemId < 0 || count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (!boundBag.TryAddObject(slotIndex, itemId, out _))
             {
-                if (!boundBag.TryAddObject(slotIndex, itemId, out _))
-                {
-                    break;
-                }
+                break;
             }
         }
     }
@@ -364,6 +432,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         isDragging = true;
         dragStartScreenPosition = eventData != null ? eventData.position : Vector2.zero;
         UpdateDragGhost(eventData);
+        RefreshDragDropFocus(eventData);
 
         if (dragGhostTransform != null)
         {
@@ -382,6 +451,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         UpdateDragGhost(eventData);
+        RefreshDragDropFocus(eventData);
     }
 
     public void OnEndDrag(PointerEventData eventData)
@@ -451,13 +521,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             hoveredDropSlot = null;
         }
 
-        if (hoveredDropSlot != this || isDragging)
+        if (isDragging)
         {
             ClearPickupPreview();
+            RefreshDragDropFocus(null);
             return;
         }
 
         RefreshPickupPreview();
+
+        if (hoveredDropSlot != this)
+        {
+            return;
+        }
 
         if (Input.GetMouseButtonDown(1))
         {
@@ -604,11 +680,390 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         dragGhostTransform.position = eventData.position;
     }
 
+    private void RefreshDragDropFocus(PointerEventData eventData)
+    {
+        if (!TryResolveDragDropFocusTarget(eventData, out PlayerController playerController, out Block targetBlock))
+        {
+            ClearDragDropFocus();
+            return;
+        }
+
+        playerController.SetTemporaryDropFocus(targetBlock);
+    }
+
+    private bool TryResolveDragDropFocusTarget(PointerEventData eventData, out PlayerController playerController, out Block targetBlock)
+    {
+        playerController = null;
+        targetBlock = null;
+        if (!isDragging)
+        {
+            return false;
+        }
+
+        if (IsDropFocusBlockedByMode())
+        {
+            return false;
+        }
+
+        Vector2 pointerPosition = eventData != null ? eventData.position : GetCurrentPointerPosition();
+        if (IsPointerOverAnyItemSlot(pointerPosition))
+        {
+            return false;
+        }
+
+        Player player = ResolvePlayer();
+        playerController = player != null ? player.GetComponent<PlayerController>() : null;
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrain();
+        if (terrainGenerator == null || !TryGetDraggedItem(out int itemId, out int itemCount))
+        {
+            return false;
+        }
+
+        Vector3 dropOrigin = player != null ? player.transform.position : Vector3.zero;
+        return TryResolveDropFocusBlock(terrainGenerator, dropOrigin, itemId, Mathf.Min(itemCount, 1), out targetBlock);
+    }
+
+    private static bool IsDropFocusBlockedByMode()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
+        {
+            return true;
+        }
+
+        InstallationPlacementController placementController = ResolveDropFocusPlacementController();
+        return placementController != null && placementController.PlacementOrMapEditModeActive;
+    }
+
+    private static InstallationPlacementController ResolveDropFocusPlacementController()
+    {
+        if (cachedDropFocusPlacementController != null)
+        {
+            return cachedDropFocusPlacementController;
+        }
+
+        cachedDropFocusPlacementController = FindObjectOfType<InstallationPlacementController>();
+        return cachedDropFocusPlacementController;
+    }
+
+    private bool TryGetDraggedItem(out int itemId, out int itemCount)
+    {
+        itemId = -1;
+        itemCount = 0;
+        if (boundBag == null || slotIndex < 0)
+        {
+            return false;
+        }
+
+        itemId = boundBag.GetSlotItemId(slotIndex);
+        itemCount = boundBag.GetSlotCount(slotIndex);
+        return itemId >= 0 && itemCount > 0;
+    }
+
+    private static Vector2 GetCurrentPointerPosition()
+    {
+        if (Input.touchCount > 0)
+        {
+            return Input.GetTouch(0).position;
+        }
+
+        return Input.mousePosition;
+    }
+
+    private static bool IsPointerOverAnyItemSlot(Vector2 pointerPosition)
+    {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem != null)
+        {
+            PointerEventData pointerData = new PointerEventData(eventSystem)
+            {
+                position = pointerPosition
+            };
+
+            itemSlotRaycastResults.Clear();
+            eventSystem.RaycastAll(pointerData, itemSlotRaycastResults);
+            for (int i = 0; i < itemSlotRaycastResults.Count; i++)
+            {
+                GameObject hitObject = itemSlotRaycastResults[i].gameObject;
+                if (hitObject == null)
+                {
+                    continue;
+                }
+
+                if (TryGetPointerBlockingItemSlot(hitObject, out _))
+                {
+                    itemSlotRaycastResults.Clear();
+                    return true;
+                }
+            }
+
+            itemSlotRaycastResults.Clear();
+            return false;
+        }
+
+        ItemSlot[] itemSlots = FindObjectsOfType<ItemSlot>(false);
+        for (int i = 0; i < itemSlots.Length; i++)
+        {
+            ItemSlot itemSlot = itemSlots[i];
+            if (!IsPointerBlockingItemSlot(itemSlot))
+            {
+                continue;
+            }
+
+            RectTransform slotRectTransform = itemSlot.transform as RectTransform;
+            Canvas canvas = itemSlot.GetComponentInParent<Canvas>();
+            Camera eventCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? canvas.worldCamera
+                : null;
+
+            if (RectTransformUtility.RectangleContainsScreenPoint(slotRectTransform, pointerPosition, eventCamera))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetPointerBlockingItemSlot(GameObject target, out ItemSlot itemSlot)
+    {
+        itemSlot = null;
+        if (target == null)
+        {
+            return false;
+        }
+
+        itemSlotParentBuffer.Clear();
+        target.GetComponentsInParent(false, itemSlotParentBuffer);
+        for (int i = 0; i < itemSlotParentBuffer.Count; i++)
+        {
+            ItemSlot candidate = itemSlotParentBuffer[i];
+            if (IsPointerBlockingItemSlot(candidate))
+            {
+                itemSlot = candidate;
+                break;
+            }
+        }
+
+        itemSlotParentBuffer.Clear();
+        return itemSlot != null;
+    }
+
+    private static bool IsVisibleItemSlotForPointer(ItemSlot itemSlot)
+    {
+        if (itemSlot == null || !itemSlot.isActiveAndEnabled || !itemSlot.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        RectTransform slotRectTransform = itemSlot.transform as RectTransform;
+        if (slotRectTransform == null || !HasVisibleRectArea(slotRectTransform))
+        {
+            return false;
+        }
+
+        CanvasGroup[] canvasGroups = itemSlot.GetComponentsInParent<CanvasGroup>(false);
+        for (int i = 0; i < canvasGroups.Length; i++)
+        {
+            CanvasGroup canvasGroup = canvasGroups[i];
+            if (canvasGroup == null || !canvasGroup.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            if (canvasGroup.alpha <= 0.001f || !canvasGroup.blocksRaycasts)
+            {
+                return false;
+            }
+
+            if (canvasGroup.ignoreParentGroups)
+            {
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsPointerBlockingItemSlot(ItemSlot itemSlot)
+    {
+        if (!IsVisibleItemSlotForPointer(itemSlot))
+        {
+            return false;
+        }
+
+        if (itemSlot is PlayerHUD)
+        {
+            return false;
+        }
+
+        if (itemSlot is BagSlot bagSlot)
+        {
+            return IsBoundDropSlot(bagSlot);
+        }
+
+        return true;
+    }
+
+    private static bool IsBoundDropSlot(BagSlot slot)
+    {
+        return slot != null
+               && !(slot is PlayerHUD)
+               && slot.boundBag != null
+               && slot.slotIndex >= 0;
+    }
+
+    private static bool HasVisibleRectArea(RectTransform rectTransform)
+    {
+        rectTransform.GetWorldCorners(itemSlotWorldCorners);
+        float width = Vector3.Distance(itemSlotWorldCorners[0], itemSlotWorldCorners[3]);
+        float height = Vector3.Distance(itemSlotWorldCorners[0], itemSlotWorldCorners[1]);
+        return width > 0.5f && height > 0.5f;
+    }
+
+    private static bool TryResolveDropFocusBlock(TerrainGenerator terrainGenerator, Vector3 dropOrigin, int itemId, int itemCount, out Block targetBlock)
+    {
+        targetBlock = null;
+        if (terrainGenerator == null
+            || itemId < 0
+            || itemCount <= 0)
+        {
+            return false;
+        }
+
+        bool resolvedDropTarget = terrainGenerator.TryResolveDroppedItemStackTargetBlockAtPlayerBlock(
+                dropOrigin,
+                itemId,
+                itemCount,
+                out targetBlock,
+                out _);
+        if ((!resolvedDropTarget || targetBlock == null)
+            && !TryResolveFallbackDropFocusBlock(terrainGenerator, dropOrigin, itemId, itemCount, out targetBlock))
+        {
+            return false;
+        }
+
+        return targetBlock != null;
+    }
+
+    private static bool TryResolveFallbackDropFocusBlock(
+        TerrainGenerator terrainGenerator,
+        Vector3 dropOrigin,
+        int itemId,
+        int itemCount,
+        out Block targetBlock)
+    {
+        targetBlock = null;
+        if (terrainGenerator == null)
+        {
+            return false;
+        }
+
+        Vector2Int centerCoordinate = ResolvePickupCoordinate(dropOrigin);
+        int count = Mathf.Max(1, itemCount);
+        if (TryFindDropFocusBlock(
+                terrainGenerator,
+                centerCoordinate,
+                itemId,
+                count,
+                true,
+                out targetBlock))
+        {
+            return true;
+        }
+
+        if (terrainGenerator.TryGetLoadedBlock(centerCoordinate, out Block centerBlock)
+            && IsDropFocusBlockCandidate(centerBlock, itemId, count))
+        {
+            targetBlock = centerBlock;
+            return true;
+        }
+
+        if (TryFindDropFocusBlock(
+                terrainGenerator,
+                centerCoordinate,
+                itemId,
+                count,
+                false,
+                out targetBlock))
+        {
+            return true;
+        }
+
+        if (terrainGenerator.TryGetLoadedBlock(centerCoordinate, out centerBlock) && centerBlock != null)
+        {
+            targetBlock = centerBlock;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryFindDropFocusBlock(
+        TerrainGenerator terrainGenerator,
+        Vector2Int centerCoordinate,
+        int itemId,
+        int itemCount,
+        bool requireSameItem,
+        out Block targetBlock)
+    {
+        targetBlock = null;
+        int bestDistance = int.MaxValue;
+        const int SearchRadius = 2;
+        for (int offsetY = -SearchRadius; offsetY <= SearchRadius; offsetY++)
+        {
+            for (int offsetX = -SearchRadius; offsetX <= SearchRadius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!terrainGenerator.TryGetLoadedBlock(coordinate, out Block block)
+                    || !IsDropFocusBlockCandidate(block, itemId, itemCount))
+                {
+                    continue;
+                }
+
+                if (requireSameItem && !block.HasFloorObjectItem(itemId))
+                {
+                    continue;
+                }
+
+                int distance = Mathf.Abs(offsetX) + Mathf.Abs(offsetY);
+                if (distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                targetBlock = block;
+            }
+        }
+
+        return targetBlock != null;
+    }
+
+    private static bool IsDropFocusBlockCandidate(Block block, int itemId, int itemCount)
+    {
+        return block != null
+               && block.Type == Block.BlockType.Ground
+               && block.CanAddFloorObjects(Mathf.Max(1, itemCount), itemId);
+    }
+
+    private void ClearDragDropFocus()
+    {
+        Player player = ResolvePlayer();
+        PlayerController playerController = player != null ? player.GetComponent<PlayerController>() : null;
+        playerController?.ClearTemporaryDropFocus();
+    }
+
     private void EndDragVisual()
     {
         isDragging = false;
 
         SetIconAlpha(1f);
+        ClearDragDropFocus();
 
         if (dragGhostTransform != null)
         {
@@ -1408,7 +1863,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        BagSlot hoveredSlot = hoveredObject.GetComponentInParent<BagSlot>();
+        BagSlot hoveredSlot = GetBoundDropSlotInParents(hoveredObject);
         if (hoveredSlot == null)
         {
             return false;
@@ -1456,7 +1911,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        BagSlot parentSlot = target.GetComponentInParent<BagSlot>();
+        BagSlot parentSlot = GetBoundDropSlotInParents(target);
         return parentSlot == this;
     }
 
@@ -1478,7 +1933,31 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return null;
         }
 
-        return target.GetComponentInParent<BagSlot>();
+        return GetBoundDropSlotInParents(target);
+    }
+
+    private static BagSlot GetBoundDropSlotInParents(GameObject target)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        bagSlotParentBuffer.Clear();
+        target.GetComponentsInParent(false, bagSlotParentBuffer);
+        BagSlot result = null;
+        for (int i = 0; i < bagSlotParentBuffer.Count; i++)
+        {
+            BagSlot slot = bagSlotParentBuffer[i];
+            if (IsBoundDropSlot(slot))
+            {
+                result = slot;
+                break;
+            }
+        }
+
+        bagSlotParentBuffer.Clear();
+        return result;
     }
 
     private bool TryTransferToSlot(BagSlot targetSlot)
@@ -1568,14 +2047,14 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         CancelPortableMoveVisuals(sourceObjects);
         CancelPortableMoveVisuals(targetObjects);
 
-        List<Vector3> sourcePositions = new List<Vector3>(itemCount);
-        if (!TryCollectPortableObjectPositions(sourceObjects, sourcePositions))
+        List<PortableMoveAnchor> sourceAnchors = new List<PortableMoveAnchor>(itemCount);
+        if (!TryCollectPortableObjectAnchors(sourceObjects, sourceAnchors))
         {
             return false;
         }
 
-        List<Vector3> targetAnchorPositions = new List<Vector3>(itemCount);
-        if (!TryCollectPortableObjectPositions(targetObjects, targetAnchorPositions))
+        List<PortableMoveAnchor> targetAnchors = new List<PortableMoveAnchor>(itemCount);
+        if (!TryCollectPortableObjectAnchors(targetObjects, targetAnchors))
         {
             return false;
         }
@@ -1588,7 +2067,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         int moveIndex = 0;
         float moveInterval = Mathf.Max(0f, transferMoveInterval);
-        AnimatePortableMoves(targetObjects, sourcePositions, targetAnchorPositions, ref moveIndex, moveInterval);
+        AnimatePortableMoves(targetObjects, sourceAnchors, targetAnchors, ref moveIndex, moveInterval);
 
         sourceBag.ForceNotifyChanged();
         targetBag.ForceNotifyChanged();
@@ -1645,26 +2124,26 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         CancelPortableMoveVisuals(destinationForSource);
         CancelPortableMoveVisuals(destinationForTarget);
 
-        List<Vector3> sourcePositions = new List<Vector3>(sourceCount);
-        if (!TryCollectPortableObjectPositions(sourceObjects, sourcePositions))
+        List<PortableMoveAnchor> sourceAnchors = new List<PortableMoveAnchor>(sourceCount);
+        if (!TryCollectPortableObjectAnchors(sourceObjects, sourceAnchors))
         {
             return false;
         }
 
-        List<Vector3> targetPositions = new List<Vector3>(targetCount);
-        if (!TryCollectPortableObjectPositions(targetObjects, targetPositions))
+        List<PortableMoveAnchor> targetAnchors = new List<PortableMoveAnchor>(targetCount);
+        if (!TryCollectPortableObjectAnchors(targetObjects, targetAnchors))
         {
             return false;
         }
 
-        List<Vector3> sourceAnchorPositions = new List<Vector3>(destinationForSource.Count);
-        if (!TryCollectPortableObjectPositions(destinationForSource, sourceAnchorPositions))
+        List<PortableMoveAnchor> sourceDestinationAnchors = new List<PortableMoveAnchor>(destinationForSource.Count);
+        if (!TryCollectPortableObjectAnchors(destinationForSource, sourceDestinationAnchors))
         {
             return false;
         }
 
-        List<Vector3> targetAnchorPositions = new List<Vector3>(destinationForTarget.Count);
-        if (!TryCollectPortableObjectPositions(destinationForTarget, targetAnchorPositions))
+        List<PortableMoveAnchor> targetDestinationAnchors = new List<PortableMoveAnchor>(destinationForTarget.Count);
+        if (!TryCollectPortableObjectAnchors(destinationForTarget, targetDestinationAnchors))
         {
             return false;
         }
@@ -1677,22 +2156,22 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         int moveIndex = 0;
         float moveInterval = Mathf.Max(0f, transferMoveInterval);
-        AnimatePortableMoves(destinationForSource, targetPositions, sourceAnchorPositions, ref moveIndex, moveInterval);
-        AnimatePortableMoves(destinationForTarget, sourcePositions, targetAnchorPositions, ref moveIndex, moveInterval);
+        AnimatePortableMoves(destinationForSource, targetAnchors, sourceDestinationAnchors, ref moveIndex, moveInterval);
+        AnimatePortableMoves(destinationForTarget, sourceAnchors, targetDestinationAnchors, ref moveIndex, moveInterval);
 
         sourceBag.ForceNotifyChanged();
         targetBag.ForceNotifyChanged();
         return true;
     }
 
-    private static bool TryCollectPortableObjectPositions(List<PortableObject> portableObjects, List<Vector3> positions)
+    private static bool TryCollectPortableObjectAnchors(List<PortableObject> portableObjects, List<PortableMoveAnchor> anchors)
     {
-        if (portableObjects == null || positions == null)
+        if (portableObjects == null || anchors == null)
         {
             return false;
         }
 
-        positions.Clear();
+        anchors.Clear();
         for (int i = 0; i < portableObjects.Count; i++)
         {
             PortableObject portableObject = portableObjects[i];
@@ -1701,7 +2180,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 return false;
             }
 
-            positions.Add(portableObject.transform.position);
+            anchors.Add(new PortableMoveAnchor(portableObject));
         }
 
         return true;
@@ -1709,16 +2188,16 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void AnimatePortableMoves(
         List<PortableObject> portableObjects,
-        List<Vector3> startPositions,
-        List<Vector3> anchorPositions,
+        List<PortableMoveAnchor> startAnchors,
+        List<PortableMoveAnchor> targetAnchors,
         ref int moveIndex,
         float moveInterval)
     {
         if (portableObjects == null
-            || startPositions == null
-            || anchorPositions == null
-            || startPositions.Count == 0
-            || anchorPositions.Count == 0)
+            || startAnchors == null
+            || targetAnchors == null
+            || startAnchors.Count == 0
+            || targetAnchors.Count == 0)
         {
             return;
         }
@@ -1731,9 +2210,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 continue;
             }
 
-            Vector3 startPosition = startPositions[Mathf.Min(i, startPositions.Count - 1)];
-            Vector3 anchorPosition = anchorPositions[Mathf.Min(i, anchorPositions.Count - 1)];
-            AnimatePortableMove(portableObject, startPosition, anchorPosition, moveIndex * moveInterval);
+            PortableMoveAnchor startAnchor = startAnchors[Mathf.Min(i, startAnchors.Count - 1)];
+            PortableMoveAnchor targetAnchor = targetAnchors[Mathf.Min(i, targetAnchors.Count - 1)];
+            AnimatePortableMove(portableObject, startAnchor, targetAnchor, moveIndex * moveInterval);
             moveIndex++;
         }
     }
@@ -1748,7 +2227,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         CraftingVisibilityChanged?.Invoke(this, isVisible);
     }
 
-    private void AnimatePortableMove(PortableObject portableObject, Vector3 startPosition, Vector3 targetPosition, float delay)
+    private void AnimatePortableMove(PortableObject portableObject, PortableMoveAnchor startAnchor, PortableMoveAnchor targetAnchor, float delay)
     {
         if (portableObject == null)
         {
@@ -1771,21 +2250,26 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         portableObject.MoveCancelled += RestorePortableMoveVisual;
 
         portableObject.transform.SetParent(null, true);
-        portableObject.transform.position = startPosition;
+        portableObject.transform.position = startAnchor.ResolveWorldPosition();
         if (!portableObject.gameObject.activeSelf)
         {
             portableObject.gameObject.SetActive(true);
         }
 
-        portableObject.MoveTo(targetPosition, delay, () =>
-        {
-            if (portableObject == null)
+        portableObject.MoveTo(
+            () => targetAnchor.ResolveWorldPosition(),
+            delay,
+            () => startAnchor.ResolveWorldPosition(),
+            () =>
             {
-                return;
-            }
+                if (portableObject == null)
+                {
+                    return;
+                }
 
-            RestorePortableMoveVisual(portableObject);
-        }, false);
+                RestorePortableMoveVisual(portableObject);
+            },
+            false);
     }
 
     private static void CancelPortableMoveVisual(PortableObject portableObject)
@@ -1902,12 +2386,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool CanShowPickupPreview()
     {
-        return IsHoveredForPickupPreview()
-               && !isDragging
-               && AllowPickupOnClick
-               && !IsInventoryUiLocked()
-               && boundBag != null
-               && slotIndex >= 0;
+        if (isDragging
+            || !AllowPickupOnClick
+            || IsInventoryUiLocked()
+            || !IsVisibleItemSlotForPointer(this)
+            || boundBag == null
+            || slotIndex < 0)
+        {
+            return false;
+        }
+
+        return !IsPickupPreviewSuppressed(ResolvePlayer());
     }
 
     private bool TryResolvePickupPreviewItem(out int previewItemId, out int previewPickupCount)
@@ -1921,7 +2410,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        if (TryPreviewFocusedRobotArmPickup(player, out bool blockOtherPickup, out previewItemId))
+        if (TryPreviewFocusedRobotArmPickup(player, out bool blockOtherPickup, out previewItemId)
+            && ShouldDisplayPickupPreviewForItem(previewItemId))
         {
             return true;
         }
@@ -1951,16 +2441,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 out previewPickupCount)
             && CanPreviewAcceptPickupItem(player, previewItemId))
         {
-            return true;
+            return ShouldDisplayPickupPreviewForItem(previewItemId);
         }
 
         if (TryPreviewFocusedBoxPickup(player, pickupOrigin, range, preferredItemId, out previewItemId, out previewPickupCount))
         {
-            return true;
+            return ShouldDisplayPickupPreviewForItem(previewItemId);
         }
 
         bool allowFocusedConveyorPickup = !hasFocusedConveyor;
-        return TryPreviewOneItemForClick(player, terrain, allowFocusedConveyorPickup, out previewItemId, out previewPickupCount);
+        return TryPreviewOneItemForClick(player, terrain, allowFocusedConveyorPickup, out previewItemId, out previewPickupCount)
+               && ShouldDisplayPickupPreviewForItem(previewItemId);
     }
 
     private bool TryPreviewOneItemForClick(Player player, TerrainGenerator terrain, bool allowFocusedConveyorPickup, out int previewItemId, out int previewPickupCount)
@@ -2133,13 +2624,18 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        blockOtherPickup = true;
-        int itemId = focusedRobotArm.HeldItemId;
-        if (!focusedRobotArm.CanTakeHeldItemFromSlot || !CanPreviewAcceptPickupItem(player, itemId))
+        if (!focusedRobotArm.CanTakeHeldItemFromSlot)
         {
             return false;
         }
 
+        int itemId = focusedRobotArm.HeldItemId;
+        if (!CanPreviewAcceptPickupItem(player, itemId))
+        {
+            return false;
+        }
+
+        blockOtherPickup = true;
         previewItemId = itemId;
         return true;
     }
@@ -2154,6 +2650,106 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && focusedBoxObject != null
                && focusedBoxObject.TryPreviewContainedObjectPickup(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount)
                && CanPreviewAcceptPickupItem(player, previewItemId);
+    }
+
+    private bool ShouldDisplayPickupPreviewForItem(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (IsHoveredForPickupPreview())
+        {
+            return true;
+        }
+
+        return TryClaimAutomaticPickupPreview(itemId);
+    }
+
+    private bool TryClaimAutomaticPickupPreview(int itemId)
+    {
+        if (hoveredDropSlot != null
+            || !TryFindAutomaticPickupPreviewSlot(itemId, out int targetSlotIndex)
+            || targetSlotIndex != slotIndex)
+        {
+            return false;
+        }
+
+        int frame = Time.frameCount;
+        int priority = GetAutomaticPickupPreviewPriority();
+        if (automaticPickupPreviewFrame != frame)
+        {
+            automaticPickupPreviewFrame = frame;
+            automaticPickupPreviewSlot = null;
+            automaticPickupPreviewPriority = int.MaxValue;
+        }
+
+        if (automaticPickupPreviewSlot == this)
+        {
+            automaticPickupPreviewPriority = Mathf.Min(automaticPickupPreviewPriority, priority);
+            return true;
+        }
+
+        if (automaticPickupPreviewSlot != null && priority >= automaticPickupPreviewPriority)
+        {
+            return false;
+        }
+
+        automaticPickupPreviewSlot?.ClearPickupPreview();
+        automaticPickupPreviewSlot = this;
+        automaticPickupPreviewPriority = priority;
+        return true;
+    }
+
+    private int GetAutomaticPickupPreviewPriority()
+    {
+        return this is HandSlot ? 10 : 0;
+    }
+
+    private bool TryFindAutomaticPickupPreviewSlot(int itemId, out int targetSlotIndex)
+    {
+        targetSlotIndex = -1;
+        if (boundBag == null || itemId < 0)
+        {
+            return false;
+        }
+
+        if (TryFindAutomaticPickupPreviewSlot(itemId, true, out targetSlotIndex))
+        {
+            return true;
+        }
+
+        return TryFindAutomaticPickupPreviewSlot(itemId, false, out targetSlotIndex);
+    }
+
+    private bool TryFindAutomaticPickupPreviewSlot(int itemId, bool requireExistingItems, out int targetSlotIndex)
+    {
+        targetSlotIndex = -1;
+        if (boundBag == null || itemId < 0)
+        {
+            return false;
+        }
+
+        int slotCount = boundBag.SlotCount;
+        for (int i = 0; i < slotCount; i++)
+        {
+            bool hasItems = boundBag.GetSlotCount(i) > 0;
+            if (hasItems != requireExistingItems)
+            {
+                continue;
+            }
+
+            if (!boundBag.CanAddObject(i, itemId))
+            {
+                continue;
+            }
+
+            targetSlotIndex = i;
+            return true;
+        }
+
+        return false;
     }
 
     protected virtual bool CanPreviewAcceptPickupItem(Player player, int itemId)
@@ -2215,10 +2811,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void RefreshPickupPreviewAfterBind()
     {
-        if (IsHoveredForPickupPreview())
-        {
-            RefreshPickupPreview();
-        }
+        RefreshPickupPreview();
     }
 
     private bool IsHoveredForPickupPreview()
@@ -2260,6 +2853,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void ClearPickupPreview()
     {
+        ReleaseAutomaticPickupPreviewSlot();
         if (!pickupPreviewActive)
         {
             return;
@@ -2272,10 +2866,48 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void ResetPickupPreviewState()
     {
+        ReleaseAutomaticPickupPreviewSlot();
         pickupPreviewActive = false;
         pickupPreviewItemId = -1;
         SetIconAlpha(1f);
         SetCountAlpha(1f);
+    }
+
+    private static bool IsPickupPreviewSuppressed(Player player = null)
+    {
+        return Time.time < pickupPreviewSuppressedUntilTime
+               || (player != null && player.IsDropExitPending);
+    }
+
+    private void SuppressPickupPreviewAfterDrop(Player player)
+    {
+        pickupPreviewSuppressedUntilTime = Mathf.Max(
+            pickupPreviewSuppressedUntilTime,
+            Time.time + PortableObject.MoveToDuration);
+
+        automaticPickupPreviewSlot?.ClearPickupPreview();
+        ClearPickupPreview();
+    }
+
+    private void SuppressPickupPreviewAfterPickup()
+    {
+        pickupPreviewSuppressedUntilTime = Mathf.Max(
+            pickupPreviewSuppressedUntilTime,
+            Time.time + PickupPreviewSuppressAfterPickupDuration);
+
+        automaticPickupPreviewSlot?.ClearPickupPreview();
+        ClearPickupPreview();
+    }
+
+    private void ReleaseAutomaticPickupPreviewSlot()
+    {
+        if (automaticPickupPreviewSlot != this)
+        {
+            return;
+        }
+
+        automaticPickupPreviewSlot = null;
+        automaticPickupPreviewPriority = int.MaxValue;
     }
 
     private void RestoreBoundSlotDisplayOrClear()
@@ -2338,6 +2970,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (TryHandleFocusedRobotArmPickup(player, out bool blockPickup))
         {
             StopPickupRoutine();
+            SuppressPickupPreviewAfterPickup();
             suppressCraftingToggleFrame = Time.frameCount;
             return;
         }
@@ -2361,6 +2994,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             && TryPickupFocusedConveyorItem(player, focusedConveyorBlock, FocusedPickupRange, maxFocusedConveyorPickupCount))
         {
             StopPickupRoutine();
+            SuppressPickupPreviewAfterPickup();
             suppressCraftingToggleFrame = Time.frameCount;
             return;
         }
@@ -2372,6 +3006,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        SuppressPickupPreviewAfterPickup();
         suppressCraftingToggleFrame = Time.frameCount;
         if (!singlePickup)
         {
@@ -2434,6 +3069,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 }
             }
 
+            SuppressPickupPreviewAfterPickup();
             yield return new WaitForSeconds(interval);
         }
 
@@ -2608,12 +3244,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        blockOtherPickup = true;
         if (!focusedRobotArm.CanTakeHeldItemFromSlot || boundBag == null || slotIndex < 0)
         {
             return false;
         }
 
+        blockOtherPickup = true;
         return focusedRobotArm.TryTakeHeldItemToBag(boundBag, slotIndex);
     }
 

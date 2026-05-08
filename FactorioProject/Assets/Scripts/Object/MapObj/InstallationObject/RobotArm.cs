@@ -8,6 +8,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private static readonly int PickTriggerHash = Animator.StringToHash("tPick");
     private static readonly int DropTriggerHash = Animator.StringToHash("tDrop");
     private static readonly List<RobotArm> ActiveRobotArms = new List<RobotArm>();
+    private const float ItemMoveDuration = PortableObject.MoveToDuration * 0.5f;
 
     public enum RobotArmState
     {
@@ -100,6 +101,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private RobotArmRenderBatcher renderBatcher;
     private RobotArmInstancedRenderPart[] instancedRenderParts;
     private bool instancedRenderingActive;
+    private Transform handItemRestParent;
+    private Vector3 handItemRestLocalPosition;
+    private Quaternion handItemRestLocalRotation;
+    private Vector3 handItemRestLocalScale;
+    private bool hasHandItemRestTransform;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -116,6 +122,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         base.OnEnable();
         RegisterActiveRobotArm(this);
         EnsureBodyRotationCache();
+        EnsureHandItemRestTransformCache();
         EnsureRuntimeStateInitialized();
         if (heldItemId < 0 && state == RobotArmState.WaitingForPickup)
         {
@@ -800,9 +807,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (TryPickupOneItem(out int pickedItemId))
+        if (TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition))
         {
-            SetHeldItem(pickedItemId);
+            SetHeldItem(pickedItemId, pickupWorldPosition);
             dropRetryTimer = 0f;
             waitingForDropRetry = false;
             state = RobotArmState.WaitingAfterPickupTake;
@@ -933,14 +940,16 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
     }
 
-    private bool TryPickupOneItem(out int pickedItemId)
+    private bool TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition)
     {
         pickedItemId = -1;
+        pickupWorldPosition = GetHandRestWorldPosition();
         if (!TryResolvePickupCandidate(
                 out Block pickupBlock,
                 out BoxObject boxObject,
                 out RobotArmPickupSource pickupSource,
-                out Vector3 referenceWorldPosition))
+                out Vector3 referenceWorldPosition,
+                out pickupWorldPosition))
         {
             return false;
         }
@@ -957,19 +966,21 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool CanPickupOneItem()
     {
-        return TryResolvePickupCandidate(out _, out _, out _, out _);
+        return TryResolvePickupCandidate(out _, out _, out _, out _, out _);
     }
 
     private bool TryResolvePickupCandidate(
         out Block pickupBlock,
         out BoxObject boxObject,
         out RobotArmPickupSource pickupSource,
-        out Vector3 referenceWorldPosition)
+        out Vector3 referenceWorldPosition,
+        out Vector3 pickupWorldPosition)
     {
         pickupBlock = null;
         boxObject = null;
         pickupSource = RobotArmPickupSource.None;
         referenceWorldPosition = GetHandWorldPosition();
+        pickupWorldPosition = referenceWorldPosition;
 
         if (!TryResolvePickupCoordinate(out Vector2Int pickupCoordinate))
         {
@@ -986,7 +997,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         if (pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out Vector3 candidateWorldPosition))
         {
-            TryChoosePickupSource(RobotArmPickupSource.Floor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+            TryChoosePickupSource(RobotArmPickupSource.Floor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
         if (TryGetBoxObject(pickupBlock, out BoxObject candidateBoxObject))
@@ -996,20 +1007,20 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                 && AcceptsPickupItem(containedItemId)
                 && candidateBoxObject.TryGetContainedObjectTopWorldPosition(out candidateWorldPosition))
             {
-                TryChoosePickupSource(RobotArmPickupSource.Box, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+                TryChoosePickupSource(RobotArmPickupSource.Box, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
             }
         }
 
         if (pickupBlock.TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out candidateWorldPosition))
         {
-            TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+            TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
         int inputAreaItemId = pickupBlock.GetInputAreaCenterItemId();
         if (AcceptsPickupItem(inputAreaItemId)
             && pickupBlock.TryGetInputAreaCenterTopWorldPosition(-1, out candidateWorldPosition))
         {
-            TryChoosePickupSource(RobotArmPickupSource.InputArea, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr);
+            TryChoosePickupSource(RobotArmPickupSource.InputArea, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
         return pickupSource != RobotArmPickupSource.None;
@@ -1020,7 +1031,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         Vector3 candidateWorldPosition,
         Vector3 referenceWorldPosition,
         ref RobotArmPickupSource bestSource,
-        ref float bestDistanceSqr)
+        ref float bestDistanceSqr,
+        ref Vector3 bestWorldPosition)
     {
         Vector3 offset = candidateWorldPosition - referenceWorldPosition;
         offset.y = 0f;
@@ -1032,6 +1044,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         bestSource = candidateSource;
         bestDistanceSqr = distanceSqr;
+        bestWorldPosition = candidateWorldPosition;
     }
 
     private bool TryTakeFilteredInputAreaItem(Block pickupBlock, out int pickedItemId)
@@ -1098,8 +1111,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         int itemId = heldItemId;
         Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
+        Vector3 dropStartWorldPosition = GetHandRestWorldPosition();
         if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
-            && boxObject.TryPutOneContainedObjectInstant(itemId, out _))
+            && boxObject.TryPutOneContainedObject(itemId, dropStartWorldPosition, 0f, out _, false, ItemMoveDuration))
         {
             return true;
         }
@@ -1107,19 +1121,20 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         if (dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
                 itemId,
                 dropReferenceWorldPosition,
-                Vector3.zero,
+                dropStartWorldPosition,
                 0f,
                 out _,
                 null,
-                null,
-                0f,
-                false))
+                () => dropStartWorldPosition,
+                ItemMoveDuration,
+                false,
+                ItemMoveDuration))
         {
             return true;
         }
 
         if (CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
-            && dropBlock.TryAddInputAreaCenterObject(itemId, out _, true))
+            && dropBlock.TryAddInputAreaCenterObjectAnimated(itemId, dropStartWorldPosition, 0f, out _, null, null, false, ItemMoveDuration))
         {
             return true;
         }
@@ -1394,14 +1409,20 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                || robotArmState == RobotArmState.TurningToPickup;
     }
 
-    private void SetHeldItem(int itemId)
+    private void SetHeldItem(int itemId, Vector3 pickupWorldPosition)
     {
+        CancelHeldItemVisualMove();
         heldItemId = itemId;
         RefreshHandItemVisual();
+        if (handItem != null && handItem.gameObject.activeSelf)
+        {
+            BeginHeldItemMoveToHand(pickupWorldPosition);
+        }
     }
 
     private void ClearHeldItem()
     {
+        CancelHeldItemVisualMove();
         heldItemId = -1;
         RefreshHandItemVisual();
     }
@@ -1422,6 +1443,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         handItem.SetBatchedRendering(true);
         if (handItem.SetItem(heldItemId))
         {
+            if (!handItem.IsMovingToTarget)
+            {
+                RestoreHandItemRestTransform();
+            }
+
             handItem.SetCachedActive(true);
             handItem.MarkBatchedRenderDataDirty();
         }
@@ -1451,7 +1477,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     {
         if (handItem != null)
         {
-            return handItem.transform.position;
+            return GetHandRestWorldPosition();
         }
 
         if (body != null)
@@ -1460,6 +1486,108 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return transform.position;
+    }
+
+    private void BeginHeldItemMoveToHand(Vector3 startWorldPosition)
+    {
+        if (heldItemId < 0 || handItem == null)
+        {
+            return;
+        }
+
+        EnsureHandItemRestTransformCache();
+        Vector3 fixedStartWorldPosition = startWorldPosition;
+        handItem.SetCachedActive(true);
+        handItem.MoveTo(
+            GetHandRestWorldPosition,
+            0f,
+            () => fixedStartWorldPosition,
+            () =>
+            {
+                if (heldItemId < 0 || handItem == null)
+                {
+                    return;
+                }
+
+                RestoreHandItemRestTransform();
+                handItem.SetBatchedRendering(true);
+                handItem.SetCachedActive(true);
+                handItem.MarkBatchedRenderDataDirty();
+            },
+            false,
+            false,
+            ItemMoveDuration);
+    }
+
+    private void CancelHeldItemVisualMove()
+    {
+        if (handItem == null)
+        {
+            return;
+        }
+
+        if (handItem.IsMovingToTarget)
+        {
+            handItem.CancelMove();
+        }
+
+        RestoreHandItemRestTransform();
+    }
+
+    private void EnsureHandItemRestTransformCache()
+    {
+        if (hasHandItemRestTransform || handItem == null)
+        {
+            return;
+        }
+
+        Transform handTransform = handItem.transform;
+        handItemRestParent = handTransform.parent;
+        handItemRestLocalPosition = handTransform.localPosition;
+        handItemRestLocalRotation = handTransform.localRotation;
+        handItemRestLocalScale = handTransform.localScale;
+        hasHandItemRestTransform = true;
+    }
+
+    private void RestoreHandItemRestTransform()
+    {
+        if (handItem == null)
+        {
+            return;
+        }
+
+        EnsureHandItemRestTransformCache();
+        Transform handTransform = handItem.transform;
+        if (handItemRestParent != null && handTransform.parent != handItemRestParent)
+        {
+            handItem.SetCachedParent(handItemRestParent, false);
+        }
+
+        handTransform.localPosition = handItemRestLocalPosition;
+        handTransform.localRotation = handItemRestLocalRotation;
+        handTransform.localScale = handItemRestLocalScale;
+        handItem.MarkBatchedRenderDataDirty();
+    }
+
+    private Vector3 GetHandRestWorldPosition()
+    {
+        if (handItem == null)
+        {
+            if (body != null)
+            {
+                return body.position;
+            }
+
+            return transform.position;
+        }
+
+        EnsureHandItemRestTransformCache();
+        if (handItemRestParent != null)
+        {
+            return handItemRestParent.TransformPoint(handItemRestLocalPosition);
+        }
+
+        return handItemRestLocalPosition;
     }
 
     private bool HasPlacementRuntime()

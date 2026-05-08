@@ -820,6 +820,7 @@ public class Player : Character
 
             pendingMoves.Add(new PortableMoveData(
                 sourcePortableObject,
+                bagTargetPortableObject,
                 handItemId,
                 startPosition,
                 targetPosition,
@@ -846,7 +847,8 @@ public class Player : Character
             return;
         }
 
-        PortableObject movingPortableObject = Instantiate(template, moveData.startPosition, template.transform.rotation);
+        Vector3 startPosition = ResolvePortableMoveStartPosition(moveData);
+        PortableObject movingPortableObject = Instantiate(template, startPosition, template.transform.rotation);
         if (movingPortableObject == null)
         {
             return;
@@ -854,7 +856,7 @@ public class Player : Character
 
         movingPortableObject.name = $"{template.name}_HandToBagMove";
         movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = moveData.startPosition;
+        movingPortableObject.transform.position = startPosition;
         movingPortableObject.transform.localScale = template.transform.lossyScale;
         if (!movingPortableObject.gameObject.activeSelf)
         {
@@ -867,26 +869,55 @@ public class Player : Character
             return;
         }
 
-        movingPortableObject.MoveTo(moveData.targetPosition, moveData.delay, () =>
-        {
-            if (movingPortableObject != null)
+        movingPortableObject.MoveTo(
+            () => ResolvePortableMoveTargetPosition(moveData),
+            moveData.delay,
+            () => ResolvePortableMoveStartPosition(moveData),
+            () =>
             {
-                Destroy(movingPortableObject.gameObject);
-            }
-        }, false);
+                if (movingPortableObject != null)
+                {
+                    Destroy(movingPortableObject.gameObject);
+                }
+            },
+            false);
+    }
+
+    private static Vector3 ResolvePortableMoveStartPosition(PortableMoveData moveData)
+    {
+        return moveData.sourcePortableObject != null
+            ? moveData.sourcePortableObject.transform.position
+            : moveData.startPosition;
+    }
+
+    private static Vector3 ResolvePortableMoveTargetPosition(PortableMoveData moveData)
+    {
+        return moveData.targetPortableObject != null
+            ? moveData.targetPortableObject.transform.position
+            : moveData.targetPosition;
     }
 
     private readonly struct PortableMoveData
     {
         public readonly PortableObject template;
+        public readonly PortableObject sourcePortableObject;
+        public readonly PortableObject targetPortableObject;
         public readonly int itemId;
         public readonly Vector3 startPosition;
         public readonly Vector3 targetPosition;
         public readonly float delay;
 
-        public PortableMoveData(PortableObject template, int itemId, Vector3 startPosition, Vector3 targetPosition, float delay)
+        public PortableMoveData(
+            PortableObject template,
+            PortableObject targetPortableObject,
+            int itemId,
+            Vector3 startPosition,
+            Vector3 targetPosition,
+            float delay)
         {
             this.template = template;
+            sourcePortableObject = template;
+            this.targetPortableObject = targetPortableObject;
             this.itemId = itemId;
             this.startPosition = startPosition;
             this.targetPosition = targetPosition;

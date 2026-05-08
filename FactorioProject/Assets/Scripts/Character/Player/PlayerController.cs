@@ -14,6 +14,7 @@ public class PlayerController : MonoBehaviour
     private const float MinPhysicsMoveDistance = 0.00001f;
     private const float MinPhysicsMoveDistanceSqr = MinPhysicsMoveDistance * MinPhysicsMoveDistance;
     private const float DefaultMultiFocusFacingScoreWeight = 0.75f;
+    private const float TemporaryDropFocusDuration = 0.18f;
 
     [SerializeField]
     private Transform movementReference;
@@ -53,6 +54,7 @@ public class PlayerController : MonoBehaviour
     private TerrainGenerator cachedTerrainGenerator;
     private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
     private bool wasInstallationPlacementActive;
+    private InstallationPlacementController cachedInstallationPlacementController;
     private bool hasDefaultBodyLocalPosition;
     private Vector3 defaultBodyLocalPosition;
     private float standingVisualOffsetVelocity;
@@ -61,6 +63,8 @@ public class PlayerController : MonoBehaviour
     private Vector3 currentConveyorCarryVelocity;
     private bool hasPendingFacingDirection;
     private Vector3 pendingFacingDirection;
+    private Block temporaryDropFocusBlock;
+    private float temporaryDropFocusUntilTime;
 
     private struct InteractionFocusCandidate
     {
@@ -97,6 +101,7 @@ public class PlayerController : MonoBehaviour
         currentConveyorCarryVelocity = Vector3.zero;
         hasPendingFacingDirection = false;
         pendingFacingDirection = Vector3.zero;
+        ClearTemporaryDropFocus();
         SetFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         focusRemovalBuffer.Clear();
@@ -114,8 +119,72 @@ public class PlayerController : MonoBehaviour
         return cachedTerrainGenerator;
     }
 
+    private InstallationPlacementController ResolveInstallationPlacementController()
+    {
+        if (cachedInstallationPlacementController != null)
+        {
+            return cachedInstallationPlacementController;
+        }
+
+        cachedInstallationPlacementController = FindObjectOfType<InstallationPlacementController>();
+        return cachedInstallationPlacementController;
+    }
+
+    public void SetTemporaryDropFocus(Block block)
+    {
+        if (block == null)
+        {
+            ClearTemporaryDropFocus();
+            return;
+        }
+
+        if (IsTemporaryDropFocusBlockedByMode())
+        {
+            ClearTemporaryDropFocus();
+            return;
+        }
+
+        if (temporaryDropFocusBlock != null && temporaryDropFocusBlock != block)
+        {
+            ClearTemporaryDropFocus();
+        }
+
+        temporaryDropFocusBlock = block;
+        temporaryDropFocusUntilTime = Time.time + TemporaryDropFocusDuration;
+        temporaryDropFocusBlock.SetFocusVisible(true);
+    }
+
+    public void ClearTemporaryDropFocus()
+    {
+        if (temporaryDropFocusBlock == null && temporaryDropFocusUntilTime <= 0f)
+        {
+            return;
+        }
+
+        Block previousDropFocusBlock = temporaryDropFocusBlock;
+        temporaryDropFocusBlock = null;
+        temporaryDropFocusUntilTime = 0f;
+        if (previousDropFocusBlock != null && !currentFocusedBlocks.Contains(previousDropFocusBlock))
+        {
+            previousDropFocusBlock.SetFocusVisible(false);
+        }
+    }
+
+    private bool IsTemporaryDropFocusBlockedByMode()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
+        {
+            return true;
+        }
+
+        InstallationPlacementController placementController = ResolveInstallationPlacementController();
+        return placementController != null && placementController.PlacementOrMapEditModeActive;
+    }
+
     private void Update()
     {
+        player?.UpdateDropExitGate(transform.position);
+
         bool isInteractionLocked = GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
 
         Vector2 input = Vector2.zero;
@@ -614,6 +683,7 @@ public class PlayerController : MonoBehaviour
 
         CancelPendingHarvest();
         currentTargetResource = null;
+        ClearTemporaryDropFocus();
         SetFocusedBlock(null);
         resourceWorkGauge?.HideIfNotFinishing();
         player.StopImmediateActions();
@@ -806,6 +876,8 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshInteractionFocus(bool hasMovement)
     {
+        ExpireTemporaryDropFocusIfNeeded();
+
         if (TryFocusStandingConveyorBelt())
         {
             return;
@@ -842,13 +914,42 @@ public class PlayerController : MonoBehaviour
         SetFocusedBlocks(combinedInteractionFocusBlocks);
     }
 
+    private void ExpireTemporaryDropFocusIfNeeded()
+    {
+        if (temporaryDropFocusBlock == null)
+        {
+            return;
+        }
+
+        if (Time.time > temporaryDropFocusUntilTime)
+        {
+            ClearTemporaryDropFocus();
+        }
+    }
+
+    private void RefreshTemporaryDropFocusVisibility()
+    {
+        if (IsTemporaryDropFocusBlockedByMode())
+        {
+            ClearTemporaryDropFocus();
+            return;
+        }
+
+        ExpireTemporaryDropFocusIfNeeded();
+        if (temporaryDropFocusBlock != null)
+        {
+            temporaryDropFocusBlock.SetFocusVisible(true);
+        }
+    }
+
     private bool TryFocusStandingConveyorBelt()
     {
         if (!TryGetStandingConveyorBlock(out Block standingBlock)
             || standingBlock == null
             || !(standingBlock.MapObject is ConveyorBelt conveyorBelt)
             || conveyorBelt == null
-            || !conveyorBelt.gameObject.activeInHierarchy)
+            || !conveyorBelt.gameObject.activeInHierarchy
+            || !conveyorBelt.AllowsFocus)
         {
             return false;
         }
@@ -869,7 +970,8 @@ public class PlayerController : MonoBehaviour
             if (block == null
                 || !(block.MapObject is WorkableObject workableObject)
                 || workableObject == null
-                || !workableObject.gameObject.activeInHierarchy)
+                || !workableObject.gameObject.activeInHierarchy
+                || !workableObject.AllowsFocus)
             {
                 continue;
             }
@@ -908,7 +1010,8 @@ public class PlayerController : MonoBehaviour
             if (block == null
                 || !(block.MapObject is BoxObject boxObject)
                 || boxObject == null
-                || !boxObject.gameObject.activeInHierarchy)
+                || !boxObject.gameObject.activeInHierarchy
+                || !boxObject.AllowsFocus)
             {
                 continue;
             }
@@ -943,7 +1046,8 @@ public class PlayerController : MonoBehaviour
             if (block == null
                 || !(block.MapObject is ConveyorBelt conveyorBelt)
                 || conveyorBelt == null
-                || !conveyorBelt.gameObject.activeInHierarchy)
+                || !conveyorBelt.gameObject.activeInHierarchy
+                || !conveyorBelt.AllowsFocus)
             {
                 continue;
             }
@@ -978,7 +1082,8 @@ public class PlayerController : MonoBehaviour
             if (block == null
                 || !TryResolveRobotArm(block.MapObject, out RobotArm robotArm)
                 || robotArm == null
-                || !robotArm.gameObject.activeInHierarchy)
+                || !robotArm.gameObject.activeInHierarchy
+                || !robotArm.AllowsFocus)
             {
                 continue;
             }
@@ -994,6 +1099,41 @@ public class PlayerController : MonoBehaviour
         }
 
         return focusedRobotArm != null;
+    }
+
+    public bool TryGetFocusedFenceDoor(out FenceDoor focusedFenceDoor)
+    {
+        focusedFenceDoor = null;
+        if (currentFocusedBlocks.Count == 0 || player == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float nearestDistanceSqr = float.MaxValue;
+
+        foreach (Block block in currentFocusedBlocks)
+        {
+            if (block == null
+                || !(block.MapObject is FenceDoor fenceDoor)
+                || fenceDoor == null
+                || !fenceDoor.gameObject.activeInHierarchy
+                || !fenceDoor.AllowsFocus)
+            {
+                continue;
+            }
+
+            float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(fenceDoor, block, origin);
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            focusedFenceDoor = fenceDoor;
+        }
+
+        return focusedFenceDoor != null;
     }
 
     public bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
@@ -1017,7 +1157,7 @@ public class PlayerController : MonoBehaviour
         foreach (Block block in currentFocusedBlocks)
         {
             MapObject mapObject = block != null ? block.MapObject : null;
-            if (mapObject == null || !mapObject.gameObject.activeInHierarchy)
+            if (mapObject == null || !mapObject.gameObject.activeInHierarchy || !mapObject.AllowsFocus)
             {
                 continue;
             }
@@ -1092,6 +1232,12 @@ public class PlayerController : MonoBehaviour
 
         if (!TryResolveStandingInputOutputModule(playerCoordinate, results, out InputOutputModule inputOutputModule))
         {
+            return false;
+        }
+
+        if (!inputOutputModule.AllowsFocus)
+        {
+            results.Clear();
             return false;
         }
 
@@ -1203,7 +1349,10 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                if (!(block.MapObject is WorkableObject workableObject) || workableObject == null || !workableObject.gameObject.activeInHierarchy)
+                if (!(block.MapObject is WorkableObject workableObject)
+                    || workableObject == null
+                    || !workableObject.gameObject.activeInHierarchy
+                    || !workableObject.AllowsFocus)
                 {
                     continue;
                 }
@@ -1270,7 +1419,10 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                if (!(block.MapObject is BoxObject boxObject) || boxObject == null || !boxObject.gameObject.activeInHierarchy)
+                if (!(block.MapObject is BoxObject boxObject)
+                    || boxObject == null
+                    || !boxObject.gameObject.activeInHierarchy
+                    || !boxObject.AllowsFocus)
                 {
                     continue;
                 }
@@ -1340,6 +1492,7 @@ public class PlayerController : MonoBehaviour
                 if (!(block.MapObject is InstallationObject installationObject)
                     || installationObject == null
                     || !installationObject.gameObject.activeInHierarchy
+                    || !installationObject.AllowsFocus
                     || installationObject is WorkableObject
                     || installationObject is BoxObject)
                 {
@@ -1624,7 +1777,7 @@ public class PlayerController : MonoBehaviour
 
     private bool AppendMapObjectFocusBlocks(MapObject mapObject, Block fallbackBlock, List<Block> results)
     {
-        if (mapObject == null || results == null)
+        if (mapObject == null || results == null || !mapObject.AllowsFocus)
         {
             return false;
         }
@@ -1759,6 +1912,7 @@ public class PlayerController : MonoBehaviour
 
         if (nextBlocks == null)
         {
+            RefreshTemporaryDropFocusVisibility();
             return;
         }
 
@@ -1778,6 +1932,8 @@ public class PlayerController : MonoBehaviour
                 }
             }
         }
+
+        RefreshTemporaryDropFocusVisibility();
     }
 
     private static bool ContainsFocusedBlock(List<Block> blocks, Block target)

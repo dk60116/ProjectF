@@ -37,6 +37,9 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 {
     private static readonly ProfilerMarker RenderBatchesMarker = new ProfilerMarker("VirtualConveyorBeltRenderer.RenderBatches");
 
+    [SerializeField, Min(1f)]
+    private float batchCellSize = 8f;
+
     private readonly Dictionary<ConveyorBelt, BeltRenderCache> beltRenderCaches = new Dictionary<ConveyorBelt, BeltRenderCache>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<VirtualConveyorBeltRenderData> scratchRenderData = new List<VirtualConveyorBeltRenderData>(8);
@@ -123,6 +126,9 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             renderData.Material.enableInstancing = true;
         }
 
+        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
+        int cellX = GetBatchCell(worldPosition.x, batchCellSize);
+        int cellZ = GetBatchCell(worldPosition.z, batchCellSize);
         VirtualRenderBatchKey key = new VirtualRenderBatchKey(
             renderData.Mesh,
             renderData.Material,
@@ -132,6 +138,8 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             false,
             renderData.HasUvScroll,
             VirtualRenderBatchKey.QuantizeUvScroll(renderData.UvScrollY),
+            batchCellX: cellX,
+            batchCellZ: cellZ,
             invertCulling: HasOddNegativeScale(renderData.Matrix));
 
         batches.AddOwnedMatrix(beltCache, beltCache.batchEntries, key, renderData.Matrix);
@@ -148,6 +156,16 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         Vector3 yAxis = new Vector3(matrix.m01, matrix.m11, matrix.m21);
         Vector3 zAxis = new Vector3(matrix.m02, matrix.m12, matrix.m22);
         return Vector3.Dot(Vector3.Cross(xAxis, yAxis), zAxis) < 0f;
+    }
+
+    private static Vector3 ExtractWorldPosition(Matrix4x4 matrix)
+    {
+        return new Vector3(matrix.m03, matrix.m13, matrix.m23);
+    }
+
+    private static int GetBatchCell(float worldCoordinate, float cellSize)
+    {
+        return Mathf.FloorToInt(worldCoordinate / Mathf.Max(1f, cellSize));
     }
 
     private sealed class BeltRenderCache : IVirtualRenderBatchOwner

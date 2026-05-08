@@ -113,6 +113,11 @@ public class InstallationObjectPool : MonoBehaviour
         {
             boxObject.SetOpenState(boxPrefab.IsOpen, false);
         }
+
+        if (installationObject is FenceDoor fenceDoor && prefab is FenceDoor fenceDoorPrefab)
+        {
+            fenceDoor.SetOpenState(fenceDoorPrefab.IsOpen, false);
+        }
     }
 
     private void EnsurePoolRoot()

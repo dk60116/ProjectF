@@ -660,6 +660,10 @@ public partial class BlockStateStore : MonoBehaviour
                 ? 2
                 : (conveyorBelt.IsCornerVariant ? 1 : 0);
         }
+        else if (installationObject is Fence fence)
+        {
+            state.conveyorVariantKind = fence.VariantKindId;
+        }
 
         if (installationObject is InputOutputModule inputOutputModule)
         {

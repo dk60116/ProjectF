@@ -81,6 +81,56 @@ public partial class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    public bool TryResolveDroppedItemStackTargetBlockAtPlayerBlock(
+        Vector3 worldPosition,
+        int itemId,
+        int itemCount,
+        out Block targetBlock,
+        out Vector2Int dropCoordinate)
+    {
+        targetBlock = null;
+        dropCoordinate = GetWorldBlockCoordinate(worldPosition);
+        if (itemId < 0 || itemCount <= 0)
+        {
+            return false;
+        }
+
+        if (TryGetFocusedConveyorBeltBlock(GetActivePlayer(), out _, out Block focusedConveyorBlock))
+        {
+            if (!TryResolveFocusedConveyorDropBlock(focusedConveyorBlock, null, out targetBlock)
+                || targetBlock == null)
+            {
+                return false;
+            }
+
+            dropCoordinate = targetBlock.Coordinate;
+            return true;
+        }
+
+        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out targetBlock)
+            && targetBlock != null)
+        {
+            dropCoordinate = targetBlock.Coordinate;
+            return true;
+        }
+
+        if (TryResolveInputAreaDropBlock(dropCoordinate, itemId, 1, out targetBlock)
+            && targetBlock != null)
+        {
+            dropCoordinate = targetBlock.Coordinate;
+            return true;
+        }
+
+        targetBlock = FindPreferredDropBlock(worldPosition, itemId, itemCount);
+        if (targetBlock == null)
+        {
+            return false;
+        }
+
+        dropCoordinate = targetBlock.Coordinate;
+        return true;
+    }
+
     private bool TryResolveFocusedConveyorDropBlock(
         Block focusedConveyorBlock,
         HashSet<Block> excludedBlocks,

@@ -321,7 +321,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: 
+  objectName: Conveyor Belt
   objId: 19
   itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
   portableObj: {fileID: 0}

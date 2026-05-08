@@ -20,6 +20,9 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
     [SerializeField]
     private bool renderOnlyVirtualRecords = true;
 
+    [SerializeField, Min(1f)]
+    private float batchCellSize = 8f;
+
     private readonly List<VirtualObjectRecord> recordSnapshot = new List<VirtualObjectRecord>(512);
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<int> itemBuffer = new List<int>(64);
@@ -153,7 +156,9 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
             false,
             false,
             default,
-            itemId);
+            itemId,
+            GetBatchCell(record.worldPosition.x, batchCellSize),
+            GetBatchCell(record.worldPosition.z, batchCellSize));
         Vector3 position = record.worldPosition + new Vector3(0f, stackBaseYOffset + (stackVerticalSpacing * stackIndex), 0f);
         batches.AddMatrix(key, Matrix4x4.TRS(position, record.worldRotation, Vector3.one));
     }
@@ -161,5 +166,10 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
     private void RenderBatches()
     {
         batches.RenderBatches();
+    }
+
+    private static int GetBatchCell(float worldCoordinate, float cellSize)
+    {
+        return Mathf.FloorToInt(worldCoordinate / Mathf.Max(1f, cellSize));
     }
 }

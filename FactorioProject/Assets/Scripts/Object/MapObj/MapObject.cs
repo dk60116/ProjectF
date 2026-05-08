@@ -7,7 +7,8 @@ public class MapObject : PropObj
     public enum MultiFocusMode
     {
         All = 0,
-        NearOne = 1
+        NearOne = 1,
+        None = 2
     }
 
     [System.Serializable]
@@ -33,7 +34,18 @@ public class MapObject : PropObj
 
     public MapObjectStatus Status => mapStatus;
     public MultiFocusMode FocusMode => multiFocusMode;
+    public bool AllowsFocus => multiFocusMode != MultiFocusMode.None;
     public bool IsItemFilterMaskInitialized => itemFilterMaskInitialized;
+
+    public void CopyFocusSettingsFrom(MapObject source)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        multiFocusMode = source.multiFocusMode;
+    }
 
     public bool IsItemFilterEnabled(int itemId, int totalItemCount)
     {

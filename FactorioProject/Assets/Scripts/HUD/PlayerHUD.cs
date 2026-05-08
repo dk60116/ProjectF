@@ -27,7 +27,7 @@ public class PlayerHUD : BagSlot
     [SerializeField, Min(0f)]
     private float craftedPortableMoveInterval = 0.1f;
 
-    private const float CraftingDurationSeconds = 5f;
+    private const float DefaultCraftingDurationSeconds = 5f;
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
     private float craftingIngredientRefreshTimer;
@@ -62,6 +62,8 @@ public class PlayerHUD : BagSlot
     [SerializeField]
     private InteractionButton InteractionButton;
     [SerializeField]
+    private InteractionButton DoorInteractionButton;
+    [SerializeField]
     private Button ItemFilterButton;
 
     [SerializeField]
@@ -73,6 +75,7 @@ public class PlayerHUD : BagSlot
 
     private TerrainGenerator cachedTerrainGenerator;
     private BoxObject currentInteractionBoxObject;
+    private FenceDoor currentInteractionDoorObject;
     private int lastObservedHandItemId = -2;
     private int lastObservedHandItemCount = -1;
     private int lastObservedHandMaxCount = -1;
@@ -116,6 +119,7 @@ public class PlayerHUD : BagSlot
         SubscribeSlotEvents();
         ResolveInstallModeButtons();
         ResolveInteractionButton();
+        ResolveDoorInteractionButton();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveMapPaper();
@@ -139,6 +143,7 @@ public class PlayerHUD : BagSlot
     {
         ResolveInstallModeButtons();
         ResolveInteractionButton();
+        ResolveDoorInteractionButton();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveMapPaper();
@@ -167,6 +172,7 @@ public class PlayerHUD : BagSlot
         PollHandBagChanges();
         ResolveInstallModeButtons();
         ResolveInteractionButton();
+        ResolveDoorInteractionButton();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveMapPaper();
@@ -640,17 +646,40 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        InteractionButton = GetComponentInChildren<InteractionButton>(true);
+        Transform buttonTransform = FindDescendantByName(transform, "InteractionButton");
+        if (buttonTransform != null)
+        {
+            InteractionButton = buttonTransform.GetComponent<InteractionButton>();
+        }
+
         if (InteractionButton == null)
         {
-            Transform buttonTransform = FindDescendantByName(transform, "InteractionButton");
-            if (buttonTransform != null)
-            {
-                InteractionButton = buttonTransform.GetComponent<InteractionButton>();
-            }
+            InteractionButton = GetComponentInChildren<InteractionButton>(true);
         }
 
         BindInteractionButton();
+    }
+
+    private void ResolveDoorInteractionButton()
+    {
+        if (DoorInteractionButton != null)
+        {
+            BindDoorInteractionButton();
+            return;
+        }
+
+        Transform buttonTransform = FindDescendantByName(transform, "DoorInteractionButton");
+        if (buttonTransform == null)
+        {
+            buttonTransform = FindDescendantByName(transform, "DoorInteraction");
+        }
+
+        if (buttonTransform != null)
+        {
+            DoorInteractionButton = buttonTransform.GetComponent<InteractionButton>();
+        }
+
+        BindDoorInteractionButton();
     }
 
     private void ResolveItemFilterButton()
@@ -1574,7 +1603,7 @@ public class PlayerHUD : BagSlot
 
     private void UpdateInteractionButtonState()
     {
-        if (InteractionButton == null)
+        if (InteractionButton == null && DoorInteractionButton == null)
         {
             return;
         }
@@ -1595,27 +1624,66 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (!TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
+        if (TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
         {
-            ClearInteractionButtonState();
+            currentInteractionBoxObject = focusedBoxObject;
+            currentInteractionDoorObject = null;
+            SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(focusedBoxObject));
             return;
         }
 
-        currentInteractionBoxObject = focusedBoxObject;
-        InteractionButton.SetIcon(ResolveInteractionIcon(focusedBoxObject));
-        InteractionButton.SetVisible(true);
+        if (TryGetFocusedFenceDoor(out FenceDoor focusedFenceDoor))
+        {
+            currentInteractionBoxObject = null;
+            currentInteractionDoorObject = focusedFenceDoor;
+            SetActiveInteractionButton(ResolveDoorInteractionButtonForUse(), ResolveInteractionIcon(focusedFenceDoor));
+            return;
+        }
+
+        ClearInteractionButtonState();
     }
 
     private void ClearInteractionButtonState()
     {
         currentInteractionBoxObject = null;
-        if (InteractionButton == null)
+        currentInteractionDoorObject = null;
+        HideInteractionButton(InteractionButton);
+        if (DoorInteractionButton != null && DoorInteractionButton != InteractionButton)
+        {
+            HideInteractionButton(DoorInteractionButton);
+        }
+    }
+
+    private void SetActiveInteractionButton(InteractionButton activeButton, Sprite icon)
+    {
+        if (activeButton == null)
         {
             return;
         }
 
-        InteractionButton.SetIcon(null);
-        InteractionButton.SetVisible(false);
+        if (InteractionButton != null && InteractionButton != activeButton)
+        {
+            HideInteractionButton(InteractionButton);
+        }
+
+        if (DoorInteractionButton != null && DoorInteractionButton != activeButton)
+        {
+            HideInteractionButton(DoorInteractionButton);
+        }
+
+        activeButton.SetIcon(icon);
+        activeButton.SetVisible(true);
+    }
+
+    private static void HideInteractionButton(InteractionButton interactionButton)
+    {
+        if (interactionButton == null)
+        {
+            return;
+        }
+
+        interactionButton.SetIcon(null);
+        interactionButton.SetVisible(false);
     }
 
     private void UpdateItemFilterButtonState()
@@ -1665,7 +1733,25 @@ public class PlayerHUD : BagSlot
         }
 
         int itemId = boxObject.ResolveItemId();
-        if (itemId < 0)
+        int preferredIconIndex = boxObject.IsOpen ? 1 : 0;
+        return ResolveInteractionIcon(itemId, preferredIconIndex);
+    }
+
+    private static Sprite ResolveInteractionIcon(FenceDoor fenceDoor)
+    {
+        if (fenceDoor == null)
+        {
+            return null;
+        }
+
+        int itemId = fenceDoor.ResolveItemId();
+        int preferredIconIndex = fenceDoor.IsOpen ? 1 : 0;
+        return ResolveInteractionIcon(itemId, preferredIconIndex);
+    }
+
+    private static Sprite ResolveInteractionIcon(int itemId, int preferredIconIndex)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
             return null;
         }
@@ -1689,7 +1775,6 @@ public class PlayerHUD : BagSlot
                 return null;
             }
 
-            int preferredIconIndex = boxObject.IsOpen ? 1 : 0;
             if (preferredIconIndex >= 0 && preferredIconIndex < definition.interactionButtonList.Count)
             {
                 Sprite preferredIcon = definition.interactionButtonList[preferredIconIndex];
@@ -1753,6 +1838,11 @@ public class PlayerHUD : BagSlot
         return null;
     }
 
+    private InteractionButton ResolveDoorInteractionButtonForUse()
+    {
+        return DoorInteractionButton != null ? DoorInteractionButton : InteractionButton;
+    }
+
     private void BindInteractionButton()
     {
         if (InteractionButton == null)
@@ -1761,6 +1851,16 @@ public class PlayerHUD : BagSlot
         }
 
         InteractionButton.SetClickAction(HandleInteractionButtonClicked);
+    }
+
+    private void BindDoorInteractionButton()
+    {
+        if (DoorInteractionButton == null || DoorInteractionButton == InteractionButton)
+        {
+            return;
+        }
+
+        DoorInteractionButton.SetClickAction(HandleInteractionButtonClicked);
     }
 
     private void BindItemFilterButton()
@@ -1784,13 +1884,30 @@ public class PlayerHUD : BagSlot
 
     private void HandleInteractionButtonClicked()
     {
-        if (currentInteractionBoxObject == null)
+        if (currentInteractionBoxObject != null)
         {
+            currentInteractionBoxObject.ToggleOpenState();
+            UpdateInteractionButtonState();
             return;
         }
 
-        currentInteractionBoxObject.ToggleOpenState();
-        UpdateInteractionButtonState();
+        if (currentInteractionDoorObject != null)
+        {
+            currentInteractionDoorObject.ToggleOpenState(ResolveCurrentPlayerInteractionPosition());
+            UpdateInteractionButtonState();
+        }
+    }
+
+    private static Vector3 ResolveCurrentPlayerInteractionPosition()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return Vector3.zero;
+        }
+
+        Player player = GameManager.Instance.Player;
+        Transform bodyTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
+        return bodyTransform != null ? bodyTransform.position : player.transform.position;
     }
 
     private void HandleItemFilterButtonClicked()
@@ -1833,6 +1950,23 @@ public class PlayerHUD : BagSlot
         }
 
         return playerController.TryGetFocusedBoxObject(out focusedBoxObject);
+    }
+
+    private bool TryGetFocusedFenceDoor(out FenceDoor focusedFenceDoor)
+    {
+        focusedFenceDoor = null;
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetFocusedFenceDoor(out focusedFenceDoor);
     }
 
     private void SubscribeSlotEvents()
@@ -2077,10 +2211,42 @@ public class PlayerHUD : BagSlot
         }
 
         int outputCount = CraftingTreeRuntime.GetOutputCount(itemId);
-        craftingQueue.Add(new CraftingQueueEntry(itemId, outputCount, CraftingDurationSeconds, refundIngredients));
+        float craftingDuration = GetCraftingDurationSeconds(itemId);
+        craftingQueue.Add(new CraftingQueueEntry(itemId, outputCount, craftingDuration, refundIngredients));
         craftingQueueDirty = true;
         RefreshCraftingQueueSlots(true);
         return true;
+    }
+
+    private static float GetCraftingDurationSeconds(int itemId)
+    {
+        ItemDefinition definition = GetItemDefinition(itemId);
+        return definition != null ? definition.CraftingDurationSeconds : DefaultCraftingDurationSeconds;
+    }
+
+    private static ItemDefinition GetItemDefinition(int itemId)
+    {
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
     }
 
     private void UpdateCraftingQueue(float deltaTime)

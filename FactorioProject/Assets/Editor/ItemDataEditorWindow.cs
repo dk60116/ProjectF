@@ -65,6 +65,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int size;
         public bool itemFilter;
         public int capacity = -1;
+        public float craftingDurationSeconds = -1f;
+        public float craftingTime = -1f;
         public string energyType;
         public int energyTypeValue = -1;
         public int energyAmount;
@@ -671,6 +673,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty useEnergyTypeProperty = serializedObject.FindProperty("useEnergyType");
         SerializedProperty useEnergyAmountProperty = serializedObject.FindProperty("useEnergyAmount");
         SerializedProperty completeEnergyProperty = serializedObject.FindProperty("completeEnergy");
+        SerializedProperty craftingDurationSecondsProperty = serializedObject.FindProperty("craftingDurationSeconds");
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Basic", EditorStyles.boldLabel);
@@ -713,6 +716,16 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             EditorGUILayout.PropertyField(capacityProperty, new GUIContent("Capacity"));
+        }
+        if (craftingDurationSecondsProperty != null)
+        {
+            if (craftingDurationSecondsProperty.floatValue <= 0f)
+            {
+                craftingDurationSecondsProperty.floatValue = 5f;
+            }
+
+            craftingDurationSecondsProperty.floatValue = Mathf.Max(0.01f, craftingDurationSecondsProperty.floatValue);
+            EditorGUILayout.PropertyField(craftingDurationSecondsProperty, new GUIContent("Crafting Time (sec)"));
         }
 
         if (energyTypeProperty != null)
@@ -888,13 +901,16 @@ public class ItemDataEditorWindow : EditorWindow
             EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
         }
 
+        bool shouldSyncConveyorVariantSpeed = false;
         if (mapObject is ConveyorBelt)
         {
             SerializedProperty conveyorSpeedProperty = mapObjectSerializedObject.FindProperty("conveyorSpeed");
             if (conveyorSpeedProperty != null)
             {
                 conveyorSpeedProperty.floatValue = Mathf.Max(0f, conveyorSpeedProperty.floatValue);
+                EditorGUI.BeginChangeCheck();
                 EditorGUILayout.PropertyField(conveyorSpeedProperty, new GUIContent("Conveyor Speed"));
+                shouldSyncConveyorVariantSpeed = EditorGUI.EndChangeCheck();
             }
         }
 
@@ -924,6 +940,16 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (mapObjectSerializedObject.ApplyModifiedProperties())
         {
+            if (shouldSyncConveyorVariantSpeed && mapObject is ConveyorBelt conveyorBelt)
+            {
+                SyncConveyorVariantSpeed(conveyorBelt);
+            }
+
+            if (mapObject is Fence fence)
+            {
+                SyncFenceVariantMultiFocusMode(fence);
+            }
+
             EditorUtility.SetDirty(mapObject);
             GameObject owner = mapObject.gameObject;
             if (owner != null)
@@ -931,6 +957,76 @@ public class ItemDataEditorWindow : EditorWindow
                 EditorUtility.SetDirty(owner);
             }
             Repaint();
+        }
+    }
+
+    private static void SyncConveyorVariantSpeed(ConveyorBelt sourceConveyor)
+    {
+        if (sourceConveyor == null)
+        {
+            return;
+        }
+
+        float speed = sourceConveyor.ConveyorSpeed;
+        HashSet<ConveyorBelt> visited = new HashSet<ConveyorBelt>();
+        Stack<ConveyorBelt> pending = new Stack<ConveyorBelt>();
+        pending.Push(sourceConveyor);
+
+        while (pending.Count > 0)
+        {
+            ConveyorBelt conveyorBelt = pending.Pop();
+            if (conveyorBelt == null || !visited.Add(conveyorBelt))
+            {
+                continue;
+            }
+
+            SetConveyorSpeed(conveyorBelt, speed, conveyorBelt != sourceConveyor);
+
+            AddConveyorVariant(conveyorBelt.StraightVariantPrefab, pending, visited);
+            AddConveyorVariant(conveyorBelt.CornerVariantPrefab, pending, visited);
+            AddConveyorVariant(conveyorBelt.ReverseCornerVariantPrefab, pending, visited);
+        }
+    }
+
+    private static void AddConveyorVariant(ConveyorBelt conveyorBelt, Stack<ConveyorBelt> pending, HashSet<ConveyorBelt> visited)
+    {
+        if (conveyorBelt != null && !visited.Contains(conveyorBelt))
+        {
+            pending.Push(conveyorBelt);
+        }
+    }
+
+    private static void SetConveyorSpeed(ConveyorBelt conveyorBelt, float speed, bool recordUndo)
+    {
+        if (conveyorBelt == null)
+        {
+            return;
+        }
+
+        if (recordUndo)
+        {
+            Undo.RecordObject(conveyorBelt, "Sync Conveyor Variant Speed");
+        }
+
+        SerializedObject serializedConveyor = new SerializedObject(conveyorBelt);
+        serializedConveyor.Update();
+        SerializedProperty conveyorSpeedProperty = serializedConveyor.FindProperty("conveyorSpeed");
+        if (conveyorSpeedProperty == null)
+        {
+            return;
+        }
+
+        conveyorSpeedProperty.floatValue = Mathf.Max(0f, speed);
+        bool applied = recordUndo
+            ? serializedConveyor.ApplyModifiedProperties()
+            : serializedConveyor.ApplyModifiedPropertiesWithoutUndo();
+        if (applied)
+        {
+            EditorUtility.SetDirty(conveyorBelt);
+            if (conveyorBelt.gameObject != null)
+            {
+                EditorUtility.SetDirty(conveyorBelt.gameObject);
+            }
         }
     }
 
@@ -1791,6 +1887,8 @@ public class ItemDataEditorWindow : EditorWindow
             size = Mathf.Max(0, (int)definition.size),
             itemFilter = definition.itemFilter,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
+            craftingDurationSeconds = definition.CraftingDurationSeconds,
+            craftingTime = definition.CraftingDurationSeconds,
             energyType = definition.energyType.ToString(),
             energyTypeValue = (int)definition.energyType,
             energyAmount = Mathf.Max(0, definition.energyAmount),
@@ -2045,6 +2143,11 @@ public class ItemDataEditorWindow : EditorWindow
         {
             definition.capacity = Mathf.Max(1, entry.capacity);
         }
+        float savedCraftingDuration = entry.craftingDurationSeconds > 0f ? entry.craftingDurationSeconds : entry.craftingTime;
+        if (savedCraftingDuration > 0f)
+        {
+            definition.SetCraftingDurationSeconds(savedCraftingDuration);
+        }
         definition.energyType = ParseEnergyType(entry.energyType, entry.energyTypeValue, definition.energyType);
         definition.energyAmount = definition.energyType == ItemDefinition.EnergyType.None ? 0 : Mathf.Max(0, entry.energyAmount);
         definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
@@ -2173,12 +2276,14 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
+        bool shouldSyncConveyorVariantSpeed = false;
         if (entry.conveyorSpeed >= 0f)
         {
             SerializedProperty conveyorSpeedProperty = serializedMapObject.FindProperty("conveyorSpeed");
             if (conveyorSpeedProperty != null)
             {
                 conveyorSpeedProperty.floatValue = Mathf.Max(0f, entry.conveyorSpeed);
+                shouldSyncConveyorVariantSpeed = mapObject is ConveyorBelt;
             }
         }
 
@@ -2187,7 +2292,13 @@ public class ItemDataEditorWindow : EditorWindow
             ApplyInputOutputModuleJson(serializedMapObject, entry, definitions);
         }
 
-        if (serializedMapObject.ApplyModifiedPropertiesWithoutUndo())
+        bool applied = serializedMapObject.ApplyModifiedPropertiesWithoutUndo();
+        if (shouldSyncConveyorVariantSpeed && mapObject is ConveyorBelt conveyorBelt)
+        {
+            SyncConveyorVariantSpeed(conveyorBelt);
+        }
+
+        if (applied)
         {
             EditorUtility.SetDirty(mapObject);
             if (mapObject.gameObject != null)
@@ -2311,19 +2422,58 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        MapObject.MultiFocusMode currentMode = (MapObject.MultiFocusMode)multiFocusModeProperty.intValue;
-        int selectedIndex = currentMode == MapObject.MultiFocusMode.All ? 1 : 0;
+        MapObject.MultiFocusMode currentMode = Enum.IsDefined(
+            typeof(MapObject.MultiFocusMode),
+            multiFocusModeProperty.intValue)
+                ? (MapObject.MultiFocusMode)multiFocusModeProperty.intValue
+                : MapObject.MultiFocusMode.NearOne;
 
         EditorGUI.BeginChangeCheck();
-        selectedIndex = EditorGUILayout.Popup("Multi Focus", selectedIndex, new[] { "NearOne", "All" });
+        currentMode = (MapObject.MultiFocusMode)EditorGUILayout.EnumPopup("Multi Focus", currentMode);
         if (!EditorGUI.EndChangeCheck())
         {
             return;
         }
 
-        multiFocusModeProperty.intValue = selectedIndex == 0
-            ? (int)MapObject.MultiFocusMode.NearOne
-            : (int)MapObject.MultiFocusMode.All;
+        multiFocusModeProperty.intValue = (int)currentMode;
+    }
+
+    private static void SyncFenceVariantMultiFocusMode(Fence fence)
+    {
+        if (fence == null)
+        {
+            return;
+        }
+
+        MapObject.MultiFocusMode mode = fence.FocusMode;
+        SyncFenceVariantMultiFocusMode(fence.StraightVariantPrefab, mode, fence);
+        SyncFenceVariantMultiFocusMode(fence.CornerVariantPrefab, mode, fence);
+        SyncFenceVariantMultiFocusMode(fence.TriCornerVariantPrefab, mode, fence);
+        SyncFenceVariantMultiFocusMode(fence.CrossVariantPrefab, mode, fence);
+    }
+
+    private static void SyncFenceVariantMultiFocusMode(Fence variantPrefab, MapObject.MultiFocusMode mode, Fence sourceFence)
+    {
+        if (variantPrefab == null || variantPrefab == sourceFence)
+        {
+            return;
+        }
+
+        SerializedObject serializedVariant = new SerializedObject(variantPrefab);
+        serializedVariant.Update();
+        SerializedProperty multiFocusModeProperty = serializedVariant.FindProperty("multiFocusMode");
+        if (multiFocusModeProperty == null || multiFocusModeProperty.intValue == (int)mode)
+        {
+            return;
+        }
+
+        multiFocusModeProperty.intValue = (int)mode;
+        serializedVariant.ApplyModifiedProperties();
+        EditorUtility.SetDirty(variantPrefab);
+        if (variantPrefab.gameObject != null)
+        {
+            EditorUtility.SetDirty(variantPrefab.gameObject);
+        }
     }
 
     private static void ApplyRectGridBlockPlacementJson(SerializedProperty rectGridPlacementsProperty, RectGridBlockPlacementJsonEntry entry)

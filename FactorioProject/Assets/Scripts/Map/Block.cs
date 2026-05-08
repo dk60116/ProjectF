@@ -902,7 +902,7 @@ public class Block : BaseObject
         return consumed;
     }
 
-    public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, bool useJumpArc = true)
+    public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, bool useJumpArc = true, float moveDuration = PortableObject.MoveToDuration)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -957,7 +957,7 @@ public class Block : BaseObject
             ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
             gate?.MarkSettled();
             onComplete?.Invoke();
-        }, false, useJumpArc);
+        }, false, useJumpArc, moveDuration);
 
         targetPortableObject = portableObject;
         return true;
@@ -1403,7 +1403,8 @@ public class Block : BaseObject
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
         float movementReleaseDelay = 0f,
-        bool useJumpArc = true)
+        bool useJumpArc = true,
+        float moveDuration = PortableObject.MoveToDuration)
     {
         return TryAddConveyorObjectAnimatedWithPlacementReference(
             objectId,
@@ -1414,7 +1415,8 @@ public class Block : BaseObject
             onComplete,
             startWorldPositionProvider,
             movementReleaseDelay,
-            useJumpArc);
+            useJumpArc,
+            moveDuration);
     }
 
     public bool CanAddConveyorObjectAtPlacement(int objectId, Vector3 placementReferenceWorldPosition)
@@ -1438,7 +1440,8 @@ public class Block : BaseObject
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
         float movementReleaseDelay = 0f,
-        bool useJumpArc = true)
+        bool useJumpArc = true,
+        float moveDuration = PortableObject.MoveToDuration)
     {
         targetPortableObject = null;
         targetBlock = null;
@@ -1452,7 +1455,8 @@ public class Block : BaseObject
                 onComplete,
                 startWorldPositionProvider,
                 movementReleaseDelay,
-                useJumpArc))
+                useJumpArc,
+                moveDuration))
         {
             targetBlock = this;
             return true;
@@ -1472,7 +1476,8 @@ public class Block : BaseObject
                 onComplete,
                 startWorldPositionProvider,
                 movementReleaseDelay,
-                useJumpArc))
+                useJumpArc,
+                moveDuration))
         {
             return false;
         }
@@ -1490,7 +1495,8 @@ public class Block : BaseObject
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
         float movementReleaseDelay = 0f,
-        bool useJumpArc = true)
+        bool useJumpArc = true,
+        float moveDuration = PortableObject.MoveToDuration)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -1577,7 +1583,7 @@ public class Block : BaseObject
             WakeConveyorMoveAttempts();
             RefreshConveyorActivityRegistration();
             onComplete?.Invoke();
-        }, false, useJumpArc);
+        }, false, useJumpArc, moveDuration);
 
         targetPortableObject = portableObject;
         return true;
@@ -3003,7 +3009,7 @@ public class Block : BaseObject
 
         if (!HasConveyorDataMotionStates())
         {
-            WakeConveyorMoveAttempts();
+            WakeConveyorMoveAttemptsAround();
         }
         else if (HasConveyorReadyLaneForMove(false, false))
         {
@@ -3230,9 +3236,11 @@ public class Block : BaseObject
         }
     }
 
-    private void WakeConveyorMoveAttempts()
+    private void WakeConveyorMoveAttempts(bool clearBlockedSleepImmediately = false)
     {
-        bool hadSleepingLanes = ClearMovableConveyorLaneSleepStates();
+        bool hadSleepingLanes = clearBlockedSleepImmediately
+            ? ClearConveyorLaneSleepStates()
+            : ClearMovableConveyorLaneSleepStates();
         TerrainGenerator.Active?.WakeConveyorNetwork(this);
         nextConveyorMoveAttemptTime = 0f;
         for (int i = 0; i < nextConveyorLaneMoveAttemptTimes.Length; i++)
@@ -3249,7 +3257,7 @@ public class Block : BaseObject
 
     public void WakeConveyorMoveAttemptsAround()
     {
-        WakeConveyorMoveAttempts();
+        WakeConveyorMoveAttempts(true);
         if (!TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator))
         {
             return;
@@ -3260,9 +3268,15 @@ public class Block : BaseObject
             if (terrainGenerator.TryGetLoadedBlock(coordinate + ConveyorNeighborDirections[i], out Block neighborBlock)
                 && neighborBlock != null)
             {
-                neighborBlock.WakeConveyorMoveAttempts();
+                neighborBlock.WakeConveyorMoveAttempts(true);
             }
         }
+    }
+
+    private void NotifyConveyorMotionSettled()
+    {
+        WakeConveyorMoveAttemptsAround();
+        RefreshConveyorActivityRegistration();
     }
 
     private void SleepConveyorMoveAttempts()
@@ -5322,6 +5336,27 @@ public class Block : BaseObject
         return hadSleepingLanes;
     }
 
+    private bool ClearConveyorLaneSleepStates()
+    {
+        bool hadSleepingLanes = false;
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            bool laneBlockedSleep = IsConveyorLaneBlockedSleep(laneIndex);
+            bool cycleBlockedSleep = IsConveyorLaneCycleBlockedSleep(laneIndex);
+            if (!laneBlockedSleep && !cycleBlockedSleep)
+            {
+                continue;
+            }
+
+            ClearConveyorLaneBlockedSleep(laneIndex);
+            ClearConveyorLaneCycleBlockedSleep(laneIndex);
+            hadSleepingLanes = true;
+        }
+
+        return hadSleepingLanes;
+    }
+
     private bool IsConveyorItemSleepAwakeSleeping(int laneIndex)
     {
         if (!HasConveyorItemAtLane(laneIndex))
@@ -6262,6 +6297,7 @@ public class Block : BaseObject
         {
             conveyorItemMotionStates[laneIndex] = default;
             MarkConveyorItemVisualDirty();
+            NotifyConveyorMotionSettled();
             return true;
         }
 
@@ -6277,6 +6313,7 @@ public class Block : BaseObject
 
         conveyorItemMotionStates[laneIndex] = default;
         MarkConveyorItemVisualDirty();
+        NotifyConveyorMotionSettled();
 
         float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
             ? Mathf.Max(0f, travelDistance - remainingPathDistance) / conveyorSpeed
@@ -6318,6 +6355,7 @@ public class Block : BaseObject
         {
             conveyorLinearMotionStates.Remove(portableObject);
             MarkConveyorItemVisualDirty();
+            NotifyConveyorMotionSettled();
             return true;
         }
 
@@ -6333,6 +6371,7 @@ public class Block : BaseObject
 
         conveyorLinearMotionStates.Remove(portableObject);
         MarkConveyorItemVisualDirty();
+        NotifyConveyorMotionSettled();
 
         float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
             ? Mathf.Max(0f, travelDistance - remainingPathDistance) / conveyorSpeed
@@ -6383,6 +6422,7 @@ public class Block : BaseObject
         {
             conveyorCornerMotionStates.Remove(portableObject);
             MarkConveyorItemVisualDirty();
+            NotifyConveyorMotionSettled();
             return true;
         }
 
@@ -6398,6 +6438,7 @@ public class Block : BaseObject
 
         conveyorCornerMotionStates.Remove(portableObject);
         MarkConveyorItemVisualDirty();
+        NotifyConveyorMotionSettled();
 
         float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
             ? Mathf.Max(0f, travelDistance - remainingPathDistance) / conveyorSpeed
@@ -6444,6 +6485,7 @@ public class Block : BaseObject
         {
             portableObject.SetWorldPosition(targetPosition);
             conveyorLinearMotionStates.Remove(portableObject);
+            NotifyConveyorMotionSettled();
             return true;
         }
 
@@ -6466,6 +6508,7 @@ public class Block : BaseObject
 
         portableObject.SetWorldPosition(targetPosition);
         conveyorLinearMotionStates.Remove(portableObject);
+        NotifyConveyorMotionSettled();
 
         float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
             ? Mathf.Max(0f, travelDistance - remainingPathDistance) / conveyorSpeed
@@ -6525,6 +6568,7 @@ public class Block : BaseObject
                 pathLength,
                 1f));
             conveyorCornerMotionStates.Remove(portableObject);
+            NotifyConveyorMotionSettled();
             return true;
         }
 
@@ -6550,6 +6594,7 @@ public class Block : BaseObject
             pathLength,
             1f));
         conveyorCornerMotionStates.Remove(portableObject);
+        NotifyConveyorMotionSettled();
 
         float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
             ? Mathf.Max(0f, travelDistance - remainingPathDistance) / conveyorSpeed
@@ -6624,6 +6669,7 @@ public class Block : BaseObject
                     pathLength,
                     1f));
                 conveyorCornerMotionStates.Remove(portableObject);
+                NotifyConveyorMotionSettled();
                 continue;
             }
 
@@ -6638,6 +6684,7 @@ public class Block : BaseObject
             if (motionState.progress >= 1f - 0.0001f)
             {
                 conveyorCornerMotionStates.Remove(portableObject);
+                NotifyConveyorMotionSettled();
                 float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
                     ? Mathf.Max(0f, travelDistance - durationPathLength) / conveyorSpeed
                     : 0f;
@@ -6702,6 +6749,7 @@ public class Block : BaseObject
             {
                 portableObject.SetWorldPosition(targetPosition);
                 conveyorLinearMotionStates.Remove(portableObject);
+                NotifyConveyorMotionSettled();
                 continue;
             }
 
@@ -6719,6 +6767,7 @@ public class Block : BaseObject
             {
                 portableObject.SetWorldPosition(targetPosition);
                 conveyorLinearMotionStates.Remove(portableObject);
+                NotifyConveyorMotionSettled();
                 float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
                     ? Mathf.Max(0f, travelDistance - motionState.pathLength) / conveyorSpeed
                     : 0f;
@@ -6740,46 +6789,6 @@ public class Block : BaseObject
         }
 
         conveyorLinearMotionTickBuffer.Clear();
-    }
-
-    private bool ShouldHoldConveyorLaneForPairedMove(
-        int sourceLaneIndex,
-        int pairedSourceLaneIndex,
-        bool ignoreMoveAttemptThrottle = false)
-    {
-        return IsValidConveyorLaneIndex(sourceLaneIndex)
-            && IsValidConveyorLaneIndex(pairedSourceLaneIndex)
-            && HasConveyorItemAtLane(sourceLaneIndex)
-            && HasConveyorItemAtLane(pairedSourceLaneIndex)
-            && !CanMoveConveyorLane(pairedSourceLaneIndex, ignoreMoveAttemptThrottle);
-    }
-
-    private bool TryGetCornerPairedMoveSourceLane(int sourceLaneIndex, out int pairedSourceLaneIndex)
-    {
-        pairedSourceLaneIndex = -1;
-        if (!IsCornerConveyor())
-        {
-            return false;
-        }
-
-        if (!TryGetConveyorSuccessor(
-                sourceLaneIndex,
-                out Block destinationBlock,
-                out int destinationLaneIndex,
-                out bool useCornerMotion)
-            || !useCornerMotion
-            || destinationBlock != this
-            || !TryGetPairedConveyorCornerTransition(
-                sourceLaneIndex,
-                destinationLaneIndex,
-                out pairedSourceLaneIndex,
-                out _))
-        {
-            pairedSourceLaneIndex = -1;
-            return false;
-        }
-
-        return IsValidConveyorLaneIndex(pairedSourceLaneIndex);
     }
 
     private bool TryMoveConveyorLane(int sourceLaneIndex)
@@ -6814,12 +6823,6 @@ public class Block : BaseObject
         if (!HasConveyorItemAtLane(sourceLaneIndex)
             || WasConveyorItemMovedThisFrame(sourceLaneIndex)
             || !IsConveyorItemReadyToMoveAtLane(sourceLaneIndex))
-        {
-            return false;
-        }
-
-        if (TryGetCornerPairedMoveSourceLane(sourceLaneIndex, out int pairedSourceLaneIndex)
-            && ShouldHoldConveyorLaneForPairedMove(sourceLaneIndex, pairedSourceLaneIndex, ignoreMoveAttemptThrottle))
         {
             return false;
         }
@@ -6928,12 +6931,6 @@ public class Block : BaseObject
 
     private bool CanRetryConveyorLaneMove(int sourceLaneIndex, bool ignoreMoveAttemptThrottle = false)
     {
-        if (TryGetCornerPairedMoveSourceLane(sourceLaneIndex, out int pairedSourceLaneIndex)
-            && ShouldHoldConveyorLaneForPairedMove(sourceLaneIndex, pairedSourceLaneIndex, ignoreMoveAttemptThrottle))
-        {
-            return false;
-        }
-
         return CanMoveConveyorLane(sourceLaneIndex, ignoreMoveAttemptThrottle);
     }
 
@@ -7214,8 +7211,7 @@ public class Block : BaseObject
             return false;
         }
 
-        return !TryGetCornerPairedMoveSourceLane(laneIndex, out int pairedSourceLaneIndex)
-            || !ShouldHoldConveyorLaneForPairedMove(laneIndex, pairedSourceLaneIndex, ignoreMoveAttemptThrottle);
+        return true;
     }
 
     private static bool TryAppendConveyorLaneMove(

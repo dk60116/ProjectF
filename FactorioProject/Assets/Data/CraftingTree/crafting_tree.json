@@ -108,8 +108,8 @@
         },
         {
             "itemId": 6,
-            "itemName": "WoodenBox",
-            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "itemName": "Wooden Box",
+            "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "outputCount": 1,
             "ingredients": [
                 {
@@ -334,7 +334,7 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 4
+                    "count": 1
                 }
             ],
             "craftingMapObjects": [
@@ -362,7 +362,7 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 1
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -468,13 +468,13 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 4
+                    "count": 2
                 },
                 {
                     "itemId": 14,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 3
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
@@ -545,16 +545,38 @@
                     "count": 3
                 },
                 {
-                    "itemId": 16,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
                     "itemId": 17,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 22,
+            "itemName": "Wooden Fence",
+            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 5,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 4
                 }
             ],
             "craftingMapObjects": [
@@ -680,8 +702,8 @@
         },
         {
             "itemId": 6,
-            "itemName": "WoodenBox",
-            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "itemName": "Wooden Box",
+            "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "outputCount": 1,
             "ingredients": [
                 {
@@ -906,7 +928,7 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 4
+                    "count": 1
                 }
             ],
             "craftingMapObjects": [
@@ -934,7 +956,7 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 1
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -1040,13 +1062,13 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 4
+                    "count": 2
                 },
                 {
                     "itemId": 14,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 3
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
@@ -1117,16 +1139,38 @@
                     "count": 3
                 },
                 {
-                    "itemId": 16,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
                     "itemId": 17,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 22,
+            "itemName": "Wooden Fence",
+            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 5,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 4
                 }
             ],
             "craftingMapObjects": [
@@ -1252,8 +1296,8 @@
         },
         {
             "itemId": 6,
-            "itemName": "WoodenBox",
-            "definitionAssetPath": "Assets/Data/Items/Item_13_WoodenBox.asset",
+            "itemName": "Wooden Box",
+            "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "outputCount": 1,
             "ingredients": [
                 {
@@ -1478,7 +1522,7 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 4
+                    "count": 1
                 }
             ],
             "craftingMapObjects": [
@@ -1506,7 +1550,7 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 1
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -1612,13 +1656,13 @@
                     "itemId": 10,
                     "itemName": "IronPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
-                    "count": 4
+                    "count": 2
                 },
                 {
                     "itemId": 14,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 3
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
@@ -1689,16 +1733,38 @@
                     "count": 3
                 },
                 {
-                    "itemId": 16,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
                     "itemId": 17,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 7,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 22,
+            "itemName": "Wooden Fence",
+            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 5,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 4
                 }
             ],
             "craftingMapObjects": [

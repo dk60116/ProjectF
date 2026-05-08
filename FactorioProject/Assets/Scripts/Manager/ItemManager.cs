@@ -179,20 +179,7 @@ public class ItemManager : MonoBehaviour
             definition.icon = itemSet.icon;
             definition.size = (uint)Mathf.Max(0, itemSet.size);
             BindMapObjectDefinition(definition);
-
-            if (itemSet.prefab != null)
-            {
-                SerializedObject prefabObject = new SerializedObject(itemSet.prefab);
-                SerializedProperty definitionProperty = prefabObject.FindProperty("itemDefinition");
-                if (definitionProperty != null)
-                {
-                    definitionProperty.objectReferenceValue = definition;
-                    prefabObject.ApplyModifiedPropertiesWithoutUndo();
-                }
-
-                PrefabUtility.SavePrefabAsset(itemSet.prefab.gameObject);
-                EditorUtility.SetDirty(itemSet.prefab.gameObject);
-            }
+            TryBindItemDefinitionToPrefab(itemSet.prefab, definition);
 
             EditorUtility.SetDirty(definition);
         }
@@ -1210,19 +1197,39 @@ public class ItemManager : MonoBehaviour
             return;
         }
 
-        if (!ShouldAutoAssignInteractionButtons(definition.interactionButtonList))
-        {
-            return;
-        }
-
         string interactionFolderPath = GetMapObjectFolderPath(definition.mapObject);
         if (string.IsNullOrWhiteSpace(interactionFolderPath))
         {
             return;
         }
 
-        List<Sprite> resolvedInteractionSprites = FindInteractionButtonSprites(interactionFolderPath);
+        bool isFenceDoor = definition.mapObject is FenceDoor;
+        List<Sprite> resolvedInteractionSprites = isFenceDoor
+            ? FindDoorInteractionButtonSprites(interactionFolderPath)
+            : new List<Sprite>();
+        if (resolvedInteractionSprites.Count > 0)
+        {
+            AssignInteractionButtons(definition, resolvedInteractionSprites);
+            return;
+        }
+
+        if (!ShouldAutoAssignInteractionButtons(definition.interactionButtonList))
+        {
+            return;
+        }
+
+        resolvedInteractionSprites = FindInteractionButtonSprites(interactionFolderPath);
         if (resolvedInteractionSprites.Count == 0)
+        {
+            return;
+        }
+
+        AssignInteractionButtons(definition, resolvedInteractionSprites);
+    }
+
+    private static void AssignInteractionButtons(ItemDefinition definition, List<Sprite> interactionSprites)
+    {
+        if (definition == null || interactionSprites == null || interactionSprites.Count == 0)
         {
             return;
         }
@@ -1233,7 +1240,7 @@ public class ItemManager : MonoBehaviour
         }
 
         definition.interactionButtonList.Clear();
-        definition.interactionButtonList.AddRange(resolvedInteractionSprites);
+        definition.interactionButtonList.AddRange(interactionSprites);
         EditorUtility.SetDirty(definition);
     }
 
@@ -1278,7 +1285,12 @@ public class ItemManager : MonoBehaviour
             : folderPath.Replace("\\", "/");
     }
 
-    private static List<Sprite> FindInteractionButtonSprites(string folderPath)
+    private static List<Sprite> FindInteractionButtonSprites(string folderPath, string fileNamePrefix = null)
+    {
+        return LoadInteractionButtonSprites(FindInteractionButtonSpritePaths(folderPath, fileNamePrefix));
+    }
+
+    private static List<string> FindInteractionButtonSpritePaths(string folderPath, string fileNamePrefix = null)
     {
         List<string> spriteCandidatePaths = new List<string>();
         string[] textureGuids = AssetDatabase.FindAssets("t:Texture2D", new[] { folderPath });
@@ -1297,21 +1309,21 @@ public class ItemManager : MonoBehaviour
                 continue;
             }
 
+            if (!string.IsNullOrWhiteSpace(fileNamePrefix)
+                && !fileNameWithoutExtension.StartsWith(fileNamePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             spriteCandidatePaths.Add(assetPath);
         }
 
-        spriteCandidatePaths.Sort((left, right) =>
-        {
-            int compareResult = ParseInteractionButtonIndex(Path.GetFileNameWithoutExtension(left))
-                .CompareTo(ParseInteractionButtonIndex(Path.GetFileNameWithoutExtension(right)));
-            if (compareResult != 0)
-            {
-                return compareResult;
-            }
+        SortInteractionButtonSpritePaths(spriteCandidatePaths);
+        return spriteCandidatePaths;
+    }
 
-            return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
-        });
-
+    private static List<Sprite> LoadInteractionButtonSprites(List<string> spriteCandidatePaths)
+    {
         List<Sprite> interactionSprites = new List<Sprite>();
         for (int i = 0; i < spriteCandidatePaths.Count; i++)
         {
@@ -1323,6 +1335,61 @@ public class ItemManager : MonoBehaviour
         }
 
         return interactionSprites;
+    }
+
+    private static List<Sprite> FindDoorInteractionButtonSprites(string prefabFolderPath)
+    {
+        const string doorInteractionPrefix = "Door_Interaction";
+
+        List<string> doorInteractionPaths = FindInteractionButtonSpritePaths(prefabFolderPath, doorInteractionPrefix);
+
+        string parentFolderPath = Path.GetDirectoryName(prefabFolderPath);
+        if (!string.IsNullOrWhiteSpace(parentFolderPath))
+        {
+            parentFolderPath = parentFolderPath.Replace("\\", "/");
+            AddUniquePaths(
+                doorInteractionPaths,
+                FindInteractionButtonSpritePaths(parentFolderPath, doorInteractionPrefix));
+        }
+
+        SortInteractionButtonSpritePaths(doorInteractionPaths);
+        return LoadInteractionButtonSprites(doorInteractionPaths);
+    }
+
+    private static void AddUniquePaths(List<string> targetPaths, List<string> sourcePaths)
+    {
+        for (int i = 0; i < sourcePaths.Count; i++)
+        {
+            bool alreadyAdded = false;
+            for (int targetIndex = 0; targetIndex < targetPaths.Count; targetIndex++)
+            {
+                if (string.Equals(targetPaths[targetIndex], sourcePaths[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    alreadyAdded = true;
+                    break;
+                }
+            }
+
+            if (!alreadyAdded)
+            {
+                targetPaths.Add(sourcePaths[i]);
+            }
+        }
+    }
+
+    private static void SortInteractionButtonSpritePaths(List<string> spriteCandidatePaths)
+    {
+        spriteCandidatePaths.Sort((left, right) =>
+        {
+            int compareResult = ParseInteractionButtonIndex(Path.GetFileNameWithoutExtension(left))
+                .CompareTo(ParseInteractionButtonIndex(Path.GetFileNameWithoutExtension(right)));
+            if (compareResult != 0)
+            {
+                return compareResult;
+            }
+
+            return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static int ParseInteractionButtonIndex(string fileNameWithoutExtension)
@@ -2470,21 +2537,76 @@ public class ItemManager : MonoBehaviour
 
     private static void TryBindItemDefinitionToPrefab(PropObj prefab, ItemDefinition definition)
     {
-        if (prefab == null || definition == null)
+        SyncPropObjectMetadata(prefab, definition);
+    }
+
+    private static void SyncPropObjectMetadata(PropObj prefabObject, ItemDefinition definition)
+    {
+        if (prefabObject == null || definition == null)
         {
             return;
         }
 
-        SerializedObject prefabObject = new SerializedObject(prefab);
-        SerializedProperty definitionProperty = prefabObject.FindProperty("itemDefinition");
+        SerializedObject serializedObject = new SerializedObject(prefabObject);
+
+        SerializedProperty objectNameProperty = serializedObject.FindProperty("objectName");
+        if (objectNameProperty != null)
+        {
+            objectNameProperty.stringValue = ResolvePrefabObjectName(definition);
+        }
+
+        SerializedProperty objIdProperty = serializedObject.FindProperty("objId");
+        if (objIdProperty != null)
+        {
+            objIdProperty.intValue = definition.id;
+        }
+
+        SerializedProperty definitionProperty = serializedObject.FindProperty("itemDefinition");
         if (definitionProperty != null)
         {
             definitionProperty.objectReferenceValue = definition;
-            prefabObject.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        PrefabUtility.SavePrefabAsset(prefab.gameObject);
-        EditorUtility.SetDirty(prefab.gameObject);
+        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+
+        EditorUtility.SetDirty(prefabObject);
+
+        GameObject prefabRoot = ResolvePrefabRoot(prefabObject.gameObject);
+        if (prefabRoot == null)
+        {
+            return;
+        }
+
+        EditorUtility.SetDirty(prefabRoot);
+        if (PrefabUtility.IsPartOfPrefabAsset(prefabRoot))
+        {
+            PrefabUtility.SavePrefabAsset(prefabRoot);
+        }
+    }
+
+    private static string ResolvePrefabObjectName(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(definition.itemName))
+        {
+            return definition.itemName.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(definition.name) ? string.Empty : definition.name.Trim();
+    }
+
+    private static GameObject ResolvePrefabRoot(GameObject gameObject)
+    {
+        if (gameObject == null)
+        {
+            return null;
+        }
+
+        return gameObject.transform.root != null ? gameObject.transform.root.gameObject : gameObject;
     }
 
     [ContextMenu("Migrate Resource Definitions From Resources")]
@@ -2609,32 +2731,7 @@ public class ItemManager : MonoBehaviour
             }
         }
 
-        SerializedObject serializedMapObject = new SerializedObject(definition.mapObject);
-        SerializedProperty objIdProperty = serializedMapObject.FindProperty("objId");
-        if (objIdProperty != null)
-        {
-            objIdProperty.intValue = definition.id;
-        }
-
-        SerializedProperty definitionProperty = serializedMapObject.FindProperty("itemDefinition");
-        if (definitionProperty != null)
-        {
-            definitionProperty.objectReferenceValue = definition;
-        }
-
-        serializedMapObject.ApplyModifiedPropertiesWithoutUndo();
-
-        prefabRoot = definition.mapObject.gameObject;
-        if (prefabRoot != null)
-        {
-            prefabRoot = prefabRoot.transform.root != null ? prefabRoot.transform.root.gameObject : prefabRoot;
-            if (PrefabUtility.IsPartOfPrefabAsset(prefabRoot))
-            {
-                PrefabUtility.SavePrefabAsset(prefabRoot);
-            }
-
-            EditorUtility.SetDirty(prefabRoot);
-        }
+        SyncPropObjectMetadata(definition.mapObject, definition);
 
         TryAutoAssignInteractionButtons(definition);
         EditorUtility.SetDirty(definition.mapObject);

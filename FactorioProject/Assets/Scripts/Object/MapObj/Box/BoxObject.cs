@@ -293,7 +293,8 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         Vector3 startWorldPosition,
         float delay,
         out PortableObject targetPortableObject,
-        bool useJumpArc = true)
+        bool useJumpArc = true,
+        float moveDuration = PortableObject.MoveToDuration)
     {
         targetPortableObject = null;
         if (itemId < 0 || !AcceptsItem(itemId))
@@ -313,7 +314,8 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
             out targetPortableObject,
             null,
             null,
-            useJumpArc);
+            useJumpArc,
+            moveDuration);
     }
 
     public bool CanPutOneContainedObject(int itemId)

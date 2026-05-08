@@ -59,7 +59,11 @@ PrefabInstance:
     - target: {fileID: 4832650038535732743, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
       propertyPath: m_Mesh
       value: 
-      objectReference: {fileID: 4300000, guid: 9c3fee9cab3dca84c870939db00672ba, type: 2}
+      objectReference: {fileID: 4300000, guid: 1f08bafc9c0620145b879a9a996f3aef, type: 2}
+    - target: {fileID: 4909268776646986644, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: 42872a1b7ef6da54abf30a525ddd4364, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -188,24 +192,36 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: 
-  objId: 0
-  itemDefinition: {fileID: 0}
+  objectName: Wooden Fence
+  objId: 22
+  itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
-  multiFocusMode: 1
+  multiFocusMode: 2
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
-  mapFilter: 1
+  mapFilter: 5
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
+  straightVariantPrefab: {fileID: 2276685300360839919}
+  cornerVariantPrefab: {fileID: 7796861901037811338, guid: 238954f228bb70940a3d17ec0d6f67f3, type: 3}
+  triCornerVariantPrefab: {fileID: 7796861901037811338, guid: 926071467c9a81d409bc3b278de1e466, type: 3}
+  crossVariantPrefab: {fileID: 7796861901037811338, guid: e531dd09359c4404aa774bdfbd49427a, type: 3}
+  isCornerVariant: 0
+  variantKind: 0
+  localStraightDirection: 1
+  localCornerFirstDirection: 1
+  localCornerSecondDirection: 0
+  localTriCornerFirstDirection: 1
+  localTriCornerSecondDirection: 0
+  localTriCornerThirdDirection: 3
 --- !u!65 &5814776344103438681
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -225,7 +241,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 1, y: 1, z: 0.32}
+  m_Size: {x: 1, y: 1, z: 0.2}
   m_Center: {x: 0, y: 0.5, z: 0}
 --- !u!4 &8553229865070038503 stripped
 Transform:
