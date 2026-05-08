@@ -574,11 +574,11 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
 
         if (lastContainedStackVisibilityBlock != null && lastContainedStackVisibilityBlock != contentBlock)
         {
-            lastContainedStackVisibilityBlock.SetInputAreaCenterObjectsVisible(true);
+            lastContainedStackVisibilityBlock.ClearInputAreaCenterObjectsVisibilitySource(this);
         }
 
         lastContainedStackVisibilityBlock = contentBlock;
-        contentBlock.SetInputAreaCenterObjectsVisible(isOpen);
+        contentBlock.SetInputAreaCenterObjectsVisible(isOpen, this);
     }
 
     private void RestoreLastContainedStackVisibilityBlock()
@@ -588,7 +588,7 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
             return;
         }
 
-        lastContainedStackVisibilityBlock.SetInputAreaCenterObjectsVisible(true);
+        lastContainedStackVisibilityBlock.ClearInputAreaCenterObjectsVisibilitySource(this);
         lastContainedStackVisibilityBlock = null;
     }
 
@@ -841,14 +841,7 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
 
     private bool TryGetVisibilityContentBlock(out Block contentBlock)
     {
-        contentBlock = null;
-        if (!TryGetAnchorBlock(out Block anchorBlock) || anchorBlock == null)
-        {
-            return false;
-        }
-
-        contentBlock = anchorBlock;
-        return true;
+        return TryGetContentBlock(out contentBlock);
     }
 
     private bool TryGetContentBlock(out Block contentBlock)

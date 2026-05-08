@@ -105,7 +105,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 Block block = chunkBlocks[i];
                 if (block != null)
                 {
-                    SaveLoadedBlockFloorObjects(block);
+                    SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Virtual);
 
                     if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
                     {

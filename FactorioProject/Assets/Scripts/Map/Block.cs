@@ -92,6 +92,7 @@ public class Block : BaseObject
     private readonly List<ConveyorLaneMove> conveyorCanMovePlannedMoves = new List<ConveyorLaneMove>();
     private readonly List<Block> conveyorTouchedBlocks = new List<Block>(4);
     private readonly HashSet<Block> conveyorTouchedBlockSet = new HashSet<Block>();
+    private readonly Dictionary<object, bool> inputAreaCenterVisibilityRequests = new Dictionary<object, bool>();
     private MaterialPropertyBlock conveyorSlotDotPropertyBlock;
     private static Material conveyorSlotDotMaterial;
     private PortableObjectPool floorObjectPool;
@@ -402,7 +403,7 @@ public class Block : BaseObject
             return;
         }
 
-        ResetFloorObjects();
+        ResetFloorObjects(false, false);
     }
 
     public void Initialize(Vector2Int blockCoordinate, BlockType blockType)
@@ -412,6 +413,7 @@ public class Block : BaseObject
         type = blockType;
         objectName = $"{blockType}_{blockCoordinate.x}_{blockCoordinate.y}";
         gameObject.name = $"Block ({blockCoordinate.x}, {blockCoordinate.y})";
+        inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
         InvalidateConveyorRuntimeCaches();
         SetFocusVisible(false);
@@ -517,6 +519,7 @@ public class Block : BaseObject
     public void PrepareForPool()
     {
         SetFocusVisible(false);
+        inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
         ResetFloorObjects();
 
@@ -727,6 +730,52 @@ public class Block : BaseObject
 
     public void SetInputAreaCenterObjectsVisible(bool visible)
     {
+        inputAreaCenterVisibilityRequests.Clear();
+        ApplyInputAreaCenterObjectsVisible(visible);
+    }
+
+    public void SetInputAreaCenterObjectsVisible(bool visible, object visibilitySource)
+    {
+        if (visibilitySource == null)
+        {
+            SetInputAreaCenterObjectsVisible(visible);
+            return;
+        }
+
+        inputAreaCenterVisibilityRequests[visibilitySource] = visible;
+        ApplyInputAreaCenterObjectsVisible(ResolveRequestedInputAreaCenterVisibility());
+    }
+
+    public void ClearInputAreaCenterObjectsVisibilitySource(object visibilitySource)
+    {
+        if (visibilitySource == null || !inputAreaCenterVisibilityRequests.Remove(visibilitySource))
+        {
+            return;
+        }
+
+        ApplyInputAreaCenterObjectsVisible(ResolveRequestedInputAreaCenterVisibility());
+    }
+
+    private bool ResolveRequestedInputAreaCenterVisibility()
+    {
+        if (inputAreaCenterVisibilityRequests.Count <= 0)
+        {
+            return true;
+        }
+
+        foreach (bool visible in inputAreaCenterVisibilityRequests.Values)
+        {
+            if (visible)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ApplyInputAreaCenterObjectsVisible(bool visible)
+    {
         inputAreaCenterObjectsVisible = visible;
         CleanupPortableStack(inputAreaCenterStack);
         EnsureInputAreaCenterAnchorInitialized();
@@ -790,6 +839,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
+            RobotArm.WakeAroundCoordinate(coordinate);
             return false;
         }
 
@@ -835,6 +885,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
+            RobotArm.WakeAroundCoordinate(coordinate);
             return false;
         }
 
@@ -845,6 +896,7 @@ public class Block : BaseObject
 
         consumedItemId = itemId;
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
+        RobotArm.WakeAroundCoordinate(coordinate);
 
         DroppedItemPickupGate gate = topObject.GetComponent<DroppedItemPickupGate>();
         gate?.ClearGate();
@@ -2180,7 +2232,7 @@ public class Block : BaseObject
 
     public void ClearLiveFloorObjectsForVirtualization()
     {
-        ResetFloorObjects();
+        ResetFloorObjects(false);
     }
 
     public void AppendVirtualConveyorItemRenderData(List<VirtualConveyorItemRenderData> results)
@@ -2223,10 +2275,11 @@ public class Block : BaseObject
     public void ApplyFloorObjectState(IReadOnlyList<int> itemIds)
     {
         EnsureFloorObjectsInitialized();
-        ResetFloorObjects();
+        ResetFloorObjects(false);
 
         if (itemIds == null)
         {
+            RefreshConveyorActivityRegistration(false);
             return;
         }
 
@@ -2281,6 +2334,7 @@ public class Block : BaseObject
             }
         }
 
+        WakeConveyorMoveAttemptsAround();
         RefreshConveyorActivityRegistration();
     }
 
@@ -3891,6 +3945,7 @@ public class Block : BaseObject
             if (floorObject == null)
             {
                 inputAreaCenterStack.RemoveAt(objectIndex);
+                RobotArm.WakeAroundCoordinate(coordinate);
                 continue;
             }
 
@@ -3899,6 +3954,7 @@ public class Block : BaseObject
             {
                 inputAreaCenterStack.RemoveAt(objectIndex);
                 ReleaseFloorObjectToHand(floorObject, null);
+                RobotArm.WakeAroundCoordinate(coordinate);
                 continue;
             }
 
@@ -3909,6 +3965,7 @@ public class Block : BaseObject
 
             inputAreaCenterStack.RemoveAt(objectIndex);
             ReleaseFloorObjectToHand(floorObject, handTarget);
+            RobotArm.WakeAroundCoordinate(coordinate);
             transferred++;
         }
 
@@ -4586,7 +4643,7 @@ public class Block : BaseObject
         renderer.SetPropertyBlock(conveyorSlotDotPropertyBlock);
     }
 
-    private void ResetFloorObjects()
+    private void ResetFloorObjects(bool notifyRuntime = true, bool releaseToPool = true)
     {
         EnsureFloorObjectsInitialized();
         if (floorObjectPool == null)
@@ -4620,8 +4677,12 @@ public class Block : BaseObject
             conveyorItemPickupGateStates.Clear();
             conveyorCornerMotionStates.Clear();
             conveyorLinearMotionStates.Clear();
-            WakeConveyorMoveAttemptsAround();
-            RefreshConveyorActivityRegistration();
+            if (notifyRuntime)
+            {
+                WakeConveyorMoveAttemptsAround();
+                RefreshConveyorActivityRegistration();
+            }
+
             return;
         }
 
@@ -4633,7 +4694,7 @@ public class Block : BaseObject
                 PortableObject portableObject = stack[objectIndex];
                 if (portableObject != null)
                 {
-                    floorObjectPool.Release(portableObject);
+                    ReleaseOrDestroyResetFloorObject(portableObject, releaseToPool);
                 }
             }
 
@@ -4645,7 +4706,7 @@ public class Block : BaseObject
             PortableObject portableObject = inputAreaCenterStack[objectIndex];
             if (portableObject != null)
             {
-                floorObjectPool.Release(portableObject);
+                ReleaseOrDestroyResetFloorObject(portableObject, releaseToPool);
             }
         }
 
@@ -4656,7 +4717,7 @@ public class Block : BaseObject
             PortableObject portableObject = conveyorStack[i];
             if (portableObject != null)
             {
-                floorObjectPool.Release(portableObject);
+                ReleaseOrDestroyResetFloorObject(portableObject, releaseToPool);
             }
         }
 
@@ -4667,8 +4728,27 @@ public class Block : BaseObject
         conveyorItemPickupGateStates.Clear();
         conveyorCornerMotionStates.Clear();
         conveyorLinearMotionStates.Clear();
-        WakeConveyorMoveAttemptsAround();
-        RefreshConveyorActivityRegistration();
+        if (notifyRuntime)
+        {
+            WakeConveyorMoveAttemptsAround();
+            RefreshConveyorActivityRegistration();
+        }
+    }
+
+    private void ReleaseOrDestroyResetFloorObject(PortableObject portableObject, bool releaseToPool)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        if (releaseToPool && floorObjectPool != null && floorObjectPool.CanRelease)
+        {
+            floorObjectPool.Release(portableObject);
+            return;
+        }
+
+        DestroyDetachedFloorObject(portableObject);
     }
 
     private void DestroyDetachedFloorObject(PortableObject portableObject)
@@ -10010,6 +10090,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
+            RobotArm.WakeAroundCoordinate(coordinate);
             return false;
         }
 
@@ -10025,6 +10106,7 @@ public class Block : BaseObject
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
+        RobotArm.WakeAroundCoordinate(coordinate);
         return true;
     }
 
@@ -10142,6 +10224,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
+            RobotArm.WakeAroundCoordinate(coordinate);
             return false;
         }
 
@@ -10152,6 +10235,7 @@ public class Block : BaseObject
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleaseFloorObjectToHand(topObject, handTarget);
+        RobotArm.WakeAroundCoordinate(coordinate);
         return true;
     }
 

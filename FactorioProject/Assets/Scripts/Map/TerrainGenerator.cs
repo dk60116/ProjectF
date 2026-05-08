@@ -607,6 +607,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
+    private bool isMaterializingVirtualFloorObjects;
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
     private bool conveyorLineCacheDirty = true;
@@ -968,7 +969,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            SaveLoadedBlockFloorObjects(block);
+            SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Live);
 
             if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
             {

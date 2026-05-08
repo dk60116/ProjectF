@@ -629,7 +629,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 return false;
             }
 
-            if (virtualizedFloorObjectCoordinates.Contains(coordinate)
+            if (!isMaterializingVirtualFloorObjects
+                && virtualizedFloorObjectCoordinates.Contains(coordinate)
                 && IsWithinFloorObjectLiveRadius(coordinate))
             {
                 EnsureResourceStateStore();
@@ -704,6 +705,7 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
+        WakeRobotArmsAroundInstallation(installationObject);
     }
 
     public InstallationObject CreateInstallationObject(MapObject sourcePrefab, Transform parent = null)
@@ -753,6 +755,31 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
+        WakeRobotArmsAroundInstallation(installationObject);
+    }
+
+    private static void WakeRobotArmsAroundInstallation(InstallationObject installationObject)
+    {
+        if (!Application.isPlaying || installationObject == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
+        {
+            if (installationObject.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+            {
+                RobotArm.WakeAroundCoordinate(anchorCoordinate);
+            }
+
+            return;
+        }
+
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            RobotArm.WakeAroundCoordinate(occupiedCoordinates[i]);
+        }
     }
 
     public void RegisterVirtualConveyorBelt(ConveyorBelt conveyorBelt)

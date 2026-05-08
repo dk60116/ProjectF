@@ -216,25 +216,39 @@ public partial class TerrainGenerator
 
     private bool TryMaterializeVirtualFloorObjects(Block block)
     {
-        if (block == null || !virtualizedFloorObjectCoordinates.Contains(block.Coordinate))
+        if (block == null)
         {
             return false;
         }
 
-        if (resourceStateStore != null
-            && resourceStateStore.TryGetFloorObjects(block.Coordinate, out List<int> itemIds)
-            && itemIds != null
-            && itemIds.Count > 0)
+        Vector2Int coordinate = block.Coordinate;
+        if (!virtualizedFloorObjectCoordinates.Remove(coordinate))
         {
-            block.ApplyFloorObjectState(itemIds);
-            resourceStateStore.SetFloorObjectsResidency(block.Coordinate, VirtualObjectResidency.Live);
-        }
-        else
-        {
-            block.ApplyFloorObjectState(null);
+            return false;
         }
 
-        virtualizedFloorObjectCoordinates.Remove(block.Coordinate);
+        bool wasMaterializing = isMaterializingVirtualFloorObjects;
+        isMaterializingVirtualFloorObjects = true;
+        try
+        {
+            if (resourceStateStore != null
+                && resourceStateStore.TryGetFloorObjects(coordinate, out List<int> itemIds)
+                && itemIds != null
+                && itemIds.Count > 0)
+            {
+                block.ApplyFloorObjectState(itemIds);
+                resourceStateStore.SetFloorObjectsResidency(coordinate, VirtualObjectResidency.Live);
+            }
+            else
+            {
+                block.ApplyFloorObjectState(null);
+            }
+        }
+        finally
+        {
+            isMaterializingVirtualFloorObjects = wasMaterializing;
+        }
+
         return true;
     }
 
@@ -257,7 +271,7 @@ public partial class TerrainGenerator
         return true;
     }
 
-    private void SaveLoadedBlockFloorObjects(Block block)
+    private void SaveLoadedBlockFloorObjects(Block block, VirtualObjectResidency residency)
     {
         if (block == null || resourceStateStore == null)
         {
@@ -270,7 +284,7 @@ public partial class TerrainGenerator
             return;
         }
 
-        resourceStateStore.SaveFloorObjects(block.Coordinate, block);
+        resourceStateStore.SaveFloorObjects(block.Coordinate, block, residency);
         if (block.IsRuntimeConveyor)
         {
             resourceStateStore.SaveConveyorItems(block.Coordinate, block);

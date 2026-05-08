@@ -177,7 +177,7 @@ public partial class BlockStateStore : MonoBehaviour
         ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, itemId, state);
     }
 
-    public void SaveFloorObjects(Vector2Int worldCoordinate, Block block)
+    public void SaveFloorObjects(Vector2Int worldCoordinate, Block block, VirtualObjectResidency residency)
     {
         if (block == null)
         {
@@ -201,7 +201,7 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         savedFloorObjectStates[worldCoordinate] = state;
-        ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds);
+        ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds, residency);
     }
 
     public bool TryGet(Vector2Int worldCoordinate, out Resource.ResourceSaveState state)

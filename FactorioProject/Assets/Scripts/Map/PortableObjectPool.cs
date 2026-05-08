@@ -9,6 +9,9 @@ public class PortableObjectPool : MonoBehaviour
 
     private readonly Stack<PortableObject> pooledObjects = new Stack<PortableObject>();
     private Transform poolRoot;
+    private bool isDestroying;
+
+    public bool CanRelease => !isDestroying && this != null;
 
     public void Configure(PortableObject prefab)
     {
@@ -61,11 +64,25 @@ public class PortableObjectPool : MonoBehaviour
         portableObject.ClearBeltItemLineDebugColor();
         portableObject.SetBatchedRendering(false);
         portableObject.gameObject.SetActive(false);
-        portableObject.transform.SetParent(GetPoolRoot(), false);
+        Transform root = GetPoolRoot();
+        if (root == null)
+        {
+            DestroyReleasedObject(portableObject);
+            return;
+        }
+
+        portableObject.transform.SetParent(root, false);
         portableObject.transform.localPosition = Vector3.zero;
         portableObject.transform.localRotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
         pooledObjects.Push(portableObject);
+    }
+
+    private void OnDestroy()
+    {
+        isDestroying = true;
+        pooledObjects.Clear();
+        poolRoot = null;
     }
 
     private void PrepareBorrowedObject(PortableObject portableObject)
@@ -79,6 +96,11 @@ public class PortableObjectPool : MonoBehaviour
 
     private Transform GetPoolRoot()
     {
+        if (!CanRelease)
+        {
+            return null;
+        }
+
         if (poolRoot != null)
         {
             return poolRoot;
@@ -88,5 +110,22 @@ public class PortableObjectPool : MonoBehaviour
         rootObject.transform.SetParent(transform, false);
         poolRoot = rootObject.transform;
         return poolRoot;
+    }
+
+    private static void DestroyReleasedObject(PortableObject portableObject)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Object.Destroy(portableObject.gameObject);
+        }
+        else
+        {
+            Object.DestroyImmediate(portableObject.gameObject);
+        }
     }
 }

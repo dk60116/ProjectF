@@ -1292,7 +1292,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
-        return CoordinateAcceptsInputAreaObject(coordinate) || dropBlock.MapObject == null;
+        return CoordinateAcceptsInputAreaObject(coordinate)
+               || dropBlock.MapObject == null
+               || IsOreMapObject(dropBlock.MapObject);
     }
 
     private static bool HasBlockingDropMapObject(Block dropBlock)
@@ -1300,6 +1302,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         MapObject mapObject = dropBlock != null ? dropBlock.MapObject : null;
         return mapObject != null
                && !IsOreMapObject(mapObject)
+               && !IsBoxMapObject(mapObject)
                && !IsConveyorBeltMapObject(mapObject);
     }
 
@@ -1312,6 +1315,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private static bool IsConveyorBeltMapObject(MapObject mapObject)
     {
         return mapObject is ConveyorBelt;
+    }
+
+    private static bool IsBoxMapObject(MapObject mapObject)
+    {
+        return mapObject is BoxObject
+               || (mapObject != null && mapObject.TryGetComponent(out BoxObject _));
     }
 
     private static bool TryGetBoxObject(Block pickupBlock, out BoxObject boxObject)
