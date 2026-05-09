@@ -86,6 +86,11 @@ public class PlayerHUD : BagSlot
     private bool pendingBagRefreshAfterCraftingVisibilityChange;
     private bool isBagRefreshQueued;
     private int queuedBagRefreshFrame = -1;
+    private bool hudReferencesResolved;
+    private bool installModeButtonsResolved;
+    private Transform cachedMapEditRoot;
+    private InteractionButton boundInteractionButton;
+    private InteractionButton boundDoorInteractionButton;
     private readonly Dictionary<Button, Vector2> cachedInstallButtonPositions = new Dictionary<Button, Vector2>();
     private readonly Dictionary<Button, Vector2> cachedMapEditButtonPositions = new Dictionary<Button, Vector2>();
     private Sequence mapEditButtonAnimationSequence;
@@ -117,12 +122,7 @@ public class PlayerHUD : BagSlot
     private void Awake()
     {
         SubscribeSlotEvents();
-        ResolveInstallModeButtons();
-        ResolveInteractionButton();
-        ResolveDoorInteractionButton();
-        ResolveItemFilterButton();
-        ResolveItemFilterUI();
-        ResolveMapPaper();
+        ResolveHudReferences(true);
         EnsureInstallationPlacementController();
         BindItemFilterButton();
         HideItemFilterUIImmediate();
@@ -141,12 +141,7 @@ public class PlayerHUD : BagSlot
 
     private void OnEnable()
     {
-        ResolveInstallModeButtons();
-        ResolveInteractionButton();
-        ResolveDoorInteractionButton();
-        ResolveItemFilterButton();
-        ResolveItemFilterUI();
-        ResolveMapPaper();
+        ResolveHudReferences(true);
         EnsureInstallationPlacementController();
         BindItemFilterButton();
         HideItemFilterUIImmediate();
@@ -166,16 +161,34 @@ public class PlayerHUD : BagSlot
         pendingBagRefreshAfterCraftingVisibilityChange = false;
     }
 
-    private void Update()
+    private void ResolveHudReferences(bool force = false)
     {
-        EnsureHandBagBinding();
-        PollHandBagChanges();
+        if (!force && hudReferencesResolved)
+        {
+            return;
+        }
+
+        if (force)
+        {
+            installModeButtonsResolved = false;
+            boundInteractionButton = null;
+            boundDoorInteractionButton = null;
+        }
+
         ResolveInstallModeButtons();
         ResolveInteractionButton();
         ResolveDoorInteractionButton();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveMapPaper();
+        hudReferencesResolved = true;
+    }
+
+    private void Update()
+    {
+        EnsureHandBagBinding();
+        PollHandBagChanges();
+        ResolveHudReferences();
         UpdateInstallModeButtons();
         ProcessQueuedBagRefresh();
         UpdateInteractionButtonState();
@@ -578,13 +591,23 @@ public class PlayerHUD : BagSlot
 
     private void ResolveInstallModeButtons()
     {
+        if (installModeButtonsResolved)
+        {
+            return;
+        }
+
         installButton = ResolveButtonReference(installButton, "InstallButton");
         Transform installRoot = installButton != null ? installButton.transform.parent : null;
         installCancelButton = ResolveButtonReferenceInRoot(installCancelButton, installRoot, "InstallCancelButton", "CancelButton");
         installRotationButton = ResolveButtonReferenceInRoot(installRotationButton, installRoot, "InstallRotationButton", "RotationButton");
         installCompleteButton = ResolveButtonReferenceInRoot(installCompleteButton, installRoot, "InstallCompleteButton", "CompleteButton");
 
-        Transform mapEditRoot = FindDescendantByName(transform, "MapEdit");
+        if (cachedMapEditRoot == null)
+        {
+            cachedMapEditRoot = FindDescendantByName(transform, "MapEdit");
+        }
+
+        Transform mapEditRoot = cachedMapEditRoot;
         mapEditButton = ResolveButtonReferenceInRoot(mapEditButton, mapEditRoot, "MapEditButton");
         mapEditCancelButton = ResolveButtonReferenceInRoot(mapEditCancelButton, mapEditRoot, "CancelButton");
         mapEditRotationButton = ResolveButtonReferenceInRoot(mapEditRotationButton, mapEditRoot, "RotationButton");
@@ -611,6 +634,8 @@ public class PlayerHUD : BagSlot
             mapEditCompleteButton,
             mapEditPackButton,
             mapEditUndoButton);
+
+        installModeButtonsResolved = true;
     }
 
     private void ResolveMapPaper()
@@ -1850,7 +1875,13 @@ public class PlayerHUD : BagSlot
             return;
         }
 
+        if (boundInteractionButton == InteractionButton)
+        {
+            return;
+        }
+
         InteractionButton.SetClickAction(HandleInteractionButtonClicked);
+        boundInteractionButton = InteractionButton;
     }
 
     private void BindDoorInteractionButton()
@@ -1860,7 +1891,13 @@ public class PlayerHUD : BagSlot
             return;
         }
 
+        if (boundDoorInteractionButton == DoorInteractionButton)
+        {
+            return;
+        }
+
         DoorInteractionButton.SetClickAction(HandleInteractionButtonClicked);
+        boundDoorInteractionButton = DoorInteractionButton;
     }
 
     private void BindItemFilterButton()
@@ -2571,31 +2608,14 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        expandedBagSlot.RefreshCraftingAvailability();
+        expandedBagSlot.RefreshCraftingAvailability(false);
 
         if (expandedBagSlot == null || !expandedBagSlot.IsCraftingExpanded)
         {
             return;
         }
 
-        Transform craftingRoot = expandedBagSlot.transform.Find("CraftingRoot");
-        if (craftingRoot == null)
-        {
-            craftingRoot = expandedBagSlot.transform.Find("Open");
-        }
-
-        Transform parent = craftingRoot != null ? craftingRoot : expandedBagSlot.transform;
-        CraftingSlot[] craftingSlots = parent.GetComponentsInChildren<CraftingSlot>(true);
-        for (int i = 0; i < craftingSlots.Length; i++)
-        {
-            CraftingSlot slot = craftingSlots[i];
-            if (slot == null)
-            {
-                continue;
-            }
-
-            slot.RefreshIngredientsIfVisible();
-        }
+        expandedBagSlot.RefreshExpandedCraftingSlotStatus();
     }
 
     private bool TryGetPrimaryPointerDown(out Vector2 pointerPosition)

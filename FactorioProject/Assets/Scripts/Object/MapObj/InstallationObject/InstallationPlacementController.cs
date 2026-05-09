@@ -3690,6 +3690,16 @@ public class InstallationPlacementController : MonoBehaviour
         return NormalizePlacementQuarterTurns(fallbackQuarterTurns);
     }
 
+    private bool ShouldRememberFenceDoorStandaloneQuarterTurns(
+        MapObject preview,
+        bool hasAnchorBlock,
+        Vector2Int anchorCoordinate)
+    {
+        return IsFenceDoorDefinition(activeInstallDefinition)
+               && preview is FenceDoor
+               && (!hasAnchorBlock || !HasFenceNeighborConnections(anchorCoordinate, preview, true));
+    }
+
     private bool TryResolveFenceDoorAlignedQuarterTurns(
         Fence doorPrefab,
         Vector2Int anchorCoordinate,
@@ -8849,6 +8859,23 @@ public class InstallationPlacementController : MonoBehaviour
         else
         {
             int nextQuarterTurns = (installPreviewQuarterTurns + 1) % 4;
+            bool shouldRememberFenceDoorStandaloneQuarterTurns =
+                ShouldRememberFenceDoorStandaloneQuarterTurns(
+                    activeInstallPreview,
+                    hasAnchorBlock,
+                    anchorCoordinate);
+            bool hadPreviousFenceDoorStandaloneQuarterTurns = false;
+            int previousFenceDoorStandaloneQuarterTurns = 0;
+            if (shouldRememberFenceDoorStandaloneQuarterTurns)
+            {
+                hadPreviousFenceDoorStandaloneQuarterTurns =
+                    installPreviewFenceDoorStandaloneQuarterTurnsByPreview.TryGetValue(
+                        activeInstallPreview,
+                        out previousFenceDoorStandaloneQuarterTurns);
+                installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
+                    NormalizePlacementQuarterTurns(nextQuarterTurns);
+            }
+
             if (hasAnchorBlock)
             {
                 if (!TryFindPlaceableInstallPreviewQuarterTurns(
@@ -8857,6 +8884,19 @@ public class InstallationPlacementController : MonoBehaviour
                     nextQuarterTurns,
                     out nextQuarterTurns))
                 {
+                    if (shouldRememberFenceDoorStandaloneQuarterTurns)
+                    {
+                        if (hadPreviousFenceDoorStandaloneQuarterTurns)
+                        {
+                            installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
+                                previousFenceDoorStandaloneQuarterTurns;
+                        }
+                        else
+                        {
+                            installPreviewFenceDoorStandaloneQuarterTurnsByPreview.Remove(activeInstallPreview);
+                        }
+                    }
+
                     return;
                 }
             }
@@ -8865,7 +8905,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
-        if (IsFenceDoorDefinition(activeInstallDefinition) && activeInstallPreview is FenceDoor)
+        if (ShouldRememberFenceDoorStandaloneQuarterTurns(activeInstallPreview, hasAnchorBlock, anchorCoordinate))
         {
             installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
                 NormalizePlacementQuarterTurns(installPreviewQuarterTurns);

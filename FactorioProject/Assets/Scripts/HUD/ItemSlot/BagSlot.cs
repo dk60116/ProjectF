@@ -23,6 +23,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private const float DragCancelDistance = 8f;
     private const float CraftingRootHideDelay = 0.12f;
     private const float PickupPreviewSuppressAfterPickupDuration = 0.12f;
+    private const float HeldClickRepeatInterval = 0.1f;
     private const int CraftingInnerRingSlotLimit = 5;
     private const float CraftingOuterRingSlotPadding = 0.9f;
     private const float FocusedPickupRange = 999f;
@@ -76,7 +77,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private int suppressCraftingToggleFrame = -1;
     private bool isCraftingExpanded;
     private bool suppressCraftingEvents;
+    private bool consumeNextPickupButtonClick;
+    private bool suppressNextCraftingToggle;
     private Vector2 dragStartScreenPosition;
+    private float nextHeldPickupTime;
+    private float nextHeldDropTime;
     private int lastBoundItemId = -1;
     private int lastBoundItemCount;
     private Coroutine pickupRoutine;
@@ -519,12 +524,14 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         else if (hoveredDropSlot == this)
         {
             hoveredDropSlot = null;
+            ResetHeldSlotInput();
         }
 
         if (isDragging)
         {
             ClearPickupPreview();
             RefreshDragDropFocus(null);
+            ResetHeldSlotInput();
             return;
         }
 
@@ -532,27 +539,76 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (hoveredDropSlot != this)
         {
+            ResetHeldSlotInput();
             return;
         }
 
-        if (Input.GetMouseButtonDown(1))
-        {
-            if (CanDragItem())
-            {
-                DropItem(1);
-            }
-            else
-            {
-                HandlePickupClick(true);
-            }
-
-            return;
-        }
+        HandleHeldSlotInput();
 
         if (Input.GetKeyDown(KeyCode.F) && CanDragItem())
         {
             DropItem();
         }
+    }
+
+    private void HandleHeldSlotInput()
+    {
+        if (Input.GetMouseButtonUp(0))
+        {
+            nextHeldPickupTime = 0f;
+            StopPickupRoutine();
+        }
+
+        if (Input.GetMouseButtonUp(1))
+        {
+            nextHeldDropTime = 0f;
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            TryPickupFromHeldSlotInput();
+            nextHeldPickupTime = Time.time + HeldClickRepeatInterval;
+            return;
+        }
+
+        if (Input.GetMouseButton(0) && nextHeldPickupTime > 0f && Time.time >= nextHeldPickupTime)
+        {
+            TryPickupFromHeldSlotInput();
+            nextHeldPickupTime = Time.time + HeldClickRepeatInterval;
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(1))
+        {
+            DropItem(1);
+            nextHeldDropTime = Time.time + HeldClickRepeatInterval;
+            return;
+        }
+
+        if (Input.GetMouseButton(1) && nextHeldDropTime > 0f && Time.time >= nextHeldDropTime)
+        {
+            DropItem(1);
+            nextHeldDropTime = Time.time + HeldClickRepeatInterval;
+        }
+    }
+
+    private bool TryPickupFromHeldSlotInput()
+    {
+        bool handled = TryHandlePickupClick(true);
+        if (!handled)
+        {
+            return false;
+        }
+
+        consumeNextPickupButtonClick = true;
+        suppressNextCraftingToggle = true;
+        return true;
+    }
+
+    private void ResetHeldSlotInput()
+    {
+        nextHeldPickupTime = 0f;
+        nextHeldDropTime = 0f;
     }
 
     public bool IsCraftingExpanded => isCraftingExpanded;
@@ -1180,6 +1236,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        if (suppressNextCraftingToggle)
+        {
+            suppressNextCraftingToggle = false;
+            return;
+        }
+
         if (IsInventoryUiLocked())
         {
             CollapseCraftingSlots(false);
@@ -1218,9 +1280,28 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         CollapseCraftingSlots(immediate);
     }
 
-    public void RefreshCraftingAvailability()
+    public void RefreshCraftingAvailability(bool force = true)
     {
-        RefreshCraftingItemsFromBag(true);
+        RefreshCraftingItemsFromBag(force);
+    }
+
+    public void RefreshExpandedCraftingSlotStatus()
+    {
+        if (!isCraftingExpanded || craftingSlots == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < craftingSlots.Count; i++)
+        {
+            CraftingSlot craftingSlot = craftingSlots[i];
+            if (craftingSlot == null || !craftingSlot.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            craftingSlot.RefreshCraftingAvailabilityVisuals();
+        }
     }
 
     public bool CanCraftItem(int itemId)
@@ -2951,20 +3032,30 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void HandlePickupClick()
     {
-        HandlePickupClick(false);
+        if (consumeNextPickupButtonClick)
+        {
+            consumeNextPickupButtonClick = false;
+            suppressNextCraftingToggle = true;
+            return;
+        }
+
+        if (TryHandlePickupClick(true))
+        {
+            suppressNextCraftingToggle = true;
+        }
     }
 
-    private void HandlePickupClick(bool singlePickup)
+    private bool TryHandlePickupClick(bool singlePickup)
     {
         if (!AllowPickupOnClick || IsInventoryUiLocked())
         {
-            return;
+            return false;
         }
 
         Player player = ResolvePlayer();
         if (player == null)
         {
-            return;
+            return false;
         }
 
         if (TryHandleFocusedRobotArmPickup(player, out bool blockPickup))
@@ -2972,20 +3063,20 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             StopPickupRoutine();
             SuppressPickupPreviewAfterPickup();
             suppressCraftingToggleFrame = Time.frameCount;
-            return;
+            return true;
         }
 
         if (blockPickup)
         {
             StopPickupRoutine();
             suppressCraftingToggleFrame = Time.frameCount;
-            return;
+            return true;
         }
 
         TerrainGenerator terrain = ResolveTerrain();
         if (terrain == null)
         {
-            return;
+            return false;
         }
 
         bool hasFocusedConveyor = TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock);
@@ -2996,14 +3087,14 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             StopPickupRoutine();
             SuppressPickupPreviewAfterPickup();
             suppressCraftingToggleFrame = Time.frameCount;
-            return;
+            return true;
         }
 
         StopPickupRoutine();
         bool allowFocusedConveyorPickup = !hasFocusedConveyor;
         if (!TryPickupOneItemForClick(player, terrain, allowFocusedConveyorPickup))
         {
-            return;
+            return false;
         }
 
         SuppressPickupPreviewAfterPickup();
@@ -3012,6 +3103,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         {
             pickupRoutine = StartCoroutine(PickupRoutine(player, terrain, true, allowFocusedConveyorPickup));
         }
+
+        return true;
     }
 
     private void StopPickupRoutine()

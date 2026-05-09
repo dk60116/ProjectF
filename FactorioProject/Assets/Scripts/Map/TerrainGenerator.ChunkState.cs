@@ -67,6 +67,7 @@ public partial class TerrainGenerator
                 block.ApplyFloorObjectState(null);
                 resourceStateStore.SetFloorObjectsResidency(block.Coordinate, VirtualObjectResidency.Virtual);
                 virtualizedFloorObjectCoordinates.Add(block.Coordinate);
+                RobotArm.WakeAroundCoordinate(block.Coordinate);
                 return;
             }
 
@@ -89,6 +90,8 @@ public partial class TerrainGenerator
             resourceStateStore.SetFloorObjectsResidency(block.Coordinate, VirtualObjectResidency.Live);
             virtualizedFloorObjectCoordinates.Remove(block.Coordinate);
         }
+
+        RobotArm.WakeAroundCoordinate(block.Coordinate);
     }
 
     private void TickFloorObjectVirtualization()

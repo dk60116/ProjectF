@@ -206,11 +206,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         waitingForDropRetry = persistentState.waitingForDropRetry;
         NormalizeRuntimeState();
         hasRuntimeStateInitialized = true;
-
-        if (heldItemId < 0 && state == RobotArmState.WaitingForPickup)
-        {
-            SetBodyLocalRotation(inputBodyLocalRotation);
-        }
+        ApplyStableBodyRotationForCurrentState();
 
         RefreshHandItemVisual();
         RefreshRuntimeSleepState(true);
@@ -345,9 +341,21 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
-        if (!TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
+        if (!TryResolveDropCoordinate(out Vector2Int dropCoordinate))
         {
             return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (terrainGenerator == null)
+        {
+            return false;
+        }
+
+        if (!terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock)
+            || dropBlock == null)
+        {
+            return true;
         }
 
         if (IsConveyorBeltMapObject(dropBlock.MapObject))
@@ -466,6 +474,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private void SetRuntimeSleeping(bool sleeping, bool force = false)
     {
+        if (sleeping)
+        {
+            ApplyRuntimeSleepPose();
+        }
+
         if (!force && runtimeSleeping == sleeping)
         {
             RefreshSleepAwakeVisual();
@@ -476,6 +489,21 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         SetUpdateTickRegistered(!runtimeSleeping && isActiveAndEnabled);
         handItem?.SetSleepAwakeSleeping(runtimeSleeping);
         RefreshSleepAwakeVisual(true);
+    }
+
+    private void ApplyRuntimeSleepPose()
+    {
+        EnsureBodyRotationCache();
+        if (heldItemId >= 0 && state == RobotArmState.WaitingForDrop)
+        {
+            SetBodyLocalRotation(GetOutputBodyLocalRotation());
+            return;
+        }
+
+        if (heldItemId < 0 && state == RobotArmState.WaitingForPickup)
+        {
+            SetBodyLocalRotation(inputBodyLocalRotation);
+        }
     }
 
     private void SetUpdateTickRegistered(bool registered)
@@ -1409,6 +1437,25 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             || state == RobotArmState.TurningToPickup)
         {
             state = RobotArmState.TurningToDrop;
+        }
+    }
+
+    private void ApplyStableBodyRotationForCurrentState()
+    {
+        EnsureBodyRotationCache();
+        if (heldItemId >= 0
+            && (state == RobotArmState.WaitingForDrop
+                || state == RobotArmState.WaitingBeforeDropPlace))
+        {
+            SetBodyLocalRotation(GetOutputBodyLocalRotation());
+            return;
+        }
+
+        if (heldItemId < 0
+            && (state == RobotArmState.WaitingForPickup
+                || state == RobotArmState.WaitingBeforePickupTake))
+        {
+            SetBodyLocalRotation(inputBodyLocalRotation);
         }
     }
 

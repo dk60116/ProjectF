@@ -458,6 +458,12 @@ public class CraftingSlot : ItemSlot
         RefreshIngredients(false);
     }
 
+    public void RefreshCraftingAvailabilityVisuals()
+    {
+        RefreshCraftingMapObjectState();
+        RefreshIngredientsIfVisible();
+    }
+
     private bool TryBuildIngredientBuffer(int itemId)
     {
         ingredientBuffer.Clear();
