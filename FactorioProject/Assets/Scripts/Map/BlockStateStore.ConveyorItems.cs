@@ -9,6 +9,8 @@ public partial class BlockStateStore
     private const int ConveyorBackgroundSimulationPassMultiplier = 64;
     private const int ConveyorBackgroundDefaultSimulationPasses = 256;
     private const float VirtualConveyorLanePathLength = 0.5f;
+    private const int ConveyorSingleLineFrontLaneIndex = 0;
+    private const int ConveyorSingleLineBackLaneIndex = 2;
 
     private sealed class ConveyorLaneLinkSaveState
     {
@@ -69,6 +71,65 @@ public partial class BlockStateStore
     private readonly Dictionary<ConveyorLaneKey, ConveyorItemLaneSaveState> conveyorSimulationOccupancy = new Dictionary<ConveyorLaneKey, ConveyorItemLaneSaveState>();
     private readonly List<ConveyorSimulationItem> conveyorSimulationItems = new List<ConveyorSimulationItem>();
     private readonly HashSet<Vector2Int> conveyorSimulationDirtyCoordinates = new HashSet<Vector2Int>();
+
+    private static bool IsSavedConveyorActiveLaneIndex(int laneIndex)
+    {
+        return laneIndex == ConveyorSingleLineFrontLaneIndex
+            || laneIndex == ConveyorSingleLineBackLaneIndex;
+    }
+
+    private static bool TryNormalizeSavedConveyorLaneIndex(int laneIndex, out int normalizedLaneIndex)
+    {
+        switch (laneIndex)
+        {
+            case 0:
+            case 1:
+                normalizedLaneIndex = ConveyorSingleLineFrontLaneIndex;
+                return true;
+            case 2:
+            case 3:
+                normalizedLaneIndex = ConveyorSingleLineBackLaneIndex;
+                return true;
+            default:
+                normalizedLaneIndex = -1;
+                return false;
+        }
+    }
+
+    private static bool TryNormalizeSavedConveyorLaneState(ConveyorItemLaneSaveState lane)
+    {
+        if (lane == null || !TryNormalizeSavedConveyorLaneIndex(lane.laneIndex, out int normalizedLaneIndex))
+        {
+            return false;
+        }
+
+        lane.laneIndex = normalizedLaneIndex;
+        if (lane.sourceLaneIndex >= 0
+            && TryNormalizeSavedConveyorLaneIndex(lane.sourceLaneIndex, out int normalizedSourceLaneIndex))
+        {
+            lane.sourceLaneIndex = normalizedSourceLaneIndex;
+        }
+
+        if (lane.destinationLaneIndex >= 0
+            && TryNormalizeSavedConveyorLaneIndex(lane.destinationLaneIndex, out int normalizedDestinationLaneIndex))
+        {
+            lane.destinationLaneIndex = normalizedDestinationLaneIndex;
+        }
+
+        if (lane.cornerContinuationSourceLaneIndex >= 0
+            && TryNormalizeSavedConveyorLaneIndex(lane.cornerContinuationSourceLaneIndex, out int normalizedContinuationSourceLaneIndex))
+        {
+            lane.cornerContinuationSourceLaneIndex = normalizedContinuationSourceLaneIndex;
+        }
+
+        if (lane.cornerContinuationDestinationLaneIndex >= 0
+            && TryNormalizeSavedConveyorLaneIndex(lane.cornerContinuationDestinationLaneIndex, out int normalizedContinuationDestinationLaneIndex))
+        {
+            lane.cornerContinuationDestinationLaneIndex = normalizedContinuationDestinationLaneIndex;
+        }
+
+        return IsSavedConveyorActiveLaneIndex(lane.laneIndex);
+    }
 
     public void SaveConveyorItems(Vector2Int worldCoordinate, Block block)
     {
@@ -299,10 +360,14 @@ public partial class BlockStateStore
         savedConveyorItemStates.TryGetValue(worldCoordinate, out ConveyorItemBlockState existingState);
         ConveyorItemBlockState state = existingState ?? new ConveyorItemBlockState();
         state.lanes.Clear();
+        state.laneCount = 0;
         for (int i = 0; i < lanes.Count; i++)
         {
             ConveyorItemLaneSaveState lane = CloneConveyorLaneState(lanes[i]);
-            if (lane == null || lane.itemId < 0 || lane.laneIndex < 0)
+            if (lane == null
+                || lane.itemId < 0
+                || !TryNormalizeSavedConveyorLaneState(lane)
+                || GetSavedConveyorLaneItemId(state, lane.laneIndex) >= 0)
             {
                 continue;
             }
@@ -398,7 +463,9 @@ public partial class BlockStateStore
             for (int i = 0; i < state.lanes.Count; i++)
             {
                 ConveyorItemLaneSaveState lane = state.lanes[i];
-                if (lane == null || lane.itemId < 0 || lane.laneIndex < 0)
+                if (lane == null
+                    || lane.itemId < 0
+                    || !TryNormalizeSavedConveyorLaneState(lane))
                 {
                     continue;
                 }
@@ -425,7 +492,9 @@ public partial class BlockStateStore
             for (int i = 0; i < state.lanes.Count; i++)
             {
                 ConveyorItemLaneSaveState lane = state.lanes[i];
-                if (lane == null || lane.itemId < 0 || lane.laneIndex < 0)
+                if (lane == null
+                    || lane.itemId < 0
+                    || !IsSavedConveyorActiveLaneIndex(lane.laneIndex))
                 {
                     continue;
                 }
@@ -701,6 +770,7 @@ public partial class BlockStateStore
             if (candidate == null
                 || candidate.itemId < 0
                 || candidate.laneIndex < 0
+                || !IsSavedConveyorActiveLaneIndex(candidate.laneIndex)
                 || (itemFilter != null && !itemFilter(candidate.itemId)))
             {
                 continue;
@@ -744,6 +814,11 @@ public partial class BlockStateStore
         float bestDistanceSqr = float.MaxValue;
         for (int candidateLaneIndex = 0; candidateLaneIndex < state.laneCount; candidateLaneIndex++)
         {
+            if (!IsSavedConveyorActiveLaneIndex(candidateLaneIndex))
+            {
+                continue;
+            }
+
             if (GetSavedConveyorLaneItemId(state, candidateLaneIndex) >= 0)
             {
                 continue;
@@ -806,34 +881,22 @@ public partial class BlockStateStore
         }
 
         state.laneLinks.Clear();
-        if (conveyor.IsCornerVariant)
-        {
-            if (IsCounterClockwiseTurn(inputDirection, outputDirection))
-            {
-                AddVirtualConveyorLaneLink(state, 3, worldCoordinate, 0, VirtualConveyorLanePathLength);
-                AddVirtualConveyorLaneLink(state, 2, worldCoordinate, 1, VirtualConveyorLanePathLength);
-            }
-            else
-            {
-                AddVirtualConveyorLaneLink(state, 2, worldCoordinate, 0, VirtualConveyorLanePathLength);
-                AddVirtualConveyorLaneLink(state, 3, worldCoordinate, 1, VirtualConveyorLanePathLength);
-            }
-        }
-        else
-        {
-            AddVirtualConveyorLaneLink(state, 2, worldCoordinate, 0, VirtualConveyorLanePathLength);
-            AddVirtualConveyorLaneLink(state, 3, worldCoordinate, 1, VirtualConveyorLanePathLength);
-        }
+        AddVirtualConveyorLaneLink(
+            state,
+            ConveyorSingleLineBackLaneIndex,
+            worldCoordinate,
+            ConveyorSingleLineFrontLaneIndex,
+            VirtualConveyorLanePathLength);
 
         Vector2Int nextCoordinate = worldCoordinate + outputDirection;
         if (TryResolveVirtualConveyorReceiveLane(nextCoordinate, outputDirection, 0, out int destinationLane0))
         {
-            AddVirtualConveyorLaneLink(state, 0, nextCoordinate, destinationLane0, VirtualConveyorLanePathLength);
-        }
-
-        if (TryResolveVirtualConveyorReceiveLane(nextCoordinate, outputDirection, 1, out int destinationLane1))
-        {
-            AddVirtualConveyorLaneLink(state, 1, nextCoordinate, destinationLane1, VirtualConveyorLanePathLength);
+            AddVirtualConveyorLaneLink(
+                state,
+                ConveyorSingleLineFrontLaneIndex,
+                nextCoordinate,
+                destinationLane0,
+                VirtualConveyorLanePathLength);
         }
 
         state.hasVirtualTopology = true;
@@ -848,7 +911,7 @@ public partial class BlockStateStore
     {
         destinationLaneIndex = -1;
         if (incomingFlowDirection == Vector2Int.zero
-            || sourceColumnOrdinal < 0
+            || sourceColumnOrdinal != 0
             || !TryResolveVirtualConveyor(
                 destinationCoordinate,
                 out _,
@@ -859,7 +922,7 @@ public partial class BlockStateStore
             return false;
         }
 
-        destinationLaneIndex = sourceColumnOrdinal == 0 ? 2 : 3;
+        destinationLaneIndex = ConveyorSingleLineBackLaneIndex;
         return true;
     }
 
@@ -1000,7 +1063,9 @@ public partial class BlockStateStore
         int destinationLaneIndex,
         float pathLength)
     {
-        if (state == null || sourceLaneIndex < 0 || destinationLaneIndex < 0)
+        if (state == null
+            || !IsSavedConveyorActiveLaneIndex(sourceLaneIndex)
+            || !IsSavedConveyorActiveLaneIndex(destinationLaneIndex))
         {
             return;
         }
@@ -1012,11 +1077,6 @@ public partial class BlockStateStore
             destinationLaneIndex = destinationLaneIndex,
             pathLength = Mathf.Max(ConveyorBackgroundSimulationEpsilon, pathLength)
         });
-    }
-
-    private static bool IsCounterClockwiseTurn(Vector2Int inputDirection, Vector2Int outputDirection)
-    {
-        return (inputDirection.x * outputDirection.y) - (inputDirection.y * outputDirection.x) > 0;
     }
 
     private static bool TryGetConveyorLaneLink(
@@ -1045,7 +1105,10 @@ public partial class BlockStateStore
 
     private static bool IsValidConveyorDestinationLane(ConveyorItemBlockState state, int laneIndex)
     {
-        return state != null && laneIndex >= 0 && laneIndex < Mathf.Max(0, state.laneCount);
+        return state != null
+            && IsSavedConveyorActiveLaneIndex(laneIndex)
+            && laneIndex >= 0
+            && laneIndex < Mathf.Max(0, state.laneCount);
     }
 
     private void FlushConveyorSimulationDirtyStates()
@@ -1172,8 +1235,7 @@ public partial class BlockStateStore
             return lane.visualWorldPosition;
         }
 
-        float lateralOffset = laneIndex % 2 == 0 ? -0.12f : 0.12f;
-        return new Vector3(coordinate.x + lateralOffset, 0.2f, coordinate.y);
+        return new Vector3(coordinate.x, 0.2f, coordinate.y);
     }
 
     private static void ClearSavedConveyorMotion(ConveyorItemLaneSaveState lane)
@@ -1230,7 +1292,7 @@ public partial class BlockStateStore
             return null;
         }
 
-        return new ConveyorItemLaneSaveState
+        ConveyorItemLaneSaveState clonedState = new ConveyorItemLaneSaveState
         {
             laneIndex = source.laneIndex,
             itemId = source.itemId,
@@ -1254,5 +1316,6 @@ public partial class BlockStateStore
             cornerContinuationPathLength = source.cornerContinuationPathLength,
             cornerContinuationDurationPathLength = source.cornerContinuationDurationPathLength
         };
+        return TryNormalizeSavedConveyorLaneState(clonedState) ? clonedState : null;
     }
 }

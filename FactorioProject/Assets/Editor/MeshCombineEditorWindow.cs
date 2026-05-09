@@ -1389,6 +1389,7 @@ public class MeshCombineEditorWindow : EditorWindow
 internal static class HierarchyMeshMergeToChild
 {
     private const string MenuPath = "GameObject/Merge To Child";
+    private const string FallbackOutputFolder = "Assets/MergedMeshes";
 
     private struct MeshSource
     {
@@ -1425,16 +1426,7 @@ internal static class HierarchyMeshMergeToChild
             return;
         }
 
-        string mainMeshPath = AssetDatabase.GetAssetPath(mainMesh);
-        if (string.IsNullOrWhiteSpace(mainMeshPath)
-            || !mainMeshPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
-        {
-            EditorUtility.DisplayDialog(
-                "Merge To Child",
-                "메인 Mesh가 Assets 폴더 안의 에셋이어야 같은 폴더에 병합 Mesh를 저장할 수 있습니다.",
-                "OK");
-            return;
-        }
+        string outputFolder = ResolveOutputFolder(rootObject, mainMesh);
 
         List<MeshSource> sources = CollectMeshSources(rootObject.transform);
         if (sources.Count <= 0)
@@ -1453,12 +1445,6 @@ internal static class HierarchyMeshMergeToChild
         {
             EditorUtility.DisplayDialog("Merge To Child Failed", exception.Message, "OK");
             return;
-        }
-
-        string outputFolder = NormalizePathSeparators(Path.GetDirectoryName(mainMeshPath));
-        if (string.IsNullOrWhiteSpace(outputFolder))
-        {
-            outputFolder = "Assets";
         }
 
         string safeName = MakeSafeFileName($"{rootObject.name}_Merged");
@@ -1498,6 +1484,78 @@ internal static class HierarchyMeshMergeToChild
         }
 
         Selection.activeGameObject = rootObject;
+    }
+
+    private static string ResolveOutputFolder(GameObject rootObject, Mesh mainMesh)
+    {
+        string mainMeshPath = NormalizePathSeparators(AssetDatabase.GetAssetPath(mainMesh));
+        if (TryGetAssetFolder(mainMeshPath, out string meshFolder))
+        {
+            return meshFolder;
+        }
+
+        string prefabPath = NormalizePathSeparators(PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(rootObject));
+        if (TryGetAssetFolder(prefabPath, out string prefabFolder))
+        {
+            return prefabFolder;
+        }
+
+        string objectPath = NormalizePathSeparators(AssetDatabase.GetAssetPath(rootObject));
+        if (TryGetAssetFolder(objectPath, out string objectFolder))
+        {
+            return objectFolder;
+        }
+
+        EnsureAssetFolder(FallbackOutputFolder);
+        return FallbackOutputFolder;
+    }
+
+    private static bool TryGetAssetFolder(string assetPath, out string folder)
+    {
+        folder = string.Empty;
+        if (string.IsNullOrWhiteSpace(assetPath)
+            || !assetPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (AssetDatabase.IsValidFolder(assetPath))
+        {
+            folder = assetPath;
+            return true;
+        }
+
+        folder = NormalizePathSeparators(Path.GetDirectoryName(assetPath));
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            folder = "Assets";
+        }
+
+        return folder.StartsWith("Assets", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureAssetFolder(string folderPath)
+    {
+        folderPath = NormalizePathSeparators(folderPath);
+        if (string.IsNullOrWhiteSpace(folderPath)
+            || AssetDatabase.IsValidFolder(folderPath)
+            || !folderPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string parent = NormalizePathSeparators(Path.GetDirectoryName(folderPath));
+        string folderName = Path.GetFileName(folderPath);
+        if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(folderName))
+        {
+            return;
+        }
+
+        EnsureAssetFolder(parent);
+        if (!AssetDatabase.IsValidFolder(folderPath))
+        {
+            AssetDatabase.CreateFolder(parent, folderName);
+        }
     }
 
     private static Material GetFirstMaterial(MeshRenderer renderer)

@@ -192,6 +192,7 @@ public class PlayerHUD : BagSlot
         UpdateInstallModeButtons();
         ProcessQueuedBagRefresh();
         UpdateInteractionButtonState();
+        HandleInteractionButtonKeyboardInput();
         UpdateItemFilterButtonState();
         UpdateInventoryEditLockState();
         UpdateCraftingQueue(Time.deltaTime);
@@ -1933,6 +1934,29 @@ public class PlayerHUD : BagSlot
             currentInteractionDoorObject.ToggleOpenState(ResolveCurrentPlayerInteractionPosition());
             UpdateInteractionButtonState();
         }
+    }
+
+    private void HandleInteractionButtonKeyboardInput()
+    {
+        if (!Input.GetKeyDown(KeyCode.Space)
+            || GameManager.Instance == null
+            || GameManager.Instance.PlayerInteractionLocked)
+        {
+            return;
+        }
+
+        InteractionButton activeButton = currentInteractionDoorObject != null
+            ? ResolveDoorInteractionButtonForUse()
+            : InteractionButton;
+        bool hasInteractionTarget = currentInteractionBoxObject != null || currentInteractionDoorObject != null;
+        if (!hasInteractionTarget
+            || activeButton == null
+            || !activeButton.gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
+        HandleInteractionButtonClicked();
     }
 
     private static Vector3 ResolveCurrentPlayerInteractionPosition()

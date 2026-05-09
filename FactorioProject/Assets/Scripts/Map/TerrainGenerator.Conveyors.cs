@@ -1196,8 +1196,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorLineTouchedSet.Clear();
 
         bool movedAny = false;
-        movedAny |= TryTickStraightConveyorLineColumn(line, 0);
-        movedAny |= TryTickStraightConveyorLineColumn(line, 1);
+        movedAny |= TryTickStraightConveyorLine(line);
         NotifyStraightConveyorLineTickCompleted(line);
 
         if (!movedAny)
@@ -1272,7 +1271,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return true;
     }
 
-    private bool TryTickStraightConveyorLineColumn(ConveyorLine line, int columnIndex)
+    private bool TryTickStraightConveyorLine(ConveyorLine line)
     {
         if (line == null || !line.simulationCacheValid)
         {
@@ -1283,23 +1282,15 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = line.blocks.Count - 1; i >= 0; i--)
         {
             Block block = line.blocks[i];
-            int frontLaneIndex = columnIndex == 0
-                ? line.frontColumn0LaneIndices[i]
-                : line.frontColumn1LaneIndices[i];
-            int backLaneIndex = columnIndex == 0
-                ? line.backColumn0LaneIndices[i]
-                : line.backColumn1LaneIndices[i];
+            int frontLaneIndex = line.frontLaneIndices[i];
+            int backLaneIndex = line.backLaneIndices[i];
 
             if (i < line.blocks.Count - 1
                 && block.TryMoveStraightConveyorDataLaneToCached(
                     line.blocks[i + 1],
                     frontLaneIndex,
-                    columnIndex == 0
-                        ? line.backColumn0LaneIndices[i + 1]
-                        : line.backColumn1LaneIndices[i + 1],
-                    columnIndex == 0
-                        ? line.nextColumn0PathLengths[i]
-                        : line.nextColumn1PathLengths[i]))
+                    line.backLaneIndices[i + 1],
+                    line.nextPathLengths[i]))
             {
                 MarkConveyorLineBlockTouched(block);
                 MarkConveyorLineBlockTouched(line.blocks[i + 1]);
@@ -1317,9 +1308,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     block,
                     backLaneIndex,
                     frontLaneIndex,
-                    columnIndex == 0
-                        ? line.withinColumn0PathLengths[i]
-                        : line.withinColumn1PathLengths[i]))
+                    line.withinPathLengths[i]))
             {
                 MarkConveyorLineBlockTouched(block);
                 movedAny = true;
@@ -1336,38 +1325,6 @@ public partial class TerrainGenerator : MonoBehaviour
             && nextBlock != null
             && nextBlock.IsRuntimeConveyor
             && !IsRuntimeConveyorLineBlock(nextBlock);
-    }
-
-    private static bool TryGetStraightLineColumnLanes(
-        Block block,
-        int columnIndex,
-        out int frontLaneIndex,
-        out int backLaneIndex)
-    {
-        frontLaneIndex = -1;
-        backLaneIndex = -1;
-        if (block == null
-            || !block.TryGetStraightConveyorLineLaneIndices(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out int backColumn0LaneIndex,
-                out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        if (columnIndex == 0)
-        {
-            frontLaneIndex = frontColumn0LaneIndex;
-            backLaneIndex = backColumn0LaneIndex;
-        }
-        else
-        {
-            frontLaneIndex = frontColumn1LaneIndex;
-            backLaneIndex = backColumn1LaneIndex;
-        }
-
-        return frontLaneIndex >= 0 && backLaneIndex >= 0;
     }
 
     private void MarkConveyorLineBlockTouched(Block block)
@@ -1621,14 +1578,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int lineLength = line.blocks.Count;
-        line.frontColumn0LaneIndices = new int[lineLength];
-        line.frontColumn1LaneIndices = new int[lineLength];
-        line.backColumn0LaneIndices = new int[lineLength];
-        line.backColumn1LaneIndices = new int[lineLength];
-        line.withinColumn0PathLengths = new float[lineLength];
-        line.withinColumn1PathLengths = new float[lineLength];
-        line.nextColumn0PathLengths = new float[lineLength];
-        line.nextColumn1PathLengths = new float[lineLength];
+        line.frontLaneIndices = new int[lineLength];
+        line.backLaneIndices = new int[lineLength];
+        line.withinPathLengths = new float[lineLength];
+        line.nextPathLengths = new float[lineLength];
 
         for (int i = 0; i < lineLength; i++)
         {
@@ -1637,14 +1590,10 @@ public partial class TerrainGenerator : MonoBehaviour
             if (block == null
                 || !block.TryGetStraightConveyorLineMotionData(
                     nextBlock,
-                    out line.frontColumn0LaneIndices[i],
-                    out line.frontColumn1LaneIndices[i],
-                    out line.backColumn0LaneIndices[i],
-                    out line.backColumn1LaneIndices[i],
-                    out line.withinColumn0PathLengths[i],
-                    out line.withinColumn1PathLengths[i],
-                    out line.nextColumn0PathLengths[i],
-                    out line.nextColumn1PathLengths[i]))
+                    out line.frontLaneIndices[i],
+                    out line.backLaneIndices[i],
+                    out line.withinPathLengths[i],
+                    out line.nextPathLengths[i]))
             {
                 return false;
             }

@@ -275,6 +275,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int MaxConveyorsPerRequest = 100;
     private const int ConveyorLineFillSearchLimit = 4096;
     private const int RequestTimeoutMilliseconds = 5000;
+    private const int MaxRequestsPerFrame = 4;
+    private const float StatusWorldStatsRefreshInterval = 1f;
 
     private static readonly Vector2Int[] ConveyorLineCardinalDirections =
     {
@@ -296,6 +298,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private int fpsSampleFrames;
     private float currentFps;
     private float currentFrameMs;
+    private float cachedStatusWorldStatsTime = float.NegativeInfinity;
+    private int cachedInstalledObjectTotal;
+    private int cachedConveyorItemTotal;
+    private string cachedInstallationTypeCounts = "-";
+    private SaveManager cachedSaveManager;
+    private PlayerCamera cachedPlayerCamera;
     private volatile bool stopRequested;
 
     public void Configure(int listenPort)
@@ -343,46 +351,52 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     {
         UpdateFrameStats();
 
-        while (TryDequeueRequest(out ToolRequest request))
+        int processedCount = 0;
+        while (processedCount < MaxRequestsPerFrame && TryDequeueRequest(out ToolRequest request))
         {
-            switch (request.Command)
-            {
-                case ToolCommand.Ping:
-                    request.Result = ToolResult.Ping();
-                    break;
-                case ToolCommand.Status:
-                    request.Result = GetStatusResult();
-                    break;
-                case ToolCommand.SetDebugToggle:
-                    request.Result = SetDebugToggle(request.DebugToggleName, request.DebugToggleValue);
-                    break;
-                case ToolCommand.SetCameraSizeRange:
-                    request.Result = SetCameraSizeRange(request.CameraMinSize, request.CameraMaxSize);
-                    break;
-                case ToolCommand.SetSeed:
-                    request.Result = SetTerrainSeed(request.SeedValue);
-                    break;
-                case ToolCommand.CreateConveyorLine:
-                    request.Result = CreateConveyorLine(request.ItemId, request.Count);
-                    break;
-                case ToolCommand.SaveSlot:
-                    request.Result = SaveSlot(request.SlotIndex);
-                    break;
-                case ToolCommand.LoadSlot:
-                    request.Result = LoadSlot(request.SlotIndex);
-                    break;
-                case ToolCommand.ResetMap:
-                    request.Result = ResetMap(request.SlotIndex, request.RandomizeSeed);
-                    break;
-                case ToolCommand.ListSaveSlots:
-                    request.Result = GetSaveSlotsResult();
-                    break;
-                default:
-                    request.Result = GiveItems(request.ItemId, request.Count);
-                    break;
-            }
-
+            ProcessRequest(request);
             request.Completion.Set();
+            processedCount++;
+        }
+    }
+
+    private void ProcessRequest(ToolRequest request)
+    {
+        switch (request.Command)
+        {
+            case ToolCommand.Ping:
+                request.Result = ToolResult.Ping();
+                break;
+            case ToolCommand.Status:
+                request.Result = GetStatusResult();
+                break;
+            case ToolCommand.SetDebugToggle:
+                request.Result = SetDebugToggle(request.DebugToggleName, request.DebugToggleValue);
+                break;
+            case ToolCommand.SetCameraSizeRange:
+                request.Result = SetCameraSizeRange(request.CameraMinSize, request.CameraMaxSize);
+                break;
+            case ToolCommand.SetSeed:
+                request.Result = SetTerrainSeed(request.SeedValue);
+                break;
+            case ToolCommand.CreateConveyorLine:
+                request.Result = CreateConveyorLine(request.ItemId, request.Count);
+                break;
+            case ToolCommand.SaveSlot:
+                request.Result = SaveSlot(request.SlotIndex);
+                break;
+            case ToolCommand.LoadSlot:
+                request.Result = LoadSlot(request.SlotIndex);
+                break;
+            case ToolCommand.ResetMap:
+                request.Result = ResetMap(request.SlotIndex, request.RandomizeSeed);
+                break;
+            case ToolCommand.ListSaveSlots:
+                request.Result = GetSaveSlotsResult();
+                break;
+            default:
+                request.Result = GiveItems(request.ItemId, request.Count);
+                break;
         }
     }
 
@@ -840,8 +854,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
         bool currentShowBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
         string extraTokens = BuildStatusExtraTokens(
-            FindObjectOfType<SaveManager>(),
-            FindObjectOfType<PlayerCamera>(),
+            ResolveSaveManager(),
+            ResolvePlayerCamera(),
             TerrainGenerator.ResolveActive());
         return ToolResult.Status(
             fps,
@@ -857,7 +871,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private ToolResult GetSaveSlotsResult()
     {
-        SaveManager saveManager = FindObjectOfType<SaveManager>();
+        SaveManager saveManager = ResolveSaveManager();
         if (saveManager == null)
         {
             return ToolResult.Error(0, 0, "save manager not found", BuildEmptySaveSlotsExtraTokens());
@@ -876,7 +890,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private ToolResult SaveSlot(int slotIndex)
     {
-        SaveManager saveManager = FindObjectOfType<SaveManager>();
+        SaveManager saveManager = ResolveSaveManager();
         if (saveManager == null)
         {
             return ToolResult.Error(0, 0, "save manager not found", BuildEmptySaveSlotsExtraTokens());
@@ -892,7 +906,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private ToolResult LoadSlot(int slotIndex)
     {
-        SaveManager saveManager = FindObjectOfType<SaveManager>();
+        SaveManager saveManager = ResolveSaveManager();
         if (saveManager == null)
         {
             return ToolResult.Error(0, 0, "save manager not found", BuildEmptySaveSlotsExtraTokens());
@@ -915,7 +929,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private ToolResult ResetMap(int slotIndex, bool randomizeSeed)
     {
-        SaveManager saveManager = FindObjectOfType<SaveManager>();
+        SaveManager saveManager = ResolveSaveManager();
         if (saveManager == null)
         {
             return ToolResult.Error(0, 0, "save manager not found", BuildEmptySaveSlotsExtraTokens());
@@ -1036,22 +1050,61 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return builder.ToString();
     }
 
+    private SaveManager ResolveSaveManager()
+    {
+        if (cachedSaveManager != null)
+        {
+            return cachedSaveManager;
+        }
+
+        cachedSaveManager = FindObjectOfType<SaveManager>();
+        return cachedSaveManager;
+    }
+
+    private PlayerCamera ResolvePlayerCamera()
+    {
+        if (cachedPlayerCamera != null)
+        {
+            return cachedPlayerCamera;
+        }
+
+        cachedPlayerCamera = FindObjectOfType<PlayerCamera>();
+        return cachedPlayerCamera;
+    }
+
     private void CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts)
     {
-        installedObjectTotal = 0;
-        conveyorItemTotal = 0;
-        installationTypeCounts = "-";
+        float now = Time.unscaledTime;
+        if (now - cachedStatusWorldStatsTime < StatusWorldStatsRefreshInterval)
+        {
+            installedObjectTotal = cachedInstalledObjectTotal;
+            conveyorItemTotal = cachedConveyorItemTotal;
+            installationTypeCounts = cachedInstallationTypeCounts;
+            return;
+        }
 
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain == null)
         {
             installationCountsByItemId.Clear();
+            cachedInstalledObjectTotal = 0;
+            cachedConveyorItemTotal = 0;
+            cachedInstallationTypeCounts = "-";
+            cachedStatusWorldStatsTime = now;
+            installedObjectTotal = cachedInstalledObjectTotal;
+            conveyorItemTotal = cachedConveyorItemTotal;
+            installationTypeCounts = cachedInstallationTypeCounts;
             return;
         }
 
-        installedObjectTotal = terrain.GetInstallationItemCounts(installationCountsByItemId);
-        conveyorItemTotal = terrain.GetLoadedConveyorItemCount();
-        installationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
+        cachedInstalledObjectTotal = terrain.GetInstallationItemCounts(installationCountsByItemId);
+        cachedConveyorItemTotal = terrain.GetLoadedConveyorItemCount();
+        cachedInstallationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
+        cachedStatusWorldStatsTime = now;
+
+        installedObjectTotal = cachedInstalledObjectTotal;
+        conveyorItemTotal = cachedConveyorItemTotal;
+        installationTypeCounts = cachedInstallationTypeCounts;
     }
 
     private string BuildInstallationTypeCountToken(Dictionary<int, int> countsByItemId)
@@ -2153,7 +2206,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private ToolResult SetCameraSizeRange(float minimumSize, float maximumSize)
     {
-        PlayerCamera playerCamera = FindObjectOfType<PlayerCamera>();
+        PlayerCamera playerCamera = ResolvePlayerCamera();
         if (playerCamera == null)
         {
             return ToolResult.Error(0, 0, "player camera not found");

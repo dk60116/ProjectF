@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: IronPlate
   id: 10
   mapObject: {fileID: 0}
-  portableMesh: {fileID: 4300000, guid: 9a8bb8e5ff0031f4f8cc2bc49d230edc, type: 2}
+  portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
   portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
   icon: {fileID: 21300000, guid: f03f9c3cb97d43241ad3e1ac5fdac2c0, type: 3}
   interactionButtonList: []

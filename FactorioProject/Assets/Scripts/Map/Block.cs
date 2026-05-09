@@ -11,6 +11,8 @@ public class Block : BaseObject
     private const int ConveyorStackStateSentinel = -1000000002;
     private const float InputAreaCenterVerticalSpacing = 0.05f;
     private const int ConveyorStackLaneLimit = ConveyorCellItemUnit;
+    private const int ConveyorSingleLineFrontLaneIndex = 0;
+    private const int ConveyorSingleLineBackLaneIndex = 2;
     private const float ConveyorLaneHeight = 0.2f;
     private const float ConveyorLaneSettleEpsilon = 0.01f;
     private const float ConveyorCycleReadyDistance = 0.12f;
@@ -113,10 +115,8 @@ public class Block : BaseObject
     private bool conveyorSuccessorCacheDirty = true;
     private bool conveyorLaneLayoutCacheDirty = true;
     private bool cachedConveyorLaneLayoutValid;
-    private int cachedFrontColumn0LaneIndex = -1;
-    private int cachedFrontColumn1LaneIndex = -1;
-    private int cachedBackColumn0LaneIndex = -1;
-    private int cachedBackColumn1LaneIndex = -1;
+    private int cachedFrontLaneIndex = -1;
+    private int cachedBackLaneIndex = -1;
     private readonly bool[] conveyorLaneBlockedSleepStates = new bool[ConveyorStackLaneLimit];
     private readonly bool[] conveyorLaneCycleBlockedSleepStates = new bool[ConveyorStackLaneLimit];
     private readonly bool[] conveyorLaneSleepAwakeDarkTintStates = new bool[ConveyorStackLaneLimit];
@@ -493,10 +493,8 @@ public class Block : BaseObject
     private void InvalidateConveyorLaneLayoutCache()
     {
         cachedConveyorLaneLayoutValid = false;
-        cachedFrontColumn0LaneIndex = -1;
-        cachedFrontColumn1LaneIndex = -1;
-        cachedBackColumn0LaneIndex = -1;
-        cachedBackColumn1LaneIndex = -1;
+        cachedFrontLaneIndex = -1;
+        cachedBackLaneIndex = -1;
         conveyorLaneLayoutCacheDirty = true;
         InvalidateConveyorSuccessorCache();
         InvalidateConveyorSlotDotPathCache();
@@ -1425,7 +1423,7 @@ public class Block : BaseObject
         int laneCount = GetConveyorLaneCount();
         for (int i = 0; i < laneCount; i++)
         {
-            if (!HasConveyorItemAtLane(i))
+            if (IsValidConveyorLaneIndex(i) && !HasConveyorItemAtLane(i))
             {
                 capacity++;
             }
@@ -1993,8 +1991,7 @@ public class Block : BaseObject
 
         if (objectId < 0
             || !IsConveyorStackingEnabled()
-            || laneIndex < 0
-            || laneIndex >= GetConveyorLaneCount()
+            || !IsValidConveyorLaneIndex(laneIndex)
             || HasConveyorItemAtLane(laneIndex))
         {
             return false;
@@ -2322,7 +2319,7 @@ public class Block : BaseObject
                         continue;
                     }
 
-                    TrySetConveyorObjectAtLane(laneIndex, laneItemId, out _);
+                    TrySetConveyorObjectAtLaneOrSingleLineFallback(laneIndex, laneItemId, out _);
                 }
 
                 continue;
@@ -2411,14 +2408,35 @@ public class Block : BaseObject
                 ConveyorItemLaneSaveState state = states[i];
                 if (state == null
                     || state.itemId < 0
-                    || state.laneIndex < 0
-                    || state.laneIndex >= laneCount)
+                    || state.laneIndex < 0)
                 {
                     continue;
                 }
 
-                if (!TrySetConveyorObjectAtLane(state.laneIndex, state.itemId, out PortableObject portableObject))
+                int targetLaneIndex = state.laneIndex;
+                if (!IsValidConveyorLaneIndex(targetLaneIndex)
+                    && (!TryNormalizeConveyorLaneIndex(targetLaneIndex, out targetLaneIndex)
+                        || !IsValidConveyorLaneIndex(targetLaneIndex)))
                 {
+                    continue;
+                }
+
+                if (!TrySetConveyorObjectAtLane(targetLaneIndex, state.itemId, out PortableObject portableObject))
+                {
+                    int fallbackLaneIndex = targetLaneIndex == ConveyorSingleLineFrontLaneIndex
+                        ? ConveyorSingleLineBackLaneIndex
+                        : ConveyorSingleLineFrontLaneIndex;
+                    if (!TrySetConveyorObjectAtLane(fallbackLaneIndex, state.itemId, out portableObject))
+                    {
+                        continue;
+                    }
+
+                    targetLaneIndex = fallbackLaneIndex;
+                }
+
+                if (targetLaneIndex != state.laneIndex)
+                {
+                    portableObject?.SetWorldPosition(GetConveyorLaneWorldPosition(targetLaneIndex));
                     continue;
                 }
 
@@ -2784,26 +2802,20 @@ public class Block : BaseObject
             && !IsCornerConveyor()
             && ShouldUseVirtualConveyorItemRendering()
             && !HasMaterializedConveyorItems()
-            && TryGetConveyorLaneLayout(out _, out _, out _, out _);
+            && TryGetConveyorLaneLayout(out _, out _);
     }
 
     public bool TryGetStraightConveyorLineLaneIndices(
-        out int frontColumn0LaneIndex,
-        out int frontColumn1LaneIndex,
-        out int backColumn0LaneIndex,
-        out int backColumn1LaneIndex)
+        out int frontLaneIndex,
+        out int backLaneIndex)
     {
-        frontColumn0LaneIndex = -1;
-        frontColumn1LaneIndex = -1;
-        backColumn0LaneIndex = -1;
-        backColumn1LaneIndex = -1;
+        frontLaneIndex = -1;
+        backLaneIndex = -1;
         return IsConveyorStackingEnabled()
             && !IsCornerConveyor()
             && TryGetConveyorLaneLayout(
-                out frontColumn0LaneIndex,
-                out frontColumn1LaneIndex,
-                out backColumn0LaneIndex,
-                out backColumn1LaneIndex);
+                out frontLaneIndex,
+                out backLaneIndex);
     }
 
     public bool HasStraightConveyorDataItemAtLane(int laneIndex)
@@ -2923,43 +2935,28 @@ public class Block : BaseObject
 
     public bool TryGetStraightConveyorLineMotionData(
         Block nextLineBlock,
-        out int frontColumn0LaneIndex,
-        out int frontColumn1LaneIndex,
-        out int backColumn0LaneIndex,
-        out int backColumn1LaneIndex,
-        out float withinColumn0PathLength,
-        out float withinColumn1PathLength,
-        out float nextColumn0PathLength,
-        out float nextColumn1PathLength)
+        out int frontLaneIndex,
+        out int backLaneIndex,
+        out float withinPathLength,
+        out float nextPathLength)
     {
-        frontColumn0LaneIndex = -1;
-        frontColumn1LaneIndex = -1;
-        backColumn0LaneIndex = -1;
-        backColumn1LaneIndex = -1;
-        withinColumn0PathLength = 0f;
-        withinColumn1PathLength = 0f;
-        nextColumn0PathLength = 0f;
-        nextColumn1PathLength = 0f;
+        frontLaneIndex = -1;
+        backLaneIndex = -1;
+        withinPathLength = 0f;
+        nextPathLength = 0f;
 
         if (!CanUseStraightConveyorLineSimulationStructureOnly()
             || !TryGetStraightConveyorLineLaneIndices(
-                out frontColumn0LaneIndex,
-                out frontColumn1LaneIndex,
-                out backColumn0LaneIndex,
-                out backColumn1LaneIndex))
+                out frontLaneIndex,
+                out backLaneIndex))
         {
             return false;
         }
 
-        withinColumn0PathLength = GetConveyorPathSegmentLength(
-            backColumn0LaneIndex,
+        withinPathLength = GetConveyorPathSegmentLength(
+            backLaneIndex,
             this,
-            frontColumn0LaneIndex,
-            false);
-        withinColumn1PathLength = GetConveyorPathSegmentLength(
-            backColumn1LaneIndex,
-            this,
-            frontColumn1LaneIndex,
+            frontLaneIndex,
             false);
 
         if (nextLineBlock == null)
@@ -2969,22 +2966,15 @@ public class Block : BaseObject
 
         if (!nextLineBlock.TryGetStraightConveyorLineLaneIndices(
                 out _,
-                out _,
-                out int nextBackColumn0LaneIndex,
-                out int nextBackColumn1LaneIndex))
+                out int nextBackLaneIndex))
         {
             return false;
         }
 
-        nextColumn0PathLength = GetConveyorPathSegmentLength(
-            frontColumn0LaneIndex,
+        nextPathLength = GetConveyorPathSegmentLength(
+            frontLaneIndex,
             nextLineBlock,
-            nextBackColumn0LaneIndex,
-            false);
-        nextColumn1PathLength = GetConveyorPathSegmentLength(
-            frontColumn1LaneIndex,
-            nextLineBlock,
-            nextBackColumn1LaneIndex,
+            nextBackLaneIndex,
             false);
         return true;
     }
@@ -3054,7 +3044,8 @@ public class Block : BaseObject
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
-            if (laneIndex < conveyorItemMotionStates.Count
+            if (IsValidConveyorLaneIndex(laneIndex)
+                && laneIndex < conveyorItemMotionStates.Count
                 && conveyorItemMotionStates[laneIndex].active)
             {
                 advancedAny |= TryAdvanceVirtualConveyorLaneMotion(laneIndex, conveyorSpeed, deltaTime);
@@ -3386,6 +3377,11 @@ public class Block : BaseObject
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
+            if (!IsValidConveyorLaneIndex(laneIndex))
+            {
+                continue;
+            }
+
             Vector3 worldPosition = EvaluateAnimatedConveyorSlotDotWorldPosition(laneIndex);
             worldPosition.y += ConveyorSlotDotVerticalOffset;
             terrainGenerator.AddConveyorSlotDotInstance(worldPosition);
@@ -4085,6 +4081,8 @@ public class Block : BaseObject
         {
             InvalidateConveyorLaneLayoutCache();
         }
+
+        NormalizeInactiveConveyorLanes();
     }
 
     public void RefreshConveyorSlotDotVisuals()
@@ -4229,6 +4227,11 @@ public class Block : BaseObject
         int laneCount = Mathf.Min(GetConveyorLaneCount(), conveyorSlotDots.Count);
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
+            if (!IsValidConveyorLaneIndex(laneIndex))
+            {
+                continue;
+            }
+
             Transform dot = conveyorSlotDots[laneIndex];
             if (dot == null || !dot.gameObject.activeSelf)
             {
@@ -4349,7 +4352,7 @@ public class Block : BaseObject
         phaseOffset = 0f;
         conveyorSlotDotSegments.Clear();
 
-        if (laneIndex < 0 || laneIndex >= GetConveyorLaneCount())
+        if (!IsValidConveyorLaneIndex(laneIndex))
         {
             return false;
         }
@@ -5182,14 +5185,46 @@ public class Block : BaseObject
         return Mathf.Min(ConveyorStackLaneLimit, floorObjects != null ? floorObjects.Count : 0);
     }
 
-    private bool IsValidConveyorLaneIndex(int laneIndex)
+    private static bool IsActiveConveyorLaneIndex(int laneIndex)
     {
-        return laneIndex >= 0 && laneIndex < conveyorItemIds.Count;
+        return laneIndex == ConveyorSingleLineFrontLaneIndex
+            || laneIndex == ConveyorSingleLineBackLaneIndex;
     }
 
-    private int GetConveyorItemIdAtLane(int laneIndex)
+    private static bool TryNormalizeConveyorLaneIndex(int laneIndex, out int normalizedLaneIndex)
     {
-        if (!IsValidConveyorLaneIndex(laneIndex))
+        switch (laneIndex)
+        {
+            case 0:
+            case 1:
+                normalizedLaneIndex = ConveyorSingleLineFrontLaneIndex;
+                return true;
+            case 2:
+            case 3:
+                normalizedLaneIndex = ConveyorSingleLineBackLaneIndex;
+                return true;
+            default:
+                normalizedLaneIndex = -1;
+                return false;
+        }
+    }
+
+    private bool IsConveyorStorageLaneIndex(int laneIndex)
+    {
+        return laneIndex >= 0
+            && laneIndex < conveyorItemIds.Count
+            && laneIndex < conveyorStack.Count;
+    }
+
+    private bool IsValidConveyorLaneIndex(int laneIndex)
+    {
+        return IsActiveConveyorLaneIndex(laneIndex)
+            && IsConveyorStorageLaneIndex(laneIndex);
+    }
+
+    private int GetConveyorStoredItemIdAtLane(int laneIndex)
+    {
+        if (!IsConveyorStorageLaneIndex(laneIndex))
         {
             return -1;
         }
@@ -5202,6 +5237,21 @@ public class Block : BaseObject
 
         PortableObject portableObject = laneIndex < conveyorStack.Count ? conveyorStack[laneIndex] : null;
         return portableObject != null ? portableObject.ItemId : -1;
+    }
+
+    private bool HasConveyorStoredItemAtLane(int laneIndex)
+    {
+        return GetConveyorStoredItemIdAtLane(laneIndex) >= 0;
+    }
+
+    private int GetConveyorItemIdAtLane(int laneIndex)
+    {
+        if (!IsValidConveyorLaneIndex(laneIndex))
+        {
+            return -1;
+        }
+
+        return GetConveyorStoredItemIdAtLane(laneIndex);
     }
 
     private bool HasConveyorItemAtLane(int laneIndex)
@@ -5264,9 +5314,92 @@ public class Block : BaseObject
         TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
     }
 
-    private void ClearConveyorItemAtLane(int laneIndex)
+    private bool TryGetConveyorSingleLineMigrationTarget(int sourceLaneIndex, out int targetLaneIndex)
     {
-        if (!IsValidConveyorLaneIndex(laneIndex))
+        targetLaneIndex = -1;
+        if (!TryNormalizeConveyorLaneIndex(sourceLaneIndex, out int normalizedLaneIndex))
+        {
+            return false;
+        }
+
+        if (IsValidConveyorLaneIndex(normalizedLaneIndex) && !HasConveyorStoredItemAtLane(normalizedLaneIndex))
+        {
+            targetLaneIndex = normalizedLaneIndex;
+            return true;
+        }
+
+        int fallbackLaneIndex = normalizedLaneIndex == ConveyorSingleLineFrontLaneIndex
+            ? ConveyorSingleLineBackLaneIndex
+            : ConveyorSingleLineFrontLaneIndex;
+        if (IsValidConveyorLaneIndex(fallbackLaneIndex) && !HasConveyorStoredItemAtLane(fallbackLaneIndex))
+        {
+            targetLaneIndex = fallbackLaneIndex;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void NormalizeInactiveConveyorLanes()
+    {
+        bool changed = false;
+        for (int laneIndex = 0; laneIndex < conveyorStack.Count; laneIndex++)
+        {
+            if (IsActiveConveyorLaneIndex(laneIndex) || !HasConveyorStoredItemAtLane(laneIndex))
+            {
+                continue;
+            }
+
+            if (TryGetConveyorSingleLineMigrationTarget(laneIndex, out int targetLaneIndex))
+            {
+                MoveConveyorStoredItemToLane(laneIndex, targetLaneIndex);
+            }
+            else
+            {
+                PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
+                ClearConveyorStorageLaneRaw(laneIndex);
+                ReleaseFloorObject(portableObject);
+            }
+
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        MarkConveyorItemVisualDirty();
+        TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
+    }
+
+    private void MoveConveyorStoredItemToLane(int sourceLaneIndex, int targetLaneIndex)
+    {
+        if (!IsConveyorStorageLaneIndex(sourceLaneIndex) || !IsValidConveyorLaneIndex(targetLaneIndex))
+        {
+            return;
+        }
+
+        int itemId = GetConveyorStoredItemIdAtLane(sourceLaneIndex);
+        PortableObject portableObject = GetConveyorPortableObjectAtLane(sourceLaneIndex);
+        ConveyorPickupGateState pickupGateState = GetConveyorPickupGateStateAtLane(sourceLaneIndex);
+
+        ClearConveyorStorageLaneRaw(sourceLaneIndex);
+        conveyorItemIds[targetLaneIndex] = itemId;
+        conveyorStack[targetLaneIndex] = portableObject;
+        conveyorItemMoveFrames[targetLaneIndex] = -1;
+        conveyorItemMotionStates[targetLaneIndex] = default;
+        conveyorItemPickupGateStates[targetLaneIndex] = pickupGateState;
+        conveyorItemMovementHoldUntilTimes[targetLaneIndex] = 0f;
+        ClearConveyorLaneMovementHold(targetLaneIndex);
+        ClearConveyorLaneBlockedSleep(targetLaneIndex);
+        ClearConveyorLaneCycleBlockedSleep(targetLaneIndex);
+        portableObject?.SetSleepAwakeSleeping(IsConveyorItemSleepAwakeSleeping(targetLaneIndex));
+    }
+
+    private void ClearConveyorStorageLaneRaw(int laneIndex)
+    {
+        if (!IsConveyorStorageLaneIndex(laneIndex))
         {
             return;
         }
@@ -5291,7 +5424,16 @@ public class Block : BaseObject
         {
             conveyorLaneSleepAwakeDarkTintStates[laneIndex] = false;
         }
+    }
 
+    private void ClearConveyorItemAtLane(int laneIndex)
+    {
+        if (!IsConveyorStorageLaneIndex(laneIndex))
+        {
+            return;
+        }
+
+        ClearConveyorStorageLaneRaw(laneIndex);
         MarkConveyorItemVisualDirty();
         TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
     }
@@ -5735,16 +5877,14 @@ public class Block : BaseObject
         bool movedAny = false;
         if (IsCornerConveyor())
         {
-            movedAny |= TryMoveConveyorLane(0, out _, out _, true);
-            movedAny |= TryMoveConveyorLane(1, out _, out _, true);
+            movedAny |= TryMoveConveyorLane(ConveyorSingleLineFrontLaneIndex, out _, out _, true);
             if (TryGetConveyorCornerLaneCandidates(
                     out int outerSourceLaneIndex,
-                    out int outerDestinationLaneIndex,
-                    out int innerSourceLaneIndex,
-                    out int innerDestinationLaneIndex))
+                    out _,
+                    out _,
+                    out _))
             {
                 movedAny |= TryMoveConveyorLane(outerSourceLaneIndex, out _, out _, true);
-                movedAny |= TryMoveConveyorLane(innerSourceLaneIndex, out _, out _, true);
             }
 
             AdvanceStartedCornerConveyorMotionStates(conveyorSpeed, deltaTime);
@@ -5754,17 +5894,15 @@ public class Block : BaseObject
             return;
         }
 
-        if (!TryGetConveyorLaneLayout(out int frontColumn0LaneIndex, out int frontColumn1LaneIndex, out int backColumn0LaneIndex, out int backColumn1LaneIndex))
+        if (!TryGetConveyorLaneLayout(out int frontLaneIndex, out int backLaneIndex))
         {
             UpdateConveyorBlockedRetry(false);
             RefreshConveyorActivityRegistration();
             return;
         }
 
-        movedAny |= TryMoveConveyorLane(frontColumn0LaneIndex);
-        movedAny |= TryMoveConveyorLane(frontColumn1LaneIndex);
-        movedAny |= TryMoveConveyorLane(backColumn0LaneIndex);
-        movedAny |= TryMoveConveyorLane(backColumn1LaneIndex);
+        movedAny |= TryMoveConveyorLane(frontLaneIndex);
+        movedAny |= TryMoveConveyorLane(backLaneIndex);
         AdvanceStartedLinearConveyorMotionStates(conveyorSpeed, deltaTime);
         UpdateConveyorBlockedRetry(movedAny);
         RefreshConveyorActivityRegistration();
@@ -5855,7 +5993,7 @@ public class Block : BaseObject
     {
         for (int i = 0; i < conveyorItemMotionStates.Count; i++)
         {
-            if (conveyorItemMotionStates[i].active)
+            if (IsValidConveyorLaneIndex(i) && conveyorItemMotionStates[i].active)
             {
                 return true;
             }
@@ -5925,7 +6063,8 @@ public class Block : BaseObject
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
-            if (GetConveyorPortableObjectAtLane(laneIndex) != null)
+            if (IsValidConveyorLaneIndex(laneIndex)
+                && GetConveyorPortableObjectAtLane(laneIndex) != null)
             {
                 return true;
             }
@@ -6256,6 +6395,11 @@ public class Block : BaseObject
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
+            if (!IsValidConveyorLaneIndex(laneIndex))
+            {
+                continue;
+            }
+
             PortableObject portableObject = conveyorStack[laneIndex];
             if (portableObject == null)
             {
@@ -7096,6 +7240,27 @@ public class Block : BaseObject
         return true;
     }
 
+    private bool TrySetConveyorObjectAtLaneOrSingleLineFallback(int laneIndex, int objectId, out PortableObject targetPortableObject)
+    {
+        if (TrySetConveyorObjectAtLane(laneIndex, objectId, out targetPortableObject))
+        {
+            return true;
+        }
+
+        if (TryNormalizeConveyorLaneIndex(laneIndex, out int normalizedLaneIndex)
+            && TrySetConveyorObjectAtLane(normalizedLaneIndex, objectId, out targetPortableObject))
+        {
+            return true;
+        }
+
+        if (TrySetConveyorObjectAtLane(ConveyorSingleLineBackLaneIndex, objectId, out targetPortableObject))
+        {
+            return true;
+        }
+
+        return TrySetConveyorObjectAtLane(ConveyorSingleLineFrontLaneIndex, objectId, out targetPortableObject);
+    }
+
     private bool TryGetUnloadedConveyorHandoffContext(
         int sourceLaneIndex,
         out TerrainGenerator terrainGenerator,
@@ -7127,28 +7292,23 @@ public class Block : BaseObject
         columnOrdinal = -1;
         if (IsCornerConveyor())
         {
-            return (sourceLaneIndex == 0 || sourceLaneIndex == 1)
-                && TryGetConveyorLaneColumnOrdinal(sourceLaneIndex, out columnOrdinal);
-        }
+            if (sourceLaneIndex != ConveyorSingleLineFrontLaneIndex)
+            {
+                return false;
+            }
 
-        if (!TryGetConveyorLaneLayout(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out _,
-                out _))
-        {
-            return false;
-        }
-
-        if (sourceLaneIndex == frontColumn0LaneIndex)
-        {
             columnOrdinal = 0;
             return true;
         }
 
-        if (sourceLaneIndex == frontColumn1LaneIndex)
+        if (!TryGetConveyorLaneLayout(out int frontLaneIndex, out _))
         {
-            columnOrdinal = 1;
+            return false;
+        }
+
+        if (sourceLaneIndex == frontLaneIndex)
+        {
+            columnOrdinal = 0;
             return true;
         }
 
@@ -8026,6 +8186,11 @@ public class Block : BaseObject
 
         if (sourceLaneIndex == outerSourceLaneIndex && destinationLaneIndex == outerDestinationLaneIndex)
         {
+            if (innerSourceLaneIndex < 0 || innerDestinationLaneIndex < 0)
+            {
+                return false;
+            }
+
             pairedSourceLaneIndex = innerSourceLaneIndex;
             pairedDestinationLaneIndex = innerDestinationLaneIndex;
             return true;
@@ -8033,6 +8198,11 @@ public class Block : BaseObject
 
         if (sourceLaneIndex == innerSourceLaneIndex && destinationLaneIndex == innerDestinationLaneIndex)
         {
+            if (outerSourceLaneIndex < 0 || outerDestinationLaneIndex < 0)
+            {
+                return false;
+            }
+
             pairedSourceLaneIndex = outerSourceLaneIndex;
             pairedDestinationLaneIndex = outerDestinationLaneIndex;
             return true;
@@ -8136,7 +8306,7 @@ public class Block : BaseObject
         useCornerMotion = false;
 
         CleanupConveyorStack();
-        if (destinationLaneIndex < 0 || destinationLaneIndex >= GetConveyorLaneCount())
+        if (!IsValidConveyorLaneIndex(destinationLaneIndex))
         {
             return false;
         }
@@ -8171,26 +8341,15 @@ public class Block : BaseObject
             return TryGetUpstreamConveyorPredecessor(destinationLaneIndex, out sourceBlock, out sourceLaneIndex);
         }
 
-        if (!TryGetConveyorLaneLayout(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out int backColumn0LaneIndex,
-                out int backColumn1LaneIndex))
+        if (!TryGetConveyorLaneLayout(out int frontLaneIndex, out int backLaneIndex))
         {
             return false;
         }
 
-        if (destinationLaneIndex == frontColumn0LaneIndex)
+        if (destinationLaneIndex == frontLaneIndex)
         {
             sourceBlock = this;
-            sourceLaneIndex = backColumn0LaneIndex;
-            return true;
-        }
-
-        if (destinationLaneIndex == frontColumn1LaneIndex)
-        {
-            sourceBlock = this;
-            sourceLaneIndex = backColumn1LaneIndex;
+            sourceLaneIndex = backLaneIndex;
             return true;
         }
 
@@ -8361,12 +8520,12 @@ public class Block : BaseObject
             return false;
         }
 
-        if (!TryGetConveyorLaneLayout(out int frontColumn0LaneIndex, out int frontColumn1LaneIndex, out int backColumn0LaneIndex, out int backColumn1LaneIndex))
+        if (!TryGetConveyorLaneLayout(out int frontLaneIndex, out int backLaneIndex))
         {
             return false;
         }
 
-        if (sourceLaneIndex == frontColumn0LaneIndex || sourceLaneIndex == frontColumn1LaneIndex)
+        if (sourceLaneIndex == frontLaneIndex)
         {
             if (!TryGetNextConveyorBlock(out destinationBlock))
             {
@@ -8380,17 +8539,10 @@ public class Block : BaseObject
                 out destinationLaneIndex);
         }
 
-        if (sourceLaneIndex == backColumn0LaneIndex)
+        if (sourceLaneIndex == backLaneIndex)
         {
             destinationBlock = this;
-            destinationLaneIndex = frontColumn0LaneIndex;
-            return true;
-        }
-
-        if (sourceLaneIndex == backColumn1LaneIndex)
-        {
-            destinationBlock = this;
-            destinationLaneIndex = frontColumn1LaneIndex;
+            destinationLaneIndex = frontLaneIndex;
             return true;
         }
 
@@ -8472,22 +8624,14 @@ public class Block : BaseObject
             return TryGetBestCornerConveyorReceiveLaneIndex(referenceWorldPosition, out bestLaneIndex);
         }
 
-        if (!TryGetPreferredConveyorColumn(referenceWorldPosition, out int preferredColumn))
+        if (!TryGetConveyorLaneLayout(out _, out int backLaneIndex))
         {
             return false;
         }
 
-        if (!TryGetConveyorLaneLayout(out _, out _, out int backColumn0LaneIndex, out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        return TryGetBestConveyorLaneIndexFromColumn(
-            referenceWorldPosition,
-            backColumn0LaneIndex,
-            backColumn1LaneIndex,
-            preferredColumn,
-            out bestLaneIndex);
+        float bestDistanceSqr = float.MaxValue;
+        TryConsiderBestConveyorLane(referenceWorldPosition, backLaneIndex, true, ref bestLaneIndex, ref bestDistanceSqr);
+        return bestLaneIndex >= 0;
     }
 
     private bool TryGetPreferredConveyorReceiveLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
@@ -8498,22 +8642,14 @@ public class Block : BaseObject
             return TryGetPreferredCornerConveyorReceiveLaneIndex(referenceWorldPosition, out bestLaneIndex);
         }
 
-        if (!TryGetPreferredConveyorColumn(referenceWorldPosition, out int preferredColumn))
+        if (!TryGetConveyorLaneLayout(out _, out int backLaneIndex))
         {
             return false;
         }
 
-        if (!TryGetConveyorLaneLayout(out _, out _, out int backColumn0LaneIndex, out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        return TryGetPreferredConveyorLaneIndexFromColumn(
-            referenceWorldPosition,
-            backColumn0LaneIndex,
-            backColumn1LaneIndex,
-            preferredColumn,
-            out bestLaneIndex);
+        float bestDistanceSqr = float.MaxValue;
+        TryConsiderBestConveyorLane(referenceWorldPosition, backLaneIndex, false, ref bestLaneIndex, ref bestDistanceSqr);
+        return bestLaneIndex >= 0;
     }
 
     private static bool TryGetConveyorHandoffReceiveLaneIndex(
@@ -8538,12 +8674,7 @@ public class Block : BaseObject
             return TryGetPreferredCornerConveyorReceiveLaneIndex(handoffWorldPosition, out laneIndex);
         }
 
-        if (!TryGetPreferredConveyorColumn(handoffWorldPosition, out int preferredColumn))
-        {
-            return false;
-        }
-
-        return TryGetConveyorLaneIndexForRowAndColumn(0, preferredColumn, out laneIndex)
+        return TryGetConveyorLaneLayout(out _, out laneIndex)
             && IsValidConveyorLaneIndex(laneIndex);
     }
 
@@ -8583,100 +8714,6 @@ public class Block : BaseObject
         bestLaneIndex = laneIndex;
     }
 
-    private bool TryGetBestConveyorLaneIndexFromColumn(Vector3 referenceWorldPosition, int firstCandidateLaneIndex, int secondCandidateLaneIndex, int preferredColumn, out int bestLaneIndex)
-    {
-        bestLaneIndex = -1;
-        if (!TryGetConveyorLaneLayout(out int frontColumn0LaneIndex, out int frontColumn1LaneIndex, out int backColumn0LaneIndex, out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        int preferredFrontLaneIndex = preferredColumn == 0 ? frontColumn0LaneIndex : frontColumn1LaneIndex;
-        int preferredBackLaneIndex = preferredColumn == 0 ? backColumn0LaneIndex : backColumn1LaneIndex;
-
-        float bestDistanceSqr = float.MaxValue;
-        TryConsiderPreferredConveyorLane(referenceWorldPosition, firstCandidateLaneIndex, preferredFrontLaneIndex, preferredBackLaneIndex, true, ref bestLaneIndex, ref bestDistanceSqr);
-        TryConsiderPreferredConveyorLane(referenceWorldPosition, secondCandidateLaneIndex, preferredFrontLaneIndex, preferredBackLaneIndex, true, ref bestLaneIndex, ref bestDistanceSqr);
-
-        return bestLaneIndex >= 0;
-    }
-
-    private bool TryGetPreferredConveyorLaneIndexFromColumn(Vector3 referenceWorldPosition, int firstCandidateLaneIndex, int secondCandidateLaneIndex, int preferredColumn, out int bestLaneIndex)
-    {
-        bestLaneIndex = -1;
-        if (!TryGetConveyorLaneLayout(out int frontColumn0LaneIndex, out int frontColumn1LaneIndex, out int backColumn0LaneIndex, out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        int preferredFrontLaneIndex = preferredColumn == 0 ? frontColumn0LaneIndex : frontColumn1LaneIndex;
-        int preferredBackLaneIndex = preferredColumn == 0 ? backColumn0LaneIndex : backColumn1LaneIndex;
-
-        float bestDistanceSqr = float.MaxValue;
-        TryConsiderPreferredConveyorLane(referenceWorldPosition, firstCandidateLaneIndex, preferredFrontLaneIndex, preferredBackLaneIndex, false, ref bestLaneIndex, ref bestDistanceSqr);
-        TryConsiderPreferredConveyorLane(referenceWorldPosition, secondCandidateLaneIndex, preferredFrontLaneIndex, preferredBackLaneIndex, false, ref bestLaneIndex, ref bestDistanceSqr);
-
-        return bestLaneIndex >= 0;
-    }
-
-    private void TryConsiderPreferredConveyorLane(
-        Vector3 referenceWorldPosition,
-        int laneIndex,
-        int preferredFrontLaneIndex,
-        int preferredBackLaneIndex,
-        bool requireEmpty,
-        ref int bestLaneIndex,
-        ref float bestDistanceSqr)
-    {
-        if ((laneIndex != preferredFrontLaneIndex && laneIndex != preferredBackLaneIndex)
-            || !IsValidConveyorLaneIndex(laneIndex)
-            || (requireEmpty && HasConveyorItemAtLane(laneIndex)))
-        {
-            return;
-        }
-
-        Vector3 offset = GetConveyorLaneWorldPosition(laneIndex) - referenceWorldPosition;
-        offset.y = 0f;
-        float distanceSqr = offset.sqrMagnitude;
-        if (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr)
-        {
-            return;
-        }
-
-        bestDistanceSqr = distanceSqr;
-        bestLaneIndex = laneIndex;
-    }
-
-    private bool TryGetPreferredConveyorColumn(Vector3 referenceWorldPosition, out int preferredColumn)
-    {
-        preferredColumn = -1;
-        Vector3 localReferencePosition = transform.InverseTransformPoint(referenceWorldPosition);
-        if (!TryGetConveyorLocalAxes(out _, out Vector2 localRightAxis))
-        {
-            preferredColumn = localReferencePosition.x <= 0f ? 0 : 1;
-            return true;
-        }
-
-        Vector2 flatReferencePosition = new Vector2(localReferencePosition.x, localReferencePosition.z);
-        preferredColumn = Vector2.Dot(flatReferencePosition, localRightAxis) <= 0f ? 0 : 1;
-        return true;
-    }
-
-    private static int GetConveyorLaneColumn(int laneIndex)
-    {
-        switch (laneIndex)
-        {
-            case 0:
-            case 2:
-                return 0;
-            case 1:
-            case 3:
-                return 1;
-            default:
-                return -1;
-        }
-    }
-
     private bool TryGetConveyorLocalAxes(out Vector2 localFlowAxis, out Vector2 localRightAxis)
     {
         localFlowAxis = Vector2.zero;
@@ -8699,214 +8736,35 @@ public class Block : BaseObject
     }
 
     private bool TryGetConveyorLaneLayout(
-        out int frontColumn0LaneIndex,
-        out int frontColumn1LaneIndex,
-        out int backColumn0LaneIndex,
-        out int backColumn1LaneIndex)
+        out int frontLaneIndex,
+        out int backLaneIndex)
     {
         if (conveyorLaneLayoutCacheDirty)
         {
             RebuildConveyorLaneLayoutCache();
         }
 
-        frontColumn0LaneIndex = cachedFrontColumn0LaneIndex;
-        frontColumn1LaneIndex = cachedFrontColumn1LaneIndex;
-        backColumn0LaneIndex = cachedBackColumn0LaneIndex;
-        backColumn1LaneIndex = cachedBackColumn1LaneIndex;
+        frontLaneIndex = cachedFrontLaneIndex;
+        backLaneIndex = cachedBackLaneIndex;
         return cachedConveyorLaneLayoutValid;
     }
 
     private void RebuildConveyorLaneLayoutCache()
     {
-        cachedFrontColumn0LaneIndex = -1;
-        cachedFrontColumn1LaneIndex = -1;
-        cachedBackColumn0LaneIndex = -1;
-        cachedBackColumn1LaneIndex = -1;
+        cachedFrontLaneIndex = -1;
+        cachedBackLaneIndex = -1;
         cachedConveyorLaneLayoutValid = false;
         conveyorLaneLayoutCacheDirty = false;
 
-        if (IsCornerConveyor())
+        if (!IsValidConveyorLaneIndex(ConveyorSingleLineFrontLaneIndex)
+            || !IsValidConveyorLaneIndex(ConveyorSingleLineBackLaneIndex))
         {
-            cachedFrontColumn0LaneIndex = 0;
-            cachedFrontColumn1LaneIndex = 1;
-            cachedBackColumn0LaneIndex = 2;
-            cachedBackColumn1LaneIndex = 3;
-            cachedConveyorLaneLayoutValid = conveyorStack.Count >= 4;
             return;
         }
 
-        int laneCount = GetConveyorLaneCount();
-        if (laneCount < 4 || !TryGetConveyorLocalAxes(out Vector2 localFlowAxis, out Vector2 localRightAxis))
-        {
-            if (laneCount >= 4)
-            {
-                cachedFrontColumn0LaneIndex = 0;
-                cachedFrontColumn1LaneIndex = 1;
-                cachedBackColumn0LaneIndex = 2;
-                cachedBackColumn1LaneIndex = 3;
-                cachedConveyorLaneLayoutValid = true;
-            }
-
-            return;
-        }
-
-        List<(int laneIndex, float forwardDot, float rightDot)> lanes = new List<(int, float, float)>(laneCount);
-        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
-        {
-            Vector3 localOffset3 = GetConveyorLaneLocalOffset(laneIndex);
-            Vector2 localOffset = new Vector2(localOffset3.x, localOffset3.z);
-            lanes.Add((
-                laneIndex,
-                Vector2.Dot(localOffset, localFlowAxis),
-                Vector2.Dot(localOffset, localRightAxis)));
-        }
-
-        lanes.Sort((left, right) => right.forwardDot.CompareTo(left.forwardDot));
-        List<(int laneIndex, float forwardDot, float rightDot)> frontLanes = new List<(int, float, float)> { lanes[0], lanes[1] };
-        List<(int laneIndex, float forwardDot, float rightDot)> backLanes = new List<(int, float, float)> { lanes[2], lanes[3] };
-        frontLanes.Sort((left, right) => left.rightDot.CompareTo(right.rightDot));
-        backLanes.Sort((left, right) => left.rightDot.CompareTo(right.rightDot));
-
-        cachedFrontColumn0LaneIndex = frontLanes[0].laneIndex;
-        cachedFrontColumn1LaneIndex = frontLanes[1].laneIndex;
-        cachedBackColumn0LaneIndex = backLanes[0].laneIndex;
-        cachedBackColumn1LaneIndex = backLanes[1].laneIndex;
+        cachedFrontLaneIndex = ConveyorSingleLineFrontLaneIndex;
+        cachedBackLaneIndex = ConveyorSingleLineBackLaneIndex;
         cachedConveyorLaneLayoutValid = true;
-    }
-
-    private bool TryGetConveyorLaneAnchor(int laneIndex, out Transform laneAnchor)
-    {
-        laneAnchor = null;
-        if (laneIndex < 0 || floorObjects == null || laneIndex >= floorObjects.Count)
-        {
-            return false;
-        }
-
-        laneAnchor = floorObjects[laneIndex];
-        return laneAnchor != null;
-    }
-
-    private bool TryGetConveyorLaneRowOrdinal(int laneIndex, out int rowOrdinal)
-    {
-        rowOrdinal = -1;
-        if (!TryGetConveyorLaneLayout(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out int backColumn0LaneIndex,
-                out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        if (laneIndex == backColumn0LaneIndex || laneIndex == backColumn1LaneIndex)
-        {
-            rowOrdinal = 0;
-            return true;
-        }
-
-        if (laneIndex == frontColumn0LaneIndex || laneIndex == frontColumn1LaneIndex)
-        {
-            rowOrdinal = 1;
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryGetConveyorLaneColumnOrdinal(int laneIndex, out int columnOrdinal)
-    {
-        columnOrdinal = -1;
-        if (!TryGetConveyorLaneLayout(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out int backColumn0LaneIndex,
-                out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        if (laneIndex == backColumn0LaneIndex || laneIndex == frontColumn0LaneIndex)
-        {
-            columnOrdinal = 0;
-            return true;
-        }
-
-        if (laneIndex == backColumn1LaneIndex || laneIndex == frontColumn1LaneIndex)
-        {
-            columnOrdinal = 1;
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryGetConveyorLaneIndexForRowAndColumn(int rowOrdinal, int columnOrdinal, out int laneIndex)
-    {
-        laneIndex = -1;
-        if (!TryGetConveyorLaneLayout(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out int backColumn0LaneIndex,
-                out int backColumn1LaneIndex))
-        {
-            return false;
-        }
-
-        if (rowOrdinal == 0)
-        {
-            if (columnOrdinal == 0)
-            {
-                laneIndex = backColumn0LaneIndex;
-                return true;
-            }
-
-            if (columnOrdinal == 1)
-            {
-                laneIndex = backColumn1LaneIndex;
-                return true;
-            }
-        }
-
-        if (rowOrdinal == 1)
-        {
-            if (columnOrdinal == 0)
-            {
-                laneIndex = frontColumn0LaneIndex;
-                return true;
-            }
-
-            if (columnOrdinal == 1)
-            {
-                laneIndex = frontColumn1LaneIndex;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private Vector3 GetConveyorRowWorldPosition(int rowOrdinal)
-    {
-        if (!TryGetConveyorLaneLayout(
-                out int frontColumn0LaneIndex,
-                out int frontColumn1LaneIndex,
-                out int backColumn0LaneIndex,
-                out int backColumn1LaneIndex))
-        {
-            return transform.position;
-        }
-
-        if (rowOrdinal == 0)
-        {
-            return (GetConveyorLaneWorldPosition(backColumn0LaneIndex) + GetConveyorLaneWorldPosition(backColumn1LaneIndex)) * 0.5f;
-        }
-
-        if (rowOrdinal == 1)
-        {
-            return (GetConveyorLaneWorldPosition(frontColumn0LaneIndex) + GetConveyorLaneWorldPosition(frontColumn1LaneIndex)) * 0.5f;
-        }
-
-        return transform.position;
     }
 
     private bool IsCornerConveyor()
@@ -8933,16 +8791,22 @@ public class Block : BaseObject
     private Vector3 GetConveyorLaneLocalOffset(int laneIndex)
     {
         float halfExtent = GetConveyorLaneHalfExtent();
+        Vector2 localFlowAxis = Vector2.down;
+        if (!TryGetConveyorLocalAxes(out localFlowAxis, out _))
+        {
+            localFlowAxis = Vector2.down;
+        }
+
+        Vector2 frontOffset = localFlowAxis.normalized * halfExtent;
+        Vector2 backOffset = -frontOffset;
         switch (laneIndex)
         {
             case 0:
-                return new Vector3(-halfExtent, 0f, -halfExtent);
             case 1:
-                return new Vector3(halfExtent, 0f, -halfExtent);
+                return new Vector3(frontOffset.x, 0f, frontOffset.y);
             case 2:
-                return new Vector3(-halfExtent, 0f, halfExtent);
             case 3:
-                return new Vector3(halfExtent, 0f, halfExtent);
+                return new Vector3(backOffset.x, 0f, backOffset.y);
             default:
                 return Vector3.zero;
         }
@@ -8990,7 +8854,7 @@ public class Block : BaseObject
             return true;
         }
 
-        if (laneIndex == innerSourceLaneIndex)
+        if (innerSourceLaneIndex >= 0 && laneIndex == innerSourceLaneIndex)
         {
             sourceLaneIndex = innerSourceLaneIndex;
             destinationLaneIndex = innerDestinationLaneIndex;
@@ -9006,7 +8870,7 @@ public class Block : BaseObject
             return true;
         }
 
-        if (laneIndex == innerDestinationLaneIndex)
+        if (innerDestinationLaneIndex >= 0 && laneIndex == innerDestinationLaneIndex)
         {
             sourceLaneIndex = innerSourceLaneIndex;
             destinationLaneIndex = innerDestinationLaneIndex;
@@ -9369,20 +9233,8 @@ public class Block : BaseObject
             return false;
         }
 
-        bool isCounterClockwiseTurn = IsCounterClockwiseTurn(localInputDirection, localOutputDirection);
-        if (isCounterClockwiseTurn)
-        {
-            outerSourceLaneIndex = 3;
-            outerDestinationLaneIndex = 0;
-            innerSourceLaneIndex = 2;
-            innerDestinationLaneIndex = 1;
-            return true;
-        }
-
-        outerSourceLaneIndex = 2;
-        outerDestinationLaneIndex = 0;
-        innerSourceLaneIndex = 3;
-        innerDestinationLaneIndex = 1;
+        outerSourceLaneIndex = ConveyorSingleLineBackLaneIndex;
+        outerDestinationLaneIndex = ConveyorSingleLineFrontLaneIndex;
         return true;
     }
 
@@ -9786,6 +9638,17 @@ public class Block : BaseObject
             return false;
         }
 
+        if (sourceLaneIndex == ConveyorSingleLineBackLaneIndex
+            && destinationLaneIndex == ConveyorSingleLineFrontLaneIndex)
+        {
+            return TryGetConveyorCornerCenterlineArcParameters(
+                applyInset,
+                out center,
+                out startAngleRadians,
+                out deltaAngleRadians,
+                out radius);
+        }
+
         if (!TryIsOuterCornerTransition(sourceLaneIndex, destinationLaneIndex, localInputDirection, localOutputDirection, out bool isOuterLane))
         {
             return false;
@@ -9904,60 +9767,25 @@ public class Block : BaseObject
 
     private bool TryGetBestCornerConveyorReceiveLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
-        bestLaneIndex = -1;
-        float lane2DistanceSqr = float.MaxValue;
-        float lane3DistanceSqr = float.MaxValue;
-
-        if (IsValidConveyorLaneIndex(2))
+        bestLaneIndex = ConveyorSingleLineBackLaneIndex;
+        if (!IsValidConveyorLaneIndex(bestLaneIndex))
         {
-            Vector3 lane2Offset = GetConveyorLaneWorldPosition(2) - referenceWorldPosition;
-            lane2Offset.y = 0f;
-            lane2DistanceSqr = lane2Offset.sqrMagnitude;
-        }
-
-        if (IsValidConveyorLaneIndex(3))
-        {
-            Vector3 lane3Offset = GetConveyorLaneWorldPosition(3) - referenceWorldPosition;
-            lane3Offset.y = 0f;
-            lane3DistanceSqr = lane3Offset.sqrMagnitude;
-        }
-
-        int preferredLaneIndex = lane2DistanceSqr <= lane3DistanceSqr ? 2 : 3;
-        if (!IsValidConveyorLaneIndex(preferredLaneIndex))
-        {
+            bestLaneIndex = -1;
             return false;
         }
 
-        if (HasConveyorItemAtLane(preferredLaneIndex))
+        if (HasConveyorItemAtLane(bestLaneIndex))
         {
+            bestLaneIndex = -1;
             return false;
         }
 
-        bestLaneIndex = preferredLaneIndex;
         return true;
     }
 
     private bool TryGetPreferredCornerConveyorReceiveLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
-        bestLaneIndex = -1;
-        float lane2DistanceSqr = float.MaxValue;
-        float lane3DistanceSqr = float.MaxValue;
-
-        if (IsValidConveyorLaneIndex(2))
-        {
-            Vector3 lane2Offset = GetConveyorLaneWorldPosition(2) - referenceWorldPosition;
-            lane2Offset.y = 0f;
-            lane2DistanceSqr = lane2Offset.sqrMagnitude;
-        }
-
-        if (IsValidConveyorLaneIndex(3))
-        {
-            Vector3 lane3Offset = GetConveyorLaneWorldPosition(3) - referenceWorldPosition;
-            lane3Offset.y = 0f;
-            lane3DistanceSqr = lane3Offset.sqrMagnitude;
-        }
-
-        bestLaneIndex = lane2DistanceSqr <= lane3DistanceSqr ? 2 : 3;
+        bestLaneIndex = ConveyorSingleLineBackLaneIndex;
         return IsValidConveyorLaneIndex(bestLaneIndex);
     }
 

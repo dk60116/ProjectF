@@ -161,6 +161,8 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<Vector2Int, LiveInstallationRecord> liveInstallationStates = new Dictionary<Vector2Int, LiveInstallationRecord>();
     private readonly Dictionary<Vector2Int, Vector2Int> liveInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
+    private readonly Dictionary<int, int> savedInstallationCountsByItemId = new Dictionary<int, int>();
+    private int savedInstallationItemTotal;
     private VirtualObjectWorld virtualObjectWorld;
 
     public void Save(Vector2Int worldCoordinate, Resource resource)
@@ -347,26 +349,15 @@ public partial class BlockStateStore : MonoBehaviour
     {
         countsByItemId?.Clear();
 
-        int total = 0;
-        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        if (countsByItemId != null)
         {
-            InstallationSaveState state = pair.Value;
-            if (state == null || state.itemId < 0)
+            foreach (KeyValuePair<int, int> pair in savedInstallationCountsByItemId)
             {
-                continue;
+                countsByItemId[pair.Key] = pair.Value;
             }
-
-            total++;
-            if (countsByItemId == null)
-            {
-                continue;
-            }
-
-            countsByItemId.TryGetValue(state.itemId, out int currentCount);
-            countsByItemId[state.itemId] = currentCount + 1;
         }
 
-        return total;
+        return savedInstallationItemTotal;
     }
 
     public bool TryGetLiveInstallation(Vector2Int anchorCoordinate, out InstallationObject installationObject, out InstallationSaveState state)
@@ -465,6 +456,7 @@ public partial class BlockStateStore : MonoBehaviour
     {
         if (savedInstallationStates.TryGetValue(anchorCoordinate, out InstallationSaveState savedState))
         {
+            AdjustSavedInstallationCount(savedState, -1);
             UnregisterSavedCoordinateMappings(savedState);
             savedInstallationStates.Remove(anchorCoordinate);
         }
@@ -480,6 +472,8 @@ public partial class BlockStateStore : MonoBehaviour
         savedFloorObjectStates.Clear();
         savedConveyorItemStates.Clear();
         savedInstallationStates.Clear();
+        savedInstallationCountsByItemId.Clear();
+        savedInstallationItemTotal = 0;
         savedInstallationAnchorsByCoordinate.Clear();
         liveInstallationStates.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
@@ -701,12 +695,34 @@ public partial class BlockStateStore : MonoBehaviour
                 clonedState.lastBackgroundSimulationTicks = existingState.lastBackgroundSimulationTicks;
             }
 
+            AdjustSavedInstallationCount(existingState, -1);
             UnregisterSavedCoordinateMappings(existingState);
         }
 
         savedInstallationStates[clonedState.anchorCoordinate] = clonedState;
+        AdjustSavedInstallationCount(clonedState, 1);
         RegisterSavedCoordinateMappings(clonedState);
         ResolveVirtualObjectWorld()?.UpsertInstallation(clonedState);
+    }
+
+    private void AdjustSavedInstallationCount(InstallationSaveState state, int delta)
+    {
+        if (state == null || state.itemId < 0 || delta == 0)
+        {
+            return;
+        }
+
+        savedInstallationItemTotal = Mathf.Max(0, savedInstallationItemTotal + delta);
+        savedInstallationCountsByItemId.TryGetValue(state.itemId, out int currentCount);
+        int nextCount = currentCount + delta;
+        if (nextCount > 0)
+        {
+            savedInstallationCountsByItemId[state.itemId] = nextCount;
+        }
+        else
+        {
+            savedInstallationCountsByItemId.Remove(state.itemId);
+        }
     }
 
     private VirtualObjectWorld ResolveVirtualObjectWorld()

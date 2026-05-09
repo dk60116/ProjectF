@@ -102,14 +102,10 @@ public partial class TerrainGenerator : MonoBehaviour
         public bool isCycle;
         public bool simulationCacheValid;
         public readonly List<Block> blocks = new List<Block>();
-        public int[] frontColumn0LaneIndices = Array.Empty<int>();
-        public int[] frontColumn1LaneIndices = Array.Empty<int>();
-        public int[] backColumn0LaneIndices = Array.Empty<int>();
-        public int[] backColumn1LaneIndices = Array.Empty<int>();
-        public float[] withinColumn0PathLengths = Array.Empty<float>();
-        public float[] withinColumn1PathLengths = Array.Empty<float>();
-        public float[] nextColumn0PathLengths = Array.Empty<float>();
-        public float[] nextColumn1PathLengths = Array.Empty<float>();
+        public int[] frontLaneIndices = Array.Empty<int>();
+        public int[] backLaneIndices = Array.Empty<int>();
+        public float[] withinPathLengths = Array.Empty<float>();
+        public float[] nextPathLengths = Array.Empty<float>();
 
         public ConveyorLine(int id)
         {
@@ -858,6 +854,19 @@ public partial class TerrainGenerator : MonoBehaviour
     public int GetLoadedConveyorItemCount()
     {
         int count = 0;
+        if (Application.isPlaying)
+        {
+            foreach (Block block in conveyorItemVisualBlocks)
+            {
+                if (block != null && block.IsRuntimeConveyor)
+                {
+                    count += block.GetRuntimeConveyorItemCount();
+                }
+            }
+
+            return count;
+        }
+
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             Block block = pair.Value;

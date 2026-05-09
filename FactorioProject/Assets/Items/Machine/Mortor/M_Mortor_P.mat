@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: M_CooperPlate_P
+  m_Name: M_Mortor_P
   m_Shader: {fileID: 4800000, guid: 2e827c8c74aa43a084b5b71af6db2df4, type: 3}
   m_Parent: {fileID: 2100000, guid: 3b0daddd139b95644b250e8907de7236, type: 2}
   m_ModifiedSerializedProperties: 4
@@ -24,11 +24,10 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: 6e88670127e947644a7f03130c76ddc7, type: 3}
+        m_Texture: {fileID: 2800000, guid: a35ed62b1b2384642ad56bd5257b05ef, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats: []
-    m_Colors:
-    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    m_Colors: []
   m_BuildTextureStacks: []
