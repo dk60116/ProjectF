@@ -14,6 +14,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float MaxOreBodyScaleRatioLimit = 1f;
     private const float BackgroundConveyorSimulationInterval = 0.05f;
     private const int BackgroundConveyorSimulationPassesPerTick = 1;
+    private const float GeneratedSurfaceBaseInset = 0.0035f;
+    private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -426,6 +428,9 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(0f)]
     private float generatedSurfaceYOffset = 0.01f;
 
+    [SerializeField, Min(0f)]
+    private float waterSurfaceDepth = 0.18f;
+
     [SerializeField]
     private Vector2 startLakeRadiusRange = new Vector2(3f, 5f);
 
@@ -642,6 +647,7 @@ public partial class TerrainGenerator : MonoBehaviour
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
+        waterSurfaceDepth = Mathf.Max(0f, waterSurfaceDepth);
         NormalizeOreBodyScaleSettings();
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);

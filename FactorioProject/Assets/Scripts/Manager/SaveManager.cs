@@ -272,6 +272,11 @@ public class SaveManager : MonoBehaviour
 
         if (player != null && data.player != null && data.player.hasPlayer)
         {
+            player.ApplyTransformState(data.player);
+        }
+
+        if (player != null && data.player != null && data.player.hasPlayer)
+        {
             player.ApplyInventoryAndStatState(data.player);
         }
     }

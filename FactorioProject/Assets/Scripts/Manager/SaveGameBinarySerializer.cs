@@ -84,7 +84,7 @@ public static class SaveGameBinarySerializer
             savedAtUtcTicks = reader.ReadInt64(),
             terrain = ReadTerrain(reader, fileVersion),
             map = ReadMap(reader, fileVersion),
-            player = ReadPlayer(reader)
+            player = ReadPlayer(reader, fileVersion)
         };
 
         return data;
@@ -417,11 +417,12 @@ public static class SaveGameBinarySerializer
         WritePlayerStats(writer, player.stats);
         WriteList(writer, player.bagSlots, WritePlayerSlot);
         WriteList(writer, player.handSlots, WritePlayerSlot);
+        WriteList(writer, player.craftingQueue, WritePlayerCraftingQueueEntry);
     }
 
-    private static PlayerSaveData ReadPlayer(BinaryReader reader)
+    private static PlayerSaveData ReadPlayer(BinaryReader reader, int version)
     {
-        return new PlayerSaveData
+        PlayerSaveData player = new PlayerSaveData
         {
             hasPlayer = reader.ReadBoolean(),
             position = ReadVector3(reader),
@@ -431,6 +432,13 @@ public static class SaveGameBinarySerializer
             bagSlots = ReadList(reader, () => ReadPlayerSlot(reader)),
             handSlots = ReadList(reader, () => ReadPlayerSlot(reader))
         };
+
+        if (version >= 4)
+        {
+            player.craftingQueue = ReadList(reader, () => ReadPlayerCraftingQueueEntry(reader));
+        }
+
+        return player;
     }
 
     private static void WritePlayerStats(BinaryWriter writer, PlayerStatSaveData stats)
@@ -472,6 +480,46 @@ public static class SaveGameBinarySerializer
             itemId = reader.ReadInt32(),
             count = reader.ReadInt32(),
             capacity = reader.ReadInt32()
+        };
+    }
+
+    private static void WritePlayerCraftingQueueEntry(BinaryWriter writer, PlayerCraftingQueueEntrySaveData entry)
+    {
+        entry ??= new PlayerCraftingQueueEntrySaveData();
+        writer.Write(entry.itemId);
+        writer.Write(entry.outputCount);
+        writer.Write(entry.remainingOutputCount);
+        writer.Write(entry.remainingTime);
+        writer.Write(entry.duration);
+        WriteList(writer, entry.refundIngredients, WritePlayerCraftingIngredient);
+    }
+
+    private static PlayerCraftingQueueEntrySaveData ReadPlayerCraftingQueueEntry(BinaryReader reader)
+    {
+        return new PlayerCraftingQueueEntrySaveData
+        {
+            itemId = reader.ReadInt32(),
+            outputCount = reader.ReadInt32(),
+            remainingOutputCount = reader.ReadInt32(),
+            remainingTime = reader.ReadSingle(),
+            duration = reader.ReadSingle(),
+            refundIngredients = ReadList(reader, () => ReadPlayerCraftingIngredient(reader))
+        };
+    }
+
+    private static void WritePlayerCraftingIngredient(BinaryWriter writer, PlayerCraftingIngredientSaveData ingredient)
+    {
+        ingredient ??= new PlayerCraftingIngredientSaveData();
+        writer.Write(ingredient.itemId);
+        writer.Write(ingredient.count);
+    }
+
+    private static PlayerCraftingIngredientSaveData ReadPlayerCraftingIngredient(BinaryReader reader)
+    {
+        return new PlayerCraftingIngredientSaveData
+        {
+            itemId = reader.ReadInt32(),
+            count = reader.ReadInt32()
         };
     }
 

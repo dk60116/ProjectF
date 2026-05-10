@@ -325,8 +325,8 @@ public class Player : Character
         PlayerSaveData saveData = new PlayerSaveData
         {
             hasPlayer = true,
-            position = transform.position,
-            rotation = transform.rotation,
+            position = ResolveSavePosition(),
+            rotation = ResolveSaveRotation(),
             bagLevel = bagLevel,
             stats = new PlayerStatSaveData
             {
@@ -347,6 +347,7 @@ public class Player : Character
             handBag.CaptureSaveSlots(saveData.handSlots);
         }
 
+        ResolvePlayerHUD()?.CaptureCraftingQueueSaveState(saveData.craftingQueue);
         return saveData;
     }
 
@@ -363,17 +364,32 @@ public class Player : Character
             return;
         }
 
-        transform.SetPositionAndRotation(saveData.position, saveData.rotation);
         Rigidbody rigidbody = GetComponent<Rigidbody>();
         if (rigidbody != null)
         {
+            rigidbody.position = saveData.position;
+            rigidbody.rotation = saveData.rotation;
             rigidbody.velocity = Vector3.zero;
             rigidbody.angularVelocity = Vector3.zero;
         }
 
+        transform.SetPositionAndRotation(saveData.position, saveData.rotation);
+        Physics.SyncTransforms();
         StopImmediateActions();
         dropExitPending = false;
         hasLastDropTarget = false;
+    }
+
+    private Vector3 ResolveSavePosition()
+    {
+        Rigidbody rigidbody = GetComponent<Rigidbody>();
+        return rigidbody != null ? rigidbody.position : transform.position;
+    }
+
+    private Quaternion ResolveSaveRotation()
+    {
+        Rigidbody rigidbody = GetComponent<Rigidbody>();
+        return rigidbody != null ? rigidbody.rotation : transform.rotation;
     }
 
     public void ApplyInventoryAndStatState(PlayerSaveData saveData)
@@ -409,6 +425,24 @@ public class Player : Character
 
         UpdateCarryState();
         RefreshBagUI();
+        ResolvePlayerHUD()?.ApplyCraftingQueueSaveState(saveData.craftingQueue);
+    }
+
+    private PlayerHUD ResolvePlayerHUD()
+    {
+        if (GameManager.Instance != null
+            && GameManager.Instance.UIManager != null
+            && GameManager.Instance.UIManager.PlayerHUD != null)
+        {
+            return GameManager.Instance.UIManager.PlayerHUD;
+        }
+
+        if (UIManager.Instance != null && UIManager.Instance.PlayerHUD != null)
+        {
+            return UIManager.Instance.PlayerHUD;
+        }
+
+        return FindObjectOfType<PlayerHUD>(true);
     }
 
     private bool IsPickStateActive()

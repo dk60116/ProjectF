@@ -135,6 +135,7 @@ public partial class TerrainGenerator : MonoBehaviour
             biomeGrid = new TerrainBiome[gridSize * gridSize],
             blockedWaterGrid = new bool[gridSize * gridSize],
             generatedSurfaceYOffset = generatedSurfaceYOffset,
+            waterSurfaceDepth = waterSurfaceDepth,
             terrainBlendJitter = terrainBlendJitter,
             terrainSurfaceVertexJitter = terrainSurfaceVertexJitter,
             seed = seed
@@ -190,14 +191,42 @@ public partial class TerrainGenerator : MonoBehaviour
                     new Vector2(input.origin.x + center.x, input.origin.y + center.y),
                     weightBuffer);
 
+                if (ShouldSkipDominantBaseSurfaceForWaterEdgeFromSnapshot(input, p00, p10, p11, p01, weightBuffer))
+                {
+                    continue;
+                }
+
                 AppendContourPolygonAtHeightFromSnapshot(
                     chunkSurface,
                     input,
                     dominantBiome,
                     new List<Vector2> { p00, p10, p11, p01 },
-                    input.generatedSurfaceYOffset - 0.0035f);
+                    GetBiomeBaseSurfaceY(dominantBiome, input.generatedSurfaceYOffset, input.waterSurfaceDepth));
             }
         }
+    }
+
+    private static bool ShouldSkipDominantBaseSurfaceForWaterEdgeFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2 p00,
+        Vector2 p10,
+        Vector2 p11,
+        Vector2 p01,
+        float[] weightBuffer)
+    {
+        if (input == null)
+        {
+            return false;
+        }
+
+        bool water00 = GetBiomeScoreAtSampleFromSnapshot(input, new Vector2(input.origin.x + p00.x, input.origin.y + p00.y), TerrainBiome.Water, weightBuffer) > 0f;
+        bool water10 = GetBiomeScoreAtSampleFromSnapshot(input, new Vector2(input.origin.x + p10.x, input.origin.y + p10.y), TerrainBiome.Water, weightBuffer) > 0f;
+        bool water11 = GetBiomeScoreAtSampleFromSnapshot(input, new Vector2(input.origin.x + p11.x, input.origin.y + p11.y), TerrainBiome.Water, weightBuffer) > 0f;
+        bool water01 = GetBiomeScoreAtSampleFromSnapshot(input, new Vector2(input.origin.x + p01.x, input.origin.y + p01.y), TerrainBiome.Water, weightBuffer) > 0f;
+
+        return water00 != water10
+               || water10 != water11
+               || water11 != water01;
     }
 
     private static void AppendBiomeContourSurfaceFromSnapshot(
@@ -294,6 +323,18 @@ public partial class TerrainGenerator : MonoBehaviour
         Vector2 right = InterpolateContourPoint(p10, p11, s10, s11);
         Vector2 top = InterpolateContourPoint(p11, p01, s11, s01);
         Vector2 left = InterpolateContourPoint(p01, p00, s01, s00);
+        if (biome == TerrainBiome.Water)
+        {
+            AppendWaterContourWallsFromSnapshot(
+                chunkSurface,
+                input,
+                mask,
+                centerScore,
+                bottom,
+                right,
+                top,
+                left);
+        }
 
         if ((mask == 5 || mask == 10) && centerScore <= 0f)
         {
@@ -335,7 +376,7 @@ public partial class TerrainGenerator : MonoBehaviour
             input,
             biome,
             polygon,
-            input.generatedSurfaceYOffset + (GetBiomeMaterialIndex(biome) * 0.004f));
+            GetBiomeSurfaceY(biome, input.generatedSurfaceYOffset, input.waterSurfaceDepth));
     }
 
     private static void AppendContourPolygonAtHeightFromSnapshot(
@@ -367,6 +408,63 @@ public partial class TerrainGenerator : MonoBehaviour
             targetTriangles.Add(vertexStart + i + 1);
             targetTriangles.Add(vertexStart + i);
         }
+    }
+
+    private static void AppendWaterContourWallsFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        ChunkSurfaceWorkerInput input,
+        int mask,
+        float centerScore,
+        Vector2 bottom,
+        Vector2 right,
+        Vector2 top,
+        Vector2 left)
+    {
+        if (chunkSurface == null
+            || input == null
+            || input.waterSurfaceDepth <= 0f)
+        {
+            return;
+        }
+
+        float waterY = GetBiomeSurfaceY(TerrainBiome.Water, input.generatedSurfaceYOffset, input.waterSurfaceDepth);
+        float probeDistance = GetWaterWallProbeDistance(input.resolution);
+
+        void AppendSegment(Vector2 start, Vector2 end)
+        {
+            Vector2 edge = end - start;
+            if (edge.sqrMagnitude <= 0.000001f)
+            {
+                return;
+            }
+
+            Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
+            Vector2 midpoint = (start + end) * 0.5f;
+            Vector2 worldMidpoint = new Vector2(input.origin.x + midpoint.x, input.origin.y + midpoint.y);
+
+            if (!TryResolveWaterWallLandBiomeFromSnapshot(
+                    input,
+                    worldMidpoint,
+                    leftNormal,
+                    probeDistance,
+                    out TerrainBiome landBiome))
+            {
+                return;
+            }
+
+            float landY = GetBiomeSurfaceY(landBiome, input.generatedSurfaceYOffset, input.waterSurfaceDepth);
+            if (landY <= waterY + 0.0001f)
+            {
+                return;
+            }
+
+            float[] weightBuffer = new float[6];
+            Color startColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, start, weightBuffer);
+            Color endColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, end, weightBuffer);
+            AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
+        }
+
+        AppendWaterContourWallSegments(mask, centerScore, bottom, right, top, left, AppendSegment);
     }
 
     private static void AppendContourSafetyPatchesFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
@@ -664,11 +762,16 @@ public partial class TerrainGenerator : MonoBehaviour
                     new Vector2(origin.x + center.x, origin.y + center.y),
                     weightBuffer);
 
+                if (ShouldSkipDominantBaseSurfaceForWaterEdge(origin, p00, p10, p11, p01, weightBuffer))
+                {
+                    continue;
+                }
+
                 AppendContourPolygonAtHeight(
                     chunkSurface,
                     dominantBiome,
                     new List<Vector2> { p00, p10, p11, p01 },
-                    generatedSurfaceYOffset - 0.0035f);
+                    GetBiomeBaseSurfaceY(dominantBiome));
             }
 
             if (allowYield && ++rowsSinceYield >= surfaceRowBudget)
@@ -677,6 +780,24 @@ public partial class TerrainGenerator : MonoBehaviour
                 yield return null;
             }
         }
+    }
+
+    private bool ShouldSkipDominantBaseSurfaceForWaterEdge(
+        Vector2Int origin,
+        Vector2 p00,
+        Vector2 p10,
+        Vector2 p11,
+        Vector2 p01,
+        float[] weightBuffer)
+    {
+        bool water00 = GetBiomeScoreAtSample(new Vector2(origin.x + p00.x, origin.y + p00.y), TerrainBiome.Water, weightBuffer) > 0f;
+        bool water10 = GetBiomeScoreAtSample(new Vector2(origin.x + p10.x, origin.y + p10.y), TerrainBiome.Water, weightBuffer) > 0f;
+        bool water11 = GetBiomeScoreAtSample(new Vector2(origin.x + p11.x, origin.y + p11.y), TerrainBiome.Water, weightBuffer) > 0f;
+        bool water01 = GetBiomeScoreAtSample(new Vector2(origin.x + p01.x, origin.y + p01.y), TerrainBiome.Water, weightBuffer) > 0f;
+
+        return water00 != water10
+               || water10 != water11
+               || water11 != water01;
     }
 
     private IEnumerator AppendBiomeContourSurfaceRoutine(
@@ -782,6 +903,17 @@ public partial class TerrainGenerator : MonoBehaviour
         Vector2 right = InterpolateContourPoint(p10, p11, s10, s11);
         Vector2 top = InterpolateContourPoint(p11, p01, s11, s01);
         Vector2 left = InterpolateContourPoint(p01, p00, s01, s00);
+        if (biome == TerrainBiome.Water)
+        {
+            AppendWaterContourWalls(
+                chunkSurface,
+                mask,
+                centerScore,
+                bottom,
+                right,
+                top,
+                left);
+        }
 
         if ((mask == 5 || mask == 10) && centerScore <= 0f)
         {
@@ -849,7 +981,7 @@ public partial class TerrainGenerator : MonoBehaviour
             chunkSurface,
             biome,
             polygon,
-            generatedSurfaceYOffset + (GetBiomeMaterialIndex(biome) * 0.004f));
+            GetBiomeSurfaceY(biome));
     }
 
     private void AppendContourPolygonAtHeight(
@@ -879,6 +1011,61 @@ public partial class TerrainGenerator : MonoBehaviour
             targetTriangles.Add(vertexStart + i + 1);
             targetTriangles.Add(vertexStart + i);
         }
+    }
+
+    private void AppendWaterContourWalls(
+        ChunkSurfaceBuildData chunkSurface,
+        int mask,
+        float centerScore,
+        Vector2 bottom,
+        Vector2 right,
+        Vector2 top,
+        Vector2 left)
+    {
+        if (chunkSurface == null
+            || waterSurfaceDepth <= 0f)
+        {
+            return;
+        }
+
+        int resolution = Mathf.Max(2, terrainSurfaceSubdivisions);
+        float waterY = GetBiomeSurfaceY(TerrainBiome.Water);
+        float probeDistance = GetWaterWallProbeDistance(resolution);
+
+        void AppendSegment(Vector2 start, Vector2 end)
+        {
+            Vector2 edge = end - start;
+            if (edge.sqrMagnitude <= 0.000001f)
+            {
+                return;
+            }
+
+            Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
+            Vector2 midpoint = (start + end) * 0.5f;
+            Vector2 worldMidpoint = new Vector2(chunkSurface.origin.x + midpoint.x, chunkSurface.origin.y + midpoint.y);
+
+            if (!TryResolveWaterWallLandBiome(
+                    worldMidpoint,
+                    leftNormal,
+                    probeDistance,
+                    out TerrainBiome landBiome))
+            {
+                return;
+            }
+
+            float landY = GetBiomeSurfaceY(landBiome);
+            if (landY <= waterY + 0.0001f)
+            {
+                return;
+            }
+
+            float[] weightBuffer = chunkSurface.blendWeightBuffer;
+            Color startColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, start, weightBuffer);
+            Color endColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, end, weightBuffer);
+            AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
+        }
+
+        AppendWaterContourWallSegments(mask, centerScore, bottom, right, top, left, AppendSegment);
     }
 
     private IEnumerator AppendContourSafetyPatchesRoutine(
@@ -1098,6 +1285,248 @@ public partial class TerrainGenerator : MonoBehaviour
 
         float t = Mathf.Clamp01(startValue / delta);
         return Vector2.Lerp(start, end, t);
+    }
+
+    private static float GetWaterWallProbeDistance(int resolution)
+    {
+        return 0.35f / Mathf.Max(1, resolution);
+    }
+
+    private static void AppendWaterContourWallSegments(
+        int mask,
+        float centerScore,
+        Vector2 bottom,
+        Vector2 right,
+        Vector2 top,
+        Vector2 left,
+        Action<Vector2, Vector2> appendSegment)
+    {
+        if (appendSegment == null)
+        {
+            return;
+        }
+
+        switch (mask)
+        {
+            case 1:
+                appendSegment(bottom, left);
+                break;
+            case 2:
+                appendSegment(right, bottom);
+                break;
+            case 3:
+                appendSegment(right, left);
+                break;
+            case 4:
+                appendSegment(top, right);
+                break;
+            case 5:
+                if (centerScore <= 0f)
+                {
+                    appendSegment(bottom, left);
+                    appendSegment(top, right);
+                }
+                else
+                {
+                    appendSegment(bottom, right);
+                    appendSegment(top, left);
+                }
+                break;
+            case 6:
+                appendSegment(top, bottom);
+                break;
+            case 7:
+                appendSegment(top, left);
+                break;
+            case 8:
+                appendSegment(left, top);
+                break;
+            case 9:
+                appendSegment(bottom, top);
+                break;
+            case 10:
+                if (centerScore <= 0f)
+                {
+                    appendSegment(right, bottom);
+                    appendSegment(left, top);
+                }
+                else
+                {
+                    appendSegment(right, top);
+                    appendSegment(left, bottom);
+                }
+                break;
+            case 11:
+                appendSegment(right, top);
+                break;
+            case 12:
+                appendSegment(left, right);
+                break;
+            case 13:
+                appendSegment(bottom, right);
+                break;
+            case 14:
+                appendSegment(left, bottom);
+                break;
+        }
+    }
+
+    private static bool TryResolveWaterWallLandBiomeFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2 worldMidpoint,
+        Vector2 leftNormal,
+        float probeDistance,
+        out TerrainBiome landBiome)
+    {
+        landBiome = TerrainBiome.Sand;
+        if (input == null)
+        {
+            return false;
+        }
+
+        float normalizedProbeDistance = Mathf.Max(0.05f, probeDistance);
+        for (int i = 0; i < 4; i++)
+        {
+            float distance = Mathf.Min(0.6f, normalizedProbeDistance * (1 << i));
+            TerrainBiome leftBiome = GetTileBiomeFromSnapshot(input, GetWaterWallSampleCoordinate(worldMidpoint + (leftNormal * distance)));
+            TerrainBiome rightBiome = GetTileBiomeFromSnapshot(input, GetWaterWallSampleCoordinate(worldMidpoint - (leftNormal * distance)));
+            if (TryResolveWaterWallLandBiomeFromBiomes(leftBiome, rightBiome, out landBiome))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveWaterWallLandBiome(
+        Vector2 worldMidpoint,
+        Vector2 leftNormal,
+        float probeDistance,
+        out TerrainBiome landBiome)
+    {
+        landBiome = TerrainBiome.Sand;
+        float normalizedProbeDistance = Mathf.Max(0.05f, probeDistance);
+        for (int i = 0; i < 4; i++)
+        {
+            float distance = Mathf.Min(0.6f, normalizedProbeDistance * (1 << i));
+            TerrainBiome leftBiome = GetTileBiome(GetWaterWallSampleCoordinate(worldMidpoint + (leftNormal * distance)));
+            TerrainBiome rightBiome = GetTileBiome(GetWaterWallSampleCoordinate(worldMidpoint - (leftNormal * distance)));
+            if (TryResolveWaterWallLandBiomeFromBiomes(leftBiome, rightBiome, out landBiome))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Vector2Int GetWaterWallSampleCoordinate(Vector2 sampleWorldPosition)
+    {
+        return new Vector2Int(
+            Mathf.RoundToInt(sampleWorldPosition.x),
+            Mathf.RoundToInt(sampleWorldPosition.y));
+    }
+
+    private static bool TryResolveWaterWallLandBiomeFromBiomes(
+        TerrainBiome leftBiome,
+        TerrainBiome rightBiome,
+        out TerrainBiome landBiome)
+    {
+        bool leftIsWater = leftBiome == TerrainBiome.Water;
+        bool rightIsWater = rightBiome == TerrainBiome.Water;
+        if (leftIsWater == rightIsWater)
+        {
+            landBiome = TerrainBiome.Sand;
+            return false;
+        }
+
+        landBiome = !leftIsWater ? leftBiome : rightBiome;
+        if (landBiome == TerrainBiome.Water)
+        {
+            landBiome = TerrainBiome.Sand;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void AppendWaterWallQuad(
+        ChunkSurfaceBuildData chunkSurface,
+        TerrainBiome wallBiome,
+        Vector2 start,
+        Vector2 end,
+        float bottomY,
+        float topY,
+        Color startColor,
+        Color endColor)
+    {
+        if (chunkSurface == null)
+        {
+            return;
+        }
+
+        int vertexStart = chunkSurface.vertices.Count;
+        float height = Mathf.Max(0.001f, topY - bottomY);
+        float length = Mathf.Max(0.001f, Vector2.Distance(start, end));
+
+        for (int side = 0; side < 2; side++)
+        {
+            chunkSurface.vertices.Add(new Vector3(start.x, bottomY, start.y));
+            chunkSurface.vertices.Add(new Vector3(end.x, bottomY, end.y));
+            chunkSurface.vertices.Add(new Vector3(end.x, topY, end.y));
+            chunkSurface.vertices.Add(new Vector3(start.x, topY, start.y));
+
+            chunkSurface.uvs.Add(new Vector2(0f, 0f));
+            chunkSurface.uvs.Add(new Vector2(length, 0f));
+            chunkSurface.uvs.Add(new Vector2(length, height));
+            chunkSurface.uvs.Add(new Vector2(0f, height));
+
+            chunkSurface.colors.Add(startColor);
+            chunkSurface.colors.Add(endColor);
+            chunkSurface.colors.Add(endColor);
+            chunkSurface.colors.Add(startColor);
+        }
+
+        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(wallBiome)];
+        targetTriangles.Add(vertexStart + 0);
+        targetTriangles.Add(vertexStart + 2);
+        targetTriangles.Add(vertexStart + 1);
+        targetTriangles.Add(vertexStart + 0);
+        targetTriangles.Add(vertexStart + 3);
+        targetTriangles.Add(vertexStart + 2);
+
+        targetTriangles.Add(vertexStart + 4);
+        targetTriangles.Add(vertexStart + 5);
+        targetTriangles.Add(vertexStart + 6);
+        targetTriangles.Add(vertexStart + 4);
+        targetTriangles.Add(vertexStart + 6);
+        targetTriangles.Add(vertexStart + 7);
+    }
+
+    private float GetBiomeSurfaceY(TerrainBiome biome)
+    {
+        return GetBiomeSurfaceY(biome, generatedSurfaceYOffset, waterSurfaceDepth);
+    }
+
+    private float GetBiomeBaseSurfaceY(TerrainBiome biome)
+    {
+        return GetBiomeBaseSurfaceY(biome, generatedSurfaceYOffset, waterSurfaceDepth);
+    }
+
+    private static float GetBiomeSurfaceY(TerrainBiome biome, float surfaceYOffset, float waterDepth)
+    {
+        if (biome == TerrainBiome.Water)
+        {
+            return surfaceYOffset - Mathf.Max(0f, waterDepth);
+        }
+
+        return surfaceYOffset + (GetBiomeMaterialIndex(biome) * GeneratedSurfaceBiomeLayerStep);
+    }
+
+    private static float GetBiomeBaseSurfaceY(TerrainBiome biome, float surfaceYOffset, float waterDepth)
+    {
+        return GetBiomeSurfaceY(biome, surfaceYOffset, waterDepth) - GeneratedSurfaceBaseInset;
     }
 
     private Material[] GetGeneratedSurfaceMaterials()

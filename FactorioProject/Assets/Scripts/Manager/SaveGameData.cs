@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -93,6 +93,7 @@ public sealed class PlayerSaveData
     public PlayerStatSaveData stats = new PlayerStatSaveData();
     public List<PlayerInventorySlotSaveState> bagSlots = new List<PlayerInventorySlotSaveState>();
     public List<PlayerInventorySlotSaveState> handSlots = new List<PlayerInventorySlotSaveState>();
+    public List<PlayerCraftingQueueEntrySaveData> craftingQueue = new List<PlayerCraftingQueueEntrySaveData>();
 }
 
 [Serializable]
@@ -112,4 +113,22 @@ public sealed class PlayerInventorySlotSaveState
     public int itemId = -1;
     public int count;
     public int capacity;
+}
+
+[Serializable]
+public sealed class PlayerCraftingQueueEntrySaveData
+{
+    public int itemId = -1;
+    public int outputCount;
+    public int remainingOutputCount;
+    public float remainingTime;
+    public float duration;
+    public List<PlayerCraftingIngredientSaveData> refundIngredients = new List<PlayerCraftingIngredientSaveData>();
+}
+
+[Serializable]
+public sealed class PlayerCraftingIngredientSaveData
+{
+    public int itemId = -1;
+    public int count;
 }

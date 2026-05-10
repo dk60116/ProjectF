@@ -905,6 +905,7 @@ public partial class TerrainGenerator : MonoBehaviour
         public TerrainBiome[] biomeGrid;
         public bool[] blockedWaterGrid;
         public float generatedSurfaceYOffset;
+        public float waterSurfaceDepth;
         public float terrainBlendJitter;
         public float terrainSurfaceVertexJitter;
         public int seed;

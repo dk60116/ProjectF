@@ -2279,6 +2279,141 @@ public class PlayerHUD : BagSlot
         return true;
     }
 
+    public void CaptureCraftingQueueSaveState(List<PlayerCraftingQueueEntrySaveData> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        for (int i = 0; i < craftingQueue.Count; i++)
+        {
+            CraftingQueueEntry entry = craftingQueue[i];
+            if (entry == null || entry.itemId < 0 || entry.remainingOutputCount <= 0)
+            {
+                continue;
+            }
+
+            PlayerCraftingQueueEntrySaveData saveData = new PlayerCraftingQueueEntrySaveData
+            {
+                itemId = entry.itemId,
+                outputCount = Mathf.Max(1, entry.outputCount),
+                remainingOutputCount = Mathf.Max(0, entry.remainingOutputCount),
+                remainingTime = Mathf.Max(0f, entry.remainingTime),
+                duration = Mathf.Max(0.01f, entry.duration)
+            };
+
+            CopyCraftingRefundIngredients(entry.refundIngredients, saveData.refundIngredients);
+            results.Add(saveData);
+        }
+    }
+
+    public void ApplyCraftingQueueSaveState(IReadOnlyList<PlayerCraftingQueueEntrySaveData> savedEntries)
+    {
+        craftingQueue.Clear();
+        int maxQueueCount = craftingWaitingQueue != null && craftingWaitingQueue.Count > 0
+            ? craftingWaitingQueue.Count
+            : int.MaxValue;
+
+        if (savedEntries != null)
+        {
+            for (int i = 0; i < savedEntries.Count && craftingQueue.Count < maxQueueCount; i++)
+            {
+                PlayerCraftingQueueEntrySaveData savedEntry = savedEntries[i];
+                if (savedEntry == null || savedEntry.itemId < 0)
+                {
+                    continue;
+                }
+
+                int outputCount = Mathf.Max(1, savedEntry.outputCount);
+                int remainingOutputCount = savedEntry.remainingOutputCount > 0
+                    ? Mathf.Min(savedEntry.remainingOutputCount, outputCount)
+                    : outputCount;
+                if (remainingOutputCount <= 0)
+                {
+                    continue;
+                }
+
+                float duration = savedEntry.duration > 0.01f
+                    ? savedEntry.duration
+                    : GetCraftingDurationSeconds(savedEntry.itemId);
+                List<CraftingTreeRuntime.IngredientEntry> refundIngredients =
+                    BuildCraftingRefundIngredients(savedEntry.refundIngredients);
+                CraftingQueueEntry entry = new CraftingQueueEntry(
+                    savedEntry.itemId,
+                    outputCount,
+                    duration,
+                    refundIngredients)
+                {
+                    remainingOutputCount = remainingOutputCount,
+                    remainingTime = Mathf.Clamp(savedEntry.remainingTime, 0f, duration)
+                };
+
+                craftingQueue.Add(entry);
+            }
+        }
+
+        craftingQueueDirty = true;
+        RefreshCraftingQueueSlots(true);
+    }
+
+    private static void CopyCraftingRefundIngredients(
+        IReadOnlyList<CraftingTreeRuntime.IngredientEntry> source,
+        List<PlayerCraftingIngredientSaveData> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        if (source == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = source[i];
+            if (ingredient.itemId < 0 || ingredient.count <= 0)
+            {
+                continue;
+            }
+
+            results.Add(new PlayerCraftingIngredientSaveData
+            {
+                itemId = ingredient.itemId,
+                count = ingredient.count
+            });
+        }
+    }
+
+    private static List<CraftingTreeRuntime.IngredientEntry> BuildCraftingRefundIngredients(
+        IReadOnlyList<PlayerCraftingIngredientSaveData> source)
+    {
+        List<CraftingTreeRuntime.IngredientEntry> results = new List<CraftingTreeRuntime.IngredientEntry>();
+        if (source == null)
+        {
+            return results;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            PlayerCraftingIngredientSaveData ingredient = source[i];
+            if (ingredient == null || ingredient.itemId < 0 || ingredient.count <= 0)
+            {
+                continue;
+            }
+
+            results.Add(new CraftingTreeRuntime.IngredientEntry(
+                ingredient.itemId,
+                Mathf.Max(1, ingredient.count)));
+        }
+
+        return results;
+    }
+
     private static float GetCraftingDurationSeconds(int itemId)
     {
         ItemDefinition definition = GetItemDefinition(itemId);

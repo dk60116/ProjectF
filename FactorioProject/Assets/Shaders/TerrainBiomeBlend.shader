@@ -238,15 +238,30 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 return NormalizeTerrainWeights(normalizedWeights);
             }
 
-            half4 GetTerrainBlendWeights(float3 positionWS, half4 blendWeights)
+            float2 GetTerrainSurfaceUV(float3 positionWS, half3 normalWS, float tiling)
             {
-                float2 noiseUV = positionWS.xz * _NoiseScale;
+                half3 axisWeight = abs(normalWS);
+                float2 projectionUV = positionWS.xz;
+
+                if (axisWeight.y < axisWeight.x || axisWeight.y < axisWeight.z)
+                {
+                    projectionUV = axisWeight.x > axisWeight.z
+                        ? positionWS.zy
+                        : positionWS.xy;
+                }
+
+                return projectionUV * tiling;
+            }
+
+            half4 GetTerrainBlendWeights(float3 positionWS, half3 normalWS, half4 blendWeights)
+            {
+                float2 noiseUV = GetTerrainSurfaceUV(positionWS, normalWS, _NoiseScale);
                 return ApplyNoiseToWeights(blendWeights, noiseUV);
             }
 
-            half4 SampleBlendedBase(float3 positionWS, half4 weights)
+            half4 SampleBlendedBase(float3 positionWS, half3 normalWS, half4 weights)
             {
-                float2 uv = positionWS.xz * _TextureTiling;
+                float2 uv = GetTerrainSurfaceUV(positionWS, normalWS, _TextureTiling);
                 half4 sandSample = SAMPLE_TEXTURE2D(_SandMap, sampler_SandMap, uv) * _SandColor;
                 half4 dirtSample = SAMPLE_TEXTURE2D(_DirtMap, sampler_DirtMap, uv) * _DirtColor;
                 half4 grassSample = SAMPLE_TEXTURE2D(_GrassMap, sampler_GrassMap, uv) * _GrassColor;
@@ -265,9 +280,9 @@ Shader "ProjectF/Terrain/BiomeBlend"
 
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
-                half4 terrainWeights = GetTerrainBlendWeights(input.positionWS, input.blendWeights);
+                half4 terrainWeights = GetTerrainBlendWeights(input.positionWS, inputData.normalWS, input.blendWeights);
 
-                half4 baseSample = SampleBlendedBase(input.positionWS, terrainWeights);
+                half4 baseSample = SampleBlendedBase(input.positionWS, inputData.normalWS, terrainWeights);
                 Light mainLight = GetMainLight(inputData.shadowCoord);
 
                 half NdotL = saturate(dot(inputData.normalWS, mainLight.direction));
