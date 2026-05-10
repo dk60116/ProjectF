@@ -6,6 +6,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
 {
     private const int InputAreaCenterStackStateSentinel = -1000000001;
     private const int ConveyorStackStateSentinel = -1000000002;
+    private const int FloorStackStateSentinel = -1000000003;
 
     [SerializeField, Min(1)]
     private int maxCraftIterationsPerSimulation = 256;
@@ -30,6 +31,30 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             for (int i = 0; i < itemIds.Count; i++)
             {
                 int itemId = itemIds[i];
+                if (itemId == FloorStackStateSentinel)
+                {
+                    if (i + 1 >= itemIds.Count)
+                    {
+                        break;
+                    }
+
+                    int stackCount = Mathf.Max(0, itemIds[++i]);
+                    for (int stackIndex = 0; stackIndex < stackCount && i + 1 < itemIds.Count; stackIndex++)
+                    {
+                        int stackItemCount = Mathf.Max(0, itemIds[++i]);
+                        for (int objectIndex = 0; objectIndex < stackItemCount && i + 1 < itemIds.Count; objectIndex++)
+                        {
+                            int stackItemId = itemIds[++i];
+                            if (stackItemId >= 0)
+                            {
+                                inventory.floorItems.Add(stackItemId);
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
                 if (itemId == InputAreaCenterStackStateSentinel)
                 {
                     if (i + 1 >= itemIds.Count)

@@ -5,7 +5,6 @@ using UnityEngine;
 
 public class TerrainDataEditorWindow : EditorWindow
 {
-    private const float SidebarWidth = 280f;
     private const float TexturePreviewSize = 42f;
     private static readonly int TextureReferenceControlHash = "TerrainTextureReferenceField".GetHashCode();
     private static int activeTexturePickerControlId;
@@ -155,16 +154,14 @@ public class TerrainDataEditorWindow : EditorWindow
         "starterWaterExclusionRadius"
     };
 
-    private Vector2 generatorListScroll;
     private Vector2 detailScroll;
-    private string searchText = string.Empty;
     private int selectedGeneratorInstanceId;
 
     [MenuItem("Window/ProjectF/Terrain Editor")]
     public static void ShowWindow()
     {
         TerrainDataEditorWindow window = GetWindow<TerrainDataEditorWindow>("Terrain Editor");
-        window.minSize = new Vector2(860f, 520f);
+        window.minSize = new Vector2(620f, 520f);
         window.Show();
     }
 
@@ -184,10 +181,16 @@ public class TerrainDataEditorWindow : EditorWindow
         Repaint();
     }
 
+    private void OnSelectionChange()
+    {
+        EnsureSelection();
+        Repaint();
+    }
+
     private void OnGUI()
     {
         DrawBackground();
-        DrawGeneratorList();
+        EnsureSelection();
         DrawDetailPanel();
     }
 
@@ -196,83 +199,9 @@ public class TerrainDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(new Rect(0f, 0f, position.width, position.height), new Color(0.15f, 0.15f, 0.15f));
     }
 
-    private void DrawGeneratorList()
-    {
-        Rect sidebarRect = new Rect(0f, 0f, SidebarWidth, position.height);
-        EditorGUI.DrawRect(sidebarRect, new Color(0.12f, 0.12f, 0.12f));
-
-        GUILayout.BeginArea(sidebarRect);
-        GUILayout.Space(10f);
-        DrawSidebarToolbar();
-        DrawSearchField();
-        EditorGUILayout.LabelField("Terrain Generators", EditorStyles.boldLabel);
-
-        List<TerrainGenerator> generators = GetVisibleGenerators();
-        EnsureSelection(generators);
-
-        if (generators.Count == 0)
-        {
-            EditorGUILayout.HelpBox("씬에서 TerrainGenerator를 찾을 수 없습니다.", MessageType.Info);
-            GUILayout.EndArea();
-            return;
-        }
-
-        generatorListScroll = EditorGUILayout.BeginScrollView(generatorListScroll);
-        for (int i = 0; i < generators.Count; i++)
-        {
-            TerrainGenerator generator = generators[i];
-            if (generator == null)
-            {
-                continue;
-            }
-
-            int instanceId = generator.GetInstanceID();
-            bool isSelected = selectedGeneratorInstanceId == instanceId;
-            string sceneName = generator.gameObject.scene.IsValid() ? generator.gameObject.scene.name : "No Scene";
-            GUIContent content = new GUIContent($"{generator.name}  ({sceneName})");
-            Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
-            if (GUI.Toggle(rowRect, isSelected, content, "Button"))
-            {
-                selectedGeneratorInstanceId = instanceId;
-            }
-        }
-
-        EditorGUILayout.EndScrollView();
-        GUILayout.EndArea();
-    }
-
-    private void DrawSidebarToolbar()
-    {
-        EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("Refresh", GUILayout.Height(24f)))
-        {
-            EnsureSelection();
-            Repaint();
-        }
-
-        TerrainGenerator selectedGenerator = GetSelectedGenerator();
-        EditorGUI.BeginDisabledGroup(selectedGenerator == null);
-        if (GUILayout.Button("Ping", GUILayout.Height(24f)))
-        {
-            EditorGUIUtility.PingObject(selectedGenerator);
-            Selection.activeObject = selectedGenerator;
-        }
-
-        EditorGUI.EndDisabledGroup();
-        EditorGUILayout.EndHorizontal();
-        GUILayout.Space(6f);
-    }
-
-    private void DrawSearchField()
-    {
-        GUI.SetNextControlName("TerrainEditorSearchField");
-        searchText = EditorGUILayout.TextField("Search", searchText);
-        GUILayout.Space(8f);
-    }
-
     private void DrawDetailPanel()
     {
-        Rect detailRect = new Rect(SidebarWidth, 0f, position.width - SidebarWidth, position.height);
+        Rect detailRect = new Rect(0f, 0f, position.width, position.height);
         GUILayout.BeginArea(detailRect);
         GUILayout.Space(10f);
 
@@ -805,6 +734,13 @@ public class TerrainDataEditorWindow : EditorWindow
             return;
         }
 
+        TerrainGenerator activeSelection = GetTerrainGeneratorFromUnitySelection();
+        if (activeSelection != null && generators.Contains(activeSelection))
+        {
+            selectedGeneratorInstanceId = activeSelection.GetInstanceID();
+            return;
+        }
+
         TerrainGenerator selectedGenerator = GetSelectedGenerator();
         if (selectedGenerator != null && generators.Contains(selectedGenerator))
         {
@@ -826,19 +762,6 @@ public class TerrainDataEditorWindow : EditorWindow
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(searchText))
-            {
-                string lowerSearch = searchText.ToLowerInvariant();
-                string generatorName = generator.name != null ? generator.name.ToLowerInvariant() : string.Empty;
-                string sceneName = generator.gameObject.scene.IsValid()
-                    ? generator.gameObject.scene.name.ToLowerInvariant()
-                    : string.Empty;
-                if (!generatorName.Contains(lowerSearch) && !sceneName.Contains(lowerSearch))
-                {
-                    continue;
-                }
-            }
-
             visibleGenerators.Add(generator);
         }
 
@@ -858,5 +781,18 @@ public class TerrainDataEditorWindow : EditorWindow
         });
 
         return visibleGenerators;
+    }
+
+    private static TerrainGenerator GetTerrainGeneratorFromUnitySelection()
+    {
+        if (Selection.activeObject is TerrainGenerator selectedGenerator)
+        {
+            return selectedGenerator;
+        }
+
+        GameObject selectedGameObject = Selection.activeGameObject;
+        return selectedGameObject != null
+            ? selectedGameObject.GetComponent<TerrainGenerator>()
+            : null;
     }
 }

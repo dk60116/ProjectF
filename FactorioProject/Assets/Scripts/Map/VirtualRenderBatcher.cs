@@ -215,9 +215,13 @@ public sealed class VirtualRenderBatchCollection
         ownerEntries.Clear();
     }
 
-    public void RenderBatches()
+    public void RenderBatches(Camera renderCamera = null)
     {
-        Camera renderCamera = Camera.main;
+        if (renderCamera == null)
+        {
+            renderCamera = Camera.main;
+        }
+
         bool canFrustumCull = renderCamera != null;
         if (canFrustumCull)
         {

@@ -44,6 +44,9 @@ public class PlayerController : MonoBehaviour
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
     private readonly List<BoxObject> nearbyBoxObjects = new List<BoxObject>();
+    private readonly HashSet<WorkableObject> currentSelectedWorkableRangeObjects = new HashSet<WorkableObject>();
+    private readonly HashSet<WorkableObject> nextSelectedWorkableRangeObjects = new HashSet<WorkableObject>();
+    private readonly List<WorkableObject> selectedWorkableRangeRemovalBuffer = new List<WorkableObject>();
     private readonly List<Block> singleFocusedBlockBuffer = new List<Block>(1);
     private readonly List<Block> focusRemovalBuffer = new List<Block>();
     private Rigidbody cachedRigidbody;
@@ -105,6 +108,7 @@ public class PlayerController : MonoBehaviour
         SetFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         focusRemovalBuffer.Clear();
+        UpdateSelectedWorkableRangeVisuals(null);
         singleFocusedBlockBuffer.Clear();
     }
 
@@ -1330,10 +1334,8 @@ public class PlayerController : MonoBehaviour
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
         Vector3 focusForward = GetInteractionFocusForward();
-        float focusRadius = Mathf.Max(0.5f, player.State.HarvestRange);
-        float focusRadiusSqr = focusRadius * focusRadius;
         float globalWorkablePadding = Mathf.Max(0f, WorkableObject.GlobalMaxFocusActivationRadius);
-        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(focusRadius + globalWorkablePadding + 1f));
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(globalWorkablePadding + 1f));
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
@@ -1364,8 +1366,9 @@ public class PlayerController : MonoBehaviour
 
                 nearbyWorkableObjects.Add(workableObject);
 
+                float focusRadius = Mathf.Max(0f, workableObject.FocusActivationRadius);
                 float score = GetWorkableFocusSelectionScore(workableObject, block, origin, focusForward, out float distanceSqr);
-                if (distanceSqr > focusRadiusSqr)
+                if (distanceSqr > focusRadius * focusRadius)
                 {
                     continue;
                 }
@@ -1531,20 +1534,39 @@ public class PlayerController : MonoBehaviour
 
     private float GetWorkableFocusDistanceSqr(WorkableObject workableObject, Block block, Vector3 origin)
     {
-        Bounds bounds = GetMapObjectFocusBounds(workableObject, block, workableObject != null ? workableObject.FocusActivationRadius : 0f);
-        Vector3 closestPoint = bounds.ClosestPoint(origin);
-        closestPoint.y = origin.y;
-
-        Vector3 offset = closestPoint - origin;
+        Vector3 focusPoint = GetWorkableFocusPoint(workableObject, block, origin);
+        Vector3 offset = focusPoint - origin;
         offset.y = 0f;
         return offset.sqrMagnitude;
     }
 
     private float GetWorkableFocusSelectionScore(WorkableObject workableObject, Block block, Vector3 origin, Vector3 focusForward, out float distanceSqr)
     {
-        Bounds bounds = GetMapObjectFocusBounds(workableObject, block, workableObject != null ? workableObject.FocusActivationRadius : 0f);
-        Vector3 focusPoint = GetFocusPointAndDistance(bounds, origin, out distanceSqr);
+        Vector3 focusPoint = GetWorkableFocusPoint(workableObject, block, origin);
+        Vector3 offset = focusPoint - origin;
+        offset.y = 0f;
+        distanceSqr = offset.sqrMagnitude;
         return GetFacingAdjustedFocusScore(distanceSqr, focusPoint, origin, focusForward);
+    }
+
+    private static Vector3 GetWorkableFocusPoint(WorkableObject workableObject, Block block, Vector3 origin)
+    {
+        Vector3 focusPoint;
+        if (workableObject != null)
+        {
+            focusPoint = workableObject.transform.position;
+        }
+        else if (block != null)
+        {
+            focusPoint = block.transform.position;
+        }
+        else
+        {
+            focusPoint = origin;
+        }
+
+        focusPoint.y = origin.y;
+        return focusPoint;
     }
 
     private float GetMapObjectFocusSelectionDistanceSqr(MapObject mapObject, Block block, Vector3 origin)
@@ -1582,7 +1604,9 @@ public class PlayerController : MonoBehaviour
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer rendererComponent = renderers[i];
-                if (rendererComponent == null || !rendererComponent.enabled)
+                if (rendererComponent == null
+                    || !rendererComponent.enabled
+                    || rendererComponent.GetComponent<WorkableObjectRangeVisual>() != null)
                 {
                     continue;
                 }
@@ -1912,6 +1936,7 @@ public class PlayerController : MonoBehaviour
 
         if (nextBlocks == null)
         {
+            UpdateSelectedWorkableRangeVisuals(null);
             RefreshTemporaryDropFocusVisibility();
             return;
         }
@@ -1933,7 +1958,60 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        UpdateSelectedWorkableRangeVisuals(nextBlocks);
         RefreshTemporaryDropFocusVisibility();
+    }
+
+    private void UpdateSelectedWorkableRangeVisuals(List<Block> nextBlocks)
+    {
+        nextSelectedWorkableRangeObjects.Clear();
+
+        if (nextBlocks != null)
+        {
+            for (int i = 0; i < nextBlocks.Count; i++)
+            {
+                Block block = nextBlocks[i];
+                if (block == null
+                    || !(block.MapObject is WorkableObject workableObject)
+                    || workableObject == null)
+                {
+                    continue;
+                }
+
+                nextSelectedWorkableRangeObjects.Add(workableObject);
+            }
+        }
+
+        selectedWorkableRangeRemovalBuffer.Clear();
+        foreach (WorkableObject workableObject in currentSelectedWorkableRangeObjects)
+        {
+            if (workableObject != null && nextSelectedWorkableRangeObjects.Contains(workableObject))
+            {
+                continue;
+            }
+
+            selectedWorkableRangeRemovalBuffer.Add(workableObject);
+        }
+
+        for (int i = 0; i < selectedWorkableRangeRemovalBuffer.Count; i++)
+        {
+            WorkableObject workableObject = selectedWorkableRangeRemovalBuffer[i];
+            currentSelectedWorkableRangeObjects.Remove(workableObject);
+            if (workableObject != null)
+            {
+                workableObject.SetSelectedRangeVisualRequested(false);
+            }
+        }
+
+        foreach (WorkableObject workableObject in nextSelectedWorkableRangeObjects)
+        {
+            if (workableObject == null || !currentSelectedWorkableRangeObjects.Add(workableObject))
+            {
+                continue;
+            }
+
+            workableObject.SetSelectedRangeVisualRequested(true);
+        }
     }
 
     private static bool ContainsFocusedBlock(List<Block> blocks, Block target)

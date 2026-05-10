@@ -115,7 +115,9 @@ MonoBehaviour:
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
-  focusActivationRadius: 3
+  workableRangeCells: 5
+  showWorkableRange: 1
+  rangeVisualYOffset: 0.04
 --- !u!65 &3506328195643533228
 BoxCollider:
   m_ObjectHideFlags: 0

@@ -68,6 +68,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private TerrainGenerator terrainGenerator;
     private ItemManager itemManager;
     private ItemManager cachedRenderAssetItemManager;
+    private Camera mainCamera;
     private int cachedVirtualConveyorVisualBlockSetVersion = int.MinValue;
 
     public int RegisteredPortableObjectCount => registeredPortableObjects.Count;
@@ -166,6 +167,11 @@ public sealed class PortableItemRenderer : MonoBehaviour
         {
             itemManager = GameManager.Instance.ItemManger;
         }
+
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
     }
 
     private void RebuildPortableObjectBatches()
@@ -230,7 +236,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RenderPortableObjectBatches()
     {
-        portableObjectBatches.RenderBatches();
+        portableObjectBatches.RenderBatches(mainCamera);
     }
 
     private void RenderVirtualConveyorItems()
@@ -485,14 +491,14 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private void RenderVirtualConveyorBatches()
     {
         RebuildDynamicVirtualConveyorBatches();
-        virtualConveyorBatches.RenderBatches();
-        dynamicVirtualConveyorBatches.RenderBatches();
+        virtualConveyorBatches.RenderBatches(mainCamera);
+        dynamicVirtualConveyorBatches.RenderBatches(mainCamera);
     }
 
     private void RebuildDynamicVirtualConveyorBatches()
     {
         dynamicVirtualConveyorBatches.ClearActiveMatrices();
-        Camera renderCamera = Camera.main;
+        Camera renderCamera = mainCamera;
         bool canCullDynamicBlocks = renderCamera != null;
         if (canCullDynamicBlocks)
         {

@@ -152,12 +152,24 @@ public class GameManager : MonoBehaviour
 
     public void SetInstallationPlacementActive(bool isActive)
     {
+        if (InstallationPlacementActive == isActive)
+        {
+            return;
+        }
+
         InstallationPlacementActive = isActive;
+        WorkableObject.RefreshAllRangeVisuals();
     }
 
     public void SetMapEditActive(bool isActive)
     {
+        if (MapEditActive == isActive)
+        {
+            return;
+        }
+
         MapEditActive = isActive;
+        WorkableObject.RefreshAllRangeVisuals();
     }
 
     public void SetShowConveyorSlotDots(bool show)
@@ -276,7 +288,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int ConveyorLineFillSearchLimit = 4096;
     private const int RequestTimeoutMilliseconds = 5000;
     private const int MaxRequestsPerFrame = 4;
+    private const int MaxRequestsPerFrameDuringChunkStreaming = 1;
     private const float StatusWorldStatsRefreshInterval = 1f;
+    private const float StatusSaveSlotRefreshInterval = 5f;
 
     private static readonly Vector2Int[] ConveyorLineCardinalDirections =
     {
@@ -302,6 +316,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private int cachedInstalledObjectTotal;
     private int cachedConveyorItemTotal;
     private string cachedInstallationTypeCounts = "-";
+    private float cachedSaveSlotsStatusTime = float.NegativeInfinity;
+    private int cachedSaveSlotsSelectedSlotIndex = -1;
+    private string cachedSaveSlotsExtraTokens = string.Empty;
     private SaveManager cachedSaveManager;
     private PlayerCamera cachedPlayerCamera;
     private volatile bool stopRequested;
@@ -352,7 +369,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         UpdateFrameStats();
 
         int processedCount = 0;
-        while (processedCount < MaxRequestsPerFrame && TryDequeueRequest(out ToolRequest request))
+        int maxRequestsThisFrame = IsTerrainChunkStreamingBusy()
+            ? MaxRequestsPerFrameDuringChunkStreaming
+            : MaxRequestsPerFrame;
+        while (processedCount < maxRequestsThisFrame && TryDequeueRequest(out ToolRequest request))
         {
             ProcessRequest(request);
             request.Completion.Set();
@@ -848,7 +868,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             frameMs = Time.unscaledDeltaTime * 1000f;
         }
 
-        CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts);
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        bool isChunkStreamingBusy = terrain != null && terrain.IsChunkStreamingBusy;
+        CaptureWorldStats(
+            terrain,
+            isChunkStreamingBusy,
+            out int installedObjectTotal,
+            out int conveyorItemTotal,
+            out string installationTypeCounts);
         GameManager gameManager = GameManager.Instance;
         bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
@@ -856,7 +883,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         string extraTokens = BuildStatusExtraTokens(
             ResolveSaveManager(),
             ResolvePlayerCamera(),
-            TerrainGenerator.ResolveActive());
+            terrain,
+            isChunkStreamingBusy);
         return ToolResult.Status(
             fps,
             frameMs,
@@ -885,7 +913,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             0,
             "save slots",
-            BuildSaveSlotsExtraTokens(saveManager));
+            BuildSaveSlotsExtraTokens(saveManager, true));
     }
 
     private ToolResult SaveSlot(int slotIndex)
@@ -898,7 +926,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         int normalizedSlotIndex = Mathf.Clamp(slotIndex, 0, SaveManager.SlotCount - 1);
         bool saved = saveManager.SaveSlot(normalizedSlotIndex);
-        string extraTokens = BuildSaveSlotsExtraTokens(saveManager);
+        InvalidateSaveSlotStatusCache();
+        string extraTokens = BuildSaveSlotsExtraTokens(saveManager, true);
         return saved
             ? ToolResult.Success(0, 0, 0, 0, 0, 0, $"saved slot {normalizedSlotIndex + 1}", extraTokens)
             : ToolResult.Error(0, 0, $"failed to save slot {normalizedSlotIndex + 1}", extraTokens);
@@ -915,7 +944,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         int normalizedSlotIndex = Mathf.Clamp(slotIndex, 0, SaveManager.SlotCount - 1);
         bool hadSaveFile = saveManager.HasSaveFile(normalizedSlotIndex);
         bool loaded = saveManager.LoadSlot(normalizedSlotIndex);
-        string extraTokens = BuildSaveSlotsExtraTokens(saveManager);
+        InvalidateSaveSlotStatusCache();
+        string extraTokens = BuildSaveSlotsExtraTokens(saveManager, true);
         if (!loaded)
         {
             return ToolResult.Error(0, 0, $"failed to load slot {normalizedSlotIndex + 1}", extraTokens);
@@ -939,8 +969,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             ? Mathf.Clamp(slotIndex, 0, SaveManager.SlotCount - 1)
             : saveManager.SelectedSlotIndex;
         saveManager.StartNewMap(normalizedSlotIndex, randomizeSeed);
+        InvalidateSaveSlotStatusCache();
         string extraTokens = BuildExtraTokens(
-            BuildSaveSlotsExtraTokens(saveManager),
+            BuildSaveSlotsExtraTokens(saveManager, true),
             BuildSeedExtraTokens(TerrainGenerator.ResolveActive()));
         return ToolResult.Success(
             0,
@@ -973,20 +1004,42 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildSeedExtraTokens(terrain));
     }
 
-    private static string BuildSaveSlotsExtraTokens(SaveManager saveManager)
+    private string BuildSaveSlotsExtraTokens(SaveManager saveManager, bool forceRefresh = false, bool allowStaleCache = false)
     {
         if (saveManager == null)
         {
             return BuildEmptySaveSlotsExtraTokens();
         }
 
-        StringBuilder builder = new StringBuilder(SaveManager.SlotCount);
-        for (int i = 0; i < SaveManager.SlotCount; i++)
+        int selectedSlotIndex = saveManager.SelectedSlotIndex;
+        float now = Time.unscaledTime;
+        if (!forceRefresh
+            && !string.IsNullOrEmpty(cachedSaveSlotsExtraTokens)
+            && cachedSaveSlotsSelectedSlotIndex == selectedSlotIndex
+            && (allowStaleCache || now - cachedSaveSlotsStatusTime < StatusSaveSlotRefreshInterval))
         {
-            builder.Append(saveManager.HasSaveFile(i) ? '1' : '0');
+            return cachedSaveSlotsExtraTokens;
         }
 
-        return $"saveSlots={builder} selectedSlot={saveManager.SelectedSlotIndex + 1}";
+        if (!forceRefresh && allowStaleCache)
+        {
+            return $"saveSlots={new string('0', SaveManager.SlotCount)} selectedSlot={selectedSlotIndex + 1}";
+        }
+
+        StringBuilder builder = new StringBuilder(SaveManager.SlotCount);
+        builder.Append(saveManager.GetSaveSlotMask(forceRefresh));
+
+        cachedSaveSlotsSelectedSlotIndex = selectedSlotIndex;
+        cachedSaveSlotsStatusTime = now;
+        cachedSaveSlotsExtraTokens = $"saveSlots={builder} selectedSlot={selectedSlotIndex + 1}";
+        return cachedSaveSlotsExtraTokens;
+    }
+
+    private void InvalidateSaveSlotStatusCache()
+    {
+        cachedSaveSlotsStatusTime = float.NegativeInfinity;
+        cachedSaveSlotsSelectedSlotIndex = -1;
+        cachedSaveSlotsExtraTokens = string.Empty;
     }
 
     private static string BuildEmptySaveSlotsExtraTokens()
@@ -994,10 +1047,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return $"saveSlots={new string('0', SaveManager.SlotCount)} selectedSlot=1";
     }
 
-    private static string BuildStatusExtraTokens(SaveManager saveManager, PlayerCamera playerCamera, TerrainGenerator terrain)
+    private string BuildStatusExtraTokens(
+        SaveManager saveManager,
+        PlayerCamera playerCamera,
+        TerrainGenerator terrain,
+        bool allowStaleCache = false)
     {
         return BuildExtraTokens(
-            BuildSaveSlotsExtraTokens(saveManager),
+            BuildSaveSlotsExtraTokens(saveManager, false, allowStaleCache),
             BuildCameraSizeExtraTokens(playerCamera),
             BuildSeedExtraTokens(terrain));
     }
@@ -1072,10 +1129,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return cachedPlayerCamera;
     }
 
-    private void CaptureWorldStats(out int installedObjectTotal, out int conveyorItemTotal, out string installationTypeCounts)
+    private void CaptureWorldStats(
+        TerrainGenerator terrain,
+        bool allowStaleCache,
+        out int installedObjectTotal,
+        out int conveyorItemTotal,
+        out string installationTypeCounts)
     {
         float now = Time.unscaledTime;
-        if (now - cachedStatusWorldStatsTime < StatusWorldStatsRefreshInterval)
+        if (allowStaleCache
+            || (!float.IsNegativeInfinity(cachedStatusWorldStatsTime)
+                && now - cachedStatusWorldStatsTime < StatusWorldStatsRefreshInterval))
         {
             installedObjectTotal = cachedInstalledObjectTotal;
             conveyorItemTotal = cachedConveyorItemTotal;
@@ -1083,7 +1147,6 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return;
         }
 
-        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain == null)
         {
             installationCountsByItemId.Clear();
@@ -1105,6 +1168,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         installedObjectTotal = cachedInstalledObjectTotal;
         conveyorItemTotal = cachedConveyorItemTotal;
         installationTypeCounts = cachedInstallationTypeCounts;
+    }
+
+    private static bool IsTerrainChunkStreamingBusy()
+    {
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        return terrain != null && terrain.IsChunkStreamingBusy;
     }
 
     private string BuildInstallationTypeCountToken(Dictionary<int, int> countsByItemId)

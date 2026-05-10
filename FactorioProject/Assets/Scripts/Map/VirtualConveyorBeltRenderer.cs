@@ -43,6 +43,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private readonly Dictionary<ConveyorBelt, BeltRenderCache> beltRenderCaches = new Dictionary<ConveyorBelt, BeltRenderCache>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<VirtualConveyorBeltRenderData> scratchRenderData = new List<VirtualConveyorBeltRenderData>(8);
+    private Camera mainCamera;
 
     public void Register(ConveyorBelt conveyorBelt)
     {
@@ -81,6 +82,11 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         if (!Application.isPlaying || batches.ActiveBatchCount == 0)
         {
             return;
+        }
+
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
         }
 
         using (RenderBatchesMarker.Auto())
@@ -147,7 +153,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
-        batches.RenderBatches();
+        batches.RenderBatches(mainCamera);
     }
 
     private static bool HasOddNegativeScale(Matrix4x4 matrix)

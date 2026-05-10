@@ -1456,12 +1456,16 @@ internal static class HierarchyMeshMergeToChild
 
         Undo.RegisterCompleteObjectUndo(rootFilter, "Merge To Child");
         Undo.RegisterCompleteObjectUndo(rootRenderer, "Merge To Child");
+        Undo.RegisterCompleteObjectUndo(rootObject.transform, "Merge To Child");
         rootFilter.sharedMesh = combinedMesh;
         rootRenderer.sharedMaterials = combinedMaterials;
+        rootObject.transform.localScale = Vector3.one;
         EditorUtility.SetDirty(rootFilter);
         EditorUtility.SetDirty(rootRenderer);
+        EditorUtility.SetDirty(rootObject.transform);
         PrefabUtility.RecordPrefabInstancePropertyModifications(rootFilter);
         PrefabUtility.RecordPrefabInstancePropertyModifications(rootRenderer);
+        PrefabUtility.RecordPrefabInstancePropertyModifications(rootObject.transform);
 
         for (int i = 0; i < sources.Count; i++)
         {
@@ -1594,6 +1598,7 @@ internal static class HierarchyMeshMergeToChild
             return sources;
         }
 
+        Matrix4x4 rootUnitScaleWorldToLocal = GetRootUnitScaleWorldToLocalMatrix(root);
         MeshFilter[] meshFilters = root.GetComponentsInChildren<MeshFilter>(true);
         for (int i = 0; i < meshFilters.Length; i++)
         {
@@ -1610,11 +1615,26 @@ internal static class HierarchyMeshMergeToChild
                 filter = meshFilter,
                 renderer = meshRenderer,
                 mesh = mesh,
-                meshToRoot = root.worldToLocalMatrix * meshFilter.transform.localToWorldMatrix
+                meshToRoot = rootUnitScaleWorldToLocal * meshFilter.transform.localToWorldMatrix
             });
         }
 
         return sources;
+    }
+
+    private static Matrix4x4 GetRootUnitScaleWorldToLocalMatrix(Transform root)
+    {
+        if (root == null)
+        {
+            return Matrix4x4.identity;
+        }
+
+        Matrix4x4 parentLocalToWorld = root.parent != null
+            ? root.parent.localToWorldMatrix
+            : Matrix4x4.identity;
+        Matrix4x4 rootUnitScaleLocalToWorld =
+            parentLocalToWorld * Matrix4x4.TRS(root.localPosition, root.localRotation, Vector3.one);
+        return rootUnitScaleLocalToWorld.inverse;
     }
 
     private static Mesh BuildCombinedMesh(

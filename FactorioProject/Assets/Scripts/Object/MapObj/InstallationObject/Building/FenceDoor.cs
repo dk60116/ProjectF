@@ -1,7 +1,7 @@
 using UnityEngine;
 using DG.Tweening;
 
-public class FenceDoor : Fence
+public class FenceDoor : Wall
 {
     private const float ClosedAngle = 0f;
     private const float OpenAngle = 90f;

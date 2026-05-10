@@ -78,6 +78,7 @@ public class ItemDataEditorWindow : EditorWindow
         public int mapSizeY = -1;
         public float focusRadius = -1f;
         public float workableFocusRadius = -1f;
+        public int workableRangeCells = -1;
         public float conveyorSpeed = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
@@ -894,11 +895,18 @@ public class ItemDataEditorWindow : EditorWindow
             DrawMultiFocusModeField(multiFocusModeProperty);
         }
 
-        SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(mapObjectSerializedObject, mapObject);
-        if (focusActivationRadiusProperty != null)
+        if (mapObject is WorkableObject)
         {
-            focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
-            EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
+            DrawWorkableRangeCellsField(mapObjectSerializedObject);
+        }
+        else
+        {
+            SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(mapObjectSerializedObject, mapObject);
+            if (focusActivationRadiusProperty != null)
+            {
+                focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
+                EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
+            }
         }
 
         bool shouldSyncConveyorVariantSpeed = false;
@@ -945,7 +953,7 @@ public class ItemDataEditorWindow : EditorWindow
                 SyncConveyorVariantSpeed(conveyorBelt);
             }
 
-            if (mapObject is Fence fence)
+            if (mapObject is Wall fence)
             {
                 SyncFenceVariantMultiFocusMode(fence);
             }
@@ -1153,7 +1161,12 @@ public class ItemDataEditorWindow : EditorWindow
             return null;
         }
 
-        if (mapObject is WorkableObject || mapObject is BoxObject)
+        if (mapObject is WorkableObject)
+        {
+            return null;
+        }
+
+        if (mapObject is BoxObject)
         {
             return serializedMapObject.FindProperty("focusActivationRadius");
         }
@@ -1164,6 +1177,48 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         return null;
+    }
+
+    private static void DrawWorkableRangeCellsField(SerializedObject serializedMapObject)
+    {
+        if (serializedMapObject == null)
+        {
+            return;
+        }
+
+        SerializedProperty workableRangeCellsProperty = serializedMapObject.FindProperty("workableRangeCells");
+        if (workableRangeCellsProperty == null)
+        {
+            return;
+        }
+
+        int currentRangeCells = Mathf.Max(0, workableRangeCellsProperty.intValue);
+        EditorGUI.BeginChangeCheck();
+        int nextRangeCells = Mathf.Max(0, EditorGUILayout.IntField("Workable Range Cells", currentRangeCells));
+        if (EditorGUI.EndChangeCheck())
+        {
+            workableRangeCellsProperty.intValue = nextRangeCells;
+        }
+    }
+
+    private static int ResolveWorkableRangeCells(ItemDataJsonEntry entry)
+    {
+        if (entry == null)
+        {
+            return -1;
+        }
+
+        if (entry.workableRangeCells >= 0)
+        {
+            return Mathf.Max(0, entry.workableRangeCells);
+        }
+
+        float legacyRangeValue = entry.workableFocusRadius >= 0f
+            ? entry.workableFocusRadius
+            : entry.focusRadius;
+        return legacyRangeValue >= 0f
+            ? Mathf.Max(0, Mathf.CeilToInt(legacyRangeValue))
+            : -1;
     }
 
     private void DrawRectGridPreview(SerializedObject mapObjectSerializedObject, InputOutputModule inputOutputModule, int width, int height)
@@ -1923,6 +1978,7 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 entry.focusRadius = workableObject.FocusActivationRadius;
                 entry.workableFocusRadius = workableObject.FocusActivationRadius;
+                entry.workableRangeCells = (int)workableObject.WorkableRangeCells;
             }
             else if (definition.mapObject is BoxObject boxObject)
             {
@@ -2266,13 +2322,28 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        float savedFocusRadius = entry.focusRadius >= 0f ? entry.focusRadius : entry.workableFocusRadius;
-        if (savedFocusRadius >= 0f)
+        if (mapObject is WorkableObject)
         {
-            SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(serializedMapObject, mapObject);
-            if (focusActivationRadiusProperty != null)
+            SerializedProperty workableRangeCellsProperty = serializedMapObject.FindProperty("workableRangeCells");
+            if (workableRangeCellsProperty != null)
             {
-                focusActivationRadiusProperty.floatValue = Mathf.Max(0f, savedFocusRadius);
+                int savedRangeCells = ResolveWorkableRangeCells(entry);
+                if (savedRangeCells >= 0)
+                {
+                    workableRangeCellsProperty.intValue = savedRangeCells;
+                }
+            }
+        }
+        else
+        {
+            float savedFocusRadius = entry.focusRadius >= 0f ? entry.focusRadius : entry.workableFocusRadius;
+            if (savedFocusRadius >= 0f)
+            {
+                SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(serializedMapObject, mapObject);
+                if (focusActivationRadiusProperty != null)
+                {
+                    focusActivationRadiusProperty.floatValue = Mathf.Max(0f, savedFocusRadius);
+                }
             }
         }
 
@@ -2438,7 +2509,7 @@ public class ItemDataEditorWindow : EditorWindow
         multiFocusModeProperty.intValue = (int)currentMode;
     }
 
-    private static void SyncFenceVariantMultiFocusMode(Fence fence)
+    private static void SyncFenceVariantMultiFocusMode(Wall fence)
     {
         if (fence == null)
         {
@@ -2452,7 +2523,7 @@ public class ItemDataEditorWindow : EditorWindow
         SyncFenceVariantMultiFocusMode(fence.CrossVariantPrefab, mode, fence);
     }
 
-    private static void SyncFenceVariantMultiFocusMode(Fence variantPrefab, MapObject.MultiFocusMode mode, Fence sourceFence)
+    private static void SyncFenceVariantMultiFocusMode(Wall variantPrefab, MapObject.MultiFocusMode mode, Wall sourceFence)
     {
         if (variantPrefab == null || variantPrefab == sourceFence)
         {

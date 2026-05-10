@@ -1,5 +1,3 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
 using DG.Tweening;
 using TMPro;
@@ -36,6 +34,10 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
     private Sprite cachedDisplayedSprite;
     private bool cachedLockIconVisible;
     private string cachedCountTextValue;
+    private readonly HashSet<int> acceptedItemIdsBuffer = new HashSet<int>();
+    private int cachedCountTextItemCount = int.MinValue;
+    private int cachedCountTextCapacity = int.MinValue;
+    private bool cachedCountTextHasValue;
     private Block lastContainedStackVisibilityBlock;
 
     public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
@@ -120,7 +122,7 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         RestoreLastContainedStackVisibilityBlock();
         ApplyItemIconSprite(null, -1, true);
         SetLockIconVisible(false, true);
-        ApplyCountText(string.Empty, true);
+        ApplyEmptyCountText(true);
         base.OnDisable();
     }
 
@@ -387,7 +389,7 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         RestoreLastContainedStackVisibilityBlock();
         ApplyItemIconSprite(null, -1, true);
         SetLockIconVisible(false, true);
-        ApplyCountText(string.Empty, true);
+        ApplyEmptyCountText(true);
         cachedTerrainGenerator = null;
         cachedDisplayedItemId = int.MinValue;
         cachedDisplayedSprite = null;
@@ -635,7 +637,7 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
 
         if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
         {
-            ApplyCountText(string.Empty, force);
+            ApplyEmptyCountText(force);
             return;
         }
 
@@ -652,11 +654,11 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
 
         if (itemCount <= 0 && !hasSingleFilteredItem)
         {
-            ApplyCountText(string.Empty, force);
+            ApplyEmptyCountText(force);
             return;
         }
 
-        ApplyCountText($"{itemCount:00} / {Mathf.Max(1, capacity):00}", force);
+        ApplyCountTextValue(itemCount, Mathf.Max(1, capacity), force);
     }
 
     private void ApplyItemIconSprite(Sprite sprite, int itemId, bool force)
@@ -700,21 +702,45 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         lockIcon.enabled = visible;
     }
 
-    private void ApplyCountText(string value, bool force)
+    private void ApplyEmptyCountText(bool force)
     {
         if (countText == null)
         {
             return;
         }
 
-        value ??= string.Empty;
-        if (!force && string.Equals(cachedCountTextValue, value, StringComparison.Ordinal))
+        if (!force && !cachedCountTextHasValue && string.IsNullOrEmpty(cachedCountTextValue))
         {
             return;
         }
 
-        cachedCountTextValue = value;
-        countText.text = value;
+        cachedCountTextValue = string.Empty;
+        cachedCountTextHasValue = false;
+        cachedCountTextItemCount = int.MinValue;
+        cachedCountTextCapacity = int.MinValue;
+        countText.text = string.Empty;
+    }
+
+    private void ApplyCountTextValue(int itemCount, int capacity, bool force)
+    {
+        if (countText == null)
+        {
+            return;
+        }
+
+        if (!force
+            && cachedCountTextHasValue
+            && cachedCountTextItemCount == itemCount
+            && cachedCountTextCapacity == capacity)
+        {
+            return;
+        }
+
+        cachedCountTextHasValue = true;
+        cachedCountTextItemCount = itemCount;
+        cachedCountTextCapacity = capacity;
+        cachedCountTextValue = $"{itemCount:00} / {capacity:00}";
+        countText.text = cachedCountTextValue;
     }
 
     private bool TryGetSingleFilteredItemId(out int itemId)
@@ -767,13 +793,13 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
             return true;
         }
 
-        HashSet<int> acceptedItemIds = new HashSet<int>();
-        if (!TryCollectAreaAcceptedItemIds(acceptedItemIds) || acceptedItemIds.Count != 1)
+        acceptedItemIdsBuffer.Clear();
+        if (!TryCollectAreaAcceptedItemIds(acceptedItemIdsBuffer) || acceptedItemIdsBuffer.Count != 1)
         {
             return false;
         }
 
-        foreach (int acceptedItemId in acceptedItemIds)
+        foreach (int acceptedItemId in acceptedItemIdsBuffer)
         {
             itemId = acceptedItemId;
             break;

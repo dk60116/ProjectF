@@ -683,6 +683,7 @@ public class ItemManager : MonoBehaviour
         }
 
         string itemKey = NormalizeItemLookupName(itemName);
+        MapObject folderMatchedFallback = null;
 
         for (int folderIndex = 0; folderIndex < searchFolders.Count; folderIndex++)
         {
@@ -697,7 +698,9 @@ public class ItemManager : MonoBehaviour
 
                 GameObject prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
                 string prefabName = prefabRoot != null ? prefabRoot.name : Path.GetFileNameWithoutExtension(prefabPath);
-                if (!IsExactMapObjectMatch(itemName, itemKey, prefabName, prefabPath))
+                bool prefabNameMatches = IsMapObjectPrefabNameMatch(itemName, itemKey, prefabName);
+                bool folderNameMatches = IsMapObjectPrefabFolderMatch(itemName, itemKey, prefabPath);
+                if (!prefabNameMatches && !folderNameMatches)
                 {
                     continue;
                 }
@@ -709,14 +712,19 @@ public class ItemManager : MonoBehaviour
                     continue;
                 }
 
-                return mapObject;
+                if (prefabNameMatches)
+                {
+                    return mapObject;
+                }
+
+                folderMatchedFallback ??= mapObject;
             }
         }
 
-        return null;
+        return folderMatchedFallback;
     }
 
-    private static bool IsExactMapObjectMatch(string itemName, string itemKey, string prefabName, string prefabPath)
+    private static bool IsMapObjectPrefabNameMatch(string itemName, string itemKey, string prefabName)
     {
         if (string.Equals(prefabName, itemName, StringComparison.OrdinalIgnoreCase))
         {
@@ -732,6 +740,11 @@ public class ItemManager : MonoBehaviour
             }
         }
 
+        return false;
+    }
+
+    private static bool IsMapObjectPrefabFolderMatch(string itemName, string itemKey, string prefabPath)
+    {
         if (string.IsNullOrWhiteSpace(prefabPath))
         {
             return false;

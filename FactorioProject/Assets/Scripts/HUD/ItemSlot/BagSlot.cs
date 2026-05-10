@@ -26,7 +26,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private const float HeldClickRepeatInterval = 0.1f;
     private const int CraftingInnerRingSlotLimit = 5;
     private const float CraftingOuterRingSlotPadding = 0.9f;
-    private const float FocusedPickupRange = 999f;
+    protected const float FocusedPickupRange = 999f;
+    private const float StandingTilePickupRange = 999f;
 
     [SerializeField, Range(0.1f, 1f)]
     private float draggingSlotAlpha = 0.6f;
@@ -2305,6 +2306,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        WorkableObject.SetCraftingSlotRangeVisualsRequested(this, isVisible);
         CraftingVisibilityChanged?.Invoke(this, isVisible);
     }
 
@@ -2509,7 +2511,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        float range = GetPickupRange();
         int preferredItemId = GetPreferredPickupItemId();
         bool hasFocusedConveyor = TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock);
         if (hasFocusedConveyor
@@ -2525,7 +2526,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return ShouldDisplayPickupPreviewForItem(previewItemId);
         }
 
-        if (TryPreviewFocusedBoxPickup(player, pickupOrigin, range, preferredItemId, out previewItemId, out previewPickupCount))
+        if (TryPreviewFocusedBoxPickup(player, pickupOrigin, FocusedPickupRange, preferredItemId, out previewItemId, out previewPickupCount))
         {
             return ShouldDisplayPickupPreviewForItem(previewItemId);
         }
@@ -2545,25 +2546,15 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
-        float range = GetPickupRange();
+        Vector2Int currentCoordinate = ResolveStandingCoordinate(player);
+        float range = GetStandingTilePickupRange();
 
         if (TryPreviewOneItemAtCoordinate(terrain, player, currentCoordinate, pickupOrigin, range, allowFocusedConveyorPickup, out previewItemId, out previewPickupCount))
         {
             return true;
         }
 
-        if (TryPreviewOneItemInRange(terrain, player, pickupOrigin, GetPickupSearchRadius(range), range, allowFocusedConveyorPickup, out previewItemId, out previewPickupCount))
-        {
-            return true;
-        }
-
-        if (!AllowDropTargetFallback || !player.IsDropExitPending || !player.TryGetLastDropTarget(out Vector2Int dropTarget))
-        {
-            return false;
-        }
-
-        return TryPreviewOneItemAtCoordinate(terrain, player, dropTarget, pickupOrigin, range, allowFocusedConveyorPickup, out previewItemId, out previewPickupCount);
+        return false;
     }
 
     private bool TryPreviewOneItemAtCoordinate(
@@ -2598,7 +2589,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return true;
         }
 
-        if (TryPreviewFocusedBoxPickup(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount))
+        if (TryPreviewFocusedBoxPickup(player, pickupOrigin, FocusedPickupRange, preferredItemId, out previewItemId, out previewPickupCount))
         {
             return true;
         }
@@ -2613,78 +2604,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        if (block.TryPreviewPickupInputAreaCenterObjects(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount)
-            && CanPreviewAcceptPickupItem(player, previewItemId))
-        {
-            return true;
-        }
-
         return block.TryPreviewPickupFloorObjects(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount)
                && CanPreviewAcceptPickupItem(player, previewItemId);
-    }
-
-    private bool TryPreviewOneItemInRange(
-        TerrainGenerator terrain,
-        Player player,
-        Vector3 pickupOrigin,
-        int radius,
-        float pickupRange,
-        bool allowFocusedConveyorPickup,
-        out int previewItemId,
-        out int previewPickupCount)
-    {
-        previewItemId = -1;
-        previewPickupCount = 0;
-        if (terrain == null || player == null || radius < 0 || pickupRange <= 0f)
-        {
-            return false;
-        }
-
-        int preferredItemId = GetPreferredPickupItemId();
-        if (allowFocusedConveyorPickup
-            && TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock)
-            && focusedConveyorBlock.TryPreviewPickupConveyorObjects(
-                player,
-                pickupOrigin,
-                pickupRange,
-                preferredItemId,
-                out previewItemId,
-                out previewPickupCount)
-            && CanPreviewAcceptPickupItem(player, previewItemId))
-        {
-            return true;
-        }
-
-        if (TryPreviewFocusedBoxPickup(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount))
-        {
-            return true;
-        }
-
-        Vector2Int centerCoordinate = ResolvePickupCoordinate(pickupOrigin);
-        for (int offsetY = -radius; offsetY <= radius; offsetY++)
-        {
-            for (int offsetX = -radius; offsetX <= radius; offsetX++)
-            {
-                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
-                {
-                    continue;
-                }
-
-                if (block.Type != Block.BlockType.Ground)
-                {
-                    continue;
-                }
-
-                if (block.TryPreviewPickupFloorObjects(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount)
-                    && CanPreviewAcceptPickupItem(player, previewItemId))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private bool TryPreviewFocusedRobotArmPickup(Player player, out bool blockOtherPickup, out int previewItemId)
@@ -3120,8 +3041,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private IEnumerator PickupRoutine(Player player, TerrainGenerator terrain, bool delayBeforeFirstPickup = false, bool allowFocusedConveyorPickup = true)
     {
-        float range = GetPickupRange();
-        int radius = GetPickupSearchRadius(range);
+        float range = GetStandingTilePickupRange();
         float interval = Mathf.Max(0.01f, pickupInterval);
 
         if (delayBeforeFirstPickup)
@@ -3137,29 +3057,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             }
 
             Vector3 pickupOrigin = ResolvePickupOrigin(player);
-            Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
+            Vector2Int currentCoordinate = ResolveStandingCoordinate(player);
 
             bool picked = TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate, pickupOrigin, range, allowFocusedConveyorPickup);
             if (!picked)
             {
-                picked = TryPickupOneItem(terrain, player, pickupOrigin, radius, range, allowFocusedConveyorPickup);
-            }
-
-            if (!picked)
-            {
-                if (AllowDropTargetFallback && player.IsDropExitPending && player.TryGetLastDropTarget(out Vector2Int dropTarget))
-                {
-                    picked = TryPickupOneItemAtCoordinate(terrain, player, dropTarget, pickupOrigin, range, allowFocusedConveyorPickup);
-                    if (!picked)
-                    {
-                        player.ClearLastDropTarget();
-                        break;
-                    }
-                }
-                else
-                {
-                    break;
-                }
+                break;
             }
 
             SuppressPickupPreviewAfterPickup();
@@ -3177,63 +3080,22 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        Vector2Int currentCoordinate = ResolvePickupCoordinate(pickupOrigin);
-        float range = GetPickupRange();
+        Vector2Int currentCoordinate = ResolveStandingCoordinate(player);
+        float range = GetStandingTilePickupRange();
 
         if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate, pickupOrigin, range, allowFocusedConveyorPickup))
         {
             return true;
         }
 
-        if (TryPickupOneItem(terrain, player, pickupOrigin, GetPickupSearchRadius(range), range, allowFocusedConveyorPickup))
-        {
-            return true;
-        }
-
-        if (!AllowDropTargetFallback || !player.IsDropExitPending || !player.TryGetLastDropTarget(out Vector2Int dropTarget))
-        {
-            return false;
-        }
-
-        if (TryPickupOneItemAtCoordinate(terrain, player, dropTarget, pickupOrigin, range, allowFocusedConveyorPickup))
-        {
-            return true;
-        }
-
-        player.ClearLastDropTarget();
         return false;
     }
 
     protected virtual bool AllowPickupOnClick => enablePickupOnClick;
 
-    protected virtual bool AllowDropTargetFallback => true;
-
-    protected virtual bool TryPickupOneItem(TerrainGenerator terrain, Player player, Vector3 pickupOrigin, int radius, float pickupRange, bool allowFocusedConveyorPickup = true)
-    {
-        if (terrain == null)
-        {
-            return false;
-        }
-
-        int targetSlotIndex = GetPickupSlotIndex();
-        if (targetSlotIndex < 0)
-        {
-            return false;
-        }
-
-        return terrain.TryPickupOneItemToBag(
-            player,
-            pickupOrigin,
-            radius,
-            pickupRange,
-            targetSlotIndex,
-            GetPreferredPickupItemId(),
-            allowFocusedConveyorPickup);
-    }
-
     protected virtual bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRange, bool allowFocusedConveyorPickup = true)
     {
-        if (terrain == null)
+        if (terrain == null || player == null)
         {
             return false;
         }
@@ -3244,14 +3106,25 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        return terrain.TryPickupOneItemToBagAtCoordinate(
-            player,
-            coordinate,
-            pickupOrigin,
-            pickupRange,
-            targetSlotIndex,
-            GetPreferredPickupItemId(),
-            allowFocusedConveyorPickup);
+        int preferredItemId = GetPreferredPickupItemId();
+        if (allowFocusedConveyorPickup
+            && TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock)
+            && TryPickupFocusedConveyorItem(player, focusedConveyorBlock, FocusedPickupRange))
+        {
+            return true;
+        }
+
+        if (TryPickupFocusedBoxToBag(player, pickupOrigin, FocusedPickupRange, targetSlotIndex, preferredItemId))
+        {
+            return true;
+        }
+
+        if (!TryGetGroundPickupBlock(terrain, coordinate, out Block block))
+        {
+            return false;
+        }
+
+        return block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRange, targetSlotIndex, preferredItemId);
     }
 
     protected virtual int GetPickupSlotIndex()
@@ -3296,17 +3169,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             maxPickupCount);
     }
 
-    private float GetPickupRange()
+    protected float GetPickupRange()
     {
         return Mathf.Max(0.01f, pickupRange);
     }
 
-    private static int GetPickupSearchRadius(float range)
+    private static float GetStandingTilePickupRange()
     {
-        return Mathf.Max(0, Mathf.CeilToInt(range));
+        return StandingTilePickupRange;
     }
 
-    private static bool TryGetFocusedConveyorBlock(Player player, out Block focusedConveyorBlock)
+    protected static bool TryGetFocusedConveyorBlock(Player player, out Block focusedConveyorBlock)
     {
         focusedConveyorBlock = null;
         if (player == null)
@@ -3318,6 +3191,38 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return playerController != null
             && playerController.TryGetFocusedConveyorBelt(out _, out focusedConveyorBlock)
             && focusedConveyorBlock != null;
+    }
+
+    protected static bool TryGetGroundPickupBlock(TerrainGenerator terrain, Vector2Int coordinate, out Block block)
+    {
+        block = null;
+        return terrain != null
+               && terrain.TryGetLoadedBlock(coordinate, out block)
+               && block != null
+               && block.Type == Block.BlockType.Ground;
+    }
+
+    protected static bool TryPickupFocusedBoxToBag(
+        Player player,
+        Vector3 pickupOrigin,
+        float pickupRange,
+        int preferredSlotIndex,
+        int preferredItemId)
+    {
+        PlayerController playerController = player != null ? player.GetComponent<PlayerController>() : null;
+        return playerController != null
+               && playerController.TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
+               && focusedBoxObject != null
+               && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRange, preferredSlotIndex, preferredItemId);
+    }
+
+    protected static bool TryPickupFocusedBoxToHand(Player player, Vector3 pickupOrigin, float pickupRange)
+    {
+        PlayerController playerController = player != null ? player.GetComponent<PlayerController>() : null;
+        return playerController != null
+               && playerController.TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
+               && focusedBoxObject != null
+               && focusedBoxObject.TryPickupContainedObjectToHand(player, pickupOrigin, pickupRange);
     }
 
     private bool TryHandleFocusedRobotArmPickup(Player player, out bool blockOtherPickup)
@@ -3375,6 +3280,13 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return new Vector2Int(
             Mathf.RoundToInt(worldPosition.x),
             Mathf.RoundToInt(worldPosition.z));
+    }
+
+    private static Vector2Int ResolveStandingCoordinate(Player player)
+    {
+        return player != null
+            ? ResolvePickupCoordinate(player.transform.position)
+            : Vector2Int.zero;
     }
 
     private static TerrainGenerator ResolveTerrain()

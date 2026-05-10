@@ -260,19 +260,13 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
-        Block sameItemBlock = FindNearestDropBlock(centerCoordinate, itemId, itemCount, 2, true);
-        if (sameItemBlock != null)
-        {
-            return sameItemBlock;
-        }
-
         if (loadedBlocks.TryGetValue(centerCoordinate, out Block centerBlock)
             && IsValidDropBlock(centerBlock, itemId, itemCount))
         {
             return centerBlock;
         }
 
-        return FindNearestDropBlock(centerCoordinate, itemId, itemCount, 2, false);
+        return null;
     }
 
     private Block FindNearestDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, int radius, bool requireSameItem)
@@ -712,7 +706,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         MapObject sourcePrefab = null;
-        if (definition.mapObject is Fence fencePrototype && savedState.conveyorVariantKind >= 0)
+        if (definition.mapObject is Wall fencePrototype && savedState.conveyorVariantKind >= 0)
         {
             sourcePrefab = InstallationPlacementController.ResolveFenceVariantPrefab(
                 fencePrototype,

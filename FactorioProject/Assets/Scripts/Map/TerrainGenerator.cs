@@ -570,8 +570,10 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Block> pendingBeltItemLineDebugRefreshSet = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
+    private readonly Dictionary<Block, int> conveyorItemCountsByBlock = new Dictionary<Block, int>();
     private int pendingBeltItemLineDebugRefreshIndex;
     private int conveyorItemVisualBlockSetVersion;
+    private int cachedLoadedConveyorItemCount;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
     private readonly HashSet<int> conveyorNetworkSleepingIds = new HashSet<int>();
@@ -582,6 +584,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Queue<Block> conveyorWakeQueue = new Queue<Block>();
     private readonly HashSet<Block> conveyorWakeQueued = new HashSet<Block>();
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
+    private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
     private readonly Dictionary<Block, ConveyorLineSlot> conveyorLineSlots = new Dictionary<Block, ConveyorLineSlot>();
     private readonly HashSet<Block> conveyorLineVisited = new HashSet<Block>();
     private readonly Dictionary<Block, int> conveyorLineBuildIndices = new Dictionary<Block, int>();
@@ -792,39 +795,7 @@ public partial class TerrainGenerator : MonoBehaviour
             Active = null;
         }
 
-        activeConveyors.Clear();
-        conveyorTickBuffer.Clear();
-        activeConveyorDataMotionBlocks.Clear();
-        conveyorDataMotionTickBuffer.Clear();
-        sortedActiveConveyors.Clear();
-        activeConveyorOrderDirty = true;
-        conveyorNetworkIds.Clear();
-        conveyorNetworkRetryTimes.Clear();
-        conveyorNetworkSleepingIds.Clear();
-        conveyorNetworkActiveIds.Clear();
-        conveyorNetworkSleepCheckQueuedIds.Clear();
-        conveyorNetworkSleepCheckBuffer.Clear();
-        conveyorNetworkBuildQueue.Clear();
-        conveyorWakeQueue.Clear();
-        conveyorWakeQueued.Clear();
-        conveyorWakeQueuedLineIds.Clear();
-        deferredConveyorRuntimeRefreshBlocks.Clear();
-        deferredConveyorNetworkWakeBlocks.Clear();
-        deferredConveyorRuntimeRefreshDepth = 0;
-        conveyorNetworkCacheDirty = true;
-        ClearConveyorLineCache();
-        nextConveyorActiveFullScanTime = 0f;
-        ClearConveyorDotVisualState();
-        conveyorSlotDotVisibilityInitialized = false;
-        lastShowConveyorSlotDots = false;
-        beltItemLineVisibilityInitialized = false;
-        lastShowBeltItemLine = false;
-        beltItemLineVisualsDirty = false;
-        ClearBeltItemLineDebugCache();
-        ClearPendingBeltItemLineDebugRefreshes();
-        conveyorItemVisualBlocks.Clear();
-        conveyorItemVisualDirtyBlocks.Clear();
-        conveyorItemVisualBlockSetVersion++;
+        ClearConveyorRuntimeState();
         virtualizedFloorObjectCoordinates.Clear();
         ClearFloorObjectVirtualizationScan();
         ClearPendingChunkGenerations();
@@ -853,20 +824,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public int GetLoadedConveyorItemCount()
     {
-        int count = 0;
         if (Application.isPlaying)
         {
-            foreach (Block block in conveyorItemVisualBlocks)
-            {
-                if (block != null && block.IsRuntimeConveyor)
-                {
-                    count += block.GetRuntimeConveyorItemCount();
-                }
-            }
-
-            return count;
+            return cachedLoadedConveyorItemCount;
         }
 
+        int count = 0;
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             Block block = pair.Value;
@@ -1563,39 +1526,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         loadedChunks.Clear();
         loadedBlocks.Clear();
-        activeConveyors.Clear();
-        conveyorTickBuffer.Clear();
-        activeConveyorDataMotionBlocks.Clear();
-        conveyorDataMotionTickBuffer.Clear();
-        sortedActiveConveyors.Clear();
-        activeConveyorOrderDirty = true;
-        conveyorNetworkIds.Clear();
-        conveyorNetworkRetryTimes.Clear();
-        conveyorNetworkSleepingIds.Clear();
-        conveyorNetworkActiveIds.Clear();
-        conveyorNetworkSleepCheckQueuedIds.Clear();
-        conveyorNetworkSleepCheckBuffer.Clear();
-        conveyorNetworkBuildQueue.Clear();
-        conveyorWakeQueue.Clear();
-        conveyorWakeQueued.Clear();
-        conveyorWakeQueuedLineIds.Clear();
-        deferredConveyorRuntimeRefreshBlocks.Clear();
-        deferredConveyorNetworkWakeBlocks.Clear();
-        deferredConveyorRuntimeRefreshDepth = 0;
-        conveyorNetworkCacheDirty = true;
-        ClearConveyorLineCache();
-        nextConveyorActiveFullScanTime = 0f;
-        ClearConveyorDotVisualState();
-        conveyorSlotDotVisibilityInitialized = false;
-        lastShowConveyorSlotDots = false;
-        beltItemLineVisibilityInitialized = false;
-        lastShowBeltItemLine = false;
-        beltItemLineVisualsDirty = false;
-        ClearBeltItemLineDebugCache();
-        ClearPendingBeltItemLineDebugRefreshes();
-        conveyorItemVisualBlocks.Clear();
-        conveyorItemVisualDirtyBlocks.Clear();
-        conveyorItemVisualBlockSetVersion++;
+        ClearConveyorRuntimeState();
         virtualizedFloorObjectCoordinates.Clear();
         ClearFloorObjectVirtualizationScan();
         CleanupOrphanedLiveInstallations();

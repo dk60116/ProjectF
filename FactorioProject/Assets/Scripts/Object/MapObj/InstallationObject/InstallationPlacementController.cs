@@ -97,9 +97,9 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<MapObject, InstallPreviewItemReservation> installPreviewItemReservationsByPreview = new Dictionary<MapObject, InstallPreviewItemReservation>();
     private readonly Dictionary<MapObject, int> installPreviewConveyorRotationSequenceIndexesByPreview = new Dictionary<MapObject, int>();
     private readonly HashSet<MapObject> automaticFenceCornerPreviews = new HashSet<MapObject>();
-    private readonly Dictionary<Fence, MapObject> installedFenceVariantPreviews = new Dictionary<Fence, MapObject>();
-    private readonly Dictionary<Fence, MapObject> installedFenceVariantPreviewSourcePrefabs = new Dictionary<Fence, MapObject>();
-    private readonly Dictionary<Fence, List<RendererVisibilityState>> installedFencePreviewRendererStates = new Dictionary<Fence, List<RendererVisibilityState>>();
+    private readonly Dictionary<Wall, MapObject> installedFenceVariantPreviews = new Dictionary<Wall, MapObject>();
+    private readonly Dictionary<Wall, MapObject> installedFenceVariantPreviewSourcePrefabs = new Dictionary<Wall, MapObject>();
+    private readonly Dictionary<Wall, List<RendererVisibilityState>> installedFencePreviewRendererStates = new Dictionary<Wall, List<RendererVisibilityState>>();
     private readonly Dictionary<int, bool> conveyorCornerTiePreferReverseBySequenceIndex = new Dictionary<int, bool>();
     private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
@@ -214,7 +214,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private sealed class InstalledFenceVariantPreviewPlan
     {
-        public Fence installedFence;
+        public Wall installedFence;
         public MapObject sourcePrefab;
         public int quarterTurns;
         public Vector3 position;
@@ -599,7 +599,7 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (installationObject is Fence)
+        if (installationObject is Wall)
         {
             return TryGetFenceInstallationDefinition(out definition);
         }
@@ -624,7 +624,7 @@ public class InstallationPlacementController : MonoBehaviour
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition candidate = definitions[i];
-            if (candidate == null || !(candidate.mapObject is Fence))
+            if (candidate == null || !(candidate.mapObject is Wall))
             {
                 continue;
             }
@@ -1152,13 +1152,20 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void SelectEditableInstallation(InstallationObject installationObject, Vector2Int anchorCoordinate)
     {
+        if (selectedEditableInstallation != installationObject)
+        {
+            SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
+        }
+
         selectedEditableInstallation = installationObject;
         selectedEditableAnchorCoordinate = anchorCoordinate;
+        SetWorkableRangeVisualRequested(selectedEditableInstallation, true);
         RefreshMapEditButtonState();
     }
 
     private void ClearEditableInstallationSelection()
     {
+        SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
         selectedEditableInstallation = null;
         selectedEditableAnchorCoordinate = Vector2Int.zero;
         RefreshMapEditButtonState();
@@ -1174,12 +1181,21 @@ public class InstallationPlacementController : MonoBehaviour
         if (!selectedEditableInstallation.gameObject.activeInHierarchy
             || !selectedEditableInstallation.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
         {
+            SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             selectedEditableInstallation = null;
             selectedEditableAnchorCoordinate = Vector2Int.zero;
             return;
         }
 
         selectedEditableAnchorCoordinate = anchorCoordinate;
+    }
+
+    private static void SetWorkableRangeVisualRequested(MapObject mapObject, bool requested)
+    {
+        if (mapObject is WorkableObject workableObject)
+        {
+            workableObject.SetSelectedRangeVisualRequested(requested);
+        }
     }
 
     private void HandleMapEditButtonClicked()
@@ -1431,7 +1447,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource = packedSession.editSession.definition != null
             ? packedSession.editSession.definition.mapObject
             : null;
-        if (footprintSource is Fence fencePrototype && packedSession.conveyorVariantKind >= 0)
+        if (footprintSource is Wall fencePrototype && packedSession.conveyorVariantKind >= 0)
         {
             footprintSource = ResolveFenceVariantPrefab(fencePrototype, packedSession.conveyorVariantKind)
                 ?? footprintSource;
@@ -1918,7 +1934,7 @@ public class InstallationPlacementController : MonoBehaviour
         activeInstallDefinition = editSession.definition;
         activeInstallPreview = null;
         MapObject previewSourcePrefab = editSession.definition.mapObject;
-        if (editSession.definition.mapObject is Fence fencePrototype && editSession.originalConveyorVariantKind >= 0)
+        if (editSession.definition.mapObject is Wall fencePrototype && editSession.originalConveyorVariantKind >= 0)
         {
             previewSourcePrefab = ResolveFenceVariantPrefab(fencePrototype, editSession.originalConveyorVariantKind)
                 ?? editSession.definition.mapObject;
@@ -1983,29 +1999,42 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         int conveyorVariantKind)
     {
+        return HasInstallationEditPositionChanged(editSession, anchorCoordinate)
+               || HasInstallationEditRotationChanged(editSession, quarterTurns)
+               || HasInstallationEditVariantChanged(editSession, conveyorVariantKind);
+    }
+
+    private bool IsSimpleInstallationEditTransformChange(
+        InstallationEditSession editSession,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        int conveyorVariantKind)
+    {
+        return !HasInstallationEditVariantChanged(editSession, conveyorVariantKind)
+               && (HasInstallationEditPositionChanged(editSession, anchorCoordinate)
+                   || HasInstallationEditRotationChanged(editSession, quarterTurns));
+    }
+
+    private static bool HasInstallationEditPositionChanged(InstallationEditSession editSession, Vector2Int anchorCoordinate)
+    {
+        return editSession != null && anchorCoordinate != editSession.originalAnchorCoordinate;
+    }
+
+    private bool HasInstallationEditRotationChanged(InstallationEditSession editSession, int quarterTurns)
+    {
         if (editSession == null)
         {
             return false;
         }
 
-        if (anchorCoordinate != editSession.originalAnchorCoordinate)
-        {
-            return true;
-        }
+        MapObject sourcePrefab = editSession.definition != null ? editSession.definition.mapObject : null;
+        return NormalizePlacementQuarterTurnsForObject(sourcePrefab, quarterTurns)
+               != NormalizePlacementQuarterTurnsForObject(sourcePrefab, editSession.originalQuarterTurns);
+    }
 
-        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
-        int originalQuarterTurns = ((editSession.originalQuarterTurns % 4) + 4) % 4;
-        if (normalizedQuarterTurns != originalQuarterTurns)
-        {
-            return true;
-        }
-
-        if (editSession.definition != null && editSession.definition.mapObject is ConveyorBelt)
-        {
-            return conveyorVariantKind != editSession.originalConveyorVariantKind;
-        }
-
-        return false;
+    private static bool HasInstallationEditVariantChanged(InstallationEditSession editSession, int variantKind)
+    {
+        return editSession != null && variantKind != editSession.originalConveyorVariantKind;
     }
 
     private int ResolveInstallationEditQuarterTurns(
@@ -2021,7 +2050,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         MapObject sourcePrefab = definition.mapObject;
-        if (installationObject is Fence installedFence && definition.mapObject is Fence fencePrototype)
+        if (installationObject is Wall installedFence && definition.mapObject is Wall fencePrototype)
         {
             sourcePrefab = ResolveFenceVariantPrefab(fencePrototype, GetFenceVariantKind(installedFence))
                 ?? definition.mapObject;
@@ -2112,7 +2141,15 @@ public class InstallationPlacementController : MonoBehaviour
             RememberLastInstalledRotation(editSession.definition, quarterTurns);
         }
 
-        PlayInstallationEditCompleteAnimation(restoredObject, editSession);
+        if (!IsSimpleInstallationEditTransformChange(
+                editSession,
+                anchorCoordinate,
+                quarterTurns,
+                conveyorVariantKind))
+        {
+            PlayInstallationEditCompleteAnimation(restoredObject, editSession);
+        }
+
         ClearInstallPreview();
         SetMapEditModeActive(false);
     }
@@ -2253,7 +2290,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         MapObject desiredSourcePrefab = null;
         if (editSession.definition != null
-            && editSession.definition.mapObject is Fence fencePrototype
+            && editSession.definition.mapObject is Wall fencePrototype
             && conveyorVariantKind >= 0)
         {
             desiredSourcePrefab = ResolveFenceVariantPrefab(fencePrototype, conveyorVariantKind);
@@ -2302,9 +2339,14 @@ public class InstallationPlacementController : MonoBehaviour
         GameManager.Instance?.SetMapEditActive(mapEditModeActive);
         if (!mapEditModeActive)
         {
+            SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             selectedEditableInstallation = null;
             selectedEditableAnchorCoordinate = Vector2Int.zero;
             FinalizePackedInstallationHistory();
+        }
+        else
+        {
+            SetWorkableRangeVisualRequested(selectedEditableInstallation, true);
         }
 
         if (IsInstallGridModeActive())
@@ -2341,7 +2383,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         MapObject desiredSourcePrefab = null;
-        if (editSession.definition.mapObject is Fence fencePrototype && conveyorVariantKind >= 0)
+        if (editSession.definition.mapObject is Wall fencePrototype && conveyorVariantKind >= 0)
         {
             desiredSourcePrefab = ResolveFenceVariantPrefab(fencePrototype, conveyorVariantKind);
         }
@@ -2726,6 +2768,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         RemovePlacedInstallPreviews(placedPreviews);
+        if (placedCount > 0)
+        {
+            WorkableObject.RefreshAllRangeVisuals();
+        }
+
         RemoveInstalledFenceVariantPreviews(null);
         if (placedAnchorCoordinates.Count > 0)
         {
@@ -2786,8 +2833,8 @@ public class InstallationPlacementController : MonoBehaviour
                                ?? sourcePrefab;
             }
         }
-        else if (activeInstallDefinition.mapObject is Fence placementFencePrototype
-                 && sourcePrefab is Fence)
+        else if (activeInstallDefinition.mapObject is Wall placementFencePrototype
+                 && sourcePrefab is Wall)
         {
             if (TryResolveFencePlacementVariant(
                     placementFencePrototype,
@@ -2803,7 +2850,7 @@ public class InstallationPlacementController : MonoBehaviour
 
             sourceResolvedWithQuarterTurns = true;
         }
-        else if (activeInstallDefinition.mapObject is Fence fencePrototype
+        else if (activeInstallDefinition.mapObject is Wall fencePrototype
                  && TryResolveFencePlacementVariant(
                      fencePrototype,
                      anchorBlock.Coordinate,
@@ -2936,7 +2983,7 @@ public class InstallationPlacementController : MonoBehaviour
         out List<Block> footprintBlocks,
         out List<Vector2Int> footprintCoordinates)
     {
-        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, preferredQuarterTurns);
         footprintBlocks = null;
         footprintCoordinates = null;
 
@@ -2945,9 +2992,12 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        for (int offset = 0; offset < 4; offset++)
+        int candidateCount = GetPlacementRotationCandidateCount(sourcePrefab);
+        for (int offset = 0; offset < candidateCount; offset++)
         {
-            int candidateQuarterTurns = NormalizePlacementQuarterTurns(resolvedQuarterTurns + offset);
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                sourcePrefab,
+                resolvedQuarterTurns + offset);
             if (!TryGetFootprintBlocks(
                     anchorCoordinate,
                     sourcePrefab,
@@ -3440,12 +3490,12 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static void ApplyFenceVariantSharedMapObjectSettings(MapObject mapObject)
     {
-        if (!(mapObject is Fence fence))
+        if (!(mapObject is Wall fence))
         {
             return;
         }
 
-        Fence straightPrefab = fence.StraightVariantPrefab;
+        Wall straightPrefab = fence.StraightVariantPrefab;
         if (straightPrefab == null || straightPrefab == fence)
         {
             return;
@@ -3513,7 +3563,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static int GetFenceVariantKind(MapObject mapObject)
     {
-        if (!(mapObject is Fence fence) || fence == null)
+        if (!(mapObject is Wall fence) || fence == null)
         {
             return -1;
         }
@@ -3532,7 +3582,7 @@ public class InstallationPlacementController : MonoBehaviour
         return GetFenceVariantKind(mapObject);
     }
 
-    public static MapObject ResolveFenceVariantPrefab(Fence fencePrototype, int fenceVariantKind)
+    public static MapObject ResolveFenceVariantPrefab(Wall fencePrototype, int fenceVariantKind)
     {
         if (fencePrototype == null)
         {
@@ -3562,7 +3612,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool TryResolveFencePlacementVariant(
-        Fence fencePrototype,
+        Wall fencePrototype,
         Vector2Int anchorCoordinate,
         int preferredQuarterTurns,
         MapObject previewToIgnore,
@@ -3576,12 +3626,12 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Fence straightPrefab = fencePrototype.StraightVariantPrefab != null
+        Wall straightPrefab = fencePrototype.StraightVariantPrefab != null
             ? fencePrototype.StraightVariantPrefab
             : fencePrototype;
-        Fence cornerPrefab = fencePrototype.CornerVariantPrefab;
-        Fence triCornerPrefab = fencePrototype.TriCornerVariantPrefab;
-        Fence crossPrefab = fencePrototype.CrossVariantPrefab;
+        Wall cornerPrefab = fencePrototype.CornerVariantPrefab;
+        Wall triCornerPrefab = fencePrototype.TriCornerVariantPrefab;
+        Wall crossPrefab = fencePrototype.CrossVariantPrefab;
         List<Vector2Int> neighborDirections = GetFenceNeighborConnectionDirections(
             anchorCoordinate,
             previewToIgnore,
@@ -3592,7 +3642,9 @@ public class InstallationPlacementController : MonoBehaviour
         if (neighborDirectionCount <= 0 && IsFenceDoor(fencePrototype, previewToIgnore))
         {
             resolvedPrefab = straightPrefab != null ? straightPrefab : fencePrototype;
-            resolvedQuarterTurns = GetFenceDoorStandaloneQuarterTurns(previewToIgnore, resolvedQuarterTurns);
+            resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                resolvedPrefab,
+                GetFenceDoorStandaloneQuarterTurns(previewToIgnore, resolvedQuarterTurns));
             return resolvedPrefab != null;
         }
 
@@ -3636,7 +3688,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         resolvedPrefab = straightPrefab != null ? straightPrefab : fencePrototype;
-        if (resolvedPrefab is Fence straightFencePrefab
+        if (resolvedPrefab is Wall straightFencePrefab
             && IsFenceDoor(straightFencePrefab, previewToIgnore)
             && TryResolveFenceDoorAlignedQuarterTurns(
                 straightFencePrefab,
@@ -3646,30 +3698,40 @@ public class InstallationPlacementController : MonoBehaviour
                 previewToIgnore,
                 out int alignedDoorQuarterTurns))
         {
-            resolvedQuarterTurns = alignedDoorQuarterTurns;
+            resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                resolvedPrefab,
+                alignedDoorQuarterTurns);
         }
-        else if (resolvedPrefab is Fence fallbackStraightFencePrefab
+        else if (resolvedPrefab is Wall fallbackStraightFencePrefab
             && TryResolveFenceStraightQuarterTurns(
                 fallbackStraightFencePrefab,
                 neighborDirections,
                 resolvedQuarterTurns,
                 out int straightQuarterTurns))
         {
-            resolvedQuarterTurns = straightQuarterTurns;
+            resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                resolvedPrefab,
+                straightQuarterTurns);
+        }
+        else
+        {
+            resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                resolvedPrefab,
+                resolvedQuarterTurns);
         }
 
         return resolvedPrefab != null;
     }
 
-    private static bool IsFenceDoor(Fence fencePrototype, MapObject preview)
+    private static bool IsFenceDoor(Wall fencePrototype, MapObject preview)
     {
         return fencePrototype is FenceDoor || preview is FenceDoor;
     }
 
     private bool ShouldAutoAlignFenceDoorPreview(MapObject preview, Vector2Int anchorCoordinate)
     {
-        Fence activeFencePrototype = activeInstallDefinition != null
-            ? activeInstallDefinition.mapObject as Fence
+        Wall activeFencePrototype = activeInstallDefinition != null
+            ? activeInstallDefinition.mapObject as Wall
             : null;
         if (!IsFenceDoor(activeFencePrototype, preview))
         {
@@ -3701,7 +3763,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool TryResolveFenceDoorAlignedQuarterTurns(
-        Fence doorPrefab,
+        Wall doorPrefab,
         Vector2Int anchorCoordinate,
         IReadOnlyList<Vector2Int> neighborDirections,
         int preferredQuarterTurns,
@@ -3731,7 +3793,7 @@ public class InstallationPlacementController : MonoBehaviour
                     anchorCoordinate + sideDirection,
                     previewToIgnore,
                     true,
-                    out Fence neighborFence,
+                    out Wall neighborFence,
                     out Quaternion neighborRotation)
                 || !neighborFence.HasConnectionTowards(neighborRotation, -sideDirection)
                 || !TryResolvePlacementQuarterTurnsFromRotation(
@@ -3754,7 +3816,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool FenceCandidateConnectsToDirections(
-        Fence fencePrefab,
+        Wall fencePrefab,
         int quarterTurns,
         IReadOnlyList<Vector2Int> neighborDirections)
     {
@@ -3833,7 +3895,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool TryResolveFenceStraightQuarterTurns(
-        Fence straightPrefab,
+        Wall straightPrefab,
         IReadOnlyList<Vector2Int> neighborDirections,
         int preferredQuarterTurns,
         out int resolvedQuarterTurns)
@@ -3877,7 +3939,9 @@ public class InstallationPlacementController : MonoBehaviour
             Quaternion candidateRotation = GetPlacementObjectRotation(straightPrefab, candidateQuarterTurns);
             if (straightPrefab.HasConnectionTowards(candidateRotation, targetDirection))
             {
-                resolvedQuarterTurns = candidateQuarterTurns;
+                resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                    straightPrefab,
+                    candidateQuarterTurns);
                 return true;
             }
         }
@@ -3886,7 +3950,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool TryResolveFenceCornerQuarterTurns(
-        Fence cornerPrefab,
+        Wall cornerPrefab,
         IReadOnlyList<Vector2Int> neighborDirections,
         int preferredQuarterTurns,
         out int resolvedQuarterTurns)
@@ -3924,7 +3988,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool TryResolveFenceVariantQuarterTurns(
-        Fence fencePrefab,
+        Wall fencePrefab,
         IReadOnlyList<Vector2Int> neighborDirections,
         int preferredQuarterTurns,
         out int resolvedQuarterTurns)
@@ -3967,7 +4031,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private bool TryGetFenceCornerQuarterTurnsForDirections(
-        Fence cornerPrefab,
+        Wall cornerPrefab,
         Vector2Int firstDirection,
         Vector2Int secondDirection,
         int preferredQuarterTurns,
@@ -4017,7 +4081,7 @@ public class InstallationPlacementController : MonoBehaviour
                     anchorCoordinate + sideDirection,
                     previewToIgnore,
                     includeAutomaticFenceCorners,
-                    out Fence neighborFence,
+                    out Wall neighborFence,
                     out Quaternion neighborRotation))
             {
                 continue;
@@ -4037,7 +4101,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private static bool ShouldFenceNeighborContributeToCorner(
-        Fence neighborFence,
+        Wall neighborFence,
         Quaternion neighborRotation,
         Vector2Int directionToCandidate,
         bool allowPotentialConnections)
@@ -4057,7 +4121,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private static bool CanFencePotentiallyConnectTowards(
-        Fence fence,
+        Wall fence,
         Quaternion baseRotation,
         Vector2Int direction)
     {
@@ -4082,7 +4146,7 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int coordinate,
         MapObject previewToIgnore,
         bool includeAutomaticFenceCorners,
-        out Fence fence,
+        out Wall fence,
         out Quaternion rotation)
     {
         fence = null;
@@ -4092,7 +4156,7 @@ public class InstallationPlacementController : MonoBehaviour
             && preview != null
             && preview != previewToIgnore
             && (includeAutomaticFenceCorners || !automaticFenceCornerPreviews.Contains(preview))
-            && preview is Fence previewFence)
+            && preview is Wall previewFence)
         {
             fence = previewFence;
             rotation = previewFence.transform.rotation;
@@ -4100,19 +4164,116 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null
-            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is Fence installedFence)
-            || installedFence == null
-            || !installedFence.gameObject.activeInHierarchy)
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.MapObject is Wall installedFence
+            && installedFence != null
+            && installedFence.gameObject.activeInHierarchy)
+        {
+            if (TryGetInstalledFenceVariantPreview(installedFence, out Wall variantPreviewFence, out Quaternion previewRotation))
+            {
+                fence = variantPreviewFence;
+                rotation = previewRotation;
+                return true;
+            }
+
+            fence = installedFence;
+            rotation = installedFence.transform.rotation;
+            return true;
+        }
+
+        if (TryGetSavedInstallationPlacementAtCoordinate(
+                coordinate,
+                out MapObject savedSourcePrefab,
+                out Quaternion savedRotation,
+                out _)
+            && savedSourcePrefab is Wall savedFence)
+        {
+            fence = savedFence;
+            rotation = savedRotation;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetInstalledFenceVariantPreview(
+        Wall installedFence,
+        out Wall previewFence,
+        out Quaternion previewRotation)
+    {
+        previewFence = null;
+        previewRotation = Quaternion.identity;
+        if (installedFence == null
+            || !installedFenceVariantPreviews.TryGetValue(installedFence, out MapObject preview)
+            || !(preview is Wall wallPreview)
+            || !wallPreview.gameObject.activeInHierarchy)
         {
             return false;
         }
 
-        fence = installedFence;
-        rotation = installedFence.transform.rotation;
+        previewFence = wallPreview;
+        previewRotation = wallPreview.transform.rotation;
         return true;
+    }
+
+    private bool TryGetSavedInstallationPlacementAtCoordinate(
+        Vector2Int coordinate,
+        out MapObject sourcePrefab,
+        out Quaternion rotation,
+        out BlockStateStore.InstallationSaveState savedState)
+    {
+        sourcePrefab = null;
+        rotation = Quaternion.identity;
+        savedState = null;
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null
+            || !terrain.TryGetInstallationStateAtCoordinate(coordinate, out savedState)
+            || savedState == null
+            || !TryGetInstallationDefinition(savedState.itemId, out ItemDefinition savedDefinition)
+            || savedDefinition == null
+            || savedDefinition.mapObject == null)
+        {
+            return false;
+        }
+
+        sourcePrefab = ResolveSavedInstallationSourcePrefab(savedDefinition, savedState);
+        if (sourcePrefab == null)
+        {
+            sourcePrefab = savedDefinition.mapObject;
+        }
+
+        if (sourcePrefab == null)
+        {
+            return false;
+        }
+
+        rotation = GetPlacementObjectRotation(sourcePrefab, savedState.quarterTurns);
+        return true;
+    }
+
+    private static MapObject ResolveSavedInstallationSourcePrefab(
+        ItemDefinition savedDefinition,
+        BlockStateStore.InstallationSaveState savedState)
+    {
+        if (savedDefinition == null || savedDefinition.mapObject == null || savedState == null)
+        {
+            return null;
+        }
+
+        if (savedDefinition.mapObject is Wall fencePrototype && savedState.conveyorVariantKind >= 0)
+        {
+            return ResolveFenceVariantPrefab(fencePrototype, savedState.conveyorVariantKind);
+        }
+
+        if (savedDefinition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
+        {
+            return ResolveConveyorVariantPrefab(conveyorPrototype, savedState.conveyorVariantKind);
+        }
+
+        return savedDefinition.mapObject;
     }
 
     private static bool DirectionsArePerpendicular(Vector2Int firstDirection, Vector2Int secondDirection)
@@ -4182,7 +4343,7 @@ public class InstallationPlacementController : MonoBehaviour
             return null;
         }
 
-        if (definition.mapObject is Fence fencePrototype)
+        if (definition.mapObject is Wall fencePrototype)
         {
             return TryResolveFencePlacementVariant(
                        fencePrototype,
@@ -4249,14 +4410,24 @@ public class InstallationPlacementController : MonoBehaviour
             return baseRotation;
         }
 
-        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, quarterTurns);
         int rotationQuarterTurns = normalizedQuarterTurns;
         if (sourcePrefab is ConveyorBelt conveyorBelt)
         {
             rotationQuarterTurns = (rotationQuarterTurns + conveyorBelt.PlacementRotationQuarterTurnOffset) % 4;
         }
 
-        return baseRotation * Quaternion.Euler(0f, rotationQuarterTurns * 90f, 0f);
+        Quaternion rotation = baseRotation * Quaternion.Euler(0f, rotationQuarterTurns * 90f, 0f);
+        return UsesTwoStateWallRotation(sourcePrefab)
+            ? CanonicalizeStraightWallRotation(rotation)
+            : rotation;
+    }
+
+    private static Quaternion CanonicalizeStraightWallRotation(Quaternion rotation)
+    {
+        float yAngle = Mathf.Repeat(rotation.eulerAngles.y, 180f);
+        float canonicalY = yAngle >= 45f && yAngle < 135f ? 90f : 0f;
+        return Quaternion.Euler(0f, canonicalY, 0f);
     }
 
     private bool TryResolveConveyorCornerPlacementPrefab(
@@ -5057,7 +5228,7 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int? previousAnchorCoordinate = null,
         bool preserveActivePreviewQuarterTurns = false)
     {
-        if (!(activeInstallPreview is Fence))
+        if (!(activeInstallPreview is Wall))
         {
             return;
         }
@@ -5224,7 +5395,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
             || block == null
-            || !(block.MapObject is Fence installedFence)
+            || !(block.MapObject is Wall installedFence)
             || installedFence == null
             || !installedFence.gameObject.activeInHierarchy
             || !installedFence.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int currentQuarterTurns))
@@ -5248,7 +5419,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        Fence fencePrototype = installedFence.StraightVariantPrefab != null
+        Wall fencePrototype = installedFence.StraightVariantPrefab != null
             ? installedFence.StraightVariantPrefab
             : installedFence;
         if (!TryResolveFencePlacementVariant(
@@ -5258,7 +5429,7 @@ public class InstallationPlacementController : MonoBehaviour
                 previewToIgnore,
                 out MapObject desiredPrefab,
                 out int desiredQuarterTurns)
-            || !(desiredPrefab is Fence desiredFencePrefab))
+            || !(desiredPrefab is Wall desiredFencePrefab))
         {
             return false;
         }
@@ -5283,7 +5454,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         MapObject replacementObject = CreateInstalledObjectInstance(desiredFencePrefab, terrain.transform, terrain);
-        if (!(replacementObject is Fence replacementFence))
+        if (!(replacementObject is Wall replacementFence))
         {
             if (replacementObject is InstallationObject replacementInstallation)
             {
@@ -5964,7 +6135,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject previewToIgnore = null,
         bool preserveActivePreviewQuarterTurns = false)
     {
-        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is Fence))
+        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is Wall))
         {
             return;
         }
@@ -5984,7 +6155,7 @@ public class InstallationPlacementController : MonoBehaviour
             for (int i = 0; i < previews.Count; i++)
             {
                 MapObject preview = previews[i];
-                if (!(preview is Fence)
+                if (!(preview is Wall)
                     || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
                 {
                     continue;
@@ -6052,7 +6223,7 @@ public class InstallationPlacementController : MonoBehaviour
             CleanupInstallPreviewReferences();
             if (IsEditingInstallation()
                 || activeInstallDefinition == null
-                || !(activeInstallDefinition.mapObject is Fence fencePrototype)
+                || !(activeInstallDefinition.mapObject is Wall fencePrototype)
                 || fencePrototype.CornerVariantPrefab == null)
             {
                 RemoveAutomaticFenceCornerPreviews(null);
@@ -6133,7 +6304,7 @@ public class InstallationPlacementController : MonoBehaviour
         for (int i = 0; i < installPreviewInstances.Count; i++)
         {
             MapObject preview = installPreviewInstances[i];
-            if (!(preview is Fence)
+            if (!(preview is Wall)
                 || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
             {
                 continue;
@@ -6151,8 +6322,8 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TryResolveAutomaticFenceCornerPreview(
         Vector2Int coordinate,
-        Fence fencePrototype,
-        out Fence cornerPrefab,
+        Wall fencePrototype,
+        out Wall cornerPrefab,
         out int resolvedQuarterTurns)
     {
         cornerPrefab = fencePrototype != null ? fencePrototype.CornerVariantPrefab : null;
@@ -6216,7 +6387,7 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private bool TryCreateAutomaticFenceCornerPreview(Vector2Int coordinate, Fence cornerPrefab, int quarterTurns)
+    private bool TryCreateAutomaticFenceCornerPreview(Vector2Int coordinate, Wall cornerPrefab, int quarterTurns)
     {
         if (activeInstallDefinition == null || cornerPrefab == null)
         {
@@ -6242,7 +6413,7 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
-    private void UpdateAutomaticFenceCornerPreview(MapObject preview, Fence cornerPrefab, Vector2Int coordinate, int quarterTurns)
+    private void UpdateAutomaticFenceCornerPreview(MapObject preview, Wall cornerPrefab, Vector2Int coordinate, int quarterTurns)
     {
         if (preview == null || cornerPrefab == null)
         {
@@ -6316,7 +6487,7 @@ public class InstallationPlacementController : MonoBehaviour
         CleanupInstalledFenceVariantPreviewReferences();
         if (IsEditingInstallation()
             || activeInstallDefinition == null
-            || !(activeInstallDefinition.mapObject is Fence fencePrototype)
+            || !(activeInstallDefinition.mapObject is Wall fencePrototype)
             || installPreviewInstances.Count <= 0)
         {
             RemoveInstalledFenceVariantPreviews(null);
@@ -6331,8 +6502,8 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        Dictionary<Fence, InstalledFenceVariantPreviewPlan> desiredPreviewsByFence =
-            new Dictionary<Fence, InstalledFenceVariantPreviewPlan>();
+        Dictionary<Wall, InstalledFenceVariantPreviewPlan> desiredPreviewsByFence =
+            new Dictionary<Wall, InstalledFenceVariantPreviewPlan>();
         foreach (Vector2Int coordinate in affectedCoordinates)
         {
             if (TryResolveInstalledFenceVariantPreview(
@@ -6347,10 +6518,10 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        List<Fence> existingPreviewOwners = new List<Fence>(installedFenceVariantPreviews.Keys);
+        List<Wall> existingPreviewOwners = new List<Wall>(installedFenceVariantPreviews.Keys);
         for (int i = 0; i < existingPreviewOwners.Count; i++)
         {
-            Fence installedFence = existingPreviewOwners[i];
+            Wall installedFence = existingPreviewOwners[i];
             if (installedFence == null)
             {
                 RemoveInstalledFenceVariantPreview(installedFence);
@@ -6386,7 +6557,7 @@ public class InstallationPlacementController : MonoBehaviour
         for (int i = 0; i < installPreviewInstances.Count; i++)
         {
             MapObject preview = installPreviewInstances[i];
-            if (!(preview is Fence)
+            if (!(preview is Wall)
                 || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
             {
                 continue;
@@ -6395,10 +6566,10 @@ public class InstallationPlacementController : MonoBehaviour
             AddFenceVariantRefreshCoordinates(coordinates, anchorCoordinate, true);
         }
 
-        List<Fence> existingPreviewOwners = new List<Fence>(installedFenceVariantPreviews.Keys);
+        List<Wall> existingPreviewOwners = new List<Wall>(installedFenceVariantPreviews.Keys);
         for (int i = 0; i < existingPreviewOwners.Count; i++)
         {
-            Fence installedFence = existingPreviewOwners[i];
+            Wall installedFence = existingPreviewOwners[i];
             if (installedFence == null
                 || !installedFence.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
             {
@@ -6431,7 +6602,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TryResolveInstalledFenceVariantPreview(
         Vector2Int coordinate,
-        Fence fencePrototype,
+        Wall fencePrototype,
         MapObject previewToIgnore,
         out InstalledFenceVariantPreviewPlan plan)
     {
@@ -6440,7 +6611,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
             || block == null
-            || !(block.MapObject is Fence installedFence)
+            || !(block.MapObject is Wall installedFence)
             || installedFence == null
             || !installedFence.gameObject.activeInHierarchy
             || !installedFence.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int currentQuarterTurns)
@@ -6449,7 +6620,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Fence sourcePrototype = installedFence.StraightVariantPrefab != null
+        Wall sourcePrototype = installedFence.StraightVariantPrefab != null
             ? installedFence.StraightVariantPrefab
             : fencePrototype != null && fencePrototype.StraightVariantPrefab != null
                 ? fencePrototype.StraightVariantPrefab
@@ -6463,7 +6634,7 @@ public class InstallationPlacementController : MonoBehaviour
                 previewToIgnore,
                 out MapObject desiredPrefab,
                 out int desiredQuarterTurns)
-            || !(desiredPrefab is Fence desiredFencePrefab))
+            || !(desiredPrefab is Wall desiredFencePrefab))
         {
             return false;
         }
@@ -6498,7 +6669,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        Fence installedFence = plan.installedFence;
+        Wall installedFence = plan.installedFence;
         installedFenceVariantPreviews.TryGetValue(installedFence, out MapObject preview);
         installedFenceVariantPreviewSourcePrefabs.TryGetValue(installedFence, out MapObject currentSourcePrefab);
         bool requiresReplacement = preview == null
@@ -6506,7 +6677,7 @@ public class InstallationPlacementController : MonoBehaviour
                                    || RequiresFencePreviewReplacement(preview, plan.sourcePrefab);
         if (requiresReplacement)
         {
-            DestroyInstalledFenceVariantPreviewObject(preview);
+            DestroyInstallPreviewObject(preview);
             preview = Instantiate(plan.sourcePrefab);
             if (preview == null)
             {
@@ -6528,7 +6699,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private void HideInstalledFenceForVariantPreview(Fence installedFence)
+    private void HideInstalledFenceForVariantPreview(Wall installedFence)
     {
         if (installedFence == null || installedFencePreviewRendererStates.ContainsKey(installedFence))
         {
@@ -6558,10 +6729,10 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RemoveInstalledFenceVariantPreviews(IReadOnlyCollection<Vector2Int> allowedCoordinates)
     {
-        List<Fence> installedFences = new List<Fence>(installedFenceVariantPreviews.Keys);
+        List<Wall> installedFences = new List<Wall>(installedFenceVariantPreviews.Keys);
         for (int i = 0; i < installedFences.Count; i++)
         {
-            Fence installedFence = installedFences[i];
+            Wall installedFence = installedFences[i];
             if (installedFence != null
                 && allowedCoordinates != null
                 && installedFence.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
@@ -6574,7 +6745,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private void RemoveInstalledFenceVariantPreview(Fence installedFence)
+    private void RemoveInstalledFenceVariantPreview(Wall installedFence)
     {
         if (ReferenceEquals(installedFence, null))
         {
@@ -6582,7 +6753,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         installedFenceVariantPreviews.TryGetValue(installedFence, out MapObject preview);
-        DestroyInstalledFenceVariantPreviewObject(preview);
+        DestroyInstallPreviewObject(preview);
         installedFenceVariantPreviews.Remove(installedFence);
         installedFenceVariantPreviewSourcePrefabs.Remove(installedFence);
         RestoreInstalledFencePreviewRenderers(installedFence);
@@ -6590,10 +6761,10 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void CleanupInstalledFenceVariantPreviewReferences()
     {
-        List<Fence> installedFences = new List<Fence>(installedFenceVariantPreviews.Keys);
+        List<Wall> installedFences = new List<Wall>(installedFenceVariantPreviews.Keys);
         for (int i = 0; i < installedFences.Count; i++)
         {
-            Fence installedFence = installedFences[i];
+            Wall installedFence = installedFences[i];
             installedFenceVariantPreviews.TryGetValue(installedFence, out MapObject preview);
             bool ownerMissing = installedFence == null;
             bool ownerInactive = !ownerMissing && !installedFence.gameObject.activeInHierarchy;
@@ -6603,10 +6774,10 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        installedFences = new List<Fence>(installedFencePreviewRendererStates.Keys);
+        installedFences = new List<Wall>(installedFencePreviewRendererStates.Keys);
         for (int i = 0; i < installedFences.Count; i++)
         {
-            Fence installedFence = installedFences[i];
+            Wall installedFence = installedFences[i];
             if (installedFence == null || !installedFenceVariantPreviews.ContainsKey(installedFence))
             {
                 RestoreInstalledFencePreviewRenderers(installedFence);
@@ -6614,7 +6785,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private void RestoreInstalledFencePreviewRenderers(Fence installedFence)
+    private void RestoreInstalledFencePreviewRenderers(Wall installedFence)
     {
         if (ReferenceEquals(installedFence, null)
             || !installedFencePreviewRendererStates.TryGetValue(installedFence, out List<RendererVisibilityState> rendererStates))
@@ -6636,13 +6807,14 @@ public class InstallationPlacementController : MonoBehaviour
         installedFencePreviewRendererStates.Remove(installedFence);
     }
 
-    private void DestroyInstalledFenceVariantPreviewObject(MapObject preview)
+    private void DestroyInstallPreviewObject(MapObject preview)
     {
         if (preview == null)
         {
             return;
         }
 
+        SetWorkableRangeVisualRequested(preview, false);
         ClearInputOutputMarkers(preview);
         if (Application.isPlaying)
         {
@@ -6656,7 +6828,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RefreshActiveFencePreviewVariant(bool preserveActivePreviewQuarterTurns = false)
     {
-        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is Fence))
+        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is Wall))
         {
             return;
         }
@@ -6681,7 +6853,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (preview == null
             || activeInstallDefinition == null
-            || !(activeInstallDefinition.mapObject is Fence fencePrototype))
+            || !(activeInstallDefinition.mapObject is Wall fencePrototype))
         {
             return false;
         }
@@ -6770,7 +6942,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool RequiresFencePreviewReplacement(MapObject currentPreview, MapObject desiredPrefab)
     {
-        if (!(currentPreview is Fence currentFence) || !(desiredPrefab is Fence desiredFence))
+        if (!(currentPreview is Wall currentFence) || !(desiredPrefab is Wall desiredFence))
         {
             return false;
         }
@@ -6986,15 +7158,7 @@ public class InstallationPlacementController : MonoBehaviour
             previewPointerOriginPreview = replacementPreview;
         }
 
-        ClearInputOutputMarkers(currentPreview);
-        if (Application.isPlaying)
-        {
-            Destroy(currentPreview.gameObject);
-        }
-        else
-        {
-            DestroyImmediate(currentPreview.gameObject);
-        }
+        DestroyInstallPreviewObject(currentPreview);
     }
 
     private bool TryResolveDisconnectedConveyorStraightQuarterTurnsForPreview(
@@ -7616,7 +7780,7 @@ public class InstallationPlacementController : MonoBehaviour
                 ? conveyorPrototype.StraightVariantPrefab
                 : definition.mapObject;
         }
-        else if (definition.mapObject is Fence fencePrototype)
+        else if (definition.mapObject is Wall fencePrototype)
         {
             sourcePrefab = fencePrototype.StraightVariantPrefab != null
                 ? fencePrototype.StraightVariantPrefab
@@ -7735,6 +7899,8 @@ public class InstallationPlacementController : MonoBehaviour
                 renderer.SetPropertyBlock(installPreviewPropertyBlock);
             }
         }
+
+        SetWorkableRangeVisualRequested(preview, true);
     }
 
     private void TrySnapInstallPreviewToInitialBlock()
@@ -8858,7 +9024,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
         else
         {
-            int nextQuarterTurns = (installPreviewQuarterTurns + 1) % 4;
+            int nextQuarterTurns = GetNextInstallPreviewQuarterTurns(
+                activeInstallPreview,
+                installPreviewQuarterTurns);
             bool shouldRememberFenceDoorStandaloneQuarterTurns =
                 ShouldRememberFenceDoorStandaloneQuarterTurns(
                     activeInstallPreview,
@@ -8873,7 +9041,7 @@ public class InstallationPlacementController : MonoBehaviour
                         activeInstallPreview,
                         out previousFenceDoorStandaloneQuarterTurns);
                 installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
-                    NormalizePlacementQuarterTurns(nextQuarterTurns);
+                    NormalizePlacementQuarterTurnsForObject(activeInstallPreview, nextQuarterTurns);
             }
 
             if (hasAnchorBlock)
@@ -8908,7 +9076,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (ShouldRememberFenceDoorStandaloneQuarterTurns(activeInstallPreview, hasAnchorBlock, anchorCoordinate))
         {
             installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
-                NormalizePlacementQuarterTurns(installPreviewQuarterTurns);
+                NormalizePlacementQuarterTurnsForObject(activeInstallPreview, installPreviewQuarterTurns);
         }
 
         preferDifferentConveyorCornerOnNextRefresh = activeInstallDefinition != null
@@ -9539,7 +9707,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (installPreviewQuarterTurnsByPreview.TryGetValue(preview, out int storedQuarterTurns))
         {
-            return Mathf.Abs(storedQuarterTurns) % 4;
+            return NormalizePlacementQuarterTurnsForObject(preview, storedQuarterTurns);
         }
 
         return 0;
@@ -9550,9 +9718,39 @@ public class InstallationPlacementController : MonoBehaviour
         return ((quarterTurns % 4) + 4) % 4;
     }
 
-    private void RememberLastBlueprintRotation(ItemDefinition definition, int quarterTurns)
+    private static bool UsesTwoStateWallRotation(MapObject sourcePrefab)
+    {
+        return sourcePrefab is Wall wall && wall.VariantKind == FenceVariantKind.Straight;
+    }
+
+    private static int GetPlacementRotationCandidateCount(MapObject sourcePrefab)
+    {
+        return UsesTwoStateWallRotation(sourcePrefab) ? 2 : 4;
+    }
+
+    private static int NormalizePlacementQuarterTurnsForObject(MapObject sourcePrefab, int quarterTurns)
     {
         int normalizedQuarterTurns = NormalizePlacementQuarterTurns(quarterTurns);
+        return UsesTwoStateWallRotation(sourcePrefab)
+            ? normalizedQuarterTurns % 2
+            : normalizedQuarterTurns;
+    }
+
+    private static int GetNextInstallPreviewQuarterTurns(MapObject preview, int currentQuarterTurns)
+    {
+        if (UsesTwoStateWallRotation(preview))
+        {
+            return NormalizePlacementQuarterTurnsForObject(preview, currentQuarterTurns) == 0 ? 1 : 0;
+        }
+
+        return NormalizePlacementQuarterTurns(currentQuarterTurns + 1);
+    }
+
+    private void RememberLastBlueprintRotation(ItemDefinition definition, int quarterTurns)
+    {
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            definition != null ? definition.mapObject : null,
+            quarterTurns);
         lastBlueprintQuarterTurns = normalizedQuarterTurns;
         hasLastBlueprintQuarterTurns = true;
 
@@ -9564,7 +9762,9 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RememberBlueprintRotationForPreview(ItemDefinition definition, MapObject preview, int quarterTurns)
     {
-        int normalizedQuarterTurns = NormalizePlacementQuarterTurns(quarterTurns);
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            preview != null ? preview : definition != null ? definition.mapObject : null,
+            quarterTurns);
         if (IsFenceDoorDefinition(definition))
         {
             if (preview is FenceDoor)
@@ -9597,7 +9797,9 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RememberLastInstalledRotation(ItemDefinition definition, int quarterTurns)
     {
-        int normalizedQuarterTurns = NormalizePlacementQuarterTurns(quarterTurns);
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            definition != null ? definition.mapObject : null,
+            quarterTurns);
         lastInstalledQuarterTurns = normalizedQuarterTurns;
         hasLastInstalledQuarterTurns = true;
 
@@ -9640,14 +9842,14 @@ public class InstallationPlacementController : MonoBehaviour
             && definition.id >= 0
             && lastBlueprintQuarterTurnsByItemId.TryGetValue(definition.id, out int blueprintQuarterTurns))
         {
-            return NormalizePlacementQuarterTurns(blueprintQuarterTurns);
+            return NormalizePlacementQuarterTurnsForObject(definition.mapObject, blueprintQuarterTurns);
         }
 
         if (definition != null
             && definition.id >= 0
             && lastInstalledQuarterTurnsByItemId.TryGetValue(definition.id, out int installedQuarterTurns))
         {
-            return NormalizePlacementQuarterTurns(installedQuarterTurns);
+            return NormalizePlacementQuarterTurnsForObject(definition.mapObject, installedQuarterTurns);
         }
 
         return 0;
@@ -9675,7 +9877,7 @@ public class InstallationPlacementController : MonoBehaviour
             && definition.id >= 0
             && lastBlueprintQuarterTurnsByItemId.TryGetValue(definition.id, out int itemQuarterTurns))
         {
-            quarterTurns = NormalizePlacementQuarterTurns(itemQuarterTurns);
+            quarterTurns = NormalizePlacementQuarterTurnsForObject(definition.mapObject, itemQuarterTurns);
             return true;
         }
 
@@ -9684,7 +9886,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        quarterTurns = NormalizePlacementQuarterTurns(lastBlueprintQuarterTurns);
+        quarterTurns = NormalizePlacementQuarterTurnsForObject(definition != null ? definition.mapObject : null, lastBlueprintQuarterTurns);
         return true;
     }
 
@@ -9695,7 +9897,7 @@ public class InstallationPlacementController : MonoBehaviour
             && definition.id >= 0
             && lastInstalledQuarterTurnsByItemId.TryGetValue(definition.id, out int itemQuarterTurns))
         {
-            quarterTurns = NormalizePlacementQuarterTurns(itemQuarterTurns);
+            quarterTurns = NormalizePlacementQuarterTurnsForObject(definition.mapObject, itemQuarterTurns);
             return true;
         }
 
@@ -9704,7 +9906,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        quarterTurns = NormalizePlacementQuarterTurns(lastInstalledQuarterTurns);
+        quarterTurns = NormalizePlacementQuarterTurnsForObject(definition != null ? definition.mapObject : null, lastInstalledQuarterTurns);
         return true;
     }
 
@@ -9726,7 +9928,8 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        for (int candidateQuarterTurns = 0; candidateQuarterTurns < 4; candidateQuarterTurns++)
+        int candidateCount = GetPlacementRotationCandidateCount(sourcePrefab);
+        for (int candidateQuarterTurns = 0; candidateQuarterTurns < candidateCount; candidateQuarterTurns++)
         {
             Quaternion candidateRotation = GetPlacementObjectRotation(sourcePrefab, candidateQuarterTurns);
             if (Mathf.Abs(Quaternion.Dot(candidateRotation, worldRotation)) >= 0.9999f)
@@ -9846,7 +10049,7 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewInstances.Add(preview);
         }
 
-        int normalizedQuarterTurns = NormalizePlacementQuarterTurns(quarterTurns);
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(preview, quarterTurns);
         installPreviewQuarterTurnsByPreview[preview] = normalizedQuarterTurns;
         if (preview is FenceDoor)
         {
@@ -10052,7 +10255,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         ConveyorChangeInfo removedPreviewConveyorChange = null;
         Vector2Int removedFenceAnchorCoordinate = Vector2Int.zero;
-        bool hadRemovedFenceAnchorCoordinate = preview is Fence
+        bool hadRemovedFenceAnchorCoordinate = preview is Wall
             && TryGetPreviewAnchorCoordinate(preview, out removedFenceAnchorCoordinate);
         if (preview is ConveyorBelt previewConveyor
             && TryGetPreviewAnchorCoordinate(preview, out Vector2Int previewAnchorCoordinate))
@@ -10085,15 +10288,7 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewQuarterTurns = 0;
         }
 
-        ClearInputOutputMarkers(preview);
-        if (Application.isPlaying)
-        {
-            Destroy(preview.gameObject);
-        }
-        else
-        {
-            DestroyImmediate(preview.gameObject);
-        }
+        DestroyInstallPreviewObject(preview);
 
         EnsureValidActiveInstallPreview();
         if (removedPreviewConveyorChange != null)
@@ -10161,15 +10356,7 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewQuarterTurns = 0;
             }
 
-            ClearInputOutputMarkers(preview);
-            if (Application.isPlaying)
-            {
-                Destroy(preview.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(preview.gameObject);
-            }
+            DestroyInstallPreviewObject(preview);
         }
 
         EnsureValidActiveInstallPreview();
@@ -10274,7 +10461,7 @@ public class InstallationPlacementController : MonoBehaviour
                               ?? footprintSource;
         }
         else if (activeInstallDefinition != null
-                 && activeInstallDefinition.mapObject is Fence fencePrototype
+                 && activeInstallDefinition.mapObject is Wall fencePrototype
                  && TryResolveFencePlacementVariant(
                      fencePrototype,
                      block.Coordinate,
@@ -10369,7 +10556,7 @@ public class InstallationPlacementController : MonoBehaviour
         int preferredQuarterTurns,
         out int resolvedQuarterTurns)
     {
-        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(previewToIgnore, preferredQuarterTurns);
         if (block == null)
         {
             return false;
@@ -10391,7 +10578,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (activeInstallDefinition != null
-            && activeInstallDefinition.mapObject is Fence fencePrototype
+            && activeInstallDefinition.mapObject is Wall fencePrototype
             && TryResolveFencePlacementVariant(
                 fencePrototype,
                 block.Coordinate,
@@ -10420,9 +10607,12 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        for (int offset = 1; offset < 4; offset++)
+        int candidateCount = GetPlacementRotationCandidateCount(previewToIgnore);
+        for (int offset = 1; offset < candidateCount; offset++)
         {
-            int candidateQuarterTurns = (resolvedQuarterTurns + offset) % 4;
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                previewToIgnore,
+                resolvedQuarterTurns + offset);
             if (!CanPlacePreviewOnBlock(block, previewToIgnore, candidateQuarterTurns))
             {
                 continue;
@@ -10443,7 +10633,7 @@ public class InstallationPlacementController : MonoBehaviour
         out int resolvedQuarterTurns)
     {
         anchorBlock = clickedBlock;
-        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(previewToIgnore, preferredQuarterTurns);
         if (clickedBlock == null)
         {
             return false;
@@ -10989,6 +11179,15 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         MapObject occupyingObject = GetBlockingMapObject(block);
+        if (occupyingObject == null
+            && TryGetSavedInstallationPlacementAtCoordinate(
+                block.Coordinate,
+                out MapObject savedOccupyingObject,
+                out _,
+                out _))
+        {
+            occupyingObject = savedOccupyingObject;
+        }
 
         if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
         {
@@ -11729,7 +11928,7 @@ public class InstallationPlacementController : MonoBehaviour
     private static MapObject ResolveInstallationSourcePrefab(ItemDefinition definition, int conveyorVariantKind)
     {
         MapObject sourcePrefab = definition != null ? definition.mapObject : null;
-        if (sourcePrefab is Fence fencePrototype && conveyorVariantKind >= 0)
+        if (sourcePrefab is Wall fencePrototype && conveyorVariantKind >= 0)
         {
             sourcePrefab = ResolveFenceVariantPrefab(fencePrototype, conveyorVariantKind)
                 ?? sourcePrefab;
@@ -12009,15 +12208,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            ClearInputOutputMarkers(preview);
-            if (Application.isPlaying)
-            {
-                Destroy(preview.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(preview.gameObject);
-            }
+            DestroyInstallPreviewObject(preview);
         }
 
         installPreviewInstances.Clear();

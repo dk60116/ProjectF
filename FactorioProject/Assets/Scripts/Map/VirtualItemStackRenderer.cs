@@ -5,8 +5,18 @@ using UnityEngine.Rendering;
 [DisallowMultipleComponent]
 public sealed class VirtualItemStackRenderer : MonoBehaviour
 {
+    private const int LegacyFloorStackCapacity = 10;
+
+    private static readonly Vector3[] DefaultFloorSlotOffsets =
+    {
+        new Vector3(0f, 0f, -0.35000002f),
+        new Vector3(0.3f, 0f, 0f),
+        new Vector3(0f, 0f, 0.35f),
+        new Vector3(-0.35000002f, 0f, 0f)
+    };
+
     [SerializeField, Min(0f)]
-    private float stackBaseYOffset = 0.2f;
+    private float stackBaseYOffset = 0.05f;
 
     [SerializeField, Min(0.001f)]
     private float stackVerticalSpacing = 0.05f;
@@ -117,15 +127,136 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
                 continue;
             }
 
-            int renderCount = Mathf.Min(itemBuffer.Count, Mathf.Max(1, maxRenderedItemsPerStack));
-            for (int itemIndex = 0; itemIndex < renderCount; itemIndex++)
-            {
-                AddItemMatrix(itemBuffer[itemIndex], record, itemIndex);
-            }
+            AddFloorItemMatrices(record, itemBuffer);
         }
     }
 
-    private void AddItemMatrix(int itemId, VirtualObjectRecord record, int stackIndex)
+    private void AddFloorItemMatrices(VirtualObjectRecord record, IReadOnlyList<int> itemIds)
+    {
+        int maxRenderCount = Mathf.Max(1, maxRenderedItemsPerStack);
+        int renderedCount = 0;
+        bool parsedStructuredState = false;
+
+        for (int i = 0; i < itemIds.Count && renderedCount < maxRenderCount; i++)
+        {
+            int itemId = itemIds[i];
+            if (itemId != Block.FloorStackStateSentinel)
+            {
+                continue;
+            }
+
+            parsedStructuredState = true;
+            if (i + 1 >= itemIds.Count)
+            {
+                break;
+            }
+
+            int stackCount = Mathf.Max(0, itemIds[++i]);
+            for (int stackIndex = 0; stackIndex < stackCount && i + 1 < itemIds.Count; stackIndex++)
+            {
+                int stackItemCount = Mathf.Max(0, itemIds[++i]);
+                for (int objectIndex = 0; objectIndex < stackItemCount && i + 1 < itemIds.Count; objectIndex++)
+                {
+                    int stackItemId = itemIds[++i];
+                    if (stackItemId < 0)
+                    {
+                        continue;
+                    }
+
+                    AddItemMatrix(stackItemId, record, stackIndex, objectIndex);
+                    renderedCount++;
+                    if (renderedCount >= maxRenderCount)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!parsedStructuredState)
+        {
+            AddLegacyFloorItemMatrices(record, itemIds, maxRenderCount);
+        }
+    }
+
+    private void AddLegacyFloorItemMatrices(VirtualObjectRecord record, IReadOnlyList<int> itemIds, int maxRenderCount)
+    {
+        int slotCount = Mathf.Max(1, DefaultFloorSlotOffsets.Length);
+        int[] slotCounts = new int[slotCount];
+        int[] slotItemIds = new int[slotCount];
+        for (int i = 0; i < slotItemIds.Length; i++)
+        {
+            slotItemIds[i] = -1;
+        }
+
+        int renderedCount = 0;
+        for (int itemIndex = 0; itemIndex < itemIds.Count && renderedCount < maxRenderCount; itemIndex++)
+        {
+            int itemId = itemIds[itemIndex];
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            if (!TryGetBestLegacyFloorSlot(itemId, true, slotCounts, slotItemIds, out int slotIndex)
+                && !TryGetBestLegacyFloorSlot(itemId, false, slotCounts, slotItemIds, out slotIndex))
+            {
+                continue;
+            }
+
+            AddItemMatrix(itemId, record, slotIndex, slotCounts[slotIndex]);
+            slotCounts[slotIndex]++;
+            slotItemIds[slotIndex] = itemId;
+            renderedCount++;
+        }
+    }
+
+    private static bool TryGetBestLegacyFloorSlot(
+        int itemId,
+        bool requireExisting,
+        IReadOnlyList<int> slotCounts,
+        IReadOnlyList<int> slotItemIds,
+        out int bestSlotIndex)
+    {
+        bestSlotIndex = -1;
+        float bestDistanceSqr = float.MaxValue;
+        int slotCount = Mathf.Min(DefaultFloorSlotOffsets.Length, slotCounts.Count);
+
+        for (int slotIndex = 0; slotIndex < slotCount; slotIndex++)
+        {
+            int slotItemCount = slotCounts[slotIndex];
+            if (requireExisting && slotItemCount == 0)
+            {
+                continue;
+            }
+
+            if (slotItemCount >= LegacyFloorStackCapacity)
+            {
+                continue;
+            }
+
+            int slotItemId = slotIndex < slotItemIds.Count ? slotItemIds[slotIndex] : -1;
+            if (slotItemCount > 0 && slotItemId != itemId)
+            {
+                continue;
+            }
+
+            Vector3 offset = ResolveVirtualFloorSlotOffset(slotIndex);
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (bestSlotIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            bestDistanceSqr = distanceSqr;
+            bestSlotIndex = slotIndex;
+        }
+
+        return bestSlotIndex >= 0;
+    }
+
+    private void AddItemMatrix(int itemId, VirtualObjectRecord record, int stackIndex, int objectIndex)
     {
         if (itemId < 0 || !itemManager.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet))
         {
@@ -159,13 +290,26 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
             itemId,
             GetBatchCell(record.worldPosition.x, batchCellSize),
             GetBatchCell(record.worldPosition.z, batchCellSize));
-        Vector3 position = record.worldPosition + new Vector3(0f, stackBaseYOffset + (stackVerticalSpacing * stackIndex), 0f);
+        Vector3 slotOffset = record.worldRotation * ResolveVirtualFloorSlotOffset(stackIndex);
+        Vector3 position = record.worldPosition
+            + slotOffset
+            + new Vector3(0f, stackBaseYOffset + (stackVerticalSpacing * objectIndex), 0f);
         batches.AddMatrix(key, Matrix4x4.TRS(position, record.worldRotation, Vector3.one));
+    }
+
+    private static Vector3 ResolveVirtualFloorSlotOffset(int stackIndex)
+    {
+        if (stackIndex >= 0 && stackIndex < DefaultFloorSlotOffsets.Length)
+        {
+            return DefaultFloorSlotOffsets[stackIndex];
+        }
+
+        return Vector3.zero;
     }
 
     private void RenderBatches()
     {
-        batches.RenderBatches();
+        batches.RenderBatches(mainCamera);
     }
 
     private static int GetBatchCell(float worldCoordinate, float cellSize)

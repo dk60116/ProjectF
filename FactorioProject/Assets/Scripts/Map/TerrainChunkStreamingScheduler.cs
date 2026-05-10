@@ -26,6 +26,13 @@ internal sealed class TerrainChunkStreamingScheduler
     private Coroutine chunkGenerationCoroutine;
     private Coroutine chunkUnloadCoroutine;
 
+    public bool IsBusy =>
+        pendingChunkGenerations.Count > 0
+        || activeChunkGenerationCoordinates.Count > 0
+        || pendingChunkUnloads.Count > 0
+        || chunkGenerationCoroutine != null
+        || chunkUnloadCoroutine != null;
+
     public TerrainChunkStreamingScheduler(
         MonoBehaviour owner,
         Func<Vector2Int, bool> isChunkLoaded,

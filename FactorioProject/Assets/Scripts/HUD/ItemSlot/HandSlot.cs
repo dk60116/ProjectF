@@ -9,24 +9,31 @@ public class HandSlot : BagSlot
 
     protected override bool AllowPickupOnClick => true;
 
-    protected override bool TryPickupOneItem(TerrainGenerator terrain, Player player, Vector3 pickupOrigin, int radius, float pickupRange, bool allowFocusedConveyorPickup = true)
-    {
-        if (terrain == null)
-        {
-            return false;
-        }
-
-        return terrain.TryPickupOneItemToHand(player, pickupOrigin, radius, pickupRange, allowFocusedConveyorPickup);
-    }
-
     protected override bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRange, bool allowFocusedConveyorPickup = true)
     {
-        if (terrain == null)
+        if (terrain == null || player == null)
         {
             return false;
         }
 
-        return terrain.TryPickupOneItemToHandAtCoordinate(player, coordinate, pickupOrigin, pickupRange, allowFocusedConveyorPickup);
+        if (allowFocusedConveyorPickup
+            && TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock)
+            && TryPickupFocusedConveyorItem(player, focusedConveyorBlock, FocusedPickupRange))
+        {
+            return true;
+        }
+
+        if (TryPickupFocusedBoxToHand(player, pickupOrigin, FocusedPickupRange))
+        {
+            return true;
+        }
+
+        if (!TryGetGroundPickupBlock(terrain, coordinate, out Block block))
+        {
+            return false;
+        }
+
+        return block.TryPickupOneFloorObjectToHand(player, pickupOrigin, pickupRange);
     }
 
     protected override bool TryPickupFocusedConveyorItem(Player player, Block focusedConveyorBlock, float pickupRange, int maxPickupCount = int.MaxValue)

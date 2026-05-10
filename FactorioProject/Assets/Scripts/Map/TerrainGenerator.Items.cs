@@ -469,11 +469,7 @@ public partial class TerrainGenerator : MonoBehaviour
         Block targetBlock = FindPreferredDropBlock(worldPosition, itemId, 1);
         if (targetBlock == null)
         {
-            targetBlock = FindNearestDropBlock(centerCoordinate, itemId, 1, 2, false);
-            if (targetBlock == null)
-            {
-                return false;
-            }
+            return false;
         }
 
         if (!targetBlock.TryAddFloorObjectAnimated(itemId, startWorldPosition, 0f, out targetPortableObject, onComplete))
@@ -536,11 +532,6 @@ public partial class TerrainGenerator : MonoBehaviour
         if (block.Type != Block.BlockType.Ground)
         {
             return false;
-        }
-
-        if (block.TryPickupOneInputAreaCenterObjectToHand(player, pickupOrigin, pickupRadius))
-        {
-            return true;
         }
 
         return block.TryPickupOneFloorObjectToHand(player, pickupOrigin, pickupRadius);
@@ -609,11 +600,6 @@ public partial class TerrainGenerator : MonoBehaviour
         if (block.Type != Block.BlockType.Ground)
         {
             return false;
-        }
-
-        if (block.TryPickupOneInputAreaCenterObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId))
-        {
-            return true;
         }
 
         return block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRadius, preferredSlotIndex, preferredItemId);

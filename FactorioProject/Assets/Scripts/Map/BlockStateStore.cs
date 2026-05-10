@@ -654,7 +654,7 @@ public partial class BlockStateStore : MonoBehaviour
                 ? 2
                 : (conveyorBelt.IsCornerVariant ? 1 : 0);
         }
-        else if (installationObject is Fence fence)
+        else if (installationObject is Wall fence)
         {
             state.conveyorVariantKind = fence.VariantKindId;
         }

@@ -23,6 +23,9 @@ public class SaveManager : MonoBehaviour
 
     private PlayerSaveData defaultPlayerState;
     private bool hasDefaultPlayerState;
+    private readonly bool[] cachedSaveFileExists = new bool[SlotCount];
+    private bool saveFileExistenceCacheInitialized;
+    private string cachedSaveDirectory;
 
     public int SelectedSlotIndex
     {
@@ -83,6 +86,7 @@ public class SaveManager : MonoBehaviour
         try
         {
             SaveGameBinarySerializer.WriteToFile(path, data);
+            SetCachedSaveFileExists(slotIndex, true);
             SetRecentSlot(slotIndex);
             Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 완료: {path}");
             return true;
@@ -100,7 +104,7 @@ public class SaveManager : MonoBehaviour
         SelectedSlotIndex = slotIndex;
         string path = GetSlotPath(slotIndex);
 
-        if (!File.Exists(path))
+        if (!HasSaveFile(slotIndex))
         {
             StartNewMap(slotIndex);
             return true;
@@ -135,9 +139,10 @@ public class SaveManager : MonoBehaviour
         string path = GetSlotPath(slotIndex);
         try
         {
-            if (File.Exists(path))
+            if (HasSaveFile(slotIndex, true))
             {
                 File.Delete(path);
+                SetCachedSaveFileExists(slotIndex, false);
                 Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 파일 삭제 완료: {path}");
             }
             else
@@ -211,13 +216,39 @@ public class SaveManager : MonoBehaviour
 
     public bool HasSaveFile(int slotIndex)
     {
-        return File.Exists(GetSlotPath(slotIndex));
+        return HasSaveFile(slotIndex, false);
+    }
+
+    public bool HasSaveFile(int slotIndex, bool forceRefresh)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        if (forceRefresh || !saveFileExistenceCacheInitialized)
+        {
+            RefreshSaveFileExistenceCache();
+        }
+
+        return cachedSaveFileExists[slotIndex];
+    }
+
+    public string GetSaveSlotMask(bool forceRefresh = false)
+    {
+        if (forceRefresh || !saveFileExistenceCacheInitialized)
+        {
+            RefreshSaveFileExistenceCache();
+        }
+
+        char[] mask = new char[SlotCount];
+        for (int i = 0; i < SlotCount; i++)
+        {
+            mask[i] = cachedSaveFileExists[i] ? '1' : '0';
+        }
+
+        return new string(mask);
     }
 
     public string GetSlotPath(int slotIndex)
     {
-        string saveDirectory = Path.Combine(Application.persistentDataPath, "Saves");
-        return Path.Combine(saveDirectory, $"slot_{NormalizeSlotIndex(slotIndex) + 1:00}{SaveFileExtension}");
+        return Path.Combine(GetSaveDirectory(), $"slot_{NormalizeSlotIndex(slotIndex) + 1:00}{SaveFileExtension}");
     }
 
     private void ApplySaveData(SaveGameData data)
@@ -280,6 +311,67 @@ public class SaveManager : MonoBehaviour
     {
         PlayerPrefs.SetInt(RecentSlotPlayerPrefsKey, NormalizeSlotIndex(slotIndex));
         PlayerPrefs.Save();
+    }
+
+    private string GetSaveDirectory()
+    {
+        if (string.IsNullOrEmpty(cachedSaveDirectory))
+        {
+            cachedSaveDirectory = Path.Combine(Application.persistentDataPath, "Saves");
+        }
+
+        return cachedSaveDirectory;
+    }
+
+    private void RefreshSaveFileExistenceCache()
+    {
+        Array.Clear(cachedSaveFileExists, 0, cachedSaveFileExists.Length);
+
+        string saveDirectory = GetSaveDirectory();
+        if (Directory.Exists(saveDirectory))
+        {
+            string[] files = Directory.GetFiles(saveDirectory, $"*{SaveFileExtension}", SearchOption.TopDirectoryOnly);
+            for (int i = 0; i < files.Length; i++)
+            {
+                if (TryParseSaveSlotIndex(files[i], out int slotIndex))
+                {
+                    cachedSaveFileExists[slotIndex] = true;
+                }
+            }
+        }
+
+        saveFileExistenceCacheInitialized = true;
+    }
+
+    private void SetCachedSaveFileExists(int slotIndex, bool exists)
+    {
+        if (!saveFileExistenceCacheInitialized)
+        {
+            RefreshSaveFileExistenceCache();
+        }
+
+        cachedSaveFileExists[NormalizeSlotIndex(slotIndex)] = exists;
+    }
+
+    private static bool TryParseSaveSlotIndex(string path, out int slotIndex)
+    {
+        slotIndex = -1;
+        string fileName = Path.GetFileNameWithoutExtension(path);
+        if (string.IsNullOrEmpty(fileName)
+            || !fileName.StartsWith("slot_", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(fileName.Substring(5), out int slotNumber))
+        {
+            return false;
+        }
+
+        int normalizedIndex = slotNumber - 1;
+        if (normalizedIndex < 0 || normalizedIndex >= SlotCount)
+        {
+            return false;
+        }
+
+        slotIndex = normalizedIndex;
+        return true;
     }
 
     private static int NormalizeSlotIndex(int slotIndex)

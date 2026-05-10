@@ -8,16 +8,16 @@ public enum FenceVariantKind
     Cross = 3
 }
 
-public class Fence : Building
+public class Wall : Building
 {
     [SerializeField]
-    private Fence straightVariantPrefab;
+    private Wall straightVariantPrefab;
     [SerializeField]
-    private Fence cornerVariantPrefab;
+    private Wall cornerVariantPrefab;
     [SerializeField]
-    private Fence triCornerVariantPrefab;
+    private Wall triCornerVariantPrefab;
     [SerializeField]
-    private Fence crossVariantPrefab;
+    private Wall crossVariantPrefab;
     [SerializeField]
     private bool isCornerVariant;
     [SerializeField]
@@ -35,10 +35,10 @@ public class Fence : Building
     [SerializeField]
     private InstallationFacingDirection localTriCornerThirdDirection = InstallationFacingDirection.NegativeX;
 
-    public Fence StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
-    public Fence CornerVariantPrefab => cornerVariantPrefab;
-    public Fence TriCornerVariantPrefab => triCornerVariantPrefab;
-    public Fence CrossVariantPrefab => crossVariantPrefab;
+    public Wall StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
+    public Wall CornerVariantPrefab => cornerVariantPrefab;
+    public Wall TriCornerVariantPrefab => triCornerVariantPrefab;
+    public Wall CrossVariantPrefab => crossVariantPrefab;
     public FenceVariantKind VariantKind => ResolveVariantKind();
     public int VariantKindId => (int)VariantKind;
     public bool IsCornerVariant => VariantKind == FenceVariantKind.Corner;

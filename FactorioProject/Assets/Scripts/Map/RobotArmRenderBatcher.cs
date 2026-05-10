@@ -13,6 +13,7 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
     private readonly HashSet<RobotArm> registeredRobotArms = new HashSet<RobotArm>();
     private readonly List<RobotArm> cleanupBuffer = new List<RobotArm>(64);
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
+    private Camera mainCamera;
 
     public static RobotArmRenderBatcher EnsureFor(GameObject host)
     {
@@ -52,6 +53,11 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
         using (RenderMarker.Auto())
         {
             batches.ClearActiveMatrices();
@@ -73,7 +79,7 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
                 registeredRobotArms.Remove(cleanupBuffer[i]);
             }
 
-            batches.RenderBatches();
+            batches.RenderBatches(mainCamera);
         }
     }
 }
