@@ -906,6 +906,10 @@ public partial class TerrainGenerator : MonoBehaviour
         public bool[] blockedWaterGrid;
         public float generatedSurfaceYOffset;
         public float waterSurfaceDepth;
+        public bool generateWaterFoamOverlay;
+        public float waterFoamWidth;
+        public float waterFoamSurfaceOffset;
+        public Color waterFoamOverlayColor;
         public float terrainBlendJitter;
         public float terrainSurfaceVertexJitter;
         public int seed;

@@ -18,7 +18,8 @@ Material:
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: -1
   stringTagMap: {}
-  disabledShaderPasses: []
+  disabledShaderPasses:
+  - MOTIONVECTORS
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -70,17 +71,17 @@ Material:
     m_Ints: []
     m_Floats:
     - Boolean_2918AA79: 0
-    - Vector1_20DB7652: 0.045
+    - Vector1_20DB7652: 0.12
     - Vector1_24CAEF48: 1
-    - Vector1_301E02E2: 512
+    - Vector1_301E02E2: 420
     - Vector1_31894ABB: 0.0066
     - Vector1_3632ABA2: 0.754
     - Vector1_45F25267: 2.6
     - Vector1_738B39CF: 0.018
-    - Vector1_854A7D8C: 0.56
-    - Vector1_9C73072A: 2.82
+    - Vector1_854A7D8C: 0
+    - Vector1_9C73072A: 2.2
     - Vector1_A524D234: 0.705
-    - Vector1_B9CC1720: 0.031
+    - Vector1_B9CC1720: 0.035
     - Vector1_E4F66A0: 0.03
     - Vector1_E53063CA: 0
     - Vector1_E71BB35E: 1.16
@@ -109,8 +110,8 @@ Material:
     m_Colors:
     - Color_1139F668: {r: 1, g: 1, b: 1, a: 0.21176471}
     - Color_198818EE: {r: 0, g: 1.2057794, b: 1.498, a: 0.16470589}
-    - Color_626750DD: {r: 2, g: 2, b: 2, a: 1}
-    - Color_77A2EDE9: {r: 31.626795, g: 31.626795, b: 31.626795, a: 1}
+    - Color_626750DD: {r: 0, g: 0, b: 0, a: 0}
+    - Color_77A2EDE9: {r: 1.6, g: 1.6, b: 1.6, a: 1}
     - Vector2_1E1B6943: {r: 1, g: 5, b: 0, a: 0}
     - Vector2_D06E76BC: {r: 0.1, g: 0.05, b: 0, a: 0}
     - Vector2_D26C9C89: {r: 1, g: 0, b: 0, a: 0}

@@ -882,10 +882,7 @@ public class PlayerController : MonoBehaviour
     {
         ExpireTemporaryDropFocusIfNeeded();
 
-        if (TryFocusStandingConveyorBelt())
-        {
-            return;
-        }
+        TryGetStandingConveyorFocusBlock(out Block standingConveyorFocusBlock);
 
         if (!player.IsCarrying
             && currentTargetResource != null
@@ -894,11 +891,15 @@ public class PlayerController : MonoBehaviour
             && stationaryHarvestTimer >= harvestStartDelay
             && GetHarvestSpeed(currentTargetResource) > 0f)
         {
-            SetFocusedBlock(currentTargetResource.OwningBlock);
+            combinedInteractionFocusBlocks.Clear();
+            AppendUniqueBlock(combinedInteractionFocusBlocks, standingConveyorFocusBlock);
+            AppendUniqueBlock(combinedInteractionFocusBlocks, currentTargetResource.OwningBlock);
+            SetFocusedBlocks(combinedInteractionFocusBlocks);
             return;
         }
 
         combinedInteractionFocusBlocks.Clear();
+        AppendUniqueBlock(combinedInteractionFocusBlocks, standingConveyorFocusBlock);
         InteractionFocusCandidate nearestFocusCandidate = CreateEmptyInteractionFocusCandidate();
         if (FindCurrentInputOutputModuleFocusBlocks(nearbyInputOutputModuleFocusBlocks, ref nearestFocusCandidate))
         {
@@ -946,9 +947,10 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private bool TryFocusStandingConveyorBelt()
+    private bool TryGetStandingConveyorFocusBlock(out Block standingBlock)
     {
-        if (!TryGetStandingConveyorBlock(out Block standingBlock)
+        standingBlock = null;
+        if (!TryGetStandingConveyorBlock(out standingBlock)
             || standingBlock == null
             || !(standingBlock.MapObject is ConveyorBelt conveyorBelt)
             || conveyorBelt == null
@@ -958,7 +960,6 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        SetFocusedBlock(standingBlock);
         return true;
     }
 
@@ -1366,9 +1367,8 @@ public class PlayerController : MonoBehaviour
 
                 nearbyWorkableObjects.Add(workableObject);
 
-                float focusRadius = Mathf.Max(0f, workableObject.FocusActivationRadius);
                 float score = GetWorkableFocusSelectionScore(workableObject, block, origin, focusForward, out float distanceSqr);
-                if (distanceSqr > focusRadius * focusRadius)
+                if (!workableObject.ContainsWorldPositionInWorkableRange(origin))
                 {
                     continue;
                 }
@@ -2049,6 +2049,17 @@ public class PlayerController : MonoBehaviour
 
             target.Add(block);
         }
+    }
+
+    private static bool AppendUniqueBlock(List<Block> target, Block block)
+    {
+        if (target == null || block == null || target.Contains(block))
+        {
+            return false;
+        }
+
+        target.Add(block);
+        return true;
     }
 
     private void ResolveMovementReference()

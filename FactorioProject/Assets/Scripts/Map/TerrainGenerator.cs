@@ -16,6 +16,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int BackgroundConveyorSimulationPassesPerTick = 1;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
+    private const float GeneratedWaterWallVerticalOverlap = 0.018f;
+    private const int GeneratedWaterFoamRenderQueue = 3010;
+    private const int GeneratedWaterGlintRenderQueue = 3012;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -73,6 +76,10 @@ public partial class TerrainGenerator : MonoBehaviour
         Rock = 5
     }
 
+    private const int GeneratedSurfaceBiomeMaterialCount = 6;
+    private const int GeneratedSurfaceFoamMaterialIndex = GeneratedSurfaceBiomeMaterialCount;
+    private const int GeneratedSurfaceMaterialCount = GeneratedSurfaceFoamMaterialIndex + 1;
+
     private struct BlockBiomeVisualData
     {
         public TerrainBiome primaryBiome;
@@ -85,7 +92,7 @@ public partial class TerrainGenerator : MonoBehaviour
         public readonly List<Vector3> vertices = new List<Vector3>();
         public readonly List<Vector2> uvs = new List<Vector2>();
         public readonly List<Color> colors = new List<Color>();
-        public readonly float[] blendWeightBuffer = new float[6];
+        public readonly float[] blendWeightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
         public readonly List<int>[] trianglesByBiome;
 
         public ChunkSurfaceBuildData(int biomeCount)
@@ -327,6 +334,12 @@ public partial class TerrainGenerator : MonoBehaviour
     private Shader generatedSurfaceBlendShader;
 
     [SerializeField, HideInInspector]
+    private Shader generatedSurfaceFoamShader;
+
+    [SerializeField, HideInInspector]
+    private Shader generatedSurfaceGlintShader;
+
+    [SerializeField, HideInInspector]
     private Material generatedSurfaceWaterMaterial;
 
     [SerializeField, HideInInspector]
@@ -430,6 +443,44 @@ public partial class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Min(0f)]
     private float waterSurfaceDepth = 0.18f;
+
+    [Header("Water Foam")]
+    [SerializeField]
+    private bool generateWaterFoamOverlay = true;
+
+    [SerializeField, Min(0f)]
+    private float waterFoamWidth = 0.22f;
+
+    [SerializeField, Min(0f)]
+    private float waterFoamSurfaceOffset = 0.004f;
+
+    [SerializeField]
+    private Color waterFoamOverlayColor = new Color(0.72f, 0.9f, 1f, 0.28f);
+
+    [Header("Water Highlights")]
+    [SerializeField]
+    private bool generateWaterSurfaceGlints = false;
+
+    [SerializeField, Min(0f)]
+    private float waterSurfaceGlintOffset = 0.012f;
+
+    [SerializeField]
+    private Color waterSurfaceGlintColor = new Color(0.86f, 0.96f, 1f, 0.30f);
+
+    [SerializeField]
+    private Vector2 waterSurfaceGlintDirection = new Vector2(1f, 0.18f);
+
+    [SerializeField, Min(0.01f)]
+    private float waterSurfaceGlintScale = 1.35f;
+
+    [SerializeField, Range(0.005f, 0.5f)]
+    private float waterSurfaceGlintLineWidth = 0.16f;
+
+    [SerializeField, Range(0f, 1f)]
+    private float waterSurfaceGlintBreakup = 0.33f;
+
+    [SerializeField, Min(0f)]
+    private float waterSurfaceGlintFlowSpeed = 0.28f;
 
     [SerializeField]
     private Vector2 startLakeRadiusRange = new Vector2(3f, 5f);
@@ -639,6 +690,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private int starterTreeCacheConfigHash = int.MinValue;
     private bool starterTreeCacheValid;
     private Material generatedSurfaceBlendMaterial;
+    private Material generatedSurfaceFoamMaterial;
+    private Material generatedSurfaceGlintMaterial;
 
     private void OnValidate()
     {
@@ -648,6 +701,11 @@ public partial class TerrainGenerator : MonoBehaviour
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
         waterSurfaceDepth = Mathf.Max(0f, waterSurfaceDepth);
+        waterFoamWidth = Mathf.Max(0f, waterFoamWidth);
+        waterFoamSurfaceOffset = Mathf.Max(0f, waterFoamSurfaceOffset);
+        waterSurfaceGlintOffset = Mathf.Max(0f, waterSurfaceGlintOffset);
+        waterSurfaceGlintScale = Mathf.Max(0.01f, waterSurfaceGlintScale);
+        waterSurfaceGlintFlowSpeed = Mathf.Max(0f, waterSurfaceGlintFlowSpeed);
         NormalizeOreBodyScaleSettings();
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
@@ -1380,7 +1438,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
         else
         {
-            chunkSurface = new ChunkSurfaceBuildData(6)
+            chunkSurface = new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount)
             {
                 origin = origin
             };

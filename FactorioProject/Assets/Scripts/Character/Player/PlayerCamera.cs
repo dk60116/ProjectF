@@ -2,8 +2,11 @@ using UnityEngine;
 
 public class PlayerCamera : MonoBehaviour
 {
+    private const float WaterSpecularHalfVectorTiltDegrees = 3f;
     private static readonly Quaternion FixedRotation = Quaternion.Euler(45f, 45f, 0f);
     private static readonly Vector3 FixedForward = FixedRotation * Vector3.forward;
+    private static readonly int WaterSpecularLightDirectionShaderId =
+        Shader.PropertyToID("_ProjectFWaterSpecularLightDirection");
 
     [SerializeField]
     private Transform target;
@@ -64,7 +67,14 @@ public class PlayerCamera : MonoBehaviour
     private void Start()
     {
         cachedCamera = GetComponent<Camera>();
+        ConfigureCameraForStableTerrainEdges();
+        ApplyWaterSpecularLightDirection();
         ResolveTarget();
+    }
+
+    private void OnDisable()
+    {
+        Shader.SetGlobalVector(WaterSpecularLightDirectionShaderId, Vector4.zero);
     }
 
     private void LateUpdate()
@@ -102,6 +112,22 @@ public class PlayerCamera : MonoBehaviour
 
         transform.rotation = FixedRotation;
         transform.position = focusPoint - FixedForward * followDistance;
+        ApplyWaterSpecularLightDirection();
+    }
+
+    private void ApplyWaterSpecularLightDirection()
+    {
+        Vector3 cameraForward = transform.rotation * Vector3.forward;
+        Vector3 viewDirection = -cameraForward;
+        Vector3 tiltDirection = Vector3.ProjectOnPlane(transform.right, Vector3.up).normalized;
+        Vector3 halfVector = Vector3.Slerp(
+            Vector3.up,
+            tiltDirection,
+            WaterSpecularHalfVectorTiltDegrees / 90f).normalized;
+        Vector3 specularDirection = (2f * Vector3.Dot(viewDirection, halfVector) * halfVector - viewDirection).normalized;
+        Shader.SetGlobalVector(
+            WaterSpecularLightDirectionShaderId,
+            new Vector4(specularDirection.x, specularDirection.y, specularDirection.z, 1f));
     }
 
     private void ResolveTarget()
@@ -208,7 +234,20 @@ public class PlayerCamera : MonoBehaviour
         if (cachedCamera == null)
         {
             cachedCamera = GetComponent<Camera>();
+            ConfigureCameraForStableTerrainEdges();
         }
+    }
+
+    private void ConfigureCameraForStableTerrainEdges()
+    {
+        if (cachedCamera == null)
+        {
+            return;
+        }
+
+        cachedCamera.allowMSAA = false;
+        cachedCamera.nearClipPlane = Mathf.Max(0.1f, cachedCamera.nearClipPlane);
+        cachedCamera.farClipPlane = Mathf.Min(200f, Mathf.Max(cachedCamera.nearClipPlane + 1f, cachedCamera.farClipPlane));
     }
 
     private void EnsureOrthographicSizeInitialized()

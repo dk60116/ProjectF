@@ -17,6 +17,7 @@ public class WorkableObject : InstallationObject
     [SerializeField, Min(0f)]
     private float rangeVisualYOffset = 0.04f;
     private bool selectedRangeVisualRequested;
+    private bool globalRangeVisualSuppressed;
 
     public uint WorkableRangeCells => workableRangeCells;
     public override float FocusActivationRadius => ResolveRangeRadius(workableRangeCells);
@@ -24,6 +25,19 @@ public class WorkableObject : InstallationObject
     public static float ResolveRangeRadius(uint rangeCells)
     {
         return Mathf.Max(0f, rangeCells - 0.5f);
+    }
+
+    public bool ContainsWorldPositionInWorkableRange(Vector3 worldPosition)
+    {
+        float rangeRadius = FocusActivationRadius;
+        if (rangeRadius <= 0f)
+        {
+            return false;
+        }
+
+        Vector3 center = transform.position;
+        return Mathf.Abs(worldPosition.x - center.x) <= rangeRadius
+               && Mathf.Abs(worldPosition.z - center.z) <= rangeRadius;
     }
 
     public void SetSelectedRangeVisualRequested(bool requested)
@@ -39,6 +53,17 @@ public class WorkableObject : InstallationObject
         }
 
         selectedRangeVisualRequested = requested;
+        RefreshWorkableRangeVisual();
+    }
+
+    public void SetGlobalRangeVisualSuppressed(bool suppressed)
+    {
+        if (globalRangeVisualSuppressed == suppressed)
+        {
+            return;
+        }
+
+        globalRangeVisualSuppressed = suppressed;
         RefreshWorkableRangeVisual();
     }
 
@@ -189,7 +214,12 @@ public class WorkableObject : InstallationObject
 
     private bool ShouldShowWorkableRangeVisual()
     {
-        return selectedRangeVisualRequested || ShouldShowWorkableRangeVisuals();
+        if (selectedRangeVisualRequested)
+        {
+            return true;
+        }
+
+        return !globalRangeVisualSuppressed && ShouldShowWorkableRangeVisuals();
     }
 
     private static bool ShouldShowWorkableRangeVisuals()

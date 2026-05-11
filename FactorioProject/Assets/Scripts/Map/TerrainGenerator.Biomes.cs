@@ -440,6 +440,34 @@ public partial class TerrainGenerator : MonoBehaviour
 
             generatedSurfaceBlendMaterial = null;
         }
+
+        if (generatedSurfaceFoamMaterial != null)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(generatedSurfaceFoamMaterial);
+            }
+            else
+            {
+                DestroyImmediate(generatedSurfaceFoamMaterial);
+            }
+
+            generatedSurfaceFoamMaterial = null;
+        }
+
+        if (generatedSurfaceGlintMaterial != null)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(generatedSurfaceGlintMaterial);
+            }
+            else
+            {
+                DestroyImmediate(generatedSurfaceGlintMaterial);
+            }
+
+            generatedSurfaceGlintMaterial = null;
+        }
     }
 
 #if UNITY_EDITOR
@@ -455,6 +483,16 @@ public partial class TerrainGenerator : MonoBehaviour
         if (generatedSurfaceBlendShader == null)
         {
             generatedSurfaceBlendShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainBiomeBlend.shader");
+        }
+
+        if (generatedSurfaceFoamShader == null)
+        {
+            generatedSurfaceFoamShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainWaterFoamOverlay.shader");
+        }
+
+        if (generatedSurfaceGlintShader == null)
+        {
+            generatedSurfaceGlintShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainWaterSurfaceGlint.shader");
         }
 
         if (generatedSurfaceWaterMaterial == null)

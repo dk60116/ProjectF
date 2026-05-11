@@ -1515,9 +1515,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
-        float radius = Mathf.Max(0.5f, requiredCraftingMapObjectRange);
-        float radiusSqr = radius * radius;
-        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(radius));
+        float searchRange = Mathf.Max(
+            requiredCraftingMapObjectRange,
+            WorkableObject.GlobalMaxFocusActivationRadius);
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(searchRange + 1f));
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
@@ -1544,9 +1545,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                     continue;
                 }
 
-                Vector3 offset = block.transform.position - origin;
-                offset.y = 0f;
-                if (offset.sqrMagnitude <= radiusSqr)
+                if (workableObject.ContainsWorldPositionInWorkableRange(origin))
                 {
                     return true;
                 }
@@ -2474,12 +2473,21 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             || IsInventoryUiLocked()
             || !IsVisibleItemSlotForPointer(this)
             || boundBag == null
-            || slotIndex < 0)
+            || slotIndex < 0
+            || HasStoredItemInPickupTargetSlot())
         {
             return false;
         }
 
         return !IsPickupPreviewSuppressed(ResolvePlayer());
+    }
+
+    private bool HasStoredItemInPickupTargetSlot()
+    {
+        int targetSlotIndex = GetPickupSlotIndex();
+        return boundBag != null
+               && targetSlotIndex >= 0
+               && boundBag.GetSlotCount(targetSlotIndex) > 0;
     }
 
     private bool TryResolvePickupPreviewItem(out int previewItemId, out int previewPickupCount)
@@ -2717,11 +2725,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        if (TryFindAutomaticPickupPreviewSlot(itemId, true, out targetSlotIndex))
-        {
-            return true;
-        }
-
         return TryFindAutomaticPickupPreviewSlot(itemId, false, out targetSlotIndex);
     }
 
@@ -2796,8 +2799,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         int currentCount = Mathf.Max(0, boundBag.GetSlotCount(targetSlotIndex));
-        int currentItemId = boundBag.GetSlotItemId(targetSlotIndex);
-        if (currentCount > 0 && currentItemId != itemId)
+        if (currentCount > 0)
         {
             return false;
         }
