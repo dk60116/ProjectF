@@ -76,6 +76,7 @@ public class PlayerHUD : BagSlot
     private TerrainGenerator cachedTerrainGenerator;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
+    private Resource currentInteractionResource;
     private int lastObservedHandItemId = -2;
     private int lastObservedHandItemCount = -1;
     private int lastObservedHandMaxCount = -1;
@@ -1650,10 +1651,18 @@ public class PlayerHUD : BagSlot
             return;
         }
 
+        PlayerController playerController = currentPlayer.GetComponent<PlayerController>();
+        if (playerController != null && playerController.IsResourceHarvestingActive)
+        {
+            ClearInteractionButtonState();
+            return;
+        }
+
         if (TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
         {
             currentInteractionBoxObject = focusedBoxObject;
             currentInteractionDoorObject = null;
+            currentInteractionResource = null;
             SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(focusedBoxObject));
             return;
         }
@@ -1662,8 +1671,22 @@ public class PlayerHUD : BagSlot
         {
             currentInteractionBoxObject = null;
             currentInteractionDoorObject = focusedFenceDoor;
+            currentInteractionResource = null;
             SetActiveInteractionButton(ResolveDoorInteractionButtonForUse(), ResolveInteractionIcon(focusedFenceDoor));
             return;
+        }
+
+        if (TryGetFocusedResource(out Resource focusedResource))
+        {
+            Sprite resourceIcon = ResolveInteractionIcon(focusedResource);
+            if (resourceIcon != null)
+            {
+                currentInteractionBoxObject = null;
+                currentInteractionDoorObject = null;
+                currentInteractionResource = focusedResource;
+                SetActiveInteractionButton(InteractionButton, resourceIcon);
+                return;
+            }
         }
 
         ClearInteractionButtonState();
@@ -1673,6 +1696,7 @@ public class PlayerHUD : BagSlot
     {
         currentInteractionBoxObject = null;
         currentInteractionDoorObject = null;
+        currentInteractionResource = null;
         HideInteractionButton(InteractionButton);
         if (DoorInteractionButton != null && DoorInteractionButton != InteractionButton)
         {
@@ -1773,6 +1797,16 @@ public class PlayerHUD : BagSlot
         int itemId = fenceDoor.ResolveItemId();
         int preferredIconIndex = fenceDoor.IsOpen ? 1 : 0;
         return ResolveInteractionIcon(itemId, preferredIconIndex);
+    }
+
+    private static Sprite ResolveInteractionIcon(Resource resource)
+    {
+        if (resource == null)
+        {
+            return null;
+        }
+
+        return ResolveInteractionIcon(resource.ResolveItemId(), 0);
     }
 
     private static Sprite ResolveInteractionIcon(int itemId, int preferredIconIndex)
@@ -1933,6 +1967,16 @@ public class PlayerHUD : BagSlot
         {
             currentInteractionDoorObject.ToggleOpenState(ResolveCurrentPlayerInteractionPosition());
             UpdateInteractionButtonState();
+            return;
+        }
+
+        if (currentInteractionResource != null)
+        {
+            PlayerController playerController = GameManager.Instance != null && GameManager.Instance.Player != null
+                ? GameManager.Instance.Player.GetComponent<PlayerController>()
+                : null;
+            playerController?.RequestFocusedResourceHarvest(currentInteractionResource);
+            UpdateInteractionButtonState();
         }
     }
 
@@ -1948,7 +1992,9 @@ public class PlayerHUD : BagSlot
         InteractionButton activeButton = currentInteractionDoorObject != null
             ? ResolveDoorInteractionButtonForUse()
             : InteractionButton;
-        bool hasInteractionTarget = currentInteractionBoxObject != null || currentInteractionDoorObject != null;
+        bool hasInteractionTarget = currentInteractionBoxObject != null
+                                    || currentInteractionDoorObject != null
+                                    || currentInteractionResource != null;
         if (!hasInteractionTarget
             || activeButton == null
             || !activeButton.gameObject.activeInHierarchy)
@@ -2028,6 +2074,23 @@ public class PlayerHUD : BagSlot
         }
 
         return playerController.TryGetFocusedFenceDoor(out focusedFenceDoor);
+    }
+
+    private bool TryGetFocusedResource(out Resource focusedResource)
+    {
+        focusedResource = null;
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetFocusedResource(out focusedResource);
     }
 
     private void SubscribeSlotEvents()

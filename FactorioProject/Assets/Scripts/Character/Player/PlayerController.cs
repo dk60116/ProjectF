@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [RequireComponent(typeof(Player))]
 public class PlayerController : MonoBehaviour
@@ -19,14 +20,11 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private Transform movementReference;
 
-    [SerializeField, Range(-1f, 1f)]
-    private float autoHarvestFacingDot = 0.45f;
+    [SerializeField, FormerlySerializedAs("autoHarvestFacingDot"), Range(-1f, 1f)]
+    private float resourceInteractionFacingDot = 0.45f;
 
     [SerializeField, Min(0f)]
     private float multiFocusFacingScoreWeight = 0.75f;
-
-    [SerializeField]
-    private float harvestStartDelay = 0.5f;
 
     [SerializeField, Min(0.01f)]
     private float rotationInterpolationSpeed = 12f;
@@ -53,7 +51,6 @@ public class PlayerController : MonoBehaviour
     private Vector3 pendingMoveDirection;
     private const float MoveSweepBuffer = 0.01f;
     private const float ConveyorCarrySweepBuffer = 0f;
-    private float stationaryHarvestTimer;
     private TerrainGenerator cachedTerrainGenerator;
     private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
     private bool wasInstallationPlacementActive;
@@ -78,6 +75,8 @@ public class PlayerController : MonoBehaviour
         public Block fallbackBlock;
         public Block singleBlock;
     }
+
+    public bool IsResourceHarvestingActive => currentTargetResource != null && pendingHarvestResources.Count > 0;
 
     private void Awake()
     {
@@ -218,13 +217,8 @@ public class PlayerController : MonoBehaviour
 
         if (hasMovement)
         {
-            stationaryHarvestTimer = 0f;
             pendingFacingDirection = moveDirection;
             hasPendingFacingDirection = true;
-        }
-        else
-        {
-            stationaryHarvestTimer += Time.deltaTime;
         }
 
         pendingMoveDirection = moveDirection;
@@ -238,7 +232,6 @@ public class PlayerController : MonoBehaviour
 
         if (wasInstallationPlacementActive)
         {
-            stationaryHarvestTimer = 0f;
             wasInstallationPlacementActive = false;
         }
 
@@ -253,20 +246,15 @@ public class PlayerController : MonoBehaviour
         UpdateBodyRotation();
 
         player.UpdateCarryState();
-        if (player.IsCarrying)
+        if (player.IsCarrying || hasMovement)
         {
-            CancelPendingHarvest();
-            SetFocusedBlock(null);
-            resourceWorkGauge?.HideIfNotFinishing();
-        }
-        else
-        {
-            UpdateAutoHarvest(hasMovement);
+            CancelActiveResourceHarvest();
         }
 
         bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
         ResolveCompletedPick(finishedPickThisFrame);
         RefreshInteractionFocus(hasMovement);
+        ClearInactiveResourceHarvestTarget();
     }
 
     private void FixedUpdate()
@@ -678,7 +666,6 @@ public class PlayerController : MonoBehaviour
         pendingMoveDirection = Vector3.zero;
         pendingFacingDirection = Vector3.zero;
         hasPendingFacingDirection = false;
-        stationaryHarvestTimer = 0f;
 
         if (joystick != null)
         {
@@ -692,71 +679,6 @@ public class PlayerController : MonoBehaviour
         resourceWorkGauge?.HideIfNotFinishing();
         player.StopImmediateActions();
         player.UpdateCarryState();
-    }
-
-    private bool UpdateAutoHarvest(bool hasMovement)
-    {
-        Resource nextTarget = FindBestHarvestTarget();
-
-        if (currentTargetResource != nextTarget)
-        {
-            CancelPendingHarvest();
-            currentTargetResource = nextTarget;
-            SetFocusedBlock(null);
-            resourceWorkGauge?.HideIfNotFinishing();
-        }
-
-        if (currentTargetResource == null)
-        {
-            CancelPendingHarvest();
-            SetFocusedBlock(null);
-            resourceWorkGauge?.HideIfNotFinishing();
-            return false;
-        }
-
-        if (hasMovement)
-        {
-            CancelPendingHarvest();
-            SetFocusedBlock(null);
-            resourceWorkGauge?.HideIfNotFinishing();
-            return false;
-        }
-        
-        if (stationaryHarvestTimer < harvestStartDelay)
-        {
-            SetFocusedBlock(null);
-            resourceWorkGauge?.HideIfNotFinishing();
-            return false;
-        }
-
-        float harvestSpeed = GetHarvestSpeed(currentTargetResource);
-        if (harvestSpeed <= 0f)
-        {
-            SetFocusedBlock(null);
-            resourceWorkGauge?.HideIfNotFinishing();
-            return false;
-        }
-
-        SetFocusedBlock(currentTargetResource.OwningBlock);
-        resourceWorkGauge?.Bind(currentTargetResource);
-
-        int harvestPower = GetHarvestPower(currentTargetResource);
-        int preparedStepCount = currentTargetResource.PrepareHarvestSteps(harvestSpeed * Time.deltaTime, harvestPower);
-
-        for (int i = 0; i < preparedStepCount; i++)
-        {
-            pendingHarvestResources.Enqueue(currentTargetResource);
-            player.QueuePickAnimation();
-        }
-
-        if (!currentTargetResource.CanHarvest)
-        {
-            SetFocusedBlock(null);
-            currentTargetResource = null;
-            stationaryHarvestTimer = 0f;
-        }
-
-        return preparedStepCount > 0;
     }
 
     private void ResolveCompletedPick(bool finishedPickThisFrame)
@@ -784,6 +706,13 @@ public class PlayerController : MonoBehaviour
                 currentTargetResource = null;
                 return;
             }
+
+            if (!QueueResourceHarvestStep(currentTargetResource))
+            {
+                SetFocusedBlock(null);
+                currentTargetResource = null;
+                resourceWorkGauge?.HideIfNotFinishing();
+            }
         }
     }
 
@@ -806,7 +735,36 @@ public class PlayerController : MonoBehaviour
         resourceWorkGauge?.HideIfNotFinishing();
     }
 
-    private Resource FindBestHarvestTarget()
+    private void CancelActiveResourceHarvest()
+    {
+        if (currentTargetResource == null && pendingHarvestResources.Count == 0)
+        {
+            return;
+        }
+
+        CancelPendingHarvest();
+        currentTargetResource = null;
+        SetFocusedBlock(null);
+        resourceWorkGauge?.HideIfNotFinishing();
+    }
+
+    private void ClearInactiveResourceHarvestTarget()
+    {
+        if (currentTargetResource == null || pendingHarvestResources.Count > 0)
+        {
+            return;
+        }
+
+        if (!currentTargetResource.CanHarvest
+            || currentTargetResource.OwningBlock == null
+            || !currentFocusedBlocks.Contains(currentTargetResource.OwningBlock))
+        {
+            currentTargetResource = null;
+            resourceWorkGauge?.HideIfNotFinishing();
+        }
+    }
+
+    private Resource FindBestResourceInteractionTarget()
     {
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
         Vector3 forward = player.BodyTransform != null ? player.BodyTransform.forward : transform.forward;
@@ -819,7 +777,11 @@ public class PlayerController : MonoBehaviour
         for (int i = 0; i < resources.Count; i++)
         {
             Resource resource = resources[i];
-            if (resource == null || !resource.CanHarvest)
+            if (resource == null
+                || !resource.gameObject.activeInHierarchy
+                || !resource.AllowsFocus
+                || !resource.CanHarvest
+                || resource.OwningBlock == null)
             {
                 continue;
             }
@@ -835,7 +797,7 @@ public class PlayerController : MonoBehaviour
 
             Vector3 direction = offset.normalized;
             float facingDot = Vector3.Dot(forward, direction);
-            if (facingDot < autoHarvestFacingDot)
+            if (facingDot < resourceInteractionFacingDot)
             {
                 continue;
             }
@@ -852,18 +814,6 @@ public class PlayerController : MonoBehaviour
         }
 
         return bestResource;
-    }
-
-    private float GetHarvestSpeed(Resource resource)
-    {
-        if (resource == null)
-        {
-            return 0f;
-        }
-
-        return resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
-            ? player.State.LoggingSpeed
-            : player.State.MiningSpeed;
     }
 
     private int GetHarvestPower(Resource resource)
@@ -884,22 +834,17 @@ public class PlayerController : MonoBehaviour
 
         TryGetStandingConveyorFocusBlock(out Block standingConveyorFocusBlock);
 
-        if (!player.IsCarrying
-            && currentTargetResource != null
-            && currentTargetResource.CanHarvest
-            && !hasMovement
-            && stationaryHarvestTimer >= harvestStartDelay
-            && GetHarvestSpeed(currentTargetResource) > 0f)
-        {
-            combinedInteractionFocusBlocks.Clear();
-            AppendUniqueBlock(combinedInteractionFocusBlocks, standingConveyorFocusBlock);
-            AppendUniqueBlock(combinedInteractionFocusBlocks, currentTargetResource.OwningBlock);
-            SetFocusedBlocks(combinedInteractionFocusBlocks);
-            return;
-        }
-
         combinedInteractionFocusBlocks.Clear();
         AppendUniqueBlock(combinedInteractionFocusBlocks, standingConveyorFocusBlock);
+        if (!player.IsCarrying)
+        {
+            Resource resourceInteractionTarget = FindBestResourceInteractionTarget();
+            if (resourceInteractionTarget != null)
+            {
+                AppendUniqueBlock(combinedInteractionFocusBlocks, resourceInteractionTarget.OwningBlock);
+            }
+        }
+
         InteractionFocusCandidate nearestFocusCandidate = CreateEmptyInteractionFocusCandidate();
         if (FindCurrentInputOutputModuleFocusBlocks(nearbyInputOutputModuleFocusBlocks, ref nearestFocusCandidate))
         {
@@ -912,7 +857,10 @@ public class PlayerController : MonoBehaviour
         FindNearbyBoxBlocks(nearbyBoxFocusBlocks, ref nearestFocusCandidate);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyBoxFocusBlocks);
 
-        FindNearbyInstallationBlocks(nearbyInstallationFocusBlocks, ref nearestFocusCandidate);
+        FindNearbyInstallationBlocks(
+            nearbyInstallationFocusBlocks,
+            ref nearestFocusCandidate,
+            standingConveyorFocusBlock);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInstallationFocusBlocks);
 
         AppendInteractionFocusCandidate(nearestFocusCandidate, combinedInteractionFocusBlocks);
@@ -1139,6 +1087,100 @@ public class PlayerController : MonoBehaviour
         }
 
         return focusedFenceDoor != null;
+    }
+
+    public bool TryGetFocusedResource(out Resource focusedResource)
+    {
+        focusedResource = null;
+        if (currentFocusedBlocks.Count == 0 || player == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float nearestDistanceSqr = float.MaxValue;
+
+        foreach (Block block in currentFocusedBlocks)
+        {
+            Resource resource = block != null ? block.Resource : null;
+            if (resource == null
+                || !resource.gameObject.activeInHierarchy
+                || !resource.AllowsFocus
+                || !resource.CanHarvest)
+            {
+                continue;
+            }
+
+            float distanceSqr = GetResourceFocusSelectionDistanceSqr(resource, origin);
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            focusedResource = resource;
+        }
+
+        return focusedResource != null;
+    }
+
+    public bool RequestFocusedResourceHarvest(Resource resource)
+    {
+        if (resource == null
+            || !resource.CanHarvest
+            || player == null
+            || player.IsCarrying)
+        {
+            return false;
+        }
+
+        if (!TryGetFocusedResource(out Resource focusedResource) || focusedResource != resource)
+        {
+            return false;
+        }
+
+        if (currentTargetResource == resource && pendingHarvestResources.Count > 0)
+        {
+            return true;
+        }
+
+        if (currentTargetResource != resource)
+        {
+            CancelPendingHarvest();
+            currentTargetResource = resource;
+        }
+
+        if (!QueueResourceHarvestStep(resource))
+        {
+            currentTargetResource = null;
+            resourceWorkGauge?.HideIfNotFinishing();
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool QueueResourceHarvestStep(Resource resource)
+    {
+        if (resource == null
+            || !resource.CanHarvest
+            || player == null
+            || player.IsCarrying)
+        {
+            return false;
+        }
+
+        int harvestPower = GetHarvestPower(resource);
+        if (!resource.PrepareManualHarvestStep(harvestPower))
+        {
+            return false;
+        }
+
+        pendingHarvestResources.Enqueue(resource);
+        player.QueuePickAnimation();
+        SetFocusedBlock(resource.OwningBlock);
+        resourceWorkGauge?.Bind(resource);
+        return true;
     }
 
     public bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
@@ -1454,7 +1496,10 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private void FindNearbyInstallationBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)
+    private void FindNearbyInstallationBlocks(
+        List<Block> results,
+        ref InteractionFocusCandidate nearestFocusCandidate,
+        Block standingConveyorFocusBlock = null)
     {
         if (results == null)
         {
@@ -1503,6 +1548,11 @@ public class PlayerController : MonoBehaviour
                 }
 
                 if (nearbyInstallationObjects.Contains(installationObject))
+                {
+                    continue;
+                }
+
+                if (standingConveyorFocusBlock != null && installationObject is ConveyorBelt)
                 {
                     continue;
                 }
@@ -1717,6 +1767,20 @@ public class PlayerController : MonoBehaviour
 
         float facingDot = Mathf.Clamp(Vector3.Dot(focusForward.normalized, offset.normalized), -1f, 1f);
         return distanceSqr + ((1f - facingDot) * facingScoreWeight);
+    }
+
+    private static float GetResourceFocusSelectionDistanceSqr(Resource resource, Vector3 origin)
+    {
+        if (resource == null)
+        {
+            return float.MaxValue;
+        }
+
+        Vector3 focusPoint = resource.FocusPoint;
+        focusPoint.y = origin.y;
+        Vector3 offset = focusPoint - origin;
+        offset.y = 0f;
+        return offset.sqrMagnitude;
     }
 
     private static bool IsItemFilterEnabled(int itemId, List<ItemDefinition> definitions)

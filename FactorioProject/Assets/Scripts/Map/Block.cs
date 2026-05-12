@@ -17,7 +17,8 @@ public class Block : BaseObject
     private const float ConveyorLaneHeight = 0.2f;
     private const float ConveyorLaneSettleEpsilon = 0.01f;
     private const float ConveyorCycleReadyDistance = 0.12f;
-    private const float ConveyorLaneSpacingScale = 0.92f;
+    private const float ConveyorItemSpacing = 0.5f;
+    private const float ConveyorLaneHalfExtent = ConveyorItemSpacing * 0.5f;
     private const float ConveyorCornerCenterRadius = 0.35f;
     private const float ConveyorCornerArcEndInsetDegrees = 20f;
     private const float ConveyorSlotDotDiameter = 0.08f;
@@ -1961,11 +1962,25 @@ public class Block : BaseObject
 
     public bool TryTakeOneConveyorObject(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out int takenItemId)
     {
+        return TryTakeOneConveyorObject(referenceWorldPosition, itemFilter, -1f, out takenItemId);
+    }
+
+    public bool TryTakeOneConveyorObject(
+        Vector3 referenceWorldPosition,
+        Predicate<int> itemFilter,
+        float maxDistance,
+        out int takenItemId)
+    {
         takenItemId = -1;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
 
-        if (!IsConveyorStackingEnabled() || !TryGetClosestConveyorItemLane(referenceWorldPosition, itemFilter, out int laneIndex))
+        if (!IsConveyorStackingEnabled()
+            || !TryGetClosestConveyorItemLane(
+                referenceWorldPosition,
+                itemFilter,
+                maxDistance,
+                out int laneIndex))
         {
             return false;
         }
@@ -1996,6 +2011,15 @@ public class Block : BaseObject
 
     public bool TryGetClosestConveyorObjectWorldPosition(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out Vector3 worldPosition)
     {
+        return TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, itemFilter, -1f, out worldPosition);
+    }
+
+    public bool TryGetClosestConveyorObjectWorldPosition(
+        Vector3 referenceWorldPosition,
+        Predicate<int> itemFilter,
+        float maxDistance,
+        out Vector3 worldPosition)
+    {
         worldPosition = transform.position;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
@@ -2007,6 +2031,7 @@ public class Block : BaseObject
 
         int bestLaneIndex = -1;
         float bestDistanceSqr = float.MaxValue;
+        float maxDistanceSqr = maxDistance >= 0f ? maxDistance * maxDistance : float.MaxValue;
         Vector3 bestWorldPosition = worldPosition;
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
@@ -2021,7 +2046,8 @@ public class Block : BaseObject
             Vector3 offset = candidateWorldPosition - referenceWorldPosition;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
-            if (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            if (distanceSqr > maxDistanceSqr
+                || (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr))
             {
                 continue;
             }
@@ -4844,7 +4870,7 @@ public class Block : BaseObject
             return destinationSpacing;
         }
 
-        return 0.48f * ConveyorLaneSpacingScale;
+        return ConveyorItemSpacing;
     }
 
     private Vector3 EvaluateConveyorPathSegmentWorldPosition(
@@ -5927,8 +5953,18 @@ public class Block : BaseObject
 
     private bool TryGetClosestConveyorItemLane(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out int bestLaneIndex)
     {
+        return TryGetClosestConveyorItemLane(referenceWorldPosition, itemFilter, -1f, out bestLaneIndex);
+    }
+
+    private bool TryGetClosestConveyorItemLane(
+        Vector3 referenceWorldPosition,
+        Predicate<int> itemFilter,
+        float maxDistance,
+        out int bestLaneIndex)
+    {
         bestLaneIndex = -1;
         float bestDistanceSqr = float.MaxValue;
+        float maxDistanceSqr = maxDistance >= 0f ? maxDistance * maxDistance : float.MaxValue;
         int laneCount = GetConveyorLaneCount();
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
@@ -5941,7 +5977,8 @@ public class Block : BaseObject
             Vector3 offset = GetConveyorItemVisualWorldPosition(laneIndex) - referenceWorldPosition;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
-            if (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr)
+            if (distanceSqr > maxDistanceSqr
+                || (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr))
             {
                 continue;
             }
@@ -10070,50 +10107,12 @@ public class Block : BaseObject
 
     private float GetConveyorLaneHalfExtent()
     {
-        float targetRadius = GetConveyorLaneTargetRadius();
-        if (targetRadius <= 0f)
-        {
-            return 0.24f * ConveyorLaneSpacingScale;
-        }
-
-        return (targetRadius / Mathf.Sqrt(2f)) * ConveyorLaneSpacingScale;
+        return ConveyorLaneHalfExtent;
     }
 
     private float GetConveyorLaneHeight()
     {
         return ConveyorLaneHeight;
-    }
-
-    private float GetConveyorLaneTargetRadius()
-    {
-        if (floorObjects == null || floorObjects.Count == 0)
-        {
-            return 0f;
-        }
-
-        float totalRadius = 0f;
-        int validCount = 0;
-        for (int i = 0; i < floorObjects.Count; i++)
-        {
-            Transform laneAnchor = floorObjects[i];
-            if (laneAnchor == null)
-            {
-                continue;
-            }
-
-            Vector3 localPosition = transform.InverseTransformPoint(laneAnchor.position);
-            Vector2 flat = new Vector2(localPosition.x, localPosition.z);
-            float radius = flat.magnitude;
-            if (radius <= 0.0001f)
-            {
-                continue;
-            }
-
-            totalRadius += radius;
-            validCount++;
-        }
-
-        return validCount > 0 ? totalRadius / validCount : 0f;
     }
 
     public bool TryAddInputAreaCenterObject(int objectId, out PortableObject targetPortableObject, bool enforceIoOverlapFilter = false)

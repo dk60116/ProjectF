@@ -243,6 +243,25 @@ public class Resource : MapObject
         return preparedStepCount;
     }
 
+    public bool PrepareManualHarvestStep(int harvestPower = 1)
+    {
+        if (!CanHarvest)
+        {
+            return false;
+        }
+
+        int reservableGaugeCount = GetReservableHarvestGaugeCount(Mathf.Max(1, harvestPower));
+        if (reservableGaugeCount <= 0)
+        {
+            return false;
+        }
+
+        accumulatedWork = 0f;
+        reservedHarvestGaugeCosts.Enqueue(reservableGaugeCount);
+        reservedHarvestGaugeCount += reservableGaugeCount;
+        return true;
+    }
+
     public bool CommitPreparedHarvestStep()
     {
         if (reservedHarvestGaugeCosts.Count <= 0 || !CanHarvest)

@@ -242,10 +242,15 @@ public class WorkableObject : InstallationObject
 public sealed class WorkableObjectRangeVisual : MonoBehaviour
 {
     private static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
+    private static readonly int BaseMapShaderId = Shader.PropertyToID("_BaseMap");
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
-    private static readonly Color RangeFillColor = new Color(0.05f, 1f, 0.05f, 0.05f);
+    private static readonly int MainTexShaderId = Shader.PropertyToID("_MainTex");
+    private static readonly Color RangeFillColor = new Color(0.05f, 1f, 0.05f, 0.1f);
+    private const int RangeAlphaTextureSize = 64;
+    private const float RangeCenterTransparentRadius = 0.8f;
     private static Mesh sharedRangeQuadMesh;
     private static Material sharedRangeMaterial;
+    private static Texture2D sharedRangeAlphaTexture;
 
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
@@ -277,6 +282,8 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         propertyBlock.Clear();
         propertyBlock.SetColor(BaseColorShaderId, RangeFillColor);
         propertyBlock.SetColor(ColorShaderId, RangeFillColor);
+        propertyBlock.SetTexture(BaseMapShaderId, ResolveRangeAlphaTexture());
+        propertyBlock.SetTexture(MainTexShaderId, ResolveRangeAlphaTexture());
         meshRenderer.SetPropertyBlock(propertyBlock);
     }
 
@@ -349,6 +356,47 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         return sharedRangeQuadMesh;
     }
 
+    private static Texture2D ResolveRangeAlphaTexture()
+    {
+        if (sharedRangeAlphaTexture != null)
+        {
+            return sharedRangeAlphaTexture;
+        }
+
+        sharedRangeAlphaTexture = new Texture2D(
+            RangeAlphaTextureSize,
+            RangeAlphaTextureSize,
+            TextureFormat.RGBA32,
+            false)
+        {
+            name = "WorkableObject_RangeEdgeFade",
+            hideFlags = HideFlags.HideAndDontSave,
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        Color[] pixels = new Color[RangeAlphaTextureSize * RangeAlphaTextureSize];
+        float denominator = Mathf.Max(1f, RangeAlphaTextureSize - 1f);
+        for (int y = 0; y < RangeAlphaTextureSize; y++)
+        {
+            for (int x = 0; x < RangeAlphaTextureSize; x++)
+            {
+                float normalizedX = (x / denominator) * 2f - 1f;
+                float normalizedY = (y / denominator) * 2f - 1f;
+                float edgeDistance = Mathf.Max(Mathf.Abs(normalizedX), Mathf.Abs(normalizedY));
+                float alpha = Mathf.SmoothStep(
+                    0f,
+                    1f,
+                    Mathf.InverseLerp(RangeCenterTransparentRadius, 1f, edgeDistance));
+                pixels[(y * RangeAlphaTextureSize) + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+
+        sharedRangeAlphaTexture.SetPixels(pixels);
+        sharedRangeAlphaTexture.Apply(false, true);
+        return sharedRangeAlphaTexture;
+    }
+
     private static Material ResolveRangeMaterial()
     {
         if (sharedRangeMaterial != null)
@@ -379,10 +427,21 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
             sharedRangeMaterial.SetColor(BaseColorShaderId, RangeFillColor);
         }
 
+        if (sharedRangeMaterial.HasProperty(BaseMapShaderId))
+        {
+            sharedRangeMaterial.SetTexture(BaseMapShaderId, ResolveRangeAlphaTexture());
+        }
+
         if (sharedRangeMaterial.HasProperty(ColorShaderId))
         {
             sharedRangeMaterial.SetColor(ColorShaderId, RangeFillColor);
         }
+
+        if (sharedRangeMaterial.HasProperty(MainTexShaderId))
+        {
+            sharedRangeMaterial.SetTexture(MainTexShaderId, ResolveRangeAlphaTexture());
+        }
+
         if (sharedRangeMaterial.HasProperty("_Surface"))
         {
             sharedRangeMaterial.SetFloat("_Surface", 1f);

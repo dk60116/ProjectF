@@ -1205,7 +1205,8 @@ public class ItemManager : MonoBehaviour
 
     private static void TryAutoAssignInteractionButtons(ItemDefinition definition)
     {
-        if (definition == null || !(definition.mapObject is InstallationObject))
+        if (definition == null
+            || !(definition.mapObject is InstallationObject || definition.mapObject is Resource))
         {
             return;
         }

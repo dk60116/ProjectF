@@ -693,13 +693,11 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUI.EndDisabledGroup();
         DrawMapObjectFields(mapObjectProperty.objectReferenceValue as MapObject, definitions);
 
-        if (mapObjectProperty.objectReferenceValue is InstallationObject && interactionButtonListProperty != null)
+        if (interactionButtonListProperty != null)
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Interaction", EditorStyles.boldLabel);
-            EditorGUI.BeginDisabledGroup(true);
             EditorGUILayout.PropertyField(interactionButtonListProperty, new GUIContent("Interaction Button List"), true);
-            EditorGUI.EndDisabledGroup();
         }
 
         EditorGUILayout.Space(8f);

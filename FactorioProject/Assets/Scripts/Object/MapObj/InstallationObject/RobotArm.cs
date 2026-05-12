@@ -78,6 +78,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     [SerializeField, Min(0f), Tooltip("Delay between action timing and the actual pickup/drop.")]
     [FormerlySerializedAs("postActionTurnDelay")]
     private float actionTurnDelay = 0.1f;
+    [SerializeField, Min(0f), Tooltip("Maximum horizontal distance from the hand to pick up belt items.")]
+    private float conveyorPickupRadius = 0.35f;
 
     [SerializeField, HideInInspector]
     private int heldItemId = -1;
@@ -986,7 +988,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         {
             RobotArmPickupSource.Floor => pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId),
             RobotArmPickupSource.Box => boxObject != null && boxObject.TryTakeOneContainedObject(AcceptsPickupItem, out pickedItemId),
-            RobotArmPickupSource.Conveyor => pickupBlock.TryTakeOneConveyorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId),
+            RobotArmPickupSource.Conveyor => pickupBlock.TryTakeOneConveyorObject(
+                referenceWorldPosition,
+                AcceptsPickupItem,
+                GetConveyorPickupRadius(),
+                out pickedItemId),
             RobotArmPickupSource.InputArea => TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId),
             _ => false
         };
@@ -1021,6 +1027,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
+        Vector3 conveyorReferenceWorldPosition = GetPickupReferencePosition(pickupBlock, pickupCoordinate);
         float bestDistanceSqr = float.MaxValue;
 
         if (pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out Vector3 candidateWorldPosition))
@@ -1039,7 +1046,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             }
         }
 
-        if (pickupBlock.TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out candidateWorldPosition))
+        if (pickupBlock.TryGetClosestConveyorObjectWorldPosition(
+                conveyorReferenceWorldPosition,
+                AcceptsPickupItem,
+                GetConveyorPickupRadius(),
+                out candidateWorldPosition))
         {
             TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
@@ -1049,6 +1060,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             && pickupBlock.TryGetInputAreaCenterTopWorldPosition(-1, out candidateWorldPosition))
         {
             TryChoosePickupSource(RobotArmPickupSource.InputArea, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
+        }
+
+        if (pickupSource == RobotArmPickupSource.Conveyor)
+        {
+            referenceWorldPosition = conveyorReferenceWorldPosition;
         }
 
         return pickupSource != RobotArmPickupSource.None;
@@ -1096,6 +1112,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return IsItemFilterEnabled(itemId, ResolveFilterBitCount(itemId));
+    }
+
+    private float GetConveyorPickupRadius()
+    {
+        return Mathf.Max(0f, conveyorPickupRadius);
     }
 
     private int ResolveFilterBitCount(int fallbackItemId)
