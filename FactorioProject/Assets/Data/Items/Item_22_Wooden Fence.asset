@@ -15,8 +15,8 @@ MonoBehaviour:
   itemName: Wooden Fence
   id: 22
   mapObject: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
-  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
-  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  portableMesh: {fileID: 4300000, guid: aa42873b872750b40a2c314806377503, type: 2}
+  portableMat: {fileID: 2100000, guid: 18982fa21a513704aa4f1f45a1cfaba6, type: 2}
   icon: {fileID: 21300000, guid: dac4f30093e209d408e04e1efeec296b, type: 3}
   interactionButtonList: []
   size: 0

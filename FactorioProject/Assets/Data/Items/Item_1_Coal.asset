@@ -15,8 +15,8 @@ MonoBehaviour:
   itemName: Robot arm
   id: 21
   mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
-  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
-  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  portableMesh: {fileID: 4300000, guid: 5ce0adc8ea6624a4db404d8419f00a30, type: 2}
+  portableMat: {fileID: 2100000, guid: f25200fb9cd7c5d4f936de1603c185fa, type: 2}
   icon: {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
   interactionButtonList: []
   size: 10

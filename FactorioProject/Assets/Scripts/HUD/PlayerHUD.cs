@@ -2319,17 +2319,7 @@ public class PlayerHUD : BagSlot
 
     public bool TryEnqueueCrafting(int itemId, List<CraftingTreeRuntime.IngredientEntry> refundIngredients = null)
     {
-        if (itemId < 0 || IsInventoryEditLocked())
-        {
-            return false;
-        }
-
-        if (craftingWaitingQueue == null || craftingWaitingQueue.Count == 0)
-        {
-            return false;
-        }
-
-        if (craftingQueue.Count >= craftingWaitingQueue.Count)
+        if (!CanEnqueueCrafting(itemId))
         {
             return false;
         }
@@ -2340,6 +2330,21 @@ public class PlayerHUD : BagSlot
         craftingQueueDirty = true;
         RefreshCraftingQueueSlots(true);
         return true;
+    }
+
+    public bool CanEnqueueCrafting(int itemId)
+    {
+        if (itemId < 0 || IsInventoryEditLocked())
+        {
+            return false;
+        }
+
+        if (craftingWaitingQueue == null || craftingWaitingQueue.Count == 0)
+        {
+            return false;
+        }
+
+        return craftingQueue.Count < craftingWaitingQueue.Count;
     }
 
     public void CaptureCraftingQueueSaveState(List<PlayerCraftingQueueEntrySaveData> results)

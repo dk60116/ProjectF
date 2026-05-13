@@ -173,7 +173,12 @@ public class ItemManager : MonoBehaviour
 
             Mesh definitionPortableMesh = itemSet.portableMesh;
             Material definitionPortableMaterial = itemSet.portableMat;
-            TryOverrideInstallationPortableAssets(definition.mapObject, ref definitionPortableMesh, ref definitionPortableMaterial);
+            TryOverrideInstallationPortableAssets(
+                itemSet.name,
+                GetItemFolderForName(itemSet.name, itemFolderLookup),
+                GetMapObjectPrefabRoot(definition.mapObject),
+                ref definitionPortableMesh,
+                ref definitionPortableMaterial);
             definition.portableMesh = definitionPortableMesh;
             definition.portableMat = definitionPortableMaterial;
             definition.icon = itemSet.icon;
@@ -1534,40 +1539,58 @@ public class ItemManager : MonoBehaviour
             return;
         }
 
-        Mesh packageMesh = LoadPackagePortableMesh();
-        if (packageMesh != null)
+        string portableFolder = ResolveInstallationPortableItemFolder(itemFolder, prefabRoot);
+        string itemKey = NormalizePortableLookupName(
+            !string.IsNullOrWhiteSpace(itemName)
+                ? itemName
+                : prefabRoot != null ? prefabRoot.name : string.Empty);
+
+        Mesh folderPortableMesh = FindPortableMeshInItemDirectory(portableFolder, itemKey);
+        if (folderPortableMesh != null)
         {
-            portableMesh = packageMesh;
+            portableMesh = folderPortableMesh;
+        }
+        else
+        {
+            Mesh packageMesh = LoadPackagePortableMesh();
+            if (packageMesh != null)
+            {
+                portableMesh = packageMesh;
+            }
         }
 
-        Material packageMaterial = LoadPackagePortableMaterial();
-        if (packageMaterial != null)
+        Material folderPortableMaterial = FindPortableMaterialInItemDirectory(portableFolder, itemKey);
+        if (folderPortableMaterial != null)
         {
-            portableMaterial = packageMaterial;
+            portableMaterial = folderPortableMaterial;
+        }
+        else
+        {
+            Material packageMaterial = LoadPackagePortableMaterial();
+            if (packageMaterial != null)
+            {
+                portableMaterial = packageMaterial;
+            }
         }
     }
 
-    private static void TryOverrideInstallationPortableAssets(
-        MapObject mapObject,
-        ref Mesh portableMesh,
-        ref Material portableMaterial)
+    private static string ResolveInstallationPortableItemFolder(string itemFolder, GameObject prefabRoot)
     {
-        if (!IsInstallationObjectPrefab(GetMapObjectPrefabRoot(mapObject)))
+        if (!string.IsNullOrWhiteSpace(itemFolder))
         {
-            return;
+            string normalizedItemFolder = itemFolder.Replace("\\", "/");
+            if (AssetDatabase.IsValidFolder(normalizedItemFolder))
+            {
+                return normalizedItemFolder;
+            }
         }
 
-        Mesh packageMesh = LoadPackagePortableMesh();
-        if (packageMesh != null)
+        if (prefabRoot == null)
         {
-            portableMesh = packageMesh;
+            return string.Empty;
         }
 
-        Material packageMaterial = LoadPackagePortableMaterial();
-        if (packageMaterial != null)
-        {
-            portableMaterial = packageMaterial;
-        }
+        return ResolveAssetDirectory(AssetDatabase.GetAssetPath(prefabRoot));
     }
 
     private static bool IsInstallationItem(string itemName, string itemFolder, GameObject prefabRoot)
@@ -2390,7 +2413,12 @@ public class ItemManager : MonoBehaviour
 
             Mesh definitionPortableMesh = itemSet.portableMesh;
             Material definitionPortableMaterial = itemSet.portableMat;
-            TryOverrideInstallationPortableAssets(definition.mapObject, ref definitionPortableMesh, ref definitionPortableMaterial);
+            TryOverrideInstallationPortableAssets(
+                itemSet.name,
+                GetItemFolderForName(itemSet.name, itemFolderLookup),
+                GetMapObjectPrefabRoot(definition.mapObject),
+                ref definitionPortableMesh,
+                ref definitionPortableMaterial);
             definition.portableMesh = definitionPortableMesh;
             definition.portableMat = definitionPortableMaterial;
             definition.icon = itemSet.icon;

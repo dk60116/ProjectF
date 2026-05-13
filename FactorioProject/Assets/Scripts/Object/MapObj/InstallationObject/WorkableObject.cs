@@ -9,6 +9,7 @@ public class WorkableObject : InstallationObject
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private static BagSlot craftingSlotRangeVisualRequestSource;
+    private static WorkableObjectRangeVisual sharedRangeVisual;
 
     [SerializeField, FormerlySerializedAs("focusActivationRadius")]
     private uint workableRangeCells = 1u;
@@ -92,15 +93,7 @@ public class WorkableObject : InstallationObject
 
     public static void RefreshAllRangeVisuals()
     {
-        foreach (WorkableObject workableObject in ActiveInstances)
-        {
-            if (workableObject == null)
-            {
-                continue;
-            }
-
-            workableObject.RefreshWorkableRangeVisual();
-        }
+        RefreshSharedRangeVisual();
     }
 
     public new static float GlobalMaxFocusActivationRadius
@@ -135,21 +128,22 @@ public class WorkableObject : InstallationObject
         base.OnEnable();
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
-        RefreshWorkableRangeVisual();
+        RefreshSharedRangeVisual();
     }
 
     protected override void OnDisable()
     {
-        SetWorkableRangeVisualActive(false);
+        DisableLegacyRangeVisual();
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
+        RefreshSharedRangeVisual();
         base.OnDisable();
     }
 
     public override void PrepareForPool()
     {
         base.PrepareForPool();
-        RefreshWorkableRangeVisual();
+        RefreshSharedRangeVisual();
     }
 
 #if UNITY_EDITOR
@@ -159,56 +153,100 @@ public class WorkableObject : InstallationObject
         globalMaxFocusActivationRadiusDirty = true;
         if (Application.isPlaying)
         {
-            RefreshWorkableRangeVisual();
+            RefreshSharedRangeVisual();
         }
     }
 #endif
 
     private void RefreshWorkableRangeVisual()
     {
+        RefreshSharedRangeVisual();
+    }
+
+    private static void RefreshSharedRangeVisual()
+    {
         if (!Application.isPlaying)
         {
             return;
         }
 
-        if (!showWorkableRange || workableRangeCells == 0u || !ShouldShowWorkableRangeVisual())
+        List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
+        foreach (WorkableObject workableObject in ActiveInstances)
         {
-            SetWorkableRangeVisualActive(false);
+            if (workableObject == null)
+            {
+                continue;
+            }
+
+            workableObject.DisableLegacyRangeVisual();
+            if (!workableObject.showWorkableRange
+                || workableObject.workableRangeCells == 0u
+                || !workableObject.ShouldShowWorkableRangeVisual())
+            {
+                continue;
+            }
+
+            float rangeRadius = ResolveRangeRadius(workableObject.workableRangeCells);
+            if (rangeRadius <= 0f)
+            {
+                continue;
+            }
+
+            requests.Add(new WorkableObjectRangeVisualRequest(
+                workableObject.transform.position,
+                rangeRadius,
+                workableObject.rangeVisualYOffset));
+        }
+
+        if (requests.Count <= 0)
+        {
+            SetSharedRangeVisualActive(false);
             return;
         }
 
-        WorkableObjectRangeVisual visual = GetOrCreateWorkableRangeVisual();
+        WorkableObjectRangeVisual visual = GetOrCreateSharedRangeVisual();
         if (visual == null)
         {
             return;
         }
 
-        visual.Configure(workableRangeCells, rangeVisualYOffset);
+        visual.Configure(requests);
         if (!visual.gameObject.activeSelf)
         {
             visual.gameObject.SetActive(true);
         }
     }
 
-    private WorkableObjectRangeVisual GetOrCreateWorkableRangeVisual()
+    private static WorkableObjectRangeVisual GetOrCreateSharedRangeVisual()
     {
-        WorkableObjectRangeVisual visual = GetComponentInChildren<WorkableObjectRangeVisual>(true);
-        if (visual != null)
+        if (sharedRangeVisual != null)
         {
-            return visual;
+            return sharedRangeVisual;
         }
 
-        GameObject visualObject = new GameObject("Workable Range Visual");
-        visualObject.transform.SetParent(transform, false);
-        return visualObject.AddComponent<WorkableObjectRangeVisual>();
+        GameObject visualObject = new GameObject("Workable Range Visuals");
+        sharedRangeVisual = visualObject.AddComponent<WorkableObjectRangeVisual>();
+        return sharedRangeVisual;
     }
 
-    private void SetWorkableRangeVisualActive(bool active)
+    private static void SetSharedRangeVisualActive(bool active)
     {
-        WorkableObjectRangeVisual visual = GetComponentInChildren<WorkableObjectRangeVisual>(true);
-        if (visual != null && visual.gameObject.activeSelf != active)
+        if (sharedRangeVisual != null && sharedRangeVisual.gameObject.activeSelf != active)
         {
-            visual.gameObject.SetActive(active);
+            sharedRangeVisual.gameObject.SetActive(active);
+        }
+    }
+
+    private void DisableLegacyRangeVisual()
+    {
+        WorkableObjectRangeVisual[] visuals = GetComponentsInChildren<WorkableObjectRangeVisual>(true);
+        for (int i = 0; i < visuals.Length; i++)
+        {
+            WorkableObjectRangeVisual visual = visuals[i];
+            if (visual != null && visual != sharedRangeVisual && visual.gameObject.activeSelf)
+            {
+                visual.gameObject.SetActive(false);
+            }
         }
     }
 
@@ -238,6 +276,20 @@ public class WorkableObject : InstallationObject
     }
 }
 
+public readonly struct WorkableObjectRangeVisualRequest
+{
+    public readonly Vector3 Center;
+    public readonly float Radius;
+    public readonly float YOffset;
+
+    public WorkableObjectRangeVisualRequest(Vector3 center, float radius, float yOffset)
+    {
+        Center = center;
+        Radius = radius;
+        YOffset = yOffset;
+    }
+}
+
 [DisallowMultipleComponent]
 public sealed class WorkableObjectRangeVisual : MonoBehaviour
 {
@@ -246,17 +298,17 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     private static readonly int MainTexShaderId = Shader.PropertyToID("_MainTex");
     private static readonly Color RangeFillColor = new Color(0.05f, 1f, 0.05f, 0.1f);
-    private const int RangeAlphaTextureSize = 64;
+    private const int RangeAlphaTextureSize = 256;
     private const float RangeCenterTransparentRadius = 0.8f;
     private static Mesh sharedRangeQuadMesh;
     private static Material sharedRangeMaterial;
-    private static Texture2D sharedRangeAlphaTexture;
 
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
     private MaterialPropertyBlock propertyBlock;
+    private Texture2D rangeAlphaTexture;
 
-    public void Configure(uint rangeCells, float yOffset)
+    public void Configure(IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
     {
         EnsureComponents();
         if (meshFilter == null || meshRenderer == null)
@@ -269,21 +321,25 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
         meshRenderer.receiveShadows = false;
 
-        float rangeDiameter = Mathf.Max(1f, WorkableObject.ResolveRangeRadius(rangeCells) * 2f);
-        Vector3 parentScale = ResolveParentLossyScale();
-        transform.localPosition = new Vector3(0f, DivideByScale(Mathf.Max(0f, yOffset), parentScale.y), 0f);
-        transform.localRotation = Quaternion.identity;
+        if (!TryBuildRangeAlphaTexture(requests, out Bounds bounds, out float yPosition))
+        {
+            return;
+        }
+
+        transform.SetParent(null, true);
+        transform.position = new Vector3(bounds.center.x, yPosition, bounds.center.z);
+        transform.rotation = Quaternion.identity;
         transform.localScale = new Vector3(
-            DivideByScale(rangeDiameter, parentScale.x),
+            Mathf.Max(0.01f, bounds.size.x),
             1f,
-            DivideByScale(rangeDiameter, parentScale.z));
+            Mathf.Max(0.01f, bounds.size.z));
 
         propertyBlock ??= new MaterialPropertyBlock();
         propertyBlock.Clear();
         propertyBlock.SetColor(BaseColorShaderId, RangeFillColor);
         propertyBlock.SetColor(ColorShaderId, RangeFillColor);
-        propertyBlock.SetTexture(BaseMapShaderId, ResolveRangeAlphaTexture());
-        propertyBlock.SetTexture(MainTexShaderId, ResolveRangeAlphaTexture());
+        propertyBlock.SetTexture(BaseMapShaderId, rangeAlphaTexture);
+        propertyBlock.SetTexture(MainTexShaderId, rangeAlphaTexture);
         meshRenderer.SetPropertyBlock(propertyBlock);
     }
 
@@ -306,18 +362,6 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
                 meshRenderer = gameObject.AddComponent<MeshRenderer>();
             }
         }
-    }
-
-    private Vector3 ResolveParentLossyScale()
-    {
-        Transform parentTransform = transform.parent;
-        return parentTransform != null ? parentTransform.lossyScale : Vector3.one;
-    }
-
-    private static float DivideByScale(float value, float scale)
-    {
-        float absoluteScale = Mathf.Abs(scale);
-        return absoluteScale > 0.0001f ? value / absoluteScale : value;
     }
 
     private static Mesh ResolveRangeQuadMesh()
@@ -356,45 +400,181 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         return sharedRangeQuadMesh;
     }
 
-    private static Texture2D ResolveRangeAlphaTexture()
+    private bool TryBuildRangeAlphaTexture(
+        IReadOnlyList<WorkableObjectRangeVisualRequest> requests,
+        out Bounds bounds,
+        out float yPosition)
     {
-        if (sharedRangeAlphaTexture != null)
+        bounds = default;
+        yPosition = 0f;
+        if (requests == null || requests.Count <= 0)
         {
-            return sharedRangeAlphaTexture;
+            return false;
         }
 
-        sharedRangeAlphaTexture = new Texture2D(
+        float minX = float.MaxValue;
+        float maxX = float.MinValue;
+        float minZ = float.MaxValue;
+        float maxZ = float.MinValue;
+        float visualY = float.MinValue;
+        float maxRadius = 0f;
+        for (int i = 0; i < requests.Count; i++)
+        {
+            WorkableObjectRangeVisualRequest request = requests[i];
+            float radius = Mathf.Max(0f, request.Radius);
+            minX = Mathf.Min(minX, request.Center.x - radius);
+            maxX = Mathf.Max(maxX, request.Center.x + radius);
+            minZ = Mathf.Min(minZ, request.Center.z - radius);
+            maxZ = Mathf.Max(maxZ, request.Center.z + radius);
+            visualY = Mathf.Max(visualY, request.Center.y + Mathf.Max(0f, request.YOffset));
+            maxRadius = Mathf.Max(maxRadius, radius);
+        }
+
+        if (minX > maxX || minZ > maxZ || maxRadius <= 0f)
+        {
+            return false;
+        }
+
+        EnsureRangeAlphaTexture();
+        float width = Mathf.Max(0.01f, maxX - minX);
+        float height = Mathf.Max(0.01f, maxZ - minZ);
+        yPosition = visualY > float.MinValue ? visualY : 0f;
+        bounds = new Bounds(
+            new Vector3((minX + maxX) * 0.5f, yPosition, (minZ + maxZ) * 0.5f),
+            new Vector3(width, 0.01f, height));
+
+        int textureWidth = rangeAlphaTexture.width;
+        int textureHeight = rangeAlphaTexture.height;
+        bool[] inside = new bool[textureWidth * textureHeight];
+        int[] left = new int[inside.Length];
+        int[] right = new int[inside.Length];
+        int[] down = new int[inside.Length];
+        int[] up = new int[inside.Length];
+
+        for (int y = 0; y < textureHeight; y++)
+        {
+            float worldZ = minZ + (((float)y + 0.5f) / textureHeight) * height;
+            for (int x = 0; x < textureWidth; x++)
+            {
+                float worldX = minX + (((float)x + 0.5f) / textureWidth) * width;
+                inside[(y * textureWidth) + x] = IsInsideAnyRange(worldX, worldZ, requests);
+            }
+        }
+
+        FillAxisDistanceFields(inside, textureWidth, textureHeight, left, right, down, up);
+
+        Color[] pixels = new Color[inside.Length];
+        float pixelWorldWidth = width / textureWidth;
+        float pixelWorldHeight = height / textureHeight;
+        float fadeDistance = Mathf.Max(0.001f, maxRadius * (1f - RangeCenterTransparentRadius));
+        for (int i = 0; i < inside.Length; i++)
+        {
+            if (!inside[i])
+            {
+                pixels[i] = new Color(1f, 1f, 1f, 0f);
+                continue;
+            }
+
+            float horizontalDistance = (Mathf.Min(left[i], right[i]) - 0.5f) * pixelWorldWidth;
+            float verticalDistance = (Mathf.Min(down[i], up[i]) - 0.5f) * pixelWorldHeight;
+            float distanceToBoundary = Mathf.Max(0f, Mathf.Min(horizontalDistance, verticalDistance));
+            float edgeStrength = 1f - Mathf.Clamp01(distanceToBoundary / fadeDistance);
+            float alpha = Mathf.SmoothStep(0f, 1f, edgeStrength);
+            pixels[i] = new Color(1f, 1f, 1f, alpha);
+        }
+
+        rangeAlphaTexture.SetPixels(pixels);
+        rangeAlphaTexture.Apply(false, false);
+        return true;
+    }
+
+    private void EnsureRangeAlphaTexture()
+    {
+        if (rangeAlphaTexture != null
+            && rangeAlphaTexture.width == RangeAlphaTextureSize
+            && rangeAlphaTexture.height == RangeAlphaTextureSize)
+        {
+            return;
+        }
+
+        rangeAlphaTexture = new Texture2D(
             RangeAlphaTextureSize,
             RangeAlphaTextureSize,
             TextureFormat.RGBA32,
             false)
         {
-            name = "WorkableObject_RangeEdgeFade",
+            name = "WorkableObject_RangeUnionFade",
             hideFlags = HideFlags.HideAndDontSave,
             filterMode = FilterMode.Bilinear,
             wrapMode = TextureWrapMode.Clamp
         };
+    }
 
-        Color[] pixels = new Color[RangeAlphaTextureSize * RangeAlphaTextureSize];
-        float denominator = Mathf.Max(1f, RangeAlphaTextureSize - 1f);
-        for (int y = 0; y < RangeAlphaTextureSize; y++)
+    private static bool IsInsideAnyRange(
+        float worldX,
+        float worldZ,
+        IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
+    {
+        for (int i = 0; i < requests.Count; i++)
         {
-            for (int x = 0; x < RangeAlphaTextureSize; x++)
+            WorkableObjectRangeVisualRequest request = requests[i];
+            float radius = Mathf.Max(0f, request.Radius);
+            if (Mathf.Abs(worldX - request.Center.x) <= radius
+                && Mathf.Abs(worldZ - request.Center.z) <= radius)
             {
-                float normalizedX = (x / denominator) * 2f - 1f;
-                float normalizedY = (y / denominator) * 2f - 1f;
-                float edgeDistance = Mathf.Max(Mathf.Abs(normalizedX), Mathf.Abs(normalizedY));
-                float alpha = Mathf.SmoothStep(
-                    0f,
-                    1f,
-                    Mathf.InverseLerp(RangeCenterTransparentRadius, 1f, edgeDistance));
-                pixels[(y * RangeAlphaTextureSize) + x] = new Color(1f, 1f, 1f, alpha);
+                return true;
             }
         }
 
-        sharedRangeAlphaTexture.SetPixels(pixels);
-        sharedRangeAlphaTexture.Apply(false, true);
-        return sharedRangeAlphaTexture;
+        return false;
+    }
+
+    private static void FillAxisDistanceFields(
+        bool[] inside,
+        int width,
+        int height,
+        int[] left,
+        int[] right,
+        int[] down,
+        int[] up)
+    {
+        for (int y = 0; y < height; y++)
+        {
+            int distance = 0;
+            for (int x = 0; x < width; x++)
+            {
+                int index = (y * width) + x;
+                distance = inside[index] ? distance + 1 : 0;
+                left[index] = distance;
+            }
+
+            distance = 0;
+            for (int x = width - 1; x >= 0; x--)
+            {
+                int index = (y * width) + x;
+                distance = inside[index] ? distance + 1 : 0;
+                right[index] = distance;
+            }
+        }
+
+        for (int x = 0; x < width; x++)
+        {
+            int distance = 0;
+            for (int y = 0; y < height; y++)
+            {
+                int index = (y * width) + x;
+                distance = inside[index] ? distance + 1 : 0;
+                down[index] = distance;
+            }
+
+            distance = 0;
+            for (int y = height - 1; y >= 0; y--)
+            {
+                int index = (y * width) + x;
+                distance = inside[index] ? distance + 1 : 0;
+                up[index] = distance;
+            }
+        }
     }
 
     private static Material ResolveRangeMaterial()
@@ -404,7 +584,12 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
             return sharedRangeMaterial;
         }
 
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        Shader shader = Shader.Find("Custom/WorkableRangeOverlay");
+        if (shader == null)
+        {
+            shader = Shader.Find("Universal Render Pipeline/Unlit");
+        }
+
         if (shader == null)
         {
             shader = Shader.Find("Unlit/Transparent");
@@ -429,7 +614,7 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         if (sharedRangeMaterial.HasProperty(BaseMapShaderId))
         {
-            sharedRangeMaterial.SetTexture(BaseMapShaderId, ResolveRangeAlphaTexture());
+            sharedRangeMaterial.SetTexture(BaseMapShaderId, Texture2D.whiteTexture);
         }
 
         if (sharedRangeMaterial.HasProperty(ColorShaderId))
@@ -439,7 +624,7 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         if (sharedRangeMaterial.HasProperty(MainTexShaderId))
         {
-            sharedRangeMaterial.SetTexture(MainTexShaderId, ResolveRangeAlphaTexture());
+            sharedRangeMaterial.SetTexture(MainTexShaderId, Texture2D.whiteTexture);
         }
 
         if (sharedRangeMaterial.HasProperty("_Surface"))

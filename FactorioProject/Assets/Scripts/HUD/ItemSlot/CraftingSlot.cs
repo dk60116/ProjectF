@@ -315,19 +315,25 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        List<CraftingTreeRuntime.IngredientEntry> refundIngredients = new List<CraftingTreeRuntime.IngredientEntry>(ingredientBuffer.Count);
-        for (int i = 0; i < ingredientBuffer.Count; i++)
-        {
-            refundIngredients.Add(ingredientBuffer[i]);
-        }
-
         PlayerHUD hud = FindObjectOfType<PlayerHUD>();
-        if (hud == null || !hud.TryEnqueueCrafting(craftItemId, refundIngredients))
+        if (hud == null || !hud.CanEnqueueCrafting(craftItemId))
         {
             return;
         }
 
-        ConsumeIngredients();
+        if (!TryConsumeIngredients(out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients))
+        {
+            RefreshIngredients(false);
+            return;
+        }
+
+        if (!hud.TryEnqueueCrafting(craftItemId, consumedIngredients))
+        {
+            RefundIngredients(consumedIngredients);
+            RefreshIngredients(false);
+            return;
+        }
+
         RefreshIngredients(false);
     }
 
@@ -506,11 +512,12 @@ public class CraftingSlot : ItemSlot
         return player.CanAcceptHandObject(craftItemId) || player.TryStoreHandItemsInBag();
     }
 
-    private void ConsumeIngredients()
+    private bool TryConsumeIngredients(out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients)
     {
+        consumedIngredients = new List<CraftingTreeRuntime.IngredientEntry>();
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
         {
-            return;
+            return false;
         }
 
         Player player = GameManager.Instance.Player;
@@ -528,10 +535,12 @@ public class CraftingSlot : ItemSlot
                 continue;
             }
 
+            int removedTotal = 0;
             if (bag != null)
             {
                 int removed = bag.RemoveItems(entry.itemId, remaining);
                 remaining -= removed;
+                removedTotal += removed;
             }
 
             if (remaining > 0 && handBag != null)
@@ -539,11 +548,76 @@ public class CraftingSlot : ItemSlot
                 handBag.RefreshExternalStackCounts(false);
                 int removed = handBag.RemoveItems(entry.itemId, remaining);
                 remaining -= removed;
+                removedTotal += removed;
             }
 
             if (remaining > 0 && terrain != null)
             {
-                terrain.RemoveDroppedItemsAround(origin, entry.itemId, 2, remaining);
+                int removed = terrain.RemoveDroppedItemsAround(origin, entry.itemId, 2, remaining);
+                remaining -= removed;
+                removedTotal += removed;
+            }
+
+            if (removedTotal > 0)
+            {
+                consumedIngredients.Add(new CraftingTreeRuntime.IngredientEntry(entry.itemId, removedTotal));
+            }
+
+            if (remaining > 0)
+            {
+                RefundIngredients(consumedIngredients);
+                consumedIngredients.Clear();
+                return false;
+            }
+        }
+
+        return consumedIngredients.Count > 0;
+    }
+
+    private void RefundIngredients(IReadOnlyList<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        if (ingredients == null || ingredients.Count == 0)
+        {
+            return;
+        }
+
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return;
+        }
+
+        Player player = GameManager.Instance.Player;
+        TerrainGenerator terrain = ResolveTerrain();
+        Vector3 refundOrigin = player.transform.position;
+
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            int remaining = Mathf.Max(0, ingredient.count);
+            while (remaining > 0)
+            {
+                if (player.TryAddToBag(ingredient.itemId, out _))
+                {
+                    remaining--;
+                    continue;
+                }
+
+                if (player.TryAddToHand(ingredient.itemId, out _))
+                {
+                    remaining--;
+                    continue;
+                }
+
+                if (terrain != null
+                    && (terrain.TryAddDroppedItemAnimated(refundOrigin, ingredient.itemId, refundOrigin, out _)
+                        || terrain.TryAddDroppedItemAtPlayerBlock(refundOrigin, ingredient.itemId, out _)
+                        || terrain.TryAddDroppedItemNear(refundOrigin, ingredient.itemId, out _)))
+                {
+                    remaining--;
+                    continue;
+                }
+
+                return;
             }
         }
     }
