@@ -222,11 +222,10 @@ MonoBehaviour:
   expandEase: 27
   collapseEase: 26
   ingredientsRoot: {fileID: 0}
-  ingredientRevealDelay: 0.04
-  ingredientRevealDuration: 0.12
-  ingredientRevealEase: 27
   insufficientIngredientAlpha: 0.45
-  IngrdientsSlots:
+  ingredientRevealStepDelay: 0.02
+  ingredientRevealFadeDuration: 0.04
+  ingredientSlots:
   - {fileID: 919697599856940436}
   - {fileID: 7038993961911737244}
   - {fileID: 1819020834653576980}

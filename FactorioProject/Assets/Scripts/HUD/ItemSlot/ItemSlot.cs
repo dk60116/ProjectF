@@ -17,6 +17,9 @@ public class ItemSlot : MonoBehaviour
     private Image icon;
 
     [SerializeField]
+    private TextMeshProUGUI itemName;
+
+    [SerializeField]
     private TextMeshProUGUI count;
 
     [SerializeField]
@@ -40,10 +43,16 @@ public class ItemSlot : MonoBehaviour
 
     public void SetItemDisplay(int itemId, int itemCount, int maxItemCount, bool allowZeroCount)
     {
+        SetItemDisplay(itemId, itemCount, maxItemCount, allowZeroCount, true);
+    }
+
+    public void SetItemDisplay(int itemId, int itemCount, int maxItemCount, bool allowZeroCount, bool showCount)
+    {
         ResolveReferences();
         id = itemId;
 
         bool hasItem = itemId >= 0 && (allowZeroCount || itemCount > 0);
+        bool shouldShowCount = hasItem && showCount;
 
         if (!hasItem && keepIconWhenEmpty)
         {
@@ -65,6 +74,7 @@ public class ItemSlot : MonoBehaviour
                 }
             }
 
+            SetItemNameText(null, false);
             return;
         }
 
@@ -80,14 +90,15 @@ public class ItemSlot : MonoBehaviour
 
         if (count != null)
         {
-            count.text = hasItem
+            count.text = shouldShowCount
                 ? (maxItemCount > 0 ? $"{itemCount} / {maxItemCount}" : itemCount.ToString())
                 : string.Empty;
-            if (count.gameObject.activeSelf != hasItem)
+            if (count.gameObject.activeSelf != shouldShowCount)
             {
-                count.gameObject.SetActive(hasItem);
+                count.gameObject.SetActive(shouldShowCount);
             }
         }
+        SetItemNameText(null, false);
 
         if (!hasItem)
         {
@@ -109,6 +120,8 @@ public class ItemSlot : MonoBehaviour
             icon.sprite = itemSet.icon;
             icon.enabled = itemSet.icon != null;
         }
+
+        SetItemNameText(itemSet.name, true);
     }
 
     public virtual void Clear()
@@ -185,9 +198,66 @@ public class ItemSlot : MonoBehaviour
             }
         }
 
-        if (count == null || !IsLocalComponent(count))
+        if (count == null)
         {
-            count = GetComponentInChildren<TextMeshProUGUI>(true);
+            TextMeshProUGUI[] textComponents = GetComponentsInChildren<TextMeshProUGUI>(true);
+            for (int i = 0; i < textComponents.Length; i++)
+            {
+                TextMeshProUGUI candidate = textComponents[i];
+                if (candidate == null || candidate == itemName)
+                {
+                    continue;
+                }
+
+                count = candidate;
+                break;
+            }
+        }
+    }
+
+    private TextMeshProUGUI FindTextComponentByName(params string[] candidateNames)
+    {
+        if (candidateNames == null || candidateNames.Length <= 0)
+        {
+            return null;
+        }
+
+        TextMeshProUGUI[] textComponents = GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int i = 0; i < textComponents.Length; i++)
+        {
+            TextMeshProUGUI candidate = textComponents[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            for (int nameIndex = 0; nameIndex < candidateNames.Length; nameIndex++)
+            {
+                if (candidate.name == candidateNames[nameIndex])
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void SetItemNameText(string displayName, bool hasItem)
+    {
+        if (itemName == null)
+        {
+            return;
+        }
+
+        string normalizedName = hasItem && !string.IsNullOrWhiteSpace(displayName)
+            ? displayName
+            : string.Empty;
+        itemName.text = normalizedName;
+        bool showName = !string.IsNullOrEmpty(normalizedName);
+        if (itemName.gameObject.activeSelf != showName)
+        {
+            itemName.gameObject.SetActive(showName);
         }
     }
 

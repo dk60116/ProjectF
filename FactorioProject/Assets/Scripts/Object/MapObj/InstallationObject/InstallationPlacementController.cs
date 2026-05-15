@@ -2038,6 +2038,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         RegisterInstallPreview(preview, editSession.originalQuarterTurns);
+
         installPreviewAnchorCoordinates[preview] = editSession.originalAnchorCoordinate;
         SelectInstallPreview(preview);
         installPreviewConveyorVariantMode = editSession.originalConveyorVariantKind > 0
@@ -2063,7 +2064,9 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewVerticalOffset);
         }
 
-        activeInstallPreview.transform.rotation = editSession.originalRotation;
+        activeInstallPreview.transform.rotation = editSession.originalInstallation is Wall
+            ? GetInstallPreviewRotation()
+            : editSession.originalRotation;
         InvalidateInstallGrid();
     }
 
@@ -2140,7 +2143,16 @@ public class InstallationPlacementController : MonoBehaviour
             return normalizedRuntimeQuarterTurns;
         }
 
-        for (int candidateQuarterTurns = 0; candidateQuarterTurns < 4; candidateQuarterTurns++)
+        if (UsesTwoStateWallRotation(sourcePrefab))
+        {
+            return ResolveTwoStateWallQuarterTurnsFromRotation(
+                sourcePrefab,
+                installationObject.transform.rotation,
+                normalizedRuntimeQuarterTurns);
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(sourcePrefab);
+        for (int candidateQuarterTurns = 0; candidateQuarterTurns < candidateCount; candidateQuarterTurns++)
         {
             Quaternion candidateRotation = GetPlacementObjectRotation(sourcePrefab, candidateQuarterTurns);
             if (Mathf.Abs(Quaternion.Dot(candidateRotation, installationObject.transform.rotation)) >= 0.9999f)
@@ -2149,7 +2161,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        return normalizedRuntimeQuarterTurns;
+        return NormalizePlacementQuarterTurnsForObject(sourcePrefab, normalizedRuntimeQuarterTurns);
     }
 
     private void CancelInstallationEdit()
@@ -2634,7 +2646,8 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         MapObject originalObject = editSession.originalInstallation;
-        if (!RequiresConveyorPreviewReplacement(originalObject, desiredSourcePrefab))
+        if (!RequiresConveyorPreviewReplacement(originalObject, desiredSourcePrefab)
+            && !RequiresFencePreviewReplacement(originalObject, desiredSourcePrefab))
         {
             return originalObject;
         }
@@ -2836,7 +2849,7 @@ public class InstallationPlacementController : MonoBehaviour
                 placedAnchorCoordinates,
                 true,
                 null,
-                placedAnchorCoordinates);
+                null);
             RefreshFencePreviewVariants(placedAnchorCoordinates);
             RefreshInstalledFenceVariantPreviews(placedAnchorCoordinates);
         }
@@ -2971,7 +2984,7 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePrefab = sourcePrefab,
             quarterTurns = resolvedQuarterTurns,
             footprintBlocks = footprintBlocks,
-            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, installPreviewVerticalOffset),
+            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, 0f),
             rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns)
         };
         return true;
@@ -3025,7 +3038,7 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePrefab = sourcePrefab,
             quarterTurns = resolvedQuarterTurns,
             footprintBlocks = footprintBlocks,
-            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, installPreviewVerticalOffset),
+            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, 0f),
             rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns)
         };
         return true;
@@ -4609,16 +4622,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Quaternion rotation = baseRotation * Quaternion.Euler(0f, rotationQuarterTurns * 90f, 0f);
-        return UsesTwoStateWallRotation(sourcePrefab)
-            ? CanonicalizeStraightWallRotation(rotation)
-            : rotation;
-    }
-
-    private static Quaternion CanonicalizeStraightWallRotation(Quaternion rotation)
-    {
-        float yAngle = Mathf.Repeat(rotation.eulerAngles.y, 180f);
-        float canonicalY = yAngle >= 45f && yAngle < 135f ? 90f : 0f;
-        return Quaternion.Euler(0f, canonicalY, 0f);
+        return rotation;
     }
 
     private bool TryResolveConveyorCornerPlacementPrefab(
@@ -8015,7 +8019,9 @@ public class InstallationPlacementController : MonoBehaviour
         int previewIndex = installPreviewInstances.IndexOf(currentPreview);
         Vector3 currentPosition = currentPreview.transform.position;
         int resolvedQuarterTurns = quarterTurns;
-        Quaternion replacementBaseRotation = replacementPreview.transform.rotation;
+        Quaternion replacementBaseRotation = replacementSourcePrefab != null
+            ? replacementSourcePrefab.transform.rotation
+            : replacementPreview.transform.rotation;
         bool wasActivePreview = activeInstallPreview == currentPreview;
         bool wasPointerOriginPreview = previewPointerOriginPreview == currentPreview;
 
@@ -8056,7 +8062,10 @@ public class InstallationPlacementController : MonoBehaviour
 
         replacementPreview.transform.SetPositionAndRotation(
             currentPosition,
-            GetPlacementObjectRotation(replacementPreview, resolvedQuarterTurns));
+            GetPlacementObjectRotation(
+                replacementBaseRotation,
+                replacementSourcePrefab != null ? replacementSourcePrefab : replacementPreview,
+                resolvedQuarterTurns));
         if (replacementPreview is InstallationObject replacementInstallation)
         {
             replacementInstallation.RefreshInstalledDirectionFromCurrentTransform();
@@ -9434,10 +9443,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         int quarterTurns = GetPreviewQuarterTurns(preview);
+        MapObject rotationSource = ResolveInstallPreviewRotationSource(preview);
         Quaternion previewBaseRotation = installPreviewBaseRotationsByPreview.TryGetValue(preview, out Quaternion storedBaseRotation)
             ? storedBaseRotation
-            : preview.transform.rotation;
-        return GetPlacementObjectRotation(previewBaseRotation, preview, quarterTurns);
+            : (rotationSource != null ? rotationSource.transform.rotation : preview.transform.rotation);
+        return GetPlacementObjectRotation(previewBaseRotation, rotationSource, quarterTurns);
     }
 
     private void AddGridEdgeLine(List<Vector3> vertices, List<int> triangles, List<Color> colors, Vector2Int coordinate, Vector2Int direction, float y, Color color)
@@ -10330,10 +10340,11 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (activeInstallPreview != null)
         {
+            MapObject rotationSource = ResolveInstallPreviewRotationSource(activeInstallPreview);
             Quaternion previewBaseRotation = installPreviewBaseRotationsByPreview.TryGetValue(activeInstallPreview, out Quaternion storedBaseRotation)
                 ? storedBaseRotation
-                : activeInstallPreview.transform.rotation;
-            return GetPlacementObjectRotation(previewBaseRotation, activeInstallPreview, installPreviewQuarterTurns);
+                : (rotationSource != null ? rotationSource.transform.rotation : activeInstallPreview.transform.rotation);
+            return GetPlacementObjectRotation(previewBaseRotation, rotationSource, installPreviewQuarterTurns);
         }
 
         if (activeInstallDefinition != null && activeInstallDefinition.mapObject != null)
@@ -10435,10 +10446,24 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (installPreviewQuarterTurnsByPreview.TryGetValue(preview, out int storedQuarterTurns))
         {
-            return NormalizePlacementQuarterTurnsForObject(preview, storedQuarterTurns);
+            return NormalizePlacementQuarterTurnsForObject(
+                ResolveInstallPreviewRotationSource(preview),
+                storedQuarterTurns);
         }
 
         return 0;
+    }
+
+    private MapObject ResolveInstallPreviewRotationSource(MapObject preview)
+    {
+        if (preview != null
+            && installPreviewSourcePrefabsByPreview.TryGetValue(preview, out MapObject sourcePrefab)
+            && sourcePrefab != null)
+        {
+            return sourcePrefab;
+        }
+
+        return preview;
     }
 
     private static int NormalizePlacementQuarterTurns(int quarterTurns)
@@ -10462,6 +10487,36 @@ public class InstallationPlacementController : MonoBehaviour
         return UsesTwoStateWallRotation(sourcePrefab)
             ? normalizedQuarterTurns % 2
             : normalizedQuarterTurns;
+    }
+
+    private static int ResolveTwoStateWallQuarterTurnsFromRotation(
+        MapObject sourcePrefab,
+        Quaternion worldRotation,
+        int fallbackQuarterTurns)
+    {
+        int bestQuarterTurns = -1;
+        float bestDot = -1f;
+        Quaternion baseRotation = sourcePrefab != null
+            ? sourcePrefab.transform.rotation
+            : Quaternion.identity;
+
+        for (int candidateQuarterTurns = 0; candidateQuarterTurns < 4; candidateQuarterTurns++)
+        {
+            Quaternion candidateRotation = baseRotation * Quaternion.Euler(0f, candidateQuarterTurns * 90f, 0f);
+            float dot = Mathf.Abs(Quaternion.Dot(candidateRotation, worldRotation));
+            if (dot > bestDot)
+            {
+                bestDot = dot;
+                bestQuarterTurns = candidateQuarterTurns;
+            }
+        }
+
+        if (bestQuarterTurns >= 0 && bestDot >= 0.9999f)
+        {
+            return bestQuarterTurns % 2;
+        }
+
+        return NormalizePlacementQuarterTurns(fallbackQuarterTurns) % 2;
     }
 
     private int GetNextInstallPreviewQuarterTurns(MapObject preview, int currentQuarterTurns)
@@ -10653,6 +10708,14 @@ public class InstallationPlacementController : MonoBehaviour
 
     private int ResolvePlacementQuarterTurnsFromRotation(MapObject sourcePrefab, Quaternion worldRotation, int fallbackQuarterTurns)
     {
+        if (UsesTwoStateWallRotation(sourcePrefab))
+        {
+            return ResolveTwoStateWallQuarterTurnsFromRotation(
+                sourcePrefab,
+                worldRotation,
+                fallbackQuarterTurns);
+        }
+
         if (TryResolvePlacementQuarterTurnsFromRotation(sourcePrefab, worldRotation, out int resolvedQuarterTurns))
         {
             return resolvedQuarterTurns;
@@ -10667,6 +10730,15 @@ public class InstallationPlacementController : MonoBehaviour
         if (sourcePrefab == null)
         {
             return false;
+        }
+
+        if (UsesTwoStateWallRotation(sourcePrefab))
+        {
+            resolvedQuarterTurns = ResolveTwoStateWallQuarterTurnsFromRotation(
+                sourcePrefab,
+                worldRotation,
+                resolvedQuarterTurns);
+            return true;
         }
 
         int candidateCount = GetPlacementRotationCandidateCount(sourcePrefab);
@@ -10790,14 +10862,17 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewInstances.Add(preview);
         }
 
-        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(preview, quarterTurns);
+        MapObject rotationSource = ResolveInstallPreviewRotationSource(preview);
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(rotationSource, quarterTurns);
         installPreviewQuarterTurnsByPreview[preview] = normalizedQuarterTurns;
         if (preview is FenceDoor)
         {
             installPreviewFenceDoorStandaloneQuarterTurnsByPreview[preview] = normalizedQuarterTurns;
         }
 
-        installPreviewBaseRotationsByPreview[preview] = preview.transform.rotation;
+        installPreviewBaseRotationsByPreview[preview] = rotationSource != null
+            ? rotationSource.transform.rotation
+            : preview.transform.rotation;
         if (!installPreviewPlacementSequencesByPreview.ContainsKey(preview))
         {
             installPreviewPlacementSequencesByPreview[preview] = InstallationObject.ClaimNextPlacementSequence();

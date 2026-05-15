@@ -1179,7 +1179,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        Vector2 startPosition = targetPositions[0];
+        Vector2 startPosition = Vector2.zero;
         float expandStepDelay = Mathf.Max(0f, craftingExpandStepDelay);
         float latestDelay = slotCount > 0 ? (slotCount - 1) * expandStepDelay : 0f;
         float longestExpandDuration = GetLongestCraftingSlotExpandDuration(visibleSlots);

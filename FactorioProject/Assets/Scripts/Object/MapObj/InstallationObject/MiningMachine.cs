@@ -42,6 +42,54 @@ public class MiningMachine : InputOutputModule
         BeginActiveCraft(-1, outputItemId, outputCount, installedDefinition);
     }
 
+    protected override string ResolveObjectInfoStatus(out bool isProducing)
+    {
+        isProducing = false;
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null)
+        {
+            return "No machine";
+        }
+
+        if (IsWaitingForOutput)
+        {
+            return "Output full";
+        }
+
+        if (IsActiveCraftRunning)
+        {
+            if (!HasOperationalEnergyAvailable(installedDefinition))
+            {
+                return "No energy";
+            }
+
+            isProducing = true;
+            return "Working";
+        }
+
+        if (!TryResolveMiningResource(out Resource resource)
+            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
+            || outputItemId < 0
+            || outputCount <= 0)
+        {
+            return "No resource";
+        }
+
+        if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+        {
+            return "Output full";
+        }
+
+        if (!HasOperationalEnergyAvailable(installedDefinition))
+        {
+            return "No energy";
+        }
+
+        isProducing = true;
+        return "Working";
+    }
+
     protected override bool TryCompleteActiveCraft()
     {
         if (ActiveOutputItemId < 0 || ActiveOutputCount <= 0)
@@ -98,6 +146,41 @@ public class MiningMachine : InputOutputModule
 
         outputItemIds.Add(outputItemId);
         return true;
+    }
+
+    public override bool TryGetObjectInfoOutput(
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity,
+        out bool displayZeroCountItem)
+    {
+        if (base.TryGetObjectInfoOutput(
+                out outputItemId,
+                out outputAreaCount,
+                out outputAreaCapacity,
+                out displayZeroCountItem))
+        {
+            return true;
+        }
+
+        outputItemId = -1;
+        outputAreaCount = 0;
+        outputAreaCapacity = 0;
+        displayZeroCountItem = false;
+
+        if (!TryResolveMiningResource(out Resource resource)
+            || !resource.TryPeekMachineHarvestOutput(out outputItemId, out int outputCount)
+            || outputItemId < 0)
+        {
+            return false;
+        }
+
+        displayZeroCountItem = true;
+        return TryResolveObjectInfoOutputAreaCounts(
+            outputItemId,
+            Mathf.Max(1, outputCount),
+            out outputAreaCount,
+            out outputAreaCapacity);
     }
 
     private bool TryResolveMiningResource(out Resource resource)

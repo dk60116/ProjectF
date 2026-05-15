@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: M_Wooden Fence_P
+  m_Name: M_Wooden Fence Door_P
   m_Shader: {fileID: 4800000, guid: 2e827c8c74aa43a084b5b71af6db2df4, type: 3}
   m_Parent: {fileID: 2100000, guid: 3b0daddd139b95644b250e8907de7236, type: 2}
   m_ModifiedSerializedProperties: 4

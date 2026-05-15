@@ -72,11 +72,14 @@ public class PlayerHUD : BagSlot
 
     [SerializeField]
     private MapPaper mapPaper;
+    [SerializeField]
+    private ObjectInfoPanel objectInfoPanel;
 
     private TerrainGenerator cachedTerrainGenerator;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
+    private MapObject currentObjectInfoTarget;
     private int lastObservedHandItemId = -2;
     private int lastObservedHandItemCount = -1;
     private int lastObservedHandMaxCount = -1;
@@ -124,6 +127,7 @@ public class PlayerHUD : BagSlot
     {
         SubscribeSlotEvents();
         ResolveHudReferences(true);
+        ClearObjectInfoPanelState();
         EnsureInstallationPlacementController();
         BindItemFilterButton();
         HideItemFilterUIImmediate();
@@ -143,6 +147,7 @@ public class PlayerHUD : BagSlot
     private void OnEnable()
     {
         ResolveHudReferences(true);
+        ClearObjectInfoPanelState();
         EnsureInstallationPlacementController();
         BindItemFilterButton();
         HideItemFilterUIImmediate();
@@ -160,6 +165,7 @@ public class PlayerHUD : BagSlot
         isBagRefreshQueued = false;
         queuedBagRefreshFrame = -1;
         pendingBagRefreshAfterCraftingVisibilityChange = false;
+        ClearObjectInfoPanelState();
     }
 
     private void ResolveHudReferences(bool force = false)
@@ -182,6 +188,8 @@ public class PlayerHUD : BagSlot
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveMapPaper();
+        ResolveObjectInfoPanel();
+        EnsureHudButtonHoverTweens();
         hudReferencesResolved = true;
     }
 
@@ -193,6 +201,7 @@ public class PlayerHUD : BagSlot
         UpdateInstallModeButtons();
         ProcessQueuedBagRefresh();
         UpdateInteractionButtonState();
+        UpdateObjectInfoPanelState();
         HandleInteractionButtonKeyboardInput();
         UpdateItemFilterButtonState();
         UpdateInventoryEditLockState();
@@ -616,21 +625,21 @@ public class PlayerHUD : BagSlot
         mapEditCompleteButton = ResolveButtonReferenceInRoot(mapEditCompleteButton, mapEditRoot, "CompleteButton");
         mapEditPackButton = ResolveButtonReferenceInRoot(mapEditPackButton, mapEditRoot, "PackButton", "Pack");
         mapEditUndoButton = ResolveButtonReferenceInRoot(mapEditUndoButton, mapEditRoot, "UnDoButton", "UndoButton");
+        WarmAnimatedButtonLayoutPositions(
+            installCancelButton,
+            installRotationButton,
+            installCompleteButton,
+            mapEditCancelButton,
+            mapEditRotationButton,
+            mapEditCompleteButton,
+            mapEditPackButton,
+            mapEditUndoButton);
         CacheAnimatedButtonPositions(
             installButton,
             installCancelButton,
             installRotationButton,
             installCompleteButton,
             mapEditButton,
-            mapEditCancelButton,
-            mapEditRotationButton,
-            mapEditCompleteButton,
-            mapEditPackButton,
-            mapEditUndoButton);
-        WarmAnimatedButtonLayoutPositions(
-            installCancelButton,
-            installRotationButton,
-            installCompleteButton,
             mapEditCancelButton,
             mapEditRotationButton,
             mapEditCompleteButton,
@@ -662,6 +671,25 @@ public class PlayerHUD : BagSlot
         if (mapPaper == null)
         {
             mapPaper = paperTransform.gameObject.AddComponent<MapPaper>();
+        }
+    }
+
+    private void ResolveObjectInfoPanel()
+    {
+        if (objectInfoPanel != null)
+        {
+            return;
+        }
+
+        Transform panelTransform = FindDescendantByName(transform, "ObjectInfoPanel");
+        if (panelTransform != null)
+        {
+            objectInfoPanel = panelTransform.GetComponent<ObjectInfoPanel>();
+        }
+
+        if (objectInfoPanel == null)
+        {
+            objectInfoPanel = GetComponentInChildren<ObjectInfoPanel>(true);
         }
     }
 
@@ -763,6 +791,21 @@ public class PlayerHUD : BagSlot
         }
 
         return null;
+    }
+
+    private void EnsureHudButtonHoverTweens()
+    {
+        Button[] buttons = GetComponentsInChildren<Button>(true);
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            Button button = buttons[i];
+            if (button == null || button.GetComponent<HUDButtonHoverTween>() != null)
+            {
+                continue;
+            }
+
+            button.gameObject.AddComponent<HUDButtonHoverTween>();
+        }
     }
 
     private void EnsureMapPaperBinding()
@@ -1736,6 +1779,50 @@ public class PlayerHUD : BagSlot
         interactionButton.SetVisible(false);
     }
 
+    private void UpdateObjectInfoPanelState()
+    {
+        ResolveObjectInfoPanel();
+        if (objectInfoPanel == null)
+        {
+            currentObjectInfoTarget = null;
+            return;
+        }
+
+        if (GameManager.Instance == null
+            || GameManager.Instance.Player == null
+            || GameManager.Instance.PlayerInteractionLocked)
+        {
+            ClearObjectInfoPanelState();
+            return;
+        }
+
+        if (!TryGetFocusedMapObject(out MapObject focusedMapObject))
+        {
+            ClearObjectInfoPanelState();
+            return;
+        }
+
+        if (currentObjectInfoTarget == focusedMapObject
+            && objectInfoPanel.IsBoundTo(focusedMapObject)
+            && objectInfoPanel.gameObject.activeSelf)
+        {
+            objectInfoPanel.Refresh();
+            return;
+        }
+
+        currentObjectInfoTarget = focusedMapObject;
+        objectInfoPanel.Bind(focusedMapObject);
+    }
+
+    private void ClearObjectInfoPanelState()
+    {
+        currentObjectInfoTarget = null;
+        if (objectInfoPanel != null)
+        {
+            objectInfoPanel.Clear();
+        }
+    }
+
     private void UpdateItemFilterButtonState()
     {
         if (ItemFilterButton == null)
@@ -2091,6 +2178,23 @@ public class PlayerHUD : BagSlot
         }
 
         return playerController.TryGetFocusedResource(out focusedResource);
+    }
+
+    private bool TryGetFocusedMapObject(out MapObject focusedMapObject)
+    {
+        focusedMapObject = null;
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetFocusedMapObject(out focusedMapObject);
     }
 
     private void SubscribeSlotEvents()

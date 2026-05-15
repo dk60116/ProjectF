@@ -1545,7 +1545,8 @@ public class ItemManager : MonoBehaviour
                 ? itemName
                 : prefabRoot != null ? prefabRoot.name : string.Empty);
 
-        Mesh folderPortableMesh = FindPortableMeshInItemDirectory(portableFolder, itemKey);
+        Mesh folderPortableMesh = FindExactPortableMeshInItemDirectory(portableFolder, itemName, prefabRoot)
+                                  ?? FindPortableMeshInItemDirectory(portableFolder, itemKey);
         if (folderPortableMesh != null)
         {
             portableMesh = folderPortableMesh;
@@ -1559,7 +1560,8 @@ public class ItemManager : MonoBehaviour
             }
         }
 
-        Material folderPortableMaterial = FindPortableMaterialInItemDirectory(portableFolder, itemKey);
+        Material folderPortableMaterial = FindExactPortableMaterialInItemDirectory(portableFolder, itemName, prefabRoot)
+                                          ?? FindPortableMaterialInItemDirectory(portableFolder, itemKey);
         if (folderPortableMaterial != null)
         {
             portableMaterial = folderPortableMaterial;
@@ -1656,6 +1658,32 @@ public class ItemManager : MonoBehaviour
         return FindBestPortableMeshByGuidSearch(new[] { itemDirectory }, itemKey);
     }
 
+    private static Mesh FindExactPortableMeshInItemDirectory(string itemDirectory, string itemName, GameObject prefabRoot)
+    {
+        if (string.IsNullOrWhiteSpace(itemDirectory) || !AssetDatabase.IsValidFolder(itemDirectory))
+        {
+            return null;
+        }
+
+        string[] extensions = { ".mesh", ".asset", ".fbx" };
+        List<string> baseNames = BuildExactPortableAssetBaseNames(itemName, prefabRoot);
+        for (int nameIndex = 0; nameIndex < baseNames.Count; nameIndex++)
+        {
+            string baseName = baseNames[nameIndex];
+            for (int extensionIndex = 0; extensionIndex < extensions.Length; extensionIndex++)
+            {
+                Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(
+                    $"{itemDirectory}/{baseName}{extensions[extensionIndex]}");
+                if (mesh != null && IsPortableMeshName(mesh.name))
+                {
+                    return mesh;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static Material FindPortableMaterialInItemDirectory(string itemDirectory, string itemKey)
     {
         if (string.IsNullOrWhiteSpace(itemDirectory) || !AssetDatabase.IsValidFolder(itemDirectory))
@@ -1664,6 +1692,58 @@ public class ItemManager : MonoBehaviour
         }
 
         return FindBestPortableMaterialByGuidSearch(new[] { itemDirectory }, itemKey);
+    }
+
+    private static Material FindExactPortableMaterialInItemDirectory(string itemDirectory, string itemName, GameObject prefabRoot)
+    {
+        if (string.IsNullOrWhiteSpace(itemDirectory) || !AssetDatabase.IsValidFolder(itemDirectory))
+        {
+            return null;
+        }
+
+        List<string> baseNames = BuildExactPortableAssetBaseNames(itemName, prefabRoot);
+        for (int nameIndex = 0; nameIndex < baseNames.Count; nameIndex++)
+        {
+            string baseName = baseNames[nameIndex];
+            Material material = AssetDatabase.LoadAssetAtPath<Material>($"{itemDirectory}/M_{baseName}.mat");
+            if (material != null && IsPortableName(material.name))
+            {
+                return material;
+            }
+
+            material = AssetDatabase.LoadAssetAtPath<Material>($"{itemDirectory}/{baseName}.mat");
+            if (material != null && IsPortableName(material.name))
+            {
+                return material;
+            }
+        }
+
+        return null;
+    }
+
+    private static List<string> BuildExactPortableAssetBaseNames(string itemName, GameObject prefabRoot)
+    {
+        List<string> baseNames = new List<string>();
+        AddPortableAssetBaseName(baseNames, itemName);
+        AddPortableAssetBaseName(baseNames, prefabRoot != null ? prefabRoot.name : null);
+        return baseNames;
+    }
+
+    private static void AddPortableAssetBaseName(List<string> baseNames, string rawName)
+    {
+        if (baseNames == null || string.IsNullOrWhiteSpace(rawName))
+        {
+            return;
+        }
+
+        string trimmedName = rawName.Trim();
+        string portableName = trimmedName.EndsWith("_P", StringComparison.OrdinalIgnoreCase)
+            ? trimmedName
+            : $"{trimmedName}_P";
+        if (!baseNames.Contains(portableName))
+        {
+            baseNames.Add(portableName);
+        }
     }
 
     private static Mesh FindPortableMeshInParentDirectory(string parentDirectory, string itemKey)

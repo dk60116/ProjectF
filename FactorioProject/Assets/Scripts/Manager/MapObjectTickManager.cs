@@ -13,13 +13,21 @@ public interface IMapObjectLateTick
 
 public sealed class MapObjectTickManager : MonoBehaviour
 {
+    private const float DefaultUpdateTickIntervalSeconds = 0.06f;
+    private const float MaxUpdateTickFrameDeltaSeconds = 0.12f;
+
     private static MapObjectTickManager instance;
     private static bool applicationQuitting;
+
+    [SerializeField, Min(0.001f)]
+    private float updateTickIntervalSeconds = DefaultUpdateTickIntervalSeconds;
 
     private readonly List<IMapObjectUpdateTick> updateTicks = new List<IMapObjectUpdateTick>();
     private readonly HashSet<IMapObjectUpdateTick> updateTickSet = new HashSet<IMapObjectUpdateTick>();
     private readonly List<IMapObjectLateTick> lateTicks = new List<IMapObjectLateTick>();
     private readonly HashSet<IMapObjectLateTick> lateTickSet = new HashSet<IMapObjectLateTick>();
+    private float updateTickQuota;
+    private int updateTickCursor;
     private bool updateTicksDirty;
     private bool lateTicksDirty;
 
@@ -113,12 +121,18 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void AddUpdateTick(IMapObjectUpdateTick tick)
     {
+        if (updateTicksDirty)
+        {
+            CompactUpdateTicks();
+        }
+
         if (tick == null || !updateTickSet.Add(tick))
         {
             return;
         }
 
         updateTicks.Add(tick);
+        enabled = true;
     }
 
     private void RemoveUpdateTick(IMapObjectUpdateTick tick)
@@ -133,12 +147,18 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void AddLateTick(IMapObjectLateTick tick)
     {
+        if (lateTicksDirty)
+        {
+            CompactLateTicks();
+        }
+
         if (tick == null || !lateTickSet.Add(tick))
         {
             return;
         }
 
         lateTicks.Add(tick);
+        enabled = true;
     }
 
     private void RemoveLateTick(IMapObjectLateTick tick)
@@ -153,36 +173,89 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void TickUpdateObjects(float deltaTime)
     {
-        int count = updateTicks.Count;
-        for (int i = 0; i < count; i++)
+        if (updateTicksDirty)
         {
-            IMapObjectUpdateTick tick = updateTicks[i];
-            if (!IsTickAlive(tick) || !updateTickSet.Contains(tick))
+            CompactUpdateTicks();
+        }
+
+        int count = updateTicks.Count;
+        if (count <= 0)
+        {
+            updateTickQuota = 0f;
+            updateTickCursor = 0;
+            RefreshEnabledState();
+            return;
+        }
+
+        float safeInterval = Mathf.Max(0.001f, updateTickIntervalSeconds);
+        float clampedDeltaTime = Mathf.Clamp(deltaTime, 0f, MaxUpdateTickFrameDeltaSeconds);
+        updateTickQuota += count * clampedDeltaTime / safeInterval;
+
+        int ticksToRun = Mathf.Min(count, Mathf.FloorToInt(updateTickQuota));
+        if (ticksToRun <= 0)
+        {
+            RefreshEnabledState();
+            return;
+        }
+
+        updateTickQuota -= ticksToRun;
+        if (ticksToRun >= count && updateTickQuota >= 1f)
+        {
+            updateTickQuota -= Mathf.Floor(updateTickQuota);
+        }
+
+        for (int processed = 0; processed < ticksToRun; processed++)
+        {
+            if (updateTickCursor >= updateTicks.Count)
+            {
+                updateTickCursor = 0;
+            }
+
+            IMapObjectUpdateTick tick = updateTicks[updateTickCursor];
+            updateTickCursor++;
+            if (!IsTickAlive(tick))
             {
                 updateTickSet.Remove(tick);
                 updateTicksDirty = true;
                 continue;
             }
 
-            tick.ManagedUpdateTick(deltaTime);
+            if (updateTicksDirty && !updateTickSet.Contains(tick))
+            {
+                continue;
+            }
+
+            tick.ManagedUpdateTick(safeInterval);
         }
 
         if (updateTicksDirty)
         {
             CompactUpdateTicks();
         }
+
+        RefreshEnabledState();
     }
 
     private void TickLateObjects(float deltaTime)
     {
+        if (lateTicksDirty)
+        {
+            CompactLateTicks();
+        }
+
         int count = lateTicks.Count;
         for (int i = 0; i < count; i++)
         {
             IMapObjectLateTick tick = lateTicks[i];
-            if (!IsTickAlive(tick) || !lateTickSet.Contains(tick))
+            if (!IsTickAlive(tick))
             {
                 lateTickSet.Remove(tick);
                 lateTicksDirty = true;
+                continue;
+            }
+
+            if (lateTicksDirty && !lateTickSet.Contains(tick))
+            {
                 continue;
             }
 
@@ -193,6 +266,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
         {
             CompactLateTicks();
         }
+
+        RefreshEnabledState();
     }
 
     private void CompactUpdateTicks()
@@ -209,6 +284,15 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         updateTicksDirty = false;
+        if (updateTicks.Count <= 0)
+        {
+            updateTickCursor = 0;
+            updateTickQuota = 0f;
+        }
+        else if (updateTickCursor >= updateTicks.Count)
+        {
+            updateTickCursor %= updateTicks.Count;
+        }
     }
 
     private void CompactLateTicks()
@@ -225,6 +309,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         lateTicksDirty = false;
+    }
+
+    private void RefreshEnabledState()
+    {
+        enabled = updateTicks.Count > 0 || lateTicks.Count > 0;
     }
 
     private static bool IsTickAlive(object tick)

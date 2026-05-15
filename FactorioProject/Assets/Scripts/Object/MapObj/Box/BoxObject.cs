@@ -290,6 +290,29 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         return itemId >= 0;
     }
 
+    public bool TryGetObjectInfoItem(out int itemId, out int itemCount, out int capacity)
+    {
+        itemId = -1;
+        itemCount = 0;
+        capacity = 0;
+
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        capacity = contentBlock.TryGetInstalledItemAreaCapacity(out int installedCapacity)
+            ? Mathf.Max(1, installedCapacity)
+            : 10;
+        itemId = contentBlock.GetInputAreaCenterItemId();
+        if (itemId >= 0)
+        {
+            itemCount = contentBlock.GetInputAreaCenterItemCount(itemId);
+        }
+
+        return true;
+    }
+
     public bool TryPutOneContainedObject(
         int itemId,
         Vector3 startWorldPosition,

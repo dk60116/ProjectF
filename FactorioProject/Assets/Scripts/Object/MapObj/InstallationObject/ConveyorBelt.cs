@@ -77,6 +77,38 @@ public class ConveyorBelt : InstallationObject
         return StraightVariantPrefab != null ? StraightVariantPrefab : this;
     }
 
+    public void CopyObjectInfoItemIds(List<int> results, int maxCount)
+    {
+        if (results == null || maxCount <= 0)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        IReadOnlyList<Vector2Int> coordinates = RuntimeOccupiedCoordinates;
+        if (terrain == null || coordinates == null || coordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int coordinateIndex = 0; coordinateIndex < coordinates.Count && results.Count < maxCount; coordinateIndex++)
+        {
+            if (!terrain.TryGetLoadedBlock(coordinates[coordinateIndex], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            int laneCount = block.GetRuntimeConveyorLaneCount();
+            for (int laneIndex = 0; laneIndex < laneCount && results.Count < maxCount; laneIndex++)
+            {
+                if (block.TryGetRuntimeConveyorItemIdAtLane(laneIndex, out int itemId))
+                {
+                    results.Add(itemId);
+                }
+            }
+        }
+    }
+
     public void HandlePlacementRotation(ref int quarterTurns, ref bool useCornerVariant, bool canUseCornerVariantAfterTurn)
     {
         quarterTurns = ((quarterTurns % 4) + 4) % 4;

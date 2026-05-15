@@ -15,8 +15,8 @@ MonoBehaviour:
   itemName: Brick Wall
   id: 24
   mapObject: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
-  portableMesh: {fileID: 0}
-  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  portableMesh: {fileID: 4300000, guid: b46aa1085ccb5014d954ecc3c6233fc3, type: 2}
+  portableMat: {fileID: 2100000, guid: 2c33df38df1346a40a0c4efc329445b2, type: 2}
   icon: {fileID: 21300000, guid: b7dedd239a404c34da40467a6f8ae628, type: 3}
   interactionButtonList: []
   size: 0

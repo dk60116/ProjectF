@@ -119,6 +119,63 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     public float BackgroundTurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
 
+    public void GetObjectInfoStatus(out string statusText, out bool isWorking)
+    {
+        statusText = ResolveObjectInfoStatus(out isWorking);
+    }
+
+    private string ResolveObjectInfoStatus(out bool isWorking)
+    {
+        isWorking = false;
+        EnsureRuntimeStateInitialized();
+
+        if (!HasPlacementRuntime())
+        {
+            return "No placement";
+        }
+
+        if (heldItemId >= 0)
+        {
+            if (!TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
+            {
+                return "No output area";
+            }
+
+            if (!CanPlaceHeldItem(dropBlock, dropCoordinate))
+            {
+                return "Output full";
+            }
+
+            isWorking = true;
+            return "Working";
+        }
+
+        if (IsActiveTransferState(state))
+        {
+            isWorking = true;
+            return "Working";
+        }
+
+        if (CanPickupOneItem())
+        {
+            isWorking = true;
+            return "Working";
+        }
+
+        if (!TryResolvePickupCoordinate(out Vector2Int pickupCoordinate))
+        {
+            return "No input area";
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out Block pickupBlock) || pickupBlock == null)
+        {
+            return "No input area";
+        }
+
+        return "No input item";
+    }
+
     protected override void OnEnable()
     {
         base.OnEnable();
@@ -598,10 +655,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                 continue;
             }
 
-            Mesh mesh = part.MeshFilter.sharedMesh;
+            Mesh mesh = part.Mesh;
             Material[] materials = part.SharedMaterials;
-            int submeshCount = mesh.subMeshCount;
-            int materialCount = Mathf.Min(materials.Length, submeshCount);
+            int materialCount = part.MaterialCount;
             for (int materialIndex = 0; materialIndex < materialCount; materialIndex++)
             {
                 Material material = materials[materialIndex];
@@ -610,18 +666,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                     continue;
                 }
 
-                if (!material.enableInstancing)
-                {
-                    material.enableInstancing = true;
-                }
-
                 VirtualRenderBatchKey key = new VirtualRenderBatchKey(
                     mesh,
                     material,
-                    part.Renderer.gameObject.layer,
+                    part.Layer,
                     materialIndex,
-                    part.Renderer.shadowCastingMode,
-                    part.Renderer.receiveShadows,
+                    part.ShadowCastingMode,
+                    part.ReceiveShadows,
                     false,
                     0,
                     useSleepTint,
@@ -1486,6 +1537,16 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                || robotArmState == RobotArmState.TurningToPickup;
     }
 
+    private static bool IsActiveTransferState(RobotArmState robotArmState)
+    {
+        return robotArmState == RobotArmState.WaitingBeforePickupTake
+               || robotArmState == RobotArmState.WaitingAfterPickupTake
+               || robotArmState == RobotArmState.TurningToDrop
+               || robotArmState == RobotArmState.WaitingBeforeDropPlace
+               || robotArmState == RobotArmState.WaitingAfterDropPlace
+               || robotArmState == RobotArmState.TurningToPickup;
+    }
+
     private void SetHeldItem(int itemId, Vector3 pickupWorldPosition)
     {
         CancelHeldItemVisualMove();
@@ -1780,7 +1841,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         public readonly MeshRenderer Renderer;
         public readonly MeshFilter MeshFilter;
         public readonly Transform Transform;
+        public readonly Mesh Mesh;
         public readonly Material[] SharedMaterials;
+        public readonly int MaterialCount;
+        public readonly int Layer;
+        public readonly ShadowCastingMode ShadowCastingMode;
+        public readonly bool ReceiveShadows;
         public readonly bool OriginalRendererEnabled;
 
         public RobotArmInstancedRenderPart(
@@ -1793,16 +1859,23 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             Renderer = renderer;
             MeshFilter = meshFilter;
             Transform = transform;
+            Mesh = meshFilter != null ? meshFilter.sharedMesh : null;
             SharedMaterials = sharedMaterials;
+            MaterialCount = Mesh != null && sharedMaterials != null
+                ? Mathf.Min(sharedMaterials.Length, Mesh.subMeshCount)
+                : 0;
+            Layer = renderer != null ? renderer.gameObject.layer : 0;
+            ShadowCastingMode = renderer != null ? renderer.shadowCastingMode : ShadowCastingMode.On;
+            ReceiveShadows = renderer != null && renderer.receiveShadows;
             OriginalRendererEnabled = originalRendererEnabled;
         }
 
         public bool IsValid =>
             Renderer != null
             && MeshFilter != null
-            && MeshFilter.sharedMesh != null
+            && Mesh != null
             && Transform != null
             && SharedMaterials != null
-            && SharedMaterials.Length > 0;
+            && MaterialCount > 0;
     }
 }

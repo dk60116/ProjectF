@@ -10,10 +10,11 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
     private static readonly ProfilerMarker RenderMarker =
         new ProfilerMarker("RobotArmRenderBatcher.Render");
 
-    private readonly HashSet<RobotArm> registeredRobotArms = new HashSet<RobotArm>();
-    private readonly List<RobotArm> cleanupBuffer = new List<RobotArm>(64);
+    private readonly List<RobotArm> registeredRobotArms = new List<RobotArm>(64);
+    private readonly HashSet<RobotArm> registeredRobotArmSet = new HashSet<RobotArm>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private Camera mainCamera;
+    private bool registeredRobotArmsDirty;
 
     public static RobotArmRenderBatcher EnsureFor(GameObject host)
     {
@@ -33,53 +34,110 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
 
     public void Register(RobotArm robotArm)
     {
-        if (robotArm == null)
+        if (registeredRobotArmsDirty)
+        {
+            CompactRegisteredRobotArms();
+        }
+
+        if (robotArm == null || !registeredRobotArmSet.Add(robotArm))
         {
             return;
         }
 
         registeredRobotArms.Add(robotArm);
+        enabled = true;
     }
 
     public void Unregister(RobotArm robotArm)
     {
-        if (robotArm == null)
+        if (robotArm == null || !registeredRobotArmSet.Remove(robotArm))
         {
             return;
         }
 
-        registeredRobotArms.Remove(robotArm);
+        registeredRobotArmsDirty = true;
+        if (registeredRobotArmSet.Count <= 0)
+        {
+            batches.ClearActiveMatrices();
+            enabled = false;
+        }
     }
 
     private void LateUpdate()
     {
-        if (mainCamera == null)
+        if (registeredRobotArmSet.Count <= 0)
         {
-            mainCamera = Camera.main;
+            batches.ClearActiveMatrices();
+            enabled = false;
+            return;
         }
 
         using (RenderMarker.Auto())
         {
-            batches.ClearActiveMatrices();
-            cleanupBuffer.Clear();
-
-            foreach (RobotArm robotArm in registeredRobotArms)
+            if (registeredRobotArmsDirty)
             {
+                CompactRegisteredRobotArms();
+            }
+
+            batches.ClearActiveMatrices();
+
+            int count = registeredRobotArms.Count;
+            for (int i = 0; i < count; i++)
+            {
+                RobotArm robotArm = registeredRobotArms[i];
                 if (robotArm == null)
                 {
-                    cleanupBuffer.Add(robotArm);
+                    registeredRobotArmSet.Remove(robotArm);
+                    registeredRobotArmsDirty = true;
+                    continue;
+                }
+
+                if (registeredRobotArmsDirty && !registeredRobotArmSet.Contains(robotArm))
+                {
                     continue;
                 }
 
                 robotArm.AppendInstancedRenderData(batches, BatchCellSize);
             }
 
-            for (int i = 0; i < cleanupBuffer.Count; i++)
+            if (registeredRobotArmsDirty)
             {
-                registeredRobotArms.Remove(cleanupBuffer[i]);
+                CompactRegisteredRobotArms();
+            }
+
+            if (registeredRobotArmSet.Count <= 0)
+            {
+                enabled = false;
+                return;
+            }
+
+            if (batches.ActiveBatchCount <= 0)
+            {
+                return;
+            }
+
+            if (mainCamera == null)
+            {
+                mainCamera = Camera.main;
             }
 
             batches.RenderBatches(mainCamera);
         }
+    }
+
+    private void CompactRegisteredRobotArms()
+    {
+        for (int i = registeredRobotArms.Count - 1; i >= 0; i--)
+        {
+            RobotArm robotArm = registeredRobotArms[i];
+            if (robotArm != null && registeredRobotArmSet.Contains(robotArm))
+            {
+                continue;
+            }
+
+            registeredRobotArms.RemoveAt(i);
+        }
+
+        registeredRobotArmsDirty = false;
     }
 }

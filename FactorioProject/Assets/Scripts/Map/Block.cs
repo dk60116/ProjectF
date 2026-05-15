@@ -2899,6 +2899,20 @@ public class Block : BaseObject
         return HasConveyorItemAtLane(laneIndex);
     }
 
+    public bool TryGetRuntimeConveyorItemIdAtLane(int laneIndex, out int itemId)
+    {
+        itemId = -1;
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        itemId = GetConveyorItemIdAtLane(laneIndex);
+        return itemId >= 0;
+    }
+
     public bool TryGetRuntimeConveyorSuccessorLane(
         int sourceLaneIndex,
         out Block destinationBlock,

@@ -1124,6 +1124,47 @@ public class PlayerController : MonoBehaviour
         return focusedResource != null;
     }
 
+    public bool TryGetFocusedMapObject(out MapObject focusedMapObject)
+    {
+        focusedMapObject = null;
+        if (currentFocusedBlocks.Count == 0 || player == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float nearestDistanceSqr = float.MaxValue;
+
+        foreach (Block block in currentFocusedBlocks)
+        {
+            MapObject mapObject = block != null ? block.MapObject : null;
+            if (mapObject == null && block != null)
+            {
+                mapObject = block.Resource;
+            }
+
+            if (mapObject == null
+                || !mapObject.gameObject.activeInHierarchy
+                || !mapObject.AllowsFocus)
+            {
+                continue;
+            }
+
+            float distanceSqr = mapObject is Resource resource
+                ? GetResourceFocusSelectionDistanceSqr(resource, origin)
+                : GetMapObjectFocusSelectionDistanceSqr(mapObject, block, origin);
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            focusedMapObject = mapObject;
+        }
+
+        return focusedMapObject != null;
+    }
+
     public bool RequestFocusedResourceHarvest(Resource resource)
     {
         if (resource == null

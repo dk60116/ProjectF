@@ -1,10 +1,15 @@
 using DG.Tweening;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 public class CraftingSlot : ItemSlot
 {
+    private const float DefaultIngredientSpacing = 10f;
+    private const float DefaultIngredientChildSize = 80f;
+    private const float MinimumLayoutSize = 0.01f;
+
     private static CraftingSlot activeIngredientsSlot;
     [SerializeField]
     private float expandDuration = 0.2f;
@@ -21,24 +26,21 @@ public class CraftingSlot : ItemSlot
     [SerializeField]
     private RectTransform ingredientsRoot;
 
-    [SerializeField, Min(0f)]
-    private float ingredientRevealDelay = 0.04f;
-
-    [SerializeField, Min(0.01f)]
-    private float ingredientRevealDuration = 0.12f;
-
-    [SerializeField]
-    private Ease ingredientRevealEase = Ease.OutBack;
-
     [SerializeField, Range(0.1f, 1f)]
     private float insufficientIngredientAlpha = 0.45f;
+
+    [SerializeField, Min(0f)]
+    private float ingredientRevealStepDelay = 0.02f;
+
+    [SerializeField, Min(0f)]
+    private float ingredientRevealFadeDuration = 0.04f;
 
     private RectTransform rectTransform;
     private CanvasGroup canvasGroup;
     private Button button;
 
-    [SerializeField]
-    private List<ItemSlot> IngrdientsSlots;
+    [SerializeField, FormerlySerializedAs("IngrdientsSlots")]
+    private List<ItemSlot> ingredientSlots;
     [SerializeField]
     private Button createButton;
 
@@ -53,9 +55,14 @@ public class CraftingSlot : ItemSlot
     private bool isCachingReferences;
     private bool isRefreshingCraftingMapObjectVisuals;
     private bool isHidingIngredientsImmediate;
+    private bool ingredientsManualLayoutReady;
+    private bool ingredientRevealAnimating;
+    private Sequence ingredientRevealSequence;
+    private float ingredientsSpacing = DefaultIngredientSpacing;
     private int requiredCraftingMapObjectId = -1;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
+    private readonly Dictionary<RectTransform, Vector2> ingredientLayoutSizes = new Dictionary<RectTransform, Vector2>();
 
     public float ExpandDuration => Mathf.Max(0f, expandDuration);
 
@@ -79,30 +86,48 @@ public class CraftingSlot : ItemSlot
         RefreshCraftingMapObjectState();
         if (ingredientsVisible)
         {
-            RefreshIngredients(false);
+            RefreshIngredients();
         }
     }
 
     public void Show(Vector2 startAnchoredPosition, Vector2 targetAnchoredPosition, float delay = 0f)
     {
         CacheReferences();
+        ResetHoverTweensImmediate();
 
         rectTransform.DOKill();
         canvasGroup.DOKill();
 
-        rectTransform.anchoredPosition = startAnchoredPosition;
+        rectTransform.anchoredPosition = targetAnchoredPosition;
         rectTransform.localScale = Vector3.zero;
         canvasGroup.alpha = 1f;
-        rectTransform.DOAnchorPos(targetAnchoredPosition, expandDuration).SetDelay(delay).SetEase(expandEase);
-        rectTransform.DOScale(Vector3.one, expandDuration).SetDelay(delay).SetEase(expandEase);
-        canvasGroup.DOFade(1f, expandDuration * 0.8f).SetDelay(delay).SetEase(Ease.OutQuad);
-        button.interactable = true;
         slotVisualHidden = false;
+        if (button != null)
+        {
+            button.interactable = false;
+        }
+
+        rectTransform.DOScale(Vector3.one, expandDuration)
+            .SetDelay(delay)
+            .SetEase(expandEase)
+            .SetLink(gameObject, LinkBehaviour.KillOnDisable)
+            .OnComplete(() =>
+            {
+                if (button != null && !slotVisualHidden)
+                {
+                    button.interactable = true;
+                }
+            });
+        canvasGroup.DOFade(1f, expandDuration * 0.8f)
+            .SetDelay(delay)
+            .SetEase(Ease.OutQuad)
+            .SetLink(gameObject, LinkBehaviour.KillOnDisable);
     }
 
     public void ShowImmediate(Vector2 anchoredPosition)
     {
         CacheReferences();
+        ResetHoverTweensImmediate();
         if (rectTransform == null || canvasGroup == null)
         {
             return;
@@ -141,6 +166,7 @@ public class CraftingSlot : ItemSlot
     public void Hide()
     {
         CacheReferences();
+        ResetHoverTweensImmediate();
 
         rectTransform.DOKill();
         canvasGroup.DOKill();
@@ -155,6 +181,7 @@ public class CraftingSlot : ItemSlot
     public void HideImmediate()
     {
         CacheReferences();
+        ResetHoverTweensImmediate();
         rectTransform.DOKill();
         canvasGroup.DOKill();
         rectTransform.anchoredPosition = Vector2.zero;
@@ -199,11 +226,13 @@ public class CraftingSlot : ItemSlot
                 ingredientsRoot = target as RectTransform;
             }
 
-            if (IngrdientsSlots == null || IngrdientsSlots.Count == 0)
+            PrepareIngredientsManualLayout();
+
+            if (ingredientSlots == null || ingredientSlots.Count == 0)
             {
                 if (ingredientsRoot != null)
                 {
-                    IngrdientsSlots = new List<ItemSlot>();
+                    ingredientSlots = new List<ItemSlot>();
                     for (int i = 0; i < ingredientsRoot.childCount; i++)
                     {
                         Transform child = ingredientsRoot.GetChild(i);
@@ -218,25 +247,25 @@ public class CraftingSlot : ItemSlot
                             continue;
                         }
 
-                        IngrdientsSlots.Add(itemSlot);
+                        ingredientSlots.Add(itemSlot);
                     }
                 }
             }
 
-            if (IngrdientsSlots != null && IngrdientsSlots.Count > 0)
+            if (ingredientSlots != null && ingredientSlots.Count > 0)
             {
-                for (int i = IngrdientsSlots.Count - 1; i >= 0; i--)
+                for (int i = ingredientSlots.Count - 1; i >= 0; i--)
                 {
-                    if (!IsIngredientSlotCandidate(IngrdientsSlots[i], ingredientsRoot))
+                    if (!IsIngredientSlotCandidate(ingredientSlots[i], ingredientsRoot))
                     {
-                        IngrdientsSlots.RemoveAt(i);
+                        ingredientSlots.RemoveAt(i);
                     }
                 }
             }
 
-            if (IngrdientsSlots != null && IngrdientsSlots.Count > 1)
+            if (ingredientSlots != null && ingredientSlots.Count > 1)
             {
-                IngrdientsSlots.Sort((left, right) =>
+                ingredientSlots.Sort((left, right) =>
                 {
                     if (left == null && right == null)
                     {
@@ -254,6 +283,9 @@ public class CraftingSlot : ItemSlot
                     return left.transform.GetSiblingIndex().CompareTo(right.transform.GetSiblingIndex());
                 });
             }
+
+            CacheStableIngredientLayoutSizes();
+            DisableIngredientSlotHoverTweens();
         }
         finally
         {
@@ -293,7 +325,7 @@ public class CraftingSlot : ItemSlot
 
         if (!TryPrepareHandForCrafting(craftItemId))
         {
-            RefreshIngredients(false);
+            RefreshIngredients();
             return;
         }
 
@@ -311,7 +343,7 @@ public class CraftingSlot : ItemSlot
 
         if (!HasAllIngredients())
         {
-            RefreshIngredients(false);
+            RefreshIngredients();
             return;
         }
 
@@ -323,18 +355,18 @@ public class CraftingSlot : ItemSlot
 
         if (!TryConsumeIngredients(out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients))
         {
-            RefreshIngredients(false);
+            RefreshIngredients();
             return;
         }
 
         if (!hud.TryEnqueueCrafting(craftItemId, consumedIngredients))
         {
             RefundIngredients(consumedIngredients);
-            RefreshIngredients(false);
+            RefreshIngredients();
             return;
         }
 
-        RefreshIngredients(false);
+        RefreshIngredients();
     }
 
     private void ToggleIngredients()
@@ -373,18 +405,14 @@ public class CraftingSlot : ItemSlot
         }
 
         RefreshIngredients(true);
-        if (!ingredientsVisible)
-        {
-            ingredientsVisible = true;
-        }
     }
 
     private void RefreshIngredients()
     {
-        RefreshIngredients(true);
+        RefreshIngredients(false);
     }
 
-    private void RefreshIngredients(bool animate)
+    private void RefreshIngredients(bool forceSequentialReveal)
     {
         CacheReferences();
         if (ingredientsRoot == null)
@@ -392,6 +420,8 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        bool revealSequentially = forceSequentialReveal || !ingredientsVisible;
+        bool preserveRunningReveal = !revealSequentially && ingredientRevealAnimating;
         ingredientBuffer.Clear();
         if (!CraftingTreeRuntime.TryGetIngredients(ItemId, ingredientBuffer))
         {
@@ -399,15 +429,15 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        if (IngrdientsSlots == null)
+        if (ingredientSlots == null)
         {
             return;
         }
 
         bool hasAllIngredients = true;
-        for (int i = 0; i < IngrdientsSlots.Count; i++)
+        for (int i = 0; i < ingredientSlots.Count; i++)
         {
-            ItemSlot slot = IngrdientsSlots[i];
+            ItemSlot slot = ingredientSlots[i];
             if (slot == null)
             {
                 continue;
@@ -447,10 +477,10 @@ public class CraftingSlot : ItemSlot
 
         bool handReady = CanPrepareHandForCrafting(ItemId);
         SetCreateButtonVisible((hasAllIngredients && handReady) || blockedByCraftingMapObject);
-        if (animate)
-        {
-            AnimateIngredientSlots(ingredientBuffer.Count);
-        }
+        ApplyIngredientsManualLayout(ingredientBuffer.Count);
+        SetIngredientSlotScalesImmediate(ingredientBuffer.Count);
+        ApplyIngredientRevealState(ingredientBuffer.Count, revealSequentially, preserveRunningReveal);
+        ForceIngredientsLayoutImmediate();
         ingredientsVisible = true;
     }
 
@@ -461,7 +491,7 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        RefreshIngredients(false);
+        RefreshIngredients();
     }
 
     public void RefreshCraftingAvailabilityVisuals()
@@ -632,43 +662,47 @@ public class CraftingSlot : ItemSlot
         isHidingIngredientsImmediate = true;
         try
         {
-        ingredientsVisible = false;
-        if (activeIngredientsSlot == this)
-        {
-            activeIngredientsSlot = null;
-        }
-        if (ingredientsRoot != null)
-        {
-            ingredientsRoot.gameObject.SetActive(false);
-        }
-
-        if (createButton != null)
-        {
-            createButton.interactable = false;
-            if (createButton.gameObject.activeSelf)
+            StopIngredientReveal();
+            ingredientsVisible = false;
+            if (activeIngredientsSlot == this)
             {
-                createButton.gameObject.SetActive(false);
+                activeIngredientsSlot = null;
             }
-        }
-
-        if (IngrdientsSlots != null)
-        {
-            for (int i = 0; i < IngrdientsSlots.Count; i++)
+            if (ingredientsRoot != null)
             {
-                ItemSlot slot = IngrdientsSlots[i];
-                if (slot == null)
-                {
-                    continue;
-                }
+                ingredientsRoot.gameObject.SetActive(false);
+            }
 
-                RectTransform slotRect = slot.transform as RectTransform;
-                if (slotRect != null)
+            if (createButton != null)
+            {
+                createButton.interactable = false;
+                ResetRevealCanvasGroup(createButton.gameObject, 0f, false);
+                if (createButton.gameObject.activeSelf)
                 {
-                    slotRect.DOKill();
-                    slotRect.localScale = Vector3.zero;
+                    createButton.gameObject.SetActive(false);
                 }
             }
-        }
+
+            if (ingredientSlots != null)
+            {
+                for (int i = 0; i < ingredientSlots.Count; i++)
+                {
+                    ItemSlot slot = ingredientSlots[i];
+                    if (slot == null)
+                    {
+                        continue;
+                    }
+
+                    RectTransform slotRect = slot.transform as RectTransform;
+                    if (slotRect != null)
+                    {
+                        slotRect.DOKill();
+                        slotRect.localScale = Vector3.zero;
+                    }
+
+                    ResetRevealCanvasGroup(slot.gameObject, 0f, false);
+                }
+            }
         }
         finally
         {
@@ -676,17 +710,17 @@ public class CraftingSlot : ItemSlot
         }
     }
 
-    private void AnimateIngredientSlots(int visibleCount)
+    private void SetIngredientSlotScalesImmediate(int visibleCount)
     {
-        if (IngrdientsSlots == null || IngrdientsSlots.Count == 0)
+        if (ingredientSlots == null || ingredientSlots.Count == 0)
         {
             return;
         }
 
         int safeVisibleCount = Mathf.Max(0, visibleCount);
-        for (int i = 0; i < IngrdientsSlots.Count; i++)
+        for (int i = 0; i < ingredientSlots.Count; i++)
         {
-            ItemSlot slot = IngrdientsSlots[i];
+            ItemSlot slot = ingredientSlots[i];
             if (slot == null)
             {
                 continue;
@@ -707,15 +741,224 @@ public class CraftingSlot : ItemSlot
                     slot.gameObject.SetActive(true);
                 }
 
-                slotRect.localScale = Vector3.zero;
-                float delay = i * ingredientRevealDelay;
-                slotRect.DOScale(Vector3.one, ingredientRevealDuration).SetDelay(delay).SetEase(ingredientRevealEase);
+                slotRect.localScale = Vector3.one;
             }
             else
             {
                 slotRect.localScale = Vector3.zero;
             }
         }
+    }
+
+    private void ApplyIngredientRevealState(int visibleCount, bool revealSequentially, bool preserveRunningReveal)
+    {
+        if (ingredientSlots == null)
+        {
+            return;
+        }
+
+        if (revealSequentially)
+        {
+            StartIngredientReveal(visibleCount);
+            return;
+        }
+
+        if (!preserveRunningReveal)
+        {
+            StopIngredientReveal();
+        }
+
+        int safeVisibleCount = Mathf.Max(0, visibleCount);
+        for (int i = 0; i < ingredientSlots.Count; i++)
+        {
+            ItemSlot slot = ingredientSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            bool visible = i < safeVisibleCount && slot.gameObject.activeSelf;
+            if (visible && !preserveRunningReveal)
+            {
+                SetRevealCanvasGroup(slot.gameObject, 1f, true);
+            }
+            else if (!visible)
+            {
+                ResetRevealCanvasGroup(slot.gameObject, 0f, false);
+            }
+        }
+
+        if (createButton != null && createButton.gameObject.activeSelf && !preserveRunningReveal)
+        {
+            SetRevealCanvasGroup(createButton.gameObject, 1f, true);
+        }
+    }
+
+    private void StartIngredientReveal(int visibleCount)
+    {
+        StopIngredientReveal();
+
+        Sequence sequence = DOTween.Sequence()
+            .SetUpdate(true)
+            .SetLink(gameObject, LinkBehaviour.KillOnDisable);
+
+        bool hasRevealTarget = false;
+        int safeVisibleCount = Mathf.Max(0, visibleCount);
+        for (int i = 0; i < ingredientSlots.Count; i++)
+        {
+            ItemSlot slot = ingredientSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            bool visible = i < safeVisibleCount && slot.gameObject.activeSelf;
+            if (visible)
+            {
+                AppendRevealTarget(sequence, slot.gameObject, ref hasRevealTarget);
+            }
+            else
+            {
+                ResetRevealCanvasGroup(slot.gameObject, 0f, false);
+            }
+        }
+
+        if (createButton != null && createButton.gameObject.activeSelf)
+        {
+            bool restoreCreateInteractable = createButton.interactable;
+            createButton.interactable = false;
+            AppendRevealTarget(
+                sequence,
+                createButton.gameObject,
+                ref hasRevealTarget,
+                () => createButton.interactable = restoreCreateInteractable);
+        }
+
+        if (!hasRevealTarget)
+        {
+            sequence.Kill();
+            return;
+        }
+
+        ingredientRevealAnimating = true;
+        ingredientRevealSequence = sequence;
+        sequence.OnComplete(() => FinishIngredientReveal(sequence));
+        sequence.OnKill(() => FinishIngredientReveal(sequence));
+    }
+
+    private void AppendRevealTarget(Sequence sequence, GameObject target, ref bool hasPreviousTarget, TweenCallback onComplete = null)
+    {
+        if (sequence == null || target == null)
+        {
+            return;
+        }
+
+        CanvasGroup revealGroup = EnsureRevealCanvasGroup(target);
+        revealGroup.DOKill();
+        SetRevealCanvasGroup(revealGroup, 0f, false);
+        if (hasPreviousTarget)
+        {
+            float stepGap = Mathf.Max(0f, ingredientRevealStepDelay);
+            if (stepGap > 0f)
+            {
+                sequence.AppendInterval(stepGap);
+            }
+        }
+
+        hasPreviousTarget = true;
+        float duration = Mathf.Max(0f, ingredientRevealFadeDuration);
+        if (duration <= 0f)
+        {
+            sequence.AppendCallback(() =>
+            {
+                SetRevealCanvasGroup(revealGroup, 1f, true);
+                onComplete?.Invoke();
+            });
+            return;
+        }
+
+        sequence.Append(
+            revealGroup.DOFade(1f, duration)
+                .SetEase(Ease.OutQuad)
+                .OnComplete(() =>
+                {
+                    SetRevealCanvasGroup(revealGroup, 1f, true);
+                    onComplete?.Invoke();
+                }));
+    }
+
+    private void StopIngredientReveal()
+    {
+        Sequence sequence = ingredientRevealSequence;
+        ingredientRevealSequence = null;
+        ingredientRevealAnimating = false;
+        if (sequence != null && sequence.IsActive())
+        {
+            sequence.Kill();
+        }
+    }
+
+    private void FinishIngredientReveal(Sequence sequence)
+    {
+        if (ingredientRevealSequence != sequence)
+        {
+            return;
+        }
+
+        ingredientRevealSequence = null;
+        ingredientRevealAnimating = false;
+    }
+
+    private static CanvasGroup EnsureRevealCanvasGroup(GameObject target)
+    {
+        CanvasGroup revealGroup = target.GetComponent<CanvasGroup>();
+        if (revealGroup == null)
+        {
+            revealGroup = target.AddComponent<CanvasGroup>();
+        }
+
+        return revealGroup;
+    }
+
+    private static void SetRevealCanvasGroup(GameObject target, float alpha, bool interactive)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        CanvasGroup revealGroup = EnsureRevealCanvasGroup(target);
+        revealGroup.DOKill();
+        SetRevealCanvasGroup(revealGroup, alpha, interactive);
+    }
+
+    private static void SetRevealCanvasGroup(CanvasGroup revealGroup, float alpha, bool interactive)
+    {
+        if (revealGroup == null)
+        {
+            return;
+        }
+
+        revealGroup.alpha = Mathf.Clamp01(alpha);
+        revealGroup.interactable = interactive;
+        revealGroup.blocksRaycasts = interactive;
+    }
+
+    private static void ResetRevealCanvasGroup(GameObject target, float alpha, bool interactive)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        CanvasGroup revealGroup = target.GetComponent<CanvasGroup>();
+        if (revealGroup == null)
+        {
+            return;
+        }
+
+        revealGroup.DOKill();
+        SetRevealCanvasGroup(revealGroup, alpha, interactive);
     }
 
     private void SetIngredientSlotAlpha(ItemSlot slot, bool hasEnough)
@@ -783,6 +1026,7 @@ public class CraftingSlot : ItemSlot
     private void SetSlotVisual(bool visible)
     {
         CacheReferences();
+        ResetHoverTweensImmediate();
         if (rectTransform == null || canvasGroup == null)
         {
             return;
@@ -816,6 +1060,203 @@ public class CraftingSlot : ItemSlot
             }
             slotVisualHidden = true;
         }
+    }
+
+    private void ForceIngredientsLayoutImmediate()
+    {
+        if (ingredientsRoot == null)
+        {
+            return;
+        }
+
+        PrepareIngredientsManualLayout();
+        Canvas.ForceUpdateCanvases();
+    }
+
+    private void PrepareIngredientsManualLayout()
+    {
+        if (ingredientsRoot == null)
+        {
+            return;
+        }
+
+        HorizontalLayoutGroup horizontalLayoutGroup = ingredientsRoot.GetComponent<HorizontalLayoutGroup>();
+        if (horizontalLayoutGroup != null)
+        {
+            if (!ingredientsManualLayoutReady)
+            {
+                ingredientsSpacing = Mathf.Max(0f, horizontalLayoutGroup.spacing);
+            }
+            horizontalLayoutGroup.enabled = false;
+        }
+
+        ContentSizeFitter contentSizeFitter = ingredientsRoot.GetComponent<ContentSizeFitter>();
+        if (contentSizeFitter != null)
+        {
+            contentSizeFitter.enabled = false;
+        }
+
+        ingredientsManualLayoutReady = true;
+    }
+
+    private void ApplyIngredientsManualLayout(int visibleIngredientCount)
+    {
+        if (ingredientsRoot == null)
+        {
+            return;
+        }
+
+        PrepareIngredientsManualLayout();
+
+        float nextX = 0f;
+        float maxHeight = 0f;
+        int safeVisibleCount = Mathf.Max(0, visibleIngredientCount);
+
+        if (ingredientSlots != null)
+        {
+            for (int i = 0; i < ingredientSlots.Count; i++)
+            {
+                ItemSlot slot = ingredientSlots[i];
+                RectTransform slotRect = slot != null ? slot.transform as RectTransform : null;
+                if (slotRect == null || !slot.gameObject.activeSelf || i >= safeVisibleCount)
+                {
+                    continue;
+                }
+
+                Vector2 childSize = ResolveStableIngredientChildSize(slotRect);
+                PositionIngredientChild(slotRect, nextX, childSize, true);
+                nextX += childSize.x + ingredientsSpacing;
+                maxHeight = Mathf.Max(maxHeight, childSize.y);
+            }
+        }
+
+        RectTransform createRect = createButton != null ? createButton.transform as RectTransform : null;
+        if (createRect != null && createButton.gameObject.activeSelf)
+        {
+            Vector2 childSize = ResolveStableIngredientChildSize(createRect);
+            PositionIngredientChild(createRect, nextX, childSize, false);
+            nextX += childSize.x + ingredientsSpacing;
+            maxHeight = Mathf.Max(maxHeight, childSize.y);
+        }
+
+        float width = Mathf.Max(0f, nextX - ingredientsSpacing);
+        ingredientsRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
+        ingredientsRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, maxHeight);
+    }
+
+    private void CacheStableIngredientLayoutSizes()
+    {
+        if (ingredientSlots != null)
+        {
+            for (int i = 0; i < ingredientSlots.Count; i++)
+            {
+                ItemSlot slot = ingredientSlots[i];
+                RectTransform slotRect = slot != null ? slot.transform as RectTransform : null;
+                CacheStableIngredientLayoutSize(slotRect);
+            }
+        }
+
+        RectTransform createRect = createButton != null ? createButton.transform as RectTransform : null;
+        CacheStableIngredientLayoutSize(createRect);
+    }
+
+    private void CacheStableIngredientLayoutSize(RectTransform child)
+    {
+        if (child == null || ingredientLayoutSizes.ContainsKey(child))
+        {
+            return;
+        }
+
+        ingredientLayoutSizes.Add(child, ResolveCurrentIngredientChildSize(child));
+    }
+
+    private Vector2 ResolveStableIngredientChildSize(RectTransform child)
+    {
+        if (child == null)
+        {
+            return Vector2.zero;
+        }
+
+        if (!ingredientLayoutSizes.TryGetValue(child, out Vector2 size) || !IsValidLayoutSize(size))
+        {
+            size = ResolveCurrentIngredientChildSize(child);
+            ingredientLayoutSizes[child] = size;
+        }
+
+        return size;
+    }
+
+    private static Vector2 ResolveCurrentIngredientChildSize(RectTransform child)
+    {
+        if (child == null)
+        {
+            return Vector2.zero;
+        }
+
+        Vector2 size = child.rect.size;
+        if (size.x <= MinimumLayoutSize || size.y <= MinimumLayoutSize)
+        {
+            size = child.sizeDelta;
+        }
+
+        if (size.x <= MinimumLayoutSize)
+        {
+            size.x = DefaultIngredientChildSize;
+        }
+
+        if (size.y <= MinimumLayoutSize)
+        {
+            size.y = DefaultIngredientChildSize;
+        }
+
+        return size;
+    }
+
+    private static bool IsValidLayoutSize(Vector2 size)
+    {
+        return size.x > MinimumLayoutSize && size.y > MinimumLayoutSize;
+    }
+
+    private static void PositionIngredientChild(RectTransform child, float left, Vector2 size, bool applySize)
+    {
+        if (child == null)
+        {
+            return;
+        }
+
+        child.anchorMin = new Vector2(0f, 0.5f);
+        child.anchorMax = new Vector2(0f, 0.5f);
+        child.pivot = new Vector2(0.5f, 0.5f);
+        if (applySize)
+        {
+            ApplyRectSize(child, size);
+        }
+        child.anchoredPosition = new Vector2(left + size.x * 0.5f, 0f);
+    }
+
+    private static void ApplyRectSize(RectTransform target, Vector2 size)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        target.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, Mathf.Max(0f, size.x));
+        target.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, Mathf.Max(0f, size.y));
+    }
+
+    private void ResetHoverTweensImmediate()
+    {
+        HUDButtonHoverTween[] hoverTweens = GetComponentsInChildren<HUDButtonHoverTween>(true);
+        for (int i = 0; i < hoverTweens.Length; i++)
+        {
+            if (hoverTweens[i] != null)
+            {
+                hoverTweens[i].ResetHoverImmediate();
+            }
+        }
+
+        PrepareIngredientsManualLayout();
     }
 
     private void SetCreateButtonVisible(bool visible)
@@ -899,6 +1340,8 @@ public class CraftingSlot : ItemSlot
         bool showBlockedState = HasItem && blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0;
         try
         {
+            SetCreateButtonHoverEnabled(!showBlockedState);
+
             if (canNotImage != null)
             {
                 canNotImage.enabled = showBlockedState;
@@ -921,6 +1364,11 @@ public class CraftingSlot : ItemSlot
                     mapObjectIcon.sprite = null;
                     mapObjectIcon.enabled = false;
                 }
+            }
+
+            if (showBlockedState)
+            {
+                ResetRequiredMapObjectTransform();
             }
         }
         finally
@@ -1005,5 +1453,77 @@ public class CraftingSlot : ItemSlot
         }
 
         return true;
+    }
+
+    private void SetCreateButtonHoverEnabled(bool enabled)
+    {
+        if (createButton == null)
+        {
+            return;
+        }
+
+        HUDButtonHoverTween[] hoverTweens = createButton.GetComponentsInChildren<HUDButtonHoverTween>(true);
+        for (int i = 0; i < hoverTweens.Length; i++)
+        {
+            HUDButtonHoverTween hoverTween = hoverTweens[i];
+            if (hoverTween == null)
+            {
+                continue;
+            }
+
+            if (!enabled)
+            {
+                hoverTween.ResetHoverImmediate(false);
+            }
+
+            hoverTween.enabled = enabled;
+        }
+    }
+
+    private void ResetRequiredMapObjectTransform()
+    {
+        if (createButton != null && createButton.transform is RectTransform createRect)
+        {
+            createRect.DOKill();
+            createRect.localScale = Vector3.one;
+            ApplyRectSize(createRect, ResolveStableIngredientChildSize(createRect));
+        }
+
+        if (mapObjectIcon != null && mapObjectIcon.transform is RectTransform mapObjectRect)
+        {
+            mapObjectRect.DOKill();
+            mapObjectRect.localScale = Vector3.one;
+            mapObjectRect.anchoredPosition = Vector2.zero;
+        }
+    }
+
+    private void DisableIngredientSlotHoverTweens()
+    {
+        if (ingredientSlots == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < ingredientSlots.Count; i++)
+        {
+            ItemSlot slot = ingredientSlots[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            HUDButtonHoverTween[] hoverTweens = slot.GetComponentsInChildren<HUDButtonHoverTween>(true);
+            for (int tweenIndex = 0; tweenIndex < hoverTweens.Length; tweenIndex++)
+            {
+                HUDButtonHoverTween hoverTween = hoverTweens[tweenIndex];
+                if (hoverTween == null)
+                {
+                    continue;
+                }
+
+                hoverTween.ResetHoverImmediate(false);
+                hoverTween.enabled = false;
+            }
+        }
     }
 }

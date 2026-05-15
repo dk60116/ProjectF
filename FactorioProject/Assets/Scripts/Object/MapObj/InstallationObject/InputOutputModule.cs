@@ -210,6 +210,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private DefaultGauge activeEnergyGauge;
     private DefaultGauge activeCraftProgressGauge;
     private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
+    private readonly List<Vector2Int> objectInfoInputAreaCoordinates = new List<Vector2Int>();
     private bool energyGaugeRenderersResolved;
 
     public IReadOnlyList<ItemIoEntry> InputList
@@ -1108,6 +1109,453 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     public int RuntimeAreaMaxObjects => Mathf.Max(1, runtimeAreaMaxObjects);
     public float CraftDurationSeconds => Mathf.Max(0.1f, craftDuration);
+    public float ObjectInfoStoredEnergy => Mathf.Max(0f, storedEnergy);
+    public float ObjectInfoEnergyGaugeCapacity => Mathf.Max(0f, energyGaugeCapacity, storedEnergy);
+    public float ObjectInfoEnergyGaugeFillAmount => ResolveEnergyGaugeFillAmount(ResolveInstalledDefinition());
+    public float ObjectInfoWorkGaugeFillAmount => ResolveCraftProgressGaugeFillAmount();
+    public Color ObjectInfoEnergyGaugeFillColor => energyGaugeFillColor;
+    public Color ObjectInfoWorkGaugeFillColor => craftProgressGaugeFillColor;
+    public float ObjectInfoCurrentUseEnergy => ResolveObjectInfoCurrentUseEnergy();
+    public float ObjectInfoCompleteEnergy => ResolveObjectInfoCompleteEnergy();
+
+    public void GetObjectInfoStatus(out string statusText, out bool isProducing)
+    {
+        statusText = ResolveObjectInfoStatus(out isProducing);
+    }
+
+    protected virtual string ResolveObjectInfoStatus(out bool isProducing)
+    {
+        isProducing = false;
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null)
+        {
+            return "No machine";
+        }
+
+        if (waitingForOutput)
+        {
+            return "Output full";
+        }
+
+        if (hasActiveCraft)
+        {
+            if (!HasOperationalEnergyAvailable(installedDefinition))
+            {
+                return "No energy";
+            }
+
+            isProducing = true;
+            return "Working";
+        }
+
+        if (runtimeOutputCoordinates == null || runtimeOutputCoordinates.Count <= 0)
+        {
+            return "No output area";
+        }
+
+        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        if (recipeCount <= 0)
+        {
+            return "No recipe";
+        }
+
+        bool hasRecipe = false;
+        bool blockedByInputArea = false;
+        bool blockedByInputItem = false;
+        bool blockedByOutput = false;
+        bool blockedByEnergy = false;
+
+        for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+        {
+            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
+            {
+                continue;
+            }
+
+            hasRecipe = true;
+            if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea)
+                || !TryGetLoadedBlock(inputArea.coordinate, out Block inputBlock)
+                || inputBlock == null)
+            {
+                blockedByInputArea = true;
+                continue;
+            }
+
+            if (inputBlock.GetInputAreaCenterItemCount(inputItemId) < inputCount)
+            {
+                blockedByInputItem = true;
+                continue;
+            }
+
+            if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+            {
+                blockedByOutput = true;
+                continue;
+            }
+
+            if (!HasOperationalEnergyAvailable(installedDefinition))
+            {
+                blockedByEnergy = true;
+                continue;
+            }
+
+            isProducing = true;
+            return "Working";
+        }
+
+        if (!hasRecipe)
+        {
+            return "No recipe";
+        }
+
+        if (blockedByOutput)
+        {
+            return "Output full";
+        }
+
+        if (blockedByEnergy)
+        {
+            return "No energy";
+        }
+
+        if (blockedByInputItem)
+        {
+            return "No input item";
+        }
+
+        if (blockedByInputArea)
+        {
+            return "No input area";
+        }
+
+        return "Stopped";
+    }
+
+    public bool TryGetObjectInfoEnergyInput(
+        out int energyItemId,
+        out int energyAreaCount,
+        out int energyAreaCapacity)
+    {
+        energyItemId = -1;
+        energyAreaCount = 0;
+        energyAreaCapacity = 0;
+
+        if (!RequiresOperationalEnergy(ResolveInstalledDefinition())
+            || runtimeInputEnergyCoordinates == null
+            || runtimeInputEnergyCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        energyAreaCapacity = Mathf.Max(ResolveRuntimeAreaCapacity(runtimeInputEnergyCoordinates), 1);
+        energyItemId = GetRuntimeAreaTopItemId(runtimeInputEnergyCoordinates);
+        if (energyItemId >= 0)
+        {
+            energyAreaCount = GetRuntimeAreaObjectCount(runtimeInputEnergyCoordinates, energyItemId);
+            energyAreaCapacity = Mathf.Max(energyAreaCapacity, energyAreaCount);
+        }
+
+        return true;
+    }
+
+    public bool TryGetObjectInfoItemPair(
+        out int inputItemId,
+        out int inputAreaCount,
+        out int inputAreaCapacity,
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity)
+    {
+        EnsurePairData();
+
+        int inputRecipeCount;
+        int outputRecipeCount;
+        if ((hasActiveCraft || waitingForOutput)
+            && activeRecipeIndex >= 0
+            && TryGetObjectInfoRecipeLine(
+                activeRecipeIndex,
+                out inputItemId,
+                out inputRecipeCount,
+                out outputItemId,
+                out outputRecipeCount))
+        {
+            if (activeOutputItemId >= 0 && activeOutputCount > 0)
+            {
+                outputItemId = activeOutputItemId;
+                outputRecipeCount = activeOutputCount;
+            }
+
+            if (!TryResolveObjectInfoAreaCounts(
+                inputItemId,
+                outputItemId,
+                inputRecipeCount,
+                outputRecipeCount,
+                out inputAreaCount,
+                out inputAreaCapacity,
+                out outputAreaCount,
+                out outputAreaCapacity))
+            {
+                ResetObjectInfoItemPair(
+                    out inputItemId,
+                    out inputAreaCount,
+                    out inputAreaCapacity,
+                    out outputItemId,
+                    out outputAreaCount,
+                    out outputAreaCapacity);
+                return false;
+            }
+
+            return true;
+        }
+
+        if (TryGetOccupiedObjectInfoItemPair(
+            out inputItemId,
+            out inputAreaCount,
+            out inputAreaCapacity,
+            out outputItemId,
+            out outputAreaCount,
+            out outputAreaCapacity))
+        {
+            return true;
+        }
+
+        for (int i = 0; i < inputList.Count; i++)
+        {
+            if (TryGetObjectInfoRecipeLine(
+                    i,
+                    out inputItemId,
+                    out inputRecipeCount,
+                    out outputItemId,
+                    out outputRecipeCount))
+            {
+                if (!TryResolveObjectInfoAreaCounts(
+                    inputItemId,
+                    outputItemId,
+                    inputRecipeCount,
+                    outputRecipeCount,
+                    out inputAreaCount,
+                    out inputAreaCapacity,
+                    out outputAreaCount,
+                    out outputAreaCapacity))
+                {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        ResetObjectInfoItemPair(
+            out inputItemId,
+            out inputAreaCount,
+            out inputAreaCapacity,
+            out outputItemId,
+            out outputAreaCount,
+            out outputAreaCapacity);
+        return false;
+    }
+
+    public virtual bool TryGetObjectInfoOutput(
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity,
+        out bool displayZeroCountItem)
+    {
+        outputItemId = -1;
+        outputAreaCount = 0;
+        outputAreaCapacity = 0;
+        displayZeroCountItem = false;
+
+        if (activeOutputItemId < 0 || activeOutputCount <= 0)
+        {
+            return false;
+        }
+
+        outputItemId = activeOutputItemId;
+        displayZeroCountItem = true;
+        return TryResolveObjectInfoOutputAreaCounts(
+            outputItemId,
+            activeOutputCount,
+            out outputAreaCount,
+            out outputAreaCapacity);
+    }
+
+    private bool TryGetOccupiedObjectInfoItemPair(
+        out int inputItemId,
+        out int inputAreaCount,
+        out int inputAreaCapacity,
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity)
+    {
+        int inputRecipeCount;
+        int outputRecipeCount;
+        for (int i = 0; i < inputList.Count; i++)
+        {
+            if (!TryGetObjectInfoRecipeLine(
+                    i,
+                    out inputItemId,
+                    out inputRecipeCount,
+                    out outputItemId,
+                    out outputRecipeCount))
+            {
+                continue;
+            }
+
+            if (!TryResolveObjectInfoAreaCounts(
+                    inputItemId,
+                    outputItemId,
+                    inputRecipeCount,
+                    outputRecipeCount,
+                    out inputAreaCount,
+                    out inputAreaCapacity,
+                    out outputAreaCount,
+                    out outputAreaCapacity)
+                || inputAreaCount <= 0)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        ResetObjectInfoItemPair(
+            out inputItemId,
+            out inputAreaCount,
+            out inputAreaCapacity,
+            out outputItemId,
+            out outputAreaCount,
+            out outputAreaCapacity);
+        return false;
+    }
+
+    private static void ResetObjectInfoItemPair(
+        out int inputItemId,
+        out int inputAreaCount,
+        out int inputAreaCapacity,
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity)
+    {
+        inputItemId = -1;
+        inputAreaCount = 0;
+        inputAreaCapacity = 0;
+        outputItemId = -1;
+        outputAreaCount = 0;
+        outputAreaCapacity = 0;
+    }
+
+    private bool TryResolveObjectInfoAreaCounts(
+        int inputItemId,
+        int outputItemId,
+        int inputRecipeCount,
+        int outputRecipeCount,
+        out int inputAreaCount,
+        out int inputAreaCapacity,
+        out int outputAreaCount,
+        out int outputAreaCapacity)
+    {
+        objectInfoInputAreaCoordinates.Clear();
+        AppendRuntimeInputItemAreaCoordinates(inputItemId, objectInfoInputAreaCoordinates);
+        if (objectInfoInputAreaCoordinates.Count <= 0)
+        {
+            inputAreaCount = 0;
+            inputAreaCapacity = 0;
+            outputAreaCount = 0;
+            outputAreaCapacity = 0;
+            return false;
+        }
+
+        inputAreaCount = GetRuntimeAreaObjectCount(objectInfoInputAreaCoordinates, inputItemId);
+        inputAreaCapacity = Mathf.Max(
+            ResolveRuntimeAreaCapacity(objectInfoInputAreaCoordinates),
+            Mathf.Max(inputAreaCount, inputRecipeCount));
+
+        if (outputItemId >= 0)
+        {
+            outputAreaCount = GetRuntimeAreaObjectCount(runtimeOutputCoordinates, outputItemId);
+            outputAreaCapacity = Mathf.Max(
+                ResolveRuntimeAreaCapacity(runtimeOutputCoordinates),
+                Mathf.Max(outputAreaCount, outputRecipeCount));
+        }
+        else
+        {
+            outputAreaCount = 0;
+            outputAreaCapacity = 0;
+        }
+
+        return true;
+    }
+
+    protected bool TryResolveObjectInfoOutputAreaCounts(
+        int outputItemId,
+        int outputRecipeCount,
+        out int outputAreaCount,
+        out int outputAreaCapacity)
+    {
+        outputAreaCount = 0;
+        outputAreaCapacity = 0;
+
+        if (outputItemId < 0)
+        {
+            return false;
+        }
+
+        outputAreaCount = GetRuntimeAreaObjectCount(runtimeOutputCoordinates, outputItemId);
+        outputAreaCapacity = Mathf.Max(
+            ResolveRuntimeAreaCapacity(runtimeOutputCoordinates),
+            Mathf.Max(outputAreaCount, Mathf.Max(1, outputRecipeCount)));
+        return true;
+    }
+
+    private bool TryGetObjectInfoRecipeLine(
+        int recipeIndex,
+        out int inputItemId,
+        out int inputCount,
+        out int outputItemId,
+        out int outputCount)
+    {
+        inputItemId = -1;
+        inputCount = 0;
+        outputItemId = -1;
+        outputCount = 0;
+
+        if (recipeIndex < 0 || recipeIndex >= inputList.Count)
+        {
+            return false;
+        }
+
+        ItemIoEntry inputEntry = inputList[recipeIndex];
+        inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
+        inputCount = Mathf.Max(1, inputEntry.count);
+
+        if (recipeIndex < outputList.Count)
+        {
+            ItemIoEntry outputEntry = outputList[recipeIndex];
+            outputItemId = outputEntry.itemDefinition != null ? outputEntry.itemDefinition.id : -1;
+            outputCount = Mathf.Max(1, outputEntry.count);
+        }
+
+        return inputItemId >= 0;
+    }
+
+    private void AppendRuntimeInputItemAreaCoordinates(int itemId, List<Vector2Int> coordinates)
+    {
+        if (itemId < 0 || coordinates == null || runtimeInputItemAreas == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea area = runtimeInputItemAreas[i];
+            if (area.itemId == itemId && !coordinates.Contains(area.coordinate))
+            {
+                coordinates.Add(area.coordinate);
+            }
+        }
+    }
 
     public int ResolveRuntimeAreaCapacity(IReadOnlyList<Vector2Int> coordinates)
     {
@@ -1886,6 +2334,37 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return count;
     }
 
+    private int GetRuntimeAreaTopItemId(IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return -1;
+        }
+
+        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            if (!visitedCoordinates.Add(coordinate))
+            {
+                continue;
+            }
+
+            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
+            {
+                continue;
+            }
+
+            int itemId = block.GetInputAreaCenterItemId();
+            if (itemId >= 0)
+            {
+                return itemId;
+            }
+        }
+
+        return -1;
+    }
+
     private bool TryFindOutputSourceBlock(int itemId, out Block sourceBlock, out Vector3 startWorldPosition)
     {
         sourceBlock = null;
@@ -2001,11 +2480,53 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return null;
     }
 
-    private static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
+    protected static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
     {
         return installedDefinition != null
                && installedDefinition.useEnergyType != ItemDefinition.EnergyType.None
                && installedDefinition.useEnergyAmount > 0;
+    }
+
+    protected bool HasOperationalEnergyAvailable(ItemDefinition installedDefinition)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return true;
+        }
+
+        return storedEnergy > 0f || HasUsableEnergyItem(installedDefinition.useEnergyType);
+    }
+
+    private bool HasUsableEnergyItem(ItemDefinition.EnergyType requiredEnergyType)
+    {
+        if (requiredEnergyType == ItemDefinition.EnergyType.None || runtimeInputEnergyCoordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeInputEnergyCoordinates.Count; i++)
+        {
+            if (!TryGetLoadedBlock(runtimeInputEnergyCoordinates[i], out Block block) || block == null)
+            {
+                continue;
+            }
+
+            int energyItemId = block.GetInputAreaCenterItemId();
+            if (energyItemId < 0)
+            {
+                continue;
+            }
+
+            ItemDefinition energyDefinition = ResolveItemDefinition(energyItemId);
+            if (energyDefinition != null
+                && energyDefinition.energyType == requiredEnergyType
+                && energyDefinition.energyAmount > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private float ResolveCompleteEnergy(ItemDefinition installedDefinition)
@@ -2213,6 +2734,41 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return Mathf.Clamp01(1f - (Mathf.Max(0f, remainingCraftTime) / duration));
     }
 
+    private float ResolveObjectInfoCurrentUseEnergy()
+    {
+        if (!hasActiveCraft)
+        {
+            return 0f;
+        }
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (RequiresOperationalEnergy(installedDefinition))
+        {
+            float completeEnergy = ResolveCompleteEnergy(installedDefinition);
+            return waitingForOutput
+                ? completeEnergy
+                : Mathf.Clamp(Mathf.Max(0f, activeCraftConsumedEnergy), 0f, completeEnergy);
+        }
+
+        float duration = Mathf.Max(0.1f, craftDuration);
+        return waitingForOutput
+            ? duration
+            : Mathf.Clamp(duration - Mathf.Max(0f, remainingCraftTime), 0f, duration);
+    }
+
+    private float ResolveObjectInfoCompleteEnergy()
+    {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (RequiresOperationalEnergy(installedDefinition))
+        {
+            return ResolveCompleteEnergy(installedDefinition);
+        }
+
+        return hasActiveCraft || waitingForOutput
+            ? Mathf.Max(0.1f, craftDuration)
+            : 0f;
+    }
+
     private Vector3 ResolveEnergyGaugeWorldPosition()
     {
         Bounds bounds = default;
@@ -2299,6 +2855,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     protected int ActiveOutputItemId => activeOutputItemId;
     protected int ActiveOutputCount => activeOutputCount;
+    protected bool IsActiveCraftRunning => hasActiveCraft;
+    protected bool IsWaitingForOutput => waitingForOutput;
 
     protected void ClearActiveCraft()
     {
