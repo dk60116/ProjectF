@@ -80,6 +80,8 @@ public class PlayerHUD : BagSlot
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
     private MapObject currentObjectInfoTarget;
+    private MapObject lastYellowObjectInfoFocusTarget;
+    private bool currentObjectInfoOpenedByYellowFocus;
     private int lastObservedHandItemId = -2;
     private int lastObservedHandItemCount = -1;
     private int lastObservedHandMaxCount = -1;
@@ -1796,27 +1798,104 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (!TryGetFocusedMapObject(out MapObject focusedMapObject))
+        PlayerController playerController = ResolvePlayerController();
+        if (TryGetSecondaryPointerDown(out Vector2 pointerPosition))
+        {
+            if (IsPointerOverObjectInfoBlockingUi(pointerPosition))
+            {
+                RefreshCurrentObjectInfoPanelTarget();
+                return;
+            }
+
+            if (playerController != null
+                && playerController.TryGetMouseFocusedMapObject(out MapObject mouseFocusedMapObject))
+            {
+                BindObjectInfoPanel(mouseFocusedMapObject, false);
+                return;
+            }
+
+            ClearObjectInfoPanelState();
+            return;
+        }
+
+        if (HandleYellowFocusObjectInfoChange())
+        {
+            return;
+        }
+
+        RefreshCurrentObjectInfoPanelTarget();
+    }
+
+    private bool HandleYellowFocusObjectInfoChange()
+    {
+        if (TryGetFocusedMapObject(out MapObject focusedMapObject))
+        {
+            if (lastYellowObjectInfoFocusTarget == focusedMapObject)
+            {
+                return false;
+            }
+
+            lastYellowObjectInfoFocusTarget = focusedMapObject;
+            BindObjectInfoPanel(focusedMapObject, true);
+            return true;
+        }
+
+        if (lastYellowObjectInfoFocusTarget == null)
+        {
+            return false;
+        }
+
+        lastYellowObjectInfoFocusTarget = null;
+        if (currentObjectInfoOpenedByYellowFocus)
+        {
+            ClearObjectInfoPanelState();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void RefreshCurrentObjectInfoPanelTarget()
+    {
+        if (currentObjectInfoTarget == null)
+        {
+            return;
+        }
+
+        if (!currentObjectInfoTarget.gameObject.activeInHierarchy)
         {
             ClearObjectInfoPanelState();
             return;
         }
 
-        if (currentObjectInfoTarget == focusedMapObject
-            && objectInfoPanel.IsBoundTo(focusedMapObject)
+        if (objectInfoPanel != null
+            && objectInfoPanel.IsBoundTo(currentObjectInfoTarget)
             && objectInfoPanel.gameObject.activeSelf)
         {
             objectInfoPanel.Refresh();
             return;
         }
 
-        currentObjectInfoTarget = focusedMapObject;
-        objectInfoPanel.Bind(focusedMapObject);
+        BindObjectInfoPanel(currentObjectInfoTarget, currentObjectInfoOpenedByYellowFocus);
+    }
+
+    private void BindObjectInfoPanel(MapObject target, bool openedByYellowFocus)
+    {
+        if (target == null || objectInfoPanel == null)
+        {
+            ClearObjectInfoPanelState();
+            return;
+        }
+
+        currentObjectInfoTarget = target;
+        currentObjectInfoOpenedByYellowFocus = openedByYellowFocus;
+        objectInfoPanel.Bind(target);
     }
 
     private void ClearObjectInfoPanelState()
     {
         currentObjectInfoTarget = null;
+        currentObjectInfoOpenedByYellowFocus = false;
         if (objectInfoPanel != null)
         {
             objectInfoPanel.Clear();
@@ -1893,10 +1972,24 @@ public class PlayerHUD : BagSlot
             return null;
         }
 
-        return ResolveInteractionIcon(resource.ResolveItemId(), 0);
+        if (resource.TryPeekHarvestOutput(out int outputItemId, out _))
+        {
+            Sprite outputIcon = ResolveInteractionIcon(outputItemId, 0, true);
+            if (outputIcon != null)
+            {
+                return outputIcon;
+            }
+        }
+
+        return ResolveInteractionIcon(resource.ResolveItemId(), 0, true);
     }
 
     private static Sprite ResolveInteractionIcon(int itemId, int preferredIconIndex)
+    {
+        return ResolveInteractionIcon(itemId, preferredIconIndex, false);
+    }
+
+    private static Sprite ResolveInteractionIcon(int itemId, int preferredIconIndex, bool allowItemIconFallback)
     {
         if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
@@ -1919,7 +2012,7 @@ public class PlayerHUD : BagSlot
 
             if (definition.interactionButtonList == null || definition.interactionButtonList.Count <= 0)
             {
-                return null;
+                return allowItemIconFallback ? definition.icon : null;
             }
 
             if (preferredIconIndex >= 0 && preferredIconIndex < definition.interactionButtonList.Count)
@@ -1946,7 +2039,7 @@ public class PlayerHUD : BagSlot
                 }
             }
 
-            return null;
+            return allowItemIconFallback ? definition.icon : null;
         }
 
         return null;
@@ -2183,18 +2276,23 @@ public class PlayerHUD : BagSlot
     private bool TryGetFocusedMapObject(out MapObject focusedMapObject)
     {
         focusedMapObject = null;
-        if (GameManager.Instance == null || GameManager.Instance.Player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
         {
             return false;
         }
 
         return playerController.TryGetFocusedMapObject(out focusedMapObject);
+    }
+
+    private PlayerController ResolvePlayerController()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return null;
+        }
+
+        return GameManager.Instance.Player.GetComponent<PlayerController>();
     }
 
     private void SubscribeSlotEvents()
@@ -2395,6 +2493,47 @@ public class PlayerHUD : BagSlot
             }
 
             if (ItemFilterButton != null && hitObject.transform.IsChildOf(ItemFilterButton.transform))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsPointerOverObjectInfoBlockingUi(Vector2 pointerPosition)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        PointerEventData pointerData = new PointerEventData(EventSystem.current)
+        {
+            position = pointerPosition
+        };
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointerData, results);
+        for (int i = 0; i < results.Count; i++)
+        {
+            GameObject hitObject = results[i].gameObject;
+            if (hitObject == null)
+            {
+                continue;
+            }
+
+            if (hitObject.GetComponentInParent<Selectable>() != null)
+            {
+                return true;
+            }
+
+            if (objectInfoPanel != null && hitObject.transform.IsChildOf(objectInfoPanel.transform))
+            {
+                return true;
+            }
+
+            if (itemFilterUI != null && hitObject.transform.IsChildOf(itemFilterUI.transform))
             {
                 return true;
             }
@@ -2964,6 +3103,18 @@ public class PlayerHUD : BagSlot
         }
 
         if (Input.GetMouseButtonDown(0))
+        {
+            pointerPosition = Input.mousePosition;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetSecondaryPointerDown(out Vector2 pointerPosition)
+    {
+        pointerPosition = Vector2.zero;
+        if (Input.GetMouseButtonDown(1))
         {
             pointerPosition = Input.mousePosition;
             return true;

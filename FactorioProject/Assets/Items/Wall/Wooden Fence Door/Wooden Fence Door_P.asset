@@ -6,7 +6,7 @@ Mesh:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: Wooden Fence Door_P
+  m_Name: Wooden fence door_P
   serializedVersion: 11
   m_SubMeshes:
   - serializedVersion: 2

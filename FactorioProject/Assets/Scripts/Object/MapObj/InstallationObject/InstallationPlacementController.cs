@@ -12043,7 +12043,7 @@ public class InstallationPlacementController : MonoBehaviour
         };
     }
 
-    private static InstallationMapFilter ResolvePlacementMapFilter(
+    public static InstallationMapFilter ResolvePlacementMapFilter(
         MapObject footprintSource,
         InstallationObject installationObject)
     {
@@ -12525,7 +12525,7 @@ public class InstallationPlacementController : MonoBehaviour
             && IsResourceAllowedByMapFilter(resource, InstallationMapFilter.Ore);
     }
 
-    private static bool IsResourceAllowedByMapFilter(Resource resource, InstallationMapFilter allowedFilter)
+    public static bool IsResourceAllowedByMapFilter(Resource resource, InstallationMapFilter allowedFilter)
     {
         if (resource == null || !resource.CanHarvest)
         {

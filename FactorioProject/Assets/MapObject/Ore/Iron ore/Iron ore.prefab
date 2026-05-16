@@ -11,10 +11,10 @@ PrefabInstance:
     - target: {fileID: 130531923366214684, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Mesh
       value: 
-      objectReference: {fileID: -4623667117242087733, guid: d7556c5bef46db341ac1a0ea152ce055, type: 3}
+      objectReference: {fileID: 1941939817260003249, guid: a9abe9ce51b7871499660143dddbd1e0, type: 3}
     - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: objId
-      value: 2
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 339709462871877203, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: itemDefinition
@@ -59,7 +59,7 @@ PrefabInstance:
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: 9f19104c7dfb07f4794aab81a15c3c64, type: 2}
+      objectReference: {fileID: 2100000, guid: 5cf11bd62c6bb7d42bb88ab36ff9b203, type: 2}
     - target: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_LocalPosition.x
       value: -0.42907155
@@ -103,7 +103,7 @@ PrefabInstance:
     - target: {fileID: 2750372666958907606, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Materials.Array.data[0]
       value: 
-      objectReference: {fileID: 2100000, guid: a41b1f1a0cc93094884ea42b9332169e, type: 2}
+      objectReference: {fileID: 2100000, guid: 5cf11bd62c6bb7d42bb88ab36ff9b203, type: 2}
     - target: {fileID: 3694201783877156887, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Mesh
       value: 
@@ -138,19 +138,19 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Name
-      value: CooperOre
+      value: Iron ore
       objectReference: {fileID: 0}
     - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: objId
-      value: 2
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: definition
       value: 
-      objectReference: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
+      objectReference: {fileID: 11400000, guid: 6a0778f55af03994a8d8400ed270cda4, type: 2}
     - target: {fileID: 7027449635130469315, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: resourceStatus.outputId
-      value: 2
+      value: 3
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects:
@@ -159,14 +159,14 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 3654828918463552362}
+      addedObject: {fileID: 2667034222479840192}
   m_SourcePrefab: {fileID: 100100000, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
 --- !u!1 &282995202885880893 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
   m_PrefabInstance: {fileID: 5998244657081757865}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &3654828918463552362
+--- !u!114 &2667034222479840192
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -179,7 +179,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: CooperOre
+  objectName: Iron ore
   objId: 4
   itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
   portableObj: {fileID: 0}
@@ -190,10 +190,10 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 1
-  definition: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
+  definition: {fileID: 11400000, guid: a13450442c005464cb4e0c70473f35d6, type: 2}
   resourceStatus:
-    outputId: 4
-    outputItemName: CooperOre
+    outputId: 3
+    outputItemName: IronOre
     resourceCount: 1
     getCount: 1
     maxGauge: 10

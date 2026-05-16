@@ -1976,6 +1976,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
+        if (eventData.button != PointerEventData.InputButton.Left)
+        {
+            return false;
+        }
+
         GameObject target = eventData.pointerPressRaycast.gameObject;
         if (target == null)
         {

@@ -1352,12 +1352,18 @@ public partial class TerrainGenerator : MonoBehaviour
                && resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out _);
     }
 
-    private bool CanSpawnResourceUnderMiningMachine(Vector2Int worldCoordinate)
+    private bool CanSpawnResourceAtGeneratedCoordinate(Vector2Int worldCoordinate, Resource resourcePrefab)
+    {
+        return !HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
+               || CanSpawnResourceUnderInstallation(worldCoordinate, resourcePrefab);
+    }
+
+    private bool CanSpawnResourceUnderInstallation(Vector2Int worldCoordinate, Resource resourcePrefab)
     {
         EnsureResourceStateStore();
         if (resourceStateStore == null
+            || resourcePrefab == null
             || !resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out Vector2Int anchorCoordinate)
-            || anchorCoordinate != worldCoordinate
             || !resourceStateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState)
             || installationState == null)
         {
@@ -1365,7 +1371,46 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ItemDefinition definition = ResolveInstallationDefinition(installationState.itemId);
-        return definition != null && definition.mapObject is MiningMachine;
+        if (definition == null || definition.mapObject == null)
+        {
+            return false;
+        }
+
+        InstallationObject installationObject = ResolveInstallationObject(definition.mapObject);
+        if (installationObject == null)
+        {
+            return false;
+        }
+
+        if (installationObject is MiningMachine)
+        {
+            return anchorCoordinate == worldCoordinate
+                   && resourcePrefab.ResolvedHarvestMode == Resource.HarvestMode.Mining;
+        }
+
+        InstallationMapFilter allowedFilter = InstallationPlacementController.ResolvePlacementMapFilter(
+            definition.mapObject,
+            installationObject);
+        return InstallationPlacementController.IsResourceAllowedByMapFilter(resourcePrefab, allowedFilter);
+    }
+
+    private static InstallationObject ResolveInstallationObject(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        InstallationObject installationObject = mapObject as InstallationObject;
+        if (installationObject != null)
+        {
+            return installationObject;
+        }
+
+        installationObject = mapObject.GetComponent<InstallationObject>();
+        return installationObject != null
+            ? installationObject
+            : mapObject.GetComponentInChildren<InstallationObject>(true);
     }
 
     private void CleanupOrphanedLiveInstallations()

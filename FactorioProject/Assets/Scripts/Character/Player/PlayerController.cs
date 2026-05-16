@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 using UnityEngine.Serialization;
 
 [RequireComponent(typeof(Player))]
@@ -39,6 +41,10 @@ public class PlayerController : MonoBehaviour
     private readonly List<Block> nearbyInstallationFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyWorkableFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyBoxFocusBlocks = new List<Block>();
+    private readonly HashSet<Block> currentMouseFocusedBlocks = new HashSet<Block>();
+    private readonly List<Block> mouseFocusBlocks = new List<Block>();
+    private readonly List<Block> mouseFocusRemovalBuffer = new List<Block>();
+    private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
     private readonly List<BoxObject> nearbyBoxObjects = new List<BoxObject>();
@@ -65,6 +71,8 @@ public class PlayerController : MonoBehaviour
     private Vector3 pendingFacingDirection;
     private Block temporaryDropFocusBlock;
     private float temporaryDropFocusUntilTime;
+    private MapObject currentMouseFocusedMapObject;
+    private PointerEventData pointerEventData;
 
     private struct InteractionFocusCandidate
     {
@@ -105,8 +113,12 @@ public class PlayerController : MonoBehaviour
         pendingFacingDirection = Vector3.zero;
         ClearTemporaryDropFocus();
         SetFocusedBlocks(null);
+        SetMouseFocusedBlocks(null);
         currentFocusedBlocks.Clear();
+        currentMouseFocusedBlocks.Clear();
         focusRemovalBuffer.Clear();
+        mouseFocusRemovalBuffer.Clear();
+        mouseFocusBlocks.Clear();
         UpdateSelectedWorkableRangeVisuals(null);
         singleFocusedBlockBuffer.Clear();
     }
@@ -225,6 +237,7 @@ public class PlayerController : MonoBehaviour
 
         if (isInteractionLocked)
         {
+            SetMouseFocusedBlocks(null);
             HandleInstallationPlacementLock();
             wasInstallationPlacementActive = true;
             return;
@@ -254,6 +267,7 @@ public class PlayerController : MonoBehaviour
         bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
         ResolveCompletedPick(finishedPickThisFrame);
         RefreshInteractionFocus(hasMovement);
+        RefreshMouseMapObjectFocus();
         ClearInactiveResourceHarvestTarget();
     }
 
@@ -780,8 +794,13 @@ public class PlayerController : MonoBehaviour
             if (resource == null
                 || !resource.gameObject.activeInHierarchy
                 || !resource.AllowsFocus
-                || !resource.CanHarvest
-                || resource.OwningBlock == null)
+                || !resource.CanHarvest)
+            {
+                continue;
+            }
+
+            Block owningBlock = ResolveResourceOwningBlock(resource);
+            if (owningBlock == null)
             {
                 continue;
             }
@@ -816,6 +835,29 @@ public class PlayerController : MonoBehaviour
         return bestResource;
     }
 
+    private static Block ResolveResourceOwningBlock(Resource resource)
+    {
+        if (resource == null)
+        {
+            return null;
+        }
+
+        Block owningBlock = resource.OwningBlock != null
+            ? resource.OwningBlock
+            : resource.GetComponentInParent<Block>();
+        if (owningBlock != null && owningBlock.MapObject != null && owningBlock.MapObject != resource)
+        {
+            return null;
+        }
+
+        if (owningBlock != null && resource.OwningBlock == null)
+        {
+            resource.SetOwningBlock(owningBlock);
+        }
+
+        return owningBlock;
+    }
+
     private int GetHarvestPower(Resource resource)
     {
         if (resource == null)
@@ -841,7 +883,7 @@ public class PlayerController : MonoBehaviour
             Resource resourceInteractionTarget = FindBestResourceInteractionTarget();
             if (resourceInteractionTarget != null)
             {
-                AppendUniqueBlock(combinedInteractionFocusBlocks, resourceInteractionTarget.OwningBlock);
+                AppendUniqueBlock(combinedInteractionFocusBlocks, ResolveResourceOwningBlock(resourceInteractionTarget));
             }
         }
 
@@ -1163,6 +1205,15 @@ public class PlayerController : MonoBehaviour
         }
 
         return focusedMapObject != null;
+    }
+
+    public bool TryGetMouseFocusedMapObject(out MapObject focusedMapObject)
+    {
+        RefreshMouseMapObjectFocus();
+        focusedMapObject = currentMouseFocusedMapObject;
+        return focusedMapObject != null
+               && focusedMapObject.gameObject.activeInHierarchy
+               && focusedMapObject.AllowsFocus;
     }
 
     public bool RequestFocusedResourceHarvest(Resource resource)
@@ -1972,6 +2023,250 @@ public class PlayerController : MonoBehaviour
 
         results.Add(block);
         return true;
+    }
+
+    private void RefreshMouseMapObjectFocus()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
+        {
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        Vector2 pointerPosition = Input.mousePosition;
+        if (IsPointerOverMouseFocusBlockingUi(pointerPosition)
+            || !TryResolveMouseFocusedMapObject(pointerPosition, out MapObject mapObject, out Block fallbackBlock))
+        {
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        mouseFocusBlocks.Clear();
+        if (!AppendMapObjectFocusBlocks(mapObject, fallbackBlock, mouseFocusBlocks))
+        {
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        SetMouseFocusedBlocks(mouseFocusBlocks, mapObject);
+    }
+
+    private bool TryResolveMouseFocusedMapObject(Vector2 pointerPosition, out MapObject mapObject, out Block fallbackBlock)
+    {
+        mapObject = null;
+        fallbackBlock = null;
+
+        Camera targetCamera = Camera.main;
+        if (targetCamera == null)
+        {
+            return false;
+        }
+
+        Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
+        float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
+        RaycastHit[] hits = Physics.RaycastAll(
+            ray,
+            Mathf.Max(0f, maxDistance),
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hits != null && hits.Length > 0)
+        {
+            System.Array.Sort(hits, CompareRaycastHits);
+            for (int i = 0; i < hits.Length; i++)
+            {
+                Collider hitCollider = hits[i].collider;
+                if (hitCollider == null)
+                {
+                    continue;
+                }
+
+                MapObject candidate = hitCollider.GetComponentInParent<MapObject>();
+                if (!IsValidMouseFocusMapObject(candidate))
+                {
+                    continue;
+                }
+
+                mapObject = candidate;
+                TryResolveMouseFocusFallbackBlock(candidate, ray, out fallbackBlock);
+                return true;
+            }
+        }
+
+        if (!TryGetPointerBlockFromGroundPlane(ray, out fallbackBlock))
+        {
+            return false;
+        }
+
+        mapObject = fallbackBlock.MapObject != null ? fallbackBlock.MapObject : fallbackBlock.Resource;
+        if (!IsValidMouseFocusMapObject(mapObject))
+        {
+            mapObject = null;
+            fallbackBlock = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsValidMouseFocusMapObject(MapObject mapObject)
+    {
+        return mapObject != null
+               && mapObject.gameObject.activeInHierarchy
+               && mapObject.AllowsFocus;
+    }
+
+    private bool TryResolveMouseFocusFallbackBlock(MapObject mapObject, Ray ray, out Block fallbackBlock)
+    {
+        fallbackBlock = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        if (mapObject is Resource resource && resource.OwningBlock != null)
+        {
+            fallbackBlock = resource.OwningBlock;
+            return true;
+        }
+
+        if (mapObject is InstallationObject installationObject)
+        {
+            IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject.RuntimeOccupiedCoordinates;
+            if (occupiedCoordinates != null)
+            {
+                TerrainGenerator terrain = ResolveTerrainGenerator();
+                for (int i = 0; i < occupiedCoordinates.Count; i++)
+                {
+                    if (terrain != null
+                        && terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block)
+                        && block != null)
+                    {
+                        fallbackBlock = block;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        fallbackBlock = mapObject.GetComponentInParent<Block>();
+        if (fallbackBlock != null)
+        {
+            return true;
+        }
+
+        return TryGetPointerBlockFromGroundPlane(ray, out fallbackBlock);
+    }
+
+    private bool TryGetPointerBlockFromGroundPlane(Ray ray, out Block block)
+    {
+        block = null;
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Plane groundPlane = new Plane(Vector3.up, new Vector3(0f, terrain.transform.position.y, 0f));
+        if (!groundPlane.Raycast(ray, out float enter))
+        {
+            return false;
+        }
+
+        Vector3 worldPoint = ray.GetPoint(enter);
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(worldPoint.x),
+            Mathf.RoundToInt(worldPoint.z));
+
+        return terrain.TryGetLoadedBlock(coordinate, out block) && block != null;
+    }
+
+    private bool IsPointerOverMouseFocusBlockingUi(Vector2 pointerPosition)
+    {
+        if (EventSystem.current == null)
+        {
+            return false;
+        }
+
+        if (pointerEventData == null)
+        {
+            pointerEventData = new PointerEventData(EventSystem.current);
+        }
+
+        pointerEventData.Reset();
+        pointerEventData.position = pointerPosition;
+        pointerRaycastResults.Clear();
+        EventSystem.current.RaycastAll(pointerEventData, pointerRaycastResults);
+        for (int i = 0; i < pointerRaycastResults.Count; i++)
+        {
+            GameObject hitObject = pointerRaycastResults[i].gameObject;
+            if (hitObject == null)
+            {
+                continue;
+            }
+
+            if (hitObject.GetComponentInParent<Selectable>() != null)
+            {
+                pointerRaycastResults.Clear();
+                return true;
+            }
+        }
+
+        pointerRaycastResults.Clear();
+        return false;
+    }
+
+    private static int CompareRaycastHits(RaycastHit left, RaycastHit right)
+    {
+        return left.distance.CompareTo(right.distance);
+    }
+
+    private void SetMouseFocusedBlocks(List<Block> nextBlocks, MapObject nextMapObject = null)
+    {
+        currentMouseFocusedMapObject = nextBlocks != null && nextBlocks.Count > 0 ? nextMapObject : null;
+        mouseFocusRemovalBuffer.Clear();
+
+        foreach (Block currentBlock in currentMouseFocusedBlocks)
+        {
+            if (ContainsFocusedBlock(nextBlocks, currentBlock))
+            {
+                continue;
+            }
+
+            mouseFocusRemovalBuffer.Add(currentBlock);
+        }
+
+        for (int i = 0; i < mouseFocusRemovalBuffer.Count; i++)
+        {
+            Block block = mouseFocusRemovalBuffer[i];
+            currentMouseFocusedBlocks.Remove(block);
+            if (block != null)
+            {
+                block.SetMouseFocusVisible(false);
+            }
+        }
+
+        if (nextBlocks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < nextBlocks.Count; i++)
+        {
+            Block block = nextBlocks[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            if (currentMouseFocusedBlocks.Add(block))
+            {
+                block.SetMouseFocusVisible(true);
+            }
+            else
+            {
+                block.SetMouseFocusVisible(true);
+            }
+        }
     }
 
     private static float GetBlockFocusDistanceSqr(Block block, Vector3 origin)

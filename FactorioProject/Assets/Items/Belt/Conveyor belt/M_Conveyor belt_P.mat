@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: M_Robot Hand_1
+  m_Name: M_Conveyor belt_P
   m_Shader: {fileID: 4800000, guid: 2e827c8c74aa43a084b5b71af6db2df4, type: 3}
   m_Parent: {fileID: 2100000, guid: 3b0daddd139b95644b250e8907de7236, type: 2}
   m_ModifiedSerializedProperties: 4
@@ -24,7 +24,7 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: 809a71629fd93fc4bb40dca4748d3608, type: 3}
+        m_Texture: {fileID: 2800000, guid: 217b9ec8ca1e06546a155b68f4926070, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []

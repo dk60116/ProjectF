@@ -1,8 +1,15 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+[DefaultExecutionOrder(1000)]
 public class UIManager : MonoBehaviour
 {
+    private struct WorldGaugeBinding
+    {
+        public Vector3 worldPosition;
+        public Vector2 anchoredOffset;
+    }
+
     public static UIManager Instance { get; private set; }
 
     [SerializeField]
@@ -18,6 +25,8 @@ public class UIManager : MonoBehaviour
     private RectTransform cachedWorldCanvasRect;
     private RectTransform energyGaugeRoot;
     private Camera cachedWorldCanvasCamera;
+    private readonly Dictionary<DefaultGauge, WorldGaugeBinding> activeWorldGaugeBindings = new Dictionary<DefaultGauge, WorldGaugeBinding>();
+    private readonly List<DefaultGauge> worldGaugeCleanupBuffer = new List<DefaultGauge>();
 
     private void Awake()
     {
@@ -38,6 +47,11 @@ public class UIManager : MonoBehaviour
         {
             Instance = null;
         }
+    }
+
+    private void LateUpdate()
+    {
+        RefreshActiveWorldGaugePositions();
     }
 
     public void BindPlayerBag(PlayerBag bag)
@@ -84,6 +98,7 @@ public class UIManager : MonoBehaviour
             return;
         }
 
+        activeWorldGaugeBindings.Remove(gauge);
         RectTransform root = ResolveEnergyGaugeRoot();
         if (root != null)
         {
@@ -107,16 +122,61 @@ public class UIManager : MonoBehaviour
             return;
         }
 
-        RectTransform root = ResolveEnergyGaugeRoot();
-        if (root == null || !TryConvertWorldToCanvasPoint(worldPosition, root, out Vector2 anchoredPosition))
+        WorldGaugeBinding binding = new WorldGaugeBinding
         {
-            gauge.SetVisible(false);
+            worldPosition = worldPosition,
+            anchoredOffset = anchoredOffset
+        };
+        activeWorldGaugeBindings[gauge] = binding;
+
+        if (!TryApplyEnergyGaugePosition(gauge, binding))
+        {
             return;
         }
 
-        gauge.SetVisible(true);
-        gauge.SetAnchoredPosition(anchoredPosition + anchoredOffset);
         gauge.SetFill(fillAmount);
+    }
+
+    private void RefreshActiveWorldGaugePositions()
+    {
+        if (activeWorldGaugeBindings.Count <= 0)
+        {
+            return;
+        }
+
+        worldGaugeCleanupBuffer.Clear();
+        foreach (KeyValuePair<DefaultGauge, WorldGaugeBinding> pair in activeWorldGaugeBindings)
+        {
+            DefaultGauge gauge = pair.Key;
+            if (gauge == null)
+            {
+                worldGaugeCleanupBuffer.Add(gauge);
+                continue;
+            }
+
+            TryApplyEnergyGaugePosition(gauge, pair.Value);
+        }
+
+        for (int i = 0; i < worldGaugeCleanupBuffer.Count; i++)
+        {
+            activeWorldGaugeBindings.Remove(worldGaugeCleanupBuffer[i]);
+        }
+
+        worldGaugeCleanupBuffer.Clear();
+    }
+
+    private bool TryApplyEnergyGaugePosition(DefaultGauge gauge, WorldGaugeBinding binding)
+    {
+        RectTransform root = ResolveEnergyGaugeRoot();
+        if (root == null || !TryConvertWorldToCanvasPoint(binding.worldPosition, root, out Vector2 anchoredPosition))
+        {
+            gauge.SetVisible(false);
+            return false;
+        }
+
+        gauge.SetVisible(true);
+        gauge.SetAnchoredPosition(anchoredPosition + binding.anchoredOffset);
+        return true;
     }
 
     private RectTransform ResolveEnergyGaugeRoot()

@@ -100,6 +100,7 @@ public class Resource : MapObject
     public int MaxGauge => Mathf.Max(1, resourceStatus.maxGauge);
     public int ResourceCount => Mathf.Max(0, resourceStatus.resourceCount);
     public int GetCount => Mathf.Max(1, resourceStatus.getCount);
+    public int RemainingHarvestOutputCount => Mathf.Max(0, ResourceCount * GetCount);
     public bool CanHarvest => ResourceCount > 0;
 
     public HarvestMode ResolvedHarvestMode
@@ -380,6 +381,11 @@ public class Resource : MapObject
     }
 
     public bool TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
+    {
+        return TryPeekHarvestOutput(out outputItemId, out outputCount);
+    }
+
+    public bool TryPeekHarvestOutput(out int outputItemId, out int outputCount)
     {
         outputItemId = ResolveOutputItemId();
         outputCount = GetCount;

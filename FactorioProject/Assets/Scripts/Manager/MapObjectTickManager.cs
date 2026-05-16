@@ -13,7 +13,7 @@ public interface IMapObjectLateTick
 
 public sealed class MapObjectTickManager : MonoBehaviour
 {
-    private const float DefaultUpdateTickIntervalSeconds = 0.06f;
+    private const float DefaultUpdateTickIntervalSeconds = 1f / 60f;
     private const float MaxUpdateTickFrameDeltaSeconds = 0.12f;
 
     private static MapObjectTickManager instance;

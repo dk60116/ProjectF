@@ -24,7 +24,7 @@ MonoBehaviour:
   itemFilter: 0
   capacity: 10
   energyType: 1
-  energyAmount: 50
+  energyAmount: 30
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

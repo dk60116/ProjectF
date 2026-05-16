@@ -95,7 +95,7 @@ GameObject:
   - component: {fileID: 2705861293071220046}
   - component: {fileID: 8277338630082605383}
   m_Layer: 0
-  m_Name: Mining Machine
+  m_Name: Mining machine
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -130,7 +130,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: Mining Machine
+  objectName: Mining machine
   objId: 20
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   portableObj: {fileID: 0}

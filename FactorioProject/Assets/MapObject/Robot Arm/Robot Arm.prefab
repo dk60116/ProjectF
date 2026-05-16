@@ -462,7 +462,7 @@ GameObject:
   - component: {fileID: 986190605775310727}
   - component: {fileID: 2610350787124706515}
   m_Layer: 7
-  m_Name: Robot Arm
+  m_Name: Robot arm
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

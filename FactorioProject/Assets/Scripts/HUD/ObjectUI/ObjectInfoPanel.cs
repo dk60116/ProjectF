@@ -1,10 +1,17 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 public class ObjectInfoPanel : MonoBehaviour
 {
-    [SerializeField]
+    [SerializeField, HideInInspector]
+    [FormerlySerializedAs("focusedObjectSlot")]
     private ItemSlot focusedObjectSlot;
+    [SerializeField]
+    private List<GameObject> focusedInfoPanels = new List<GameObject>();
+    [SerializeField]
+    private List<ItemSlot> focusedObjectSlots = new List<ItemSlot>();
     [SerializeField]
     private ItemInfoDescription infoLine;
 
@@ -31,20 +38,10 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         boundObject = mapObject;
-        int itemId = mapObject.ResolveItemId();
-        if (focusedObjectSlot != null)
-        {
-            if (itemId >= 0)
-            {
-                focusedObjectSlot.SetItemDisplay(itemId, 1, 0, true);
-            }
-            else
-            {
-                focusedObjectSlot.Clear();
-            }
-        }
+        Resource underlyingResource = ResolveUnderlyingResource(mapObject);
+        RefreshFocusedInfoPanels(mapObject, underlyingResource);
 
-        RefreshInfoLine(mapObject);
+        RefreshInfoLine(mapObject, underlyingResource);
 
         if (!gameObject.activeSelf)
         {
@@ -63,7 +60,9 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         ResolveReferences();
-        RefreshInfoLine(boundObject);
+        Resource underlyingResource = ResolveUnderlyingResource(boundObject);
+        RefreshFocusedInfoPanels(boundObject, underlyingResource);
+        RefreshInfoLine(boundObject, underlyingResource);
         RefreshInfoLineRectTransformImmediate();
     }
 
@@ -71,7 +70,7 @@ public class ObjectInfoPanel : MonoBehaviour
     {
         boundObject = null;
         ResolveReferences();
-        focusedObjectSlot?.Clear();
+        ClearFocusedInfoPanels();
         CloseInfoLine();
         if (gameObject.activeSelf)
         {
@@ -86,20 +85,16 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void ResolveReferences()
     {
-        if (focusedObjectSlot == null)
-        {
-            focusedObjectSlot = GetComponentInChildren<ItemSlot>(true);
-        }
-
         if (infoLine == null || !IsLocalComponent(infoLine))
         {
             infoLine = GetComponentInChildren<ItemInfoDescription>(true);
         }
 
+        ResolveFocusedInfoPanelReferences();
         CloseExtraInfoLines();
     }
 
-    private void RefreshInfoLine(MapObject mapObject)
+    private void RefreshInfoLine(MapObject mapObject, Resource underlyingResource)
     {
         CloseInfoLine();
 
@@ -111,25 +106,142 @@ public class ObjectInfoPanel : MonoBehaviour
 
         if (mapObject is BoxObject boxObject)
         {
-            ShowBoxObjectInfo(boxObject);
+            ShowBoxObjectInfo(boxObject, underlyingResource);
             return;
         }
 
         if (mapObject is ConveyorBelt conveyorBelt)
         {
-            ShowConveyorBeltInfo(conveyorBelt);
+            ShowConveyorBeltInfo(conveyorBelt, underlyingResource);
             return;
         }
 
         if (mapObject is RobotArm robotArm)
         {
-            ShowRobotArmInfo(robotArm);
+            ShowRobotArmInfo(robotArm, underlyingResource);
             return;
         }
 
         if (mapObject is InputOutputModule inputOutputModule)
         {
-            ShowInputOutputModuleInfo(inputOutputModule);
+            ShowInputOutputModuleInfo(inputOutputModule, underlyingResource);
+        }
+    }
+
+    private void RefreshFocusedInfoPanels(MapObject mapObject, Resource underlyingResource)
+    {
+        ClearFocusedInfoPanels();
+        SetFocusedInfoPanelItem(1, underlyingResource, underlyingResource != null);
+        SetFocusedInfoPanelItem(0, mapObject, true);
+    }
+
+    private void ClearFocusedInfoPanels()
+    {
+        int count = Mathf.Max(
+            focusedInfoPanels != null ? focusedInfoPanels.Count : 0,
+            focusedObjectSlots != null ? focusedObjectSlots.Count : 0);
+        for (int i = 0; i < count; i++)
+        {
+            ItemSlot slot = GetListItem(focusedObjectSlots, i);
+            if (slot != null)
+            {
+                slot.Clear();
+            }
+
+            SetFocusedInfoPanelVisible(i, false);
+        }
+    }
+
+    private void SetFocusedInfoPanelItem(int index, MapObject mapObject, bool forceVisible)
+    {
+        ItemSlot slot = GetListItem(focusedObjectSlots, index);
+        int itemId = mapObject != null ? mapObject.ResolveItemId() : -1;
+        bool visible = forceVisible || itemId >= 0;
+        SetFocusedInfoPanelVisible(index, visible);
+        if (slot == null)
+        {
+            return;
+        }
+
+        if (itemId >= 0)
+        {
+            slot.SetItemDisplay(itemId, 1, 0, true);
+        }
+        else
+        {
+            slot.Clear();
+        }
+    }
+
+    private void SetFocusedInfoPanelVisible(int index, bool visible)
+    {
+        GameObject panel = GetListItem(focusedInfoPanels, index);
+        if (panel == null)
+        {
+            ItemSlot slot = GetListItem(focusedObjectSlots, index);
+            panel = slot != null ? slot.gameObject : null;
+        }
+
+        if (panel != null && panel.activeSelf != visible)
+        {
+            panel.SetActive(visible);
+        }
+    }
+
+    private void ResolveFocusedInfoPanelReferences()
+    {
+        if (focusedInfoPanels == null)
+        {
+            focusedInfoPanels = new List<GameObject>();
+        }
+
+        if (focusedObjectSlots == null)
+        {
+            focusedObjectSlots = new List<ItemSlot>();
+        }
+
+        bool hasExplicitFocusedInfoReferences = focusedInfoPanels.Count > 0 || focusedObjectSlots.Count > 0;
+        AddUnique(focusedObjectSlots, focusedObjectSlot);
+
+        for (int i = 0; i < focusedInfoPanels.Count; i++)
+        {
+            GameObject panel = focusedInfoPanels[i];
+            if (panel == null)
+            {
+                continue;
+            }
+
+            ItemSlot slot = panel.GetComponent<ItemSlot>();
+            if (slot == null)
+            {
+                slot = panel.GetComponentInChildren<ItemSlot>(true);
+            }
+
+            AddUnique(focusedObjectSlots, slot);
+        }
+
+        if (!hasExplicitFocusedInfoReferences)
+        {
+            ItemSlot[] slots = GetComponentsInChildren<ItemSlot>(true);
+            for (int i = 0; i < slots.Length; i++)
+            {
+                ItemSlot slot = slots[i];
+                if (slot == null || IsInsideInfoLine(slot.transform))
+                {
+                    continue;
+                }
+
+                AddUnique(focusedObjectSlots, slot);
+            }
+        }
+
+        for (int i = 0; i < focusedObjectSlots.Count; i++)
+        {
+            ItemSlot slot = focusedObjectSlots[i];
+            if (slot != null)
+            {
+                AddUnique(focusedInfoPanels, slot.gameObject);
+            }
         }
     }
 
@@ -145,10 +257,10 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowResourceReserves(resource != null ? resource.ResourceCount : 0);
+        infoLine.ShowResourceReserves(resource != null ? resource.RemainingHarvestOutputCount : 0);
     }
 
-    private void ShowBoxObjectInfo(BoxObject boxObject)
+    private void ShowBoxObjectInfo(BoxObject boxObject, Resource underlyingResource)
     {
         if (infoLine == null)
         {
@@ -160,10 +272,10 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowBoxObject(boxObject);
+        infoLine.ShowBoxObject(boxObject, underlyingResource);
     }
 
-    private void ShowConveyorBeltInfo(ConveyorBelt conveyorBelt)
+    private void ShowConveyorBeltInfo(ConveyorBelt conveyorBelt, Resource underlyingResource)
     {
         if (infoLine == null)
         {
@@ -175,10 +287,10 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowConveyorBelt(conveyorBelt);
+        infoLine.ShowConveyorBelt(conveyorBelt, underlyingResource);
     }
 
-    private void ShowRobotArmInfo(RobotArm robotArm)
+    private void ShowRobotArmInfo(RobotArm robotArm, Resource underlyingResource)
     {
         if (infoLine == null)
         {
@@ -190,10 +302,10 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowRobotArm(robotArm);
+        infoLine.ShowRobotArm(robotArm, underlyingResource);
     }
 
-    private void ShowInputOutputModuleInfo(InputOutputModule inputOutputModule)
+    private void ShowInputOutputModuleInfo(InputOutputModule inputOutputModule, Resource underlyingResource)
     {
         if (infoLine == null)
         {
@@ -205,7 +317,56 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowInputOutputModule(inputOutputModule);
+        infoLine.ShowInputOutputModule(inputOutputModule, underlyingResource);
+    }
+
+    private static Resource ResolveUnderlyingResource(MapObject mapObject)
+    {
+        if (mapObject == null || mapObject is Resource)
+        {
+            return null;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain != null
+            && mapObject is InstallationObject installationObject
+            && installationObject.RuntimeOccupiedCoordinates != null)
+        {
+            IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject.RuntimeOccupiedCoordinates;
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                if (terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block)
+                    && TryGetUnderlyingResource(block, mapObject, out Resource resource))
+                {
+                    return resource;
+                }
+            }
+        }
+
+        Block parentBlock = mapObject.GetComponentInParent<Block>();
+        return TryGetUnderlyingResource(parentBlock, mapObject, out Resource parentResource)
+            ? parentResource
+            : null;
+    }
+
+    private static bool TryGetUnderlyingResource(Block block, MapObject displayedObject, out Resource resource)
+    {
+        resource = null;
+        if (block == null)
+        {
+            return false;
+        }
+
+        resource = block.Resource;
+        if (resource == null
+            || resource == displayedObject
+            || !resource.CanHarvest)
+        {
+            resource = null;
+            return false;
+        }
+
+        return true;
     }
 
     private void CloseInfoLine()
@@ -266,5 +427,28 @@ public class ObjectInfoPanel : MonoBehaviour
     private bool IsLocalComponent(Component component)
     {
         return component != null && component.transform != null && component.transform.IsChildOf(transform);
+    }
+
+    private bool IsInsideInfoLine(Transform target)
+    {
+        return target != null
+               && infoLine != null
+               && infoLine.transform != null
+               && target.IsChildOf(infoLine.transform);
+    }
+
+    private static T GetListItem<T>(List<T> list, int index) where T : class
+    {
+        return list != null && index >= 0 && index < list.Count ? list[index] : null;
+    }
+
+    private static void AddUnique<T>(List<T> list, T item) where T : class
+    {
+        if (list == null || item == null || list.Contains(item))
+        {
+            return;
+        }
+
+        list.Add(item);
     }
 }

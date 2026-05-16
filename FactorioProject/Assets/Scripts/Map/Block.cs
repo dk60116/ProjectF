@@ -72,6 +72,9 @@ public class Block : BaseObject
     [SerializeField]
     private MapFocus focus;
 
+    private bool interactionFocusVisible;
+    private bool mouseFocusVisible;
+
     private readonly List<List<PortableObject>> floorStacks = new List<List<PortableObject>>();
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
     private readonly List<PortableObject> conveyorStack = new List<PortableObject>();
@@ -386,9 +389,25 @@ public class Block : BaseObject
     private void Awake()
     {
         CacheChildReferences();
+        RefreshSerializedResourceOwnership();
         EnsureFloorObjectsInitialized();
         conveyorSlotDotPropertyBlock ??= new MaterialPropertyBlock();
         RefreshConveyorSlotDotVisuals();
+    }
+
+    private void RefreshSerializedResourceOwnership()
+    {
+        if (mapObject is Resource mapResource)
+        {
+            mapResource.SetOwningBlock(this);
+            return;
+        }
+
+        Resource childResource = mapObject == null ? GetComponentInChildren<Resource>(true) : null;
+        if (childResource != null && childResource.transform.IsChildOf(transform))
+        {
+            childResource.SetOwningBlock(this);
+        }
     }
 
     private void OnDestroy()
@@ -419,6 +438,7 @@ public class Block : BaseObject
         inputAreaCenterObjectsVisible = true;
         InvalidateConveyorRuntimeCaches();
         SetFocusVisible(false);
+        SetMouseFocusVisible(false);
     }
 
     public void SetMapObject(MapObject value)
@@ -519,6 +539,7 @@ public class Block : BaseObject
     public void PrepareForPool()
     {
         SetFocusVisible(false);
+        SetMouseFocusVisible(false);
         inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
         ResetFloorObjects();
@@ -2824,12 +2845,36 @@ public class Block : BaseObject
             return;
         }
 
+        interactionFocusVisible = isVisible;
+        RefreshFocusMarker();
+    }
+
+    public void SetMouseFocusVisible(bool isVisible)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        mouseFocusVisible = isVisible;
+        RefreshFocusMarker();
+    }
+
+    private void RefreshFocusMarker()
+    {
         if (focus == null)
         {
             focus = GetComponentInChildren<MapFocus>(true);
         }
 
-        focus?.SetVisible(isVisible);
+        if (focus == null)
+        {
+            return;
+        }
+
+        bool isVisible = interactionFocusVisible || mouseFocusVisible;
+        Color focusColor = mouseFocusVisible ? MapFocus.MouseFocusColor : MapFocus.DefaultFocusColor;
+        focus.SetVisible(isVisible, focusColor);
     }
 
     public Vector2Int Coordinate => coordinate;

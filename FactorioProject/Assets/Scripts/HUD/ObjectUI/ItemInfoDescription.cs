@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -9,9 +10,11 @@ public class ItemInfoDescription : MonoBehaviour
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
 
     [SerializeField]
-    private TextMeshProUGUI defaultText;
+    private List<GameObject> defaultParent = new List<GameObject>();
     [SerializeField]
-    private Image defaultSign;
+    private List<TextMeshProUGUI> defaultText = new List<TextMeshProUGUI>();
+    [SerializeField]
+    private List<Image> defaultSign = new List<Image>();
     [SerializeField]
     private GameObject energyGauge, workGauge;
     [SerializeField]
@@ -28,11 +31,12 @@ public class ItemInfoDescription : MonoBehaviour
     private ItemSlot energyItemSlot, inputItemSlot, outputItemSlot;
 
     private readonly List<int> conveyorItemIds = new List<int>(2);
+    private int defaultStatusLineIndex;
 
     public void Clear()
     {
-        SetDefaultText(null, false);
-        SetDefaultSign(false, Color.white);
+        defaultStatusLineIndex = 0;
+        ClearDefaultLines();
         SetGauge(energyGauge, energyFill, energyText, false, 0f, Color.white, 0f, 0f);
         SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
 
@@ -45,12 +49,12 @@ public class ItemInfoDescription : MonoBehaviour
     public void ShowResourceReserves(int reserves)
     {
         Clear();
-        SetDefaultText($"Reserves: {Mathf.Max(0, reserves)}", true);
+        SetResourceReservesLine(0, reserves);
     }
 
-    public void ShowConveyorBelt(ConveyorBelt conveyorBelt)
+    public void ShowConveyorBelt(ConveyorBelt conveyorBelt, Resource underlyingResource = null)
     {
-        Clear();
+        BeginObjectDisplay(underlyingResource);
 
         conveyorItemIds.Clear();
         conveyorBelt?.CopyObjectInfoItemIds(conveyorItemIds, 2);
@@ -59,9 +63,9 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultItemSlot(1, conveyorItemIds.Count > 1 ? conveyorItemIds[1] : -1, true);
     }
 
-    public void ShowBoxObject(BoxObject boxObject)
+    public void ShowBoxObject(BoxObject boxObject, Resource underlyingResource = null)
     {
-        Clear();
+        BeginObjectDisplay(underlyingResource);
 
         if (boxObject != null
             && boxObject.TryGetObjectInfoItem(out int itemId, out int itemCount, out int capacity)
@@ -76,9 +80,9 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowRobotArm(RobotArm robotArm)
+    public void ShowRobotArm(RobotArm robotArm, Resource underlyingResource = null)
     {
-        Clear();
+        BeginObjectDisplay(underlyingResource);
         SetDefaultItemSlot(0, robotArm != null ? robotArm.HeldItemId : -1, true);
         if (robotArm == null)
         {
@@ -89,9 +93,9 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultStatus(statusText, isWorking);
     }
 
-    public void ShowInputOutputModule(InputOutputModule module)
+    public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)
     {
-        Clear();
+        BeginObjectDisplay(underlyingResource);
 
         SetGauge(
             energyGauge,
@@ -101,7 +105,8 @@ public class ItemInfoDescription : MonoBehaviour
             module != null ? module.ObjectInfoEnergyGaugeFillAmount : 0f,
             module != null ? module.ObjectInfoEnergyGaugeFillColor : Color.white,
             module != null ? module.ObjectInfoStoredEnergy : 0f,
-            module != null ? module.ObjectInfoEnergyGaugeCapacity : 0f);
+            module != null ? module.ObjectInfoEnergyGaugeCapacity : 0f,
+            true);
         SetGauge(
             workGauge,
             workFill,
@@ -110,7 +115,8 @@ public class ItemInfoDescription : MonoBehaviour
             module != null ? module.ObjectInfoWorkGaugeFillAmount : 0f,
             module != null ? module.ObjectInfoWorkGaugeFillColor : Color.white,
             module != null ? module.ObjectInfoCurrentUseEnergy : 0f,
-            module != null ? module.ObjectInfoCompleteEnergy : 0f);
+            module != null ? module.ObjectInfoCompleteEnergy : 0f,
+            true);
 
         if (module == null)
         {
@@ -155,8 +161,31 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetDefaultStatus(string text, bool isProducing)
     {
-        SetDefaultText(text, !string.IsNullOrEmpty(text));
-        SetDefaultSign(!string.IsNullOrEmpty(text), isProducing ? ProducingSignColor : StoppedSignColor);
+        SetDefaultText(defaultStatusLineIndex, text, !string.IsNullOrEmpty(text));
+        SetDefaultSign(defaultStatusLineIndex, !string.IsNullOrEmpty(text), isProducing ? ProducingSignColor : StoppedSignColor);
+    }
+
+    private void BeginObjectDisplay(Resource underlyingResource)
+    {
+        Clear();
+        if (!IsDisplayableUnderlyingResource(underlyingResource))
+        {
+            return;
+        }
+
+        SetResourceReservesLine(0, underlyingResource.RemainingHarvestOutputCount);
+        defaultStatusLineIndex = 1;
+    }
+
+    private void SetResourceReservesLine(int index, int reserves)
+    {
+        SetDefaultText(index, $"Reserves: {Mathf.Max(0, reserves)}", true);
+        SetDefaultSign(index, false, Color.white);
+    }
+
+    private static bool IsDisplayableUnderlyingResource(Resource resource)
+    {
+        return resource != null && resource.CanHarvest;
     }
 
     private void SetDefaultItemSlot(int index, int itemId, bool forceRootActive)
@@ -187,24 +216,72 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetDefaultText(string text, bool visible)
     {
-        if (defaultText == null)
+        SetDefaultText(0, text, visible);
+    }
+
+    private void SetDefaultText(int index, string text, bool visible)
+    {
+        TextMeshProUGUI targetText = GetListItem(defaultText, index);
+        if (targetText != null)
         {
-            return;
+            targetText.text = visible ? text : string.Empty;
+            SetActiveIfNeeded(targetText.gameObject, visible);
         }
 
-        defaultText.text = visible ? text : string.Empty;
-        SetActiveIfNeeded(defaultText.gameObject, visible);
+        RefreshDefaultParentActive(index);
     }
 
     private void SetDefaultSign(bool visible, Color color)
     {
-        if (defaultSign == null)
+        SetDefaultSign(0, visible, color);
+    }
+
+    private void SetDefaultSign(int index, bool visible, Color color)
+    {
+        Image targetSign = GetListItem(defaultSign, index);
+        if (targetSign != null)
         {
-            return;
+            targetSign.color = color;
+            SetActiveIfNeeded(targetSign.gameObject, visible);
         }
 
-        defaultSign.color = color;
-        SetActiveIfNeeded(defaultSign.gameObject, visible);
+        RefreshDefaultParentActive(index);
+    }
+
+    private void ClearDefaultLines()
+    {
+        int count = Mathf.Max(
+            defaultParent != null ? defaultParent.Count : 0,
+            defaultText != null ? defaultText.Count : 0,
+            defaultSign != null ? defaultSign.Count : 0);
+
+        for (int i = 0; i < count; i++)
+        {
+            TextMeshProUGUI text = GetListItem(defaultText, i);
+            if (text != null)
+            {
+                text.text = string.Empty;
+                SetActiveIfNeeded(text.gameObject, false);
+            }
+
+            Image sign = GetListItem(defaultSign, i);
+            if (sign != null)
+            {
+                sign.color = Color.white;
+                SetActiveIfNeeded(sign.gameObject, false);
+            }
+
+            SetActiveIfNeeded(GetListItem(defaultParent, i), false);
+        }
+    }
+
+    private void RefreshDefaultParentActive(int index)
+    {
+        TextMeshProUGUI targetText = GetListItem(defaultText, index);
+        Image targetSign = GetListItem(defaultSign, index);
+        bool active = (targetText != null && targetText.gameObject.activeSelf)
+            || (targetSign != null && targetSign.gameObject.activeSelf);
+        SetActiveIfNeeded(GetListItem(defaultParent, index), active);
     }
 
     private static void ClearItemSlot(GameObject root, ItemSlot slot)
@@ -279,6 +356,11 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    private static T GetListItem<T>(List<T> list, int index) where T : class
+    {
+        return list != null && index >= 0 && index < list.Count ? list[index] : null;
+    }
+
     private static void SetGauge(
         GameObject root,
         Image fill,
@@ -287,7 +369,8 @@ public class ItemInfoDescription : MonoBehaviour
         float fillAmount,
         Color fillColor,
         float currentValue,
-        float maxValue)
+        float maxValue,
+        bool alwaysShowOneDecimal = false)
     {
         SetActiveIfNeeded(root, active);
         if (fill != null)
@@ -301,18 +384,23 @@ public class ItemInfoDescription : MonoBehaviour
 
         if (text != null)
         {
-            text.text = active ? FormatGaugeValue(currentValue, maxValue) : string.Empty;
+            text.text = active ? FormatGaugeValue(currentValue, maxValue, alwaysShowOneDecimal) : string.Empty;
         }
     }
 
-    private static string FormatGaugeValue(float currentValue, float maxValue)
+    private static string FormatGaugeValue(float currentValue, float maxValue, bool alwaysShowOneDecimal)
     {
-        return $"{FormatGaugeNumber(currentValue)} / {FormatGaugeNumber(maxValue)}";
+        return $"{FormatGaugeNumber(currentValue, alwaysShowOneDecimal)} / {FormatGaugeNumber(maxValue, alwaysShowOneDecimal)}";
     }
 
-    private static string FormatGaugeNumber(float value)
+    private static string FormatGaugeNumber(float value, bool alwaysShowOneDecimal)
     {
         value = Mathf.Max(0f, value);
+        if (alwaysShowOneDecimal)
+        {
+            return value.ToString("0.0", CultureInfo.InvariantCulture);
+        }
+
         float rounded = Mathf.Round(value);
         if (Mathf.Abs(value - rounded) < 0.05f)
         {

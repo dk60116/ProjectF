@@ -6,6 +6,8 @@ using UnityEngine.UI;
 [RequireComponent(typeof(Image))]
 public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPointerUpHandler
 {
+    private const int NoActivePointerId = int.MinValue;
+
     [SerializeField]
     private Image background;
 
@@ -23,6 +25,8 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
     private Canvas rootCanvas;
     private Image inputCatcher;
     private Vector2 joystickCenter;
+    private int activePointerId = NoActivePointerId;
+    private bool isPointerActive;
 
     private void Awake()
     {
@@ -49,11 +53,18 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
 
     public void OnPointerDown(PointerEventData eventData)
     {
+        if (!IsPrimaryPointerEvent(eventData))
+        {
+            return;
+        }
+
         if (!TryGetRootLocalPoint(eventData, out Vector2 localPoint))
         {
             return;
         }
 
+        activePointerId = eventData.pointerId;
+        isPointerActive = true;
         joystickCenter = localPoint;
         SetVisualPosition(localPoint);
         SetVisualActive(true);
@@ -62,7 +73,10 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
 
     public void OnDrag(PointerEventData eventData)
     {
-        if (backgroundRect == null || handleRect == null || !TryGetRootLocalPoint(eventData, out Vector2 localPoint))
+        if (!IsActivePointerEvent(eventData)
+            || backgroundRect == null
+            || handleRect == null
+            || !TryGetRootLocalPoint(eventData, out Vector2 localPoint))
         {
             return;
         }
@@ -76,6 +90,11 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
 
     public void OnPointerUp(PointerEventData eventData)
     {
+        if (!IsActivePointerEvent(eventData))
+        {
+            return;
+        }
+
         ResetHandle();
     }
 
@@ -86,6 +105,8 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
 
     private void ResetHandle()
     {
+        isPointerActive = false;
+        activePointerId = NoActivePointerId;
         InputDirection = Vector2.zero;
         joystickCenter = Vector2.zero;
 
@@ -96,6 +117,16 @@ public class Joystick : MonoBehaviour, IDragHandler, IPointerDownHandler, IPoint
         }
 
         SetVisualActive(false);
+    }
+
+    private static bool IsPrimaryPointerEvent(PointerEventData eventData)
+    {
+        return eventData != null && eventData.button == PointerEventData.InputButton.Left;
+    }
+
+    private bool IsActivePointerEvent(PointerEventData eventData)
+    {
+        return eventData != null && isPointerActive && eventData.pointerId == activePointerId;
     }
 
     private void ConfigureTouchArea()

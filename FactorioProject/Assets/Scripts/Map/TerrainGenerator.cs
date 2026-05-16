@@ -1373,10 +1373,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
 
                 ApplyBlockBiomeVisuals(block, visualData);
-                if ((!HasSavedOrLiveInstallationAtCoordinate(worldCoordinate)
-                        || CanSpawnResourceUnderMiningMachine(worldCoordinate))
-                    && CanSpawnResourceOnBiome(visualData.primaryBiome)
-                    && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab))
+                if (CanSpawnResourceOnBiome(visualData.primaryBiome)
+                    && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab)
+                    && CanSpawnResourceAtGeneratedCoordinate(worldCoordinate, resourcePrefab))
                 {
                     SpawnResourceOnBlock(block, resourcePrefab, worldCoordinate);
                 }
