@@ -1757,6 +1757,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             craftingSlots.Add(craftingSlot);
         }
 
+        EnsureMinimumCraftingSlotCapacity();
         craftingSlots.Sort((left, right) => GetCraftingSlotSortKey(left).CompareTo(GetCraftingSlotSortKey(right)));
     }
 
@@ -1871,6 +1872,53 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     protected virtual int GetCraftingDirectionSign()
     {
         return -1;
+    }
+
+    protected virtual int MinimumCraftingSlotCapacity => 0;
+
+    private void EnsureMinimumCraftingSlotCapacity()
+    {
+        int minimumCapacity = Mathf.Max(0, MinimumCraftingSlotCapacity);
+        if (minimumCapacity <= 0 || craftingRoot == null || craftingSlots == null || craftingSlots.Count >= minimumCapacity)
+        {
+            return;
+        }
+
+        CraftingSlot template = GetCraftingSlotCloneTemplate();
+        if (template == null)
+        {
+            return;
+        }
+
+        while (craftingSlots.Count < minimumCapacity)
+        {
+            CraftingSlot clonedSlot = Instantiate(template, craftingRoot);
+            clonedSlot.name = $"CraftingSlot ({craftingSlots.Count})";
+            clonedSlot.Clear();
+            clonedSlot.HideImmediate();
+            craftingSlots.Add(clonedSlot);
+        }
+
+        craftingSlots.Sort((left, right) => GetCraftingSlotSortKey(left).CompareTo(GetCraftingSlotSortKey(right)));
+    }
+
+    private CraftingSlot GetCraftingSlotCloneTemplate()
+    {
+        if (craftingSlots == null)
+        {
+            return null;
+        }
+
+        for (int i = craftingSlots.Count - 1; i >= 0; i--)
+        {
+            CraftingSlot candidate = craftingSlots[i];
+            if (candidate != null)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private bool IsCraftingExpandAnimationPlaying()

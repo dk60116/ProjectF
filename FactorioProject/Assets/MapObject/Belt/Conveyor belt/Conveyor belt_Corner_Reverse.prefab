@@ -321,7 +321,7 @@ PrefabInstance:
       objectReference: {fileID: 4300000, guid: e3c6e76f904cb5b4a99d9769d9d387ac, type: 2}
     - target: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Name
-      value: Conveyor Belt_Corner_Reverse
+      value: Conveyor belt_Corner_Reverse
       objectReference: {fileID: 0}
     m_RemovedComponents:
     - {fileID: 6362304892840611056, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -447,6 +447,10 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: aa03b77214b221240923e637a6e5d462, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 90
+      objectReference: {fileID: 0}
+    - target: {fileID: -5922727265890951825, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: -0.014
       objectReference: {fileID: 0}
     - target: {fileID: -3220916626886679871, guid: aa03b77214b221240923e637a6e5d462, type: 3}
       propertyPath: m_Materials.Array.data[0]

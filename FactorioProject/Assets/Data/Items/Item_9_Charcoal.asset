@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_9_Charcoal
   m_EditorClassIdentifier: 
   itemName: Charcoal
-  id: 9
+  id: 8
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 984c040f3a6583b4b980d2dabf30525a, type: 2}
   portableMat: {fileID: 2100000, guid: 18b6e63bb38afe440a0d47b49fdee14d, type: 2}

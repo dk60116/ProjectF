@@ -521,6 +521,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIds);
     }
 
+    public static bool TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    {
+        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendAcceptedRuntimeInputItemIds);
+    }
+
     public static bool TryGetInputEnergyTypesAtRuntimeGridCoordinate(
         Vector2Int coordinate,
         ISet<ItemDefinition.EnergyType> energyTypes)
@@ -610,6 +615,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return module != null && module.AppendRuntimeInputItemIdsAtCoordinate(coordinate, inputItemIds);
     }
 
+    private static bool TryAppendAcceptedRuntimeInputItemIds(
+        InputOutputModule module,
+        Vector2Int coordinate,
+        ISet<int> inputItemIds)
+    {
+        return module != null && module.AppendAcceptedRuntimeInputItemIdsAtCoordinate(coordinate, inputItemIds);
+    }
+
     private static bool TryAppendRuntimeInputEnergyTypes(
         InputOutputModule module,
         Vector2Int coordinate,
@@ -659,7 +672,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         HashSet<int> inputItemIds = new HashSet<int>();
         bool hasInputItemArea = InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, inputItemIds);
-        hasInputItemArea |= TryGetInputItemIdsAtRuntimeGridCoordinate(coordinate, inputItemIds);
+        hasInputItemArea |= TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(coordinate, inputItemIds);
 
         HashSet<ItemDefinition.EnergyType> inputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
         bool hasInputEnergyArea = InputOutputModuleEnergyAreaController.TryGetAcceptedEnergyTypes(coordinate, inputEnergyTypes);
@@ -827,6 +840,38 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
 
             inputItemIds.Add(inputArea.itemId);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    private bool AppendAcceptedRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    {
+        if (inputItemIds == null || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        if (recipeCount <= 0)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+        {
+            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out int outputItemId, out _)
+                || inputItemId < 0
+                || !IsRecipeOutputAllowedByItemFilter(outputItemId)
+                || !TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea)
+                || inputArea.coordinate != coordinate)
+            {
+                continue;
+            }
+
+            inputItemIds.Add(inputItemId);
             foundAny = true;
         }
 
@@ -1165,6 +1210,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         bool blockedByInputItem = false;
         bool blockedByOutput = false;
         bool blockedByEnergy = false;
+        bool blockedByTargetFilter = false;
+        bool hasFilterAllowedRecipe = false;
 
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
@@ -1174,6 +1221,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
 
             hasRecipe = true;
+            if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
+            {
+                blockedByTargetFilter = true;
+                continue;
+            }
+
+            hasFilterAllowedRecipe = true;
+
             if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea)
                 || !TryGetLoadedBlock(inputArea.coordinate, out Block inputBlock)
                 || inputBlock == null)
@@ -1217,6 +1272,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         if (blockedByEnergy)
         {
             return "No energy";
+        }
+
+        if (blockedByTargetFilter && !hasFilterAllowedRecipe)
+        {
+            return "No target";
         }
 
         if (blockedByInputItem)
@@ -1329,6 +1389,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                     out outputItemId,
                     out outputRecipeCount))
             {
+                if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
+                {
+                    continue;
+                }
+
                 if (!TryResolveObjectInfoAreaCounts(
                     inputItemId,
                     outputItemId,
@@ -1342,8 +1407,27 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                     continue;
                 }
 
+                if (inputAreaCount <= 0
+                    && outputAreaCount <= 0
+                    && !ShouldShowObjectInfoEmptyRecipeLine(outputItemId))
+                {
+                    continue;
+                }
+
                 return true;
             }
+        }
+
+        if (ShouldShowObjectInfoEmptyInputOutputSlots())
+        {
+            ResetObjectInfoItemPair(
+                out inputItemId,
+                out inputAreaCount,
+                out inputAreaCapacity,
+                out outputItemId,
+                out outputAreaCount,
+                out outputAreaCapacity);
+            return true;
         }
 
         ResetObjectInfoItemPair(
@@ -1399,6 +1483,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                     out inputRecipeCount,
                     out outputItemId,
                     out outputRecipeCount))
+            {
+                continue;
+            }
+
+            if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
             {
                 continue;
             }
@@ -2009,6 +2098,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
             if (!TryGetRecipePair(recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
+            {
+                continue;
+            }
+
+            if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
             {
                 continue;
             }
@@ -2857,6 +2951,21 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     protected int ActiveOutputCount => activeOutputCount;
     protected bool IsActiveCraftRunning => hasActiveCraft;
     protected bool IsWaitingForOutput => waitingForOutput;
+
+    protected virtual bool IsRecipeOutputAllowedByItemFilter(int outputItemId)
+    {
+        return true;
+    }
+
+    protected virtual bool ShouldShowObjectInfoEmptyRecipeLine(int outputItemId)
+    {
+        return false;
+    }
+
+    protected virtual bool ShouldShowObjectInfoEmptyInputOutputSlots()
+    {
+        return runtimeInputItemAreas != null && runtimeInputItemAreas.Count > 0;
+    }
 
     protected void ClearActiveCraft()
     {

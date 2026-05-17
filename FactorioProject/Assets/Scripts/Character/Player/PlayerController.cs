@@ -7,6 +7,9 @@ using UnityEngine.Serialization;
 [RequireComponent(typeof(Player))]
 public class PlayerController : MonoBehaviour
 {
+    private const int Belt2FDefaultFootprintWidth = 1;
+    private const int Belt2FDefaultFootprintLength = 3;
+
     private const float ConveyorStandingHeight = 0.2f;
     private const float ConveyorStandingSmoothTime = 0.08f;
     private const float ConveyorStandingEnterDistance = 0.08f;
@@ -44,6 +47,8 @@ public class PlayerController : MonoBehaviour
     private readonly HashSet<Block> currentMouseFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> mouseFocusBlocks = new List<Block>();
     private readonly List<Block> mouseFocusRemovalBuffer = new List<Block>();
+    private readonly List<FocusMarkerGroup> focusMarkerGroups = new List<FocusMarkerGroup>();
+    private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
@@ -82,6 +87,62 @@ public class PlayerController : MonoBehaviour
         public MapObject mapObject;
         public Block fallbackBlock;
         public Block singleBlock;
+    }
+
+    private sealed class FocusMarkerGroup
+    {
+        public MapObject mapObject;
+        public Block markerBlock;
+        public int count;
+        private Vector2Int markerCoordinate;
+        private Vector3 minWorldPosition;
+        private Vector3 maxWorldPosition;
+
+        public Vector3 Center => new Vector3(
+            (minWorldPosition.x + maxWorldPosition.x) * 0.5f,
+            markerBlock != null ? markerBlock.transform.position.y : (minWorldPosition.y + maxWorldPosition.y) * 0.5f,
+            (minWorldPosition.z + maxWorldPosition.z) * 0.5f);
+
+        public Vector2 Size => new Vector2(
+            Mathf.Max(1f, maxWorldPosition.x - minWorldPosition.x + 1f),
+            Mathf.Max(1f, maxWorldPosition.z - minWorldPosition.z + 1f));
+
+        public void Reset(MapObject targetMapObject, Block block)
+        {
+            mapObject = targetMapObject;
+            markerBlock = block;
+            count = 0;
+            markerCoordinate = block != null ? block.Coordinate : Vector2Int.zero;
+            if (block != null)
+            {
+                Vector3 position = block.transform.position;
+                minWorldPosition = position;
+                maxWorldPosition = position;
+                Add(block);
+            }
+        }
+
+        public void Add(Block block)
+        {
+            if (block == null)
+            {
+                return;
+            }
+
+            count++;
+            Vector2Int coordinate = block.Coordinate;
+            if (markerBlock == null
+                || coordinate.x < markerCoordinate.x
+                || (coordinate.x == markerCoordinate.x && coordinate.y < markerCoordinate.y))
+            {
+                markerBlock = block;
+                markerCoordinate = coordinate;
+            }
+
+            Vector3 position = block.transform.position;
+            minWorldPosition = Vector3.Min(minWorldPosition, position);
+            maxWorldPosition = Vector3.Max(maxWorldPosition, position);
+        }
     }
 
     public bool IsResourceHarvestingActive => currentTargetResource != null && pendingHarvestResources.Count > 0;
@@ -1302,7 +1363,8 @@ public class PlayerController : MonoBehaviour
             }
 
             bool supportsItemFilter = IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
-                                      || TryResolveRobotArm(mapObject, out _);
+                                      || TryResolveRobotArm(mapObject, out _)
+                                      || TryResolveProductionMachine(mapObject, out _);
             if (!supportsItemFilter)
             {
                 continue;
@@ -1319,6 +1381,30 @@ public class PlayerController : MonoBehaviour
         }
 
         return focusedMapObject != null;
+    }
+
+    private static bool TryResolveProductionMachine(MapObject mapObject, out ProductionMachine productionMachine)
+    {
+        productionMachine = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        productionMachine = mapObject as ProductionMachine;
+        if (productionMachine != null)
+        {
+            return true;
+        }
+
+        productionMachine = mapObject.GetComponent<ProductionMachine>();
+        if (productionMachine != null)
+        {
+            return true;
+        }
+
+        productionMachine = mapObject.GetComponentInChildren<ProductionMachine>(true);
+        return productionMachine != null;
     }
 
     private static bool TryResolveRobotArm(MapObject mapObject, out RobotArm robotArm)
@@ -1995,6 +2081,19 @@ public class PlayerController : MonoBehaviour
                     appended = true;
                 }
             }
+
+            if (TryGetInstallationVisualCoordinates(installationObject, out List<Vector2Int> visualCoordinates))
+            {
+                for (int i = 0; i < visualCoordinates.Count; i++)
+                {
+                    if (!TryAppendFocusBlock(results, visualCoordinates[i]))
+                    {
+                        continue;
+                    }
+
+                    appended = true;
+                }
+            }
         }
 
         if (!appended && fallbackBlock != null && !results.Contains(fallbackBlock))
@@ -2097,7 +2196,19 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        mapObject = fallbackBlock.MapObject != null ? fallbackBlock.MapObject : fallbackBlock.Resource;
+        mapObject = TryFindInstallationCoveringCoordinate(
+                fallbackBlock.Coordinate,
+                out InstallationObject coveringInstallation,
+                out Block coveringFallbackBlock)
+            ? coveringInstallation
+            : fallbackBlock.MapObject != null
+                ? fallbackBlock.MapObject
+                : fallbackBlock.Resource;
+        if (coveringFallbackBlock != null)
+        {
+            fallbackBlock = coveringFallbackBlock;
+        }
+
         if (!IsValidMouseFocusMapObject(mapObject))
         {
             mapObject = null;
@@ -2155,6 +2266,158 @@ public class PlayerController : MonoBehaviour
         }
 
         return TryGetPointerBlockFromGroundPlane(ray, out fallbackBlock);
+    }
+
+    private bool TryFindInstallationCoveringCoordinate(
+        Vector2Int coordinate,
+        out InstallationObject installationObject,
+        out Block fallbackBlock)
+    {
+        installationObject = null;
+        fallbackBlock = null;
+
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        List<InstallationObject> checkedInstallations = new List<InstallationObject>();
+        int searchRadius = Mathf.Max(4, Mathf.CeilToInt(InstallationObject.GlobalMaxFocusActivationRadius) + 4);
+        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        {
+            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            {
+                Vector2Int candidateCoordinate = coordinate + new Vector2Int(offsetX, offsetY);
+                if (!terrain.TryGetLoadedBlock(candidateCoordinate, out Block candidateBlock)
+                    || candidateBlock == null
+                    || !(candidateBlock.MapObject is InstallationObject candidate)
+                    || candidate == null
+                    || !candidate.gameObject.activeInHierarchy
+                    || !candidate.AllowsFocus
+                    || checkedInstallations.Contains(candidate)
+                    || !InstallationCoversCoordinate(candidate, coordinate))
+                {
+                    continue;
+                }
+
+                checkedInstallations.Add(candidate);
+                installationObject = candidate;
+                fallbackBlock = candidateBlock;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool InstallationCoversCoordinate(InstallationObject installationObject, Vector2Int coordinate)
+    {
+        if (installationObject == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates != null)
+        {
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                if (occupiedCoordinates[i] == coordinate)
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (!TryGetInstallationVisualCoordinates(installationObject, out List<Vector2Int> visualCoordinates))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < visualCoordinates.Count; i++)
+        {
+            if (visualCoordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetInstallationVisualCoordinates(
+        InstallationObject installationObject,
+        out List<Vector2Int> coordinates)
+    {
+        coordinates = null;
+        if (installationObject == null
+            || !installationObject.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return false;
+        }
+
+        List<Vector2Int> offsets = GetInstallationVisualLocalOffsets(installationObject, quarterTurns);
+        if (offsets.Count <= 0)
+        {
+            return false;
+        }
+
+        coordinates = new List<Vector2Int>(offsets.Count);
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            coordinates.Add(anchorCoordinate + offsets[i]);
+        }
+
+        return coordinates.Count > 0;
+    }
+
+    private static List<Vector2Int> GetInstallationVisualLocalOffsets(
+        InstallationObject installationObject,
+        int quarterTurns)
+    {
+        int sizeX = Mathf.Max(1, installationObject != null ? installationObject.Status.mapSizeX : 1);
+        int sizeY = Mathf.Max(1, installationObject != null ? installationObject.Status.mapSizeY : 1);
+        Vector2Int anchorCell;
+        if (installationObject is ConvayorBelt2F)
+        {
+            if (sizeX == 1 && sizeY == 1)
+            {
+                sizeX = Belt2FDefaultFootprintWidth;
+                sizeY = Belt2FDefaultFootprintLength;
+            }
+
+            anchorCell = installationObject != null
+                ? installationObject.PlacementCenterCell
+                : Vector2Int.zero;
+        }
+        else
+        {
+            anchorCell = installationObject != null ? installationObject.PlacementCenterCell : Vector2Int.zero;
+        }
+
+        List<Vector2Int> offsets = new List<Vector2Int>(sizeX * sizeY);
+        for (int y = 0; y < sizeY; y++)
+        {
+            for (int x = 0; x < sizeX; x++)
+            {
+                offsets.Add(RotateFootprintOffset(new Vector2Int(x - anchorCell.x, y - anchorCell.y), quarterTurns));
+            }
+        }
+
+        return offsets;
+    }
+
+    private static Vector2Int RotateFootprintOffset(Vector2Int offset, int quarterTurns)
+    {
+        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        return normalizedQuarterTurns switch
+        {
+            1 => new Vector2Int(offset.y, -offset.x),
+            2 => new Vector2Int(-offset.x, -offset.y),
+            3 => new Vector2Int(-offset.y, offset.x),
+            _ => offset
+        };
     }
 
     private bool TryGetPointerBlockFromGroundPlane(Ray ray, out Block block)
@@ -2258,15 +2521,10 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            if (currentMouseFocusedBlocks.Add(block))
-            {
-                block.SetMouseFocusVisible(true);
-            }
-            else
-            {
-                block.SetMouseFocusVisible(true);
-            }
+            currentMouseFocusedBlocks.Add(block);
         }
+
+        RefreshMouseFocusMarkers();
     }
 
     private static float GetBlockFocusDistanceSqr(Block block, Vector3 origin)
@@ -2349,17 +2607,146 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            if (currentFocusedBlocks.Add(block))
+            currentFocusedBlocks.Add(block);
+        }
+
+        RefreshInteractionFocusMarkers();
+        UpdateSelectedWorkableRangeVisuals(nextBlocks);
+        RefreshTemporaryDropFocusVisibility();
+    }
+
+    private void RefreshInteractionFocusMarkers()
+    {
+        RefreshGroupedFocusMarkers(currentFocusedBlocks, false);
+    }
+
+    private void RefreshMouseFocusMarkers()
+    {
+        RefreshGroupedFocusMarkers(currentMouseFocusedBlocks, true);
+    }
+
+    private void RefreshGroupedFocusMarkers(HashSet<Block> focusedBlocks, bool mouseFocus)
+    {
+        focusMarkerGroupCount = 0;
+        if (focusedBlocks == null || focusedBlocks.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (Block block in focusedBlocks)
+        {
+            if (block == null)
             {
-                if (block != null)
-                {
-                    block.SetFocusVisible(true);
-                }
+                continue;
+            }
+
+            SetBlockFocusVisible(block, mouseFocus, false);
+            MapObject focusedMapObject = block.MapObject;
+            if (focusedMapObject == null)
+            {
+                SetBlockFocusVisible(block, mouseFocus, true);
+                continue;
+            }
+
+            FocusMarkerGroup group = GetFocusMarkerGroup(focusedMapObject);
+            if (group == null)
+            {
+                group = GetNextFocusMarkerGroup();
+                group.Reset(focusedMapObject, block);
+            }
+            else
+            {
+                group.Add(block);
             }
         }
 
-        UpdateSelectedWorkableRangeVisuals(nextBlocks);
-        RefreshTemporaryDropFocusVisibility();
+        for (int i = 0; i < focusMarkerGroupCount; i++)
+        {
+            FocusMarkerGroup group = focusMarkerGroups[i];
+            if (group == null || group.markerBlock == null)
+            {
+                continue;
+            }
+
+            if (group.count <= 1)
+            {
+                SetBlockFocusVisible(group.markerBlock, mouseFocus, true);
+            }
+            else
+            {
+                SetBlockFocusVisible(group.markerBlock, mouseFocus, true, group.Center, group.Size);
+            }
+        }
+    }
+
+    private FocusMarkerGroup GetNextFocusMarkerGroup()
+    {
+        FocusMarkerGroup group;
+        if (focusMarkerGroupCount < focusMarkerGroups.Count)
+        {
+            group = focusMarkerGroups[focusMarkerGroupCount];
+        }
+        else
+        {
+            group = new FocusMarkerGroup();
+            focusMarkerGroups.Add(group);
+        }
+
+        focusMarkerGroupCount++;
+        return group;
+    }
+
+    private FocusMarkerGroup GetFocusMarkerGroup(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < focusMarkerGroupCount; i++)
+        {
+            FocusMarkerGroup group = focusMarkerGroups[i];
+            if (group != null && group.mapObject == mapObject)
+            {
+                return group;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SetBlockFocusVisible(Block block, bool mouseFocus, bool isVisible)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        if (mouseFocus)
+        {
+            block.SetMouseFocusVisible(isVisible);
+        }
+        else
+        {
+            block.SetFocusVisible(isVisible);
+        }
+    }
+
+    private static void SetBlockFocusVisible(Block block, bool mouseFocus, bool isVisible, Vector3 center, Vector2 size)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        if (mouseFocus)
+        {
+            block.SetMouseFocusVisible(isVisible, center, size);
+        }
+        else
+        {
+            block.SetFocusVisible(isVisible, center, size);
+        }
     }
 
     private void UpdateSelectedWorkableRangeVisuals(List<Block> nextBlocks)

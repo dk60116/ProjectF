@@ -11,6 +11,7 @@ public interface IVirtualRenderBatchOwner
 public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBatchKey>
 {
     public const int UvScrollQuantize = 10000;
+    public const int UvLengthQuantize = 10000;
 
     public readonly Mesh Mesh;
     public readonly Material Material;
@@ -20,6 +21,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly bool ReceiveShadows;
     public readonly bool HasUvScroll;
     public readonly int UvScrollYTicks;
+    public readonly int UvLengthScaleTicks;
+    public readonly int UvLengthOffsetTicks;
     public readonly bool UseSleepAwakeDarkTint;
     public readonly bool UseBeltItemLineDebugColor;
     public readonly Color32 BeltItemLineDebugColor;
@@ -43,7 +46,9 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         int batchGroupId = 0,
         int batchCellX = 0,
         int batchCellZ = 0,
-        bool invertCulling = false)
+        bool invertCulling = false,
+        int uvLengthScaleTicks = UvLengthQuantize,
+        int uvLengthOffsetTicks = 0)
     {
         Mesh = mesh;
         Material = material;
@@ -53,6 +58,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         ReceiveShadows = receiveShadows;
         HasUvScroll = hasUvScroll;
         UvScrollYTicks = hasUvScroll ? uvScrollYTicks : 0;
+        UvLengthScaleTicks = hasUvScroll ? uvLengthScaleTicks : UvLengthQuantize;
+        UvLengthOffsetTicks = hasUvScroll ? uvLengthOffsetTicks : 0;
         UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
         UseBeltItemLineDebugColor = useBeltItemLineDebugColor;
         BeltItemLineDebugColor = useBeltItemLineDebugColor ? beltItemLineDebugColor : (Color32)Color.white;
@@ -67,6 +74,11 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         return Mathf.RoundToInt(uvScrollY * UvScrollQuantize);
     }
 
+    public static int QuantizeUvLength(float uvLengthValue)
+    {
+        return Mathf.RoundToInt(uvLengthValue * UvLengthQuantize);
+    }
+
     public bool Equals(VirtualRenderBatchKey other)
     {
         return Mesh == other.Mesh
@@ -77,6 +89,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && ReceiveShadows == other.ReceiveShadows
             && HasUvScroll == other.HasUvScroll
             && UvScrollYTicks == other.UvScrollYTicks
+            && UvLengthScaleTicks == other.UvLengthScaleTicks
+            && UvLengthOffsetTicks == other.UvLengthOffsetTicks
             && UseSleepAwakeDarkTint == other.UseSleepAwakeDarkTint
             && UseBeltItemLineDebugColor == other.UseBeltItemLineDebugColor
             && BeltItemLineDebugColor.Equals(other.BeltItemLineDebugColor)
@@ -103,6 +117,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
             hash = (hash * 397) ^ (HasUvScroll ? 1 : 0);
             hash = (hash * 397) ^ UvScrollYTicks;
+            hash = (hash * 397) ^ UvLengthScaleTicks;
+            hash = (hash * 397) ^ UvLengthOffsetTicks;
             hash = (hash * 397) ^ (UseSleepAwakeDarkTint ? 1 : 0);
             hash = (hash * 397) ^ (UseBeltItemLineDebugColor ? 1 : 0);
             hash = (hash * 397) ^ BeltItemLineDebugColor.GetHashCode();
@@ -134,6 +150,8 @@ public sealed class VirtualRenderBatchCollection
 
     private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
+    private static readonly int UvLengthScaleShaderId = Shader.PropertyToID("_UvLengthScale");
+    private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
 
     private readonly Dictionary<VirtualRenderBatchKey, BatchRenderCache> batchesByKey = new Dictionary<VirtualRenderBatchKey, BatchRenderCache>();
     private readonly List<VirtualRenderBatchKey> activeBatchKeys = new List<VirtualRenderBatchKey>();
@@ -360,6 +378,8 @@ public sealed class VirtualRenderBatchCollection
         {
             batchCache.PropertyBlock.SetFloat(UvScrollXShaderId, 0f);
             batchCache.PropertyBlock.SetFloat(UvScrollYShaderId, key.UvScrollYTicks / (float)VirtualRenderBatchKey.UvScrollQuantize);
+            batchCache.PropertyBlock.SetFloat(UvLengthScaleShaderId, key.UvLengthScaleTicks / (float)VirtualRenderBatchKey.UvLengthQuantize);
+            batchCache.PropertyBlock.SetFloat(UvLengthOffsetShaderId, key.UvLengthOffsetTicks / (float)VirtualRenderBatchKey.UvLengthQuantize);
         }
 
         if (key.UseBeltItemLineDebugColor)

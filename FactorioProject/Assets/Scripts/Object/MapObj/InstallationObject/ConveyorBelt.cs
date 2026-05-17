@@ -4,8 +4,12 @@ using UnityEngine.Rendering;
 
 public class ConveyorBelt : InstallationObject
 {
+    private const float UvLengthReferenceAspect = 1.4285714f;
+
     private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
+    private static readonly int UvLengthScaleShaderId = Shader.PropertyToID("_UvLengthScale");
+    private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
 
     [SerializeField]
     private ConveyorBelt straightVariantPrefab;
@@ -30,9 +34,17 @@ public class ConveyorBelt : InstallationObject
     private MeshRenderer[] cachedRenderers;
     private MeshFilter[] cachedRendererMeshFilters;
     private readonly List<Material> sharedMaterialBuffer = new List<Material>(4);
-    private float lastAppliedUvScrollY = float.NaN;
+    private readonly List<BeltTopRenderInfo> beltTopRenderInfos = new List<BeltTopRenderInfo>(8);
     private bool virtualRenderingSuppressed;
     private bool virtualRenderingSuppressBeltTopOnly;
+
+    private struct BeltTopRenderInfo
+    {
+        public MeshRenderer Renderer;
+        public float CenterZ;
+        public float UvLengthScale;
+        public float UvLengthOffset;
+    }
 
     public float ConveyorSpeed => Mathf.Max(0f, conveyorSpeed);
     public ConveyorBelt StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
@@ -205,17 +217,17 @@ public class ConveyorBelt : InstallationObject
     protected new void Awake()
     {
         base.Awake();
-        ResolveBeltTopRenderer();
+        RefreshBeltTopRenderInfo();
         ConfigureRuntimeRenderers();
-        ApplyBeltTopScroll();
+        ApplyBeltTopShaderProperties();
     }
 
     protected override void OnEnable()
     {
         base.OnEnable();
-        ResolveBeltTopRenderer();
+        RefreshBeltTopRenderInfo();
         ConfigureRuntimeRenderers();
-        ApplyBeltTopScroll();
+        ApplyBeltTopShaderProperties();
     }
 
     protected override void OnDisable()
@@ -259,8 +271,7 @@ public class ConveyorBelt : InstallationObject
             return;
         }
 
-        ResolveBeltTopRenderer();
-        EnsureRendererCache();
+        RefreshBeltTopRenderInfo();
 
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
@@ -270,7 +281,8 @@ public class ConveyorBelt : InstallationObject
                 continue;
             }
 
-            if (beltTopOnly && renderer != beltTopRenderer)
+            bool hasUvScroll = TryGetBeltTopRenderInfo(renderer, out BeltTopRenderInfo beltTopInfo);
+            if (beltTopOnly && !hasUvScroll)
             {
                 continue;
             }
@@ -292,8 +304,15 @@ public class ConveyorBelt : InstallationObject
 
             int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
             int entryCount = Mathf.Max(materialCount, subMeshCount);
-            bool hasUvScroll = renderer == beltTopRenderer;
             float uvScrollY = hasUvScroll ? -ConveyorSpeed * 0.75f : 0f;
+            float uvLengthScale = 1f;
+            float uvLengthOffset = 0f;
+            if (hasUvScroll)
+            {
+                uvLengthScale = beltTopInfo.UvLengthScale;
+                uvLengthOffset = beltTopInfo.UvLengthOffset;
+            }
+
             Matrix4x4 matrix = renderer.localToWorldMatrix;
             int layer = renderer.gameObject.layer;
 
@@ -315,7 +334,9 @@ public class ConveyorBelt : InstallationObject
                     layer,
                     subMeshIndex,
                     hasUvScroll,
-                    uvScrollY));
+                    uvScrollY,
+                    uvLengthScale,
+                    uvLengthOffset));
             }
         }
     }
@@ -327,58 +348,103 @@ public class ConveyorBelt : InstallationObject
         ApplyVirtualRenderingSuppression();
     }
 
-    private void ResolveBeltTopRenderer()
+    private void RefreshBeltTopRenderInfo()
     {
-        if (beltTopRenderer != null)
+        EnsureRendererCache();
+
+        beltTopRenderInfos.Clear();
+        TryAddBeltTopRenderInfo(beltTopRenderer);
+
+        for (int i = 0; i < cachedRenderers.Length; i++)
         {
-            return;
+            TryAddBeltTopRenderInfo(cachedRenderers[i]);
         }
 
-        Transform beltTopTransform = transform.Find("BeltTop");
-        if (beltTopTransform != null)
+        beltTopRenderInfos.Sort(CompareBeltTopCenterZ);
+
+        float uvLengthOffset = 0f;
+        for (int i = 0; i < beltTopRenderInfos.Count; i++)
         {
-            beltTopRenderer = beltTopTransform.GetComponent<MeshRenderer>();
+            BeltTopRenderInfo info = beltTopRenderInfos[i];
+            info.UvLengthOffset = uvLengthOffset;
+            beltTopRenderInfos[i] = info;
+            uvLengthOffset += info.UvLengthScale;
         }
 
-        if (beltTopRenderer == null)
-        {
-            MeshRenderer[] childRenderers = GetComponentsInChildren<MeshRenderer>(true);
-            for (int i = 0; i < childRenderers.Length; i++)
-            {
-                MeshRenderer candidate = childRenderers[i];
-                if (candidate != null && candidate.name == "BeltTop")
-                {
-                    beltTopRenderer = candidate;
-                    break;
-                }
-            }
-        }
+        beltTopRenderer = beltTopRenderInfos.Count > 0 ? beltTopRenderInfos[0].Renderer : null;
     }
 
-    private void ApplyBeltTopScroll()
+    private void ApplyBeltTopShaderProperties()
     {
-        ResolveBeltTopRenderer();
-        if (beltTopRenderer == null)
+        if (beltTopRenderInfos.Count == 0)
         {
-            return;
+            RefreshBeltTopRenderInfo();
         }
 
         float targetUvScrollY = -ConveyorSpeed * 0.75f;
-        if (!float.IsNaN(lastAppliedUvScrollY) && Mathf.Approximately(lastAppliedUvScrollY, targetUvScrollY))
+        beltTopPropertyBlock ??= new MaterialPropertyBlock();
+
+        for (int i = 0; i < beltTopRenderInfos.Count; i++)
+        {
+            BeltTopRenderInfo info = beltTopRenderInfos[i];
+            MeshRenderer renderer = info.Renderer;
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.GetPropertyBlock(beltTopPropertyBlock);
+            beltTopPropertyBlock.SetFloat(UvScrollXShaderId, 0f);
+            beltTopPropertyBlock.SetFloat(UvScrollYShaderId, targetUvScrollY);
+            beltTopPropertyBlock.SetFloat(UvLengthScaleShaderId, info.UvLengthScale);
+            beltTopPropertyBlock.SetFloat(UvLengthOffsetShaderId, info.UvLengthOffset);
+            renderer.SetPropertyBlock(beltTopPropertyBlock);
+        }
+    }
+
+    private void TryAddBeltTopRenderInfo(MeshRenderer renderer)
+    {
+        if (renderer == null || renderer.name != "BeltTop" || TryGetBeltTopRenderInfo(renderer, out _))
         {
             return;
         }
 
-        if (beltTopPropertyBlock == null)
+        beltTopRenderInfos.Add(new BeltTopRenderInfo
         {
-            beltTopPropertyBlock = new MaterialPropertyBlock();
+            Renderer = renderer,
+            CenterZ = transform.InverseTransformPoint(renderer.transform.position).z,
+            UvLengthScale = CalculateBeltTopUvLengthScale(renderer),
+            UvLengthOffset = 0f
+        });
+    }
+
+    private bool TryGetBeltTopRenderInfo(MeshRenderer renderer, out BeltTopRenderInfo info)
+    {
+        for (int i = 0; i < beltTopRenderInfos.Count; i++)
+        {
+            info = beltTopRenderInfos[i];
+            if (info.Renderer == renderer)
+            {
+                return true;
+            }
         }
 
-        beltTopRenderer.GetPropertyBlock(beltTopPropertyBlock);
-        beltTopPropertyBlock.SetFloat(UvScrollXShaderId, 0f);
-        beltTopPropertyBlock.SetFloat(UvScrollYShaderId, targetUvScrollY);
-        beltTopRenderer.SetPropertyBlock(beltTopPropertyBlock);
-        lastAppliedUvScrollY = targetUvScrollY;
+        info = default;
+        return false;
+    }
+
+    private static int CompareBeltTopCenterZ(BeltTopRenderInfo left, BeltTopRenderInfo right)
+    {
+        return left.CenterZ.CompareTo(right.CenterZ);
+    }
+
+    private static float CalculateBeltTopUvLengthScale(MeshRenderer renderer)
+    {
+        Matrix4x4 matrix = renderer.localToWorldMatrix;
+        Vector3 widthAxis = new Vector3(matrix.m00, matrix.m10, matrix.m20);
+        Vector3 lengthAxis = new Vector3(matrix.m02, matrix.m12, matrix.m22);
+        float currentAspect = lengthAxis.magnitude / Mathf.Max(widthAxis.magnitude, 0.0001f);
+        return Mathf.Max(currentAspect / UvLengthReferenceAspect, 0.0001f);
     }
 
     private void ConfigureRuntimeRenderers()
@@ -434,6 +500,11 @@ public class ConveyorBelt : InstallationObject
             return;
         }
 
+        if (virtualRenderingSuppressBeltTopOnly && beltTopRenderInfos.Count == 0)
+        {
+            RefreshBeltTopRenderInfo();
+        }
+
         EnsureRendererCache();
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
@@ -444,7 +515,7 @@ public class ConveyorBelt : InstallationObject
             }
 
             renderer.enabled = virtualRenderingSuppressBeltTopOnly
-                ? renderer != beltTopRenderer
+                ? !TryGetBeltTopRenderInfo(renderer, out _)
                 : false;
         }
     }
@@ -475,8 +546,8 @@ public class ConveyorBelt : InstallationObject
             conveyorSpeed = 0f;
         }
 
-        ResolveBeltTopRenderer();
-        ApplyBeltTopScroll();
+        RefreshBeltTopRenderInfo();
+        ApplyBeltTopShaderProperties();
     }
 #endif
 }

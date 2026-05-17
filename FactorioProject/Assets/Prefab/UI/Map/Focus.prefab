@@ -47,6 +47,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   render: {fileID: 696369144107114915}
   focusColor: {r: 1, g: 0.86, b: 0, a: 0.45}
+  areaCornerLength: 0.32
+  areaLineWidth: 0.035
 --- !u!1 &8866868816652681722
 GameObject:
   m_ObjectHideFlags: 0

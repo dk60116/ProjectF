@@ -13,6 +13,8 @@ public class ItemDataEditorWindow : EditorWindow
     private const float RectGridCellSize = 34f;
     private const float RectGridCellSpacing = 5f;
     private const float RectGridPaletteBlockWidth = 78f;
+    private const float PlacementCenterGridCellSize = 30f;
+    private const float PlacementCenterGridCellSpacing = 4f;
     private const string UiIconAtlasFolder = "Assets/Image/UI/Item";
     private const string UiIconAtlasPath = UiIconAtlasFolder + "/ItemUIIcons.spriteatlas";
     private static readonly RectGridPaletteEntry[] RectGridPaletteEntries =
@@ -28,6 +30,8 @@ public class ItemDataEditorWindow : EditorWindow
     private int selectedItemId = -1;
     private string itemSearchText = string.Empty;
     private ItemDefinition pendingReorderSelection;
+    private readonly HashSet<string> collapsedInputOutputPairSectionKeys = new HashSet<string>();
+    private readonly HashSet<string> collapsedInputOutputPairKeys = new HashSet<string>();
 
     private readonly struct RectGridPaletteEntry
     {
@@ -80,6 +84,8 @@ public class ItemDataEditorWindow : EditorWindow
         public float completeEnergy;
         public int mapSizeX = -1;
         public int mapSizeY = -1;
+        public int placementCenterX = -1;
+        public int placementCenterY = -1;
         public float focusRadius = -1f;
         public float workableFocusRadius = -1f;
         public int workableRangeCells = -1;
@@ -903,6 +909,7 @@ public class ItemDataEditorWindow : EditorWindow
         Rect yRect = new Rect(labelRect.x + fieldWidth + spacing, labelRect.y, fieldWidth, labelRect.height);
         EditorGUI.PropertyField(xRect, mapSizeXProperty, GUIContent.none);
         EditorGUI.PropertyField(yRect, mapSizeYProperty, GUIContent.none);
+        DrawPlacementCenterGridFields(mapObjectSerializedObject, mapStatusProperty, mapSizeXProperty, mapSizeYProperty, mapObject);
 
         SerializedProperty multiFocusModeProperty = mapObjectSerializedObject.FindProperty("multiFocusMode");
         if (multiFocusModeProperty != null)
@@ -925,9 +932,19 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         bool shouldSyncConveyorVariantSpeed = false;
-        if (mapObject is ConveyorBelt)
+        ConveyorBelt conveyorBeltForSpeed = ResolveConveyorBelt(mapObject);
+        bool usesSeparateConveyorSerializedObject = conveyorBeltForSpeed != null && conveyorBeltForSpeed != mapObject;
+        SerializedObject conveyorSerializedObject = usesSeparateConveyorSerializedObject
+            ? new SerializedObject(conveyorBeltForSpeed)
+            : mapObjectSerializedObject;
+        if (conveyorBeltForSpeed != null)
         {
-            SerializedProperty conveyorSpeedProperty = mapObjectSerializedObject.FindProperty("conveyorSpeed");
+            if (usesSeparateConveyorSerializedObject)
+            {
+                conveyorSerializedObject.Update();
+            }
+
+            SerializedProperty conveyorSpeedProperty = FindSerializedProperty(conveyorSerializedObject, "conveyorSpeed");
             if (conveyorSpeedProperty != null)
             {
                 conveyorSpeedProperty.floatValue = Mathf.Max(0f, conveyorSpeedProperty.floatValue);
@@ -961,11 +978,14 @@ public class ItemDataEditorWindow : EditorWindow
             DrawInputOutputModuleFields(mapObjectSerializedObject, definitions);
         }
 
-        if (mapObjectSerializedObject.ApplyModifiedProperties())
+        bool mapObjectApplied = mapObjectSerializedObject.ApplyModifiedProperties();
+        bool conveyorObjectApplied = usesSeparateConveyorSerializedObject
+            && conveyorSerializedObject.ApplyModifiedProperties();
+        if (mapObjectApplied || conveyorObjectApplied)
         {
-            if (shouldSyncConveyorVariantSpeed && mapObject is ConveyorBelt conveyorBelt)
+            if (shouldSyncConveyorVariantSpeed)
             {
-                SyncConveyorVariantSpeed(conveyorBelt);
+                SyncConveyorVariantSpeed(conveyorBeltForSpeed);
             }
 
             if (mapObject is Wall fence)
@@ -979,8 +999,192 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 EditorUtility.SetDirty(owner);
             }
+
+            if (conveyorObjectApplied && conveyorBeltForSpeed != null)
+            {
+                EditorUtility.SetDirty(conveyorBeltForSpeed);
+                if (conveyorBeltForSpeed.gameObject != null)
+                {
+                    EditorUtility.SetDirty(conveyorBeltForSpeed.gameObject);
+                }
+            }
+
             Repaint();
         }
+    }
+
+    private void DrawPlacementCenterGridFields(
+        SerializedObject mapObjectSerializedObject,
+        SerializedProperty mapStatusProperty,
+        SerializedProperty mapSizeXProperty,
+        SerializedProperty mapSizeYProperty,
+        MapObject mapObject)
+    {
+        if (mapObjectSerializedObject == null
+            || mapStatusProperty == null
+            || mapSizeXProperty == null
+            || mapSizeYProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty centerXProperty = mapStatusProperty.FindPropertyRelative("centerCellX");
+        SerializedProperty centerYProperty = mapStatusProperty.FindPropertyRelative("centerCellY");
+        if (centerXProperty == null || centerYProperty == null)
+        {
+            return;
+        }
+
+        int width = Mathf.Clamp(mapSizeXProperty.intValue, 1, byte.MaxValue);
+        int height = Mathf.Clamp(mapSizeYProperty.intValue, 1, byte.MaxValue);
+        mapSizeXProperty.intValue = width;
+        mapSizeYProperty.intValue = height;
+
+        int centerX = Mathf.Clamp(centerXProperty.intValue, 0, width - 1);
+        int centerY = Mathf.Clamp(centerYProperty.intValue, 0, height - 1);
+        centerXProperty.intValue = centerX;
+        centerYProperty.intValue = centerY;
+
+        if (width * height <= 1)
+        {
+            return;
+        }
+
+        EditorGUILayout.Space(2f);
+        EditorGUILayout.LabelField($"Center Cell ({centerX}, {centerY})", EditorStyles.miniBoldLabel);
+        DrawPlacementCenterGrid(mapObjectSerializedObject, mapObject, centerXProperty, centerYProperty, width, height);
+    }
+
+    private void DrawPlacementCenterGrid(
+        SerializedObject mapObjectSerializedObject,
+        MapObject mapObject,
+        SerializedProperty centerXProperty,
+        SerializedProperty centerYProperty,
+        int width,
+        int height)
+    {
+        float cellSize = PlacementCenterGridCellSize;
+        float spacing = PlacementCenterGridCellSpacing;
+        float previewWidth = width * cellSize + Mathf.Max(0, width - 1) * spacing;
+        float previewHeight = height * cellSize + Mathf.Max(0, height - 1) * spacing;
+
+        Rect previewRect = GUILayoutUtility.GetRect(previewWidth, previewHeight, GUILayout.ExpandWidth(false));
+        EditorGUI.DrawRect(previewRect, new Color(0.15f, 0.15f, 0.15f, 0.85f));
+
+        Event current = Event.current;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                float cellX = previewRect.x + x * (cellSize + spacing);
+                float cellY = previewRect.y + y * (cellSize + spacing);
+                Rect cellRect = new Rect(cellX, cellY, cellSize, cellSize);
+                Vector2Int cell = new Vector2Int(x, height - 1 - y);
+                bool isCenter = cell.x == centerXProperty.intValue && cell.y == centerYProperty.intValue;
+
+                DrawPlacementCenterGridCell(cellRect, isCenter);
+                if (isCenter)
+                {
+                    GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+                    {
+                        alignment = TextAnchor.MiddleCenter,
+                        fontSize = cellSize >= 30f ? 9 : 8,
+                        normal = { textColor = Color.white }
+                    };
+                    GUI.Label(cellRect, cellSize >= 30f ? "Center" : "C", labelStyle);
+                }
+
+                if (current != null
+                    && current.type == EventType.MouseDown
+                    && current.button == 0
+                    && cellRect.Contains(current.mousePosition))
+                {
+                    Undo.RecordObject(mapObject, "Set Placement Center");
+                    centerXProperty.intValue = cell.x;
+                    centerYProperty.intValue = cell.y;
+                    MarkMapObjectDirty(mapObjectSerializedObject, mapObject);
+                    current.Use();
+                }
+            }
+        }
+    }
+
+    private static void DrawPlacementCenterGridCell(Rect rect, bool isCenter)
+    {
+        Color fillColor = isCenter
+            ? new Color(0.22f, 0.58f, 0.94f, 1f)
+            : new Color(0.28f, 0.28f, 0.28f, 1f);
+        Color borderColor = isCenter
+            ? new Color(0.75f, 0.92f, 1f, 1f)
+            : new Color(0.55f, 0.55f, 0.55f, 1f);
+
+        EditorGUI.DrawRect(rect, fillColor);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 1f), borderColor);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 1f, rect.width, 1f), borderColor);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.y, 1f, rect.height), borderColor);
+        EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.y, 1f, rect.height), borderColor);
+    }
+
+    private void MarkMapObjectDirty(SerializedObject mapObjectSerializedObject, MapObject mapObject)
+    {
+        mapObjectSerializedObject?.ApplyModifiedProperties();
+        EditorUtility.SetDirty(mapObject);
+        if (mapObject != null && mapObject.gameObject != null)
+        {
+            EditorUtility.SetDirty(mapObject.gameObject);
+        }
+
+        Repaint();
+    }
+
+    private static ConveyorBelt ResolveConveyorBelt(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        if (mapObject is ConveyorBelt conveyorBelt)
+        {
+            return conveyorBelt;
+        }
+
+        conveyorBelt = mapObject.GetComponent<ConveyorBelt>();
+        if (conveyorBelt != null)
+        {
+            return conveyorBelt;
+        }
+
+        return mapObject.GetComponentInParent<ConveyorBelt>(true);
+    }
+
+    private static SerializedProperty FindSerializedProperty(SerializedObject serializedObject, string propertyName)
+    {
+        if (serializedObject == null || string.IsNullOrWhiteSpace(propertyName))
+        {
+            return null;
+        }
+
+        SerializedProperty directProperty = serializedObject.FindProperty(propertyName);
+        if (directProperty != null)
+        {
+            return directProperty;
+        }
+
+        SerializedProperty iterator = serializedObject.GetIterator();
+        bool enterChildren = true;
+        while (iterator.Next(enterChildren))
+        {
+            enterChildren = false;
+            if (iterator.name == propertyName
+                || string.Equals(iterator.propertyPath, propertyName, StringComparison.Ordinal)
+                || iterator.propertyPath.EndsWith("." + propertyName, StringComparison.Ordinal))
+            {
+                return iterator.Copy();
+            }
+        }
+
+        return null;
     }
 
     private static void SyncConveyorVariantSpeed(ConveyorBelt sourceConveyor)
@@ -1072,31 +1276,120 @@ public class ItemDataEditorWindow : EditorWindow
 
         EditorGUILayout.Space(6f);
         EditorGUILayout.LabelField("Input Output Module", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("Input / Output Pairs", EditorStyles.miniBoldLabel);
-
-        for (int i = 0; i < inputListProperty.arraySize; i++)
+        UnityEngine.Object targetObject = mapObjectSerializedObject.targetObject;
+        string sectionFoldoutKey = GetInputOutputPairSectionFoldoutKey(targetObject);
+        bool isSectionExpanded = string.IsNullOrEmpty(sectionFoldoutKey)
+            || !collapsedInputOutputPairSectionKeys.Contains(sectionFoldoutKey);
+        EditorGUILayout.BeginHorizontal();
+        bool nextSectionExpanded = EditorGUILayout.Foldout(
+            isSectionExpanded,
+            $"Input / Output Pairs ({inputListProperty.arraySize})",
+            true,
+            EditorStyles.foldout);
+        if (nextSectionExpanded != isSectionExpanded)
         {
-            SerializedProperty inputEntryProperty = inputListProperty.GetArrayElementAtIndex(i);
-            SerializedProperty outputEntryProperty = outputListProperty.GetArrayElementAtIndex(i);
-            DrawInputOutputPairRow(inputEntryProperty, outputEntryProperty, definitions, i, () =>
-            {
-                inputListProperty.DeleteArrayElementAtIndex(i);
-                outputListProperty.DeleteArrayElementAtIndex(i);
-            });
+            SetInputOutputPairSectionCollapsedState(sectionFoldoutKey, !nextSectionExpanded);
+            isSectionExpanded = nextSectionExpanded;
         }
 
-        if (GUILayout.Button("Add Pair", GUILayout.Width(96f)))
+        if (GUILayout.Button("Expand All", GUILayout.Width(76f)))
         {
-            int insertIndex = inputListProperty.arraySize;
-            inputListProperty.InsertArrayElementAtIndex(insertIndex);
-            ResetInputOutputEntry(inputListProperty.GetArrayElementAtIndex(insertIndex));
+            SetInputOutputPairSectionCollapsedState(sectionFoldoutKey, false);
+            SetInputOutputPairCollapsedState(targetObject, inputListProperty.arraySize, false);
+            isSectionExpanded = true;
+        }
 
-            outputListProperty.InsertArrayElementAtIndex(insertIndex);
-            ResetInputOutputEntry(outputListProperty.GetArrayElementAtIndex(insertIndex));
+        if (GUILayout.Button("Collapse All", GUILayout.Width(82f)))
+        {
+            SetInputOutputPairCollapsedState(targetObject, inputListProperty.arraySize, true);
+            SetInputOutputPairSectionCollapsedState(sectionFoldoutKey, true);
+            isSectionExpanded = false;
+        }
+
+        EditorGUILayout.EndHorizontal();
+
+        if (isSectionExpanded)
+        {
+            for (int i = 0; i < inputListProperty.arraySize; i++)
+            {
+                SerializedProperty inputEntryProperty = inputListProperty.GetArrayElementAtIndex(i);
+                SerializedProperty outputEntryProperty = outputListProperty.GetArrayElementAtIndex(i);
+                DrawInputOutputPairRow(
+                    inputEntryProperty,
+                    outputEntryProperty,
+                    definitions,
+                    GetInputOutputPairFoldoutKey(targetObject, i),
+                    i,
+                    () =>
+                {
+                    inputListProperty.DeleteArrayElementAtIndex(i);
+                    outputListProperty.DeleteArrayElementAtIndex(i);
+                });
+            }
+
+            if (GUILayout.Button("Add Pair", GUILayout.Width(96f)))
+            {
+                int insertIndex = inputListProperty.arraySize;
+                inputListProperty.InsertArrayElementAtIndex(insertIndex);
+                ResetInputOutputEntry(inputListProperty.GetArrayElementAtIndex(insertIndex));
+
+                outputListProperty.InsertArrayElementAtIndex(insertIndex);
+                ResetInputOutputEntry(outputListProperty.GetArrayElementAtIndex(insertIndex));
+            }
         }
 
         GUILayout.Space(8f);
         DrawInputOutputRectGridFields(mapObjectSerializedObject);
+    }
+
+    private string GetInputOutputPairSectionFoldoutKey(UnityEngine.Object targetObject)
+    {
+        return $"{GetInputOutputTargetKey(targetObject)}/Pairs";
+    }
+
+    private string GetInputOutputPairFoldoutKey(UnityEngine.Object targetObject, int pairIndex)
+    {
+        return $"{GetInputOutputTargetKey(targetObject)}/Pair/{Mathf.Max(0, pairIndex)}";
+    }
+
+    private static string GetInputOutputTargetKey(UnityEngine.Object targetObject)
+    {
+        return targetObject != null
+            ? GlobalObjectId.GetGlobalObjectIdSlow(targetObject).ToString()
+            : "UnknownInputOutputModule";
+    }
+
+    private void SetInputOutputPairSectionCollapsedState(string sectionFoldoutKey, bool collapsed)
+    {
+        if (string.IsNullOrEmpty(sectionFoldoutKey))
+        {
+            return;
+        }
+
+        if (collapsed)
+        {
+            collapsedInputOutputPairSectionKeys.Add(sectionFoldoutKey);
+        }
+        else
+        {
+            collapsedInputOutputPairSectionKeys.Remove(sectionFoldoutKey);
+        }
+    }
+
+    private void SetInputOutputPairCollapsedState(UnityEngine.Object targetObject, int pairCount, bool collapsed)
+    {
+        for (int i = 0; i < pairCount; i++)
+        {
+            string key = GetInputOutputPairFoldoutKey(targetObject, i);
+            if (collapsed)
+            {
+                collapsedInputOutputPairKeys.Add(key);
+            }
+            else
+            {
+                collapsedInputOutputPairKeys.Remove(key);
+            }
+        }
     }
 
     private void DrawInputOutputRectGridFields(SerializedObject mapObjectSerializedObject)
@@ -1533,12 +1826,29 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty inputEntryProperty,
         SerializedProperty outputEntryProperty,
         List<ItemDefinition> definitions,
+        string foldoutKey,
         int pairIndex,
         Action removeAction)
     {
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField($"Pair {pairIndex + 1}", EditorStyles.miniBoldLabel);
+        bool isExpanded = string.IsNullOrEmpty(foldoutKey) || !collapsedInputOutputPairKeys.Contains(foldoutKey);
+        string header = GetInputOutputPairHeader(inputEntryProperty, outputEntryProperty, pairIndex);
+        bool nextExpanded = EditorGUILayout.Foldout(isExpanded, header, true, EditorStyles.foldout);
+        if (nextExpanded != isExpanded && !string.IsNullOrEmpty(foldoutKey))
+        {
+            if (nextExpanded)
+            {
+                collapsedInputOutputPairKeys.Remove(foldoutKey);
+            }
+            else
+            {
+                collapsedInputOutputPairKeys.Add(foldoutKey);
+            }
+
+            isExpanded = nextExpanded;
+        }
+
         GUILayout.FlexibleSpace();
         if (GUILayout.Button("X", GUILayout.Width(24f)) && removeAction != null)
         {
@@ -1549,10 +1859,39 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         EditorGUILayout.EndHorizontal();
-        DrawInputOutputEntryFields(inputEntryProperty, definitions, "Input");
-        GUILayout.Space(4f);
-        DrawInputOutputEntryFields(outputEntryProperty, definitions, "Output");
+        if (isExpanded)
+        {
+            DrawInputOutputEntryFields(inputEntryProperty, definitions, "Input");
+            GUILayout.Space(4f);
+            DrawInputOutputEntryFields(outputEntryProperty, definitions, "Output");
+        }
+
         EditorGUILayout.EndVertical();
+    }
+
+    private static string GetInputOutputPairHeader(
+        SerializedProperty inputEntryProperty,
+        SerializedProperty outputEntryProperty,
+        int pairIndex)
+    {
+        return $"Pair {pairIndex + 1}: {GetInputOutputEntrySummary(inputEntryProperty)} -> {GetInputOutputEntrySummary(outputEntryProperty)}";
+    }
+
+    private static string GetInputOutputEntrySummary(SerializedProperty entryProperty)
+    {
+        if (entryProperty == null)
+        {
+            return "None";
+        }
+
+        SerializedProperty itemDefinitionProperty = entryProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty countProperty = entryProperty.FindPropertyRelative("count");
+        ItemDefinition definition = itemDefinitionProperty != null
+            ? itemDefinitionProperty.objectReferenceValue as ItemDefinition
+            : null;
+        string itemName = definition != null ? GetDefinitionDisplayName(definition) : "None";
+        int count = countProperty != null ? Mathf.Max(1, countProperty.intValue) : 1;
+        return $"{itemName} x{count}";
     }
 
     private void DrawInputOutputEntryFields(
@@ -1817,11 +2156,12 @@ public class ItemDataEditorWindow : EditorWindow
         Undo.RecordObject(itemManager, "Rebuild Item Data");
         itemManager.RebuildItemDefinitionsFromAssets();
         itemManager.ApplyItemIdsToPrefabs();
+        int productionMachineRecipeCount = ProductionMachineRecipeAutoFill.SyncMk1(itemManager);
         EditorUtility.SetDirty(itemManager);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         EnsureSelection(GetDefinitions(itemManager));
-        ShowNotification(new GUIContent("Item Data rebuilt."));
+        ShowNotification(new GUIContent($"Item Data rebuilt. Production Mk1 recipes: {productionMachineRecipeCount}"));
         Repaint();
     }
 
@@ -2174,6 +2514,9 @@ public class ItemDataEditorWindow : EditorWindow
             entry.mapObjectType = definition.mapObject.GetType().FullName;
             entry.mapSizeX = definition.mapObject.Status.mapSizeX;
             entry.mapSizeY = definition.mapObject.Status.mapSizeY;
+            Vector2Int placementCenterCell = definition.mapObject.PlacementCenterCell;
+            entry.placementCenterX = placementCenterCell.x;
+            entry.placementCenterY = placementCenterCell.y;
             entry.multiFocusMode = definition.mapObject.FocusMode.ToString();
             entry.multiFocusModeValue = (int)definition.mapObject.FocusMode;
             if (definition.mapObject is WorkableObject workableObject)
@@ -2191,7 +2534,8 @@ public class ItemDataEditorWindow : EditorWindow
                 entry.focusRadius = installationObjectWithFocus.FocusActivationRadius;
             }
 
-            if (definition.mapObject is ConveyorBelt conveyorBelt)
+            ConveyorBelt conveyorBelt = ResolveConveyorBelt(definition.mapObject);
+            if (conveyorBelt != null)
             {
                 entry.conveyorSpeed = conveyorBelt.ConveyorSpeed;
             }
@@ -2490,6 +2834,20 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 mapSizeYProperty.intValue = Mathf.Clamp(entry.mapSizeY, 1, byte.MaxValue);
             }
+
+            SerializedProperty centerXProperty = mapStatusProperty.FindPropertyRelative("centerCellX");
+            SerializedProperty centerYProperty = mapStatusProperty.FindPropertyRelative("centerCellY");
+            int mapSizeX = mapSizeXProperty != null ? Mathf.Max(1, mapSizeXProperty.intValue) : Mathf.Max(1, entry.mapSizeX);
+            int mapSizeY = mapSizeYProperty != null ? Mathf.Max(1, mapSizeYProperty.intValue) : Mathf.Max(1, entry.mapSizeY);
+            if (centerXProperty != null && entry.placementCenterX >= 0)
+            {
+                centerXProperty.intValue = Mathf.Clamp(entry.placementCenterX, 0, mapSizeX - 1);
+            }
+
+            if (centerYProperty != null && entry.placementCenterY >= 0)
+            {
+                centerYProperty.intValue = Mathf.Clamp(entry.placementCenterY, 0, mapSizeY - 1);
+            }
         }
 
         SerializedProperty multiFocusModeProperty = serializedMapObject.FindProperty("multiFocusMode");
@@ -2550,13 +2908,23 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         bool shouldSyncConveyorVariantSpeed = false;
-        if (entry.conveyorSpeed >= 0f)
+        ConveyorBelt conveyorBelt = ResolveConveyorBelt(mapObject);
+        bool usesSeparateConveyorSerializedObject = conveyorBelt != null && conveyorBelt != mapObject;
+        SerializedObject serializedConveyor = usesSeparateConveyorSerializedObject
+            ? new SerializedObject(conveyorBelt)
+            : serializedMapObject;
+        if (entry.conveyorSpeed >= 0f && conveyorBelt != null)
         {
-            SerializedProperty conveyorSpeedProperty = serializedMapObject.FindProperty("conveyorSpeed");
+            if (usesSeparateConveyorSerializedObject)
+            {
+                serializedConveyor.Update();
+            }
+
+            SerializedProperty conveyorSpeedProperty = FindSerializedProperty(serializedConveyor, "conveyorSpeed");
             if (conveyorSpeedProperty != null)
             {
                 conveyorSpeedProperty.floatValue = Mathf.Max(0f, entry.conveyorSpeed);
-                shouldSyncConveyorVariantSpeed = mapObject is ConveyorBelt;
+                shouldSyncConveyorVariantSpeed = true;
             }
         }
 
@@ -2566,7 +2934,12 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         bool applied = serializedMapObject.ApplyModifiedPropertiesWithoutUndo();
-        if (shouldSyncConveyorVariantSpeed && mapObject is ConveyorBelt conveyorBelt)
+        if (usesSeparateConveyorSerializedObject)
+        {
+            applied |= serializedConveyor.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        if (shouldSyncConveyorVariantSpeed)
         {
             SyncConveyorVariantSpeed(conveyorBelt);
         }
@@ -2577,6 +2950,15 @@ public class ItemDataEditorWindow : EditorWindow
             if (mapObject.gameObject != null)
             {
                 EditorUtility.SetDirty(mapObject.gameObject);
+            }
+
+            if (usesSeparateConveyorSerializedObject && conveyorBelt != null)
+            {
+                EditorUtility.SetDirty(conveyorBelt);
+                if (conveyorBelt.gameObject != null)
+                {
+                    EditorUtility.SetDirty(conveyorBelt.gameObject);
+                }
             }
         }
     }
@@ -3297,5 +3679,681 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         return null;
+    }
+}
+
+internal static class ProductionMachineRecipeAutoFill
+{
+    private const string ProductionMachineMk1Name = "Production machine (Mk1)";
+    private const int CurrentCraftingTreeFileVersion = 4;
+    private const int MultiCraftingMapObjectGuidFileVersion = 3;
+    private const int OutputCountCraftingTreeFileVersion = 2;
+    private const int LegacyCraftingTreeFileVersion = 1;
+
+    [Serializable]
+    private sealed class CraftingTreeJsonFile
+    {
+        public List<CraftingTreeJsonEntry> recipes = new List<CraftingTreeJsonEntry>();
+        public List<CraftingTreeJsonEntry> items = new List<CraftingTreeJsonEntry>();
+        public List<CraftingTreeJsonEntry> entries = new List<CraftingTreeJsonEntry>();
+    }
+
+    [Serializable]
+    private sealed class CraftingTreeJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName = string.Empty;
+        public string definitionAssetPath = string.Empty;
+        public int outputCount = 1;
+        public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
+        public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
+        public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
+    }
+
+    [Serializable]
+    private sealed class CraftingIngredientJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName = string.Empty;
+        public string definitionAssetPath = string.Empty;
+        public int count = 1;
+    }
+
+    [Serializable]
+    private sealed class CraftingMapObjectJsonEntry
+    {
+        public int itemId = -1;
+        public string mapObjectName = string.Empty;
+        public string assetPath = string.Empty;
+    }
+
+    private readonly struct RecipeEntry
+    {
+        public readonly ItemDefinition inputDefinition;
+        public readonly int inputCount;
+        public readonly ItemDefinition outputDefinition;
+        public readonly int outputCount;
+
+        public RecipeEntry(
+            ItemDefinition inputDefinition,
+            int inputCount,
+            ItemDefinition outputDefinition,
+            int outputCount)
+        {
+            this.inputDefinition = inputDefinition;
+            this.inputCount = Mathf.Max(1, inputCount);
+            this.outputDefinition = outputDefinition;
+            this.outputCount = Mathf.Max(1, outputCount);
+        }
+    }
+
+    public static int SyncMk1(ItemManager itemManager)
+    {
+        List<ItemDefinition> definitions = CollectDefinitions(itemManager);
+        if (definitions.Count == 0)
+        {
+            return 0;
+        }
+
+        ProductionMachine productionMachine = FindProductionMachineMk1(definitions);
+        if (productionMachine == null)
+        {
+            return 0;
+        }
+
+        List<RecipeEntry> recipes = BuildSingleInputRecipes(definitions);
+        ApplyRecipes(productionMachine, recipes);
+        return recipes.Count;
+    }
+
+    private static List<ItemDefinition> CollectDefinitions(ItemManager itemManager)
+    {
+        List<ItemDefinition> results = new List<ItemDefinition>();
+        if (itemManager == null || itemManager.ItemDefinitions == null)
+        {
+            return results;
+        }
+
+        for (int i = 0; i < itemManager.ItemDefinitions.Count; i++)
+        {
+            ItemDefinition definition = itemManager.ItemDefinitions[i];
+            if (definition != null && definition.id >= 0)
+            {
+                results.Add(definition);
+            }
+        }
+
+        return results;
+    }
+
+    private static ProductionMachine FindProductionMachineMk1(List<ItemDefinition> definitions)
+    {
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            ProductionMachine productionMachine = ResolveProductionMachine(definition.mapObject);
+            if (productionMachine == null)
+            {
+                continue;
+            }
+
+            string definitionName = GetDefinitionDisplayName(definition);
+            GameObject prefabRoot = productionMachine.transform.root != null
+                ? productionMachine.transform.root.gameObject
+                : productionMachine.gameObject;
+            string prefabName = prefabRoot != null ? prefabRoot.name : productionMachine.name;
+            if (string.Equals(definitionName, ProductionMachineMk1Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(prefabName, ProductionMachineMk1Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return productionMachine;
+            }
+        }
+
+        return null;
+    }
+
+    private static ProductionMachine ResolveProductionMachine(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        if (mapObject is ProductionMachine productionMachine)
+        {
+            return productionMachine;
+        }
+
+        return mapObject.GetComponentInChildren<ProductionMachine>(true);
+    }
+
+    private static List<RecipeEntry> BuildSingleInputRecipes(List<ItemDefinition> definitions)
+    {
+        List<RecipeEntry> recipes = new List<RecipeEntry>();
+        DefinitionLookup definitionLookup = new DefinitionLookup(definitions);
+        List<CraftingTreeJsonEntry> entries = LoadCraftingTreeEntries();
+        HashSet<string> seenPairs = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            CraftingTreeJsonEntry entry = entries[i];
+            if (entry == null
+                || entry.ingredients == null
+                || entry.ingredients.Count != 1)
+            {
+                continue;
+            }
+
+            CraftingIngredientJsonEntry ingredient = entry.ingredients[0];
+            if (ingredient == null
+                || (ingredient.itemId < 0
+                    && string.IsNullOrWhiteSpace(ingredient.itemName)
+                    && string.IsNullOrWhiteSpace(ingredient.definitionAssetPath)))
+            {
+                continue;
+            }
+
+            if (!IsCraftableByHandOrWorkableObject(entry, definitionLookup))
+            {
+                continue;
+            }
+
+            ItemDefinition inputDefinition = definitionLookup.Resolve(
+                ingredient.itemName,
+                ingredient.definitionAssetPath,
+                ingredient.itemId);
+            ItemDefinition outputDefinition = definitionLookup.Resolve(
+                entry.itemName,
+                entry.definitionAssetPath,
+                entry.itemId);
+            if (inputDefinition == null || outputDefinition == null)
+            {
+                continue;
+            }
+
+            string pairKey = $"{inputDefinition.id}>{outputDefinition.id}";
+            if (!seenPairs.Add(pairKey))
+            {
+                continue;
+            }
+
+            recipes.Add(new RecipeEntry(
+                inputDefinition,
+                Mathf.Max(1, ingredient.count),
+                outputDefinition,
+                Mathf.Max(1, entry.outputCount)));
+        }
+
+        return recipes;
+    }
+
+    private static bool IsCraftableByHandOrWorkableObject(CraftingTreeJsonEntry entry, DefinitionLookup definitionLookup)
+    {
+        IReadOnlyList<CraftingMapObjectJsonEntry> craftingMapObjects = GetCraftingMapObjectEntries(entry);
+        if (craftingMapObjects.Count == 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < craftingMapObjects.Count; i++)
+        {
+            CraftingMapObjectJsonEntry mapObjectEntry = craftingMapObjects[i];
+            if (mapObjectEntry == null)
+            {
+                continue;
+            }
+
+            MapObject mapObject = definitionLookup.ResolveMapObject(
+                mapObjectEntry.mapObjectName,
+                mapObjectEntry.assetPath,
+                mapObjectEntry.itemId);
+            if (IsWorkableMapObject(mapObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<CraftingMapObjectJsonEntry> GetCraftingMapObjectEntries(CraftingTreeJsonEntry entry)
+    {
+        if (entry == null)
+        {
+            return Array.Empty<CraftingMapObjectJsonEntry>();
+        }
+
+        if (entry.craftingMapObjects != null && entry.craftingMapObjects.Count > 0)
+        {
+            return entry.craftingMapObjects;
+        }
+
+        if (entry.requiredMapObjects != null && entry.requiredMapObjects.Count > 0)
+        {
+            return entry.requiredMapObjects;
+        }
+
+        return Array.Empty<CraftingMapObjectJsonEntry>();
+    }
+
+    private static bool IsWorkableMapObject(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        return mapObject is WorkableObject || mapObject.GetComponentInChildren<WorkableObject>(true) != null;
+    }
+
+    private sealed class DefinitionLookup
+    {
+        private readonly List<ItemDefinition> definitions = new List<ItemDefinition>();
+        private readonly Dictionary<int, ItemDefinition> definitionsById = new Dictionary<int, ItemDefinition>();
+        private readonly Dictionary<string, ItemDefinition> definitionsByName = new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
+
+        public DefinitionLookup(List<ItemDefinition> definitions)
+        {
+            if (definitions == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition == null)
+                {
+                    continue;
+                }
+
+                this.definitions.Add(definition);
+
+                if (definition.id >= 0 && !definitionsById.ContainsKey(definition.id))
+                {
+                    definitionsById.Add(definition.id, definition);
+                }
+
+                string definitionName = GetDefinitionDisplayName(definition);
+                if (!string.IsNullOrWhiteSpace(definitionName) && !definitionsByName.ContainsKey(definitionName))
+                {
+                    definitionsByName.Add(definitionName, definition);
+                }
+            }
+        }
+
+        public ItemDefinition Resolve(string itemName, string assetPath, int itemId)
+        {
+            string normalizedName = string.IsNullOrWhiteSpace(itemName) ? string.Empty : itemName.Trim();
+            if (!string.IsNullOrWhiteSpace(normalizedName)
+                && definitionsByName.TryGetValue(normalizedName, out ItemDefinition namedDefinition))
+            {
+                return namedDefinition;
+            }
+
+            ItemDefinition pathDefinition = ResolveByAssetPath(assetPath);
+            if (pathDefinition != null && (string.IsNullOrWhiteSpace(normalizedName)
+                                           || string.Equals(GetDefinitionDisplayName(pathDefinition), normalizedName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return pathDefinition;
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedName)
+                && itemId >= 0
+                && definitionsById.TryGetValue(itemId, out ItemDefinition idDefinition))
+            {
+                return idDefinition;
+            }
+
+            return null;
+        }
+
+        public MapObject ResolveMapObject(string mapObjectName, string assetPath, int itemId)
+        {
+            string normalizedName = string.IsNullOrWhiteSpace(mapObjectName) ? string.Empty : mapObjectName.Trim();
+            if (!string.IsNullOrWhiteSpace(normalizedName))
+            {
+                MapObject namedMapObject = ResolveMapObjectByName(normalizedName);
+                if (namedMapObject != null)
+                {
+                    return namedMapObject;
+                }
+            }
+
+            MapObject pathMapObject = ResolveMapObjectByAssetPath(assetPath);
+            if (pathMapObject != null && (string.IsNullOrWhiteSpace(normalizedName)
+                                          || MapObjectNameMatches(pathMapObject, normalizedName)))
+            {
+                return pathMapObject;
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedName)
+                && itemId >= 0
+                && definitionsById.TryGetValue(itemId, out ItemDefinition idDefinition))
+            {
+                return idDefinition != null ? idDefinition.mapObject : null;
+            }
+
+            return null;
+        }
+
+        private MapObject ResolveMapObjectByName(string normalizedName)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition == null || definition.mapObject == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(GetDefinitionDisplayName(definition), normalizedName, StringComparison.OrdinalIgnoreCase)
+                    || MapObjectNameMatches(definition.mapObject, normalizedName))
+                {
+                    return definition.mapObject;
+                }
+            }
+
+            return null;
+        }
+
+        private static ItemDefinition ResolveByAssetPath(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                return null;
+            }
+
+            string normalizedPath = assetPath.Trim().Replace("\\", "/");
+            return AssetDatabase.LoadAssetAtPath<ItemDefinition>(normalizedPath);
+        }
+
+        private static MapObject ResolveMapObjectByAssetPath(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                return null;
+            }
+
+            string normalizedPath = assetPath.Trim().Replace("\\", "/");
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(normalizedPath);
+            return prefab != null ? prefab.GetComponentInChildren<MapObject>(true) : null;
+        }
+
+        private static bool MapObjectNameMatches(MapObject mapObject, string normalizedName)
+        {
+            if (mapObject == null || string.IsNullOrWhiteSpace(normalizedName))
+            {
+                return false;
+            }
+
+            if (string.Equals(mapObject.name, normalizedName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            GameObject prefabRoot = mapObject.transform.root != null
+                ? mapObject.transform.root.gameObject
+                : mapObject.gameObject;
+            return prefabRoot != null
+                   && string.Equals(prefabRoot.name, normalizedName, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static List<CraftingTreeJsonEntry> LoadCraftingTreeEntries()
+    {
+        if (TryLoadCraftingTreeBytes(out List<CraftingTreeJsonEntry> binaryEntries))
+        {
+            return binaryEntries;
+        }
+
+        CraftingTreeJsonFile craftingTree = LoadCraftingTreeJson();
+        return GetCraftingTreeEntries(craftingTree);
+    }
+
+    private static bool TryLoadCraftingTreeBytes(out List<CraftingTreeJsonEntry> entries)
+    {
+        entries = new List<CraftingTreeJsonEntry>();
+
+        string absolutePath = Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.bytes");
+        if (!File.Exists(absolutePath))
+        {
+            absolutePath = Path.Combine(Application.dataPath, "Resources", "Data", "CraftingTree", "crafting_tree.bytes");
+        }
+
+        if (!File.Exists(absolutePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using (FileStream stream = new FileStream(absolutePath, FileMode.Open, FileAccess.Read))
+            using (BinaryReader reader = new BinaryReader(stream))
+            {
+                int version = reader.ReadInt32();
+                if (version != LegacyCraftingTreeFileVersion && version != CurrentCraftingTreeFileVersion)
+                {
+                    return false;
+                }
+
+                int itemCount = Mathf.Max(0, reader.ReadInt32());
+                for (int i = 0; i < itemCount; i++)
+                {
+                    CraftingTreeJsonEntry entry = new CraftingTreeJsonEntry
+                    {
+                        itemId = reader.ReadInt32()
+                    };
+
+                    List<CraftingMapObjectJsonEntry> mapObjects = ReadCraftingMapObjectEntries(reader, version);
+                    entry.craftingMapObjects.AddRange(mapObjects);
+                    entry.requiredMapObjects.AddRange(mapObjects);
+
+                    entry.outputCount = version >= OutputCountCraftingTreeFileVersion
+                        ? Mathf.Max(1, reader.ReadInt32())
+                        : 1;
+
+                    int ingredientCount = Mathf.Max(0, reader.ReadInt32());
+                    for (int ingredientIndex = 0; ingredientIndex < ingredientCount; ingredientIndex++)
+                    {
+                        entry.ingredients.Add(new CraftingIngredientJsonEntry
+                        {
+                            itemId = reader.ReadInt32(),
+                            count = Mathf.Max(1, reader.ReadInt32())
+                        });
+                    }
+
+                    entries.Add(entry);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"ProductionMachineRecipeAutoFill: Failed to load CraftingTree bytes. {ex.Message}");
+            entries.Clear();
+            return false;
+        }
+    }
+
+    private static List<CraftingMapObjectJsonEntry> ReadCraftingMapObjectEntries(BinaryReader reader, int version)
+    {
+        List<CraftingMapObjectJsonEntry> results = new List<CraftingMapObjectJsonEntry>();
+        if (reader == null)
+        {
+            return results;
+        }
+
+        if (version >= CurrentCraftingTreeFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                int runtimeId = reader.ReadInt32();
+                if (runtimeId >= 0)
+                {
+                    results.Add(new CraftingMapObjectJsonEntry { itemId = runtimeId });
+                }
+            }
+
+            return results;
+        }
+
+        if (version >= MultiCraftingMapObjectGuidFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                AddGuidMapObjectEntry(results, reader.ReadString());
+            }
+
+            return results;
+        }
+
+        AddGuidMapObjectEntry(results, reader.ReadString());
+        return results;
+    }
+
+    private static void AddGuidMapObjectEntry(List<CraftingMapObjectJsonEntry> results, string guid)
+    {
+        if (results == null || string.IsNullOrWhiteSpace(guid))
+        {
+            return;
+        }
+
+        string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+        if (!string.IsNullOrWhiteSpace(assetPath))
+        {
+            results.Add(new CraftingMapObjectJsonEntry { assetPath = assetPath });
+        }
+    }
+
+    private static CraftingTreeJsonFile LoadCraftingTreeJson()
+    {
+        string absolutePath = Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
+        if (!File.Exists(absolutePath))
+        {
+            return null;
+        }
+
+        string json = File.ReadAllText(absolutePath);
+        return string.IsNullOrWhiteSpace(json)
+            ? null
+            : JsonUtility.FromJson<CraftingTreeJsonFile>(json);
+    }
+
+    private static List<CraftingTreeJsonEntry> GetCraftingTreeEntries(CraftingTreeJsonFile file)
+    {
+        if (file == null)
+        {
+            return new List<CraftingTreeJsonEntry>();
+        }
+
+        if (file.recipes != null && file.recipes.Count > 0)
+        {
+            return file.recipes;
+        }
+
+        if (file.items != null && file.items.Count > 0)
+        {
+            return file.items;
+        }
+
+        if (file.entries != null && file.entries.Count > 0)
+        {
+            return file.entries;
+        }
+
+        return new List<CraftingTreeJsonEntry>();
+    }
+
+    private static void ApplyRecipes(ProductionMachine productionMachine, List<RecipeEntry> recipes)
+    {
+        if (productionMachine == null || recipes == null)
+        {
+            return;
+        }
+
+        Undo.RecordObject(productionMachine, "Auto Fill Production Machine Recipes");
+        SerializedObject serializedMachine = new SerializedObject(productionMachine);
+        serializedMachine.Update();
+
+        SerializedProperty inputListProperty = serializedMachine.FindProperty("inputList");
+        SerializedProperty outputListProperty = serializedMachine.FindProperty("outputList");
+        SerializedProperty legacyOutputProperty = serializedMachine.FindProperty("output");
+        if (inputListProperty == null || outputListProperty == null)
+        {
+            return;
+        }
+
+        inputListProperty.ClearArray();
+        outputListProperty.ClearArray();
+
+        for (int i = 0; i < recipes.Count; i++)
+        {
+            RecipeEntry recipe = recipes[i];
+
+            inputListProperty.InsertArrayElementAtIndex(i);
+            SetIoEntry(inputListProperty.GetArrayElementAtIndex(i), recipe.inputDefinition, recipe.inputCount);
+
+            outputListProperty.InsertArrayElementAtIndex(i);
+            SetIoEntry(outputListProperty.GetArrayElementAtIndex(i), recipe.outputDefinition, recipe.outputCount);
+        }
+
+        if (legacyOutputProperty != null)
+        {
+            SetIoEntry(legacyOutputProperty, null, 1);
+        }
+
+        serializedMachine.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(productionMachine);
+
+        GameObject prefabRoot = productionMachine.transform.root != null
+            ? productionMachine.transform.root.gameObject
+            : productionMachine.gameObject;
+        if (prefabRoot != null)
+        {
+            EditorUtility.SetDirty(prefabRoot);
+            if (PrefabUtility.IsPartOfPrefabAsset(prefabRoot))
+            {
+                PrefabUtility.SavePrefabAsset(prefabRoot);
+            }
+        }
+    }
+
+    private static void SetIoEntry(SerializedProperty entryProperty, ItemDefinition definition, int count)
+    {
+        if (entryProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty itemDefinitionProperty = entryProperty.FindPropertyRelative("itemDefinition");
+        SerializedProperty countProperty = entryProperty.FindPropertyRelative("count");
+        if (itemDefinitionProperty != null)
+        {
+            itemDefinitionProperty.objectReferenceValue = definition;
+        }
+
+        if (countProperty != null)
+        {
+            countProperty.intValue = Mathf.Max(1, count);
+        }
+    }
+
+    private static string GetDefinitionDisplayName(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        return string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName.Trim();
     }
 }

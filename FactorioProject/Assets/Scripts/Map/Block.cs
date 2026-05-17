@@ -74,6 +74,12 @@ public class Block : BaseObject
 
     private bool interactionFocusVisible;
     private bool mouseFocusVisible;
+    private bool interactionFocusUsesArea;
+    private bool mouseFocusUsesArea;
+    private Vector3 interactionFocusAreaCenter;
+    private Vector2 interactionFocusAreaSize = Vector2.one;
+    private Vector3 mouseFocusAreaCenter;
+    private Vector2 mouseFocusAreaSize = Vector2.one;
 
     private readonly List<List<PortableObject>> floorStacks = new List<List<PortableObject>>();
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
@@ -2846,6 +2852,24 @@ public class Block : BaseObject
         }
 
         interactionFocusVisible = isVisible;
+        interactionFocusUsesArea = false;
+        interactionFocusAreaSize = Vector2.one;
+        RefreshFocusMarker();
+    }
+
+    public void SetFocusVisible(bool isVisible, Vector3 worldCenter, Vector2 worldSize)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        interactionFocusVisible = isVisible;
+        interactionFocusUsesArea = isVisible;
+        interactionFocusAreaCenter = worldCenter;
+        interactionFocusAreaSize = new Vector2(
+            Mathf.Max(0.01f, worldSize.x),
+            Mathf.Max(0.01f, worldSize.y));
         RefreshFocusMarker();
     }
 
@@ -2857,6 +2881,24 @@ public class Block : BaseObject
         }
 
         mouseFocusVisible = isVisible;
+        mouseFocusUsesArea = false;
+        mouseFocusAreaSize = Vector2.one;
+        RefreshFocusMarker();
+    }
+
+    public void SetMouseFocusVisible(bool isVisible, Vector3 worldCenter, Vector2 worldSize)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        mouseFocusVisible = isVisible;
+        mouseFocusUsesArea = isVisible;
+        mouseFocusAreaCenter = worldCenter;
+        mouseFocusAreaSize = new Vector2(
+            Mathf.Max(0.01f, worldSize.x),
+            Mathf.Max(0.01f, worldSize.y));
         RefreshFocusMarker();
     }
 
@@ -2874,7 +2916,18 @@ public class Block : BaseObject
 
         bool isVisible = interactionFocusVisible || mouseFocusVisible;
         Color focusColor = mouseFocusVisible ? MapFocus.MouseFocusColor : MapFocus.DefaultFocusColor;
-        focus.SetVisible(isVisible, focusColor);
+        if (mouseFocusVisible && mouseFocusUsesArea)
+        {
+            focus.SetAreaVisible(true, focusColor, mouseFocusAreaCenter, mouseFocusAreaSize);
+        }
+        else if (interactionFocusVisible && interactionFocusUsesArea)
+        {
+            focus.SetAreaVisible(true, focusColor, interactionFocusAreaCenter, interactionFocusAreaSize);
+        }
+        else
+        {
+            focus.SetVisible(isVisible, focusColor);
+        }
     }
 
     public Vector2Int Coordinate => coordinate;

@@ -180,8 +180,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Iron ore
-  objId: 4
-  itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+  objId: 9
+  itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1

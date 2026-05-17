@@ -1,5 +1,6 @@
 using DG.Tweening;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
@@ -47,6 +48,8 @@ public class CraftingSlot : ItemSlot
     [SerializeField]
     private Image canNotImage;
     [SerializeField]
+    private TextMeshProUGUI createCountTxt;
+    [SerializeField]
     private Image createIcon, mapObjectIcon;
 
     private bool ingredientsVisible;
@@ -62,6 +65,7 @@ public class CraftingSlot : ItemSlot
     private int requiredCraftingMapObjectId = -1;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
+    private readonly List<HUDButtonHoverTween> hoverTweenBuffer = new List<HUDButtonHoverTween>();
     private readonly Dictionary<RectTransform, Vector2> ingredientLayoutSizes = new Dictionary<RectTransform, Vector2>();
 
     public float ExpandDuration => Mathf.Max(0f, expandDuration);
@@ -83,6 +87,7 @@ public class CraftingSlot : ItemSlot
     public override void SetItem(int itemId, int itemCount, int maxItemCount = 0)
     {
         base.SetItem(itemId, itemCount, maxItemCount);
+        RefreshCreateCountText();
         RefreshCraftingMapObjectState();
         if (ingredientsVisible)
         {
@@ -226,6 +231,12 @@ public class CraftingSlot : ItemSlot
                 ingredientsRoot = target as RectTransform;
             }
 
+            if (createCountTxt == null)
+            {
+                Transform target = transform.Find("CountText");
+                createCountTxt = target != null ? target.GetComponent<TextMeshProUGUI>() : null;
+            }
+
             PrepareIngredientsManualLayout();
 
             if (ingredientSlots == null || ingredientSlots.Count == 0)
@@ -286,6 +297,7 @@ public class CraftingSlot : ItemSlot
 
             CacheStableIngredientLayoutSizes();
             DisableIngredientSlotHoverTweens();
+            RefreshCreateCountText();
         }
         finally
         {
@@ -377,6 +389,8 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        ResetHoverTweensImmediate();
+
         if (ingredientsVisible)
         {
             HideIngredientsImmediate();
@@ -399,11 +413,6 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        if (!ingredientsRoot.gameObject.activeSelf)
-        {
-            ingredientsRoot.gameObject.SetActive(true);
-        }
-
         RefreshIngredients(true);
     }
 
@@ -422,6 +431,7 @@ public class CraftingSlot : ItemSlot
 
         bool revealSequentially = forceSequentialReveal || !ingredientsVisible;
         bool preserveRunningReveal = !revealSequentially && ingredientRevealAnimating;
+        bool rootWasActive = ingredientsRoot.gameObject.activeSelf;
         ingredientBuffer.Clear();
         if (!CraftingTreeRuntime.TryGetIngredients(ItemId, ingredientBuffer))
         {
@@ -434,6 +444,32 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        bool hasAllIngredients = RefreshIngredientSlotDisplays();
+
+        bool handReady = CanPrepareHandForCrafting(ItemId);
+        bool createButtonChangedVisibility = SetCreateButtonVisible((hasAllIngredients && handReady) || blockedByCraftingMapObject);
+        bool resetCreateButtonLayout = ShouldResetCreateButtonLayout(
+            revealSequentially,
+            rootWasActive,
+            createButtonChangedVisibility);
+        if (resetCreateButtonLayout)
+        {
+            ResetCreateButtonHoverImmediate(false);
+        }
+        ApplyIngredientsManualLayout(ingredientBuffer.Count, resetCreateButtonLayout);
+        SetIngredientSlotScalesImmediate(ingredientBuffer.Count);
+        ApplyIngredientRevealState(ingredientBuffer.Count, revealSequentially, preserveRunningReveal);
+        if (!rootWasActive && !ingredientsRoot.gameObject.activeSelf)
+        {
+            ingredientsRoot.gameObject.SetActive(true);
+        }
+
+        ForceIngredientsLayoutImmediate();
+        ingredientsVisible = true;
+    }
+
+    private bool RefreshIngredientSlotDisplays()
+    {
         bool hasAllIngredients = true;
         for (int i = 0; i < ingredientSlots.Count; i++)
         {
@@ -443,45 +479,52 @@ public class CraftingSlot : ItemSlot
                 continue;
             }
 
-            if (i < ingredientBuffer.Count)
+            if (i >= ingredientBuffer.Count)
             {
-                CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
-                int ownedCount = GetOwnedIngredientCount(entry.itemId);
-                bool hasEnough = ownedCount >= entry.count;
-                if (!hasEnough)
-                {
-                    hasAllIngredients = false;
-                }
-                slot.SetItemDisplay(entry.itemId, ownedCount, entry.count, true);
-                SetIngredientSlotAlpha(slot, hasEnough);
-                if (!slot.gameObject.activeSelf)
-                {
-                    slot.gameObject.SetActive(true);
-                }
+                ClearIngredientSlotDisplay(slot);
+                continue;
             }
-            else
+
+            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            int ownedCount = GetOwnedIngredientCount(entry.itemId);
+            bool hasEnough = ownedCount >= entry.count;
+            if (!hasEnough)
             {
-                slot.Clear();
-                SetIngredientSlotAlpha(slot, true);
-                if (slot.gameObject.activeSelf)
-                {
-                    slot.gameObject.SetActive(false);
-                }
+                hasAllIngredients = false;
+            }
+
+            slot.SetItemDisplay(entry.itemId, ownedCount, entry.count, true);
+            SetIngredientSlotAlpha(slot, hasEnough);
+            if (!slot.gameObject.activeSelf)
+            {
+                slot.gameObject.SetActive(true);
             }
         }
 
-        if (!ingredientsRoot.gameObject.activeSelf)
+        return hasAllIngredients;
+    }
+
+    private void ClearIngredientSlotDisplay(ItemSlot slot)
+    {
+        if (slot == null)
         {
-            ingredientsRoot.gameObject.SetActive(true);
+            return;
         }
 
-        bool handReady = CanPrepareHandForCrafting(ItemId);
-        SetCreateButtonVisible((hasAllIngredients && handReady) || blockedByCraftingMapObject);
-        ApplyIngredientsManualLayout(ingredientBuffer.Count);
-        SetIngredientSlotScalesImmediate(ingredientBuffer.Count);
-        ApplyIngredientRevealState(ingredientBuffer.Count, revealSequentially, preserveRunningReveal);
-        ForceIngredientsLayoutImmediate();
-        ingredientsVisible = true;
+        slot.Clear();
+        SetIngredientSlotAlpha(slot, true);
+        if (slot.gameObject.activeSelf)
+        {
+            slot.gameObject.SetActive(false);
+        }
+    }
+
+    private static bool ShouldResetCreateButtonLayout(
+        bool revealSequentially,
+        bool rootWasActive,
+        bool createButtonChangedVisibility)
+    {
+        return revealSequentially || !rootWasActive || createButtonChangedVisibility;
     }
 
     public void RefreshIngredientsIfVisible()
@@ -504,6 +547,34 @@ public class CraftingSlot : ItemSlot
     {
         ingredientBuffer.Clear();
         return CraftingTreeRuntime.TryGetIngredients(itemId, ingredientBuffer);
+    }
+
+    private void RefreshCreateCountText()
+    {
+        if (createCountTxt == null)
+        {
+            return;
+        }
+
+        int outputCount = HasItem && ItemId >= 0
+            ? CraftingTreeRuntime.GetOutputCount(ItemId)
+            : 0;
+        bool showCount = outputCount > 1;
+        if (!showCount)
+        {
+            createCountTxt.text = string.Empty;
+            if (createCountTxt.gameObject.activeSelf)
+            {
+                createCountTxt.gameObject.SetActive(false);
+            }
+            return;
+        }
+
+        createCountTxt.text = outputCount.ToString();
+        if (!createCountTxt.gameObject.activeSelf)
+        {
+            createCountTxt.gameObject.SetActive(true);
+        }
     }
 
     private bool HasAllIngredients()
@@ -675,6 +746,7 @@ public class CraftingSlot : ItemSlot
 
             if (createButton != null)
             {
+                ResetCreateButtonHoverImmediate(false);
                 createButton.interactable = false;
                 ResetRevealCanvasGroup(createButton.gameObject, 0f, false);
                 if (createButton.gameObject.activeSelf)
@@ -804,6 +876,12 @@ public class CraftingSlot : ItemSlot
 
         bool hasRevealTarget = false;
         int safeVisibleCount = Mathf.Max(0, visibleCount);
+        bool placeCreateButtonFirst = ShouldPlaceCreateButtonFirst();
+        if (placeCreateButtonFirst)
+        {
+            AppendCreateButtonRevealTarget(sequence, ref hasRevealTarget);
+        }
+
         for (int i = 0; i < ingredientSlots.Count; i++)
         {
             ItemSlot slot = ingredientSlots[i];
@@ -823,15 +901,9 @@ public class CraftingSlot : ItemSlot
             }
         }
 
-        if (createButton != null && createButton.gameObject.activeSelf)
+        if (!placeCreateButtonFirst)
         {
-            bool restoreCreateInteractable = createButton.interactable;
-            createButton.interactable = false;
-            AppendRevealTarget(
-                sequence,
-                createButton.gameObject,
-                ref hasRevealTarget,
-                () => createButton.interactable = restoreCreateInteractable);
+            AppendCreateButtonRevealTarget(sequence, ref hasRevealTarget);
         }
 
         if (!hasRevealTarget)
@@ -844,6 +916,20 @@ public class CraftingSlot : ItemSlot
         ingredientRevealSequence = sequence;
         sequence.OnComplete(() => FinishIngredientReveal(sequence));
         sequence.OnKill(() => FinishIngredientReveal(sequence));
+    }
+
+    private void AppendCreateButtonRevealTarget(Sequence sequence, ref bool hasRevealTarget)
+    {
+        if (createButton != null && createButton.gameObject.activeSelf)
+        {
+            bool restoreCreateInteractable = createButton.interactable;
+            createButton.interactable = false;
+            AppendRevealTarget(
+                sequence,
+                createButton.gameObject,
+                ref hasRevealTarget,
+                () => createButton.interactable = restoreCreateInteractable);
+        }
     }
 
     private void AppendRevealTarget(Sequence sequence, GameObject target, ref bool hasPreviousTarget, TweenCallback onComplete = null)
@@ -1099,7 +1185,7 @@ public class CraftingSlot : ItemSlot
         ingredientsManualLayoutReady = true;
     }
 
-    private void ApplyIngredientsManualLayout(int visibleIngredientCount)
+    private void ApplyIngredientsManualLayout(int visibleIngredientCount, bool applyCreateButtonSize = false)
     {
         if (ingredientsRoot == null)
         {
@@ -1111,6 +1197,13 @@ public class CraftingSlot : ItemSlot
         float nextX = 0f;
         float maxHeight = 0f;
         int safeVisibleCount = Mathf.Max(0, visibleIngredientCount);
+
+        RectTransform createRect = createButton != null ? createButton.transform as RectTransform : null;
+        bool placeCreateButtonFirst = ShouldPlaceCreateButtonFirst();
+        if (placeCreateButtonFirst)
+        {
+            PositionCreateButtonIfVisible(createRect, ref nextX, ref maxHeight, applyCreateButtonSize);
+        }
 
         if (ingredientSlots != null)
         {
@@ -1130,18 +1223,30 @@ public class CraftingSlot : ItemSlot
             }
         }
 
-        RectTransform createRect = createButton != null ? createButton.transform as RectTransform : null;
-        if (createRect != null && createButton.gameObject.activeSelf)
+        if (!placeCreateButtonFirst)
         {
-            Vector2 childSize = ResolveStableIngredientChildSize(createRect);
-            PositionIngredientChild(createRect, nextX, childSize, false);
-            nextX += childSize.x + ingredientsSpacing;
-            maxHeight = Mathf.Max(maxHeight, childSize.y);
+            PositionCreateButtonIfVisible(createRect, ref nextX, ref maxHeight, applyCreateButtonSize);
         }
 
         float width = Mathf.Max(0f, nextX - ingredientsSpacing);
         ingredientsRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
         ingredientsRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, maxHeight);
+    }
+
+    private void PositionCreateButtonIfVisible(RectTransform createRect, ref float nextX, ref float maxHeight, bool applySize)
+    {
+        if (createRect != null && createButton != null && createButton.gameObject.activeSelf)
+        {
+            Vector2 childSize = ResolveStableIngredientChildSize(createRect);
+            PositionIngredientChild(createRect, nextX, childSize, applySize);
+            nextX += childSize.x + ingredientsSpacing;
+            maxHeight = Mathf.Max(maxHeight, childSize.y);
+        }
+    }
+
+    private bool ShouldPlaceCreateButtonFirst()
+    {
+        return GetComponentInParent<HandSlot>() != null;
     }
 
     private void CacheStableIngredientLayoutSizes()
@@ -1247,25 +1352,18 @@ public class CraftingSlot : ItemSlot
 
     private void ResetHoverTweensImmediate()
     {
-        HUDButtonHoverTween[] hoverTweens = GetComponentsInChildren<HUDButtonHoverTween>(true);
-        for (int i = 0; i < hoverTweens.Length; i++)
-        {
-            if (hoverTweens[i] != null)
-            {
-                hoverTweens[i].ResetHoverImmediate();
-            }
-        }
-
+        ResetHoverTweensIn(this, true);
         PrepareIngredientsManualLayout();
     }
 
-    private void SetCreateButtonVisible(bool visible)
+    private bool SetCreateButtonVisible(bool visible)
     {
         if (createButton == null)
         {
-            return;
+            return false;
         }
 
+        bool wasActive = createButton.gameObject.activeSelf;
         if (visible && !createButton.gameObject.activeSelf)
         {
             createButton.gameObject.SetActive(true);
@@ -1285,6 +1383,8 @@ public class CraftingSlot : ItemSlot
         {
             createButton.gameObject.SetActive(false);
         }
+
+        return wasActive != createButton.gameObject.activeSelf;
     }
 
     private void RefreshCraftingMapObjectState()
@@ -1457,27 +1557,12 @@ public class CraftingSlot : ItemSlot
 
     private void SetCreateButtonHoverEnabled(bool enabled)
     {
-        if (createButton == null)
-        {
-            return;
-        }
+        SetHoverTweensEnabledIn(createButton, enabled, !enabled, false);
+    }
 
-        HUDButtonHoverTween[] hoverTweens = createButton.GetComponentsInChildren<HUDButtonHoverTween>(true);
-        for (int i = 0; i < hoverTweens.Length; i++)
-        {
-            HUDButtonHoverTween hoverTween = hoverTweens[i];
-            if (hoverTween == null)
-            {
-                continue;
-            }
-
-            if (!enabled)
-            {
-                hoverTween.ResetHoverImmediate(false);
-            }
-
-            hoverTween.enabled = enabled;
-        }
+    private void ResetCreateButtonHoverImmediate(bool rebuildLayout)
+    {
+        ResetHoverTweensIn(createButton, rebuildLayout);
     }
 
     private void ResetRequiredMapObjectTransform()
@@ -1512,18 +1597,48 @@ public class CraftingSlot : ItemSlot
                 continue;
             }
 
-            HUDButtonHoverTween[] hoverTweens = slot.GetComponentsInChildren<HUDButtonHoverTween>(true);
-            for (int tweenIndex = 0; tweenIndex < hoverTweens.Length; tweenIndex++)
-            {
-                HUDButtonHoverTween hoverTween = hoverTweens[tweenIndex];
-                if (hoverTween == null)
-                {
-                    continue;
-                }
+            SetHoverTweensEnabledIn(slot, false, true, false);
+        }
+    }
 
-                hoverTween.ResetHoverImmediate(false);
-                hoverTween.enabled = false;
+    private void ResetHoverTweensIn(Component root, bool rebuildLayout)
+    {
+        ApplyHoverTweensIn(root, null, true, rebuildLayout);
+    }
+
+    private void SetHoverTweensEnabledIn(Component root, bool enabled, bool reset, bool rebuildLayout)
+    {
+        ApplyHoverTweensIn(root, enabled, reset, rebuildLayout);
+    }
+
+    private void ApplyHoverTweensIn(Component root, bool? enabled, bool reset, bool rebuildLayout)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        hoverTweenBuffer.Clear();
+        root.GetComponentsInChildren(true, hoverTweenBuffer);
+        for (int i = 0; i < hoverTweenBuffer.Count; i++)
+        {
+            HUDButtonHoverTween hoverTween = hoverTweenBuffer[i];
+            if (hoverTween == null)
+            {
+                continue;
+            }
+
+            if (reset)
+            {
+                hoverTween.ResetHoverImmediate(rebuildLayout);
+            }
+
+            if (enabled.HasValue)
+            {
+                hoverTween.enabled = enabled.Value;
             }
         }
+
+        hoverTweenBuffer.Clear();
     }
 }

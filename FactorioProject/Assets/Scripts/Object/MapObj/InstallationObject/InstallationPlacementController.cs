@@ -11,6 +11,8 @@ public class InstallationPlacementController : MonoBehaviour
     private const string InstallGridOverlayShaderName = "Custom/InstallGridOverlay";
     private const int ConveyorStackStateSentinel = -1000000002;
     private const int InstallPreviewAreaMarkerSortingOrderOffset = 6000;
+    private const int Belt2FDefaultFootprintWidth = 1;
+    private const int Belt2FDefaultFootprintLength = 3;
 
     [SerializeField]
     private Button installButton;
@@ -603,6 +605,40 @@ public class InstallationPlacementController : MonoBehaviour
             return TryGetFenceInstallationDefinition(out definition);
         }
 
+        if (IsBelt2F(installationObject))
+        {
+            return TryGetBelt2FInstallationDefinition(out definition);
+        }
+
+        return false;
+    }
+
+    private bool TryGetBelt2FInstallationDefinition(out ItemDefinition definition)
+    {
+        definition = null;
+        if (GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return false;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition candidate = definitions[i];
+            if (candidate == null || !IsBelt2F(candidate.mapObject))
+            {
+                continue;
+            }
+
+            definition = candidate;
+            return true;
+        }
+
         return false;
     }
 
@@ -1128,24 +1164,201 @@ public class InstallationPlacementController : MonoBehaviour
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
         float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
-        if (TryGetEditableInstallationFromRaycast(ray, maxDistance, out installationObject, out anchorCoordinate))
+        if (TryGetBlockFromGroundPlane(ray, out Block clickedBlock)
+            && clickedBlock != null)
         {
-            return true;
+            if (TryGetEditableBelt2FAtPointerBlock(ray, maxDistance, clickedBlock, out installationObject, out anchorCoordinate))
+            {
+                return true;
+            }
+
+            if (TryGetEditableInstallationAtBlock(clickedBlock, out installationObject, out anchorCoordinate))
+            {
+                return true;
+            }
         }
 
-        if (!TryGetBlockFromGroundPlane(ray, out Block clickedBlock) || clickedBlock == null)
+        return TryGetEditableInstallationFromRaycast(ray, maxDistance, out installationObject, out anchorCoordinate);
+    }
+
+    private bool TryGetEditableBelt2FAtPointerBlock(
+        Ray ray,
+        float maxDistance,
+        Block clickedBlock,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+        if (clickedBlock == null)
         {
             return false;
         }
 
-        installationObject = clickedBlock.MapObject as InstallationObject;
+        if (TryGetEditableBelt2FFromRaycast(ray, maxDistance, clickedBlock, out installationObject, out anchorCoordinate))
+        {
+            return true;
+        }
 
+        return TryFindEditableBelt2FCoveringBlock(clickedBlock, out installationObject, out anchorCoordinate);
+    }
+
+    private bool TryGetEditableInstallationAtBlock(
+        Block block,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+        if (block == null)
+        {
+            return false;
+        }
+
+        installationObject = block.MapObject as InstallationObject;
         if (installationObject == null || !installationObject.TryGetPlacementRuntime(out anchorCoordinate, out _))
         {
             installationObject = null;
             return false;
         }
 
+        return true;
+    }
+
+    private bool TryGetEditableBelt2FFromRaycast(
+        Ray ray,
+        float maxDistance,
+        Block clickedBlock,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+        if (clickedBlock == null)
+        {
+            return false;
+        }
+
+        RaycastHit[] hits = Physics.RaycastAll(
+            ray,
+            Mathf.Max(0f, maxDistance),
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hits == null || hits.Length <= 0)
+        {
+            return false;
+        }
+
+        System.Array.Sort(hits, CompareRaycastHits);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider hitCollider = hits[i].collider;
+            if (hitCollider == null)
+            {
+                continue;
+            }
+
+            InstallationObject candidate = hitCollider.GetComponentInParent<InstallationObject>();
+            if (TryResolveEditableBelt2FAtCoordinate(candidate, clickedBlock, out installationObject, out anchorCoordinate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryFindEditableBelt2FCoveringBlock(
+        Block clickedBlock,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+        if (clickedBlock == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        List<InstallationObject> checkedInstallations = new List<InstallationObject>();
+        int searchRadius = Mathf.Max(Belt2FDefaultFootprintWidth, Belt2FDefaultFootprintLength) + 2;
+        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        {
+            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            {
+                Vector2Int candidateCoordinate = clickedBlock.Coordinate + new Vector2Int(offsetX, offsetY);
+                if (!terrain.TryGetLoadedBlock(candidateCoordinate, out Block candidateBlock)
+                    || candidateBlock == null
+                    || !(candidateBlock.MapObject is InstallationObject candidate)
+                    || checkedInstallations.Contains(candidate))
+                {
+                    continue;
+                }
+
+                checkedInstallations.Add(candidate);
+                if (TryResolveEditableBelt2FAtCoordinate(candidate, clickedBlock, out installationObject, out anchorCoordinate))
+                {
+                    return true;
+                }
+            }
+        }
+
+        ConvayorBelt2F[] activeBelts = FindObjectsOfType<ConvayorBelt2F>(false);
+        for (int i = 0; i < activeBelts.Length; i++)
+        {
+            if (TryResolveEditableBelt2FAtCoordinate(activeBelts[i], clickedBlock, out installationObject, out anchorCoordinate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveEditableBelt2FAtCoordinate(
+        InstallationObject candidate,
+        Block clickedBlock,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+        if (candidate == null
+            || clickedBlock == null
+            || !IsBelt2F(candidate)
+            || !candidate.gameObject.activeInHierarchy
+            || !candidate.TryGetPlacementRuntime(out Vector2Int candidateAnchorCoordinate, out int candidateQuarterTurns))
+        {
+            return false;
+        }
+
+        Vector2Int bridgeCenterCoordinate = GetBelt2FBridgeCenterCoordinate(
+            candidateAnchorCoordinate,
+            candidate,
+            candidateQuarterTurns);
+        if (clickedBlock.Coordinate == bridgeCenterCoordinate
+            && IsBaseConveyorBelt(GetBlockingMapObject(clickedBlock)))
+        {
+            return false;
+        }
+
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(
+            candidateAnchorCoordinate,
+            candidate,
+            candidateQuarterTurns);
+        if (!footprintCoordinates.Contains(clickedBlock.Coordinate))
+        {
+            return false;
+        }
+
+        installationObject = candidate;
+        anchorCoordinate = candidateAnchorCoordinate;
         return true;
     }
 
@@ -1753,7 +1966,13 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource = editSession.definition != null && editSession.definition.mapObject != null
             ? editSession.definition.mapObject
             : editSession.originalInstallation;
-        return GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+        List<Vector2Int> coordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+        if (ShouldSkipBelt2FBridgeCenterBinding(anchorCoordinate, footprintSource, quarterTurns, out Vector2Int bridgeCenterCoordinate))
+        {
+            coordinates.Remove(bridgeCenterCoordinate);
+        }
+
+        return coordinates;
     }
 
     private void CaptureAttachedAreaBoxes(InstallationEditSession editSession)
@@ -2872,7 +3091,11 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewSourcePrefabsByPreview.TryGetValue(preview, out MapObject sourcePrefab);
         bool sourceResolvedWithQuarterTurns = false;
 
-        if (activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype)
+        if (IsBelt2F(activeInstallDefinition.mapObject))
+        {
+            sourcePrefab = activeInstallDefinition.mapObject;
+        }
+        else if (activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype)
         {
             ConveyorPreviewVariantMode previewVariantMode = preview == activeInstallPreview
                 ? installPreviewConveyorVariantMode
@@ -3063,7 +3286,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        int candidateCount = GetPlacementRotationCandidateCount(sourcePrefab);
+        int candidateCount = IsBelt2F(sourcePrefab) ? 1 : GetPlacementRotationCandidateCount(sourcePrefab);
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
@@ -3518,7 +3741,13 @@ public class InstallationPlacementController : MonoBehaviour
             return objectCoordinates;
         }
 
-        return GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+        List<Vector2Int> coordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+        if (ShouldSkipBelt2FBridgeCenterBinding(anchorCoordinate, footprintSource, quarterTurns, out Vector2Int bridgeCenterCoordinate))
+        {
+            coordinates.Remove(bridgeCenterCoordinate);
+        }
+
+        return coordinates;
     }
 
     public void ConfigureInstalledObjectRuntime(
@@ -3560,6 +3789,40 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
+    public bool BindInstalledObjectToFootprintBlocks(
+        MapObject installedObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (installedObject == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        bool boundAnyBlock = false;
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorCoordinate, installedObject, quarterTurns);
+        for (int i = 0; i < footprintCoordinates.Count; i++)
+        {
+            if (!terrain.TryGetLoadedBlock(footprintCoordinates[i], out Block block)
+                || block == null
+                || !ShouldBindInstalledObjectToBlock(block, anchorCoordinate, installedObject, quarterTurns))
+            {
+                continue;
+            }
+
+            block.SetMapObject(installedObject);
+            boundAnyBlock = true;
+        }
+
+        return boundAnyBlock;
+    }
+
     private static void ApplyFenceVariantSharedMapObjectSettings(MapObject mapObject)
     {
         if (!(mapObject is Wall fence))
@@ -3573,6 +3836,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        fence.MapFilter = straightPrefab.MapFilter;
         mapObject.CopyFocusSettingsFrom(straightPrefab);
     }
 
@@ -3635,6 +3899,11 @@ public class InstallationPlacementController : MonoBehaviour
         if (conveyorPrototype == null)
         {
             return null;
+        }
+
+        if (IsBelt2F(conveyorPrototype))
+        {
+            return conveyorPrototype;
         }
 
         return conveyorVariantKind switch
@@ -4561,6 +4830,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (!(definition.mapObject is ConveyorBelt conveyorPrototype))
+        {
+            return definition.mapObject;
+        }
+
+        if (IsBelt2F(conveyorPrototype))
         {
             return definition.mapObject;
         }
@@ -7871,7 +8145,9 @@ public class InstallationPlacementController : MonoBehaviour
         IReadOnlyList<ConveyorChangeInfo> changedConveyors = null,
         MapObject previewToIgnore = null)
     {
-        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt))
+        if (activeInstallDefinition == null
+            || !(activeInstallDefinition.mapObject is ConveyorBelt)
+            || IsBelt2F(activeInstallDefinition.mapObject))
         {
             return;
         }
@@ -7901,6 +8177,12 @@ public class InstallationPlacementController : MonoBehaviour
 
         int quarterTurns = GetPreviewQuarterTurns(preview);
         MapObject manualSourcePrefab = ResolveInstallPreviewFootprintSource(preview);
+        if (IsBelt2F(activeInstallDefinition.mapObject))
+        {
+            installPreviewSourcePrefabsByPreview[preview] = activeInstallDefinition.mapObject;
+            return false;
+        }
+
         if (activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype)
         {
             manualSourcePrefab = ResolveConveyorPreviewSourceForAnchor(
@@ -9147,7 +9429,7 @@ public class InstallationPlacementController : MonoBehaviour
                         continue;
                     }
 
-                    if (CanPlacePreviewOnTargetBlockType(block, activeInstallDefinition.mapObject))
+                    if (CanPlaceActiveDefinitionFromGridCoordinate(block))
                     {
                         continue;
                     }
@@ -9207,6 +9489,22 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMesh.RecalculateBounds();
     }
 
+    private bool CanPlaceActiveDefinitionFromGridCoordinate(Block block)
+    {
+        if (block == null || activeInstallDefinition == null || activeInstallDefinition.mapObject == null)
+        {
+            return false;
+        }
+
+        MapObject footprintSource = activeInstallDefinition.mapObject;
+        if (!IsBelt2F(footprintSource))
+        {
+            return CanPlacePreviewOnTargetBlockType(block, footprintSource);
+        }
+
+        return CanPlaceBelt2FGridTargetBlock(block, footprintSource);
+    }
+
     private void AddInstallPreviewFootprintFill(List<Vector3> vertices, List<int> triangles, List<Color> colors, float fillY)
     {
         CleanupInstallPreviewReferences();
@@ -9231,14 +9529,16 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             Color previewFillColor = isBlockedPreview ? installGridBlockedFillColor : installPreviewTint;
-            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, preview, quarterTurns);
+            MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
+            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
+                Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
                 AddGridCellQuad(
                     vertices,
                     triangles,
                     colors,
-                    occupiedCoordinates[coordinateIndex],
+                    coordinate,
                     fillY,
                     previewFillColor);
             }
@@ -9270,14 +9570,16 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             Color previewLineColor = isBlockedPreview ? installGridBlockedLineColor : installGridColor;
-            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, preview, quarterTurns);
+            MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
+            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
+                Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
                 AddGridCellOutline(
                     vertices,
                     triangles,
                     colors,
-                    occupiedCoordinates[coordinateIndex],
+                    coordinate,
                     lineY,
                     previewLineColor);
             }
@@ -9918,7 +10220,22 @@ public class InstallationPlacementController : MonoBehaviour
                 out previousConveyorChange);
         }
 
-        if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt conveyorBelt)
+        if (IsActiveBelt2FPreview())
+        {
+            if (!TryRotateBelt2FPreviewAroundBridgeCenter(
+                    hasAnchorBlock,
+                    anchorCoordinate,
+                    out anchorBlock,
+                    out anchorCoordinate,
+                    out int resolvedQuarterTurns))
+            {
+                return;
+            }
+
+            hasAnchorBlock = anchorBlock != null;
+            installPreviewQuarterTurns = resolvedQuarterTurns;
+        }
+        else if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt conveyorBelt)
         {
             int logicalQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
 
@@ -10030,6 +10347,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
+        if (hasAnchorBlock)
+        {
+            installPreviewAnchorCoordinates[activeInstallPreview] = anchorCoordinate;
+        }
+
         if (ShouldRememberFenceDoorStandaloneQuarterTurns(activeInstallPreview, hasAnchorBlock, anchorCoordinate))
         {
             installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
@@ -10066,6 +10388,82 @@ public class InstallationPlacementController : MonoBehaviour
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null,
             true);
         InvalidateInstallGrid();
+    }
+
+    private bool IsActiveBelt2FPreview()
+    {
+        if (activeInstallPreview == null)
+        {
+            return false;
+        }
+
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(activeInstallPreview)
+                                    ?? (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null)
+                                    ?? activeInstallPreview;
+        return IsBelt2F(footprintSource);
+    }
+
+    private bool TryRotateBelt2FPreviewAroundBridgeCenter(
+        bool hasAnchorBlock,
+        Vector2Int currentAnchorCoordinate,
+        out Block rotatedAnchorBlock,
+        out Vector2Int rotatedAnchorCoordinate,
+        out int rotatedQuarterTurns)
+    {
+        rotatedAnchorBlock = null;
+        rotatedAnchorCoordinate = currentAnchorCoordinate;
+        rotatedQuarterTurns = GetNextInstallPreviewQuarterTurns(activeInstallPreview, installPreviewQuarterTurns);
+
+        if (!hasAnchorBlock)
+        {
+            return true;
+        }
+
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(activeInstallPreview)
+                                    ?? (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null)
+                                    ?? activeInstallPreview;
+        if (!IsBelt2F(footprintSource))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector2Int bridgeCenterCoordinate = GetBelt2FBridgeCenterCoordinate(
+            currentAnchorCoordinate,
+            footprintSource,
+            GetPreviewQuarterTurns(activeInstallPreview));
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        int startQuarterTurns = GetNextInstallPreviewQuarterTurns(activeInstallPreview, installPreviewQuarterTurns);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+                activeInstallPreview,
+                startQuarterTurns + offset);
+            Vector2Int candidateAnchorCoordinate =
+                bridgeCenterCoordinate - GetBelt2FBridgeCenterOffset(footprintSource, candidateQuarterTurns);
+            if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                || candidateAnchorBlock == null
+                || !CanPlacePreviewOnBlock(candidateAnchorBlock, activeInstallPreview, candidateQuarterTurns))
+            {
+                continue;
+            }
+
+            rotatedAnchorBlock = candidateAnchorBlock;
+            rotatedAnchorCoordinate = candidateAnchorCoordinate;
+            rotatedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        rotatedAnchorBlock = null;
+        rotatedAnchorCoordinate = currentAnchorCoordinate;
+        rotatedQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        return false;
     }
 
     private bool TryFindNextConveyorPreviewRotation(
@@ -10282,6 +10680,11 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         MapObject previewToIgnore)
     {
+        if (IsBelt2F(conveyorPrototype))
+        {
+            return sourcePrefab != null ? sourcePrefab : conveyorPrototype;
+        }
+
         if (conveyorPrototype == null || !(sourcePrefab is ConveyorBelt sourceConveyor) || !sourceConveyor.IsCornerVariant)
         {
             return sourcePrefab;
@@ -11060,7 +11463,8 @@ public class InstallationPlacementController : MonoBehaviour
 
             RefreshActiveConveyorPreviewVariant();
         }
-        if (MoveInstallPreviewToBlock(anchorBlock))
+        Block initialPreviewBlock = IsBelt2F(activeInstallDefinition.mapObject) ? block : anchorBlock;
+        if (MoveInstallPreviewToBlock(initialPreviewBlock))
         {
             return true;
         }
@@ -11243,7 +11647,11 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource = previewToIgnore != null
             ? previewToIgnore
             : (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null);
-        if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt)
+        if (activeInstallDefinition != null && IsBelt2F(activeInstallDefinition.mapObject))
+        {
+            footprintSource = activeInstallDefinition.mapObject;
+        }
+        else if (activeInstallDefinition != null && activeInstallDefinition.mapObject is ConveyorBelt)
         {
             ConveyorPreviewVariantMode previewVariantMode = previewToIgnore == activeInstallPreview
                 ? installPreviewConveyorVariantMode
@@ -11277,7 +11685,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!TryGetFootprintBlocks(block.Coordinate, footprintSource, quarterTurns, previewToIgnore, out _))
         {
-            return CanPlaceStraightConveyorPreviewOnBlock(block, previewToIgnore, quarterTurns);
+            return !IsBelt2F(footprintSource)
+                   && CanPlaceStraightConveyorPreviewOnBlock(block, previewToIgnore, quarterTurns);
         }
 
         if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype))
@@ -11316,7 +11725,9 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CanUseStraightConveyorFallback(MapObject preview)
     {
-        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt))
+        if (activeInstallDefinition == null
+            || !(activeInstallDefinition.mapObject is ConveyorBelt)
+            || IsBelt2F(activeInstallDefinition.mapObject))
         {
             return false;
         }
@@ -11437,6 +11848,27 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        if (TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            && IsBelt2F(footprintSource))
+        {
+            return TryResolveBelt2FBridgeCenterInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                out anchorBlock,
+                out resolvedQuarterTurns);
+        }
+
+        if (TryResolveBelt2FBridgeCenterInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
         if (TryFindPlaceableInstallPreviewQuarterTurns(
                 clickedBlock,
                 previewToIgnore,
@@ -11453,6 +11885,51 @@ public class InstallationPlacementController : MonoBehaviour
             preferredQuarterTurns,
             out anchorBlock,
             out resolvedQuarterTurns);
+    }
+
+    private bool TryResolveBelt2FBridgeCenterInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsBelt2F(footprintSource))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+                previewToIgnore,
+                resolvedQuarterTurns + offset);
+            Vector2Int bridgeCenterOffset = GetBelt2FBridgeCenterOffset(footprintSource, candidateQuarterTurns);
+            Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - bridgeCenterOffset;
+            if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                || candidateAnchorBlock == null
+                || !CanPlacePreviewOnBlock(candidateAnchorBlock, previewToIgnore, candidateQuarterTurns))
+            {
+                continue;
+            }
+
+            anchorBlock = candidateAnchorBlock;
+            resolvedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryFindPlaceableItemAreaOverlapInstallPreviewTarget(
@@ -11566,6 +12043,12 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsConveyorInstallPreview(MapObject previewToIgnore)
     {
+        if (IsBelt2F(previewToIgnore)
+            || (activeInstallDefinition != null && IsBelt2F(activeInstallDefinition.mapObject)))
+        {
+            return false;
+        }
+
         if (previewToIgnore is ConveyorBelt)
         {
             return true;
@@ -11730,18 +12213,81 @@ public class InstallationPlacementController : MonoBehaviour
         {
             sizeX = Mathf.Max(1, footprintSource.Status.mapSizeX);
             sizeY = Mathf.Max(1, footprintSource.Status.mapSizeY);
+            if (IsBelt2F(footprintSource))
+            {
+                Vector2Int belt2FSize = GetBelt2FFootprintSize(footprintSource);
+                sizeX = belt2FSize.x;
+                sizeY = belt2FSize.y;
+            }
         }
 
+        Vector2Int centerCell = GetFootprintAnchorCell(footprintSource);
         List<Vector2Int> offsets = new List<Vector2Int>(sizeX * sizeY);
         for (int y = 0; y < sizeY; y++)
         {
             for (int x = 0; x < sizeX; x++)
             {
-                offsets.Add(RotateFootprintOffset(new Vector2Int(x, y), quarterTurns));
+                offsets.Add(RotateFootprintOffset(new Vector2Int(x - centerCell.x, y - centerCell.y), quarterTurns));
             }
         }
 
         return offsets;
+    }
+
+    private static Vector2Int GetFootprintAnchorCell(MapObject footprintSource)
+    {
+        if (footprintSource == null)
+        {
+            return Vector2Int.zero;
+        }
+
+        return IsBelt2F(footprintSource)
+            ? GetBelt2FAnchorCell(footprintSource)
+            : footprintSource.PlacementCenterCell;
+    }
+
+    private static Vector2Int GetBelt2FAnchorCell(MapObject footprintSource)
+    {
+        Vector2Int size = GetBelt2FFootprintSize(footprintSource);
+        Vector2Int centerCell = footprintSource != null
+            ? footprintSource.PlacementCenterCell
+            : Vector2Int.zero;
+        return new Vector2Int(
+            Mathf.Clamp(centerCell.x, 0, size.x - 1),
+            Mathf.Clamp(centerCell.y, 0, size.y - 1));
+    }
+
+    private static Vector2Int GetBelt2FBridgeCenterCell(MapObject footprintSource)
+    {
+        return GetBelt2FAnchorCell(footprintSource);
+    }
+
+    private static Vector2Int GetBelt2FFootprintSize(MapObject footprintSource)
+    {
+        int sizeX = Mathf.Max(1, footprintSource != null ? footprintSource.Status.mapSizeX : 1);
+        int sizeY = Mathf.Max(1, footprintSource != null ? footprintSource.Status.mapSizeY : 1);
+        if (sizeX == 1 && sizeY == 1)
+        {
+            sizeX = Belt2FDefaultFootprintWidth;
+            sizeY = Belt2FDefaultFootprintLength;
+        }
+
+        return new Vector2Int(sizeX, sizeY);
+    }
+
+    private static Vector2Int GetBelt2FBridgeCenterOffset(MapObject footprintSource, int quarterTurns)
+    {
+        return RotateFootprintOffset(
+            GetBelt2FBridgeCenterCell(footprintSource) - GetBelt2FAnchorCell(footprintSource),
+            quarterTurns);
+    }
+
+    private static Vector2Int GetBelt2FBridgeCenterCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        return anchorCoordinate + GetBelt2FBridgeCenterOffset(footprintSource, quarterTurns);
     }
 
     private bool TryGetRectGridFootprintSettings(
@@ -11863,16 +12409,19 @@ public class InstallationPlacementController : MonoBehaviour
             if (!ignoreOtherPreviews
                 && TryGetInstallPreviewAtCoordinate(coordinate, out MapObject existingPreview)
                 && existingPreview != null
-                && existingPreview != previewToIgnore
-                && !CanOverlapCompatibleInstallPreview(
-                    coordinate,
-                    footprintSource,
-                    rectGridBlockType,
-                    anchorCoordinate,
-                    quarterTurns,
-                    existingPreview))
+                && existingPreview != previewToIgnore)
             {
-                return false;
+                if (IsBelt2F(footprintSource)
+                    || !CanOverlapCompatibleInstallPreview(
+                        coordinate,
+                        footprintSource,
+                        rectGridBlockType,
+                        anchorCoordinate,
+                        quarterTurns,
+                        existingPreview))
+                {
+                    return false;
+                }
             }
 
             footprintBlocks.Add(footprintBlock);
@@ -11952,7 +12501,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (!TryGetRectGridFootprintSettings(footprintSource, out _, out _, out _)
             || !TryGetInputOutputModule(footprintSource, out _))
         {
-            return true;
+            return !ShouldSkipBelt2FBridgeCenterBinding(block, anchorCoordinate, footprintSource, quarterTurns);
         }
 
         return TryGetRectGridFootprintBlockType(
@@ -12001,6 +12550,23 @@ public class InstallationPlacementController : MonoBehaviour
             || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.Output);
         bool isInputOutputAreaBlock = isInputOutputEnergyAreaBlock || isInputOutputItemAreaBlock || isInputOutputOutputAreaBlock;
 
+        if (IsResourceAllowedForPlacement(block, occupyingObject, allowedFilter))
+        {
+            return true;
+        }
+
+        if (IsBelt2F(footprintSource))
+        {
+            return CanPlaceBelt2FBlock(
+                block,
+                footprintSource,
+                occupyingObject,
+                anchorCoordinate,
+                quarterTurns,
+                isInputOutputAreaBlock,
+                allowedFilter);
+        }
+
         if (IsRectGridAreaBlockType(rectGridBlockType))
         {
             return CanPlaceRectGridAreaBlock(
@@ -12026,11 +12592,6 @@ public class InstallationPlacementController : MonoBehaviour
                 allowedFilter);
         }
 
-        if (occupyingObject is Resource resource)
-        {
-            return IsResourceAllowedByMapFilter(resource, allowedFilter);
-        }
-
         if (occupyingObject != null)
         {
             return false;
@@ -12041,6 +12602,152 @@ public class InstallationPlacementController : MonoBehaviour
             Block.BlockType.Ground => (allowedFilter & InstallationMapFilter.Ground) != 0,
             _ => false
         };
+    }
+
+    private bool CanPlaceBelt2FBlock(
+        Block block,
+        MapObject footprintSource,
+        MapObject occupyingObject,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        bool isInputOutputAreaBlock,
+        InstallationMapFilter allowedFilter)
+    {
+        if (block == null
+            || !anchorCoordinate.HasValue
+            || block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        bool isBridgeCenter = block.Coordinate == GetBelt2FBridgeCenterCoordinate(
+            anchorCoordinate.Value,
+            footprintSource,
+            quarterTurns);
+        if (IsResourceAllowedForPlacement(block, occupyingObject, allowedFilter))
+        {
+            return true;
+        }
+
+        if (isBridgeCenter)
+        {
+            if (isInputOutputAreaBlock)
+            {
+                return false;
+            }
+
+            return occupyingObject == null || IsBaseConveyorBelt(occupyingObject);
+        }
+
+        return occupyingObject == null && !isInputOutputAreaBlock;
+    }
+
+    private bool CanPlaceBelt2FGridTargetBlock(Block block, MapObject footprintSource)
+    {
+        if (block == null || block.Type != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        MapObject occupyingObject = GetBlockingMapObject(block);
+        if (occupyingObject == null
+            && TryGetSavedInstallationPlacementAtCoordinate(
+                block.Coordinate,
+                out MapObject savedOccupyingObject,
+                out _,
+                out _))
+        {
+            occupyingObject = savedOccupyingObject;
+        }
+
+        if (TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
+            && IsResourceAllowedForPlacement(
+                block,
+                occupyingObject,
+                ResolvePlacementMapFilter(footprintSource, installationObject)))
+        {
+            return true;
+        }
+
+        bool isInputOutputAreaBlock =
+            InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
+            || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
+            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputEnergy)
+            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputItem)
+            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.Output);
+        if (isInputOutputAreaBlock)
+        {
+            return false;
+        }
+
+        return occupyingObject == null || IsBaseConveyorBelt(occupyingObject);
+    }
+
+    private bool ShouldSkipBelt2FBridgeCenterBinding(
+        Block block,
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        if (block == null
+            || !IsBelt2F(footprintSource)
+            || block.Coordinate != GetBelt2FBridgeCenterCoordinate(anchorCoordinate, footprintSource, quarterTurns))
+        {
+            return false;
+        }
+
+        return IsBelt2FBridgeCenterBlockedByBaseConveyor(block);
+    }
+
+    private bool ShouldSkipBelt2FBridgeCenterBinding(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        out Vector2Int bridgeCenterCoordinate)
+    {
+        bridgeCenterCoordinate = Vector2Int.zero;
+        if (!IsBelt2F(footprintSource))
+        {
+            return false;
+        }
+
+        bridgeCenterCoordinate = GetBelt2FBridgeCenterCoordinate(anchorCoordinate, footprintSource, quarterTurns);
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        return terrain != null
+               && terrain.TryGetLoadedBlock(bridgeCenterCoordinate, out Block bridgeCenterBlock)
+               && bridgeCenterBlock != null
+               && IsBelt2FBridgeCenterBlockedByBaseConveyor(bridgeCenterBlock);
+    }
+
+    private bool IsBelt2FBridgeCenterBlockedByBaseConveyor(Block block)
+    {
+        if (block == null)
+        {
+            return false;
+        }
+
+        if (IsBaseConveyorBelt(GetBlockingMapObject(block)))
+        {
+            return true;
+        }
+
+        return TryGetSavedInstallationPlacementAtCoordinate(
+                   block.Coordinate,
+                   out MapObject savedSourcePrefab,
+                   out _,
+                   out _)
+               && IsBaseConveyorBelt(savedSourcePrefab);
+    }
+
+    private static bool IsBaseConveyorBelt(MapObject mapObject)
+    {
+        return mapObject is ConveyorBelt && !IsBelt2F(mapObject);
+    }
+
+    private static bool IsBelt2F(MapObject mapObject)
+    {
+        return mapObject is ConvayorBelt2F;
     }
 
     public static InstallationMapFilter ResolvePlacementMapFilter(
@@ -12054,6 +12761,11 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 return straightPrefab.MapFilter;
             }
+        }
+
+        if (footprintSource is Wall wall && wall.StraightVariantPrefab != null && wall.StraightVariantPrefab != wall)
+        {
+            return wall.StraightVariantPrefab.MapFilter;
         }
 
         return installationObject != null
@@ -12536,6 +13248,20 @@ public class InstallationPlacementController : MonoBehaviour
             ? InstallationMapFilter.Tree
             : InstallationMapFilter.Ore;
         return (allowedFilter & resourceFilter) != 0;
+    }
+
+    private static bool IsResourceAllowedForPlacement(
+        Block block,
+        MapObject occupyingObject,
+        InstallationMapFilter allowedFilter)
+    {
+        Resource resource = occupyingObject as Resource;
+        if (resource == null && occupyingObject == null && block != null)
+        {
+            resource = block.Resource;
+        }
+
+        return IsResourceAllowedByMapFilter(resource, allowedFilter);
     }
 
     private static bool IsRectGridAreaBlockType(InputOutputModule.RectGridBlockType blockType)

@@ -140,12 +140,10 @@ public class ItemInfoDescription : MonoBehaviour
                 out int inputAreaCapacity,
                 out int outputItemId,
                 out int outputAreaCount,
-                out int outputAreaCapacity)
-            && inputItemId >= 0)
+                out int outputAreaCapacity))
         {
-            SetItemSlot(inputItem, inputItemSlot, inputItemId, inputAreaCount, inputAreaCapacity, true);
-            bool displayEmptyOutputItem = inputAreaCount > 0 || module.HasActiveOrPendingCraft();
-            SetItemSlot(outputItem, outputItemSlot, outputItemId, outputAreaCount, outputAreaCapacity, true, displayEmptyOutputItem);
+            SetItemSlot(inputItem, inputItemSlot, inputItemId, inputAreaCount, inputAreaCapacity, true, true);
+            SetItemSlot(outputItem, outputItemSlot, outputItemId, outputAreaCount, outputAreaCapacity, true, true);
             return;
         }
 

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_24_Brick Wall
   m_EditorClassIdentifier: 
   itemName: Brick wall
-  id: 24
+  id: 25
   mapObject: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
   portableMesh: {fileID: 4300000, guid: b46aa1085ccb5014d954ecc3c6233fc3, type: 2}
   portableMat: {fileID: 2100000, guid: 2c33df38df1346a40a0c4efc329445b2, type: 2}

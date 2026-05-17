@@ -1397,7 +1397,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             installedObject.transform.SetPositionAndRotation(
                 placementController.GetInstalledObjectWorldPosition(plan.Coordinate, plan.SourcePrefab, plan.QuarterTurns, 0f),
                 placementController.GetInstalledObjectRotation(plan.SourcePrefab, plan.QuarterTurns));
-            anchorBlock.SetMapObject(installedObject);
+            if (!placementController.BindInstalledObjectToFootprintBlocks(installedObject, plan.Coordinate, plan.QuarterTurns))
+            {
+                anchorBlock.SetMapObject(installedObject);
+            }
+
             placementController.ConfigureInstalledObjectRuntime(installedObject, plan.Coordinate, plan.QuarterTurns);
             terrain.RegisterLiveInstallationObject(installedInstallation);
 

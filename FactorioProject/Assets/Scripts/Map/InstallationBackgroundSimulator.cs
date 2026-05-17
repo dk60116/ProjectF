@@ -221,7 +221,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 continue;
             }
 
-            if (!TryStartNextCraft(stateStore, installationState.inputOutputState, templateModule, installedDefinition))
+            if (!TryStartNextCraft(stateStore, installationState, installationState.inputOutputState, templateModule, installedDefinition))
             {
                 blockedOrIdle = true;
                 break;
@@ -1220,6 +1220,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
 
     private bool TryStartNextCraft(
         BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
         InputOutputModule.PersistentState state,
         InputOutputModule templateModule,
         ItemDefinition installedDefinition)
@@ -1233,6 +1234,11 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
             if (!TryGetRecipePair(templateModule, recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
+            {
+                continue;
+            }
+
+            if (!SavedProductionMachineAcceptsOutput(installationState, templateModule, outputItemId))
             {
                 continue;
             }
@@ -1270,6 +1276,44 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             state.activeOutputItemId = outputItemId;
             state.activeOutputCount = outputCount;
             return true;
+        }
+
+        return false;
+    }
+
+    private static bool SavedProductionMachineAcceptsOutput(
+        BlockStateStore.InstallationSaveState installationState,
+        InputOutputModule templateModule,
+        int outputItemId)
+    {
+        if (!(templateModule is ProductionMachine productionMachine))
+        {
+            return true;
+        }
+
+        if (outputItemId < 0)
+        {
+            return false;
+        }
+
+        List<int> targetItemIds = new List<int>();
+        if (!productionMachine.TryCollectProductionTargetItemIds(targetItemIds))
+        {
+            return true;
+        }
+
+        if (installationState == null || !installationState.itemFilterMaskInitialized)
+        {
+            return targetItemIds.Count > 0 && outputItemId == targetItemIds[0];
+        }
+
+        for (int i = 0; i < targetItemIds.Count; i++)
+        {
+            int targetItemId = targetItemIds[i];
+            if (SavedInstallationAcceptsItem(installationState, targetItemId))
+            {
+                return outputItemId == targetItemId;
+            }
         }
 
         return false;

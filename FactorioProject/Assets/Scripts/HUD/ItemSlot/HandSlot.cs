@@ -2,10 +2,14 @@ using UnityEngine;
 
 public class HandSlot : BagSlot
 {
+    private const int MirroredBagSlotCraftingCapacity = 9;
+
     protected override int GetCraftingDirectionSign()
     {
-        return 1;
+        return -base.GetCraftingDirectionSign();
     }
+
+    protected override int MinimumCraftingSlotCapacity => MirroredBagSlotCraftingCapacity;
 
     protected override bool AllowPickupOnClick => true;
 

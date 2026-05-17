@@ -198,13 +198,48 @@ public class ItemSlot : MonoBehaviour
             }
         }
 
+        if (itemName == null)
+        {
+            itemName = FindTextComponentByName(
+                "ItemName",
+                "Item Name",
+                "ItemNameText",
+                "Item Name Text",
+                "NameText",
+                "Name Text",
+                "ObjectName",
+                "Object Name");
+        }
+
+        if (count != null
+            && (count == itemName || IsNameTextComponent(count)))
+        {
+            count = null;
+        }
+
         if (count == null)
         {
-            TextMeshProUGUI[] textComponents = GetComponentsInChildren<TextMeshProUGUI>(true);
+            TextMeshProUGUI namedCount = FindTextComponentByName(
+                "Count",
+                "CountText",
+                "Count Text",
+                "ItemCount",
+                "Item Count",
+                "CreateCount",
+                "Create Count");
+            if (namedCount != null && namedCount != itemName)
+            {
+                count = namedCount;
+            }
+        }
+
+        if (count == null)
+        {
+            TextMeshProUGUI[] textComponents = GetTextComponentsForReferenceSearch();
             for (int i = 0; i < textComponents.Length; i++)
             {
                 TextMeshProUGUI candidate = textComponents[i];
-                if (candidate == null || candidate == itemName)
+                if (candidate == null || candidate == itemName || IsNameTextComponent(candidate))
                 {
                     continue;
                 }
@@ -222,7 +257,7 @@ public class ItemSlot : MonoBehaviour
             return null;
         }
 
-        TextMeshProUGUI[] textComponents = GetComponentsInChildren<TextMeshProUGUI>(true);
+        TextMeshProUGUI[] textComponents = GetTextComponentsForReferenceSearch();
         for (int i = 0; i < textComponents.Length; i++)
         {
             TextMeshProUGUI candidate = textComponents[i];
@@ -233,7 +268,7 @@ public class ItemSlot : MonoBehaviour
 
             for (int nameIndex = 0; nameIndex < candidateNames.Length; nameIndex++)
             {
-                if (candidate.name == candidateNames[nameIndex])
+                if (IsTextComponentNamed(candidate, candidateNames[nameIndex]))
                 {
                     return candidate;
                 }
@@ -241,6 +276,95 @@ public class ItemSlot : MonoBehaviour
         }
 
         return null;
+    }
+
+    private TextMeshProUGUI[] GetTextComponentsForReferenceSearch()
+    {
+        Transform searchRoot = ResolveSingleSlotReferenceRoot();
+        return searchRoot != null
+            ? searchRoot.GetComponentsInChildren<TextMeshProUGUI>(true)
+            : GetComponentsInChildren<TextMeshProUGUI>(true);
+    }
+
+    private Transform ResolveSingleSlotReferenceRoot()
+    {
+        Transform current = transform.parent;
+        while (current != null)
+        {
+            ItemSlot[] slots = current.GetComponentsInChildren<ItemSlot>(true);
+            int slotCount = 0;
+            bool containsThisSlot = false;
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] == null)
+                {
+                    continue;
+                }
+
+                slotCount++;
+                containsThisSlot |= slots[i] == this;
+            }
+
+            if (containsThisSlot && slotCount == 1)
+            {
+                return current;
+            }
+
+            if (containsThisSlot && slotCount > 1)
+            {
+                break;
+            }
+
+            current = current.parent;
+        }
+
+        return transform;
+    }
+
+    private static bool IsNameTextComponent(TextMeshProUGUI candidate)
+    {
+        return IsTextComponentNamed(
+            candidate,
+            "ItemName",
+            "Item Name",
+            "ItemNameText",
+            "Item Name Text",
+            "NameText",
+            "Name Text",
+            "ObjectName",
+            "Object Name");
+    }
+
+    private static bool IsTextComponentNamed(TextMeshProUGUI candidate, params string[] names)
+    {
+        if (candidate == null || names == null)
+        {
+            return false;
+        }
+
+        string normalizedCandidateName = NormalizeTextComponentName(candidate.name);
+        for (int i = 0; i < names.Length; i++)
+        {
+            if (normalizedCandidateName == NormalizeTextComponentName(names[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeTextComponentName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Replace(" ", string.Empty)
+            .Replace("_", string.Empty)
+            .Replace("-", string.Empty)
+            .ToLowerInvariant();
     }
 
     private void SetItemNameText(string displayName, bool hasItem)

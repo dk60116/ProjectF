@@ -467,6 +467,11 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool TryResolveInputAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
     {
         targetBlock = null;
+        if (TryResolveFocusedInputOutputModuleDropBlock(itemId, itemCount, out targetBlock))
+        {
+            return true;
+        }
+
         if (!loadedBlocks.TryGetValue(centerCoordinate, out Block block) || block == null)
         {
             return false;
@@ -478,7 +483,12 @@ public partial class TerrainGenerator : MonoBehaviour
             return true;
         }
 
-        return TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, itemCount, out targetBlock);
+        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, itemCount, out targetBlock))
+        {
+            return true;
+        }
+
+        return TryResolveInputOutputModuleDropBlock(centerCoordinate, itemId, itemCount, out targetBlock);
     }
 
     private bool TryResolveInputEnergyAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
@@ -509,8 +519,127 @@ public partial class TerrainGenerator : MonoBehaviour
         return block != null
                && itemId >= 0
                && block.Type == Block.BlockType.Ground
-               && InputOutputModuleItemAreaController.CoordinateAcceptsItemId(block.Coordinate, itemId)
+               && CoordinateAcceptsInputItemId(block.Coordinate, itemId)
                && block.CanAddInputAreaCenterObjects(itemCount, itemId);
+    }
+
+    private bool TryResolveInputOutputModuleDropBlock(
+        Vector2Int sourceCoordinate,
+        int itemId,
+        int itemCount,
+        out Block targetBlock)
+    {
+        targetBlock = null;
+        if (itemId < 0
+            || !loadedBlocks.TryGetValue(sourceCoordinate, out Block sourceBlock)
+            || sourceBlock == null
+            || !TryResolveInputOutputModule(sourceBlock.MapObject, out InputOutputModule module)
+            || module == null
+            || !ModuleContainsRuntimeGridCoordinate(module, sourceCoordinate)
+            || !module.TryGetRuntimeInputBlock(this, itemId, out Block inputBlock)
+            || !IsValidInputItemAreaDropBlock(inputBlock, itemId, itemCount))
+        {
+            return false;
+        }
+
+        targetBlock = inputBlock;
+        return true;
+    }
+
+    private bool TryResolveFocusedInputOutputModuleDropBlock(int itemId, int itemCount, out Block targetBlock)
+    {
+        targetBlock = null;
+        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (itemId < 0
+            || itemCount <= 0
+            || !TryGetFocusedInputOutputModule(currentPlayer, out InputOutputModule module)
+            || module == null
+            || !module.TryGetRuntimeInputBlock(this, itemId, out Block inputBlock)
+            || !IsValidInputItemAreaDropBlock(inputBlock, itemId, itemCount))
+        {
+            return false;
+        }
+
+        targetBlock = inputBlock;
+        return true;
+    }
+
+    private static bool CoordinateAcceptsInputItemId(Vector2Int coordinate, int itemId)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        HashSet<int> runtimeInputItemIds = new HashSet<int>();
+        if (InputOutputModule.TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(coordinate, runtimeInputItemIds))
+        {
+            return runtimeInputItemIds.Contains(itemId);
+        }
+
+        return InputOutputModuleItemAreaController.CoordinateAcceptsItemId(coordinate, itemId);
+    }
+
+    private static bool TryGetFocusedInputOutputModule(Player player, out InputOutputModule module)
+    {
+        module = null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null
+            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+            || !TryResolveInputOutputModule(focusedMapObject, out module))
+        {
+            return false;
+        }
+
+        return module != null;
+    }
+
+    private static bool TryResolveInputOutputModule(MapObject mapObject, out InputOutputModule module)
+    {
+        module = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        module = mapObject as InputOutputModule;
+        if (module != null)
+        {
+            return true;
+        }
+
+        module = mapObject.GetComponent<InputOutputModule>();
+        if (module != null)
+        {
+            return true;
+        }
+
+        module = mapObject.GetComponentInChildren<InputOutputModule>(true);
+        return module != null;
+    }
+
+    private static bool ModuleContainsRuntimeGridCoordinate(InputOutputModule module, Vector2Int coordinate)
+    {
+        IReadOnlyList<Vector2Int> coordinates = module != null ? module.RuntimeGridCoordinates : null;
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (coordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsValidInputEnergyAreaDropBlock(

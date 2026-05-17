@@ -20,6 +20,8 @@ Shader "Custom/ConveyorBeltScroll"
         _CornerRotationSteps("Corner Rotation Steps", Float) = 0
         _FlowAlongScale("Flow Along Scale", Float) = 1
         _FlowAcrossTiling("Flow Across Tiling", Float) = 1
+        _UvLengthScale("UV Length Scale", Float) = 1
+        _UvLengthOffset("UV Length Offset", Float) = 0
 
         _Surface("__surface", Float) = 0.0
         _Blend("__blend", Float) = 0.0
@@ -141,6 +143,8 @@ Shader "Custom/ConveyorBeltScroll"
                 float _CornerRotationSteps;
                 float _FlowAlongScale;
                 float _FlowAcrossTiling;
+                float _UvLengthScale;
+                float _UvLengthOffset;
                 half _Surface;
             CBUFFER_END
 
@@ -241,7 +245,7 @@ Shader "Custom/ConveyorBeltScroll"
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
 
-                float2 scrollOffset = float2(_UVScrollX, _UVScrollY) * _Time.y;
+                float2 scrollOffset = frac(float2(_UVScrollX, _UVScrollY) * _Time.y);
                 half4 baseSample;
 
                 if (_CornerFlowMode > 0.5h)
@@ -289,7 +293,9 @@ Shader "Custom/ConveyorBeltScroll"
                 }
                 else
                 {
-                    baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv + scrollOffset) * _BaseColor;
+                    float2 scaledUv = input.uv;
+                    scaledUv.y = scaledUv.y * max(_UvLengthScale, 0.0001) + _UvLengthOffset;
+                    baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, scaledUv + scrollOffset) * _BaseColor;
                 }
 
                 Light mainLight = GetMainLight(inputData.shadowCoord);

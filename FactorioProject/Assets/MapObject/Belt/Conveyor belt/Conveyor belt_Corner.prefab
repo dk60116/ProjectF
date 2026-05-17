@@ -24,15 +24,15 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1948038216579974848}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0.09649827, y: 0, z: -0.07849997}
+  m_LocalScale: {x: 1.0309646, y: 1, z: 1.217054}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 8447155603669827682}
   - {fileID: 3504049714258714756}
   - {fileID: 8978846732233214000}
-  m_Father: {fileID: 8553229865070038503}
+  m_Father: {fileID: 6329141710235238171}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &6448747719361446765
 GameObject:
@@ -61,11 +61,11 @@ Transform:
   m_GameObject: {fileID: 6448747719361446765}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -0.0785, y: 0.13, z: 0.0837}
-  m_LocalScale: {x: 0.08728354, y: 1, z: 0.081805184}
+  m_LocalPosition: {x: 0.015567559, y: 0.13, z: 0.023367442}
+  m_LocalScale: {x: 0.08998623, y: 1, z: 0.099561326}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 8553229865070038503}
+  m_Father: {fileID: 6329141710235238171}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &7289403385443562273
 MeshFilter:
@@ -313,16 +313,16 @@ PrefabInstance:
       objectReference: {fileID: 4300000, guid: e3c6e76f904cb5b4a99d9769d9d387ac, type: 2}
     - target: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Name
-      value: Conveyor Belt_Corner
+      value: Conveyor belt_Corner
       objectReference: {fileID: 0}
     m_RemovedComponents:
     - {fileID: 6362304892840611056, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects:
-    - targetCorrespondingSourceObject: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+    - targetCorrespondingSourceObject: {fileID: 354565451974692786, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
       addedObject: {fileID: 7295538888801889471}
-    - targetCorrespondingSourceObject: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+    - targetCorrespondingSourceObject: {fileID: 354565451974692786, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       insertIndex: -1
       addedObject: {fileID: 8777241906564659446}
     m_AddedComponents:
@@ -375,9 +375,9 @@ MonoBehaviour:
   localInputDirection: 0
   conveyorSpeed: 0.5
   beltTopRenderer: {fileID: 533515098945374496}
---- !u!4 &8553229865070038503 stripped
+--- !u!4 &6329141710235238171 stripped
 Transform:
-  m_CorrespondingSourceObject: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
+  m_CorrespondingSourceObject: {fileID: 354565451974692786, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
   m_PrefabInstance: {fileID: 5998244657081757865}
   m_PrefabAsset: {fileID: 0}
 --- !u!1001 &8264362847858698121
@@ -488,7 +488,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aa03b77214b221240923e637a6e5d462, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -0.297
+      value: -0.323
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aa03b77214b221240923e637a6e5d462, type: 3}
       propertyPath: m_LocalPosition.y
@@ -496,7 +496,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aa03b77214b221240923e637a6e5d462, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -0.304
+      value: -0.339
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aa03b77214b221240923e637a6e5d462, type: 3}
       propertyPath: m_LocalRotation.w

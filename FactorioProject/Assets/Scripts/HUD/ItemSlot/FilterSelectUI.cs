@@ -51,6 +51,7 @@ public class FilterSelectUI : MonoBehaviour
     {
         EnsureSlotList();
         boundTarget = ResolveCurrentTarget();
+        ApplyBulkButtonVisibility();
         BuildVisibleDefinitions();
         ApplyDefinitionsToSlots();
     }
@@ -117,6 +118,20 @@ public class FilterSelectUI : MonoBehaviour
         }
     }
 
+    private void ApplyBulkButtonVisibility()
+    {
+        bool isProductionTargetFilter = TryResolveProductionMachine(boundTarget, out _);
+        if (allBtuuon != null && allBtuuon.gameObject.activeSelf == isProductionTargetFilter)
+        {
+            allBtuuon.gameObject.SetActive(!isProductionTargetFilter);
+        }
+
+        if (noneButton != null && !noneButton.gameObject.activeSelf)
+        {
+            noneButton.gameObject.SetActive(true);
+        }
+    }
+
     private void BuildVisibleDefinitions()
     {
         visibleDefinitions.Clear();
@@ -128,6 +143,11 @@ public class FilterSelectUI : MonoBehaviour
 
         List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
         if (definitions == null)
+        {
+            return;
+        }
+
+        if (TryBuildProductionTargetFilter(boundTarget, definitions, visibleDefinitions))
         {
             return;
         }
@@ -163,6 +183,7 @@ public class FilterSelectUI : MonoBehaviour
         }
 
         int filterBitCount = GetFilterBitCount();
+        bool isProductionTargetFilter = TryResolveProductionMachine(boundTarget, out ProductionMachine productionMachine);
 
         for (int i = 0; i < slotList.Count; i++)
         {
@@ -180,7 +201,9 @@ public class FilterSelectUI : MonoBehaviour
                     slot.gameObject.SetActive(true);
                 }
 
-                bool isChecked = boundTarget == null || boundTarget.IsItemFilterEnabled(definition.id, filterBitCount);
+                bool isChecked = isProductionTargetFilter
+                    ? productionMachine.IsProductionTargetSelected(definition.id)
+                    : boundTarget == null || boundTarget.IsItemFilterEnabled(definition.id, filterBitCount);
                 int itemId = definition.id;
                 slot.SetFilterItem(itemId, isChecked, isOn => HandleSlotToggleChanged(itemId, isOn));
             }
@@ -253,6 +276,45 @@ public class FilterSelectUI : MonoBehaviour
         return isAreaScoped;
     }
 
+    private static bool TryBuildProductionTargetFilter(
+        MapObject target,
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> results)
+    {
+        if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
+        {
+            return false;
+        }
+
+        results?.Clear();
+        if (definitions == null || results == null)
+        {
+            return true;
+        }
+
+        Dictionary<int, ItemDefinition> definitionsById = new Dictionary<int, ItemDefinition>();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id >= 0 && !definitionsById.ContainsKey(definition.id))
+            {
+                definitionsById.Add(definition.id, definition);
+            }
+        }
+
+        List<int> targetItemIds = new List<int>();
+        productionMachine.TryCollectProductionTargetItemIds(targetItemIds);
+        for (int i = 0; i < targetItemIds.Count; i++)
+        {
+            if (definitionsById.TryGetValue(targetItemIds[i], out ItemDefinition definition))
+            {
+                results.Add(definition);
+            }
+        }
+
+        return true;
+    }
+
     private static bool IsDefinitionAllowedForArea(
         ItemDefinition definition,
         ISet<int> allowedItemIds,
@@ -279,6 +341,13 @@ public class FilterSelectUI : MonoBehaviour
         MapObject target = ResolveCurrentTarget();
         if (target == null)
         {
+            return;
+        }
+
+        if (TryApplyProductionTargetSelection(target, itemId, isOn))
+        {
+            PersistTargetFilterState(target);
+            Refresh();
             return;
         }
 
@@ -374,6 +443,13 @@ public class FilterSelectUI : MonoBehaviour
             return;
         }
 
+        if (TryApplyProductionTargetBulkSelection(target, isEnabled))
+        {
+            PersistTargetFilterState(target);
+            Refresh();
+            return;
+        }
+
         if (TryApplyAreaScopedBulkSelection(target, isEnabled))
         {
             PersistTargetFilterState(target);
@@ -432,6 +508,50 @@ public class FilterSelectUI : MonoBehaviour
         return true;
     }
 
+    private bool TryApplyProductionTargetSelection(MapObject target, int changedItemId, bool changedState)
+    {
+        if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
+        {
+            return false;
+        }
+
+        if (changedState)
+        {
+            productionMachine.SetExclusiveProductionTarget(changedItemId);
+        }
+        else if (productionMachine.IsProductionTargetSelected(changedItemId))
+        {
+            productionMachine.ClearProductionTargetSelection();
+        }
+
+        return true;
+    }
+
+    private bool TryApplyProductionTargetBulkSelection(MapObject target, bool isEnabled)
+    {
+        if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
+        {
+            return false;
+        }
+
+        if (!isEnabled)
+        {
+            productionMachine.ClearProductionTargetSelection();
+            return true;
+        }
+
+        if (visibleDefinitions.Count > 0 && visibleDefinitions[0] != null)
+        {
+            productionMachine.SetExclusiveProductionTarget(visibleDefinitions[0].id);
+        }
+        else
+        {
+            productionMachine.ClearProductionTargetSelection();
+        }
+
+        return true;
+    }
+
     private bool TryApplyAreaScopedBulkSelection(MapObject target, bool isEnabled)
     {
         if (!TryIsAreaScopedTarget(target))
@@ -469,6 +589,30 @@ public class FilterSelectUI : MonoBehaviour
         HashSet<int> allowedItemIds = new HashSet<int>();
         HashSet<ItemDefinition.EnergyType> allowedEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
         return TryBuildAreaRestrictedFilter(target, allowedItemIds, allowedEnergyTypes);
+    }
+
+    private static bool TryResolveProductionMachine(MapObject target, out ProductionMachine productionMachine)
+    {
+        productionMachine = null;
+        if (target == null)
+        {
+            return false;
+        }
+
+        productionMachine = target as ProductionMachine;
+        if (productionMachine != null)
+        {
+            return true;
+        }
+
+        productionMachine = target.GetComponent<ProductionMachine>();
+        if (productionMachine != null)
+        {
+            return true;
+        }
+
+        productionMachine = target.GetComponentInChildren<ProductionMachine>(true);
+        return productionMachine != null;
     }
 
     private static void OverwriteTargetFilterMask(MapObject target, int totalFilterBitCount, ISet<int> enabledItemIds)

@@ -32,6 +32,8 @@ Material:
     - _Cull: 0
     - _UVScrollX: 0
     - _UVScrollY: -0.75
+    - _UvLengthOffset: 0
+    - _UvLengthScale: 1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []

@@ -16,6 +16,8 @@ public class MapObject : PropObj
     {
         public byte mapSizeX;
         public byte mapSizeY;
+        public byte centerCellX;
+        public byte centerCellY;
     }
 
     [SerializeField]
@@ -36,6 +38,17 @@ public class MapObject : PropObj
     public MultiFocusMode FocusMode => multiFocusMode;
     public bool AllowsFocus => multiFocusMode != MultiFocusMode.None;
     public bool IsItemFilterMaskInitialized => itemFilterMaskInitialized;
+    public Vector2Int PlacementCenterCell
+    {
+        get
+        {
+            int sizeX = Mathf.Max(1, mapStatus.mapSizeX);
+            int sizeY = Mathf.Max(1, mapStatus.mapSizeY);
+            return new Vector2Int(
+                Mathf.Clamp(mapStatus.centerCellX, 0, sizeX - 1),
+                Mathf.Clamp(mapStatus.centerCellY, 0, sizeY - 1));
+        }
+    }
 
     public void CopyFocusSettingsFrom(MapObject source)
     {
@@ -88,6 +101,7 @@ public class MapObject : PropObj
         itemFilterMaskWords[wordIndex] = enabled
             ? (currentWord | bitMask)
             : (currentWord & ~bitMask);
+        OnItemFilterMaskChanged();
     }
 
     public List<ulong> CaptureItemFilterMaskWords()
@@ -110,6 +124,7 @@ public class MapObject : PropObj
 
         if (words == null)
         {
+            OnItemFilterMaskChanged();
             return;
         }
 
@@ -117,6 +132,12 @@ public class MapObject : PropObj
         {
             itemFilterMaskWords.Add(words[i]);
         }
+
+        OnItemFilterMaskChanged();
+    }
+
+    protected virtual void OnItemFilterMaskChanged()
+    {
     }
 
     private void EnsureItemFilterMaskCapacity(int itemCount, bool enableNewBitsByDefault)
