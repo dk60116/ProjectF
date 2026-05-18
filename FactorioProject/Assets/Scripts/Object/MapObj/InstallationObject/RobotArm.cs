@@ -8,6 +8,18 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private static readonly int PickTriggerHash = Animator.StringToHash("tPick");
     private static readonly int DropTriggerHash = Animator.StringToHash("tDrop");
     private static readonly List<RobotArm> ActiveRobotArms = new List<RobotArm>();
+    private static readonly Vector2Int[] Belt2FPickupSearchOffsets =
+    {
+        Vector2Int.zero,
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
+
+    private const float DefaultManagedUpdateDeltaSeconds = 1f / 60f;
+    private const float MaxManagedUpdateDeltaSeconds = 0.12f;
+    private const float ConveyorPickupFrameAllowanceMax = 0.25f;
     private const float ItemMoveDuration = PortableObject.MoveToDuration * 0.5f;
 
     public enum RobotArmState
@@ -88,6 +100,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private float pickupTimer;
     private float dropRetryTimer;
     private float actionTurnTimer;
+    private float lastManagedUpdateTime;
+    private float lastManagedUpdateDeltaTime = DefaultManagedUpdateDeltaSeconds;
+    private bool hasManagedUpdateTime;
     private bool waitingForDropRetry;
     private RobotArmState state;
     private Quaternion inputBodyLocalRotation;
@@ -273,6 +288,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     public void ManagedUpdateTick(float deltaTime)
     {
+        deltaTime = ResolveManagedUpdateDeltaTime(deltaTime);
         EnsureBodyRotationCache();
         RefreshHeldItemVisualIfNeeded();
         if (RefreshRuntimeSleepState())
@@ -575,12 +591,43 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         updateTickRegistered = registered;
         if (registered)
         {
+            ResetManagedUpdateClock();
             MapObjectTickManager.RegisterUpdateTick(this);
         }
         else
         {
+            hasManagedUpdateTime = false;
             MapObjectTickManager.UnregisterUpdateTick(this);
         }
+    }
+
+    private void ResetManagedUpdateClock()
+    {
+        hasManagedUpdateTime = Application.isPlaying;
+        lastManagedUpdateTime = Time.time;
+        lastManagedUpdateDeltaTime = DefaultManagedUpdateDeltaSeconds;
+    }
+
+    private float ResolveManagedUpdateDeltaTime(float fallbackDeltaTime)
+    {
+        fallbackDeltaTime = Mathf.Max(0f, fallbackDeltaTime);
+        if (!Application.isPlaying)
+        {
+            lastManagedUpdateDeltaTime = fallbackDeltaTime;
+            return fallbackDeltaTime;
+        }
+
+        float now = Time.time;
+        float elapsedTime = hasManagedUpdateTime ? now - lastManagedUpdateTime : fallbackDeltaTime;
+        hasManagedUpdateTime = true;
+        lastManagedUpdateTime = now;
+
+        float resolvedDeltaTime = Mathf.Clamp(
+            Mathf.Max(fallbackDeltaTime, elapsedTime),
+            0f,
+            MaxManagedUpdateDeltaSeconds);
+        lastManagedUpdateDeltaTime = resolvedDeltaTime;
+        return resolvedDeltaTime;
     }
 
     private void RefreshSleepAwakeVisual(bool force = false)
@@ -857,9 +904,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         RotateBodyToward(inputBodyLocalRotation, deltaTime);
-        if (pickupTimer > 0f)
+        if (TickTimerStillRunning(ref pickupTimer, deltaTime))
         {
-            pickupTimer -= deltaTime;
             return;
         }
 
@@ -882,9 +928,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (actionTurnTimer > 0f)
+        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
         {
-            actionTurnTimer -= deltaTime;
             return;
         }
 
@@ -911,9 +956,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (actionTurnTimer > 0f)
+        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
         {
-            actionTurnTimer -= deltaTime;
             return;
         }
 
@@ -948,9 +992,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (dropRetryTimer > 0f)
+        if (TickTimerStillRunning(ref dropRetryTimer, deltaTime))
         {
-            dropRetryTimer -= deltaTime;
             return;
         }
 
@@ -976,9 +1019,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (actionTurnTimer > 0f)
+        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
         {
-            actionTurnTimer -= deltaTime;
             return;
         }
 
@@ -1003,9 +1045,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (actionTurnTimer > 0f)
+        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
         {
-            actionTurnTimer -= deltaTime;
             return;
         }
 
@@ -1019,6 +1060,17 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             state = RobotArmState.WaitingForPickup;
             pickupTimer = pickupInterval;
         }
+    }
+
+    private static bool TickTimerStillRunning(ref float timer, float deltaTime)
+    {
+        if (timer <= 0f)
+        {
+            return false;
+        }
+
+        timer = Mathf.Max(0f, timer - Mathf.Max(0f, deltaTime));
+        return timer > 0f;
     }
 
     private bool TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition)
@@ -1042,7 +1094,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             RobotArmPickupSource.Conveyor => pickupBlock.TryTakeOneConveyorObject(
                 referenceWorldPosition,
                 AcceptsPickupItem,
-                GetConveyorPickupRadius(),
+                GetConveyorPickupSearchRadius(pickupBlock),
                 out pickedItemId),
             RobotArmPickupSource.InputArea => TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId),
             _ => false
@@ -1097,12 +1149,15 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             }
         }
 
-        if (pickupBlock.TryGetClosestConveyorObjectWorldPosition(
+        if (TryResolveConveyorPickupCandidate(
+                terrainGenerator,
+                pickupCoordinate,
+                pickupBlock,
                 conveyorReferenceWorldPosition,
-                AcceptsPickupItem,
-                GetConveyorPickupRadius(),
+                out Block conveyorPickupBlock,
                 out candidateWorldPosition))
         {
+            pickupBlock = conveyorPickupBlock;
             TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
@@ -1119,6 +1174,56 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return pickupSource != RobotArmPickupSource.None;
+    }
+
+    private bool TryResolveConveyorPickupCandidate(
+        TerrainGenerator terrainGenerator,
+        Vector2Int pickupCoordinate,
+        Block primaryPickupBlock,
+        Vector3 conveyorReferenceWorldPosition,
+        out Block conveyorPickupBlock,
+        out Vector3 pickupWorldPosition)
+    {
+        conveyorPickupBlock = null;
+        pickupWorldPosition = conveyorReferenceWorldPosition;
+        if (terrainGenerator == null || primaryPickupBlock == null)
+        {
+            return false;
+        }
+
+        bool searchBelt2FNeighbors = primaryPickupBlock.HasRuntimeBelt2FConveyor();
+        int searchCount = searchBelt2FNeighbors ? Belt2FPickupSearchOffsets.Length : 1;
+        float bestDistanceSqr = float.MaxValue;
+
+        for (int i = 0; i < searchCount; i++)
+        {
+            Vector2Int candidateCoordinate = pickupCoordinate + Belt2FPickupSearchOffsets[i];
+            if (!terrainGenerator.TryGetLoadedBlock(candidateCoordinate, out Block candidateBlock)
+                || candidateBlock == null
+                || (i > 0 && !candidateBlock.HasRuntimeBelt2FConveyor())
+                || !candidateBlock.TryGetClosestConveyorObjectWorldPosition(
+                    conveyorReferenceWorldPosition,
+                    AcceptsPickupItem,
+                    GetConveyorPickupSearchRadius(candidateBlock),
+                    out Vector3 candidateWorldPosition))
+            {
+                continue;
+            }
+
+            Vector3 offset = candidateWorldPosition - conveyorReferenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (conveyorPickupBlock != null && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            conveyorPickupBlock = candidateBlock;
+            pickupWorldPosition = candidateWorldPosition;
+            bestDistanceSqr = distanceSqr;
+        }
+
+        return conveyorPickupBlock != null;
     }
 
     private static void TryChoosePickupSource(
@@ -1168,6 +1273,21 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private float GetConveyorPickupRadius()
     {
         return Mathf.Max(0f, conveyorPickupRadius);
+    }
+
+    private float GetConveyorPickupSearchRadius(Block conveyorBlock)
+    {
+        float radius = GetConveyorPickupRadius();
+        if (conveyorBlock == null)
+        {
+            return radius;
+        }
+
+        float frameDeltaTime = Mathf.Max(Time.deltaTime, lastManagedUpdateDeltaTime);
+        float frameMovementAllowance = Mathf.Min(
+            ConveyorPickupFrameAllowanceMax,
+            Mathf.Max(0f, conveyorBlock.RuntimeConveyorSpeed) * Mathf.Max(0f, frameDeltaTime));
+        return radius + frameMovementAllowance;
     }
 
     private int ResolveFilterBitCount(int fallbackItemId)

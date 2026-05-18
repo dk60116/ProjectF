@@ -474,6 +474,34 @@
             "outputCount": 1,
             "ingredients": [
                 {
+                    "itemId": 19,
+                    "itemName": "Conveyor belt",
+                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 21,
+            "itemName": "Robot arm",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
                     "itemId": 4,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
@@ -508,40 +536,6 @@
             ]
         },
         {
-            "itemId": 21,
-            "itemName": "Robot arm",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 16,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 17,
-                    "itemName": "Coil",
-                    "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 6,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 6,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
             "itemId": 22,
             "itemName": "Production machine (Mk1)",
             "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
@@ -551,13 +545,13 @@
                     "itemId": 16,
                     "itemName": "Mortor",
                     "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 3
+                    "count": 1
                 },
                 {
-                    "itemId": 21,
-                    "itemName": "Robot arm",
-                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-                    "count": 4
+                    "itemId": 10,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -579,6 +573,40 @@
             "itemId": 23,
             "itemName": "Wooden fence",
             "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 16,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 3
+                },
+                {
+                    "itemId": 22,
+                    "itemName": "Production machine (Mk1)",
+                    "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 24,
+            "itemName": "Wooden fence door",
+            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
             "outputCount": 2,
             "ingredients": [
                 {
@@ -604,15 +632,15 @@
             ]
         },
         {
-            "itemId": 24,
-            "itemName": "Wooden fence door",
-            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "itemId": 25,
+            "itemName": "Brick wall",
+            "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 23,
-                    "itemName": "Wooden fence",
-                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+                    "itemId": 24,
+                    "itemName": "Wooden fence door",
+                    "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
                     "count": 2
                 },
                 {
@@ -638,9 +666,9 @@
             ]
         },
         {
-            "itemId": 25,
-            "itemName": "Brick wall",
-            "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
+            "itemId": 26,
+            "itemName": "Conveyor belt 2F",
+            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "outputCount": 1,
             "ingredients": [
                 {
@@ -1139,6 +1167,34 @@
             "outputCount": 1,
             "ingredients": [
                 {
+                    "itemId": 19,
+                    "itemName": "Conveyor belt",
+                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 21,
+            "itemName": "Robot arm",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
                     "itemId": 4,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
@@ -1173,40 +1229,6 @@
             ]
         },
         {
-            "itemId": 21,
-            "itemName": "Robot arm",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 16,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 17,
-                    "itemName": "Coil",
-                    "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 6,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 6,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
             "itemId": 22,
             "itemName": "Production machine (Mk1)",
             "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
@@ -1216,13 +1238,13 @@
                     "itemId": 16,
                     "itemName": "Mortor",
                     "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 3
+                    "count": 1
                 },
                 {
-                    "itemId": 21,
-                    "itemName": "Robot arm",
-                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-                    "count": 4
+                    "itemId": 10,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -1244,6 +1266,40 @@
             "itemId": 23,
             "itemName": "Wooden fence",
             "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 16,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 3
+                },
+                {
+                    "itemId": 22,
+                    "itemName": "Production machine (Mk1)",
+                    "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 24,
+            "itemName": "Wooden fence door",
+            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
             "outputCount": 2,
             "ingredients": [
                 {
@@ -1269,15 +1325,15 @@
             ]
         },
         {
-            "itemId": 24,
-            "itemName": "Wooden fence door",
-            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "itemId": 25,
+            "itemName": "Brick wall",
+            "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 23,
-                    "itemName": "Wooden fence",
-                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+                    "itemId": 24,
+                    "itemName": "Wooden fence door",
+                    "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
                     "count": 2
                 },
                 {
@@ -1303,9 +1359,9 @@
             ]
         },
         {
-            "itemId": 25,
-            "itemName": "Brick wall",
-            "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
+            "itemId": 26,
+            "itemName": "Conveyor belt 2F",
+            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "outputCount": 1,
             "ingredients": [
                 {
@@ -1804,6 +1860,34 @@
             "outputCount": 1,
             "ingredients": [
                 {
+                    "itemId": 19,
+                    "itemName": "Conveyor belt",
+                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 21,
+            "itemName": "Robot arm",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
                     "itemId": 4,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
@@ -1838,40 +1922,6 @@
             ]
         },
         {
-            "itemId": 21,
-            "itemName": "Robot arm",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 16,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 17,
-                    "itemName": "Coil",
-                    "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 6,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 6,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
             "itemId": 22,
             "itemName": "Production machine (Mk1)",
             "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
@@ -1881,13 +1931,13 @@
                     "itemId": 16,
                     "itemName": "Mortor",
                     "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 3
+                    "count": 1
                 },
                 {
-                    "itemId": 21,
-                    "itemName": "Robot arm",
-                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-                    "count": 4
+                    "itemId": 10,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -1909,6 +1959,40 @@
             "itemId": 23,
             "itemName": "Wooden fence",
             "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 16,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 3
+                },
+                {
+                    "itemId": 22,
+                    "itemName": "Production machine (Mk1)",
+                    "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 6,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 24,
+            "itemName": "Wooden fence door",
+            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
             "outputCount": 2,
             "ingredients": [
                 {
@@ -1934,15 +2018,15 @@
             ]
         },
         {
-            "itemId": 24,
-            "itemName": "Wooden fence door",
-            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "itemId": 25,
+            "itemName": "Brick wall",
+            "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 23,
-                    "itemName": "Wooden fence",
-                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+                    "itemId": 24,
+                    "itemName": "Wooden fence door",
+                    "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
                     "count": 2
                 },
                 {
@@ -1968,9 +2052,9 @@
             ]
         },
         {
-            "itemId": 25,
-            "itemName": "Brick wall",
-            "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
+            "itemId": 26,
+            "itemName": "Conveyor belt 2F",
+            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "outputCount": 1,
             "ingredients": [
                 {

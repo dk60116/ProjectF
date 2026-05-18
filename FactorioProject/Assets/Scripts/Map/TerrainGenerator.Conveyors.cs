@@ -12,9 +12,11 @@ public partial class TerrainGenerator : MonoBehaviour
 {
     private const int MaxConveyorSlotDotRefreshesPerFrame = 64;
     private const int MaxConveyorSlotDotInstancesPerBatch = 1023;
+    private const int MaxBeltDirectionArrowInstancesPerBatch = 1023;
     private const int MaxBeltItemLineDebugRefreshesPerFrame = 128;
     private const float ConveyorSlotDotInstancedDiameter = 0.08f;
     private static readonly Color ConveyorSlotDotInstancedColor = new Color(1f, 0.36f, 0.08f, 1f);
+    private static readonly Color BeltDirectionArrowInstancedColor = new Color(1f, 0.92f, 0.08f, 1f);
 
     public void SetConveyorActive(Block block, bool isActive, bool queueWake = true)
     {
@@ -103,10 +105,13 @@ public partial class TerrainGenerator : MonoBehaviour
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
         ClearConveyorDotVisualState();
+        ClearBeltDirectionVisualState();
         conveyorSlotDotVisibilityInitialized = false;
         lastShowConveyorSlotDots = false;
         beltItemLineVisibilityInitialized = false;
         lastShowBeltItemLine = false;
+        beltDirectionVisibilityInitialized = false;
+        lastShowBeltDirections = false;
         beltItemLineVisualsDirty = false;
         ClearBeltItemLineDebugCache();
         ClearPendingBeltItemLineDebugRefreshes();
@@ -184,6 +189,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
             block.RefreshConveyorActivityRegistration(false, false);
             block.RefreshConveyorSlotDotVisuals();
+            block.RefreshBeltDirectionDebugVisuals();
         }
 
         conveyorTickBuffer.Clear();
@@ -196,6 +202,11 @@ public partial class TerrainGenerator : MonoBehaviour
         if (GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine)
         {
             RefreshBeltItemLineRuntimeVisibility();
+        }
+
+        if (GameManager.Instance != null && GameManager.Instance.ShowBeltDirections)
+        {
+            RefreshBeltDirectionRuntimeVisibility();
         }
     }
 
@@ -301,6 +312,29 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    public void SetBeltDirectionVisualActive(Block block, bool isActive)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (isActive)
+        {
+            if (activeBeltDirectionVisuals.Add(block))
+            {
+                activeBeltDirectionVisualList.Add(block);
+            }
+        }
+        else
+        {
+            if (activeBeltDirectionVisuals.Remove(block))
+            {
+                RemoveBeltDirectionVisualBlock(block);
+            }
+        }
+    }
+
     private void ClearConveyorDotVisualState()
     {
         activeConveyorDotVisuals.Clear();
@@ -308,6 +342,13 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorDotVisualTickBuffer.Clear();
         pendingConveyorSlotDotRefreshBlocks.Clear();
         pendingConveyorSlotDotRefreshIndex = 0;
+    }
+
+    private void ClearBeltDirectionVisualState()
+    {
+        activeBeltDirectionVisuals.Clear();
+        activeBeltDirectionVisualList.Clear();
+        beltDirectionArrowInstanceMatrixCount = 0;
     }
 
     private void RemoveConveyorDotVisualBlock(Block block)
@@ -329,6 +370,27 @@ public partial class TerrainGenerator : MonoBehaviour
 
         activeConveyorDotVisualList[index] = activeConveyorDotVisualList[lastIndex];
         activeConveyorDotVisualList.RemoveAt(lastIndex);
+    }
+
+    private void RemoveBeltDirectionVisualBlock(Block block)
+    {
+        int index = activeBeltDirectionVisualList.IndexOf(block);
+        if (index >= 0)
+        {
+            RemoveBeltDirectionVisualAt(index);
+        }
+    }
+
+    private void RemoveBeltDirectionVisualAt(int index)
+    {
+        int lastIndex = activeBeltDirectionVisualList.Count - 1;
+        if (index < 0 || index > lastIndex)
+        {
+            return;
+        }
+
+        activeBeltDirectionVisualList[index] = activeBeltDirectionVisualList[lastIndex];
+        activeBeltDirectionVisualList.RemoveAt(lastIndex);
     }
 
     private void SyncConveyorSlotDotRuntimeVisibility()
@@ -375,6 +437,39 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         bool showBeltItemLine = GameManager.Instance != null && GameManager.Instance.ShowBeltItemLine;
         ApplyBeltItemLineRuntimeVisibility(showBeltItemLine);
+    }
+
+    private void SyncBeltDirectionRuntimeVisibility()
+    {
+        bool showBeltDirections = GameManager.Instance != null && GameManager.Instance.ShowBeltDirections;
+        if (beltDirectionVisibilityInitialized && lastShowBeltDirections == showBeltDirections)
+        {
+            return;
+        }
+
+        ApplyBeltDirectionRuntimeVisibility(showBeltDirections);
+    }
+
+    public void RefreshBeltDirectionRuntimeVisibility()
+    {
+        bool showBeltDirections = GameManager.Instance != null && GameManager.Instance.ShowBeltDirections;
+        ApplyBeltDirectionRuntimeVisibility(showBeltDirections);
+    }
+
+    private void ApplyBeltDirectionRuntimeVisibility(bool showBeltDirections)
+    {
+        beltDirectionVisibilityInitialized = true;
+        lastShowBeltDirections = showBeltDirections;
+        ClearBeltDirectionVisualState();
+        if (!showBeltDirections)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            pair.Value?.RefreshBeltDirectionDebugVisuals();
+        }
     }
 
     private void ApplyBeltItemLineRuntimeVisibility(bool showBeltItemLine)
@@ -1757,6 +1852,156 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         EndConveyorSlotDotInstancedRendering();
+    }
+
+    private void DrawActiveBeltDirectionArrows()
+    {
+        if (activeBeltDirectionVisualList.Count == 0
+            || GameManager.Instance == null
+            || !GameManager.Instance.ShowBeltDirections)
+        {
+            return;
+        }
+
+        BeginBeltDirectionArrowInstancedRendering();
+
+        int index = 0;
+        while (index < activeBeltDirectionVisualList.Count)
+        {
+            Block block = activeBeltDirectionVisualList[index];
+            if (block == null
+                || !block.IsConveyorStackingEnabled()
+                || !block.TryGetBeltDirectionArrowMatrix(out Matrix4x4 matrix))
+            {
+                activeBeltDirectionVisuals.Remove(block);
+                RemoveBeltDirectionVisualAt(index);
+                continue;
+            }
+
+            AddBeltDirectionArrowInstance(matrix);
+            index++;
+        }
+
+        EndBeltDirectionArrowInstancedRendering();
+    }
+
+    private void AddBeltDirectionArrowInstance(Matrix4x4 matrix)
+    {
+        if (beltDirectionArrowInstanceMatrixCount >= MaxBeltDirectionArrowInstancesPerBatch)
+        {
+            FlushBeltDirectionArrowInstances();
+        }
+
+        beltDirectionArrowInstanceMatrices[beltDirectionArrowInstanceMatrixCount] = matrix;
+        beltDirectionArrowInstanceMatrixCount++;
+    }
+
+    private void BeginBeltDirectionArrowInstancedRendering()
+    {
+        beltDirectionArrowInstanceMatrixCount = 0;
+    }
+
+    private void EndBeltDirectionArrowInstancedRendering()
+    {
+        FlushBeltDirectionArrowInstances();
+    }
+
+    private void FlushBeltDirectionArrowInstances()
+    {
+        if (beltDirectionArrowInstanceMatrixCount <= 0)
+        {
+            return;
+        }
+
+        EnsureBeltDirectionArrowInstancedResources();
+        Mesh arrowMesh = Block.ResolveBeltDirectionArrowMesh();
+        if (arrowMesh == null || beltDirectionArrowInstancedMaterial == null)
+        {
+            beltDirectionArrowInstanceMatrixCount = 0;
+            return;
+        }
+
+        Graphics.DrawMeshInstanced(
+            arrowMesh,
+            0,
+            beltDirectionArrowInstancedMaterial,
+            beltDirectionArrowInstanceMatrices,
+            beltDirectionArrowInstanceMatrixCount,
+            null,
+            UnityEngine.Rendering.ShadowCastingMode.Off,
+            false,
+            gameObject.layer,
+            null,
+            UnityEngine.Rendering.LightProbeUsage.Off,
+            null);
+        beltDirectionArrowInstanceMatrixCount = 0;
+    }
+
+    private void EnsureBeltDirectionArrowInstancedResources()
+    {
+        Shader shader = Shader.Find("Custom/InstallGridOverlay");
+        if (shader == null)
+        {
+            shader = Shader.Find("Sprites/Default");
+        }
+
+        if (shader == null)
+        {
+            shader = Shader.Find("Universal Render Pipeline/Unlit");
+        }
+
+        if (shader == null)
+        {
+            shader = Shader.Find("Unlit/Color");
+        }
+
+        if (shader == null)
+        {
+            shader = Shader.Find("Standard");
+        }
+
+        if (shader == null)
+        {
+            return;
+        }
+
+        if (beltDirectionArrowInstancedMaterial != null && beltDirectionArrowInstancedMaterial.shader == shader)
+        {
+            beltDirectionArrowInstancedMaterial.enableInstancing = true;
+            return;
+        }
+
+        if (beltDirectionArrowInstancedMaterial != null)
+        {
+            Destroy(beltDirectionArrowInstancedMaterial);
+        }
+
+        beltDirectionArrowInstancedMaterial = new Material(shader)
+        {
+            name = "BeltDirectionArrowInstancedMaterial",
+            enableInstancing = true,
+            hideFlags = HideFlags.DontSave,
+            renderQueue = 5000
+        };
+
+        Color materialColor = shader.name == "Custom/InstallGridOverlay" || shader.name == "Sprites/Default"
+            ? Color.white
+            : BeltDirectionArrowInstancedColor;
+
+        if (beltDirectionArrowInstancedMaterial.HasProperty("_BaseColor"))
+        {
+            beltDirectionArrowInstancedMaterial.SetColor("_BaseColor", materialColor);
+        }
+
+        if (beltDirectionArrowInstancedMaterial.HasProperty("_Color"))
+        {
+            beltDirectionArrowInstancedMaterial.SetColor("_Color", materialColor);
+        }
+
+        if (beltDirectionArrowInstancedMaterial.HasProperty("_Cull"))
+        {
+            beltDirectionArrowInstancedMaterial.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        }
     }
 
     public void AddConveyorSlotDotInstance(Vector3 worldPosition)

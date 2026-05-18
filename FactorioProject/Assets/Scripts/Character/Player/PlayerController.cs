@@ -498,7 +498,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        float targetOffset = TryGetStandingConveyorBlock(out _) ? ConveyorStandingHeight : 0f;
+        float targetOffset = ResolveStandingConveyorVisualOffset();
         float targetY = defaultBodyLocalPosition.y + targetOffset;
         Vector3 localPosition = bodyTransform.localPosition;
 
@@ -516,6 +516,34 @@ public class PlayerController : MonoBehaviour
         }
 
         bodyTransform.localPosition = localPosition;
+    }
+
+    private float ResolveStandingConveyorVisualOffset()
+    {
+        if (!TryGetStandingConveyorBlock(out Block standingBlock) || standingBlock == null)
+        {
+            return 0f;
+        }
+
+        Vector3 samplePosition = GetConveyorSamplePosition();
+        if (standingBlock.ShouldBlockPlayerCarryForCrossingBelt2F(currentConveyorCarryVelocity))
+        {
+            return ConveyorStandingHeight;
+        }
+
+        if (standingBlock.TryGetConveyorStandingWorldHeight(samplePosition, out float standingWorldHeight))
+        {
+            return Mathf.Max(0f, standingWorldHeight - samplePosition.y);
+        }
+
+        return ConveyorStandingHeight;
+    }
+
+    private Vector3 GetConveyorSamplePosition()
+    {
+        return cachedRigidbody != null
+            ? cachedRigidbody.position
+            : transform.position;
     }
 
     private void RestoreStandingVisualOffset()
@@ -572,9 +600,7 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        Vector3 samplePosition = cachedRigidbody != null
-            ? cachedRigidbody.position
-            : transform.position;
+        Vector3 samplePosition = GetConveyorSamplePosition();
 
         float enterDistanceSqr = ConveyorStandingEnterDistance * ConveyorStandingEnterDistance;
         float exitDistanceSqr = ConveyorStandingExitDistance * ConveyorStandingExitDistance;
@@ -668,9 +694,12 @@ public class PlayerController : MonoBehaviour
 
         standingBlock = resolvedStandingBlock;
 
-        Vector3 samplePosition = cachedRigidbody != null
-            ? cachedRigidbody.position
-            : transform.position;
+        Vector3 samplePosition = GetConveyorSamplePosition();
+        if (standingBlock.ShouldBlockPlayerCarryForCrossingBelt2F(currentConveyorCarryVelocity))
+        {
+            currentConveyorCarryVelocity = Vector3.zero;
+            return false;
+        }
 
         if (standingBlock.IsCornerConveyorBlock())
         {

@@ -2694,7 +2694,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private void UpdateEnergyGaugeVisual()
     {
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
-        if (!RequiresOperationalEnergy(installedDefinition) || !hasActiveCraft)
+        if (!hasActiveCraft)
         {
             ReleaseEnergyGaugeVisual();
             return;
@@ -2706,19 +2706,27 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
+        bool requiresOperationalEnergy = RequiresOperationalEnergy(installedDefinition);
         UIManager uiManager = UIManager.Instance;
         if (uiManager == null)
         {
             return;
         }
 
-        if (activeEnergyGauge == null)
+        if (requiresOperationalEnergy)
         {
-            activeEnergyGauge = uiManager.AcquireEnergyGauge();
             if (activeEnergyGauge == null)
             {
-                return;
+                activeEnergyGauge = uiManager.AcquireEnergyGauge();
+                if (activeEnergyGauge == null)
+                {
+                    return;
+                }
             }
+        }
+        else
+        {
+            ReleaseGaugeVisual(ref activeEnergyGauge);
         }
 
         if (activeCraftProgressGauge == null)
@@ -2730,18 +2738,24 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
         }
 
-        activeEnergyGauge.SetFillColor(energyGaugeFillColor);
         activeCraftProgressGauge.SetFillColor(craftProgressGaugeFillColor);
         Vector3 gaugeWorldPosition = ResolveEnergyGaugeWorldPosition();
-        uiManager.UpdateEnergyGauge(
-            activeEnergyGauge,
-            gaugeWorldPosition,
-            ResolveEnergyGaugeFillAmount(installedDefinition));
+        if (requiresOperationalEnergy)
+        {
+            activeEnergyGauge.SetFillColor(energyGaugeFillColor);
+            uiManager.UpdateEnergyGauge(
+                activeEnergyGauge,
+                gaugeWorldPosition,
+                ResolveEnergyGaugeFillAmount(installedDefinition));
+        }
+
         uiManager.UpdateEnergyGauge(
             activeCraftProgressGauge,
             gaugeWorldPosition,
             ResolveCraftProgressGaugeFillAmount(),
-            new Vector2(0f, -Mathf.Max(0f, craftProgressGaugeCanvasVerticalOffset)));
+            requiresOperationalEnergy
+                ? new Vector2(0f, -Mathf.Max(0f, craftProgressGaugeCanvasVerticalOffset))
+                : Vector2.zero);
     }
 
     private bool ShouldShowGaugeByAreaMarkerVisibility()
@@ -2757,34 +2771,28 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
+        ReleaseGaugeVisual(ref activeEnergyGauge);
+        ReleaseGaugeVisual(ref activeCraftProgressGauge);
+    }
+
+    private void ReleaseGaugeVisual(ref DefaultGauge gauge)
+    {
+        if (gauge == null)
+        {
+            return;
+        }
+
         UIManager uiManager = UIManager.Instance;
-        if (activeEnergyGauge != null)
+        if (uiManager != null)
         {
-            if (uiManager != null)
-            {
-                uiManager.ReleaseEnergyGauge(activeEnergyGauge);
-            }
-            else
-            {
-                Destroy(activeEnergyGauge.gameObject);
-            }
-
-            activeEnergyGauge = null;
+            uiManager.ReleaseEnergyGauge(gauge);
+        }
+        else
+        {
+            Destroy(gauge.gameObject);
         }
 
-        if (activeCraftProgressGauge != null)
-        {
-            if (uiManager != null)
-            {
-                uiManager.ReleaseEnergyGauge(activeCraftProgressGauge);
-            }
-            else
-            {
-                Destroy(activeCraftProgressGauge.gameObject);
-            }
-
-            activeCraftProgressGauge = null;
-        }
+        gauge = null;
     }
 
     private float ResolveEnergyGaugeFillAmount(ItemDefinition installedDefinition)

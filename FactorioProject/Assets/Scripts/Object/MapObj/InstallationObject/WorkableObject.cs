@@ -6,10 +6,12 @@ using UnityEngine.Serialization;
 public class WorkableObject : InstallationObject
 {
     private static readonly HashSet<WorkableObject> ActiveInstances = new HashSet<WorkableObject>();
+    private static readonly HashSet<WorkableObject> SelectedRangeVisualInstances = new HashSet<WorkableObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private static BagSlot craftingSlotRangeVisualRequestSource;
     private static WorkableObjectRangeVisual sharedRangeVisual;
+    private static bool installOrEditWorkableSelectionRangeVisualsRequested;
 
     [SerializeField, FormerlySerializedAs("focusActivationRadius")]
     private uint workableRangeCells = 1u;
@@ -25,20 +27,70 @@ public class WorkableObject : InstallationObject
 
     public static float ResolveRangeRadius(uint rangeCells)
     {
-        return Mathf.Max(0f, rangeCells - 0.5f);
+        return Mathf.Max(0f, rangeCells * 0.5f);
     }
 
     public bool ContainsWorldPositionInWorkableRange(Vector3 worldPosition)
     {
+        if (!TryGetWorkableRangeBounds(out Bounds rangeBounds))
+        {
+            return false;
+        }
+
+        return worldPosition.x >= rangeBounds.min.x
+               && worldPosition.x <= rangeBounds.max.x
+               && worldPosition.z >= rangeBounds.min.z
+               && worldPosition.z <= rangeBounds.max.z;
+    }
+
+    public bool TryGetWorkableRangeBounds(out Bounds bounds)
+    {
+        bounds = default;
         float rangeRadius = FocusActivationRadius;
         if (rangeRadius <= 0f)
         {
             return false;
         }
 
-        Vector3 center = transform.position;
-        return Mathf.Abs(worldPosition.x - center.x) <= rangeRadius
-               && Mathf.Abs(worldPosition.z - center.z) <= rangeRadius;
+        Vector3 center = GetWorkableRangeCenter();
+        float rangeSize = rangeRadius * 2f;
+        bounds = new Bounds(
+            center,
+            new Vector3(rangeSize, 0.01f, rangeSize));
+        return true;
+    }
+
+    private Vector3 GetWorkableRangeCenter()
+    {
+        if (TryGetRuntimeFootprintCenter(out Vector3 runtimeCenter))
+        {
+            return runtimeCenter;
+        }
+
+        return transform.position;
+    }
+
+    private bool TryGetRuntimeFootprintCenter(out Vector3 center)
+    {
+        center = default;
+        IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        float x = 0f;
+        float z = 0f;
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = occupiedCoordinates[i];
+            x += coordinate.x;
+            z += coordinate.y;
+        }
+
+        float count = occupiedCoordinates.Count;
+        center = new Vector3(x / count, transform.position.y, z / count);
+        return true;
     }
 
     public void SetSelectedRangeVisualRequested(bool requested)
@@ -54,6 +106,15 @@ public class WorkableObject : InstallationObject
         }
 
         selectedRangeVisualRequested = requested;
+        if (requested)
+        {
+            SelectedRangeVisualInstances.Add(this);
+        }
+        else
+        {
+            SelectedRangeVisualInstances.Remove(this);
+        }
+
         RefreshWorkableRangeVisual();
     }
 
@@ -88,6 +149,17 @@ public class WorkableObject : InstallationObject
         }
 
         craftingSlotRangeVisualRequestSource = null;
+        RefreshAllRangeVisuals();
+    }
+
+    public static void SetInstallOrEditWorkableSelectionRangeVisualsRequested(bool requested)
+    {
+        if (installOrEditWorkableSelectionRangeVisualsRequested == requested)
+        {
+            return;
+        }
+
+        installOrEditWorkableSelectionRangeVisualsRequested = requested;
         RefreshAllRangeVisuals();
     }
 
@@ -127,6 +199,11 @@ public class WorkableObject : InstallationObject
     {
         base.OnEnable();
         ActiveInstances.Add(this);
+        if (selectedRangeVisualRequested)
+        {
+            SelectedRangeVisualInstances.Add(this);
+        }
+
         globalMaxFocusActivationRadiusDirty = true;
         RefreshSharedRangeVisual();
     }
@@ -135,6 +212,12 @@ public class WorkableObject : InstallationObject
     {
         DisableLegacyRangeVisual();
         ActiveInstances.Remove(this);
+        if (selectedRangeVisualRequested && !gameObject.activeInHierarchy)
+        {
+            SelectedRangeVisualInstances.Remove(this);
+            selectedRangeVisualRequested = false;
+        }
+
         globalMaxFocusActivationRadiusDirty = true;
         RefreshSharedRangeVisual();
         base.OnDisable();
@@ -171,32 +254,9 @@ public class WorkableObject : InstallationObject
         }
 
         List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
-        foreach (WorkableObject workableObject in ActiveInstances)
-        {
-            if (workableObject == null)
-            {
-                continue;
-            }
-
-            workableObject.DisableLegacyRangeVisual();
-            if (!workableObject.showWorkableRange
-                || workableObject.workableRangeCells == 0u
-                || !workableObject.ShouldShowWorkableRangeVisual())
-            {
-                continue;
-            }
-
-            float rangeRadius = ResolveRangeRadius(workableObject.workableRangeCells);
-            if (rangeRadius <= 0f)
-            {
-                continue;
-            }
-
-            requests.Add(new WorkableObjectRangeVisualRequest(
-                workableObject.transform.position,
-                rangeRadius,
-                workableObject.rangeVisualYOffset));
-        }
+        HashSet<WorkableObject> appendedObjects = new HashSet<WorkableObject>();
+        AppendRangeVisualRequests(ActiveInstances, requests, appendedObjects);
+        AppendRangeVisualRequests(SelectedRangeVisualInstances, requests, appendedObjects);
 
         if (requests.Count <= 0)
         {
@@ -214,6 +274,49 @@ public class WorkableObject : InstallationObject
         if (!visual.gameObject.activeSelf)
         {
             visual.gameObject.SetActive(true);
+        }
+    }
+
+    private static void AppendRangeVisualRequests(
+        IEnumerable<WorkableObject> sourceObjects,
+        List<WorkableObjectRangeVisualRequest> requests,
+        HashSet<WorkableObject> appendedObjects)
+    {
+        if (sourceObjects == null || requests == null || appendedObjects == null)
+        {
+            return;
+        }
+
+        foreach (WorkableObject workableObject in sourceObjects)
+        {
+            if (workableObject == null)
+            {
+                continue;
+            }
+
+            if (!appendedObjects.Add(workableObject))
+            {
+                continue;
+            }
+
+            workableObject.DisableLegacyRangeVisual();
+            if (!workableObject.showWorkableRange
+                || workableObject.workableRangeCells == 0u
+                || !workableObject.gameObject.activeInHierarchy
+                || !workableObject.ShouldShowWorkableRangeVisual())
+            {
+                continue;
+            }
+
+            if (!workableObject.TryGetWorkableRangeBounds(out Bounds rangeBounds))
+            {
+                continue;
+            }
+
+            requests.Add(new WorkableObjectRangeVisualRequest(
+                rangeBounds.center,
+                rangeBounds.extents.x,
+                workableObject.rangeVisualYOffset));
         }
     }
 
@@ -269,6 +372,11 @@ public class WorkableObject : InstallationObject
         }
 
         craftingSlotRangeVisualRequestSource = null;
+
+        if (!installOrEditWorkableSelectionRangeVisualsRequested)
+        {
+            return false;
+        }
 
         GameManager gameManager = GameManager.Instance;
         return gameManager != null
@@ -446,10 +554,7 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         int textureWidth = rangeAlphaTexture.width;
         int textureHeight = rangeAlphaTexture.height;
         bool[] inside = new bool[textureWidth * textureHeight];
-        int[] left = new int[inside.Length];
-        int[] right = new int[inside.Length];
-        int[] down = new int[inside.Length];
-        int[] up = new int[inside.Length];
+        float[] boundaryDistances = new float[inside.Length];
 
         for (int y = 0; y < textureHeight; y++)
         {
@@ -461,12 +566,23 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
             }
         }
 
-        FillAxisDistanceFields(inside, textureWidth, textureHeight, left, right, down, up);
-
         Color[] pixels = new Color[inside.Length];
         float pixelWorldWidth = width / textureWidth;
         float pixelWorldHeight = height / textureHeight;
+        float boundaryPixelOffset = Mathf.Min(pixelWorldWidth, pixelWorldHeight) * 0.5f;
         float fadeDistance = Mathf.Max(0.001f, maxRadius * (1f - RangeCenterTransparentRadius));
+        FillInsideBoundaryDistances(
+            inside,
+            textureWidth,
+            textureHeight,
+            pixelWorldWidth,
+            pixelWorldHeight,
+            minX,
+            maxX,
+            minZ,
+            maxZ,
+            boundaryDistances);
+
         for (int i = 0; i < inside.Length; i++)
         {
             if (!inside[i])
@@ -475,9 +591,7 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
                 continue;
             }
 
-            float horizontalDistance = (Mathf.Min(left[i], right[i]) - 0.5f) * pixelWorldWidth;
-            float verticalDistance = (Mathf.Min(down[i], up[i]) - 0.5f) * pixelWorldHeight;
-            float distanceToBoundary = Mathf.Max(0f, Mathf.Min(horizontalDistance, verticalDistance));
+            float distanceToBoundary = Mathf.Max(0f, boundaryDistances[i] - boundaryPixelOffset);
             float edgeStrength = 1f - Mathf.Clamp01(distanceToBoundary / fadeDistance);
             float alpha = Mathf.SmoothStep(0f, 1f, edgeStrength);
             pixels[i] = new Color(1f, 1f, 1f, alpha);
@@ -529,51 +643,97 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         return false;
     }
 
-    private static void FillAxisDistanceFields(
+    private static void FillInsideBoundaryDistances(
         bool[] inside,
         int width,
         int height,
-        int[] left,
-        int[] right,
-        int[] down,
-        int[] up)
+        float pixelWorldWidth,
+        float pixelWorldHeight,
+        float minX,
+        float maxX,
+        float minZ,
+        float maxZ,
+        float[] distances)
     {
+        if (inside == null || distances == null || inside.Length != distances.Length)
+        {
+            return;
+        }
+
+        float horizontalCost = Mathf.Max(0.0001f, pixelWorldWidth);
+        float verticalCost = Mathf.Max(0.0001f, pixelWorldHeight);
+        float diagonalCost = Mathf.Sqrt((horizontalCost * horizontalCost) + (verticalCost * verticalCost));
+
         for (int y = 0; y < height; y++)
         {
-            int distance = 0;
+            float worldZ = minZ + (((float)y + 0.5f) / height) * (maxZ - minZ);
             for (int x = 0; x < width; x++)
             {
                 int index = (y * width) + x;
-                distance = inside[index] ? distance + 1 : 0;
-                left[index] = distance;
-            }
+                if (!inside[index])
+                {
+                    distances[index] = 0f;
+                    continue;
+                }
 
-            distance = 0;
-            for (int x = width - 1; x >= 0; x--)
-            {
-                int index = (y * width) + x;
-                distance = inside[index] ? distance + 1 : 0;
-                right[index] = distance;
+                float worldX = minX + (((float)x + 0.5f) / width) * (maxX - minX);
+                float distanceToBounds = Mathf.Min(
+                    worldX - minX,
+                    maxX - worldX,
+                    worldZ - minZ,
+                    maxZ - worldZ);
+                distances[index] = Mathf.Max(0f, distanceToBounds);
             }
         }
 
-        for (int x = 0; x < width; x++)
+        for (int y = 0; y < height; y++)
         {
-            int distance = 0;
-            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
             {
                 int index = (y * width) + x;
-                distance = inside[index] ? distance + 1 : 0;
-                down[index] = distance;
+                RelaxDistance(distances, width, height, x, y, index, -1, 0, horizontalCost);
+                RelaxDistance(distances, width, height, x, y, index, 0, -1, verticalCost);
+                RelaxDistance(distances, width, height, x, y, index, -1, -1, diagonalCost);
+                RelaxDistance(distances, width, height, x, y, index, 1, -1, diagonalCost);
             }
+        }
 
-            distance = 0;
-            for (int y = height - 1; y >= 0; y--)
+        for (int y = height - 1; y >= 0; y--)
+        {
+            for (int x = width - 1; x >= 0; x--)
             {
                 int index = (y * width) + x;
-                distance = inside[index] ? distance + 1 : 0;
-                up[index] = distance;
+                RelaxDistance(distances, width, height, x, y, index, 1, 0, horizontalCost);
+                RelaxDistance(distances, width, height, x, y, index, 0, 1, verticalCost);
+                RelaxDistance(distances, width, height, x, y, index, 1, 1, diagonalCost);
+                RelaxDistance(distances, width, height, x, y, index, -1, 1, diagonalCost);
             }
+        }
+    }
+
+    private static void RelaxDistance(
+        float[] distances,
+        int width,
+        int height,
+        int x,
+        int y,
+        int index,
+        int offsetX,
+        int offsetY,
+        float cost)
+    {
+        int neighborX = x + offsetX;
+        int neighborY = y + offsetY;
+        if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height)
+        {
+            return;
+        }
+
+        int neighborIndex = (neighborY * width) + neighborX;
+        float nextDistance = distances[neighborIndex] + cost;
+        if (nextDistance < distances[index])
+        {
+            distances[index] = nextDistance;
         }
     }
 

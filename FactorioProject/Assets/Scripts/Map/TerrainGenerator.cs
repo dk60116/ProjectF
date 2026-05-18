@@ -603,16 +603,23 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
     private readonly List<Block> activeConveyorDotVisualList = new List<Block>();
     private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
+    private readonly HashSet<Block> activeBeltDirectionVisuals = new HashSet<Block>();
+    private readonly List<Block> activeBeltDirectionVisualList = new List<Block>();
     private readonly List<Block> pendingConveyorSlotDotRefreshBlocks = new List<Block>();
     private readonly Matrix4x4[] conveyorSlotDotInstanceMatrices = new Matrix4x4[MaxConveyorSlotDotInstancesPerBatch];
+    private readonly Matrix4x4[] beltDirectionArrowInstanceMatrices = new Matrix4x4[MaxBeltDirectionArrowInstancesPerBatch];
     private int conveyorSlotDotInstanceMatrixCount;
+    private int beltDirectionArrowInstanceMatrixCount;
     private Mesh conveyorSlotDotInstancedMesh;
     private Material conveyorSlotDotInstancedMaterial;
+    private Material beltDirectionArrowInstancedMaterial;
     private int pendingConveyorSlotDotRefreshIndex;
     private bool conveyorSlotDotVisibilityInitialized;
     private bool lastShowConveyorSlotDots;
     private bool beltItemLineVisibilityInitialized;
     private bool lastShowBeltItemLine;
+    private bool beltDirectionVisibilityInitialized;
+    private bool lastShowBeltDirections;
     private bool beltItemLineVisualsDirty;
     private bool beltItemLineDebugCacheDirty = true;
     private bool applyingBeltItemLineRuntimeVisibility;
@@ -783,7 +790,9 @@ public partial class TerrainGenerator : MonoBehaviour
             TickPendingConveyorSlotDotRefreshes();
             SyncBeltItemLineRuntimeVisibility();
             TickPendingBeltItemLineDebugRefreshes();
+            SyncBeltDirectionRuntimeVisibility();
             TickActiveConveyorDotVisuals(Time.deltaTime);
+            DrawActiveBeltDirectionArrows();
         }
 
         using (RefreshChunksMarker.Auto())

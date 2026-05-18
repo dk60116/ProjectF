@@ -940,6 +940,12 @@ public partial class TerrainGenerator : MonoBehaviour
                 savedState.quarterTurns,
                 occupiedCoordinates,
                 savedState.placementSequence);
+            if (restoredInstallation is ConvayorBelt2F restoredBelt2F)
+            {
+                ConvayorBelt2F.MarkCoverageDirty();
+                restoredBelt2F.RefreshCoveredConveyorTopology();
+            }
+
             if (savedState.inputOutputState != null && restoredInstallation is InputOutputModule inputOutputModule)
             {
                 inputOutputModule.ApplyPersistentState(savedState.inputOutputState);
@@ -997,6 +1003,12 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 block.SetMapObject(installedObject);
             }
+        }
+
+        if (installedObject is ConvayorBelt2F belt2F)
+        {
+            ConvayorBelt2F.MarkCoverageDirty();
+            belt2F.RefreshCoveredConveyorTopology();
         }
         }
     }
@@ -1232,6 +1244,7 @@ public partial class TerrainGenerator : MonoBehaviour
         SetConveyorActive(block, false, false);
         SetConveyorDataMotionActive(block, false);
         SetConveyorDotVisualActive(block, false);
+        SetBeltDirectionVisualActive(block, false);
         SetConveyorItemVisualActive(block, false);
         conveyorWakeQueued.Remove(block);
     }

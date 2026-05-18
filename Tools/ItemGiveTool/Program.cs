@@ -46,6 +46,7 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
     private readonly CheckBox showBeltItemLineCheckBox = new CheckBox();
+    private readonly CheckBox showBeltDirectionsCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
     private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
     private readonly Button applyCameraSizeButton = new Button();
@@ -335,9 +336,17 @@ internal sealed class EditorToolForm : Form
                 showBeltItemLineCheckBox.Checked,
                 "Show Belt Item Line");
 
+        StyleDebugCheckBox(showBeltDirectionsCheckBox, "Show Belt Directions");
+        showBeltDirectionsCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showBeltDirections",
+                showBeltDirectionsCheckBox.Checked,
+                "Show Belt Directions");
+
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
+        debugTogglePanel.Controls.Add(showBeltDirectionsCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 5);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
@@ -906,6 +915,11 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(showBeltItemLineCheckBox, showBeltItemLine);
         }
 
+        if (TryReadProtocolBool(response, "showBeltDirections", out bool showBeltDirections))
+        {
+            ApplyRuntimeCheckBoxState(showBeltDirectionsCheckBox, showBeltDirections);
+        }
+
         if (TryReadProtocolFloat(response, "cameraMinSize", out float cameraMinSize)
             && TryReadProtocolFloat(response, "cameraMaxSize", out float cameraMaxSize))
         {
@@ -1230,6 +1244,7 @@ internal sealed class EditorToolForm : Form
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
         showBeltItemLineCheckBox.Enabled = !busy;
+        showBeltDirectionsCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;
         cameraMaxSizeInput.Enabled = !busy;
         applyCameraSizeButton.Enabled = !busy;

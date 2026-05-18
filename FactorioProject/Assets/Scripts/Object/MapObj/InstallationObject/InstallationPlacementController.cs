@@ -13,6 +13,7 @@ public class InstallationPlacementController : MonoBehaviour
     private const int InstallPreviewAreaMarkerSortingOrderOffset = 6000;
     private const int Belt2FDefaultFootprintWidth = 1;
     private const int Belt2FDefaultFootprintLength = 3;
+    private const float ConveyorDebugArrowWorldLift = 0.55f;
 
     [SerializeField]
     private Button installButton;
@@ -290,6 +291,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void OnDisable()
     {
+        WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
         ClearEditableInstallationSelection();
         mapEditModeActive = false;
         GameManager.Instance?.SetMapEditActive(false);
@@ -308,6 +310,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void OnDestroy()
     {
+        WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
         UnbindInstallButtons();
         mapEditModeActive = false;
         GameManager.Instance?.SetMapEditActive(false);
@@ -1372,6 +1375,7 @@ public class InstallationPlacementController : MonoBehaviour
         selectedEditableInstallation = installationObject;
         selectedEditableAnchorCoordinate = anchorCoordinate;
         SetWorkableRangeVisualRequested(selectedEditableInstallation, true);
+        RefreshInstallOrEditWorkableRangeVisualRequest();
         RefreshMapEditButtonState();
     }
 
@@ -1380,6 +1384,7 @@ public class InstallationPlacementController : MonoBehaviour
         SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
         selectedEditableInstallation = null;
         selectedEditableAnchorCoordinate = Vector2Int.zero;
+        RefreshInstallOrEditWorkableRangeVisualRequest();
         RefreshMapEditButtonState();
     }
 
@@ -1396,6 +1401,7 @@ public class InstallationPlacementController : MonoBehaviour
             SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             selectedEditableInstallation = null;
             selectedEditableAnchorCoordinate = Vector2Int.zero;
+            RefreshInstallOrEditWorkableRangeVisualRequest();
             return;
         }
 
@@ -1404,7 +1410,8 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static void SetWorkableRangeVisualRequested(MapObject mapObject, bool requested)
     {
-        if (mapObject is WorkableObject workableObject)
+        WorkableObject workableObject = ResolveWorkableObject(mapObject);
+        if (workableObject != null)
         {
             workableObject.SetSelectedRangeVisualRequested(requested);
         }
@@ -1412,17 +1419,57 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static void SetWorkableRangeVisualGlobalSuppressed(MapObject mapObject, bool suppressed)
     {
-        if (mapObject is WorkableObject workableObject)
+        WorkableObject workableObject = ResolveWorkableObject(mapObject);
+        if (workableObject != null)
         {
             workableObject.SetGlobalRangeVisualSuppressed(suppressed);
         }
     }
 
-    private void SetInstallPreviewSelectionVisual(MapObject preview, bool selected)
+    private static WorkableObject ResolveWorkableObject(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        if (mapObject is WorkableObject workableObject)
+        {
+            return workableObject;
+        }
+
+        return mapObject.GetComponentInChildren<WorkableObject>(true);
+    }
+
+    private bool ShouldRequestInstallOrEditWorkableRangeVisuals()
+    {
+        GameManager gameManager = GameManager.Instance;
+        bool installationModeActive = gameManager != null && gameManager.InstallationPlacementActive;
+        if (installationModeActive && activeInstallDefinition != null && ResolveWorkableObject(activeInstallDefinition.mapObject) != null)
+        {
+            return true;
+        }
+
+        if ((installationModeActive || mapEditModeActive) && ResolveWorkableObject(activeInstallPreview) != null)
+        {
+            return true;
+        }
+
+        return mapEditModeActive && ResolveWorkableObject(selectedEditableInstallation) != null;
+    }
+
+    private void RefreshInstallOrEditWorkableRangeVisualRequest()
+    {
+        WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(
+            ShouldRequestInstallOrEditWorkableRangeVisuals());
+    }
+
+    private void SetInstallPreviewSelectionVisual(MapObject preview, bool selected, bool forceWorkableRangeVisible = false)
     {
         SetWorkableRangeVisualGlobalSuppressed(preview, true);
         ApplyInstallPreviewTint(preview, selected);
-        SetWorkableRangeVisualRequested(preview, selected);
+        SetWorkableRangeVisualRequested(preview, selected || (forceWorkableRangeVisible && ResolveWorkableObject(preview) != null));
+        RefreshInstallOrEditWorkableRangeVisualRequest();
         if (!selected)
         {
             ClearInputOutputMarkers(preview);
@@ -1432,6 +1479,7 @@ public class InstallationPlacementController : MonoBehaviour
     private void RefreshInstallPreviewSelectionVisuals()
     {
         CleanupInstallPreviewReferences();
+        bool forceWorkablePreviewRangesVisible = ShouldRequestInstallOrEditWorkableRangeVisuals();
         for (int i = 0; i < installPreviewInstances.Count; i++)
         {
             MapObject preview = installPreviewInstances[i];
@@ -1440,8 +1488,13 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            SetInstallPreviewSelectionVisual(preview, preview == activeInstallPreview);
+            SetInstallPreviewSelectionVisual(
+                preview,
+                preview == activeInstallPreview,
+                forceWorkablePreviewRangesVisible);
         }
+
+        RefreshInstallOrEditWorkableRangeVisualRequest();
     }
 
     private void ApplyInstallPreviewTint(MapObject preview, bool selected)
@@ -2248,6 +2301,7 @@ public class InstallationPlacementController : MonoBehaviour
         waitForPointerReleaseAfterPreviewSpawn = true;
         installGridRefreshTimer = 0f;
         GameManager.Instance?.SetInstallationPlacementActive(true);
+        RefreshInstallOrEditWorkableRangeVisualRequest();
 
         MapObject preview = CreateInstallPreviewInstance(previewSourcePrefab, editSession.definition != null ? editSession.definition.mapObject : null);
         if (preview == null)
@@ -2286,6 +2340,7 @@ public class InstallationPlacementController : MonoBehaviour
         activeInstallPreview.transform.rotation = editSession.originalInstallation is Wall
             ? GetInstallPreviewRotation()
             : editSession.originalRotation;
+        WorkableObject.RefreshAllRangeVisuals();
         InvalidateInstallGrid();
     }
 
@@ -2653,6 +2708,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             SetWorkableRangeVisualRequested(selectedEditableInstallation, true);
         }
+
+        RefreshInstallOrEditWorkableRangeVisualRequest();
 
         if (IsInstallGridModeActive())
         {
@@ -3772,6 +3829,12 @@ public class InstallationPlacementController : MonoBehaviour
                 quarterTurns,
                 GetInstalledObjectBlockingCoordinates(anchorCoordinate, installedObject, quarterTurns),
                 placementSequence);
+
+            if (installationObject is ConvayorBelt2F belt2F)
+            {
+                ConvayorBelt2F.MarkCoverageDirty();
+                belt2F.RefreshCoveredConveyorTopology();
+            }
         }
 
         ConfigureInstalledInputOutputMarkers(installedObject, anchorCoordinate, quarterTurns);
@@ -8972,6 +9035,7 @@ public class InstallationPlacementController : MonoBehaviour
         waitForPointerReleaseAfterPreviewSpawn = true;
         installGridRefreshTimer = 0f;
         GameManager.Instance?.SetInstallationPlacementActive(true);
+        RefreshInstallOrEditWorkableRangeVisualRequest();
     }
 
     private MapObject CreateInstallPreviewInstance(ItemDefinition definition)
@@ -9190,6 +9254,7 @@ public class InstallationPlacementController : MonoBehaviour
             movedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
         }
 
+        WorkableObject.RefreshAllRangeVisuals();
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RefreshConveyorVariantsAroundActivePreview(
             hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null,
@@ -9296,7 +9361,9 @@ public class InstallationPlacementController : MonoBehaviour
     private void UpdateInstallGrid(float deltaTime)
     {
         bool showFullGrid = IsInstallGridModeActive();
-        bool showConveyorDebugOnly = !showFullGrid && GameManager.Instance != null && GameManager.Instance.DebugConveyorInstallGridEnds;
+        bool showConveyorDebugOnly = !showFullGrid
+            && GameManager.Instance != null
+            && GameManager.Instance.DebugConveyorInstallGridEnds;
         if (!showFullGrid && !showConveyorDebugOnly)
         {
             SetInstallGridVisible(false);
@@ -9405,9 +9472,13 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMaxCoordinate = maxCoordinate;
 
         bool showFullGrid = IsInstallGridModeActive();
+        bool showConveyorDebugOnly = !showFullGrid
+            && GameManager.Instance != null
+            && GameManager.Instance.DebugConveyorInstallGridEnds;
 
         float lineY = terrain.transform.position.y + installGridVerticalOffset;
         float fillY = lineY - 0.002f;
+        float conveyorDebugArrowY = lineY + ConveyorDebugArrowWorldLift;
         float minX = minCoordinate.x - 0.5f;
         float maxX = maxCoordinate.x + 0.5f;
         float minZ = minCoordinate.y - 0.5f;
@@ -9448,10 +9519,12 @@ public class InstallationPlacementController : MonoBehaviour
         if (showFullGrid)
         {
             AddInstallPreviewFootprintFill(vertices, triangles, colors, fillY);
-            AddConveyorInstallPreviewDebugEnds(vertices, triangles, colors, lineY);
         }
 
-        AddInstalledConveyorDebugEnds(vertices, triangles, colors, minCoordinate, maxCoordinate, lineY);
+        if (showConveyorDebugOnly)
+        {
+            AddInstalledConveyorDebugEnds(vertices, triangles, colors, minCoordinate, maxCoordinate, conveyorDebugArrowY);
+        }
 
         if (showFullGrid)
         {
@@ -10378,6 +10451,7 @@ public class InstallationPlacementController : MonoBehaviour
                 installPreviewVerticalOffset);
         }
 
+        WorkableObject.RefreshAllRangeVisuals();
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
         RefreshConveyorVariantsAroundActivePreview(
@@ -10837,6 +10911,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         RefreshInstallPreviewSelectionVisuals();
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
+        RefreshInstallOrEditWorkableRangeVisualRequest();
         InvalidateInstallGrid();
     }
 
@@ -11505,6 +11580,7 @@ public class InstallationPlacementController : MonoBehaviour
         DestroyInstallPreviewObject(preview);
 
         EnsureValidActiveInstallPreview();
+        RefreshInstallOrEditWorkableRangeVisualRequest();
         RefreshActiveConveyorPreviewVariant();
 
         if (hadRemovedFenceAnchorCoordinate)
@@ -11560,6 +11636,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         EnsureValidActiveInstallPreview();
+        RefreshInstallOrEditWorkableRangeVisualRequest();
         if (installPreviewInstances.Count <= 0)
         {
             ClearInstallPreview();
@@ -13780,6 +13857,7 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewItemReservationsByPreview.Clear();
         automaticFenceCornerPreviews.Clear();
         activeInstallPreview = null;
+        RefreshInstallOrEditWorkableRangeVisualRequest();
     }
 
     private void SetInstallButtonVisible(bool isVisible)

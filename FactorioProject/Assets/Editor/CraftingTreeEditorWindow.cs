@@ -78,6 +78,27 @@ public class CraftingTreeEditorWindow : EditorWindow
         window.Show();
     }
 
+    public static void ReloadOpenWindows()
+    {
+        CraftingTreeEditorWindow[] windows = Resources.FindObjectsOfTypeAll<CraftingTreeEditorWindow>();
+        if (windows == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < windows.Length; i++)
+        {
+            CraftingTreeEditorWindow window = windows[i];
+            if (window == null)
+            {
+                continue;
+            }
+
+            window.LoadCraftingTree();
+            window.Repaint();
+        }
+    }
+
     private void OnEnable()
     {
         LoadCraftingTree();

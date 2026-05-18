@@ -27,6 +27,7 @@ Shader "Custom/InstallGridOverlay"
             #pragma vertex vert
             #pragma fragment frag
             #pragma target 2.0
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -38,6 +39,7 @@ Shader "Custom/InstallGridOverlay"
             {
                 float4 positionOS : POSITION;
                 float4 color : COLOR;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -49,6 +51,7 @@ Shader "Custom/InstallGridOverlay"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 output.positionHCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.color = input.color * _Color;
                 return output;

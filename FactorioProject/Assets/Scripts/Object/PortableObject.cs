@@ -206,6 +206,12 @@ public class PortableObject : MonoBehaviour
         MarkPortableItemRenderDataDirty();
     }
 
+    public void SetWorldPose(Vector3 position, Quaternion rotation)
+    {
+        CachedTransform.SetPositionAndRotation(position, rotation);
+        MarkPortableItemRenderDataDirty();
+    }
+
     public void MarkBatchedRenderDataDirty()
     {
         MarkPortableItemRenderDataDirty();

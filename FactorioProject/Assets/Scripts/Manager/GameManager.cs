@@ -31,6 +31,8 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private bool showBeltItemLine;
     [SerializeField]
+    private bool showBeltDirections;
+    [SerializeField]
     private bool runtimeItemGiveServerEnabled = true;
     [SerializeField, Min(1)]
     private int runtimeItemGiveServerPort = RuntimeItemGiveReceiver.DefaultPort;
@@ -40,6 +42,8 @@ public class GameManager : MonoBehaviour
     private bool lastRuntimeShowSleepAwake;
     private bool beltItemLineRuntimeStateInitialized;
     private bool lastRuntimeShowBeltItemLine;
+    private bool beltDirectionRuntimeStateInitialized;
+    private bool lastRuntimeShowBeltDirections;
 
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
@@ -84,6 +88,7 @@ public class GameManager : MonoBehaviour
         SyncConveyorSlotDotRuntimeVisibility();
         SyncSleepAwakeRuntimeVisibility();
         SyncBeltItemLineRuntimeVisibility();
+        SyncBeltDirectionRuntimeVisibility();
     }
 
     private void OnValidate()
@@ -93,6 +98,7 @@ public class GameManager : MonoBehaviour
             SyncConveyorSlotDotRuntimeVisibility(true);
             SyncSleepAwakeRuntimeVisibility(true);
             SyncBeltItemLineRuntimeVisibility(true);
+            SyncBeltDirectionRuntimeVisibility(true);
         }
     }
 
@@ -147,6 +153,7 @@ public class GameManager : MonoBehaviour
     public bool ShowConveyorSlotDots => showConveyorSlotDots;
     public bool ShowSleepAwake => showSleepAwake;
     public bool ShowBeltItemLine => showBeltItemLine;
+    public bool ShowBeltDirections => showBeltDirections;
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
     public int RuntimeItemGiveServerPort => runtimeItemGiveServerPort;
 
@@ -158,6 +165,11 @@ public class GameManager : MonoBehaviour
         }
 
         InstallationPlacementActive = isActive;
+        if (!InstallationPlacementActive && !MapEditActive)
+        {
+            WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
+        }
+
         WorkableObject.RefreshAllRangeVisuals();
     }
 
@@ -169,6 +181,11 @@ public class GameManager : MonoBehaviour
         }
 
         MapEditActive = isActive;
+        if (!InstallationPlacementActive && !MapEditActive)
+        {
+            WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
+        }
+
         WorkableObject.RefreshAllRangeVisuals();
     }
 
@@ -188,6 +205,12 @@ public class GameManager : MonoBehaviour
     {
         showBeltItemLine = show;
         SyncBeltItemLineRuntimeVisibility(true);
+    }
+
+    public void SetShowBeltDirections(bool show)
+    {
+        showBeltDirections = show;
+        SyncBeltDirectionRuntimeVisibility(true);
     }
 
     private void SyncConveyorSlotDotRuntimeVisibility(bool force = false)
@@ -255,6 +278,25 @@ public class GameManager : MonoBehaviour
         {
             PortableObject.RefreshAllBeltItemLineDebugVisuals();
         }
+    }
+
+    private void SyncBeltDirectionRuntimeVisibility(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && beltDirectionRuntimeStateInitialized
+            && lastRuntimeShowBeltDirections == showBeltDirections)
+        {
+            return;
+        }
+
+        beltDirectionRuntimeStateInitialized = true;
+        lastRuntimeShowBeltDirections = showBeltDirections;
+        TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
     }
 
     private void ConfigureRuntimeItemGiveReceiver()
@@ -784,7 +826,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine> <true|false> | camera size <minSize> <maxSize> | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltDirections> <true|false> | camera size <minSize> <maxSize> | ping | status";
             return false;
         }
 
@@ -880,6 +922,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
         bool currentShowBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
+        bool currentShowBeltDirections = gameManager != null && gameManager.ShowBeltDirections;
         string extraTokens = BuildStatusExtraTokens(
             ResolveSaveManager(),
             ResolvePlayerCamera(),
@@ -894,6 +937,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             currentShowConveyorSlotDots,
             currentShowSleepAwake,
             currentShowBeltItemLine,
+            currentShowBeltDirections,
             extraTokens);
     }
 
@@ -2274,6 +2318,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showBeltItemLine={(value ? 1 : 0)}");
         }
 
+        if (string.Equals(toggleName, "showBeltDirections", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "beltDirections", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "showConveyorDirections", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "conveyorDirections", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetShowBeltDirections(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showBeltDirections={(value ? 1 : 0)}");
+        }
+
         return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");
     }
 
@@ -2384,6 +2437,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             bool showConveyorSlotDots,
             bool showSleepAwake,
             bool showBeltItemLine,
+            bool showBeltDirections,
             string message,
             string extraTokens)
         {
@@ -2402,6 +2456,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             ShowConveyorSlotDots = showConveyorSlotDots;
             ShowSleepAwake = showSleepAwake;
             ShowBeltItemLine = showBeltItemLine;
+            ShowBeltDirections = showBeltDirections;
             Message = message;
             ExtraTokens = string.IsNullOrWhiteSpace(extraTokens) ? string.Empty : extraTokens.Trim();
         }
@@ -2421,22 +2476,23 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         private bool ShowConveyorSlotDots { get; }
         private bool ShowSleepAwake { get; }
         private bool ShowBeltItemLine { get; }
+        private bool ShowBeltDirections { get; }
         private string Message { get; }
         private string ExtraTokens { get; }
 
         public static ToolResult Success(int itemId, int requested, int given, int bag, int hand, int dropped, string message = "ok", string extraTokens = "")
         {
-            return new ToolResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", false, false, false, message, extraTokens);
+            return new ToolResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", false, false, false, false, message, extraTokens);
         }
 
         public static ToolResult Error(int itemId, int requested, string message, string extraTokens = "")
         {
-            return new ToolResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, message, extraTokens);
+            return new ToolResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, false, message, extraTokens);
         }
 
         public static ToolResult Ping()
         {
-            return new ToolResult(true, 0, 0, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, "pong", string.Empty);
+            return new ToolResult(true, 0, 0, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, false, "pong", string.Empty);
         }
 
         public static ToolResult Status(
@@ -2448,6 +2504,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             bool showConveyorSlotDots,
             bool showSleepAwake,
             bool showBeltItemLine,
+            bool showBeltDirections,
             string extraTokens = "")
         {
             return new ToolResult(
@@ -2466,6 +2523,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 showConveyorSlotDots,
                 showSleepAwake,
                 showBeltItemLine,
+                showBeltDirections,
                 "status",
                 extraTokens);
         }
@@ -2478,7 +2536,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             {
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} showConveyorSlotDots={12} showSleepAwake={13} showBeltItemLine={14}{15} message=\"{16}\"",
+                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} showConveyorSlotDots={12} showSleepAwake={13} showBeltItemLine={14} showBeltDirections={15}{16} message=\"{17}\"",
                     prefix,
                     ItemId,
                     Requested,
@@ -2494,6 +2552,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     ShowConveyorSlotDots ? 1 : 0,
                     ShowSleepAwake ? 1 : 0,
                     ShowBeltItemLine ? 1 : 0,
+                    ShowBeltDirections ? 1 : 0,
                     extra,
                     Message);
             }

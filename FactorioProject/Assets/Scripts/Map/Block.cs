@@ -24,6 +24,12 @@ public class Block : BaseObject
     private const float ConveyorSlotDotDiameter = 0.08f;
     private const float ConveyorSlotDotThickness = 0.02f;
     private const float ConveyorSlotDotVerticalOffset = 0.012f;
+    private const float BeltDirectionArrowLength = 0.62f;
+    private const float BeltDirectionArrowShaftWidth = 0.18f;
+    private const float BeltDirectionArrowHeadLength = 0.24f;
+    private const float BeltDirectionArrowHeadWidth = 0.34f;
+    private const float BeltDirectionArrowVerticalOffset = 0.08f;
+    private const float BeltDirectionArrowMinimumWorldHeight = 0.32f;
     private const int ConveyorSlotDotPathMaxSegments = 32;
     private const int ConveyorRunMoveMaxSegments = ConveyorSlotDotPathMaxSegments;
     private const int ConveyorPlacementForwardSearchDepth = 4;
@@ -53,6 +59,7 @@ public class Block : BaseObject
 
     [SerializeField, ReadOnly]
     private MapObject mapObject;
+    private ConveyorBelt runtimeConveyorOverride;
 
     [SerializeField]
     private List<Transform> floorObjects;
@@ -108,6 +115,7 @@ public class Block : BaseObject
     private readonly Dictionary<object, bool> inputAreaCenterVisibilityRequests = new Dictionary<object, bool>();
     private MaterialPropertyBlock conveyorSlotDotPropertyBlock;
     private static Material conveyorSlotDotMaterial;
+    private static Mesh beltDirectionArrowMesh;
     private PortableObjectPool floorObjectPool;
     private TerrainGenerator cachedTerrainGenerator;
     private Transform inputAreaCenterAnchor;
@@ -476,6 +484,7 @@ public class Block : BaseObject
             {
                 RefreshConveyorActivityRegistration();
                 RefreshConveyorSlotDotVisuals();
+                RefreshBeltDirectionDebugVisuals();
             }
         }
 
@@ -507,6 +516,14 @@ public class Block : BaseObject
         }
 
         WakeConveyorMoveAttemptsAround();
+    }
+
+    public void InvalidateRuntimeConveyorTopology()
+    {
+        InvalidateConveyorRuntimeCachesAround();
+        RefreshConveyorActivityRegistration(false, false);
+        RefreshConveyorSlotDotVisuals();
+        RefreshBeltDirectionDebugVisuals();
     }
 
     private void InvalidateConveyorConnectionCache()
@@ -1329,148 +1346,396 @@ public class Block : BaseObject
         return false;
     }
 
-    public bool IsConveyorStackingEnabled()
+    private bool TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
     {
-        return mapObject is ConveyorBelt conveyorBelt
-               && conveyorBelt != null
+        conveyorBelt = null;
+        if (IsActiveRuntimeConveyor(runtimeConveyorOverride))
+        {
+            conveyorBelt = runtimeConveyorOverride;
+            return true;
+        }
+
+        if (mapObject is ConveyorBelt mappedConveyor && IsActiveRuntimeConveyor(mappedConveyor))
+        {
+            conveyorBelt = mappedConveyor;
+            return true;
+        }
+
+        if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F belt2F)
+            && IsActiveRuntimeConveyor(belt2F))
+        {
+            conveyorBelt = belt2F;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
+    {
+        if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F belt2F)
+            && IsActiveRuntimeConveyor(belt2F))
+        {
+            conveyorBelt = belt2F;
+            return true;
+        }
+
+        return TryGetRuntimeConveyorBelt(out conveyorBelt);
+    }
+
+    private static bool IsActiveRuntimeConveyor(ConveyorBelt conveyorBelt)
+    {
+        return conveyorBelt != null
                && conveyorBelt.gameObject != null
                && conveyorBelt.gameObject.activeInHierarchy;
+    }
+
+    private bool TryGetRuntimeBelt2F(out ConvayorBelt2F belt2F)
+    {
+        belt2F = null;
+        if (TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
+            && conveyorBelt is ConvayorBelt2F resolvedBelt2F)
+        {
+            belt2F = resolvedBelt2F;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F)
+    {
+        belt2F = null;
+        return mapObject is ConveyorBelt mappedConveyor
+               && !(mappedConveyor is ConvayorBelt2F)
+               && ConvayorBelt2F.TryFindCoveringBelt(coordinate, out belt2F)
+               && IsActiveRuntimeConveyor(belt2F)
+               && belt2F.IsBridgeCenterCoordinate(coordinate);
+    }
+
+    private bool IsBelt2FBridgeCenterFor(ConvayorBelt2F belt2F)
+    {
+        return belt2F != null
+               && TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F centerBelt)
+               && ReferenceEquals(centerBelt, belt2F);
+    }
+
+    private static bool IsBelt2FBridgeLaneIndex(int laneIndex)
+    {
+        return laneIndex == 1 || laneIndex == 3;
+    }
+
+    private bool IsActiveRuntimeConveyorLaneIndex(int laneIndex)
+    {
+        return IsActiveConveyorLaneIndex(laneIndex)
+               || (IsBelt2FBridgeLaneIndex(laneIndex) && TryGetBelt2FBridgeCenterBelt(out _));
+    }
+
+    public bool IsConveyorStackingEnabled()
+    {
+        return TryGetRuntimeConveyorBelt(out _);
+    }
+
+    public bool HasRuntimeBelt2FConveyor()
+    {
+        return TryGetRuntimeBelt2F(out _)
+               || TryGetBelt2FBridgeCenterBelt(out _);
     }
 
     public bool TryGetConveyorStandingDistanceSqr(Vector3 worldPosition, out float distanceSqr)
     {
         distanceSqr = float.MaxValue;
-        if (!IsConveyorStackingEnabled())
+        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
         {
             return false;
         }
 
-        if (IsCornerConveyor())
+        ConveyorBelt previousOverride = runtimeConveyorOverride;
+        runtimeConveyorOverride = playerConveyor;
+        try
         {
-            return TryGetCornerConveyorStandingDistanceSqr(worldPosition, out distanceSqr);
-        }
+            if (!IsConveyorStackingEnabled())
+            {
+                return false;
+            }
 
-        Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
-        Vector2 flatLocalPosition = new Vector2(localPosition3.x, localPosition3.z);
-        if (!TryGetConveyorLocalAxes(out Vector2 localFlowAxis, out Vector2 localRightAxis))
+            if (IsCornerConveyor())
+            {
+                return TryGetCornerConveyorStandingDistanceSqr(worldPosition, out distanceSqr);
+            }
+
+            Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
+            Vector2 flatLocalPosition = new Vector2(localPosition3.x, localPosition3.z);
+            if (!TryGetConveyorLocalAxes(out Vector2 localFlowAxis, out Vector2 localRightAxis))
+            {
+                localFlowAxis = Vector2.up;
+                localRightAxis = Vector2.right;
+            }
+
+            float forward = Vector2.Dot(flatLocalPosition, localFlowAxis);
+            float right = Vector2.Dot(flatLocalPosition, localRightAxis);
+            float clampedForward = Mathf.Clamp(forward, -0.5f, 0.5f);
+            float halfWidth = Mathf.Max(0.18f, GetConveyorLaneHalfExtent() + 0.12f);
+            float clampedRight = Mathf.Clamp(right, -halfWidth, halfWidth);
+            Vector2 delta = new Vector2(forward - clampedForward, right - clampedRight);
+            distanceSqr = delta.sqrMagnitude;
+            return true;
+        }
+        finally
         {
-            localFlowAxis = Vector2.up;
-            localRightAxis = Vector2.right;
+            runtimeConveyorOverride = previousOverride;
         }
-
-        float forward = Vector2.Dot(flatLocalPosition, localFlowAxis);
-        float right = Vector2.Dot(flatLocalPosition, localRightAxis);
-        float clampedForward = Mathf.Clamp(forward, -0.5f, 0.5f);
-        float halfWidth = Mathf.Max(0.18f, GetConveyorLaneHalfExtent() + 0.12f);
-        float clampedRight = Mathf.Clamp(right, -halfWidth, halfWidth);
-        Vector2 delta = new Vector2(forward - clampedForward, right - clampedRight);
-        distanceSqr = delta.sqrMagnitude;
-        return true;
     }
 
     public bool TryGetConveyorCarryVelocity(Vector3 worldPosition, out Vector3 velocity)
     {
         velocity = Vector3.zero;
-        if (!IsConveyorStackingEnabled())
+        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
         {
             return false;
         }
 
-        float conveyorSpeed = GetConveyorSpeed();
-        if (conveyorSpeed <= 0f)
+        ConveyorBelt previousOverride = runtimeConveyorOverride;
+        runtimeConveyorOverride = playerConveyor;
+        try
+        {
+            if (!IsConveyorStackingEnabled())
+            {
+                return false;
+            }
+
+            float conveyorSpeed = GetConveyorSpeed();
+            if (conveyorSpeed <= 0f)
+            {
+                return false;
+            }
+
+            if (IsCornerConveyor())
+            {
+                if (!TryGetCornerConveyorCarryDirection(worldPosition, out Vector3 cornerCarryDirection))
+                {
+                    return false;
+                }
+
+                cornerCarryDirection.y = 0f;
+                if (cornerCarryDirection.sqrMagnitude <= 0.0001f)
+                {
+                    return false;
+                }
+
+                velocity = cornerCarryDirection.normalized * conveyorSpeed;
+                return true;
+            }
+
+            if (!TryGetConveyorFlowDirection(out Vector2Int flowDirection) || flowDirection == Vector2Int.zero)
+            {
+                return false;
+            }
+
+            Vector3 carryDirection = new Vector3(flowDirection.x, 0f, flowDirection.y);
+            carryDirection.y = 0f;
+            if (carryDirection.sqrMagnitude <= 0.0001f)
+            {
+                return false;
+            }
+
+            velocity = carryDirection.normalized * conveyorSpeed;
+            return true;
+        }
+        finally
+        {
+            runtimeConveyorOverride = previousOverride;
+        }
+    }
+
+    public bool ShouldBlockPlayerCarryForCrossingBelt2F(Vector3 incomingCarryVelocity)
+    {
+        if (!TryGetMappedConveyorCrossingBelt2F(out Vector3 lowerDirection, out Vector3 upperDirection))
         {
             return false;
         }
 
-        if (IsCornerConveyor())
+        Vector3 flatIncomingVelocity = incomingCarryVelocity;
+        flatIncomingVelocity.y = 0f;
+        if (flatIncomingVelocity.sqrMagnitude <= 0.0001f)
         {
-            if (!TryGetCornerConveyorCarryDirection(worldPosition, out Vector3 cornerCarryDirection))
-            {
-                return false;
-            }
-
-            cornerCarryDirection.y = 0f;
-            if (cornerCarryDirection.sqrMagnitude <= 0.0001f)
-            {
-                return false;
-            }
-
-            velocity = cornerCarryDirection.normalized * conveyorSpeed;
             return true;
         }
 
-        if (!TryGetConveyorFlowDirection(out Vector2Int flowDirection) || flowDirection == Vector2Int.zero)
+        flatIncomingVelocity.Normalize();
+        float lowerAlignment = Mathf.Abs(Vector3.Dot(flatIncomingVelocity, lowerDirection));
+        float upperAlignment = Mathf.Abs(Vector3.Dot(flatIncomingVelocity, upperDirection));
+        return lowerAlignment >= upperAlignment;
+    }
+
+    public bool TryGetConveyorStandingWorldHeight(Vector3 worldPosition, out float worldHeight)
+    {
+        worldHeight = 0f;
+        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
         {
             return false;
         }
 
-        Vector3 carryDirection = new Vector3(flowDirection.x, 0f, flowDirection.y);
-        carryDirection.y = 0f;
-        if (carryDirection.sqrMagnitude <= 0.0001f)
+        ConveyorBelt previousOverride = runtimeConveyorOverride;
+        runtimeConveyorOverride = playerConveyor;
+        try
         {
+            if (!IsConveyorStackingEnabled())
+            {
+                return false;
+            }
+
+            if (playerConveyor is ConvayorBelt2F belt2F)
+            {
+                worldHeight = belt2F.ApplyPathHeight(worldPosition).y;
+                return true;
+            }
+
+            worldHeight = transform.position.y + ConveyorLaneHeight;
+            return true;
+        }
+        finally
+        {
+            runtimeConveyorOverride = previousOverride;
+        }
+    }
+
+    private bool TryGetMappedConveyorCrossingBelt2F(out Vector3 lowerDirection, out Vector3 upperDirection)
+    {
+        lowerDirection = Vector3.zero;
+        upperDirection = Vector3.zero;
+        if (!(mapObject is ConveyorBelt mappedConveyor)
+            || mappedConveyor is ConvayorBelt2F
+            || !IsActiveRuntimeConveyor(mappedConveyor)
+            || !ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F coveringBelt2F)
+            || !IsActiveRuntimeConveyor(coveringBelt2F)
+            || !TryGetFlatOutputDirection(mappedConveyor, out lowerDirection)
+            || !TryGetFlatOutputDirection(coveringBelt2F, out upperDirection)
+            || Mathf.Abs(Vector3.Dot(lowerDirection, upperDirection)) > 0.0001f)
+        {
+            lowerDirection = Vector3.zero;
+            upperDirection = Vector3.zero;
             return false;
         }
 
-        velocity = carryDirection.normalized * conveyorSpeed;
         return true;
+    }
+
+    private static bool TryGetFlatOutputDirection(ConveyorBelt conveyorBelt, out Vector3 direction)
+    {
+        direction = Vector3.zero;
+        if (conveyorBelt == null
+            || !conveyorBelt.TryGetOutputDirection(conveyorBelt.transform.rotation, out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        direction = new Vector3(outputDirection.x, 0f, outputDirection.y).normalized;
+        return direction.sqrMagnitude > 0.0001f;
     }
 
     public bool TryGetConveyorCarryDelta(Vector3 worldPosition, float deltaTime, out Vector3 delta)
     {
         delta = Vector3.zero;
-        if (!IsConveyorStackingEnabled() || deltaTime <= 0f)
+        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
         {
             return false;
         }
 
-        float conveyorSpeed = GetConveyorSpeed();
-        if (conveyorSpeed <= 0f)
+        ConveyorBelt previousOverride = runtimeConveyorOverride;
+        runtimeConveyorOverride = playerConveyor;
+        try
         {
-            return false;
+            if (!IsConveyorStackingEnabled() || deltaTime <= 0f)
+            {
+                return false;
+            }
+
+            float conveyorSpeed = GetConveyorSpeed();
+            if (conveyorSpeed <= 0f)
+            {
+                return false;
+            }
+
+            if (IsCornerConveyor())
+            {
+                return TryGetCornerConveyorCarryDelta(worldPosition, conveyorSpeed, deltaTime, out delta);
+            }
+
+            if (!TryGetConveyorFlowDirection(out Vector2Int flowDirection) || flowDirection == Vector2Int.zero)
+            {
+                return false;
+            }
+
+            Vector3 carryDirection = new Vector3(flowDirection.x, 0f, flowDirection.y).normalized;
+            delta = ApplyConveyorCarryPathHeightDelta(
+                worldPosition,
+                carryDirection * conveyorSpeed * deltaTime);
+            return delta.sqrMagnitude > 0.0000001f;
+        }
+        finally
+        {
+            runtimeConveyorOverride = previousOverride;
+        }
+    }
+
+    private Vector3 ApplyConveyorCarryPathHeightDelta(Vector3 worldPosition, Vector3 delta)
+    {
+        if (delta.sqrMagnitude <= 0.0000001f
+            || !TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
+            || !(conveyorBelt is ConvayorBelt2F belt2F))
+        {
+            return delta;
         }
 
-        if (IsCornerConveyor())
-        {
-            return TryGetCornerConveyorCarryDelta(worldPosition, conveyorSpeed, deltaTime, out delta);
-        }
-
-        if (!TryGetConveyorFlowDirection(out Vector2Int flowDirection) || flowDirection == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        Vector3 carryDirection = new Vector3(flowDirection.x, 0f, flowDirection.y).normalized;
-        delta = carryDirection * conveyorSpeed * deltaTime;
-        return delta.sqrMagnitude > 0.0000001f;
+        Vector3 currentPathPosition = belt2F.ApplyPathHeight(worldPosition);
+        Vector3 nextPathPosition = belt2F.ApplyPathHeight(worldPosition + delta);
+        delta.y += nextPathPosition.y - currentPathPosition.y;
+        return delta;
     }
 
     public bool TryGetConveyorCarryDeltaWithHandoff(Vector3 worldPosition, float deltaTime, out Block resultingBlock, out Vector3 delta)
     {
         resultingBlock = this;
         delta = Vector3.zero;
-        if (!IsConveyorStackingEnabled() || deltaTime <= 0f)
+        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
         {
             return false;
         }
 
-        float conveyorSpeed = GetConveyorSpeed();
-        if (conveyorSpeed <= 0f)
+        ConveyorBelt previousOverride = runtimeConveyorOverride;
+        runtimeConveyorOverride = playerConveyor;
+        try
         {
-            return false;
-        }
-
-        if (!IsCornerConveyor())
-        {
-            if (!TryGetConveyorCarryDelta(worldPosition, deltaTime, out delta))
+            if (!IsConveyorStackingEnabled() || deltaTime <= 0f)
             {
                 return false;
             }
 
-            resultingBlock = this;
-            return true;
-        }
+            float conveyorSpeed = GetConveyorSpeed();
+            if (conveyorSpeed <= 0f)
+            {
+                return false;
+            }
 
-        return TryGetCornerConveyorCarryDeltaWithHandoff(worldPosition, conveyorSpeed, deltaTime, out resultingBlock, out delta);
+            if (!IsCornerConveyor())
+            {
+                if (!TryGetConveyorCarryDelta(worldPosition, deltaTime, out delta))
+                {
+                    return false;
+                }
+
+                resultingBlock = this;
+                return true;
+            }
+
+            return TryGetCornerConveyorCarryDeltaWithHandoff(worldPosition, conveyorSpeed, deltaTime, out resultingBlock, out delta);
+        }
+        finally
+        {
+            runtimeConveyorOverride = previousOverride;
+        }
     }
 
     public bool TryGetNextConnectedConveyorBlock(out Block nextBlock)
@@ -2436,10 +2701,11 @@ public class Block : BaseObject
 
             ApplyConveyorObjectRenderingMode(portableObject);
             Vector3 position = GetConveyorItemVisualWorldPosition(laneIndex);
+            Quaternion rotation = GetConveyorItemVisualWorldRotation(laneIndex, position);
             bool useBeltItemLineDebugColor = TryGetBeltItemLineDebugColor(laneIndex, out Color32 beltItemLineDebugColor);
             results.Add(new VirtualConveyorItemRenderData(
                 itemId,
-                Matrix4x4.TRS(position, Quaternion.identity, Vector3.one),
+                Matrix4x4.TRS(position, rotation, Vector3.one),
                 gameObject.layer,
                 ShouldUseSleepAwakeDarkTint(laneIndex),
                 useBeltItemLineDebugColor,
@@ -2640,7 +2906,10 @@ public class Block : BaseObject
 
                 if (targetLaneIndex != state.laneIndex)
                 {
-                    portableObject?.SetWorldPosition(GetConveyorLaneWorldPosition(targetLaneIndex));
+                    SetConveyorPortableObjectWorldPose(
+                        portableObject,
+                        targetLaneIndex,
+                        GetConveyorLaneWorldPosition(targetLaneIndex));
                     continue;
                 }
 
@@ -2734,7 +3003,7 @@ public class Block : BaseObject
                 Vector3 settledWorldPosition = IsValidConveyorLaneIndex(state.laneIndex)
                     ? GetConveyorLaneWorldPosition(state.laneIndex)
                     : state.visualWorldPosition;
-                portableObject.SetWorldPosition(settledWorldPosition);
+                SetConveyorPortableObjectWorldPose(portableObject, state.laneIndex, settledWorldPosition);
             }
 
             return;
@@ -2756,7 +3025,7 @@ public class Block : BaseObject
             {
                 conveyorCornerMotionStates[portableObject] = motionState;
                 conveyorLinearMotionStates.Remove(portableObject);
-                portableObject.SetWorldPosition(state.visualWorldPosition);
+                SetConveyorPortableObjectWorldPose(portableObject, state.laneIndex, state.visualWorldPosition);
             }
             else if (state.laneIndex >= 0 && state.laneIndex < conveyorItemMotionStates.Count)
             {
@@ -2790,7 +3059,7 @@ public class Block : BaseObject
                 progress = Mathf.Clamp01(state.progress),
                 pathLength = state.pathLength
             };
-            portableObject.SetWorldPosition(state.visualWorldPosition);
+            SetConveyorPortableObjectWorldPose(portableObject, state.laneIndex, state.visualWorldPosition);
         }
         else if (state.laneIndex >= 0 && state.laneIndex < conveyorItemMotionStates.Count)
         {
@@ -3088,6 +3357,8 @@ public class Block : BaseObject
         CleanupConveyorStack();
         return Application.isPlaying
             && IsConveyorStackingEnabled()
+            && !TryGetRuntimeBelt2F(out _)
+            && !TryGetBelt2FBridgeCenterBelt(out _)
             && !IsCornerConveyor()
             && ShouldUseVirtualConveyorItemRendering()
             && !HasMaterializedConveyorItems()
@@ -3183,10 +3454,13 @@ public class Block : BaseObject
             out Vector3 viaWorldPosition);
         if (hasViaWorldPosition)
         {
-            float leadInLength = Vector3.Distance(startWorldPosition, viaWorldPosition);
-            if (leadInLength > ConveyorContinuousMotionEpsilon)
+            Vector3 destinationWorldPosition = destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex);
+            float viaPathLength =
+                Vector3.Distance(startWorldPosition, viaWorldPosition)
+                + Vector3.Distance(viaWorldPosition, destinationWorldPosition);
+            if (viaPathLength > ConveyorContinuousMotionEpsilon)
             {
-                pathLength = Mathf.Max(0f, pathLength) + leadInLength;
+                pathLength = viaPathLength;
             }
         }
 
@@ -3477,6 +3751,7 @@ public class Block : BaseObject
         {
             RefreshSleepAwakeDebugVisuals();
             generator.QueueBeltItemLineDebugVisualRefresh(this);
+            RefreshBeltDirectionDebugVisuals();
         }
     }
 
@@ -4509,6 +4784,182 @@ public class Block : BaseObject
         return GameManager.Instance != null && GameManager.Instance.ShowConveyorSlotDots;
     }
 
+    public void RefreshBeltDirectionDebugVisuals()
+    {
+        TerrainGenerator.Active?.SetBeltDirectionVisualActive(
+            this,
+            Application.isPlaying
+            && IsConveyorStackingEnabled()
+            && ShouldShowBeltDirections()
+            && TryGetBeltDirectionArrowPose(out _, out _));
+    }
+
+    public bool TryGetBeltDirectionArrowMatrix(out Matrix4x4 matrix)
+    {
+        matrix = Matrix4x4.identity;
+        if (!Application.isPlaying
+            || !IsConveyorStackingEnabled()
+            || !ShouldShowBeltDirections()
+            || !TryGetBeltDirectionArrowPose(out Vector3 worldPosition, out Quaternion worldRotation))
+        {
+            return false;
+        }
+
+        matrix = Matrix4x4.TRS(worldPosition, worldRotation, Vector3.one);
+        return true;
+    }
+
+    private static bool ShouldShowBeltDirections()
+    {
+        return GameManager.Instance != null && GameManager.Instance.ShowBeltDirections;
+    }
+
+    private bool TryGetBeltDirectionArrowPose(out Vector3 worldPosition, out Quaternion worldRotation)
+    {
+        worldPosition = Vector3.zero;
+        worldRotation = Quaternion.identity;
+        if (!TryGetConveyorFlowDirection(out Vector2Int flowDirection) || flowDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector3 flowWorldDirection = new Vector3(flowDirection.x, 0f, flowDirection.y);
+        if (flowWorldDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        worldPosition = GetBeltDirectionArrowWorldPosition();
+        worldRotation = Quaternion.LookRotation(flowWorldDirection.normalized, Vector3.up);
+        return true;
+    }
+
+    private Vector3 GetBeltDirectionArrowWorldPosition()
+    {
+        Vector3 center = transform.position;
+        int laneCount = GetConveyorLaneCount();
+        if (laneCount > 0)
+        {
+            Vector3 sum = Vector3.zero;
+            int validLaneCount = 0;
+            for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+            {
+                if (!IsValidConveyorLaneIndex(laneIndex))
+                {
+                    continue;
+                }
+
+                sum += GetConveyorLaneWorldPosition(laneIndex);
+                validLaneCount++;
+            }
+
+            if (validLaneCount > 0)
+            {
+                center = sum / validLaneCount;
+            }
+        }
+
+        center.y = Mathf.Max(
+            center.y + BeltDirectionArrowVerticalOffset,
+            transform.position.y + BeltDirectionArrowMinimumWorldHeight);
+        return center;
+    }
+
+    public static Mesh ResolveBeltDirectionArrowMesh()
+    {
+        if (beltDirectionArrowMesh != null)
+        {
+            return beltDirectionArrowMesh;
+        }
+
+        beltDirectionArrowMesh = new Mesh
+        {
+            name = "BeltDirectionArrowMesh",
+            hideFlags = HideFlags.DontSave
+        };
+
+        List<Vector3> vertices = new List<Vector3>(14);
+        List<int> triangles = new List<int>(18);
+        List<Color> colors = new List<Color>(14);
+        AddBeltDirectionArrowShape(
+            vertices,
+            triangles,
+            colors,
+            BeltDirectionArrowLength * 1.12f,
+            BeltDirectionArrowShaftWidth * 1.45f,
+            BeltDirectionArrowHeadLength * 1.15f,
+            BeltDirectionArrowHeadWidth * 1.35f,
+            -0.012f,
+            new Color(0f, 0f, 0f, 0.82f));
+        AddBeltDirectionArrowShape(
+            vertices,
+            triangles,
+            colors,
+            BeltDirectionArrowLength,
+            BeltDirectionArrowShaftWidth,
+            BeltDirectionArrowHeadLength,
+            BeltDirectionArrowHeadWidth,
+            0f,
+            new Color(1f, 0.92f, 0.08f, 1f));
+
+        beltDirectionArrowMesh.SetVertices(vertices);
+        beltDirectionArrowMesh.SetTriangles(triangles, 0);
+        beltDirectionArrowMesh.SetColors(colors);
+        List<Vector3> normals = new List<Vector3>(vertices.Count);
+        List<Vector2> uvs = new List<Vector2>(vertices.Count);
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            normals.Add(Vector3.up);
+            uvs.Add(new Vector2(vertices[i].x, vertices[i].z));
+        }
+
+        beltDirectionArrowMesh.SetNormals(normals);
+        beltDirectionArrowMesh.SetUVs(0, uvs);
+        beltDirectionArrowMesh.RecalculateBounds();
+        return beltDirectionArrowMesh;
+    }
+
+    private static void AddBeltDirectionArrowShape(
+        List<Vector3> vertices,
+        List<int> triangles,
+        List<Color> colors,
+        float length,
+        float shaftWidth,
+        float headLength,
+        float headWidth,
+        float y,
+        Color color)
+    {
+        float halfLength = length * 0.5f;
+        float shaftHalfWidth = shaftWidth * 0.5f;
+        float headHalfWidth = headWidth * 0.5f;
+        float headBaseZ = halfLength - headLength;
+        int startIndex = vertices.Count;
+
+        vertices.Add(new Vector3(-shaftHalfWidth, y, -halfLength));
+        vertices.Add(new Vector3(shaftHalfWidth, y, -halfLength));
+        vertices.Add(new Vector3(shaftHalfWidth, y, headBaseZ));
+        vertices.Add(new Vector3(-shaftHalfWidth, y, headBaseZ));
+        vertices.Add(new Vector3(-headHalfWidth, y, headBaseZ));
+        vertices.Add(new Vector3(headHalfWidth, y, headBaseZ));
+        vertices.Add(new Vector3(0f, y, halfLength));
+
+        for (int i = 0; i < 7; i++)
+        {
+            colors.Add(color);
+        }
+
+        triangles.Add(startIndex);
+        triangles.Add(startIndex + 2);
+        triangles.Add(startIndex + 1);
+        triangles.Add(startIndex);
+        triangles.Add(startIndex + 3);
+        triangles.Add(startIndex + 2);
+        triangles.Add(startIndex + 4);
+        triangles.Add(startIndex + 6);
+        triangles.Add(startIndex + 5);
+    }
+
     private void EnsureConveyorSlotDotRoot()
     {
         if (conveyorSlotDotRoot != null)
@@ -4907,6 +5358,25 @@ public class Block : BaseObject
             }
         }
 
+        if (destinationBlock != null)
+        {
+            int coordinateDistance =
+                Mathf.Abs(destinationBlock.coordinate.x - coordinate.x)
+                + Mathf.Abs(destinationBlock.coordinate.y - coordinate.y);
+            if (coordinateDistance > 1)
+            {
+                Vector3 skippedSourceWorldPosition = GetConveyorLaneWorldPosition(sourceLaneIndex);
+                Vector3 skippedDestinationWorldPosition = destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex);
+                if (TryGetBelt2FBridgeViaWorldPosition(out Vector3 skippedViaWorldPosition))
+                {
+                    return Vector3.Distance(skippedSourceWorldPosition, skippedViaWorldPosition)
+                           + Vector3.Distance(skippedViaWorldPosition, skippedDestinationWorldPosition);
+                }
+
+                return Vector3.Distance(skippedSourceWorldPosition, skippedDestinationWorldPosition);
+            }
+        }
+
         float logicalLength = GetConveyorSlotDotLogicalSegmentLength(this, destinationBlock);
         if (logicalLength > 0.0001f)
         {
@@ -4946,9 +5416,12 @@ public class Block : BaseObject
         }
 
         float leadInLength = Vector3.Distance(startWorldPosition, viaWorldPosition);
-        return leadInLength > ConveyorContinuousMotionEpsilon
-            ? leadInLength + nominalPathLength
-            : nominalPathLength;
+        Vector3 destinationWorldPosition = destinationBlock != null
+            ? destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex)
+            : GetConveyorLaneWorldPosition(sourceLaneIndex);
+        float viaToDestinationLength = Vector3.Distance(viaWorldPosition, destinationWorldPosition);
+        float viaPathLength = leadInLength + viaToDestinationLength;
+        return viaPathLength > ConveyorContinuousMotionEpsilon ? viaPathLength : nominalPathLength;
     }
 
     private bool TryGetConveyorLinearMoveViaWorldPosition(
@@ -4956,10 +5429,33 @@ public class Block : BaseObject
         Vector3 startWorldPosition,
         out Vector3 viaWorldPosition)
     {
+        if (TryGetConveyorLaneLayout(out int frontLaneIndex, out _)
+            && sourceLaneIndex == frontLaneIndex
+            && TryGetNextConveyorBlock(out Block nextBlock)
+            && nextBlock != null)
+        {
+            int coordinateDistance =
+                Mathf.Abs(nextBlock.coordinate.x - coordinate.x)
+                + Mathf.Abs(nextBlock.coordinate.y - coordinate.y);
+            if (coordinateDistance > 1 && TryGetBelt2FBridgeViaWorldPosition(out viaWorldPosition))
+            {
+                return true;
+            }
+        }
+
         viaWorldPosition = GetConveyorLaneWorldPosition(sourceLaneIndex);
         Vector3 sourceOffset = startWorldPosition - viaWorldPosition;
         sourceOffset.y = 0f;
         return sourceOffset.sqrMagnitude > ConveyorContinuousMotionEpsilon * ConveyorContinuousMotionEpsilon;
+    }
+
+    private bool TryGetBelt2FBridgeViaWorldPosition(out Vector3 viaWorldPosition)
+    {
+        viaWorldPosition = default;
+        return TryGetRuntimeConveyorBelt(out ConveyorBelt runtimeConveyor)
+               && runtimeConveyor is ConvayorBelt2F belt2F
+               && belt2F != null
+               && belt2F.TryGetBridgePeakWorldPosition(out viaWorldPosition);
     }
 
     private float GetConveyorSlotDotLogicalSegmentLength(Block sourceBlock, Block destinationBlock)
@@ -5009,6 +5505,38 @@ public class Block : BaseObject
         Vector3 destinationWorldPosition = destinationBlock != null
             ? destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex)
             : sourceWorldPosition;
+
+        if (sourceBlock != null
+            && destinationBlock != null
+            && sourceBlock.TryGetBelt2FBridgeViaWorldPosition(out Vector3 bridgeViaWorldPosition))
+        {
+            int coordinateDistance =
+                Mathf.Abs(destinationBlock.coordinate.x - sourceBlock.coordinate.x)
+                + Mathf.Abs(destinationBlock.coordinate.y - sourceBlock.coordinate.y);
+            if (coordinateDistance > 1)
+            {
+                float sourceToViaLength = Vector3.Distance(sourceWorldPosition, bridgeViaWorldPosition);
+                float viaToDestinationLength = Vector3.Distance(bridgeViaWorldPosition, destinationWorldPosition);
+                float pathLength = sourceToViaLength + viaToDestinationLength;
+                if (pathLength > ConveyorContinuousMotionEpsilon)
+                {
+                    float distance = Mathf.Clamp01(progress) * pathLength;
+                    if (sourceToViaLength > ConveyorContinuousMotionEpsilon && distance < sourceToViaLength)
+                    {
+                        return Vector3.Lerp(sourceWorldPosition, bridgeViaWorldPosition, distance / sourceToViaLength);
+                    }
+
+                    if (viaToDestinationLength > ConveyorContinuousMotionEpsilon)
+                    {
+                        return Vector3.Lerp(
+                            bridgeViaWorldPosition,
+                            destinationWorldPosition,
+                            Mathf.Clamp01((distance - sourceToViaLength) / viaToDestinationLength));
+                    }
+                }
+            }
+        }
+
         return Vector3.LerpUnclamped(sourceWorldPosition, destinationWorldPosition, progress);
     }
 
@@ -5380,8 +5908,7 @@ public class Block : BaseObject
         gate?.SetPreserveStateOnDisable(false);
         portableObject.SetBatchedRendering(false);
         portableObject.SetCachedParent(transform, true);
-        portableObject.SetWorldPosition(worldPosition);
-        portableObject.CachedTransform.localRotation = Quaternion.identity;
+        SetConveyorPortableObjectWorldPose(portableObject, laneIndex, worldPosition);
         portableObject.CachedTransform.localScale = Vector3.one;
         return portableObject;
     }
@@ -5486,8 +6013,7 @@ public class Block : BaseObject
 
         Transform portableTransform = portableObject.CachedTransform;
         portableObject.SetCachedParent(transform, true);
-        portableObject.SetWorldPosition(GetConveyorLaneWorldPosition(laneIndex, anchor));
-        portableTransform.localRotation = Quaternion.identity;
+        SetConveyorPortableObjectWorldPose(portableObject, laneIndex, GetConveyorLaneWorldPosition(laneIndex, anchor));
         portableTransform.localScale = Vector3.one;
         portableObject.SetCachedActive(true);
     }
@@ -5611,7 +6137,7 @@ public class Block : BaseObject
 
     private bool IsValidConveyorLaneIndex(int laneIndex)
     {
-        return IsActiveConveyorLaneIndex(laneIndex)
+        return IsActiveRuntimeConveyorLaneIndex(laneIndex)
             && IsConveyorStorageLaneIndex(laneIndex);
     }
 
@@ -5738,7 +6264,7 @@ public class Block : BaseObject
         bool changed = false;
         for (int laneIndex = 0; laneIndex < conveyorStack.Count; laneIndex++)
         {
-            if (IsActiveConveyorLaneIndex(laneIndex) || !HasConveyorStoredItemAtLane(laneIndex))
+            if (IsActiveRuntimeConveyorLaneIndex(laneIndex) || !HasConveyorStoredItemAtLane(laneIndex))
             {
                 continue;
             }
@@ -6493,7 +7019,7 @@ public class Block : BaseObject
 
     private float GetConveyorSpeed()
     {
-        return mapObject is ConveyorBelt conveyorBelt ? conveyorBelt.ConveyorSpeed : 0f;
+        return TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt) ? conveyorBelt.ConveyorSpeed : 0f;
     }
 
     private bool ShouldUseVirtualConveyorItemRendering()
@@ -6645,6 +7171,50 @@ public class Block : BaseObject
         }
 
         return GetConveyorLaneWorldPosition(laneIndex);
+    }
+
+    private Quaternion GetConveyorItemVisualWorldRotation(int laneIndex, Vector3 worldPosition)
+    {
+        return ResolveConveyorItemWorldRotation(laneIndex, worldPosition);
+    }
+
+    private void SetConveyorPortableObjectWorldPose(PortableObject portableObject, int laneIndex, Vector3 worldPosition)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        portableObject.SetWorldPose(worldPosition, ResolveConveyorItemWorldRotation(laneIndex, worldPosition));
+    }
+
+    private Quaternion ResolveConveyorItemWorldRotation(int laneIndex, Vector3 worldPosition)
+    {
+        if (TryGetConveyorItemBelt2F(laneIndex, out ConvayorBelt2F belt2F))
+        {
+            return belt2F.ResolvePathItemRotation(worldPosition);
+        }
+
+        return Quaternion.identity;
+    }
+
+    private bool TryGetConveyorItemBelt2F(int laneIndex, out ConvayorBelt2F belt2F)
+    {
+        belt2F = null;
+        if (IsBelt2FBridgeLaneIndex(laneIndex)
+            && TryGetBelt2FBridgeCenterBelt(out belt2F))
+        {
+            return true;
+        }
+
+        if (TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
+            && conveyorBelt is ConvayorBelt2F resolvedBelt2F)
+        {
+            belt2F = resolvedBelt2F;
+            return true;
+        }
+
+        return false;
     }
 
     private float GetConveyorCornerContinuationRemainingPathLength(ConveyorCornerContinuation continuation)
@@ -6865,11 +7435,11 @@ public class Block : BaseObject
 
             if (conveyorSpeed <= 0f || deltaTime <= 0f)
             {
-                portableObject.SetWorldPosition(targetPosition);
+                SetConveyorPortableObjectWorldPose(portableObject, laneIndex, targetPosition);
                 continue;
             }
 
-            portableObject.SetWorldPosition(Vector3.MoveTowards(
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, Vector3.MoveTowards(
                 portableObject.WorldPosition,
                 targetPosition,
                 conveyorSpeed * deltaTime));
@@ -7134,7 +7704,7 @@ public class Block : BaseObject
         Vector3 targetPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
         if (motionState.pathLength <= 0.0001f || conveyorSpeed <= 0f || deltaTime <= 0f)
         {
-            portableObject.SetWorldPosition(targetPosition);
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, targetPosition);
             conveyorLinearMotionStates.Remove(portableObject);
             NotifyConveyorMotionSettled();
             return true;
@@ -7145,7 +7715,7 @@ public class Block : BaseObject
         if (travelDistance + ConveyorContinuousMotionEpsilon < remainingPathDistance)
         {
             motionState.progress = Mathf.Clamp01(motionState.progress + (travelDistance / motionState.pathLength));
-            portableObject.SetWorldPosition(EvaluateConveyorLinearMotionWorldPosition(
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorLinearMotionWorldPosition(
                 motionState.cornerContinuation,
                 motionState.startWorldPosition,
                 motionState.hasViaWorldPosition,
@@ -7157,7 +7727,7 @@ public class Block : BaseObject
             return true;
         }
 
-        portableObject.SetWorldPosition(targetPosition);
+        SetConveyorPortableObjectWorldPose(portableObject, laneIndex, targetPosition);
         conveyorLinearMotionStates.Remove(portableObject);
         NotifyConveyorMotionSettled();
 
@@ -7212,7 +7782,7 @@ public class Block : BaseObject
             motionState.durationPathLength);
         if (durationPathLength <= 0.0001f || conveyorSpeed <= 0f || deltaTime <= 0f)
         {
-            portableObject.SetWorldPosition(EvaluateConveyorCornerMotionWorldPosition(
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorCornerMotionWorldPosition(
                 motionState.sourceLaneIndex,
                 motionState.destinationLaneIndex,
                 motionState.startWorldPosition,
@@ -7228,7 +7798,7 @@ public class Block : BaseObject
         if (travelDistance + ConveyorContinuousMotionEpsilon < remainingPathDistance)
         {
             motionState.progress = Mathf.Clamp01(motionState.progress + (travelDistance / durationPathLength));
-            portableObject.SetWorldPosition(EvaluateConveyorCornerMotionWorldPosition(
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorCornerMotionWorldPosition(
                 motionState.sourceLaneIndex,
                 motionState.destinationLaneIndex,
                 motionState.startWorldPosition,
@@ -7238,7 +7808,7 @@ public class Block : BaseObject
             return true;
         }
 
-        portableObject.SetWorldPosition(EvaluateConveyorCornerMotionWorldPosition(
+        SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorCornerMotionWorldPosition(
             motionState.sourceLaneIndex,
             motionState.destinationLaneIndex,
             motionState.startWorldPosition,
@@ -7311,9 +7881,10 @@ public class Block : BaseObject
                 motionState.startWorldPosition,
                 motionState.pathLength,
                 motionState.durationPathLength);
+            int laneIndex = FindConveyorLaneIndexForPortableObject(portableObject);
             if (durationPathLength <= 0.0001f)
             {
-                portableObject.SetWorldPosition(EvaluateConveyorCornerMotionWorldPosition(
+                SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorCornerMotionWorldPosition(
                     motionState.sourceLaneIndex,
                     motionState.destinationLaneIndex,
                     motionState.startWorldPosition,
@@ -7326,7 +7897,7 @@ public class Block : BaseObject
 
             float travelDistance = conveyorSpeed * deltaTime;
             motionState.progress = Mathf.Clamp01(travelDistance / durationPathLength);
-            portableObject.SetWorldPosition(EvaluateConveyorCornerMotionWorldPosition(
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorCornerMotionWorldPosition(
                 motionState.sourceLaneIndex,
                 motionState.destinationLaneIndex,
                 motionState.startWorldPosition,
@@ -7341,7 +7912,6 @@ public class Block : BaseObject
                     : 0f;
                 if (carryDeltaTime > ConveyorContinuousMotionEpsilon)
                 {
-                    int laneIndex = FindConveyorLaneIndexForPortableObject(portableObject);
                     TryContinueConveyorItemMotion(
                         laneIndex,
                         portableObject,
@@ -7396,9 +7966,10 @@ public class Block : BaseObject
             }
 
             Vector3 targetPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
+            int laneIndex = FindConveyorLaneIndexForPortableObject(portableObject);
             if (motionState.pathLength <= 0.0001f)
             {
-                portableObject.SetWorldPosition(targetPosition);
+                SetConveyorPortableObjectWorldPose(portableObject, laneIndex, targetPosition);
                 conveyorLinearMotionStates.Remove(portableObject);
                 NotifyConveyorMotionSettled();
                 continue;
@@ -7406,7 +7977,7 @@ public class Block : BaseObject
 
             float travelDistance = conveyorSpeed * deltaTime;
             motionState.progress = Mathf.Clamp01(travelDistance / motionState.pathLength);
-            portableObject.SetWorldPosition(EvaluateConveyorLinearMotionWorldPosition(
+            SetConveyorPortableObjectWorldPose(portableObject, laneIndex, EvaluateConveyorLinearMotionWorldPosition(
                 motionState.cornerContinuation,
                 motionState.startWorldPosition,
                 motionState.hasViaWorldPosition,
@@ -7416,7 +7987,7 @@ public class Block : BaseObject
                 motionState.progress));
             if (motionState.progress >= 1f - 0.0001f)
             {
-                portableObject.SetWorldPosition(targetPosition);
+                SetConveyorPortableObjectWorldPose(portableObject, laneIndex, targetPosition);
                 conveyorLinearMotionStates.Remove(portableObject);
                 NotifyConveyorMotionSettled();
                 float carryDeltaTime = conveyorSpeed > ConveyorContinuousMotionEpsilon
@@ -7424,7 +7995,6 @@ public class Block : BaseObject
                     : 0f;
                 if (carryDeltaTime > ConveyorContinuousMotionEpsilon)
                 {
-                    int laneIndex = FindConveyorLaneIndexForPortableObject(portableObject);
                     TryContinueConveyorItemMotion(
                         laneIndex,
                         portableObject,
@@ -8671,6 +9241,19 @@ public class Block : BaseObject
             return;
         }
 
+        if (TryGetRuntimeBelt2F(out ConvayorBelt2F currentBelt2F)
+            && nextBlock.IsBelt2FBridgeCenterFor(currentBelt2F))
+        {
+            cachedNextConveyorBlock = nextBlock;
+            cachedHasNextConveyorBlock = true;
+            return;
+        }
+
+        if (TryResolveBelt2FSkippedAdjacentBlock(terrainGenerator, nextBlock, flowDirection, out Block skippedNextBlock))
+        {
+            nextBlock = skippedNextBlock;
+        }
+
         if (!nextBlock.IsConveyorStackingEnabled())
         {
             return;
@@ -8709,6 +9292,17 @@ public class Block : BaseObject
             return false;
         }
 
+        if (TryGetRuntimeBelt2F(out ConvayorBelt2F currentBelt2F)
+            && previousBlock.IsBelt2FBridgeCenterFor(currentBelt2F))
+        {
+            return true;
+        }
+
+        if (TryResolveBelt2FSkippedAdjacentBlock(terrainGenerator, previousBlock, inputDirection, out Block skippedPreviousBlock))
+        {
+            previousBlock = skippedPreviousBlock;
+        }
+
         if (!previousBlock.IsConveyorStackingEnabled())
         {
             return false;
@@ -8720,6 +9314,41 @@ public class Block : BaseObject
         }
 
         return previousFlowDirection == -inputDirection;
+    }
+
+    private bool TryResolveBelt2FSkippedAdjacentBlock(
+        TerrainGenerator terrainGenerator,
+        Block immediateBlock,
+        Vector2Int direction,
+        out Block resolvedBlock)
+    {
+        resolvedBlock = null;
+        if (terrainGenerator == null
+            || immediateBlock == null
+            || direction == Vector2Int.zero
+            || !TryGetRuntimeConveyorBelt(out ConveyorBelt runtimeConveyor)
+            || !(runtimeConveyor is ConvayorBelt2F belt2F)
+            || belt2F == null
+            || !belt2F.CoversCoordinate(coordinate)
+            || !belt2F.CoversCoordinate(immediateBlock.Coordinate)
+            || immediateBlock.IsBelt2FBridgeCenterFor(belt2F)
+            || !(immediateBlock.MapObject is ConveyorBelt centerConveyor)
+            || centerConveyor is ConvayorBelt2F)
+        {
+            return false;
+        }
+
+        Vector2Int skippedCoordinate = immediateBlock.Coordinate + direction;
+        if (!terrainGenerator.TryGetLoadedBlock(skippedCoordinate, out Block candidateBlock)
+            || candidateBlock == null
+            || candidateBlock == this
+            || !belt2F.CoversCoordinate(candidateBlock.Coordinate))
+        {
+            return false;
+        }
+
+        resolvedBlock = candidateBlock;
+        return true;
     }
 
     private bool TryGetConveyorPredecessor(
@@ -8736,6 +9365,11 @@ public class Block : BaseObject
         if (!IsValidConveyorLaneIndex(destinationLaneIndex))
         {
             return false;
+        }
+
+        if (TryGetBelt2FBridgeCenterPredecessor(destinationLaneIndex, out sourceBlock, out sourceLaneIndex))
+        {
+            return true;
         }
 
         if (IsCornerConveyor())
@@ -8781,6 +9415,61 @@ public class Block : BaseObject
         }
 
         return TryGetUpstreamConveyorPredecessor(destinationLaneIndex, out sourceBlock, out sourceLaneIndex);
+    }
+
+    private bool TryGetBelt2FBridgeCenterPredecessor(
+        int destinationLaneIndex,
+        out Block sourceBlock,
+        out int sourceLaneIndex)
+    {
+        sourceBlock = null;
+        sourceLaneIndex = -1;
+        if (!TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F))
+        {
+            return false;
+        }
+
+        if (destinationLaneIndex == 1)
+        {
+            sourceBlock = this;
+            sourceLaneIndex = 3;
+            return IsValidConveyorLaneIndex(sourceLaneIndex);
+        }
+
+        if (destinationLaneIndex != 3
+            || !belt2F.TryGetInputDirection(belt2F.transform.rotation, out Vector2Int inputDirection)
+            || inputDirection == Vector2Int.zero
+            || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
+            || terrainGenerator == null)
+        {
+            return false;
+        }
+
+        Vector2Int previousCoordinate = coordinate + inputDirection;
+        if (!terrainGenerator.TryGetLoadedBlock(previousCoordinate, out Block previousBlock)
+            || previousBlock == null
+            || previousBlock == this
+            || !belt2F.CoversCoordinate(previousBlock.Coordinate))
+        {
+            return false;
+        }
+
+        int candidateSourceLaneIndex = ConveyorSingleLineFrontLaneIndex;
+        if (!previousBlock.IsValidConveyorLaneIndex(candidateSourceLaneIndex)
+            || !previousBlock.TryGetConveyorSuccessor(
+                candidateSourceLaneIndex,
+                out Block candidateDestinationBlock,
+                out int candidateDestinationLaneIndex,
+                out _)
+            || candidateDestinationBlock != this
+            || candidateDestinationLaneIndex != destinationLaneIndex)
+        {
+            return false;
+        }
+
+        sourceBlock = previousBlock;
+        sourceLaneIndex = candidateSourceLaneIndex;
+        return true;
     }
 
     private bool TryGetUpstreamConveyorPredecessor(
@@ -8897,6 +9586,14 @@ public class Block : BaseObject
             return false;
         }
 
+        if (TryResolveBelt2FBridgeCenterSuccessor(
+                sourceLaneIndex,
+                out destinationBlock,
+                out destinationLaneIndex))
+        {
+            return true;
+        }
+
         if (IsCornerConveyor())
         {
             if (sourceLaneIndex == 0 || sourceLaneIndex == 1)
@@ -8976,6 +9673,52 @@ public class Block : BaseObject
         return false;
     }
 
+    private bool TryResolveBelt2FBridgeCenterSuccessor(
+        int sourceLaneIndex,
+        out Block destinationBlock,
+        out int destinationLaneIndex)
+    {
+        destinationBlock = null;
+        destinationLaneIndex = -1;
+        if (!TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F))
+        {
+            return false;
+        }
+
+        if (sourceLaneIndex == 3)
+        {
+            destinationBlock = this;
+            destinationLaneIndex = 1;
+            return IsValidConveyorLaneIndex(destinationLaneIndex);
+        }
+
+        if (sourceLaneIndex != 1
+            || !belt2F.TryGetOutputDirection(belt2F.transform.rotation, out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero
+            || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
+            || terrainGenerator == null)
+        {
+            return false;
+        }
+
+        Vector2Int nextCoordinate = coordinate + outputDirection;
+        if (!terrainGenerator.TryGetLoadedBlock(nextCoordinate, out destinationBlock)
+            || destinationBlock == null
+            || destinationBlock == this
+            || !belt2F.CoversCoordinate(destinationBlock.Coordinate)
+            || !destinationBlock.IsConveyorStackingEnabled())
+        {
+            destinationBlock = null;
+            return false;
+        }
+
+        Vector3 handoffWorldPosition = GetConveyorLaneWorldPosition(sourceLaneIndex);
+        return TryGetConveyorHandoffReceiveLaneIndex(
+            destinationBlock,
+            handoffWorldPosition,
+            out destinationLaneIndex);
+    }
+
     private bool TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
     {
         terrainGenerator = cachedTerrainGenerator;
@@ -8992,7 +9735,7 @@ public class Block : BaseObject
     private bool TryGetConveyorFlowDirection(out Vector2Int flowDirection)
     {
         flowDirection = Vector2Int.zero;
-        if (!(mapObject is ConveyorBelt conveyorBelt) || conveyorBelt == null)
+        if (!TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt))
         {
             return false;
         }
@@ -9003,7 +9746,7 @@ public class Block : BaseObject
     private bool TryGetConveyorInputDirection(out Vector2Int inputDirection)
     {
         inputDirection = Vector2Int.zero;
-        if (!(mapObject is ConveyorBelt conveyorBelt) || conveyorBelt == null)
+        if (!TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt))
         {
             return false;
         }
@@ -9047,6 +9790,11 @@ public class Block : BaseObject
     private bool TryGetBestConveyorReceiveLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
         bestLaneIndex = -1;
+        if (TryGetBelt2FBridgeReceiveLaneIndex(referenceWorldPosition, true, out bestLaneIndex))
+        {
+            return true;
+        }
+
         if (IsCornerConveyor())
         {
             return TryGetBestCornerConveyorReceiveLaneIndex(referenceWorldPosition, out bestLaneIndex);
@@ -9065,6 +9813,11 @@ public class Block : BaseObject
     private bool TryGetPreferredConveyorReceiveLaneIndex(Vector3 referenceWorldPosition, out int bestLaneIndex)
     {
         bestLaneIndex = -1;
+        if (TryGetBelt2FBridgeReceiveLaneIndex(referenceWorldPosition, false, out bestLaneIndex))
+        {
+            return true;
+        }
+
         if (IsCornerConveyor())
         {
             return TryGetPreferredCornerConveyorReceiveLaneIndex(referenceWorldPosition, out bestLaneIndex);
@@ -9097,6 +9850,11 @@ public class Block : BaseObject
         out int laneIndex)
     {
         laneIndex = -1;
+        if (TryGetBelt2FBridgeReceiveLaneIndex(handoffWorldPosition, false, out laneIndex))
+        {
+            return true;
+        }
+
         if (IsCornerConveyor())
         {
             return TryGetPreferredCornerConveyorReceiveLaneIndex(handoffWorldPosition, out laneIndex);
@@ -9104,6 +9862,29 @@ public class Block : BaseObject
 
         return TryGetConveyorLaneLayout(out _, out laneIndex)
             && IsValidConveyorLaneIndex(laneIndex);
+    }
+
+    private bool TryGetBelt2FBridgeReceiveLaneIndex(
+        Vector3 referenceWorldPosition,
+        bool requireEmpty,
+        out int laneIndex)
+    {
+        laneIndex = -1;
+        if (!TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F)
+            || !belt2F.IsUpperPathWorldPosition(referenceWorldPosition))
+        {
+            return false;
+        }
+
+        const int bridgeBackLaneIndex = 3;
+        if (!IsValidConveyorLaneIndex(bridgeBackLaneIndex)
+            || (requireEmpty && HasConveyorItemAtLane(bridgeBackLaneIndex)))
+        {
+            return false;
+        }
+
+        laneIndex = bridgeBackLaneIndex;
+        return true;
     }
 
     private bool TryGetBestConveyorLaneIndexFromRange(Vector3 referenceWorldPosition, int laneCount, out int bestLaneIndex)
@@ -9197,8 +9978,7 @@ public class Block : BaseObject
 
     private bool IsCornerConveyor()
     {
-        return mapObject is ConveyorBelt conveyorBelt
-               && conveyorBelt != null
+        return TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
                && conveyorBelt.IsCornerVariant;
     }
 
@@ -9207,13 +9987,34 @@ public class Block : BaseObject
         if (TryGetConveyorCornerLaneLocalPosition(laneIndex, out Vector3 cornerLocalPosition))
         {
             cornerLocalPosition.y = GetConveyorLaneHeight();
-            return transform.TransformPoint(cornerLocalPosition);
+            return ResolveConveyorLaneWorldPosition(laneIndex, transform.TransformPoint(cornerLocalPosition));
         }
 
         Vector3 localPosition = GetConveyorLaneLocalOffset(laneIndex);
         localPosition.y = GetConveyorLaneHeight();
 
-        return transform.TransformPoint(localPosition);
+        return ResolveConveyorLaneWorldPosition(laneIndex, transform.TransformPoint(localPosition));
+    }
+
+    private Vector3 ResolveConveyorLaneWorldPosition(int laneIndex, Vector3 worldPosition)
+    {
+        if (IsBelt2FBridgeLaneIndex(laneIndex)
+            && TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F centerBelt2F))
+        {
+            return centerBelt2F.TryGetLaneWorldPosition(coordinate, laneIndex, worldPosition, out Vector3 bridgeLaneWorldPosition)
+                ? bridgeLaneWorldPosition
+                : centerBelt2F.ApplyPathHeight(worldPosition);
+        }
+
+        if (TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
+            && conveyorBelt is ConvayorBelt2F belt2F)
+        {
+            return belt2F.TryGetLaneWorldPosition(coordinate, laneIndex, worldPosition, out Vector3 laneWorldPosition)
+                ? laneWorldPosition
+                : belt2F.ApplyPathHeight(worldPosition);
+        }
+
+        return worldPosition;
     }
 
     private Vector3 GetConveyorLaneLocalOffset(int laneIndex)
@@ -9313,7 +10114,7 @@ public class Block : BaseObject
     {
         localInputDirection = Vector2.zero;
         localOutputDirection = Vector2.zero;
-        if (!(mapObject is ConveyorBelt conveyorBelt) || conveyorBelt == null)
+        if (!TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt))
         {
             return false;
         }

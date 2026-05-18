@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_17_Mining Machine
   m_EditorClassIdentifier: 
   itemName: Mining machine
-  id: 20
+  id: 21
   mapObject: {fileID: 8277338630082605383, guid: 1dd1602260bd3534da753f8f0708df08, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
