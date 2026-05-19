@@ -2002,8 +2002,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: 
-  objId: 26
+  objectName: Conveyor belt 2F
+  objId: 20
   itemDefinition: {fileID: 11400000, guid: ae10ba0d1a5a35a4f9732630fda54471, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -2015,7 +2015,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
-  mapFilter: 5
+  mapFilter: 37
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}

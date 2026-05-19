@@ -68,11 +68,9 @@ public class ItemInfoDescription : MonoBehaviour
         BeginObjectDisplay(underlyingResource);
 
         if (boxObject != null
-            && boxObject.TryGetObjectInfoItem(out int itemId, out int itemCount, out int capacity)
-            && itemId >= 0
-            && itemCount > 0)
+            && boxObject.TryGetObjectInfoItem(out int itemId, out int itemCount, out int capacity))
         {
-            SetDefaultItemSlot(0, itemId, itemCount, capacity, true, true);
+            SetDefaultItemSlot(0, itemId, itemCount, capacity, true, true, true);
         }
         else
         {
@@ -193,10 +191,22 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetDefaultItemSlot(int index, int itemId, int count, int maxCount, bool forceRootActive, bool showCount)
     {
+        SetDefaultItemSlot(index, itemId, count, maxCount, forceRootActive, showCount, false);
+    }
+
+    private void SetDefaultItemSlot(
+        int index,
+        int itemId,
+        int count,
+        int maxCount,
+        bool forceRootActive,
+        bool showCount,
+        bool showEmptyCount)
+    {
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
 
-        SetActiveIfNeeded(root, forceRootActive || itemId >= 0);
+        SetActiveIfNeeded(root, forceRootActive || itemId >= 0 || showEmptyCount);
         if (slot == null)
         {
             return;
@@ -208,7 +218,14 @@ public class ItemInfoDescription : MonoBehaviour
         }
         else
         {
-            slot.Clear();
+            if (showEmptyCount)
+            {
+                slot.SetEmptyCountDisplay(Mathf.Max(0, count), Mathf.Max(0, maxCount));
+            }
+            else
+            {
+                slot.Clear();
+            }
         }
     }
 

@@ -98,6 +98,7 @@ public partial class TerrainGenerator : MonoBehaviour
         int blocksSinceYield = 0;
         int blockBudget = GetChunkUnloadBlockStepBudget();
         HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
+        HashSet<Vector2Int> chunkCoordinates = new HashSet<Vector2Int>();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
             using (UnloadChunkSaveStatesMarker.Auto())
@@ -105,6 +106,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 Block block = chunkBlocks[i];
                 if (block != null)
                 {
+                    chunkCoordinates.Add(block.Coordinate);
                     SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Virtual);
 
                     if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
@@ -127,6 +129,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 yield return null;
             }
         }
+
+        SaveActiveRuntimeInstallations(savedInstallations, chunkCoordinates);
     }
 
     private List<Vector2Int> CollectChunkInstallationAnchors(Transform chunkTransform)
@@ -174,16 +178,20 @@ public partial class TerrainGenerator : MonoBehaviour
         int blocksSinceYield = 0;
         int blockBudget = GetChunkUnloadBlockStepBudget();
         HashSet<Vector2Int> uniqueAnchors = new HashSet<Vector2Int>();
+        HashSet<Vector2Int> chunkCoordinates = new HashSet<Vector2Int>();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
             using (UnloadChunkCollectAnchorsMarker.Auto())
             {
                 Block block = chunkBlocks[i];
-                if (block != null
-                    && resourceStateStore.TryGetInstallationAnchorAtCoordinate(block.Coordinate, out Vector2Int anchorCoordinate)
-                    && uniqueAnchors.Add(anchorCoordinate))
+                if (block != null)
                 {
-                    installationAnchors.Add(anchorCoordinate);
+                    chunkCoordinates.Add(block.Coordinate);
+                    if (resourceStateStore.TryGetInstallationAnchorAtCoordinate(block.Coordinate, out Vector2Int anchorCoordinate)
+                        && uniqueAnchors.Add(anchorCoordinate))
+                    {
+                        installationAnchors.Add(anchorCoordinate);
+                    }
                 }
             }
 
@@ -193,6 +201,74 @@ public partial class TerrainGenerator : MonoBehaviour
                 yield return null;
             }
         }
+
+        AddSavedInstallationAnchorsIntersectingCoordinates(chunkCoordinates, uniqueAnchors, installationAnchors);
+    }
+
+    private void AddSavedInstallationAnchorsIntersectingCoordinates(
+        ISet<Vector2Int> chunkCoordinates,
+        HashSet<Vector2Int> installationAnchors)
+    {
+        AddSavedInstallationAnchorsIntersectingCoordinates(chunkCoordinates, installationAnchors, null);
+    }
+
+    private void AddSavedInstallationAnchorsIntersectingCoordinates(
+        ISet<Vector2Int> chunkCoordinates,
+        HashSet<Vector2Int> uniqueAnchors,
+        List<Vector2Int> installationAnchors)
+    {
+        if (chunkCoordinates == null
+            || chunkCoordinates.Count <= 0
+            || uniqueAnchors == null
+            || resourceStateStore == null)
+        {
+            return;
+        }
+
+        List<Vector2Int> savedStorageKeys = resourceStateStore.GetSavedInstallationStorageKeys();
+        for (int i = 0; i < savedStorageKeys.Count; i++)
+        {
+            Vector2Int storageKey = savedStorageKeys[i];
+            if (uniqueAnchors.Contains(storageKey)
+                || !resourceStateStore.TryGetInstallationState(storageKey, out BlockStateStore.InstallationSaveState savedState)
+                || !InstallationStateIntersectsCoordinates(savedState, chunkCoordinates))
+            {
+                continue;
+            }
+
+            uniqueAnchors.Add(storageKey);
+            installationAnchors?.Add(storageKey);
+        }
+    }
+
+    private static bool InstallationStateIntersectsCoordinates(
+        BlockStateStore.InstallationSaveState state,
+        ISet<Vector2Int> coordinates)
+    {
+        if (state == null || coordinates == null || coordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        if (coordinates.Contains(state.anchorCoordinate))
+        {
+            return true;
+        }
+
+        if (state.occupiedCoordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < state.occupiedCoordinates.Count; i++)
+        {
+            if (coordinates.Contains(state.occupiedCoordinates[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RemoveChunkBlocksFromLookup(Transform chunkTransform)
@@ -747,21 +823,31 @@ public partial class TerrainGenerator : MonoBehaviour
 
         Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
         HashSet<Vector2Int> installationAnchors = new HashSet<Vector2Int>();
+        HashSet<Vector2Int> chunkCoordinates = new HashSet<Vector2Int>();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
-            if (chunkBlocks[i] != null
-                && resourceStateStore.TryGetInstallationAnchorAtCoordinate(chunkBlocks[i].Coordinate, out Vector2Int anchorCoordinate))
+            if (chunkBlocks[i] == null)
+            {
+                continue;
+            }
+
+            chunkCoordinates.Add(chunkBlocks[i].Coordinate);
+            if (resourceStateStore.TryGetInstallationAnchorAtCoordinate(chunkBlocks[i].Coordinate, out Vector2Int anchorCoordinate))
             {
                 installationAnchors.Add(anchorCoordinate);
             }
         }
+
+        AddSavedInstallationAnchorsIntersectingCoordinates(chunkCoordinates, installationAnchors);
 
         int restoresSinceYield = 0;
         int restoreBudget = Mathf.Max(1, chunkInstallationRestoresPerFrame);
         BeginConveyorRuntimeRefreshBatch();
         try
         {
-            foreach (Vector2Int anchorCoordinate in installationAnchors)
+            List<Vector2Int> orderedInstallationAnchors = new List<Vector2Int>(installationAnchors);
+            orderedInstallationAnchors.Sort(CompareInstallationRestoreOrder);
+            foreach (Vector2Int anchorCoordinate in orderedInstallationAnchors)
             {
                 RestoreOrBindSavedInstallation(anchorCoordinate);
                 restoresSinceYield++;
@@ -776,6 +862,35 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             EndConveyorRuntimeRefreshBatch();
         }
+    }
+
+    private int CompareInstallationRestoreOrder(Vector2Int left, Vector2Int right)
+    {
+        bool leftIsBelt2F = IsSavedInstallationBelt2F(left);
+        bool rightIsBelt2F = IsSavedInstallationBelt2F(right);
+        if (leftIsBelt2F != rightIsBelt2F)
+        {
+            return leftIsBelt2F ? 1 : -1;
+        }
+
+        int xComparison = left.x.CompareTo(right.x);
+        return xComparison != 0 ? xComparison : left.y.CompareTo(right.y);
+    }
+
+    private bool IsSavedInstallationBelt2F(Vector2Int storageKey)
+    {
+        if (resourceStateStore == null
+            || !resourceStateStore.TryGetInstallationState(storageKey, out BlockStateStore.InstallationSaveState savedState)
+            || savedState == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(savedState);
+        return ItemDefinitionLookup.IsConveyorBelt2FDefinition(definition)
+               || (savedState.occupiedCoordinates != null
+                   && savedState.occupiedCoordinates.Count > 0
+                   && !savedState.occupiedCoordinates.Contains(savedState.anchorCoordinate));
     }
 
     private void RestoreOrBindSavedInstallation(Vector2Int anchorCoordinate)
@@ -828,17 +943,27 @@ public partial class TerrainGenerator : MonoBehaviour
             return null;
         }
 
-        definition ??= ResolveInstallationDefinition(savedState.itemId);
+        definition ??= ResolveInstallationDefinition(savedState);
         if (definition == null || definition.mapObject == null)
         {
             return null;
         }
 
         MapObject sourcePrefab = null;
-        if (definition.mapObject is Wall fencePrototype && savedState.conveyorVariantKind >= 0)
+        if (ItemDefinitionLookup.IsConveyorBelt2FDefinition(definition))
+        {
+            sourcePrefab = definition.mapObject;
+        }
+        else if (definition.mapObject is Wall fencePrototype && savedState.conveyorVariantKind >= 0)
         {
             sourcePrefab = InstallationPlacementController.ResolveFenceVariantPrefab(
                 fencePrototype,
+                savedState.conveyorVariantKind);
+        }
+        else if (definition.mapObject is Pipe pipePrototype && savedState.conveyorVariantKind >= 0)
+        {
+            sourcePrefab = InstallationPlacementController.ResolvePipeVariantPrefab(
+                pipePrototype,
                 savedState.conveyorVariantKind);
         }
         else if (definition.mapObject is ConveyorBelt conveyorPrototype && savedState.conveyorVariantKind >= 0)
@@ -878,7 +1003,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        ItemDefinition definition = ResolveInstallationDefinition(savedState.itemId);
+        ItemDefinition definition = ResolveInstallationDefinition(savedState);
         if (definition == null || definition.mapObject == null)
         {
             return false;
@@ -895,7 +1020,7 @@ public partial class TerrainGenerator : MonoBehaviour
             ? placementController.GetInstalledObjectRotation(sourcePrefab, savedState.quarterTurns)
             : sourcePrefab.transform.rotation * Quaternion.Euler(0f, (((savedState.quarterTurns % 4) + 4) % 4) * 90f, 0f);
         Vector3 position = placementController != null
-            ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, definition, savedState.quarterTurns, 0f)
+            ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, sourcePrefab, savedState.quarterTurns, 0f)
             : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
 
         bool reusedSleepingView = TryTakeSleepingInstallationView(savedState, out InstallationObject restoredInstallation);
@@ -920,7 +1045,7 @@ public partial class TerrainGenerator : MonoBehaviour
         List<Vector2Int> occupiedCoordinates = savedState.occupiedCoordinates != null && savedState.occupiedCoordinates.Count > 0
             ? new List<Vector2Int>(savedState.occupiedCoordinates)
             : placementController != null
-                ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, definition, savedState.quarterTurns)
+                ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, sourcePrefab, savedState.quarterTurns)
                 : new List<Vector2Int> { savedState.anchorCoordinate };
         savedState.occupiedCoordinates = occupiedCoordinates;
 
@@ -1232,6 +1357,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 yield return null;
             }
         }
+
     }
 
     private void DetachChunkBlockRuntimeView(Block block)
@@ -1298,7 +1424,7 @@ public partial class TerrainGenerator : MonoBehaviour
         sleepingChunkViews[chunkCoordinate] = chunkTransform;
     }
 
-    private void SleepInstallationView(Vector2Int anchorCoordinate, InstallationObject installationObject)
+    private void SleepInstallationView(Vector2Int storageKey, InstallationObject installationObject)
     {
         using (UnloadChunkSleepInstallationsMarker.Auto())
         {
@@ -1307,7 +1433,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            if (sleepingInstallationViews.TryGetValue(anchorCoordinate, out InstallationObject existingView)
+            if (sleepingInstallationViews.TryGetValue(storageKey, out InstallationObject existingView)
                 && existingView != null
                 && existingView != installationObject)
             {
@@ -1318,7 +1444,7 @@ public partial class TerrainGenerator : MonoBehaviour
             Transform cacheRoot = EnsureSleepingInstallationViewRoot();
             installationObject.transform.SetParent(cacheRoot, true);
             installationObject.gameObject.SetActive(false);
-            sleepingInstallationViews[anchorCoordinate] = installationObject;
+            sleepingInstallationViews[storageKey] = installationObject;
         }
     }
 
@@ -1327,27 +1453,30 @@ public partial class TerrainGenerator : MonoBehaviour
         out InstallationObject installationObject)
     {
         installationObject = null;
+        Vector2Int storageKey = BlockStateStore.GetInstallationStorageKey(savedState);
         if (!Application.isPlaying
             || savedState == null
-            || !sleepingInstallationViews.TryGetValue(savedState.anchorCoordinate, out InstallationObject cachedInstallation)
+            || !sleepingInstallationViews.TryGetValue(storageKey, out InstallationObject cachedInstallation)
             || cachedInstallation == null)
         {
             if (savedState != null)
             {
-                sleepingInstallationViews.Remove(savedState.anchorCoordinate);
+                sleepingInstallationViews.Remove(storageKey);
             }
 
             return false;
         }
 
-        if (cachedInstallation.ResolveItemId() != savedState.itemId)
+        ItemDefinition definition = ResolveInstallationDefinition(savedState);
+        int expectedItemId = definition != null ? definition.id : savedState.itemId;
+        if (cachedInstallation.ResolveItemId() != expectedItemId)
         {
-            sleepingInstallationViews.Remove(savedState.anchorCoordinate);
+            sleepingInstallationViews.Remove(storageKey);
             ReleaseInstallationObject(cachedInstallation, ResolveInstallationSourcePrefab(savedState));
             return false;
         }
 
-        sleepingInstallationViews.Remove(savedState.anchorCoordinate);
+        sleepingInstallationViews.Remove(storageKey);
         installationObject = cachedInstallation;
         return true;
     }
@@ -1512,7 +1641,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        ItemDefinition definition = ResolveInstallationDefinition(installationState.itemId);
+        ItemDefinition definition = ResolveInstallationDefinition(installationState);
         if (definition == null || definition.mapObject == null)
         {
             return false;
@@ -1563,7 +1692,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        CleanupOrphanedLiveInstallations(resourceStateStore.GetLiveInstallationAnchors());
+        CleanupOrphanedLiveInstallations(resourceStateStore.GetLiveInstallationStorageKeys());
     }
 
     private void CleanupOrphanedLiveInstallations(IReadOnlyList<Vector2Int> liveAnchors)
@@ -1766,15 +1895,27 @@ public partial class TerrainGenerator : MonoBehaviour
             return null;
         }
 
-        for (int i = 0; i < definitions.Count; i++)
+        return ItemDefinitionLookup.ResolveInstallationById(definitions, itemId);
+    }
+
+    private static ItemDefinition ResolveInstallationDefinition(BlockStateStore.InstallationSaveState savedState)
+    {
+        if (savedState == null)
         {
-            ItemDefinition definition = definitions[i];
-            if (definition != null && definition.id == itemId)
-            {
-                return definition;
-            }
+            return null;
         }
 
-        return null;
+        ItemDefinition definition = ResolveInstallationDefinition(savedState.itemId);
+        if (!ItemDefinitionLookup.LooksLikeLegacyConveyorBelt2FState(
+                savedState.itemId,
+                definition,
+                savedState.occupiedCoordinates))
+        {
+            return definition;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        ItemDefinition belt2FDefinition = ItemDefinitionLookup.ResolveConveyorBelt2F(definitions);
+        return belt2FDefinition != null ? belt2FDefinition : definition;
     }
 }

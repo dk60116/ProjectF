@@ -11,7 +11,8 @@ public enum InstallationMapFilter
     Water = 1 << 1,
     Ore = 1 << 2,
     ItemArea = 1 << 3,
-    Tree = 1 << 4
+    Tree = 1 << 4,
+    WaterOutline = 1 << 5
 }
 
 public enum InstallationFacingDirection
@@ -24,6 +25,9 @@ public enum InstallationFacingDirection
 
 public class InstallationObject : MapObject
 {
+    public const InstallationMapFilter DefaultMapFilter =
+        InstallationMapFilter.Ground | InstallationMapFilter.Ore | InstallationMapFilter.WaterOutline;
+
     [SerializeField]
     private Animator animator;
 
@@ -33,7 +37,7 @@ public class InstallationObject : MapObject
     private static long nextPlacementSequence = 1;
 
     [SerializeField]
-    private InstallationMapFilter mapFilter = InstallationMapFilter.Ground;
+    private InstallationMapFilter mapFilter = DefaultMapFilter;
     [SerializeField]
     [Min(0f)]
     private float installationFocusRadius = 1f;
@@ -50,8 +54,8 @@ public class InstallationObject : MapObject
 
     public InstallationMapFilter MapFilter
     {
-        get => mapFilter == InstallationMapFilter.None ? InstallationMapFilter.Ground : mapFilter;
-        set => mapFilter = value == InstallationMapFilter.None ? InstallationMapFilter.Ground : value;
+        get => mapFilter == InstallationMapFilter.None ? DefaultMapFilter : mapFilter;
+        set => mapFilter = value == InstallationMapFilter.None ? DefaultMapFilter : value;
     }
 
     public virtual float FocusActivationRadius => Mathf.Max(0f, installationFocusRadius);
@@ -177,6 +181,20 @@ public class InstallationObject : MapObject
         globalMaxFocusActivationRadiusDirty = true;
     }
 
+    protected Animator ResolveInstallationAnimator()
+    {
+        if (animator == null)
+        {
+            animator = GetComponent<Animator>();
+            if (animator == null)
+            {
+                animator = GetComponentInChildren<Animator>(true);
+            }
+        }
+
+        return animator;
+    }
+
     protected void MarkFocusActivationRadiusDirty()
     {
         globalMaxFocusActivationRadiusDirty = true;
@@ -214,7 +232,7 @@ public class InstallationObject : MapObject
     {
         if (mapFilter == InstallationMapFilter.None)
         {
-            mapFilter = InstallationMapFilter.Ground;
+            mapFilter = DefaultMapFilter;
         }
 
         if (installationFocusRadius < 0f)

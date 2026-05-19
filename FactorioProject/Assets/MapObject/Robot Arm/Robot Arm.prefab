@@ -498,17 +498,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Robot arm
-  objId: 21
+  objId: 22
   itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
   multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 2610350787124706515}
-  mapFilter: 5
+  mapFilter: 37
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}

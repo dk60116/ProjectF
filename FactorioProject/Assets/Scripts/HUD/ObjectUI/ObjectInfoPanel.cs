@@ -38,15 +38,15 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         boundObject = mapObject;
-        Resource underlyingResource = ResolveUnderlyingResource(mapObject);
-        RefreshFocusedInfoPanels(mapObject, underlyingResource);
-
-        RefreshInfoLine(mapObject, underlyingResource);
-
         if (!gameObject.activeSelf)
         {
             gameObject.SetActive(true);
         }
+
+        Resource underlyingResource = ResolveUnderlyingResource(mapObject);
+        RefreshFocusedInfoPanels(mapObject, underlyingResource);
+
+        RefreshInfoLine(mapObject, underlyingResource);
 
         RefreshInfoLineRectTransformImmediate();
     }
@@ -125,6 +125,7 @@ public class ObjectInfoPanel : MonoBehaviour
         if (mapObject is InputOutputModule inputOutputModule)
         {
             ShowInputOutputModuleInfo(inputOutputModule, underlyingResource);
+            return;
         }
     }
 

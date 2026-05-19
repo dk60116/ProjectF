@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -46,4 +47,129 @@ public class ItemDefinition : ScriptableObject
         }
     }
 #endif
+}
+
+public static class ItemDefinitionLookup
+{
+    private const int LegacyConveyorBelt2FItemId = 26;
+    private const string ConveyorBelt2FItemName = "Conveyor belt 2F";
+
+    public static ItemDefinition ResolveById(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        if (definitions == null || itemId < 0)
+        {
+            return null;
+        }
+
+        ItemDefinition exactDefinition = FindByExactId(definitions, itemId);
+        return exactDefinition != null
+            ? exactDefinition
+            : ResolveLegacyDefinition(definitions, itemId);
+    }
+
+    public static ItemDefinition ResolveInstallationById(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        if (definitions == null || itemId < 0)
+        {
+            return null;
+        }
+
+        ItemDefinition exactDefinition = FindByExactId(definitions, itemId);
+        if (exactDefinition != null)
+        {
+            return IsInstallationDefinition(exactDefinition) ? exactDefinition : null;
+        }
+
+        ItemDefinition legacyDefinition = ResolveLegacyDefinition(definitions, itemId);
+        return IsInstallationDefinition(legacyDefinition) ? legacyDefinition : null;
+    }
+
+    public static bool IsConveyorBelt2FDefinition(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return false;
+        }
+
+        if (definition.mapObject is ConvayorBelt2F)
+        {
+            return true;
+        }
+
+        return NameMatches(definition.itemName)
+               || NameMatches(definition.name)
+               || (definition.mapObject != null && NameMatches(definition.mapObject.name));
+    }
+
+    public static bool LooksLikeLegacyConveyorBelt2FState(
+        int itemId,
+        ItemDefinition resolvedDefinition,
+        IReadOnlyList<Vector2Int> occupiedCoordinates)
+    {
+        return itemId == LegacyConveyorBelt2FItemId
+               && !IsConveyorBelt2FDefinition(resolvedDefinition)
+               && occupiedCoordinates != null
+               && occupiedCoordinates.Count > 1;
+    }
+
+    public static ItemDefinition ResolveConveyorBelt2F(IReadOnlyList<ItemDefinition> definitions)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (IsConveyorBelt2FDefinition(definition))
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private static ItemDefinition FindByExactId(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private static ItemDefinition ResolveLegacyDefinition(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        if (itemId != LegacyConveyorBelt2FItemId)
+        {
+            return null;
+        }
+
+        return ResolveConveyorBelt2F(definitions);
+    }
+
+    private static bool IsInstallationDefinition(ItemDefinition definition)
+    {
+        if (definition == null || definition.mapObject == null)
+        {
+            return false;
+        }
+
+        return definition.mapObject is InstallationObject
+               || definition.mapObject.GetComponent<InstallationObject>() != null
+               || definition.mapObject.GetComponentInChildren<InstallationObject>(true) != null;
+    }
+
+    private static bool NameMatches(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+               && string.Equals(value.Trim(), ConveyorBelt2FItemName, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -827,7 +827,7 @@ public class ItemDataEditorWindow : EditorWindow
 
     private static InstallationMapFilter NormalizeInstallationMapFilter(InstallationMapFilter filter)
     {
-        return filter == InstallationMapFilter.None ? InstallationMapFilter.Ground : filter;
+        return filter == InstallationMapFilter.None ? InstallationObject.DefaultMapFilter : filter;
     }
 
     private static bool TryParseInstallationMapFilter(string mapFilter, out InstallationMapFilter parsedFilter)
@@ -858,6 +858,15 @@ public class ItemDataEditorWindow : EditorWindow
             if (string.Equals(token, "Resource", StringComparison.OrdinalIgnoreCase))
             {
                 combinedFilter |= InstallationMapFilter.Ore;
+                parsedAny = true;
+                continue;
+            }
+
+            if (string.Equals(token, "WaterOutlne", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(token, "WaterLOutline", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(token, "WaterLandOutline", StringComparison.OrdinalIgnoreCase))
+            {
+                combinedFilter |= InstallationMapFilter.WaterOutline;
                 parsedAny = true;
                 continue;
             }

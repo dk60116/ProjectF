@@ -7,6 +7,12 @@ Shader "Custom/ToonCharacter"
         _ShadowColor("Shadow Color", Color) = (0.7,0.7,0.75,1)
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
+        [ToggleUI] _UseSpecular("Use Specular", Float) = 0
+        [HDR] _SpecularColor("Specular Color", Color) = (1,1,1,1)
+        _SpecularIntensity("Specular Intensity", Range(0,2)) = 0.5
+        _SpecularPower("Specular Power", Range(1,128)) = 32
+        _SpecularThreshold("Specular Threshold", Range(0,1)) = 0.5
+        _SpecularSmoothness("Specular Smoothness", Range(0.001,0.5)) = 0.05
         _Surface("__surface", Float) = 0.0
         _Blend("__blend", Float) = 0.0
         _Cull("__cull", Float) = 2.0
@@ -111,8 +117,14 @@ Shader "Custom/ToonCharacter"
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
                 float4 _ShadowColor;
+                float4 _SpecularColor;
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
+                half _UseSpecular;
+                half _SpecularIntensity;
+                half _SpecularPower;
+                half _SpecularThreshold;
+                half _SpecularSmoothness;
                 half _Surface;
             CBUFFER_END
 
@@ -185,6 +197,23 @@ Shader "Custom/ToonCharacter"
                 inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
             }
 
+            half3 GetToonSpecular(
+                half3 normalWS,
+                half3 viewDirectionWS,
+                half3 lightDirectionWS,
+                half3 lightColor,
+                half lightAttenuation)
+            {
+                half3 halfDirection = SafeNormalize(lightDirectionWS + viewDirectionWS);
+                half specular = pow(saturate(dot(normalWS, halfDirection)), _SpecularPower);
+                specular = smoothstep(
+                    _SpecularThreshold - _SpecularSmoothness,
+                    _SpecularThreshold + _SpecularSmoothness,
+                    specular);
+                specular *= saturate(_UseSpecular) * _SpecularIntensity * lightAttenuation;
+                return _SpecularColor.rgb * lightColor * specular;
+            }
+
             half4 frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
@@ -201,6 +230,12 @@ Shader "Custom/ToonCharacter"
                 half3 direct = lerp(baseSample.rgb * _ShadowColor.rgb, baseSample.rgb, lightBand) * mainLight.color;
                 half3 ambient = inputData.bakedGI * baseSample.rgb;
                 half3 additional = inputData.vertexLighting * baseSample.rgb;
+                half3 specular = GetToonSpecular(
+                    inputData.normalWS,
+                    inputData.viewDirectionWS,
+                    mainLight.direction,
+                    mainLight.color,
+                    mainLight.shadowAttenuation);
 
 #if defined(_ADDITIONAL_LIGHTS)
                 uint pixelLightCount = GetAdditionalLightsCount();
@@ -210,10 +245,16 @@ Shader "Custom/ToonCharacter"
                     half additionalNdotL = saturate(dot(inputData.normalWS, light.direction));
                     half additionalBand = smoothstep(_ShadeThreshold - _ShadeSmoothness, _ShadeThreshold + _ShadeSmoothness, additionalNdotL * light.shadowAttenuation);
                     additional += lerp(baseSample.rgb * _ShadowColor.rgb, baseSample.rgb, additionalBand) * light.color * light.distanceAttenuation;
+                    specular += GetToonSpecular(
+                        inputData.normalWS,
+                        inputData.viewDirectionWS,
+                        light.direction,
+                        light.color,
+                        light.distanceAttenuation * light.shadowAttenuation);
                 }
 #endif
 
-                half3 finalColor = ambient + direct + additional;
+                half3 finalColor = ambient + direct + additional + specular;
                 finalColor = MixFog(finalColor, inputData.fogCoord);
                 return half4(finalColor, baseSample.a);
             }

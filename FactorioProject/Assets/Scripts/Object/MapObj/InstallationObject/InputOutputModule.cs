@@ -900,7 +900,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return true;
     }
 
-    public void ManagedUpdateTick(float deltaTime)
+    public virtual void ManagedUpdateTick(float deltaTime)
     {
         if (!Application.isPlaying)
         {

@@ -14,7 +14,6 @@ public interface IMapObjectLateTick
 public sealed class MapObjectTickManager : MonoBehaviour
 {
     private const float DefaultUpdateTickIntervalSeconds = 1f / 60f;
-    private const float MaxUpdateTickFrameDeltaSeconds = 0.12f;
 
     private static MapObjectTickManager instance;
     private static bool applicationQuitting;
@@ -188,8 +187,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         float safeInterval = Mathf.Max(0.001f, updateTickIntervalSeconds);
-        float clampedDeltaTime = Mathf.Clamp(deltaTime, 0f, MaxUpdateTickFrameDeltaSeconds);
-        updateTickQuota += count * clampedDeltaTime / safeInterval;
+        float frameDeltaTime = Mathf.Max(0f, deltaTime);
+        updateTickQuota += count * frameDeltaTime / safeInterval;
 
         int ticksToRun = Mathf.Min(count, Mathf.FloorToInt(updateTickQuota));
         if (ticksToRun <= 0)
@@ -199,7 +198,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         updateTickQuota -= ticksToRun;
-        if (ticksToRun >= count && updateTickQuota >= 1f)
+        bool tickedEveryObject = ticksToRun >= count;
+        float managedDeltaTime = tickedEveryObject
+            ? frameDeltaTime
+            : safeInterval;
+        if (tickedEveryObject && updateTickQuota >= 1f)
         {
             updateTickQuota -= Mathf.Floor(updateTickQuota);
         }
@@ -225,7 +228,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 continue;
             }
 
-            tick.ManagedUpdateTick(safeInterval);
+            tick.ManagedUpdateTick(managedDeltaTime);
         }
 
         if (updateTicksDirty)

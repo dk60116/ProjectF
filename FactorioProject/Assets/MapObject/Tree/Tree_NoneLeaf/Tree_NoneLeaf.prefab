@@ -54,6 +54,8 @@ MonoBehaviour:
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
   multiFocusMode: 0
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 

@@ -800,6 +800,12 @@ public partial class TerrainGenerator : MonoBehaviour
         resourceStateStore?.RemoveInstallation(anchorCoordinate);
     }
 
+    public void RemoveInstallationPersistence(InstallationObject installationObject)
+    {
+        EnsureResourceStateStore();
+        resourceStateStore?.RemoveInstallation(installationObject);
+    }
+
     public bool TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate)
     {
         minCoordinate = Vector2Int.zero;

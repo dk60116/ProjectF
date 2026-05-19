@@ -983,7 +983,7 @@ public partial class BlockStateStore
             return false;
         }
 
-        ItemDefinition definition = ResolveVirtualConveyorItemDefinition(state.itemId);
+        ItemDefinition definition = ResolveVirtualConveyorItemDefinition(state.itemId, state);
         if (definition == null || !(definition.mapObject is ConveyorBelt conveyorPrototype))
         {
             return false;
@@ -1004,6 +1004,11 @@ public partial class BlockStateStore
         if (conveyorPrototype == null)
         {
             return null;
+        }
+
+        if (conveyorPrototype is ConvayorBelt2F)
+        {
+            return conveyorPrototype;
         }
 
         switch (conveyorVariantKind)
@@ -1031,7 +1036,7 @@ public partial class BlockStateStore
         return conveyor.transform.rotation * Quaternion.Euler(0f, rotationQuarterTurns * 90f, 0f);
     }
 
-    private static ItemDefinition ResolveVirtualConveyorItemDefinition(int itemId)
+    private static ItemDefinition ResolveVirtualConveyorItemDefinition(int itemId, InstallationSaveState state)
     {
         if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
@@ -1044,16 +1049,17 @@ public partial class BlockStateStore
             return null;
         }
 
-        for (int i = 0; i < definitions.Count; i++)
+        ItemDefinition definition = ItemDefinitionLookup.ResolveById(definitions, itemId);
+        if (!ItemDefinitionLookup.LooksLikeLegacyConveyorBelt2FState(
+                itemId,
+                definition,
+                state?.occupiedCoordinates))
         {
-            ItemDefinition definition = definitions[i];
-            if (definition != null && definition.id == itemId)
-            {
-                return definition;
-            }
+            return definition;
         }
 
-        return null;
+        ItemDefinition belt2FDefinition = ItemDefinitionLookup.ResolveConveyorBelt2F(definitions);
+        return belt2FDefinition != null ? belt2FDefinition : definition;
     }
 
     private static void AddVirtualConveyorLaneLink(

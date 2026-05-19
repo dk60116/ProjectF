@@ -309,6 +309,11 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         {
             itemCount = contentBlock.GetInputAreaCenterItemCount(itemId);
         }
+        else if (TryGetSingleResolvedItemId(out int filteredItemId))
+        {
+            itemId = filteredItemId;
+            itemCount = contentBlock.GetInputAreaCenterItemCount(filteredItemId);
+        }
 
         return true;
     }

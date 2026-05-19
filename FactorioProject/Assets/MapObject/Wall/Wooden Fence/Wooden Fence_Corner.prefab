@@ -156,7 +156,7 @@ PrefabInstance:
       objectReference: {fileID: 4300000, guid: b9fb55ad42546b24589be8281fd7453c, type: 2}
     - target: {fileID: 5824118724912299156, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
       propertyPath: m_Name
-      value: Wooden Fence_Corner
+      value: Wooden fence_Corner
       objectReference: {fileID: 0}
     m_RemovedComponents:
     - {fileID: 6362304892840611056, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -202,7 +202,9 @@ MonoBehaviour:
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
-  multiFocusMode: 2
+    centerCellX: 0
+    centerCellY: 0
+  multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}

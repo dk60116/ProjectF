@@ -1028,6 +1028,66 @@ public partial class TerrainGenerator : MonoBehaviour
                 resourceStateStore.Save(block.Coordinate, resource);
             }
         }
+
+        SaveActiveRuntimeInstallations(savedInstallations, null);
+    }
+
+    private void SaveActiveRuntimeInstallations(
+        HashSet<InstallationObject> savedInstallations,
+        ISet<Vector2Int> coordinateFilter)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        InstallationObject[] activeInstallations = FindObjectsOfType<InstallationObject>(false);
+        for (int i = 0; i < activeInstallations.Length; i++)
+        {
+            InstallationObject installationObject = activeInstallations[i];
+            if (installationObject == null
+                || (savedInstallations != null && savedInstallations.Contains(installationObject))
+                || !installationObject.TryGetPlacementRuntime(out _, out _)
+                || !InstallationIntersectsCoordinateFilter(installationObject, coordinateFilter))
+            {
+                continue;
+            }
+
+            savedInstallations?.Add(installationObject);
+            resourceStateStore.SaveInstallation(installationObject);
+            resourceStateStore.RegisterLiveInstallation(installationObject);
+        }
+    }
+
+    private static bool InstallationIntersectsCoordinateFilter(
+        InstallationObject installationObject,
+        ISet<Vector2Int> coordinateFilter)
+    {
+        if (coordinateFilter == null || coordinateFilter.Count <= 0)
+        {
+            return true;
+        }
+
+        if (installationObject == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates != null)
+        {
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                if (coordinateFilter.Contains(occupiedCoordinates[i]))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return installationObject.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
+               && coordinateFilter.Contains(anchorCoordinate);
     }
 
     private void CaptureLoadedConveyorItemSaveStates(MapSaveData mapSaveData)

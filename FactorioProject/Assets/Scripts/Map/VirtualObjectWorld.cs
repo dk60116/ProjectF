@@ -449,9 +449,10 @@ public sealed class VirtualObjectWorld : MonoBehaviour
             return default;
         }
 
+        Vector2Int storageKey = BlockStateStore.GetInstallationStorageKey(state);
         VirtualObjectRecord record = GetOrCreateIndexedRecord(
             installationRecordByAnchor,
-            state.anchorCoordinate,
+            storageKey,
             VirtualObjectKind.Installation);
 
         record.residency = liveInstallation != null ? VirtualObjectResidency.Live : residency;

@@ -124,6 +124,35 @@ public class ItemSlot : MonoBehaviour
         SetItemNameText(itemSet.name, true);
     }
 
+    public void SetEmptyCountDisplay(int itemCount, int maxItemCount)
+    {
+        ResolveReferences();
+        id = -1;
+
+        if (icon != null)
+        {
+            icon.enabled = false;
+            icon.sprite = null;
+            if (icon.gameObject.activeSelf)
+            {
+                icon.gameObject.SetActive(false);
+            }
+        }
+
+        int displayCount = Mathf.Max(0, itemCount);
+        int displayMaxCount = Mathf.Max(1, maxItemCount, displayCount);
+        if (count != null)
+        {
+            count.text = $"{displayCount} / {displayMaxCount}";
+            if (!count.gameObject.activeSelf)
+            {
+                count.gameObject.SetActive(true);
+            }
+        }
+
+        SetItemNameText(null, false);
+    }
+
     public virtual void Clear()
     {
         SetItem(-1, 0, 0);
