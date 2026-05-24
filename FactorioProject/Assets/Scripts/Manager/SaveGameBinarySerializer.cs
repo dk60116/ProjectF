@@ -219,6 +219,7 @@ public static class SaveGameBinarySerializer
 
         writer.Write(state.itemFilterMaskInitialized);
         WriteUlongList(writer, state.itemFilterMaskWords);
+        writer.Write(state.storedFluidLiters);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -248,6 +249,10 @@ public static class SaveGameBinarySerializer
 
         state.itemFilterMaskInitialized = reader.ReadBoolean();
         state.itemFilterMaskWords = ReadUlongList(reader);
+        if (version >= 5)
+        {
+            state.storedFluidLiters = reader.ReadSingle();
+        }
         return state;
     }
 

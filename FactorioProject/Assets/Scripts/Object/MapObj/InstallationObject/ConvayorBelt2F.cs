@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class ConvayorBelt2F : ConveyorBelt
 {
+    private const int ObjectInfoSlotCount = 6;
     private const int DefaultFootprintWidth = 1;
     private const int DefaultFootprintLength = 3;
     private const float DefaultPathHalfLength = 1.33f;
@@ -30,6 +31,7 @@ public class ConvayorBelt2F : ConveyorBelt
     private float pathHighHalfLength = DefaultPathHighHalfLength;
     private float pathLowHeight = DefaultPathLowHeight;
     private float pathHighHeight = DefaultPathHighHeight;
+    private bool pathUsesLocalX;
 
     protected override void OnEnable()
     {
@@ -190,7 +192,7 @@ public class ConvayorBelt2F : ConveyorBelt
     {
         RefreshPathMetrics();
         Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
-        localPosition.y = ResolvePathHeight(localPosition.z);
+        localPosition.y = ResolvePathHeight(GetPathCoordinate(localPosition));
         return transform.TransformPoint(localPosition);
     }
 
@@ -198,8 +200,11 @@ public class ConvayorBelt2F : ConveyorBelt
     {
         RefreshPathMetrics();
         Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
-        float pitchDegrees = ResolvePathItemPitch(localPosition.z);
-        return transform.rotation * Quaternion.Euler(pitchDegrees, 0f, 0f);
+        float pitchDegrees = ResolvePathItemPitch(GetPathCoordinate(localPosition));
+        Quaternion localPitchRotation = pathUsesLocalX
+            ? Quaternion.Euler(0f, 0f, -pitchDegrees)
+            : Quaternion.Euler(pitchDegrees, 0f, 0f);
+        return transform.rotation * localPitchRotation;
     }
 
     public bool IsUpperPathWorldPosition(Vector3 worldPosition)
@@ -244,17 +249,70 @@ public class ConvayorBelt2F : ConveyorBelt
                 ? SlotLongitudinalOffset
                 : isFrontLane ? -SlotLongitudinalOffset : 0f;
 
-            localPosition.x = 0f;
-            localPosition.z = Mathf.Clamp(
+            SetPathLateralCoordinate(ref localPosition, 0f);
+            SetPathCoordinate(
+                ref localPosition,
+                Mathf.Clamp(
                 -longitudinalStep + slotOffset,
                 -pathHalfLength,
-                pathHalfLength);
+                pathHalfLength));
         }
 
-        localPosition.y = ResolvePathHeight(localPosition.z);
+        localPosition.y = ResolvePathHeight(GetPathCoordinate(localPosition));
 
         worldPosition = transform.TransformPoint(localPosition);
         return true;
+    }
+
+    public override void CopyObjectInfoItemIds(List<int> results, int maxCount)
+    {
+        if (results == null || maxCount <= 0)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain == null)
+        {
+            return;
+        }
+
+        List<Vector2Int> coordinates = new List<Vector2Int>(ObjectInfoSlotCount / 2);
+        CopyCoverageCoordinates(coordinates);
+        for (int i = 0; i < coordinates.Count && results.Count < maxCount; i++)
+        {
+            if (!terrain.TryGetLoadedBlock(coordinates[i], out Block block) || block == null)
+            {
+                AppendEmptyObjectInfoSlots(results, maxCount, 2);
+                continue;
+            }
+
+            IReadOnlyList<int> laneIndices = ShouldUseBridgeObjectInfoLanes(block, coordinates[i])
+                ? ObjectInfoBridgeLaneIndices
+                : ObjectInfoMainLaneIndices;
+            AppendObjectInfoLaneItemIds(results, maxCount, block, laneIndices);
+        }
+
+        while (results.Count < Mathf.Min(maxCount, ObjectInfoSlotCount))
+        {
+            results.Add(-1);
+        }
+    }
+
+    private bool ShouldUseBridgeObjectInfoLanes(Block block, Vector2Int coordinate)
+    {
+        return block != null
+               && IsBridgeCenterCoordinate(coordinate)
+               && block.MapObject is ConveyorBelt mappedConveyor
+               && !(mappedConveyor is ConvayorBelt2F);
+    }
+
+    private static void AppendEmptyObjectInfoSlots(List<int> results, int maxCount, int count)
+    {
+        for (int i = 0; i < count && results.Count < maxCount; i++)
+        {
+            results.Add(-1);
+        }
     }
 
     private float ResolvePathHeight(float localZ)
@@ -319,6 +377,30 @@ public class ConvayorBelt2F : ConveyorBelt
         }
     }
 
+    private void CopyCoverageCoordinates(List<Vector2Int> coordinates)
+    {
+        if (coordinates == null
+            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return;
+        }
+
+        Vector2Int size = GetFootprintSize();
+        Vector2Int anchorCell = GetAnchorCell(size);
+        for (int y = 0; y < size.y; y++)
+        {
+            for (int x = 0; x < size.x; x++)
+            {
+                Vector2Int localOffset = new Vector2Int(x - anchorCell.x, y - anchorCell.y);
+                Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+                if (!coordinates.Contains(coordinate))
+                {
+                    coordinates.Add(coordinate);
+                }
+            }
+        }
+    }
+
     private Vector2Int GetFootprintSize()
     {
         int sizeX = Mathf.Max(1, Status.mapSizeX);
@@ -351,6 +433,30 @@ public class ConvayorBelt2F : ConveyorBelt
         float lowBodyHeight = 0f;
         float highBodyHeight = 0f;
         float halfLength = 0f;
+        float maxBodyAbsX = 0f;
+        float maxBodyAbsZ = 0f;
+
+        for (int i = 0; i < childTransforms.Length; i++)
+        {
+            Transform child = childTransforms[i];
+            if (child == null || child == transform)
+            {
+                continue;
+            }
+
+            if (child.name == "Body_Start"
+                || child.name == "Body_End"
+                || child.name == "Body_Up"
+                || child.name == "Body_Down"
+                || child.name == "Body")
+            {
+                Vector3 localPosition = child.localPosition;
+                maxBodyAbsX = Mathf.Max(maxBodyAbsX, Mathf.Abs(localPosition.x));
+                maxBodyAbsZ = Mathf.Max(maxBodyAbsZ, Mathf.Abs(localPosition.z));
+            }
+        }
+
+        pathUsesLocalX = maxBodyAbsX > maxBodyAbsZ + 0.0001f;
         for (int i = 0; i < childTransforms.Length; i++)
         {
             Transform child = childTransforms[i];
@@ -363,7 +469,7 @@ public class ConvayorBelt2F : ConveyorBelt
             {
                 Vector3 localPosition = child.localPosition;
                 lowBodyHeight += localPosition.y;
-                halfLength = Mathf.Max(halfLength, Mathf.Abs(localPosition.z));
+                halfLength = Mathf.Max(halfLength, Mathf.Abs(GetPathCoordinate(localPosition)));
                 lowBodyCount++;
                 continue;
             }
@@ -391,6 +497,33 @@ public class ConvayorBelt2F : ConveyorBelt
         {
             pathHalfLength = halfLength;
         }
+    }
+
+    private float GetPathCoordinate(Vector3 localPosition)
+    {
+        return pathUsesLocalX ? localPosition.x : localPosition.z;
+    }
+
+    private void SetPathCoordinate(ref Vector3 localPosition, float value)
+    {
+        if (pathUsesLocalX)
+        {
+            localPosition.x = value;
+            return;
+        }
+
+        localPosition.z = value;
+    }
+
+    private void SetPathLateralCoordinate(ref Vector3 localPosition, float value)
+    {
+        if (pathUsesLocalX)
+        {
+            localPosition.z = value;
+            return;
+        }
+
+        localPosition.x = value;
     }
 
     private Vector2Int GetAnchorCell(Vector2Int size)

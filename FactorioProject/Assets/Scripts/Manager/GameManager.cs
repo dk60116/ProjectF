@@ -10,6 +10,7 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 
 public class GameManager : MonoBehaviour
 {
@@ -30,8 +31,9 @@ public class GameManager : MonoBehaviour
     private bool showSleepAwake;
     [SerializeField]
     private bool showBeltItemLine;
+    [FormerlySerializedAs("showBeltDirections")]
     [SerializeField]
-    private bool showBeltDirections;
+    private bool showDirections;
     [SerializeField]
     private bool runtimeItemGiveServerEnabled = true;
     [SerializeField, Min(1)]
@@ -153,7 +155,8 @@ public class GameManager : MonoBehaviour
     public bool ShowConveyorSlotDots => showConveyorSlotDots;
     public bool ShowSleepAwake => showSleepAwake;
     public bool ShowBeltItemLine => showBeltItemLine;
-    public bool ShowBeltDirections => showBeltDirections;
+    public bool ShowDirections => showDirections;
+    public bool ShowBeltDirections => ShowDirections;
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
     public int RuntimeItemGiveServerPort => runtimeItemGiveServerPort;
 
@@ -209,7 +212,12 @@ public class GameManager : MonoBehaviour
 
     public void SetShowBeltDirections(bool show)
     {
-        showBeltDirections = show;
+        SetShowDirections(show);
+    }
+
+    public void SetShowDirections(bool show)
+    {
+        showDirections = show;
         SyncBeltDirectionRuntimeVisibility(true);
     }
 
@@ -289,13 +297,13 @@ public class GameManager : MonoBehaviour
 
         if (!force
             && beltDirectionRuntimeStateInitialized
-            && lastRuntimeShowBeltDirections == showBeltDirections)
+            && lastRuntimeShowBeltDirections == showDirections)
         {
             return;
         }
 
         beltDirectionRuntimeStateInitialized = true;
-        lastRuntimeShowBeltDirections = showBeltDirections;
+        lastRuntimeShowBeltDirections = showDirections;
         TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
     }
 
@@ -826,7 +834,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltDirections> <true|false> | camera size <minSize> <maxSize> | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showDirections> <true|false> | camera size <minSize> <maxSize> | ping | status";
             return false;
         }
 
@@ -922,7 +930,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
         bool currentShowBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
-        bool currentShowBeltDirections = gameManager != null && gameManager.ShowBeltDirections;
+        bool currentShowBeltDirections = gameManager != null && gameManager.ShowDirections;
         string extraTokens = BuildStatusExtraTokens(
             ResolveSaveManager(),
             ResolvePlayerCamera(),
@@ -1439,7 +1447,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
             MapObject installedObject = installedInstallation;
             installedObject.transform.SetPositionAndRotation(
-                placementController.GetInstalledObjectWorldPosition(plan.Coordinate, plan.SourcePrefab, plan.QuarterTurns, 0f),
+                placementController.GetInstalledObjectWorldPosition(plan.Coordinate, plan.SourcePrefab, plan.QuarterTurns),
                 placementController.GetInstalledObjectRotation(plan.SourcePrefab, plan.QuarterTurns));
             if (!placementController.BindInstalledObjectToFootprintBlocks(installedObject, plan.Coordinate, plan.QuarterTurns))
             {
@@ -2318,13 +2326,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showBeltItemLine={(value ? 1 : 0)}");
         }
 
-        if (string.Equals(toggleName, "showBeltDirections", StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(toggleName, "showDirections", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "directions", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "showBeltDirections", StringComparison.OrdinalIgnoreCase)
             || string.Equals(toggleName, "beltDirections", StringComparison.OrdinalIgnoreCase)
             || string.Equals(toggleName, "showConveyorDirections", StringComparison.OrdinalIgnoreCase)
             || string.Equals(toggleName, "conveyorDirections", StringComparison.OrdinalIgnoreCase))
         {
-            gameManager.SetShowBeltDirections(value);
-            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showBeltDirections={(value ? 1 : 0)}");
+            gameManager.SetShowDirections(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showDirections={(value ? 1 : 0)}");
         }
 
         return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");

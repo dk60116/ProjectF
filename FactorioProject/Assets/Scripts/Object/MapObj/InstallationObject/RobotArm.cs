@@ -1582,6 +1582,22 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return true;
     }
 
+    public bool TryClearHeldItemForPacking(int expectedItemId)
+    {
+        if (heldItemId < 0 || (expectedItemId >= 0 && heldItemId != expectedItemId))
+        {
+            return false;
+        }
+
+        ClearHeldItem();
+        dropRetryTimer = 0f;
+        actionTurnTimer = 0f;
+        waitingForDropRetry = false;
+        state = RobotArmState.TurningToPickup;
+        WakeRuntimeSleep();
+        return true;
+    }
+
     private bool CanTakeHeldItemFromSlotInternal()
     {
         return heldItemId >= 0 && state == RobotArmState.WaitingForDrop;

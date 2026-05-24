@@ -20,6 +20,9 @@ public class ItemDefinition : ScriptableObject
     public bool itemFilter;
     [Min(1)]
     public int capacity = 10;
+    public bool storesFluid;
+    [Min(0f)]
+    public float fluidStorageLiters = 0f;
     public EnergyType energyType = EnergyType.None;
     [Min(0)]
     public int energyAmount = 0;
@@ -44,6 +47,15 @@ public class ItemDefinition : ScriptableObject
         if (craftingDurationSeconds <= 0f)
         {
             craftingDurationSeconds = DefaultCraftingDurationSeconds;
+        }
+
+        if (!storesFluid)
+        {
+            fluidStorageLiters = 0f;
+        }
+        else
+        {
+            fluidStorageLiters = Mathf.Max(0f, fluidStorageLiters);
         }
     }
 #endif

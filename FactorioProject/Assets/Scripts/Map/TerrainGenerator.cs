@@ -605,6 +605,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
     private readonly HashSet<Block> activeBeltDirectionVisuals = new HashSet<Block>();
     private readonly List<Block> activeBeltDirectionVisualList = new List<Block>();
+    private readonly List<Matrix4x4> directionArrowMatrixScratch = new List<Matrix4x4>(4);
     private readonly List<Block> pendingConveyorSlotDotRefreshBlocks = new List<Block>();
     private readonly Matrix4x4[] conveyorSlotDotInstanceMatrices = new Matrix4x4[MaxConveyorSlotDotInstancesPerBatch];
     private readonly Matrix4x4[] beltDirectionArrowInstanceMatrices = new Matrix4x4[MaxBeltDirectionArrowInstancesPerBatch];

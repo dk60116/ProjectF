@@ -6,6 +6,10 @@ using UnityEngine.UI;
 
 public class ItemInfoDescription : MonoBehaviour
 {
+    private const int DefaultConveyorInfoSlotCount = 2;
+    private const int Belt2FInfoSlotCount = 6;
+    private const string DefaultFluidItemName = "Water";
+    private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
 
@@ -33,8 +37,19 @@ public class ItemInfoDescription : MonoBehaviour
     private readonly List<int> conveyorItemIds = new List<int>(2);
     private int defaultStatusLineIndex;
 
+    private void Awake()
+    {
+        ResolveDefaultItemSlotReferences();
+    }
+
+    private void OnValidate()
+    {
+        ResolveDefaultItemSlotReferences();
+    }
+
     public void Clear()
     {
+        ResolveDefaultItemSlotReferences();
         defaultStatusLineIndex = 0;
         ClearDefaultLines();
         SetGauge(energyGauge, energyFill, energyText, false, 0f, Color.white, 0f, 0f);
@@ -57,10 +72,13 @@ public class ItemInfoDescription : MonoBehaviour
         BeginObjectDisplay(underlyingResource);
 
         conveyorItemIds.Clear();
-        conveyorBelt?.CopyObjectInfoItemIds(conveyorItemIds, 2);
+        int slotCount = conveyorBelt is ConvayorBelt2F ? Belt2FInfoSlotCount : DefaultConveyorInfoSlotCount;
+        conveyorBelt?.CopyObjectInfoItemIds(conveyorItemIds, slotCount);
 
-        SetDefaultItemSlot(0, conveyorItemIds.Count > 0 ? conveyorItemIds[0] : -1, true);
-        SetDefaultItemSlot(1, conveyorItemIds.Count > 1 ? conveyorItemIds[1] : -1, true);
+        for (int i = 0; i < slotCount; i++)
+        {
+            SetDefaultItemSlot(i, conveyorItemIds.Count > i ? conveyorItemIds[i] : -1, true);
+        }
     }
 
     public void ShowBoxObject(BoxObject boxObject, Resource underlyingResource = null)
@@ -91,30 +109,54 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultStatus(statusText, isWorking);
     }
 
+    public void ShowInstallationObject(InstallationObject installationObject, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        SetFluidStorageDefaultItemSlot(0, installationObject);
+    }
+
     public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
 
-        SetGauge(
-            energyGauge,
-            energyFill,
-            energyText,
-            true,
-            module != null ? module.ObjectInfoEnergyGaugeFillAmount : 0f,
-            module != null ? module.ObjectInfoEnergyGaugeFillColor : Color.white,
-            module != null ? module.ObjectInfoStoredEnergy : 0f,
-            module != null ? module.ObjectInfoEnergyGaugeCapacity : 0f,
-            true);
-        SetGauge(
-            workGauge,
-            workFill,
-            workText,
-            true,
-            module != null ? module.ObjectInfoWorkGaugeFillAmount : 0f,
-            module != null ? module.ObjectInfoWorkGaugeFillColor : Color.white,
-            module != null ? module.ObjectInfoCurrentUseEnergy : 0f,
-            module != null ? module.ObjectInfoCompleteEnergy : 0f,
-            true);
+        if (module is Boiler && module.CanStoreFluid)
+        {
+            SetFluidStorageGauge(module);
+            SetGauge(
+                workGauge,
+                workFill,
+                workText,
+                true,
+                module.ObjectInfoEnergyGaugeFillAmount,
+                module.ObjectInfoEnergyGaugeFillColor,
+                module.ObjectInfoStoredEnergy,
+                module.ObjectInfoEnergyGaugeCapacity,
+                true);
+        }
+        else
+        {
+            SetGauge(
+                energyGauge,
+                energyFill,
+                energyText,
+                true,
+                module != null ? module.ObjectInfoEnergyGaugeFillAmount : 0f,
+                module != null ? module.ObjectInfoEnergyGaugeFillColor : Color.white,
+                module != null ? module.ObjectInfoStoredEnergy : 0f,
+                module != null ? module.ObjectInfoEnergyGaugeCapacity : 0f,
+                true);
+
+            SetGauge(
+                workGauge,
+                workFill,
+                workText,
+                true,
+                module != null ? module.ObjectInfoWorkGaugeFillAmount : 0f,
+                module != null ? module.ObjectInfoWorkGaugeFillColor : Color.white,
+                module != null ? module.ObjectInfoCurrentUseEnergy : 0f,
+                module != null ? module.ObjectInfoCompleteEnergy : 0f,
+                true);
+        }
 
         if (module == null)
         {
@@ -123,6 +165,7 @@ public class ItemInfoDescription : MonoBehaviour
 
         module.GetObjectInfoStatus(out string statusText, out bool isProducing);
         SetDefaultStatus(statusText, isProducing);
+        SetFluidStorageDefaultItemSlot(0, module);
 
         if (module.TryGetObjectInfoEnergyInput(
             out int energyItemId,
@@ -177,6 +220,46 @@ public class ItemInfoDescription : MonoBehaviour
     {
         SetDefaultText(index, $"Reserves: {Mathf.Max(0, reserves)}", true);
         SetDefaultSign(index, false, Color.white);
+    }
+
+    private void SetFluidStorageDefaultItemSlot(int index, InstallationObject installationObject)
+    {
+        if (installationObject == null || !installationObject.CanStoreFluid)
+        {
+            return;
+        }
+
+        GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
+        ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return;
+        }
+
+        float storedLiters = installationObject.StoredFluidLiters;
+        float capacityLiters = installationObject.FluidStorageCapacityLiters;
+        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet();
+        slot.SetCustomDisplay(
+            fluidItemSet.icon,
+            null,
+            $"{fluidItemSet.name}\n{FormatGaugeNumber(storedLiters, true)} / {FormatGaugeNumber(capacityLiters, true)} L");
+    }
+
+    private void SetFluidStorageGauge(InstallationObject installationObject)
+    {
+        float capacityLiters = installationObject != null ? installationObject.FluidStorageCapacityLiters : 0f;
+        float storedLiters = installationObject != null ? installationObject.StoredFluidLiters : 0f;
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            capacityLiters > 0.0001f ? storedLiters / capacityLiters : 0f,
+            FluidGaugeFillColor,
+            storedLiters,
+            capacityLiters,
+            true);
     }
 
     private static bool IsDisplayableUnderlyingResource(Resource resource)
@@ -360,6 +443,114 @@ public class ItemInfoDescription : MonoBehaviour
         for (int i = 0; i < roots.Count; i++)
         {
             SetActiveIfNeeded(roots[i], false);
+        }
+    }
+
+    private static ItemManager.ItemSet ResolveFluidItemSet()
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (itemManager != null && TryResolveItemSetByName(itemManager, DefaultFluidItemName, out ItemManager.ItemSet itemSet))
+        {
+            return itemSet;
+        }
+
+        return new ItemManager.ItemSet
+        {
+            id = -1,
+            name = DefaultFluidItemName
+        };
+    }
+
+    private static bool TryResolveItemSetByName(ItemManager itemManager, string itemName, out ItemManager.ItemSet itemSet)
+    {
+        itemSet = default;
+        if (itemManager == null || string.IsNullOrWhiteSpace(itemName))
+        {
+            return false;
+        }
+
+        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        if (definitions != null)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition == null
+                    || (!NameMatches(definition.itemName, itemName) && !NameMatches(definition.name, itemName)))
+                {
+                    continue;
+                }
+
+                itemSet = new ItemManager.ItemSet
+                {
+                    id = definition.id,
+                    name = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName,
+                    portableMesh = definition.portableMesh,
+                    portableMat = definition.portableMat,
+                    icon = definition.icon,
+                    size = (int)definition.size
+                };
+                return true;
+            }
+        }
+
+        List<ItemManager.ItemSet> itemSets = itemManager.ItemSets;
+        if (itemSets != null)
+        {
+            for (int i = 0; i < itemSets.Count; i++)
+            {
+                ItemManager.ItemSet candidate = itemSets[i];
+                if (!NameMatches(candidate.name, itemName))
+                {
+                    continue;
+                }
+
+                itemSet = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool NameMatches(string value, string target)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && !string.IsNullOrWhiteSpace(target)
+            && string.Equals(value.Trim(), target.Trim(), System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ResolveDefaultItemSlotReferences()
+    {
+        if (defaultItemSlot == null)
+        {
+            defaultItemSlot = new List<ItemSlot>();
+        }
+
+        if (defaultItem == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < defaultItem.Count; i++)
+        {
+            while (defaultItemSlot.Count <= i)
+            {
+                defaultItemSlot.Add(null);
+            }
+
+            if (defaultItemSlot[i] != null || defaultItem[i] == null)
+            {
+                continue;
+            }
+
+            ItemSlot slot = defaultItem[i].GetComponent<ItemSlot>();
+            if (slot == null)
+            {
+                slot = defaultItem[i].GetComponentInChildren<ItemSlot>(true);
+            }
+
+            defaultItemSlot[i] = slot;
         }
     }
 

@@ -59,6 +59,9 @@ public class PlayerController : MonoBehaviour
     private readonly List<Block> singleFocusedBlockBuffer = new List<Block>(1);
     private readonly List<Block> focusRemovalBuffer = new List<Block>();
     private Rigidbody cachedRigidbody;
+    private CapsuleCollider cachedCapsuleCollider;
+    private Vector3 defaultCapsuleColliderCenter;
+    private bool hasDefaultCapsuleColliderCenter;
     private Vector3 pendingMoveDirection;
     private const float MoveSweepBuffer = 0.01f;
     private const float ConveyorCarrySweepBuffer = 0f;
@@ -151,6 +154,7 @@ public class PlayerController : MonoBehaviour
     {
         player = GetComponent<Player>();
         cachedRigidbody = GetComponent<Rigidbody>();
+        CacheDefaultCapsuleColliderCenter();
         if (cachedRigidbody != null && cachedRigidbody.interpolation == RigidbodyInterpolation.None)
         {
             cachedRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
@@ -354,6 +358,7 @@ public class PlayerController : MonoBehaviour
             out Block standingConveyorBlock);
         if (hasRawCarryDelta)
         {
+            rawCarryDelta = FlattenPlayerConveyorCarryDelta(rawCarryDelta);
             targetCarryVelocity = rawCarryDelta / Mathf.Max(Time.fixedDeltaTime, 0.0001f);
             if (standingConveyorBlock != null
                 && standingConveyorBlock.IsCornerConveyorBlock()
@@ -373,10 +378,13 @@ public class PlayerController : MonoBehaviour
             currentConveyorCarryVelocity,
             targetCarryVelocity,
             carryRate * Time.fixedDeltaTime);
+        currentConveyorCarryVelocity = FlattenPlayerConveyorCarryDelta(currentConveyorCarryVelocity);
 
         Vector3 manualDelta = manualVelocity * Time.fixedDeltaTime;
         Vector3 carryDelta = currentConveyorCarryVelocity * Time.fixedDeltaTime;
         Vector3 totalDelta = manualDelta + carryDelta;
+
+        ApplyStandingColliderOffset(ResolveStandingConveyorVisualOffset());
 
         if (manualDelta.sqrMagnitude <= 0.0001f)
         {
@@ -416,9 +424,17 @@ public class PlayerController : MonoBehaviour
         MoveRigidbody(totalDelta, MoveSweepBuffer);
     }
 
+    private static Vector3 FlattenPlayerConveyorCarryDelta(Vector3 delta)
+    {
+        // The player's visible/collision height is handled by Body and Capsule offsets.
+        // Keep Rigidbody motion planar so descending 2F ramps do not sweep downward into the ground.
+        delta.y = 0f;
+        return delta;
+    }
+
     private void LateUpdate()
     {
-        ApplyStandingVisualOffset();
+        ApplyStandingOffset();
     }
 
     private void MoveRigidbody(Vector3 delta)
@@ -440,7 +456,7 @@ public class PlayerController : MonoBehaviour
         Vector3 startPosition = cachedRigidbody.position;
         Vector3 finalMove = Vector3.zero;
 
-        if (cachedRigidbody.SweepTest(direction, out RaycastHit hit, distance + sweepBuffer, QueryTriggerInteraction.Ignore))
+        if (TryGetBlockingSweepHit(direction, distance + sweepBuffer, out RaycastHit hit))
         {
             float allowedDistance = Mathf.Max(0f, hit.distance - sweepBuffer);
             if (allowedDistance > 0f)
@@ -457,7 +473,7 @@ public class PlayerController : MonoBehaviour
                 {
                     Vector3 slideDirection = slide.normalized;
                     float slideDistance = slide.magnitude;
-                    if (!cachedRigidbody.SweepTest(slideDirection, out _, slideDistance + sweepBuffer, QueryTriggerInteraction.Ignore))
+                    if (!TryGetBlockingSweepHit(slideDirection, slideDistance + sweepBuffer, out _))
                     {
                         finalMove += slide;
                     }
@@ -476,6 +492,152 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private bool TryGetBlockingSweepHit(Vector3 direction, float distance, out RaycastHit blockingHit)
+    {
+        blockingHit = default;
+        if (cachedRigidbody == null || distance <= 0f)
+        {
+            return false;
+        }
+
+        RaycastHit[] hits = cachedRigidbody.SweepTestAll(
+            direction,
+            distance,
+            QueryTriggerInteraction.Ignore);
+        if (hits == null || hits.Length == 0)
+        {
+            return false;
+        }
+
+        System.Array.Sort(hits, CompareSweepHitsByDistance);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+            if (hit.collider == null || ShouldIgnorePlayerMovementSweepHit(hit, direction))
+            {
+                continue;
+            }
+
+            blockingHit = hit;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int CompareSweepHitsByDistance(RaycastHit left, RaycastHit right)
+    {
+        return left.distance.CompareTo(right.distance);
+    }
+
+    private bool ShouldIgnorePlayerMovementSweepHit(RaycastHit hit, Vector3 direction)
+    {
+        Pipe pipe = hit.collider != null ? hit.collider.GetComponentInParent<Pipe>() : null;
+        if (pipe == null
+            || !TryResolvePipeBridgeBelt(pipe, out ConvayorBelt2F belt2F)
+            || belt2F == null)
+        {
+            return false;
+        }
+
+        Vector3 currentPosition = cachedRigidbody != null ? cachedRigidbody.position : transform.position;
+        Vector3 hitProbePosition = hit.point;
+        hitProbePosition.y = currentPosition.y;
+
+        Vector3 forwardProbePosition = currentPosition;
+        if (direction.sqrMagnitude > 0.0001f)
+        {
+            forwardProbePosition += direction.normalized * Mathf.Max(0.05f, hit.distance);
+        }
+
+        return IsPositionOnPlayerBelt2FPath(currentPosition, belt2F)
+               || IsPositionOnPlayerBelt2FPath(forwardProbePosition, belt2F)
+               || IsPositionOnPlayerBelt2FPath(hitProbePosition, belt2F);
+    }
+
+    private bool TryResolvePipeBridgeBelt(Pipe pipe, out ConvayorBelt2F belt2F)
+    {
+        belt2F = null;
+        if (pipe == null)
+        {
+            return false;
+        }
+
+        Vector2Int pipeCoordinate = pipe.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
+            ? anchorCoordinate
+            : new Vector2Int(
+                Mathf.RoundToInt(pipe.transform.position.x),
+                Mathf.RoundToInt(pipe.transform.position.z));
+
+        return ConvayorBelt2F.TryFindCoveringBelt(pipeCoordinate, out belt2F)
+               && belt2F != null
+               && belt2F.IsBridgeCenterCoordinate(pipeCoordinate);
+    }
+
+    private bool IsPositionOnPlayerBelt2FPath(Vector3 worldPosition, ConvayorBelt2F belt2F)
+    {
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null || belt2F == null)
+        {
+            return false;
+        }
+
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(worldPosition.x),
+            Mathf.RoundToInt(worldPosition.z));
+        float maxDistanceSqr = ConveyorStandingHandoffDistance * ConveyorStandingHandoffDistance;
+        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        {
+            for (int offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (!terrain.TryGetLoadedBlock(coordinate, out Block block)
+                    || block == null
+                    || !ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F coveringBelt)
+                    || !ReferenceEquals(coveringBelt, belt2F)
+                    || !block.TryGetConveyorStandingDistanceSqr(worldPosition, out float distanceSqr)
+                    || distanceSqr > maxDistanceSqr)
+                {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void CacheDefaultCapsuleColliderCenter()
+    {
+        if (hasDefaultCapsuleColliderCenter)
+        {
+            return;
+        }
+
+        cachedCapsuleCollider = GetComponent<CapsuleCollider>();
+        if (cachedCapsuleCollider == null)
+        {
+            return;
+        }
+
+        defaultCapsuleColliderCenter = cachedCapsuleCollider.center;
+        hasDefaultCapsuleColliderCenter = true;
+    }
+
+    private void ApplyStandingColliderOffset(float targetOffset)
+    {
+        CacheDefaultCapsuleColliderCenter();
+        if (!hasDefaultCapsuleColliderCenter || cachedCapsuleCollider == null)
+        {
+            return;
+        }
+
+        Vector3 center = defaultCapsuleColliderCenter;
+        center.y += Mathf.Max(0f, targetOffset);
+        cachedCapsuleCollider.center = center;
+    }
+
     private void CacheDefaultBodyLocalPosition()
     {
         Transform bodyTransform = player != null ? player.BodyTransform : null;
@@ -488,9 +650,11 @@ public class PlayerController : MonoBehaviour
         hasDefaultBodyLocalPosition = true;
     }
 
-    private void ApplyStandingVisualOffset()
+    private void ApplyStandingOffset()
     {
         CacheDefaultBodyLocalPosition();
+        float targetOffset = ResolveStandingConveyorVisualOffset();
+        ApplyStandingColliderOffset(targetOffset);
 
         Transform bodyTransform = player != null ? player.BodyTransform : null;
         if (!hasDefaultBodyLocalPosition || bodyTransform == null || bodyTransform == transform)
@@ -498,7 +662,6 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        float targetOffset = ResolveStandingConveyorVisualOffset();
         float targetY = defaultBodyLocalPosition.y + targetOffset;
         Vector3 localPosition = bodyTransform.localPosition;
 
@@ -548,9 +711,14 @@ public class PlayerController : MonoBehaviour
 
     private void RestoreStandingVisualOffset()
     {
+        ApplyStandingColliderOffset(0f);
+
         Transform bodyTransform = player != null ? player.BodyTransform : null;
         if (!hasDefaultBodyLocalPosition || bodyTransform == null || bodyTransform == transform)
         {
+            standingVisualOffsetVelocity = 0f;
+            hasStandingConveyorCoordinate = false;
+            standingConveyorCoordinate = default;
             return;
         }
 

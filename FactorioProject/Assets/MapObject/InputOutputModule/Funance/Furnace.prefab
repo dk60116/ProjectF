@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Funance
-  objId: 7
+  objId: 9
   itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -67,6 +67,7 @@ MonoBehaviour:
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
+  storedFluidLiters: 0
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
@@ -124,6 +125,7 @@ MonoBehaviour:
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []
   runtimeOutputCoordinates: []
+  runtimePipeInputCoordinates: []
   runtimeGridCoordinates: []
   runtimeFocusCoordinates: []
   storedEnergy: 0

@@ -18,6 +18,7 @@ public partial class BlockStateStore : MonoBehaviour
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
+        public float storedFluidLiters;
 
         public InstallationSaveState Clone()
         {
@@ -34,7 +35,8 @@ public partial class BlockStateStore : MonoBehaviour
                 lastBackgroundSimulationTicks = lastBackgroundSimulationTicks,
                 boxIsOpen = boxIsOpen,
                 itemFilterMaskInitialized = itemFilterMaskInitialized,
-                itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>())
+                itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>()),
+                storedFluidLiters = storedFluidLiters
             };
         }
     }
@@ -705,6 +707,7 @@ public partial class BlockStateStore : MonoBehaviour
 
         state.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         state.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
+        state.storedFluidLiters = installationObject.StoredFluidLiters;
 
         return true;
     }

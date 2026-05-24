@@ -349,7 +349,8 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         IReadOnlyList<AreaMarkerSpawnRequest> markerRequests,
         bool forceVisible = false,
         int sortingOrderOffset = 0,
-        bool renderOnTop = false)
+        bool renderOnTop = false,
+        Transform markerParent = null)
     {
         ReleaseMarkers();
         areaMarkerPool = pool;
@@ -378,6 +379,11 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
             marker.SetIcon(request.Icon, request.IconRotationZ);
             marker.SetSortingOrderOffset(markerSortingOrderOffset);
             marker.SetRenderOnTop(renderMarkersOnTop);
+            if (markerParent != null)
+            {
+                marker.transform.SetParent(markerParent, true);
+            }
+
             activeMarkers.Add(marker);
         }
 

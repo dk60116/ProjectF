@@ -3,6 +3,7 @@ Shader "Custom/InstallGridOverlay"
     Properties
     {
         _Color("Tint", Color) = (1,1,1,1)
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("ZTest", Float) = 4
     }
 
     SubShader
@@ -18,7 +19,7 @@ Shader "Custom/InstallGridOverlay"
         Cull Off
         Lighting Off
         ZWrite Off
-        ZTest LEqual
+        ZTest [_ZTest]
         Blend SrcAlpha OneMinusSrcAlpha
 
         Pass

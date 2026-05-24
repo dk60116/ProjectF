@@ -12,7 +12,8 @@ public enum InstallationMapFilter
     Ore = 1 << 2,
     ItemArea = 1 << 3,
     Tree = 1 << 4,
-    WaterOutline = 1 << 5
+    WaterOutline = 1 << 5,
+    Pipe = 1 << 6
 }
 
 public enum InstallationFacingDirection
@@ -27,6 +28,8 @@ public class InstallationObject : MapObject
 {
     public const InstallationMapFilter DefaultMapFilter =
         InstallationMapFilter.Ground | InstallationMapFilter.Ore | InstallationMapFilter.WaterOutline;
+    private const float FluidInRateSampleSeconds = 0.25f;
+    private const float FluidInRateIdleResetSeconds = 0.75f;
 
     [SerializeField]
     private Animator animator;
@@ -51,6 +54,13 @@ public class InstallationObject : MapObject
     private List<Vector2Int> runtimeOccupiedCoordinates = new List<Vector2Int>();
     [SerializeField, HideInInspector]
     private long runtimePlacementSequence;
+    [SerializeField, HideInInspector, Min(0f)]
+    private float storedFluidLiters;
+
+    private float fluidInSampleLiters;
+    private float fluidInSampleStartTime = -1f;
+    private float fluidInLastReceiveTime = -1f;
+    private float fluidInRateLitersPerSecond;
 
     public InstallationMapFilter MapFilter
     {
@@ -64,6 +74,28 @@ public class InstallationObject : MapObject
     public int RuntimeQuarterTurns => runtimeQuarterTurns;
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
     public long RuntimePlacementSequence => runtimePlacementSequence;
+    public float StoredFluidLiters => Mathf.Max(0f, storedFluidLiters);
+    public float FluidStorageCapacityLiters
+    {
+        get
+        {
+            ItemDefinition definition = ResolveFluidStorageDefinition();
+            return definition != null && definition.storesFluid
+                ? Mathf.Max(0f, definition.fluidStorageLiters)
+                : 0f;
+        }
+    }
+    public float AvailableFluidStorageLiters => Mathf.Max(0f, FluidStorageCapacityLiters - StoredFluidLiters);
+    public bool CanStoreFluid => FluidStorageCapacityLiters > 0f;
+    public bool HasFluidStorageSpace => AvailableFluidStorageLiters > 0.0001f;
+    public float FluidInLitersPerSecond
+    {
+        get
+        {
+            RefreshFluidInRate();
+            return Mathf.Max(0f, fluidInRateLitersPerSecond);
+        }
+    }
     public static float GlobalMaxFocusActivationRadius
     {
         get
@@ -164,8 +196,140 @@ public class InstallationObject : MapObject
         }
 
         ApplyItemFilterMask(null, false);
+        storedFluidLiters = 0f;
+        ClearFluidInRate();
         transform.localPosition = Vector3.zero;
         RefreshInstalledDirectionFromCurrentTransform();
+    }
+
+    public bool TryAddFluidLiters(float requestedLiters, out float acceptedLiters)
+    {
+        acceptedLiters = 0f;
+        if (requestedLiters <= 0f)
+        {
+            return false;
+        }
+
+        float capacity = FluidStorageCapacityLiters;
+        if (capacity <= 0f)
+        {
+            storedFluidLiters = 0f;
+            return false;
+        }
+
+        storedFluidLiters = Mathf.Clamp(storedFluidLiters, 0f, capacity);
+        float availableLiters = capacity - storedFluidLiters;
+        if (availableLiters <= 0.0001f)
+        {
+            return false;
+        }
+
+        acceptedLiters = Mathf.Min(requestedLiters, availableLiters);
+        storedFluidLiters += acceptedLiters;
+        RecordFluidIn(acceptedLiters);
+        return acceptedLiters > 0f;
+    }
+
+    public bool TryConsumeFluidLiters(float requestedLiters, out float consumedLiters)
+    {
+        consumedLiters = 0f;
+        if (requestedLiters <= 0f)
+        {
+            return false;
+        }
+
+        float capacity = FluidStorageCapacityLiters;
+        if (capacity <= 0f)
+        {
+            storedFluidLiters = 0f;
+            return false;
+        }
+
+        storedFluidLiters = Mathf.Clamp(storedFluidLiters, 0f, capacity);
+        if (storedFluidLiters <= 0.0001f)
+        {
+            return false;
+        }
+
+        consumedLiters = Mathf.Min(requestedLiters, storedFluidLiters);
+        storedFluidLiters = Mathf.Max(0f, storedFluidLiters - consumedLiters);
+        return consumedLiters > 0f;
+    }
+
+    public void SetStoredFluidLiters(float liters)
+    {
+        float capacity = FluidStorageCapacityLiters;
+        storedFluidLiters = capacity > 0f
+            ? Mathf.Clamp(liters, 0f, capacity)
+            : 0f;
+    }
+
+    private void RecordFluidIn(float liters)
+    {
+        if (liters <= 0f || !Application.isPlaying)
+        {
+            return;
+        }
+
+        float now = Time.time;
+        if (fluidInSampleStartTime < 0f
+            || fluidInLastReceiveTime < 0f
+            || now - fluidInLastReceiveTime > FluidInRateIdleResetSeconds)
+        {
+            fluidInSampleStartTime = now;
+            fluidInSampleLiters = 0f;
+            fluidInRateLitersPerSecond = 0f;
+        }
+
+        fluidInSampleLiters += liters;
+        fluidInLastReceiveTime = now;
+        RefreshFluidInRate(now);
+    }
+
+    private void RefreshFluidInRate()
+    {
+        if (!Application.isPlaying)
+        {
+            ClearFluidInRate();
+            return;
+        }
+
+        RefreshFluidInRate(Time.time);
+    }
+
+    private void RefreshFluidInRate(float now)
+    {
+        if (fluidInLastReceiveTime < 0f
+            || now - fluidInLastReceiveTime > FluidInRateIdleResetSeconds)
+        {
+            ClearFluidInRate(now);
+            return;
+        }
+
+        float elapsed = now - fluidInSampleStartTime;
+        if (elapsed < FluidInRateSampleSeconds)
+        {
+            return;
+        }
+
+        fluidInRateLitersPerSecond = elapsed > 0.0001f
+            ? fluidInSampleLiters / elapsed
+            : 0f;
+        fluidInSampleLiters = 0f;
+        fluidInSampleStartTime = now;
+    }
+
+    private void ClearFluidInRate()
+    {
+        ClearFluidInRate(-1f);
+    }
+
+    private void ClearFluidInRate(float sampleStartTime)
+    {
+        fluidInSampleLiters = 0f;
+        fluidInSampleStartTime = sampleStartTime;
+        fluidInLastReceiveTime = -1f;
+        fluidInRateLitersPerSecond = 0f;
     }
 
     protected virtual void OnEnable()
@@ -227,6 +391,37 @@ public class InstallationObject : MapObject
             : InstallationFacingDirection.NegativeZ;
     }
 
+    private ItemDefinition ResolveFluidStorageDefinition()
+    {
+        if (BoundItemDefinition != null)
+        {
+            return BoundItemDefinition;
+        }
+
+        int itemId = ResolveItemId();
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return null;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
 #if UNITY_EDITOR
     protected virtual void OnValidate()
     {
@@ -239,6 +434,8 @@ public class InstallationObject : MapObject
         {
             installationFocusRadius = 0f;
         }
+
+        SetStoredFluidLiters(storedFluidLiters);
 
         globalMaxFocusActivationRadiusDirty = true;
         RefreshInstalledDirectionFromCurrentTransform();

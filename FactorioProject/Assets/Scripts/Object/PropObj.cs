@@ -28,6 +28,8 @@ public class PropObj : BaseObject
 
     public int ResolvedItemId => ResolveItemId();
 
+    public ItemDefinition BoundItemDefinition => itemDefinition;
+
     public int ResolveItemId()
     {
         if (itemDefinition != null)

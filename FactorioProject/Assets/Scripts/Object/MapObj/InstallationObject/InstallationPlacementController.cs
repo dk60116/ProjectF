@@ -9,12 +9,15 @@ using UnityEngine.UI;
 public class InstallationPlacementController : MonoBehaviour
 {
     private const string InstallGridOverlayShaderName = "Custom/InstallGridOverlay";
-    private const int ConveyorStackStateSentinel = -1000000002;
+    private const string PipePassMarkerIconAssetPath = "Assets/Image/UI/Item/Fluid.png";
     private const int InstallPreviewAreaMarkerSortingOrderOffset = 6000;
     private const int Belt2FDefaultFootprintWidth = 1;
     private const int Belt2FDefaultFootprintLength = 3;
-    private const int WaterPumpItemId = 27;
     private const float ConveyorDebugArrowWorldLift = 0.55f;
+    private const float PackedPortableMoveInterval = 0.1f;
+    private const int InstallGridViewportPaddingCells = 3;
+    private const float PlacementRotationExactDotThreshold = 0.9999f;
+    private const float PlacementRotationNearestDotThreshold = 0.7f;
 
     [SerializeField]
     private Button installButton;
@@ -38,8 +41,6 @@ public class InstallationPlacementController : MonoBehaviour
     private Button mapEditUndoButton;
     [SerializeField]
     private Color installPreviewTint = new Color(0.45f, 0.95f, 1f, 0.85f);
-    [SerializeField, Min(0f)]
-    private float installPreviewVerticalOffset = 0.05f;
     [SerializeField]
     private Color installGridColor = new Color(1f, 1f, 1f, 0.55f);
     [SerializeField]
@@ -64,8 +65,6 @@ public class InstallationPlacementController : MonoBehaviour
     private float installGridConveyorArrowHeadLength = 0.12f;
     [SerializeField, Min(0.03f)]
     private float installGridConveyorArrowHeadWidth = 0.16f;
-    [SerializeField, Min(0.05f)]
-    private float installGridRefreshInterval = 0.35f;
     [SerializeField, Min(1f)]
     private float installRotateTapThreshold = 12f;
 
@@ -75,6 +74,8 @@ public class InstallationPlacementController : MonoBehaviour
     private Camera installPreviewCamera;
     private TerrainGenerator installPreviewTerrain;
     private AreaMarkerPool areaMarkerPool;
+    [SerializeField]
+    private Sprite pipePassMarkerIcon;
     private MaterialPropertyBlock installPreviewPropertyBlock;
     private bool waitForPointerReleaseAfterPreviewSpawn;
     private bool isPreviewPointerTracking;
@@ -88,10 +89,31 @@ public class InstallationPlacementController : MonoBehaviour
     private MeshRenderer installGridMeshRenderer;
     private Mesh installGridMesh;
     private Material installGridMaterial;
-    private float installGridRefreshTimer;
     private Vector2Int installGridMinCoordinate;
     private Vector2Int installGridMaxCoordinate;
+    private bool installGridBoundsInitialized;
+    private bool installGridDirty = true;
+    private bool installGridLastShowFullGrid;
+    private bool installGridLastShowConveyorDebugOnly;
+    private readonly List<Vector3> installGridVertices = new List<Vector3>(4096);
+    private readonly List<int> installGridTriangles = new List<int>(6144);
+    private readonly List<Color> installGridColors = new List<Color>(4096);
+    private readonly RaycastHit[] pointerRaycastHits = new RaycastHit[128];
+    private EventSystem pointerRaycastEventSystem;
+    private PointerEventData pointerRaycastEventData;
+    private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>(16);
+    private readonly List<InputOutputModule> runtimeGridModuleScratch = new List<InputOutputModule>(4);
+    private readonly List<InputOutputModule> runtimeAreaModuleScratch = new List<InputOutputModule>(4);
+    private readonly List<PipeAreaBlockCandidate> pipeAreaBlockCandidateScratchA =
+        new List<PipeAreaBlockCandidate>(4);
+    private readonly List<PipeAreaBlockCandidate> pipeAreaBlockCandidateScratchB =
+        new List<PipeAreaBlockCandidate>(4);
+    private readonly List<PipeAreaBlockCandidate> pipeAreaBlockCandidateScratchC =
+        new List<PipeAreaBlockCandidate>(4);
     private readonly List<MapObject> installPreviewInstances = new List<MapObject>();
+    private readonly List<MapObject> cleanupMapObjectScratch = new List<MapObject>(32);
+    private readonly List<Wall> cleanupWallScratch = new List<Wall>(16);
+    private readonly List<Pipe> cleanupPipeScratch = new List<Pipe>(16);
     private readonly Dictionary<MapObject, int> installPreviewQuarterTurnsByPreview = new Dictionary<MapObject, int>();
     private readonly Dictionary<MapObject, int> installPreviewFenceDoorStandaloneQuarterTurnsByPreview = new Dictionary<MapObject, int>();
     private readonly Dictionary<MapObject, Quaternion> installPreviewBaseRotationsByPreview = new Dictionary<MapObject, Quaternion>();
@@ -120,6 +142,13 @@ public class InstallationPlacementController : MonoBehaviour
     private bool hasLastInstalledQuarterTurns;
     private int lastInstalledQuarterTurns;
     private bool isRefreshingAutomaticFenceCornerPreviews;
+    private bool installButtonHierarchySearchComplete;
+    private MapObject cachedInstallPreviewMovePreview;
+    private Block cachedInstallPreviewMoveBlock;
+    private int cachedInstallPreviewMoveQuarterTurns;
+    private int cachedInstallPreviewMovePreviewCount;
+    private bool cachedInstallPreviewMovePreserveRotation;
+    private bool cachedInstallPreviewMoveResult;
 
     private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
@@ -131,6 +160,50 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int.right,
         Vector2Int.down,
         Vector2Int.left
+    };
+    private static readonly Vector2Int[] PipeCardinalDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] InputEnergyRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.InputEnergy,
+        InputOutputModule.RectGridBlockType.PipeInputEnergy,
+        InputOutputModule.RectGridBlockType.DoubleEnergy
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] DirectInputEnergyRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.InputEnergy,
+        InputOutputModule.RectGridBlockType.DoubleEnergy
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] InputItemRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.InputItem,
+        InputOutputModule.RectGridBlockType.PipeInputItem,
+        InputOutputModule.RectGridBlockType.DoubleInputItem
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] DirectInputItemRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.InputItem,
+        InputOutputModule.RectGridBlockType.DoubleInputItem
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] OutputRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.Output,
+        InputOutputModule.RectGridBlockType.PipeOutputItem,
+        InputOutputModule.RectGridBlockType.DoublePipeOutputItem
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] PipeInputRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.PipeInput
+    };
+    private static readonly InputOutputModule.RectGridBlockType[] DirectOutputRectGridBlockTypes =
+    {
+        InputOutputModule.RectGridBlockType.Output,
+        InputOutputModule.RectGridBlockType.DoublePipeOutputItem
     };
 
     private sealed class InstallationEditSession
@@ -149,6 +222,7 @@ public class InstallationPlacementController : MonoBehaviour
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
+        public float storedFluidLiters;
     }
 
     private sealed class AreaAttachedBoxState
@@ -179,17 +253,8 @@ public class InstallationPlacementController : MonoBehaviour
         public int itemId;
         public Vector2Int dropCoordinate;
         public PortableObject portableObject;
+        public bool packedItemStoredInInventory;
         public Dictionary<Vector2Int, List<int>> pendingDroppedBlockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
-    }
-
-    private sealed class ConveyorChangeInfo
-    {
-        public Vector2Int coordinate;
-        public List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
-        public Vector2Int inputDirection;
-        public Vector2Int outputDirection;
-        public Quaternion rotation = Quaternion.identity;
-        public bool isCornerVariant;
     }
 
     private sealed class InstallPreviewPlacementPlan
@@ -243,6 +308,51 @@ public class InstallationPlacementController : MonoBehaviour
         public Quaternion rotation = Quaternion.identity;
     }
 
+    private sealed class PlacementSnapshot
+    {
+        public MapObject mapObject;
+        public Quaternion rotation = Quaternion.identity;
+        public Vector2Int anchorCoordinate;
+        public int quarterTurns;
+    }
+
+    private struct PipeAreaBlockCandidate
+    {
+        public PlacementSnapshot snapshot;
+        public InputOutputModule.RectGridBlockType blockType;
+
+        public PipeAreaBlockCandidate(
+            PlacementSnapshot snapshot,
+            InputOutputModule.RectGridBlockType blockType)
+        {
+            this.snapshot = snapshot;
+            this.blockType = blockType;
+        }
+    }
+
+    private struct RectGridPlacementCell
+    {
+        public InputOutputModule.RectGridBlockPlacement placement;
+        public InputOutputModule.RectGridBlockType blockType;
+        public Vector2Int localOffset;
+        public Vector2Int rotatedOffset;
+        public Vector2Int coordinate;
+
+        public RectGridPlacementCell(
+            InputOutputModule.RectGridBlockPlacement placement,
+            InputOutputModule.RectGridBlockType blockType,
+            Vector2Int localOffset,
+            Vector2Int rotatedOffset,
+            Vector2Int coordinate)
+        {
+            this.placement = placement;
+            this.blockType = blockType;
+            this.localOffset = localOffset;
+            this.rotatedOffset = rotatedOffset;
+            this.coordinate = coordinate;
+        }
+    }
+
     private void Awake()
     {
         ResolveInstallButtons();
@@ -269,14 +379,14 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        UpdateInstallGrid(Time.deltaTime);
-
         if (!IsInstallationModeActive())
         {
             if (mapEditModeActive)
             {
                 UpdateMapEditSelectionInput();
             }
+
+            UpdateInstallGrid();
             return;
         }
 
@@ -284,6 +394,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             if (IsPrimaryPointerHeld())
             {
+                UpdateInstallGrid();
                 return;
             }
 
@@ -291,6 +402,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         UpdateInstallPreviewPointerInput();
+        UpdateInstallGrid();
     }
 
     private bool TryHandleModeCancelInput()
@@ -355,6 +467,8 @@ public class InstallationPlacementController : MonoBehaviour
                              && installButton != null;
         if (isSameBinding)
         {
+            BindInstallButtons();
+            RefreshInstallButton();
             return;
         }
 
@@ -363,6 +477,7 @@ public class InstallationPlacementController : MonoBehaviour
         installCancelButton = cancelButton;
         installRotationButton = rotationButton;
         installCompleteButton = completeButton;
+        installButtonHierarchySearchComplete = false;
         ResolveInstallButtons();
         BindInstallButtons();
         RefreshInstallButton();
@@ -384,6 +499,13 @@ public class InstallationPlacementController : MonoBehaviour
                              && mapEditButton != null;
         if (isSameBinding)
         {
+            BindButton(mapEditButton, HandleMapEditButtonClicked);
+            BindButton(mapEditCancelButton, HandleInstallCancelClicked);
+            BindButton(mapEditRotationButton, HandleInstallRotationClicked);
+            BindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+            BindButton(mapEditPackButton, HandleMapEditPackClicked);
+            BindButton(mapEditUndoButton, HandleMapEditUndoClicked);
+            RefreshMapEditButtonState();
             return;
         }
 
@@ -399,6 +521,7 @@ public class InstallationPlacementController : MonoBehaviour
         mapEditCompleteButton = completeButton;
         mapEditPackButton = packButton;
         mapEditUndoButton = undoButton;
+        installButtonHierarchySearchComplete = false;
         ResolveInstallButtons();
         BindButton(mapEditButton, HandleMapEditButtonClicked);
         BindButton(mapEditCancelButton, HandleInstallCancelClicked);
@@ -415,6 +538,49 @@ public class InstallationPlacementController : MonoBehaviour
         if (installButton == null && playerHud != null && playerHud.InstallButton != null)
         {
             installButton = playerHud.InstallButton;
+        }
+
+        if (playerHud != null)
+        {
+            if (installCancelButton == null)
+            {
+                installCancelButton = playerHud.InstallCancelButton;
+            }
+
+            if (installRotationButton == null)
+            {
+                installRotationButton = playerHud.InstallRotationButton;
+            }
+
+            if (installCompleteButton == null)
+            {
+                installCompleteButton = playerHud.InstallCompleteButton;
+            }
+
+            if (mapEditButton == null)
+            {
+                mapEditButton = playerHud.MapEditButton;
+            }
+
+            if (mapEditCancelButton == null)
+            {
+                mapEditCancelButton = playerHud.MapEditCancelButton;
+            }
+
+            if (mapEditRotationButton == null)
+            {
+                mapEditRotationButton = playerHud.MapEditRotationButton;
+            }
+
+            if (mapEditCompleteButton == null)
+            {
+                mapEditCompleteButton = playerHud.MapEditCompleteButton;
+            }
+        }
+
+        if (installButtonHierarchySearchComplete)
+        {
+            return;
         }
 
         Button[] buttons = GetComponentsInChildren<Button>(true);
@@ -444,6 +610,7 @@ public class InstallationPlacementController : MonoBehaviour
             if (installRotationButton == null)
             {
                 if ((playerHud != null && playerHud.InstallRotationButton == candidate)
+                    || candidate.name == "RotateButton"
                     || candidate.name == "RotationButton"
                     || candidate.name == "InstallRotationButton")
                 {
@@ -482,23 +649,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        if (playerHud != null)
-        {
-            if (mapEditCancelButton == null)
-            {
-                mapEditCancelButton = playerHud.MapEditCancelButton;
-            }
-
-            if (mapEditRotationButton == null)
-            {
-                mapEditRotationButton = playerHud.MapEditRotationButton;
-            }
-
-            if (mapEditCompleteButton == null)
-            {
-                mapEditCompleteButton = playerHud.MapEditCompleteButton;
-            }
-        }
+        installButtonHierarchySearchComplete = true;
     }
 
     private void UpdateInstallButtonVisibility(PlayerBag handBag)
@@ -1557,6 +1708,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             installPreviewPropertyBlock.Clear();
+            renderer.GetPropertyBlock(installPreviewPropertyBlock);
             bool hasColorProperty = false;
             if (sharedMaterial.HasProperty(BaseColorPropertyId))
             {
@@ -1579,6 +1731,28 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 renderer.SetPropertyBlock(installPreviewPropertyBlock);
             }
+        }
+
+        RefreshInstallPreviewConveyorShaderProperties(preview);
+    }
+
+    private static void RefreshInstallPreviewConveyorShaderProperties(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return;
+        }
+
+        ConveyorBelt[] conveyorBelts = preview.GetComponentsInChildren<ConveyorBelt>(true);
+        for (int i = 0; i < conveyorBelts.Length; i++)
+        {
+            ConveyorBelt conveyorBelt = conveyorBelts[i];
+            if (conveyorBelt == null)
+            {
+                continue;
+            }
+
+            conveyorBelt.RefreshBeltTopShaderProperties();
         }
     }
 
@@ -1657,7 +1831,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        packedInstallationHistory.Push(new PackedInstallationSession
+        PackedInstallationSession packedSession = new PackedInstallationSession
         {
             editSession = editSession,
             anchorCoordinate = targetAnchorCoordinate,
@@ -1667,10 +1841,12 @@ public class InstallationPlacementController : MonoBehaviour
             dropCoordinate = targetAnchorCoordinate,
             portableObject = null,
             pendingDroppedBlockStatesByCanonicalOffset = BuildPackedInstallationDroppedBlockStates(editSession)
-        });
+        };
+        packedInstallationHistory.Push(packedSession);
 
         ClearEditableInstallationSelection();
         ClearInstallPreview();
+        RefreshInstalledConnectorVariantsAfterRemoval(editSession, targetAnchorCoordinate, targetQuarterTurns);
         return true;
     }
 
@@ -1688,7 +1864,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (packedSession.portableObject != null && !TryRemovePackedPortable(packedSession))
+        if (!TryRemovePackedSessionItem(packedSession))
         {
             return false;
         }
@@ -1767,13 +1943,54 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private bool TryRemovePackedSessionItem(PackedInstallationSession packedSession)
+    {
+        if (packedSession == null)
+        {
+            return true;
+        }
+
+        if (packedSession.packedItemStoredInInventory && !TryRemovePackedInventoryItem(packedSession))
+        {
+            return false;
+        }
+
+        if (packedSession.portableObject == null)
+        {
+            return true;
+        }
+
+        return TryRemovePackedPortable(packedSession);
+    }
+
+    private bool TryRemovePackedInventoryItem(PackedInstallationSession packedSession)
+    {
+        if (packedSession == null || !packedSession.packedItemStoredInInventory)
+        {
+            return true;
+        }
+
+        PlayerBag inventoryBag = GetPlayerInventoryBag();
+        if (inventoryBag == null || inventoryBag.RemoveItems(packedSession.itemId, 1) <= 0)
+        {
+            return false;
+        }
+
+        packedSession.packedItemStoredInInventory = false;
+        return true;
+    }
+
     private void FinalizePackedInstallationHistory()
     {
+        int packedPortableMoveIndex = 0;
         while (packedInstallationHistory.Count > 0)
         {
             PackedInstallationSession packedSession = packedInstallationHistory.Pop();
+            TryStorePackedItemInInventory(packedSession, ref packedPortableMoveIndex);
+            TransferPackedContentsToInventory(packedSession, ref packedPortableMoveIndex);
             ApplyPackedInstallationDroppedBlockStates(packedSession);
-            if (packedSession.itemId >= 0
+            if (!packedSession.packedItemStoredInInventory
+                && packedSession.itemId >= 0
                 && TryDropPackedPortable(
                     packedSession.itemId,
                     packedSession.dropCoordinate,
@@ -1798,6 +2015,191 @@ public class InstallationPlacementController : MonoBehaviour
                     packedSession.editSession.originalConveyorVariantKind),
                 terrain);
         }
+    }
+
+    private void TransferPackedContentsToInventory(PackedInstallationSession packedSession, ref int moveIndex)
+    {
+        TransferPackedBlockItemsToInventory(packedSession, ref moveIndex);
+        TransferPackedRobotArmHeldItemToInventory(packedSession, ref moveIndex);
+    }
+
+    private bool TryStorePackedItemInInventory(PackedInstallationSession packedSession, ref int moveIndex)
+    {
+        if (packedSession == null || packedSession.itemId < 0 || packedSession.packedItemStoredInInventory)
+        {
+            return false;
+        }
+
+        if (!TryAddPackedItemToInventory(
+                packedSession.itemId,
+                ResolvePackedItemMoveStartPosition(packedSession),
+                ref moveIndex))
+        {
+            return false;
+        }
+
+        packedSession.packedItemStoredInInventory = true;
+        return true;
+    }
+
+    private void TransferPackedBlockItemsToInventory(PackedInstallationSession packedSession, ref int moveIndex)
+    {
+        if (packedSession?.pendingDroppedBlockStatesByCanonicalOffset == null
+            || packedSession.pendingDroppedBlockStatesByCanonicalOffset.Count <= 0)
+        {
+            return;
+        }
+
+        List<Vector2Int> keys = new List<Vector2Int>(packedSession.pendingDroppedBlockStatesByCanonicalOffset.Keys);
+        for (int keyIndex = 0; keyIndex < keys.Count; keyIndex++)
+        {
+            Vector2Int key = keys[keyIndex];
+            if (!packedSession.pendingDroppedBlockStatesByCanonicalOffset.TryGetValue(key, out List<int> itemIds)
+                || itemIds == null
+                || itemIds.Count <= 0)
+            {
+                continue;
+            }
+
+            Vector2Int worldOffset = RotateFootprintOffset(key, packedSession.quarterTurns);
+            Vector2Int itemCoordinate = packedSession.anchorCoordinate + worldOffset;
+            Vector3 startPosition = ResolvePackedItemMoveStartPosition(packedSession, itemCoordinate);
+            for (int itemIndex = itemIds.Count - 1; itemIndex >= 0; itemIndex--)
+            {
+                int itemId = itemIds[itemIndex];
+                if (itemId < 0 || TryAddPackedItemToInventory(itemId, startPosition, ref moveIndex))
+                {
+                    itemIds.RemoveAt(itemIndex);
+                }
+            }
+
+            if (itemIds.Count <= 0)
+            {
+                packedSession.pendingDroppedBlockStatesByCanonicalOffset.Remove(key);
+            }
+        }
+    }
+
+    private void TransferPackedRobotArmHeldItemToInventory(PackedInstallationSession packedSession, ref int moveIndex)
+    {
+        RobotArm robotArm = packedSession?.editSession?.originalInstallation as RobotArm;
+        if (robotArm == null || !robotArm.HasHeldItem)
+        {
+            return;
+        }
+
+        int itemId = robotArm.HeldItemId;
+        if (itemId < 0)
+        {
+            return;
+        }
+
+        bool storedItem = TryAddPackedItemToInventory(itemId, robotArm.HeldItemWorldPosition, ref moveIndex)
+                          || TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _);
+        if (storedItem)
+        {
+            robotArm.TryClearHeldItemForPacking(itemId);
+        }
+    }
+
+    private bool TryAddPackedItemToInventory(int itemId, Vector3 startPosition, ref int moveIndex)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        PlayerBag inventoryBag = GetPlayerInventoryBag();
+        if (inventoryBag == null || !inventoryBag.TryAddObject(itemId, out PortableObject targetPortableObject))
+        {
+            return false;
+        }
+
+        PlayPackedPortableMoveToInventory(
+            itemId,
+            targetPortableObject,
+            startPosition,
+            moveIndex * PackedPortableMoveInterval);
+        moveIndex++;
+        return true;
+    }
+
+    private void PlayPackedPortableMoveToInventory(
+        int itemId,
+        PortableObject targetPortableObject,
+        Vector3 startPosition,
+        float delay)
+    {
+        if (targetPortableObject == null || itemId < 0)
+        {
+            return;
+        }
+
+        PortableObject movingPortableObject = Instantiate(
+            targetPortableObject,
+            startPosition,
+            targetPortableObject.transform.rotation);
+        if (movingPortableObject == null)
+        {
+            return;
+        }
+
+        movingPortableObject.name = $"{targetPortableObject.name}_PackedMove";
+        movingPortableObject.transform.SetParent(null, true);
+        movingPortableObject.transform.position = startPosition;
+        movingPortableObject.transform.localScale = targetPortableObject.transform.lossyScale;
+        if (!movingPortableObject.gameObject.activeSelf)
+        {
+            movingPortableObject.gameObject.SetActive(true);
+        }
+
+        if (!movingPortableObject.SetItem(itemId))
+        {
+            Destroy(movingPortableObject.gameObject);
+            return;
+        }
+
+        Vector3 targetPosition = targetPortableObject.transform.position;
+        movingPortableObject.MoveTo(
+            () => targetPortableObject != null ? targetPortableObject.transform.position : targetPosition,
+            Mathf.Max(0f, delay),
+            () => startPosition,
+            () =>
+            {
+                if (movingPortableObject != null)
+                {
+                    Destroy(movingPortableObject.gameObject);
+                }
+            },
+            false);
+    }
+
+    private Vector3 ResolvePackedItemMoveStartPosition(PackedInstallationSession packedSession)
+    {
+        if (packedSession?.editSession?.originalInstallation != null)
+        {
+            return packedSession.editSession.originalInstallation.transform.position;
+        }
+
+        return packedSession != null
+            ? ResolvePackedItemMoveStartPosition(packedSession, packedSession.dropCoordinate)
+            : Vector3.zero;
+    }
+
+    private Vector3 ResolvePackedItemMoveStartPosition(PackedInstallationSession packedSession, Vector2Int coordinate)
+    {
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain != null && terrain.TryGetLoadedBlock(coordinate, out Block block) && block != null)
+        {
+            return block.transform.position + Vector3.up * 0.35f;
+        }
+
+        if (packedSession?.editSession?.originalInstallation != null)
+        {
+            return packedSession.editSession.originalInstallation.transform.position;
+        }
+
+        return Vector3.zero;
     }
 
     private void ApplyPackedInstallationDroppedBlockStates(PackedInstallationSession packedSession)
@@ -1927,7 +2329,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            TryRemovePackedPortable(packedSession);
+            TryRemovePackedSessionItem(packedSession);
             RestoreEditedInstallation(
                 packedSession.editSession,
                 packedSession.anchorCoordinate,
@@ -2036,6 +2438,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
+        editSession.storedFluidLiters = installationObject.StoredFluidLiters;
 
         CaptureAttachedAreaBoxes(editSession);
         CaptureInstallationBlockStates(editSession);
@@ -2184,30 +2587,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            List<int> droppedItemIds = new List<int>(blockState.Count);
-            for (int i = 0; i < blockState.Count; i++)
-            {
-                int itemId = blockState[i];
-                if (itemId != ConveyorStackStateSentinel)
-                {
-                    continue;
-                }
-
-                if (i + 1 >= blockState.Count)
-                {
-                    break;
-                }
-
-                int laneCount = Mathf.Max(0, blockState[++i]);
-                for (int laneIndex = 0; laneIndex < laneCount && i + 1 < blockState.Count; laneIndex++)
-                {
-                    int laneItemId = blockState[++i];
-                    if (laneItemId >= 0)
-                    {
-                        droppedItemIds.Add(laneItemId);
-                    }
-                }
-            }
+            List<int> droppedItemIds = ExtractPackedItemSlotIds(blockState);
 
             if (droppedItemIds.Count > 0)
             {
@@ -2216,6 +2596,71 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return droppedStatesByCanonicalOffset;
+    }
+
+    private static List<int> ExtractPackedItemSlotIds(IReadOnlyList<int> blockState)
+    {
+        List<int> itemIds = new List<int>();
+        if (blockState == null || blockState.Count <= 0)
+        {
+            return itemIds;
+        }
+
+        for (int i = 0; i < blockState.Count; i++)
+        {
+            int stateToken = blockState[i];
+            if (stateToken == Block.InputAreaCenterStackStateSentinel)
+            {
+                AddPackedSequentialItemIds(blockState, ref i, itemIds);
+                continue;
+            }
+
+            if (stateToken == Block.ConveyorStackStateSentinel)
+            {
+                AddPackedSequentialItemIds(blockState, ref i, itemIds);
+                continue;
+            }
+
+            if (stateToken == Block.FloorStackStateSentinel)
+            {
+                SkipPackedFloorStackState(blockState, ref i);
+            }
+        }
+
+        return itemIds;
+    }
+
+    private static void AddPackedSequentialItemIds(IReadOnlyList<int> blockState, ref int index, List<int> itemIds)
+    {
+        if (blockState == null || itemIds == null || index + 1 >= blockState.Count)
+        {
+            return;
+        }
+
+        int itemCount = Mathf.Max(0, blockState[++index]);
+        for (int itemIndex = 0; itemIndex < itemCount && index + 1 < blockState.Count; itemIndex++)
+        {
+            int itemId = blockState[++index];
+            if (itemId >= 0)
+            {
+                itemIds.Add(itemId);
+            }
+        }
+    }
+
+    private static void SkipPackedFloorStackState(IReadOnlyList<int> blockState, ref int index)
+    {
+        if (blockState == null || index + 1 >= blockState.Count)
+        {
+            return;
+        }
+
+        int stackCount = Mathf.Max(0, blockState[++index]);
+        for (int stackIndex = 0; stackIndex < stackCount && index + 1 < blockState.Count; stackIndex++)
+        {
+            int stackItemCount = Mathf.Max(0, blockState[++index]);
+            index = Mathf.Min(blockState.Count - 1, index + stackItemCount);
+        }
     }
 
     private void DetachInstallationForEditing(InstallationEditSession editSession, bool preserveConveyorItemsOnGround = false)
@@ -2340,7 +2785,7 @@ public class InstallationPlacementController : MonoBehaviour
             ? ConveyorPreviewVariantMode.Corner
             : ConveyorPreviewVariantMode.Straight;
         waitForPointerReleaseAfterPreviewSpawn = true;
-        installGridRefreshTimer = 0f;
+        InvalidateInstallGrid();
         GameManager.Instance?.SetInstallationPlacementActive(true);
         RefreshInstallOrEditWorkableRangeVisualRequest();
 
@@ -2359,30 +2804,31 @@ public class InstallationPlacementController : MonoBehaviour
             ? ConveyorPreviewVariantMode.Corner
             : ConveyorPreviewVariantMode.Straight;
 
+        MapObject editPlacementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
         if (ResolveInstallPreviewTerrain() != null
             && ResolveInstallPreviewTerrain().TryGetLoadedBlock(editSession.originalAnchorCoordinate, out Block anchorBlock)
             && anchorBlock != null)
         {
             activeInstallPreview.transform.position = GetPreviewWorldPosition(
                 anchorBlock,
-                activeInstallPreview,
-                editSession.originalQuarterTurns,
-                installPreviewVerticalOffset);
+                editPlacementSource,
+                editSession.originalQuarterTurns);
         }
         else
         {
             activeInstallPreview.transform.position = GetPlacementWorldPositionFromAnchorCoordinate(
                 editSession.originalAnchorCoordinate,
-                activeInstallPreview,
-                editSession.originalQuarterTurns,
-                installPreviewVerticalOffset);
+                editPlacementSource,
+                editSession.originalQuarterTurns);
         }
 
         activeInstallPreview.transform.rotation = editSession.originalInstallation is Wall
                                                 || editSession.originalInstallation is Pipe
             ? GetInstallPreviewRotation()
             : editSession.originalRotation;
+        SetInstallPreviewQuarterTurns(activeInstallPreview, editSession.originalQuarterTurns);
         WorkableObject.RefreshAllRangeVisuals();
+        RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         InvalidateInstallGrid();
     }
 
@@ -2771,7 +3217,7 @@ public class InstallationPlacementController : MonoBehaviour
         else
         {
             SetInstallGridVisible(false);
-            installGridRefreshTimer = 0f;
+            ResetInstallGridRefreshState();
         }
 
         RefreshMapEditButtonState();
@@ -2832,8 +3278,7 @@ public class InstallationPlacementController : MonoBehaviour
                 ?? GetInstalledObjectWorldPosition(
                     anchorCoordinate,
                     desiredSourcePrefab != null ? desiredSourcePrefab : editSession.definition.mapObject,
-                    quarterTurns,
-                    0f),
+                    quarterTurns),
             restoredRotation);
         restoredObject.gameObject.SetActive(true);
 
@@ -2856,6 +3301,10 @@ public class InstallationPlacementController : MonoBehaviour
 
         ConfigureInstalledObjectRuntime(restoredObject, anchorCoordinate, quarterTurns, editSession.inputOutputState);
         restoredObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
+        if (restoredObject is InstallationObject restoredInstallationObject)
+        {
+            restoredInstallationObject.SetStoredFluidLiters(editSession.storedFluidLiters);
+        }
         if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
         {
             restoredBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
@@ -2870,7 +3319,97 @@ public class InstallationPlacementController : MonoBehaviour
             SelectEditableInstallation(restoredInstallation, anchorCoordinate);
         }
 
+        RefreshInstalledConnectorVariantsAfterRestore(
+            editSession,
+            restoredObject,
+            anchorCoordinate,
+            quarterTurns,
+            activeInstallPreview);
+
         return restoredObject;
+    }
+
+    private void RefreshInstalledConnectorVariantsAfterRemoval(
+        InstallationEditSession editSession,
+        Vector2Int removedAnchorCoordinate,
+        int removedQuarterTurns)
+    {
+        RefreshInstalledConnectorVariantsAroundCoordinates(
+            BuildInstallationEditAffectedCoordinates(editSession, removedAnchorCoordinate, removedQuarterTurns),
+            editSession != null ? editSession.originalInstallation : null,
+            true,
+            null);
+    }
+
+    private void RefreshInstalledConnectorVariantsAfterRestore(
+        InstallationEditSession editSession,
+        MapObject restoredObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        RefreshInstalledConnectorVariantsAroundCoordinates(
+            BuildInstallationEditAffectedCoordinates(editSession, anchorCoordinate, quarterTurns),
+            restoredObject != null ? restoredObject : editSession != null ? editSession.originalInstallation : null,
+            false,
+            previewToIgnore);
+    }
+
+    private void RefreshInstalledConnectorVariantsAroundCoordinates(
+        IReadOnlyList<Vector2Int> changedCoordinates,
+        MapObject connectorSource,
+        bool includeSelf,
+        MapObject previewToIgnore)
+    {
+        if (changedCoordinates == null || changedCoordinates.Count <= 0 || connectorSource == null)
+        {
+            return;
+        }
+
+        if (connectorSource is Wall)
+        {
+            NormalizeFenceCornersAroundCoordinates(changedCoordinates, includeSelf, previewToIgnore, null);
+        }
+
+        if (IsPipeConnectorObject(connectorSource))
+        {
+            NormalizePipeVariantsAroundCoordinates(changedCoordinates, includeSelf, previewToIgnore, null);
+        }
+    }
+
+    private List<Vector2Int> BuildInstallationEditAffectedCoordinates(
+        InstallationEditSession editSession,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        HashSet<Vector2Int> coordinates = new HashSet<Vector2Int>();
+        if (editSession != null)
+        {
+            AddInstallationEditCoordinates(coordinates, editSession.originalStateCoordinates);
+            AddInstallationEditCoordinates(coordinates, editSession.originalOccupiedCoordinates);
+            AddInstallationEditCoordinates(
+                coordinates,
+                GetInstallationEditStateCoordinates(editSession, anchorCoordinate, quarterTurns));
+            coordinates.Add(editSession.originalAnchorCoordinate);
+        }
+
+        coordinates.Add(anchorCoordinate);
+        return new List<Vector2Int>(coordinates);
+    }
+
+    private static void AddInstallationEditCoordinates(
+        HashSet<Vector2Int> target,
+        IReadOnlyList<Vector2Int> source)
+    {
+        if (target == null || source == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            target.Add(source[i]);
+        }
     }
 
     private void ApplyEditedInstallationBlockStates(InstallationEditSession editSession, Vector2Int newAnchorCoordinate, int newQuarterTurns)
@@ -2941,7 +3480,7 @@ public class InstallationPlacementController : MonoBehaviour
 
             boxObject.transform.SetParent(installParent, true);
             boxObject.transform.SetPositionAndRotation(
-                GetInstalledObjectWorldPosition(targetAnchorCoordinate, footprintSource, targetQuarterTurns, 0f),
+                GetInstalledObjectWorldPosition(targetAnchorCoordinate, footprintSource, targetQuarterTurns),
                 GetInstalledObjectRotation(footprintSource, targetQuarterTurns));
             boxObject.gameObject.SetActive(true);
 
@@ -2998,6 +3537,10 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         replacementObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
+        if (replacementObject is InstallationObject replacementInstallation)
+        {
+            replacementInstallation.SetStoredFluidLiters(editSession.storedFluidLiters);
+        }
 
         ReleaseInstalledObjectInstance(
             editSession.originalInstallation,
@@ -3012,12 +3555,17 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void HandleInstallRotationClicked()
     {
-        if (!IsInstallationModeActive())
+        CleanupInstallPreviewReferences();
+        if (activeInstallPreview == null)
         {
-            return;
+            if (!IsInstallationModeActive() && !IsEditingInstallation())
+            {
+                return;
+            }
+
+            EnsureValidActiveInstallPreview();
         }
 
-        EnsureValidActiveInstallPreview();
         RotateInstallPreviewClockwise();
     }
 
@@ -3079,11 +3627,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!IsEditingInstallation())
         {
-            int availableInstallItemCount = GetAvailableInstallItemCount();
-            if (placementPlans.Count > availableInstallItemCount)
-            {
-                placementPlans.RemoveRange(availableInstallItemCount, placementPlans.Count - availableInstallItemCount);
-            }
+            TrimUnreservedPlacementPlansToAvailableItems(placementPlans);
         }
 
         for (int i = 0; i < placementPlans.Count; i++)
@@ -3104,6 +3648,7 @@ public class InstallationPlacementController : MonoBehaviour
             for (int blockIndex = 0; blockIndex < placementPlan.footprintBlocks.Count; blockIndex++)
             {
                 Block footprintBlock = placementPlan.footprintBlocks[blockIndex];
+                PrepareBelt2FBridgeCenterForPassthroughPlacement(footprintBlock, placementPlan.sourcePrefab);
                 if (ShouldBindInstalledObjectToBlock(
                         footprintBlock,
                         placementPlan.anchorBlock.Coordinate,
@@ -3186,13 +3731,16 @@ public class InstallationPlacementController : MonoBehaviour
                 null);
             RefreshFencePreviewVariants(placedAnchorCoordinates);
             RefreshInstalledFenceVariantPreviews(placedAnchorCoordinates);
-            NormalizePipeVariantsAroundCoordinates(
-                placedAnchorCoordinates,
-                true,
-                null,
-                null);
-            RefreshPipePreviewVariants(placedAnchorCoordinates);
-            RefreshInstalledPipeVariantPreviews(placedAnchorCoordinates);
+            if (activeInstallDefinition.mapObject is Pipe)
+            {
+                NormalizePipeVariantsAroundCoordinates(
+                    placedAnchorCoordinates,
+                    true,
+                    null,
+                    placedAnchorCoordinates);
+                RefreshPipePreviewVariants(placedAnchorCoordinates);
+                RefreshInstalledPipeVariantPreviews(placedAnchorCoordinates, null, placedAnchorCoordinates);
+            }
         }
     }
 
@@ -3211,7 +3759,6 @@ public class InstallationPlacementController : MonoBehaviour
 
         int previewQuarterTurns = GetPreviewQuarterTurns(preview);
         installPreviewSourcePrefabsByPreview.TryGetValue(preview, out MapObject sourcePrefab);
-        bool sourceResolvedWithQuarterTurns = false;
 
         if (IsBelt2F(activeInstallDefinition.mapObject))
         {
@@ -3264,7 +3811,6 @@ public class InstallationPlacementController : MonoBehaviour
                 previewQuarterTurns = fenceQuarterTurns;
             }
 
-            sourceResolvedWithQuarterTurns = true;
         }
         else if (activeInstallDefinition.mapObject is Wall fencePrototype
                  && TryResolveFencePlacementVariant(
@@ -3277,20 +3823,15 @@ public class InstallationPlacementController : MonoBehaviour
         {
             sourcePrefab = fenceSourcePrefab;
             previewQuarterTurns = fenceQuarterTurns;
-            sourceResolvedWithQuarterTurns = true;
         }
-        else if (activeInstallDefinition.mapObject is Pipe pipePrototype
-                 && TryResolvePipePlacementVariant(
-                     pipePrototype,
-                     anchorBlock.Coordinate,
-                     previewQuarterTurns,
-                     preview,
-                     out MapObject pipeSourcePrefab,
-                     out int pipeQuarterTurns))
+        else if (activeInstallDefinition.mapObject is Pipe pipePrototype)
         {
-            sourcePrefab = pipeSourcePrefab;
-            previewQuarterTurns = pipeQuarterTurns;
-            sourceResolvedWithQuarterTurns = true;
+            if (!(sourcePrefab is Pipe))
+            {
+                sourcePrefab = pipePrototype.StraightVariantPrefab != null
+                    ? pipePrototype.StraightVariantPrefab
+                    : pipePrototype;
+            }
         }
 
         if (sourcePrefab == null)
@@ -3308,12 +3849,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        int resolvedQuarterTurns = sourceResolvedWithQuarterTurns
-            ? previewQuarterTurns
-            : ResolvePlacementQuarterTurnsFromRotation(
-                sourcePrefab,
-                preview.transform.rotation,
-                previewQuarterTurns);
+        int resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, previewQuarterTurns);
         if (TryResolveWaterPumpOutwardQuarterTurns(
                 anchorBlock.Coordinate,
                 sourcePrefab,
@@ -3350,10 +3886,37 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePrefab = sourcePrefab,
             quarterTurns = resolvedQuarterTurns,
             footprintBlocks = footprintBlocks,
-            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, 0f),
+            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns),
             rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns)
         };
         return true;
+    }
+
+    private void TrimUnreservedPlacementPlansToAvailableItems(List<InstallPreviewPlacementPlan> placementPlans)
+    {
+        if (placementPlans == null || placementPlans.Count <= 0)
+        {
+            return;
+        }
+
+        int availableUnreservedItemCount = GetCurrentInstallItemCount();
+        int unreservedPlanCount = 0;
+        for (int i = placementPlans.Count - 1; i >= 0; i--)
+        {
+            InstallPreviewPlacementPlan placementPlan = placementPlans[i];
+            if (placementPlan != null
+                && placementPlan.preview != null
+                && installPreviewItemReservationsByPreview.ContainsKey(placementPlan.preview))
+            {
+                continue;
+            }
+
+            unreservedPlanCount++;
+            if (unreservedPlanCount > availableUnreservedItemCount)
+            {
+                placementPlans.RemoveAt(i);
+            }
+        }
     }
 
     private bool TryCreateStraightConveyorPlacementPlan(
@@ -3372,10 +3935,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         int previewQuarterTurns = GetPreviewQuarterTurns(preview);
-        int resolvedQuarterTurns = ResolvePlacementQuarterTurnsFromRotation(
-            sourcePrefab,
-            preview.transform.rotation,
-            previewQuarterTurns);
+        int resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, previewQuarterTurns);
 
         if (!TryFindPlaceablePlacementPlanFootprint(
                 anchorBlock.Coordinate,
@@ -3404,7 +3964,7 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePrefab = sourcePrefab,
             quarterTurns = resolvedQuarterTurns,
             footprintBlocks = footprintBlocks,
-            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, 0f),
+            position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns),
             rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns)
         };
         return true;
@@ -3438,48 +3998,36 @@ public class InstallationPlacementController : MonoBehaviour
             resolvedQuarterTurns = waterPumpQuarterTurns;
         }
 
-        int candidateCount = IsBelt2F(sourcePrefab) || IsWaterPumpSource(sourcePrefab)
-            ? 1
-            : GetPlacementRotationCandidateCount(sourcePrefab);
-        for (int offset = 0; offset < candidateCount; offset++)
-        {
-            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
-                sourcePrefab,
-                resolvedQuarterTurns + offset);
-            if (!TryGetFootprintBlocks(
-                    anchorCoordinate,
-                    sourcePrefab,
-                    candidateQuarterTurns,
-                    previewToIgnore,
-                    out List<Block> candidateFootprintBlocks,
-                    true)
-                || candidateFootprintBlocks == null
-                || candidateFootprintBlocks.Count <= 0)
-            {
-                continue;
-            }
-
-            List<Vector2Int> candidateFootprintCoordinates = GetFootprintCoordinates(
+        if (!TryGetFootprintBlocks(
                 anchorCoordinate,
                 sourcePrefab,
-                candidateQuarterTurns);
-            if (CoordinatesOverlapReserved(
-                    anchorCoordinate,
-                    sourcePrefab,
-                    candidateQuarterTurns,
-                    candidateFootprintCoordinates,
-                    reservedFootprintReservations))
-            {
-                continue;
-            }
-
-            resolvedQuarterTurns = candidateQuarterTurns;
-            footprintBlocks = candidateFootprintBlocks;
-            footprintCoordinates = candidateFootprintCoordinates;
-            return true;
+                resolvedQuarterTurns,
+                previewToIgnore,
+                out List<Block> resolvedFootprintBlocks,
+                true)
+            || resolvedFootprintBlocks == null
+            || resolvedFootprintBlocks.Count <= 0)
+        {
+            return false;
         }
 
-        return false;
+        List<Vector2Int> resolvedFootprintCoordinates = GetFootprintCoordinates(
+            anchorCoordinate,
+            sourcePrefab,
+            resolvedQuarterTurns);
+        if (CoordinatesOverlapReserved(
+                anchorCoordinate,
+                sourcePrefab,
+                resolvedQuarterTurns,
+                resolvedFootprintCoordinates,
+                reservedFootprintReservations))
+        {
+            return false;
+        }
+
+        footprintBlocks = resolvedFootprintBlocks;
+        footprintCoordinates = resolvedFootprintCoordinates;
+        return true;
     }
 
     private static void AddReservedPlacementFootprint(
@@ -3578,13 +4126,14 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        int quarterTurns = GetPreviewQuarterTurns(preview);
-        if (ConfigureRobotArmInstallDirectionMarkers(preview, anchorCoordinate, quarterTurns))
+        int quarterTurns = GetPreviewAreaQuarterTurns(preview);
+        MapObject footprintSource = ResolveInstallPreviewPlacementSource(preview);
+        if (ConfigureRobotArmInstallDirectionMarkers(preview, footprintSource, anchorCoordinate, quarterTurns))
         {
             return;
         }
 
-        ConfigureInputOutputMarkers(preview, anchorCoordinate, quarterTurns, true);
+        ConfigureInputOutputMarkers(preview, footprintSource, anchorCoordinate, quarterTurns, true);
     }
 
     private static void ClearInputOutputMarkers(MapObject mapObject)
@@ -3603,7 +4152,22 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         bool isInstallPreview)
     {
-        if (!TryGetInputOutputModule(mapObject, out _))
+        ConfigureInputOutputMarkers(
+            mapObject,
+            mapObject,
+            anchorCoordinate,
+            quarterTurns,
+            isInstallPreview);
+    }
+
+    private void ConfigureInputOutputMarkers(
+        MapObject mapObject,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        bool isInstallPreview)
+    {
+        if (mapObject == null || !TryGetInputOutputModule(footprintSource, out _))
         {
             ClearInputOutputMarkers(mapObject);
             return;
@@ -3612,7 +4176,7 @@ public class InstallationPlacementController : MonoBehaviour
         List<AreaMarkerSpawnRequest> markerRequests = new List<AreaMarkerSpawnRequest>();
         List<Vector3> primaryObjectWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            mapObject,
+            footprintSource,
             quarterTurns,
             InputOutputModule.RectGridBlockType.Object);
         Vector3 primaryObjectWorldPosition = primaryObjectWorldPositions.Count > 0
@@ -3622,19 +4186,19 @@ public class InstallationPlacementController : MonoBehaviour
 
         List<Vector3> inputEnergyWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            mapObject,
+            footprintSource,
             quarterTurns,
-            InputOutputModule.RectGridBlockType.InputEnergy);
+            InputEnergyRectGridBlockTypes);
         AddAreaMarkerRequests(
             markerRequests,
             inputEnergyWorldPositions,
-            ResolveInputEnergyMarkerIcon(mapObject));
+            ResolveInputEnergyMarkerIcon(footprintSource));
 
         List<Vector3> inputItemWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            mapObject,
+            footprintSource,
             quarterTurns,
-            InputOutputModule.RectGridBlockType.InputItem);
+            InputItemRectGridBlockTypes);
         AddDirectionalAreaMarkerRequests(
             markerRequests,
             inputItemWorldPositions,
@@ -3644,15 +4208,25 @@ public class InstallationPlacementController : MonoBehaviour
 
         List<Vector3> outputWorldPositions = GetRectGridBlockWorldPositions(
             anchorCoordinate,
-            mapObject,
+            footprintSource,
             quarterTurns,
-            InputOutputModule.RectGridBlockType.Output);
+            OutputRectGridBlockTypes);
         AddDirectionalAreaMarkerRequests(
             markerRequests,
             outputWorldPositions,
             arrowIcon,
             primaryObjectWorldPosition,
             true);
+
+        List<Vector3> pipeInputWorldPositions = GetRectGridBlockWorldPositions(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            PipeInputRectGridBlockTypes);
+        AddAreaMarkerRequests(
+            markerRequests,
+            pipeInputWorldPositions,
+            ResolvePipePassMarkerIcon());
 
         if (markerRequests.Count <= 0)
         {
@@ -3679,11 +4253,13 @@ public class InstallationPlacementController : MonoBehaviour
             markerRequests,
             isInstallPreview,
             isInstallPreview ? InstallPreviewAreaMarkerSortingOrderOffset : 0,
-            isInstallPreview);
+            isInstallPreview,
+            isInstallPreview ? mapObject.transform : null);
     }
 
     private bool ConfigureRobotArmInstallDirectionMarkers(
         MapObject mapObject,
+        MapObject footprintSource,
         Vector2Int anchorCoordinate,
         int quarterTurns)
     {
@@ -3699,7 +4275,10 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        List<Vector2Int> objectCoordinates = GetPlacementVisualCoordinates(anchorCoordinate, mapObject, quarterTurns);
+        List<Vector2Int> objectCoordinates = GetPlacementVisualCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns);
         if (objectCoordinates.Count <= 0)
         {
             objectCoordinates.Add(anchorCoordinate);
@@ -3736,7 +4315,8 @@ public class InstallationPlacementController : MonoBehaviour
             markerRequests,
             true,
             InstallPreviewAreaMarkerSortingOrderOffset,
-            true);
+            true,
+            mapObject.transform);
         return true;
     }
 
@@ -3757,7 +4337,7 @@ public class InstallationPlacementController : MonoBehaviour
                 anchorCoordinate,
                 installedObject,
                 quarterTurns,
-                InputOutputModule.RectGridBlockType.InputEnergy,
+                DirectInputEnergyRectGridBlockTypes,
                 out List<Vector2Int> inputEnergyCoordinates)
             || inputEnergyCoordinates == null
             || inputEnergyCoordinates.Count <= 0)
@@ -3787,7 +4367,8 @@ public class InstallationPlacementController : MonoBehaviour
                 installedObject,
                 quarterTurns,
                 inputOutputModule,
-                out List<InputOutputModuleItemAreaBinding> itemAreaBindings)
+                out List<InputOutputModuleItemAreaBinding> itemAreaBindings,
+                true)
             || itemAreaBindings == null
             || itemAreaBindings.Count <= 0)
         {
@@ -3815,7 +4396,7 @@ public class InstallationPlacementController : MonoBehaviour
                 anchorCoordinate,
                 installedObject,
                 quarterTurns,
-                InputOutputModule.RectGridBlockType.Output,
+                DirectOutputRectGridBlockTypes,
                 out List<Vector2Int> outputCoordinates)
             || outputCoordinates == null
             || outputCoordinates.Count <= 0)
@@ -3844,7 +4425,7 @@ public class InstallationPlacementController : MonoBehaviour
             anchorCoordinate,
             installedObject,
             quarterTurns,
-            InputOutputModule.RectGridBlockType.InputEnergy,
+            InputEnergyRectGridBlockTypes,
             out inputEnergyCoordinates);
 
         List<InputOutputModuleItemAreaBinding> itemAreaBindings = new List<InputOutputModuleItemAreaBinding>();
@@ -3860,10 +4441,22 @@ public class InstallationPlacementController : MonoBehaviour
             anchorCoordinate,
             installedObject,
             quarterTurns,
-            InputOutputModule.RectGridBlockType.Output,
+            OutputRectGridBlockTypes,
             out outputCoordinates);
 
-        inputOutputModule.ConfigureRuntimeAreas(inputEnergyCoordinates, itemAreaBindings, outputCoordinates);
+        List<Vector2Int> pipeInputCoordinates = new List<Vector2Int>();
+        TryGetRectGridBlockCoordinates(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns,
+            PipeInputRectGridBlockTypes,
+            out pipeInputCoordinates);
+
+        inputOutputModule.ConfigureRuntimeAreas(
+            inputEnergyCoordinates,
+            itemAreaBindings,
+            outputCoordinates,
+            pipeInputCoordinates);
     }
 
     private void ConfigureInstalledInputOutputRuntimeGrid(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -3873,7 +4466,15 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(anchorCoordinate, installedObject, quarterTurns);
+        List<Vector2Int> footprintCoordinates = GetRectGridPlacementCoordinates(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns);
+        if (footprintCoordinates.Count <= 0)
+        {
+            footprintCoordinates = GetFootprintCoordinates(anchorCoordinate, installedObject, quarterTurns);
+        }
+
         List<Vector2Int> focusCoordinates = GetPlacementVisualCoordinates(anchorCoordinate, installedObject, quarterTurns);
         inputOutputModule.ConfigureRuntimeGridCoordinates(footprintCoordinates);
         inputOutputModule.ConfigureRuntimeFocusCoordinates(focusCoordinates);
@@ -4190,6 +4791,40 @@ public class InstallationPlacementController : MonoBehaviour
             0 => pipePrototype.StraightVariantPrefab,
             _ => null
         };
+    }
+
+    public bool TryResolvePipeLoadPlacement(
+        ItemDefinition definition,
+        Vector2Int anchorCoordinate,
+        int preferredQuarterTurns,
+        out MapObject resolvedPrefab,
+        out int resolvedQuarterTurns,
+        out int resolvedVariantKind)
+    {
+        resolvedPrefab = null;
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        resolvedVariantKind = -1;
+
+        if (definition == null || !(definition.mapObject is Pipe pipePrototype))
+        {
+            return false;
+        }
+
+        if (!TryResolvePipePlacementVariant(
+                pipePrototype,
+                anchorCoordinate,
+                preferredQuarterTurns,
+                null,
+                out resolvedPrefab,
+                out resolvedQuarterTurns)
+            || !(resolvedPrefab is Pipe resolvedPipe))
+        {
+            return false;
+        }
+
+        resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(resolvedPrefab, resolvedQuarterTurns);
+        resolvedVariantKind = resolvedPipe.VariantKindId;
+        return true;
     }
 
     private bool TryResolveFencePlacementVariant(
@@ -4804,13 +5439,49 @@ public class InstallationPlacementController : MonoBehaviour
             anchorCoordinate,
             previewToIgnore,
             true);
+        List<Vector2Int> actualNeighborDirections = GetPipeNeighborConnectionDirections(
+            anchorCoordinate,
+            previewToIgnore,
+            false);
+        List<Vector2Int> fixedConnectorDirections = new List<Vector2Int>(4);
+        AppendFixedFluidPipeConnectionDirections(anchorCoordinate, previewToIgnore, fixedConnectorDirections);
+        if (fixedConnectorDirections.Count <= 0)
+        {
+            AddPipeDirections(
+                fixedConnectorDirections,
+                GetFixedFluidConnectorNeighborConnectionDirections(anchorCoordinate));
+        }
 
-        int neighborDirectionCount = CountFenceNeighborDirections(neighborDirections);
-        if (neighborDirectionCount >= 4
+        List<Vector2Int> connectionDirections = MergePipeDirections(neighborDirections, fixedConnectorDirections);
+        List<Vector2Int> actualConnectionDirections = MergePipeDirections(actualNeighborDirections, fixedConnectorDirections);
+        int connectionDirectionCount = CountFenceNeighborDirections(connectionDirections);
+        int actualConnectionDirectionCount = CountFenceNeighborDirections(actualConnectionDirections);
+        if (fixedConnectorDirections.Count > 0 && cornerPrefab != null)
+        {
+            if (TryResolveFixedConnectorCornerPipeVariant(
+                    cornerPrefab,
+                    actualNeighborDirections,
+                    fixedConnectorDirections,
+                    resolvedQuarterTurns,
+                    out int fixedConnectorCornerQuarterTurns)
+                || TryResolveFixedConnectorCornerPipeVariant(
+                    cornerPrefab,
+                    neighborDirections,
+                    fixedConnectorDirections,
+                    resolvedQuarterTurns,
+                    out fixedConnectorCornerQuarterTurns))
+            {
+                resolvedPrefab = cornerPrefab;
+                resolvedQuarterTurns = fixedConnectorCornerQuarterTurns;
+                return true;
+            }
+        }
+
+        if (actualConnectionDirectionCount >= 4
             && crossPrefab != null
             && TryResolvePipeVariantQuarterTurns(
                 crossPrefab,
-                neighborDirections,
+                actualConnectionDirections,
                 resolvedQuarterTurns,
                 out int crossQuarterTurns))
         {
@@ -4819,11 +5490,11 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (neighborDirectionCount >= 3
+        if (actualConnectionDirectionCount >= 3
             && teePrefab != null
             && TryResolvePipeVariantQuarterTurns(
                 teePrefab,
-                neighborDirections,
+                actualConnectionDirections,
                 resolvedQuarterTurns,
                 out int teeQuarterTurns))
         {
@@ -4832,12 +5503,26 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (neighborDirectionCount >= 2
+        List<Vector2Int> boilerConnectorDirections = null;
+        if (teePrefab != null
+            && TryResolveBoilerTeePipeVariant(
+                teePrefab,
+                actualNeighborDirections,
+                boilerConnectorDirections ??= GetBoilerFixedFluidPipeConnectionDirections(anchorCoordinate, previewToIgnore),
+                resolvedQuarterTurns,
+                out int boilerTeeQuarterTurns))
+        {
+            resolvedPrefab = teePrefab;
+            resolvedQuarterTurns = boilerTeeQuarterTurns;
+            return true;
+        }
+
+        if (connectionDirectionCount >= 2
             && cornerPrefab != null
-            && HasPerpendicularPipeNeighborDirections(neighborDirections)
+            && HasPerpendicularPipeNeighborDirections(connectionDirections)
             && TryResolvePipeVariantQuarterTurns(
                 cornerPrefab,
-                neighborDirections,
+                connectionDirections,
                 resolvedQuarterTurns,
                 out int cornerQuarterTurns))
         {
@@ -4846,11 +5531,24 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (cornerPrefab != null
+            && TryResolveBoilerCornerPipeVariant(
+                cornerPrefab,
+                neighborDirections,
+                boilerConnectorDirections ??= GetBoilerFixedFluidPipeConnectionDirections(anchorCoordinate, previewToIgnore),
+                resolvedQuarterTurns,
+                out int boilerCornerQuarterTurns))
+        {
+            resolvedPrefab = cornerPrefab;
+            resolvedQuarterTurns = boilerCornerQuarterTurns;
+            return true;
+        }
+
         resolvedPrefab = straightPrefab != null ? straightPrefab : pipePrototype;
         if (resolvedPrefab is Pipe straightPipePrefab
             && TryResolvePipeStraightQuarterTurns(
                 straightPipePrefab,
-                neighborDirections,
+                connectionDirections,
                 resolvedQuarterTurns,
                 out int straightQuarterTurns))
         {
@@ -4966,6 +5664,254 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private static List<Vector2Int> MergePipeDirections(
+        IReadOnlyList<Vector2Int> firstDirections,
+        IReadOnlyList<Vector2Int> secondDirections)
+    {
+        List<Vector2Int> mergedDirections = new List<Vector2Int>(4);
+        AddPipeDirections(mergedDirections, firstDirections);
+        AddPipeDirections(mergedDirections, secondDirections);
+        return mergedDirections;
+    }
+
+    private static void AddPipeDirections(
+        List<Vector2Int> targetDirections,
+        IReadOnlyList<Vector2Int> sourceDirections)
+    {
+        if (targetDirections == null || sourceDirections == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < sourceDirections.Count; i++)
+        {
+            AddPipeDirection(targetDirections, sourceDirections[i]);
+        }
+    }
+
+    private bool TryResolveBoilerTeePipeVariant(
+        Pipe teePrefab,
+        IReadOnlyList<Vector2Int> neighborDirections,
+        IReadOnlyList<Vector2Int> boilerNeighborDirections,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        if (teePrefab == null || boilerNeighborDirections == null || boilerNeighborDirections.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < boilerNeighborDirections.Count; i++)
+        {
+            Vector2Int boilerDirection = boilerNeighborDirections[i];
+            if (boilerDirection == Vector2Int.zero)
+            {
+                continue;
+            }
+
+            Vector2Int clockwiseDirection = RotateCardinalDirectionClockwise(boilerDirection);
+            Vector2Int counterClockwiseDirection = RotateCardinalDirectionCounterClockwise(boilerDirection);
+            if (!PipeDirectionsContain(neighborDirections, clockwiseDirection)
+                || !PipeDirectionsContain(neighborDirections, counterClockwiseDirection))
+            {
+                continue;
+            }
+
+            List<Vector2Int> requiredDirections = new List<Vector2Int>(3);
+            AddPipeDirection(requiredDirections, boilerDirection);
+            AddPipeDirection(requiredDirections, clockwiseDirection);
+            AddPipeDirection(requiredDirections, counterClockwiseDirection);
+
+            if (!PipeDirectionsContainAll(requiredDirections, neighborDirections))
+            {
+                continue;
+            }
+
+            if (TryResolvePipeVariantQuarterTurns(
+                    teePrefab,
+                    requiredDirections,
+                    preferredQuarterTurns,
+                    out resolvedQuarterTurns))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveBoilerCornerPipeVariant(
+        Pipe cornerPrefab,
+        IReadOnlyList<Vector2Int> neighborDirections,
+        IReadOnlyList<Vector2Int> boilerNeighborDirections,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        if (cornerPrefab == null
+            || neighborDirections == null
+            || neighborDirections.Count <= 0
+            || boilerNeighborDirections == null
+            || boilerNeighborDirections.Count <= 0)
+        {
+            return false;
+        }
+
+        int normalizedPreferredQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        for (int offset = 0; offset < 4; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurns(normalizedPreferredQuarterTurns + offset);
+            Quaternion candidateRotation = GetPlacementObjectRotation(cornerPrefab, candidateQuarterTurns);
+
+            for (int boilerIndex = 0; boilerIndex < boilerNeighborDirections.Count; boilerIndex++)
+            {
+                Vector2Int boilerDirection = boilerNeighborDirections[boilerIndex];
+                if (boilerDirection == Vector2Int.zero
+                    || !cornerPrefab.HasConnectionTowards(candidateRotation, boilerDirection))
+                {
+                    continue;
+                }
+
+                for (int neighborIndex = 0; neighborIndex < neighborDirections.Count; neighborIndex++)
+                {
+                    Vector2Int neighborDirection = neighborDirections[neighborIndex];
+                    if (neighborDirection == Vector2Int.zero
+                        || !DirectionsArePerpendicular(boilerDirection, neighborDirection)
+                        || !cornerPrefab.HasConnectionTowards(candidateRotation, neighborDirection))
+                    {
+                        continue;
+                    }
+
+                    resolvedQuarterTurns = candidateQuarterTurns;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveFixedConnectorCornerPipeVariant(
+        Pipe cornerPrefab,
+        IReadOnlyList<Vector2Int> actualNeighborDirections,
+        IReadOnlyList<Vector2Int> fixedConnectorDirections,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        if (cornerPrefab == null
+            || CountFenceNeighborDirections(actualNeighborDirections) != 1
+            || fixedConnectorDirections == null
+            || fixedConnectorDirections.Count <= 0)
+        {
+            return false;
+        }
+
+        Vector2Int actualNeighborDirection = Vector2Int.zero;
+        for (int i = 0; i < actualNeighborDirections.Count; i++)
+        {
+            if (actualNeighborDirections[i] != Vector2Int.zero)
+            {
+                actualNeighborDirection = actualNeighborDirections[i];
+                break;
+            }
+        }
+
+        if (actualNeighborDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < fixedConnectorDirections.Count; i++)
+        {
+            Vector2Int fixedConnectorDirection = fixedConnectorDirections[i];
+            if (fixedConnectorDirection == Vector2Int.zero
+                || !DirectionsArePerpendicular(actualNeighborDirection, fixedConnectorDirection))
+            {
+                continue;
+            }
+
+            List<Vector2Int> requiredDirections = new List<Vector2Int>(2);
+            AddPipeDirection(requiredDirections, actualNeighborDirection);
+            AddPipeDirection(requiredDirections, fixedConnectorDirection);
+            if (TryResolvePipeVariantQuarterTurns(
+                    cornerPrefab,
+                    requiredDirections,
+                    preferredQuarterTurns,
+                    out resolvedQuarterTurns))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AddPipeDirection(List<Vector2Int> directions, Vector2Int direction)
+    {
+        if (directions == null || direction == Vector2Int.zero || directions.Contains(direction))
+        {
+            return;
+        }
+
+        directions.Add(direction);
+    }
+
+    private static bool PipeDirectionsContainAll(
+        IReadOnlyList<Vector2Int> availableDirections,
+        IReadOnlyList<Vector2Int> requiredDirections)
+    {
+        if (requiredDirections == null || requiredDirections.Count <= 0)
+        {
+            return true;
+        }
+
+        if (availableDirections == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < requiredDirections.Count; i++)
+        {
+            Vector2Int direction = requiredDirections[i];
+            if (direction != Vector2Int.zero && !PipeDirectionsContain(availableDirections, direction))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool PipeDirectionsContain(IReadOnlyList<Vector2Int> directions, Vector2Int direction)
+    {
+        if (directions == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < directions.Count; i++)
+        {
+            if (directions[i] == direction)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Vector2Int RotateCardinalDirectionClockwise(Vector2Int direction)
+    {
+        return new Vector2Int(direction.y, -direction.x);
+    }
+
+    private static Vector2Int RotateCardinalDirectionCounterClockwise(Vector2Int direction)
+    {
+        return new Vector2Int(-direction.y, direction.x);
+    }
+
     private static bool HasPerpendicularPipeNeighborDirections(IReadOnlyList<Vector2Int> neighborDirections)
     {
         if (neighborDirections == null || neighborDirections.Count < 2)
@@ -4993,18 +5939,11 @@ public class InstallationPlacementController : MonoBehaviour
         bool allowPotentialConnections)
     {
         List<Vector2Int> directions = new List<Vector2Int>(4);
-        Vector2Int[] sideDirections =
-        {
-            Vector2Int.up,
-            Vector2Int.right,
-            Vector2Int.down,
-            Vector2Int.left
-        };
 
-        for (int i = 0; i < sideDirections.Length; i++)
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
         {
-            Vector2Int sideDirection = sideDirections[i];
-            if (TryGetPipeConnectionAtCoordinate(
+            Vector2Int sideDirection = PipeCardinalDirections[i];
+            if (TryGetPipeOnlyConnectionAtCoordinate(
                     anchorCoordinate + sideDirection,
                     previewToIgnore,
                     -sideDirection,
@@ -5017,7 +5956,7 @@ public class InstallationPlacementController : MonoBehaviour
         return directions;
     }
 
-    private bool TryGetPipeConnectionAtCoordinate(
+    private bool TryGetPipeOnlyConnectionAtCoordinate(
         Vector2Int coordinate,
         MapObject previewToIgnore,
         Vector2Int directionToCandidate,
@@ -5031,8 +5970,9 @@ public class InstallationPlacementController : MonoBehaviour
         if (TryGetInstallPreviewAtCoordinate(coordinate, out MapObject preview)
             && preview != null
             && preview != previewToIgnore
-            && MapObjectHasPipeConnectionTowards(
-                preview,
+            && preview is Pipe previewPipe
+            && ShouldPipeNeighborContributeToVariant(
+                previewPipe,
                 preview.transform.rotation,
                 directionToCandidate,
                 allowPotentialConnections))
@@ -5044,21 +5984,20 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain != null
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
             && block != null
-            && block.MapObject != null
-            && block.MapObject.gameObject.activeInHierarchy)
+            && block.MapObject is Pipe installedPipe
+            && installedPipe.gameObject.activeInHierarchy)
         {
-            MapObject installedMapObject = block.MapObject;
-            Quaternion installedRotation = installedMapObject.transform.rotation;
-            if (installedMapObject is Pipe installedPipe
-                && TryGetInstalledPipeVariantPreview(installedPipe, out Pipe variantPreviewPipe, out Quaternion previewRotation))
+            Pipe pipeToEvaluate = installedPipe;
+            Quaternion pipeRotation = installedPipe.transform.rotation;
+            if (TryGetInstalledPipeVariantPreview(installedPipe, out Pipe variantPreviewPipe, out Quaternion previewRotation))
             {
-                installedMapObject = variantPreviewPipe;
-                installedRotation = previewRotation;
+                pipeToEvaluate = variantPreviewPipe;
+                pipeRotation = previewRotation;
             }
 
-            if (MapObjectHasPipeConnectionTowards(
-                    installedMapObject,
-                    installedRotation,
+            if (ShouldPipeNeighborContributeToVariant(
+                    pipeToEvaluate,
+                    pipeRotation,
                     directionToCandidate,
                     allowPotentialConnections))
             {
@@ -5071,11 +6010,1350 @@ public class InstallationPlacementController : MonoBehaviour
                    out MapObject savedSourcePrefab,
                    out Quaternion savedRotation,
                    out _)
-               && MapObjectHasPipeConnectionTowards(
-                   savedSourcePrefab,
+               && savedSourcePrefab is Pipe savedPipe
+               && ShouldPipeNeighborContributeToVariant(
+                   savedPipe,
                    savedRotation,
                    directionToCandidate,
                    allowPotentialConnections);
+    }
+
+    private List<Vector2Int> GetFixedFluidConnectorNeighborConnectionDirections(Vector2Int anchorCoordinate)
+    {
+        List<Vector2Int> directions = new List<Vector2Int>(4);
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int sideDirection = PipeCardinalDirections[i];
+            if (TryGetFixedFluidConnectorCompatibilityAtCoordinate(
+                    anchorCoordinate + sideDirection,
+                    -sideDirection,
+                    out bool connectorCanConnect)
+                && CanPipeAreaBlocksConnect(anchorCoordinate, anchorCoordinate + sideDirection)
+                && connectorCanConnect)
+            {
+                AddPipeDirection(directions, sideDirection);
+            }
+        }
+
+        return directions;
+    }
+
+    private List<Vector2Int> GetBoilerFixedFluidPipeConnectionDirections(
+        Vector2Int anchorCoordinate,
+        MapObject previewToIgnore)
+    {
+        List<Vector2Int> directions = new List<Vector2Int>(4);
+        AppendBoilerFixedFluidPipeConnectionDirections(anchorCoordinate, previewToIgnore, directions);
+        if (directions.Count <= 0)
+        {
+            AddPipeDirections(directions, GetBoilerFixedFluidConnectorNeighborConnectionDirections(anchorCoordinate));
+        }
+
+        return directions;
+    }
+
+    private List<Vector2Int> GetBoilerFixedFluidConnectorNeighborConnectionDirections(Vector2Int anchorCoordinate)
+    {
+        List<Vector2Int> directions = new List<Vector2Int>(4);
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int sideDirection = PipeCardinalDirections[i];
+            if (TryGetBoilerFixedFluidConnectorCompatibilityAtCoordinate(
+                    anchorCoordinate + sideDirection,
+                    -sideDirection,
+                    out bool connectorCanConnect)
+                && CanPipeAreaBlocksConnect(anchorCoordinate, anchorCoordinate + sideDirection)
+                && connectorCanConnect)
+            {
+                AddPipeDirection(directions, sideDirection);
+            }
+        }
+
+        return directions;
+    }
+
+    private void AppendBoilerFixedFluidPipeConnectionDirections(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        List<Vector2Int> directions)
+    {
+        if (directions == null)
+        {
+            return;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot))
+        {
+            TryAppendBoilerPipeAxisDirections(previewSnapshot, coordinate, directions);
+        }
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot))
+        {
+            TryAppendBoilerPipeAxisDirections(installedSnapshot, coordinate, directions);
+        }
+
+        runtimeGridModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
+        {
+            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeGridModuleScratch[i],
+                        out PlacementSnapshot runtimeGridSnapshot))
+                {
+                    TryAppendBoilerPipeAxisDirections(runtimeGridSnapshot, coordinate, directions);
+                }
+            }
+            runtimeGridModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot))
+        {
+            TryAppendBoilerPipeAxisDirections(runtimeGridSnapshot, coordinate, directions);
+        }
+
+        runtimeAreaModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
+        {
+            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeAreaModuleScratch[i],
+                        out PlacementSnapshot runtimeAreaSnapshot))
+                {
+                    TryAppendBoilerPipeAxisDirections(runtimeAreaSnapshot, coordinate, directions);
+                }
+            }
+            runtimeAreaModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot))
+        {
+            TryAppendBoilerPipeAxisDirections(runtimeAreaSnapshot, coordinate, directions);
+        }
+
+        if (TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot))
+        {
+            TryAppendBoilerPipeAxisDirections(savedSnapshot, coordinate, directions);
+        }
+    }
+
+    private void AppendFixedFluidPipeConnectionDirections(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        List<Vector2Int> directions)
+    {
+        if (directions == null)
+        {
+            return;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot))
+        {
+            TryAppendFixedFluidPipeConnectionDirections(previewSnapshot, coordinate, directions);
+        }
+        AppendPreviewRectGridPipeAreaConnectionDirections(coordinate, previewToIgnore, directions);
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot))
+        {
+            TryAppendFixedFluidPipeConnectionDirections(installedSnapshot, coordinate, directions);
+        }
+
+        runtimeGridModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
+        {
+            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeGridModuleScratch[i],
+                        out PlacementSnapshot runtimeGridSnapshot))
+                {
+                    TryAppendFixedFluidPipeConnectionDirections(runtimeGridSnapshot, coordinate, directions);
+                }
+            }
+            runtimeGridModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot))
+        {
+            TryAppendFixedFluidPipeConnectionDirections(runtimeGridSnapshot, coordinate, directions);
+        }
+
+        runtimeAreaModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
+        {
+            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeAreaModuleScratch[i],
+                        out PlacementSnapshot runtimeAreaSnapshot))
+                {
+                    TryAppendFixedFluidPipeConnectionDirections(runtimeAreaSnapshot, coordinate, directions);
+                }
+            }
+            runtimeAreaModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot))
+        {
+            TryAppendFixedFluidPipeConnectionDirections(runtimeAreaSnapshot, coordinate, directions);
+        }
+
+        if (TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot))
+        {
+            TryAppendFixedFluidPipeConnectionDirections(savedSnapshot, coordinate, directions);
+        }
+    }
+
+    private bool CanPipeAreaBlocksConnect(Vector2Int firstCoordinate, Vector2Int secondCoordinate)
+    {
+        pipeAreaBlockCandidateScratchA.Clear();
+        pipeAreaBlockCandidateScratchB.Clear();
+
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(firstCoordinate, null, pipeAreaBlockCandidateScratchA);
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(secondCoordinate, null, pipeAreaBlockCandidateScratchB);
+
+        bool hasTypedPipeAreaCandidates = pipeAreaBlockCandidateScratchA.Count > 0
+            && pipeAreaBlockCandidateScratchB.Count > 0;
+        bool canConnect = !hasTypedPipeAreaCandidates;
+        if (hasTypedPipeAreaCandidates)
+        {
+            for (int firstIndex = 0; firstIndex < pipeAreaBlockCandidateScratchA.Count; firstIndex++)
+            {
+                for (int secondIndex = 0; secondIndex < pipeAreaBlockCandidateScratchB.Count; secondIndex++)
+                {
+                    if (CanPipeAreaBlockCandidatesConnect(
+                            firstCoordinate,
+                            pipeAreaBlockCandidateScratchA[firstIndex],
+                            secondCoordinate,
+                            pipeAreaBlockCandidateScratchB[secondIndex]))
+                    {
+                        canConnect = true;
+                        break;
+                    }
+                }
+
+                if (canConnect)
+                {
+                    break;
+                }
+            }
+        }
+        else if (HasPipeAreaFluidStorageAtCoordinate(firstCoordinate)
+                 || HasPipeAreaFluidStorageAtCoordinate(secondCoordinate))
+        {
+            canConnect = true;
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        pipeAreaBlockCandidateScratchB.Clear();
+        return canConnect;
+    }
+
+    private bool HasPipeAreaFluidStorageAtCoordinate(Vector2Int coordinate)
+    {
+        if (TryGetPreviewPlacementSnapshot(coordinate, null, out PlacementSnapshot previewSnapshot)
+            && IsFluidStoragePipeNodeAtCoordinate(previewSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot)
+            && IsFluidStoragePipeNodeAtCoordinate(installedSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        runtimeGridModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
+        {
+            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeGridModuleScratch[i],
+                        out PlacementSnapshot runtimeGridSnapshot)
+                    && IsFluidStoragePipeNodeAtCoordinate(runtimeGridSnapshot, coordinate))
+                {
+                    runtimeGridModuleScratch.Clear();
+                    return true;
+                }
+            }
+
+            runtimeGridModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot)
+                 && IsFluidStoragePipeNodeAtCoordinate(runtimeGridSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        runtimeAreaModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
+        {
+            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeAreaModuleScratch[i],
+                        out PlacementSnapshot runtimeAreaSnapshot)
+                    && IsFluidStoragePipeNodeAtCoordinate(runtimeAreaSnapshot, coordinate))
+                {
+                    runtimeAreaModuleScratch.Clear();
+                    return true;
+                }
+            }
+
+            runtimeAreaModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot)
+                 && IsFluidStoragePipeNodeAtCoordinate(runtimeAreaSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        return TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
+               && IsFluidStoragePipeNodeAtCoordinate(savedSnapshot, coordinate);
+    }
+
+    private void AppendPreviewRectGridPipeAreaConnectionDirections(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        List<Vector2Int> directions)
+    {
+        if (directions == null)
+        {
+            return;
+        }
+
+        pipeAreaBlockCandidateScratchC.Clear();
+        CollectPreviewRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchC);
+
+        for (int i = 0; i < pipeAreaBlockCandidateScratchC.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchC[i];
+            if (candidate.snapshot == null
+                || !TryGetInputOutputModule(candidate.snapshot.mapObject, out InputOutputModule inputOutputModule)
+                || !TryGetRectGridPipeAreaConnectionDirection(
+                    candidate.snapshot.mapObject,
+                    inputOutputModule,
+                    candidate.snapshot.anchorCoordinate,
+                    candidate.snapshot.quarterTurns,
+                    coordinate,
+                    out Vector2Int connectionDirection))
+            {
+                continue;
+            }
+
+            AddPipeDirection(directions, connectionDirection);
+        }
+
+        pipeAreaBlockCandidateScratchC.Clear();
+    }
+
+    private bool IsFluidStoragePipeNodeAtCoordinate(PlacementSnapshot snapshot, Vector2Int coordinate)
+    {
+        if (snapshot == null
+            || !(snapshot.mapObject is InstallationObject installationObject)
+            || installationObject is Pipe
+            || installationObject is Pump
+            || installationObject is InputOutputModule
+            || !installationObject.CanStoreFluid)
+        {
+            return false;
+        }
+
+        List<Vector2Int> coordinates = GetFootprintCoordinates(
+            snapshot.anchorCoordinate,
+            snapshot.mapObject,
+            snapshot.quarterTurns);
+        return coordinates.Contains(coordinate);
+    }
+
+    private void CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        List<PipeAreaBlockCandidate> candidates)
+    {
+        if (candidates == null)
+        {
+            return;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot))
+        {
+            TryAddRectGridPipeAreaBlockCandidate(previewSnapshot, coordinate, candidates);
+        }
+
+        CollectPreviewRectGridPipeAreaBlockCandidatesAtCoordinate(coordinate, previewToIgnore, candidates);
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot))
+        {
+            TryAddRectGridPipeAreaBlockCandidate(installedSnapshot, coordinate, candidates);
+        }
+
+        runtimeGridModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
+        {
+            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeGridModuleScratch[i],
+                        out PlacementSnapshot runtimeGridSnapshot))
+                {
+                    TryAddRectGridPipeAreaBlockCandidate(runtimeGridSnapshot, coordinate, candidates);
+                }
+            }
+
+            runtimeGridModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot))
+        {
+            TryAddRectGridPipeAreaBlockCandidate(runtimeGridSnapshot, coordinate, candidates);
+        }
+
+        runtimeAreaModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
+        {
+            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeAreaModuleScratch[i],
+                        out PlacementSnapshot runtimeAreaSnapshot))
+                {
+                    TryAddRectGridPipeAreaBlockCandidate(runtimeAreaSnapshot, coordinate, candidates);
+                }
+            }
+
+            runtimeAreaModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot))
+        {
+            TryAddRectGridPipeAreaBlockCandidate(runtimeAreaSnapshot, coordinate, candidates);
+        }
+
+        if (TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot))
+        {
+            TryAddRectGridPipeAreaBlockCandidate(savedSnapshot, coordinate, candidates);
+        }
+    }
+
+    private void CollectPreviewRectGridPipeAreaBlockCandidatesAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        List<PipeAreaBlockCandidate> candidates)
+    {
+        if (candidates == null)
+        {
+            return;
+        }
+
+        CleanupInstallPreviewReferences();
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            MapObject preview = installPreviewInstances[i];
+            if (preview == null
+                || preview == previewToIgnore
+                || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int previewAnchorCoordinate))
+            {
+                continue;
+            }
+
+            MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
+            PlacementSnapshot snapshot = new PlacementSnapshot
+            {
+                mapObject = footprintSource,
+                rotation = preview.transform.rotation,
+                anchorCoordinate = previewAnchorCoordinate,
+                quarterTurns = GetPreviewAreaQuarterTurns(preview)
+            };
+            TryAddRectGridPipeAreaBlockCandidate(snapshot, coordinate, candidates);
+        }
+    }
+
+    private bool TryAddRectGridPipeAreaBlockCandidate(
+        PlacementSnapshot snapshot,
+        Vector2Int coordinate,
+        List<PipeAreaBlockCandidate> candidates)
+    {
+        if (snapshot == null
+            || snapshot.mapObject == null
+            || candidates == null
+            || !TryGetRectGridFootprintBlockType(
+                snapshot.anchorCoordinate,
+                snapshot.mapObject,
+                snapshot.quarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            || !InputOutputModule.AllowsPipeAreaInteraction(blockType)
+            || PipeAreaBlockCandidatesContain(candidates, snapshot, blockType))
+        {
+            return false;
+        }
+
+        candidates.Add(new PipeAreaBlockCandidate(snapshot, blockType));
+        return true;
+    }
+
+    private static bool PipeAreaBlockCandidatesContain(
+        List<PipeAreaBlockCandidate> candidates,
+        PlacementSnapshot snapshot,
+        InputOutputModule.RectGridBlockType blockType)
+    {
+        if (candidates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = candidates[i];
+            if (candidate.blockType == blockType
+                && candidate.snapshot != null
+                && snapshot != null
+                && candidate.snapshot.mapObject == snapshot.mapObject
+                && candidate.snapshot.anchorCoordinate == snapshot.anchorCoordinate
+                && candidate.snapshot.quarterTurns == snapshot.quarterTurns)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool CanPipeAreaBlockTypesConnect(
+        InputOutputModule.RectGridBlockType firstBlockType,
+        InputOutputModule.RectGridBlockType secondBlockType)
+    {
+        if (!InputOutputModule.AllowsPipeAreaInteraction(firstBlockType)
+            || !InputOutputModule.AllowsPipeAreaInteraction(secondBlockType))
+        {
+            return false;
+        }
+
+        if (IsPipePassBlockType(firstBlockType) || IsPipePassBlockType(secondBlockType))
+        {
+            return true;
+        }
+
+        return InputOutputModule.IsOutputBlockType(firstBlockType)
+               != InputOutputModule.IsOutputBlockType(secondBlockType);
+    }
+
+    private bool CanPipeAreaBlockCandidatesConnect(
+        Vector2Int firstCoordinate,
+        PipeAreaBlockCandidate firstCandidate,
+        Vector2Int secondCoordinate,
+        PipeAreaBlockCandidate secondCandidate)
+    {
+        if (!CanPipeAreaBlockTypesConnect(firstCandidate.blockType, secondCandidate.blockType))
+        {
+            return false;
+        }
+
+        if (IsPipePassBlockType(firstCandidate.blockType) || IsPipePassBlockType(secondCandidate.blockType))
+        {
+            return PipePassMatchesPipeArea(
+                firstCoordinate,
+                firstCandidate,
+                secondCoordinate,
+                secondCandidate);
+        }
+
+        if (InputOutputModule.IsOutputBlockType(firstCandidate.blockType))
+        {
+            return PipeOutputMatchesPipeInput(
+                firstCoordinate,
+                firstCandidate,
+                secondCoordinate,
+                secondCandidate);
+        }
+
+        if (InputOutputModule.IsOutputBlockType(secondCandidate.blockType))
+        {
+            return PipeOutputMatchesPipeInput(
+                secondCoordinate,
+                secondCandidate,
+                firstCoordinate,
+                firstCandidate);
+        }
+
+        return false;
+    }
+
+    private bool PipePassMatchesPipeArea(
+        Vector2Int firstCoordinate,
+        PipeAreaBlockCandidate firstCandidate,
+        Vector2Int secondCoordinate,
+        PipeAreaBlockCandidate secondCandidate)
+    {
+        bool firstIsPipePass = IsPipePassBlockType(firstCandidate.blockType);
+        bool secondIsPipePass = IsPipePassBlockType(secondCandidate.blockType);
+        if (!firstIsPipePass && !secondIsPipePass)
+        {
+            return false;
+        }
+
+        if (firstIsPipePass && secondIsPipePass)
+        {
+            return PipePassMatchesPipePass(
+                firstCoordinate,
+                firstCandidate,
+                secondCoordinate,
+                secondCandidate);
+        }
+
+        if (firstIsPipePass)
+        {
+            return PipePassMatchesTypedPipeArea(
+                firstCoordinate,
+                firstCandidate,
+                secondCoordinate,
+                secondCandidate);
+        }
+
+        return PipePassMatchesTypedPipeArea(
+            secondCoordinate,
+            secondCandidate,
+            firstCoordinate,
+            firstCandidate);
+    }
+
+    private bool PipePassMatchesTypedPipeArea(
+        Vector2Int pipePassCoordinate,
+        PipeAreaBlockCandidate pipePassCandidate,
+        Vector2Int typedCoordinate,
+        PipeAreaBlockCandidate typedCandidate)
+    {
+        if (!TryGetPipeAreaObjectDirection(pipePassCoordinate, pipePassCandidate, out Vector2Int pipePassObjectDirection)
+            || !TryGetPipeAreaObjectDirection(typedCoordinate, typedCandidate, out Vector2Int typedObjectDirection))
+        {
+            return false;
+        }
+
+        if (InputOutputModule.IsOutputBlockType(typedCandidate.blockType))
+        {
+            Vector2Int outputFlowDirection = -typedObjectDirection;
+            return PipeOutputDirectionMatchesPipePass(
+                    typedCoordinate,
+                    outputFlowDirection,
+                    pipePassCoordinate,
+                    pipePassObjectDirection)
+                && PipePassItemsMatchOutput(pipePassCandidate, typedCandidate);
+        }
+
+        if (InputOutputModule.IsInputItemBlockType(typedCandidate.blockType))
+        {
+            return PipePassDirectionMatchesPipeInput(
+                    pipePassCoordinate,
+                    pipePassObjectDirection,
+                    typedCoordinate,
+                    typedObjectDirection)
+                && PipePassItemsMatchInput(pipePassCandidate, typedCandidate, typedCoordinate);
+        }
+
+        return false;
+    }
+
+    private bool PipePassMatchesPipePass(
+        Vector2Int firstCoordinate,
+        PipeAreaBlockCandidate firstCandidate,
+        Vector2Int secondCoordinate,
+        PipeAreaBlockCandidate secondCandidate)
+    {
+        return TryGetPipeAreaObjectDirection(firstCoordinate, firstCandidate, out Vector2Int firstObjectDirection)
+               && TryGetPipeAreaObjectDirection(secondCoordinate, secondCandidate, out Vector2Int secondObjectDirection)
+               && PipePassDirectionsMatch(
+                   firstCoordinate,
+                   firstObjectDirection,
+                   secondCoordinate,
+                   secondObjectDirection)
+               && PipePassItemsMatchPipePass(firstCandidate, secondCandidate);
+    }
+
+    private bool TryGetPipeAreaObjectDirection(
+        Vector2Int coordinate,
+        PipeAreaBlockCandidate candidate,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        return candidate.snapshot != null
+               && candidate.snapshot.mapObject != null
+               && TryGetInputOutputModule(candidate.snapshot.mapObject, out InputOutputModule inputOutputModule)
+               && TryGetRectGridPipeAreaConnectionDirection(
+                   candidate.snapshot.mapObject,
+                   inputOutputModule,
+                   candidate.snapshot.anchorCoordinate,
+                   candidate.snapshot.quarterTurns,
+                   coordinate,
+                   out direction)
+               && direction != Vector2Int.zero;
+    }
+
+    private static bool PipePassDirectionMatchesPipeInput(
+        Vector2Int pipePassCoordinate,
+        Vector2Int pipePassObjectDirection,
+        Vector2Int inputCoordinate,
+        Vector2Int inputObjectDirection)
+    {
+        Vector2Int coordinateDelta = inputCoordinate - pipePassCoordinate;
+        if (coordinateDelta == Vector2Int.zero)
+        {
+            return inputObjectDirection == -pipePassObjectDirection;
+        }
+
+        return coordinateDelta == -pipePassObjectDirection
+               && inputObjectDirection == coordinateDelta;
+    }
+
+    private static bool PipeOutputDirectionMatchesPipePass(
+        Vector2Int outputCoordinate,
+        Vector2Int outputFlowDirection,
+        Vector2Int pipePassCoordinate,
+        Vector2Int pipePassObjectDirection)
+    {
+        if (outputFlowDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2Int coordinateDelta = pipePassCoordinate - outputCoordinate;
+        return (coordinateDelta == Vector2Int.zero || coordinateDelta == outputFlowDirection)
+               && pipePassObjectDirection == outputFlowDirection;
+    }
+
+    private static bool PipePassDirectionsMatch(
+        Vector2Int firstCoordinate,
+        Vector2Int firstObjectDirection,
+        Vector2Int secondCoordinate,
+        Vector2Int secondObjectDirection)
+    {
+        Vector2Int coordinateDelta = secondCoordinate - firstCoordinate;
+        if (coordinateDelta == Vector2Int.zero)
+        {
+            return firstObjectDirection == -secondObjectDirection;
+        }
+
+        return coordinateDelta == -firstObjectDirection
+               && secondObjectDirection == coordinateDelta;
+    }
+
+    private bool PipePassItemsMatchInput(
+        PipeAreaBlockCandidate pipePassCandidate,
+        PipeAreaBlockCandidate inputCandidate,
+        Vector2Int inputCoordinate)
+    {
+        HashSet<int> pipePassItemIds = new HashSet<int>();
+        HashSet<int> inputItemIds = new HashSet<int>();
+        bool hasPipePassItems = TryGetCandidatePipePassItemIds(pipePassCandidate, pipePassItemIds);
+        bool hasInputItems = inputCandidate.snapshot != null
+                             && TryGetCandidateInputItemIdsAtCoordinate(
+                                 inputCandidate.snapshot.anchorCoordinate,
+                                 inputCandidate.snapshot.mapObject,
+                                 inputCandidate.snapshot.quarterTurns,
+                                 inputCoordinate,
+                                 inputItemIds);
+
+        return !hasPipePassItems || !hasInputItems || HasSharedItemId(pipePassItemIds, inputItemIds);
+    }
+
+    private bool PipePassItemsMatchOutput(
+        PipeAreaBlockCandidate pipePassCandidate,
+        PipeAreaBlockCandidate outputCandidate)
+    {
+        HashSet<int> pipePassItemIds = new HashSet<int>();
+        HashSet<int> outputItemIds = new HashSet<int>();
+        bool hasPipePassItems = TryGetCandidatePipePassItemIds(pipePassCandidate, pipePassItemIds);
+        bool hasOutputItems = outputCandidate.snapshot != null
+                              && TryGetCandidateOutputItemIds(
+                                  outputCandidate.snapshot.anchorCoordinate,
+                                  outputCandidate.snapshot.mapObject,
+                                  outputItemIds);
+
+        return !hasPipePassItems || !hasOutputItems || HasSharedItemId(pipePassItemIds, outputItemIds);
+    }
+
+    private bool PipePassItemsMatchPipePass(
+        PipeAreaBlockCandidate firstCandidate,
+        PipeAreaBlockCandidate secondCandidate)
+    {
+        HashSet<int> firstItemIds = new HashSet<int>();
+        HashSet<int> secondItemIds = new HashSet<int>();
+        bool hasFirstItems = TryGetCandidatePipePassItemIds(firstCandidate, firstItemIds);
+        bool hasSecondItems = TryGetCandidatePipePassItemIds(secondCandidate, secondItemIds);
+        return !hasFirstItems || !hasSecondItems || HasSharedItemId(firstItemIds, secondItemIds);
+    }
+
+    private bool TryGetCandidatePipePassItemIds(PipeAreaBlockCandidate candidate, ISet<int> itemIds)
+    {
+        if (itemIds == null
+            || !IsPipePassBlockType(candidate.blockType)
+            || candidate.snapshot == null
+            || !TryGetInputOutputModule(candidate.snapshot.mapObject, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        IReadOnlyList<InputOutputModule.ItemIoEntry> inputList = inputOutputModule.InputList;
+        if (inputList == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < inputList.Count; i++)
+        {
+            ItemDefinition itemDefinition = inputList[i].itemDefinition;
+            if (itemDefinition == null || itemDefinition.id < 0)
+            {
+                continue;
+            }
+
+            itemIds.Add(itemDefinition.id);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    private bool PipeOutputMatchesPipeInput(
+        Vector2Int outputCoordinate,
+        PipeAreaBlockCandidate outputCandidate,
+        Vector2Int inputCoordinate,
+        PipeAreaBlockCandidate inputCandidate)
+    {
+        if (outputCandidate.snapshot == null || inputCandidate.snapshot == null)
+        {
+            return false;
+        }
+
+        if (!PipeOutputDirectionMatchesPipeInput(
+                outputCoordinate,
+                outputCandidate,
+                inputCoordinate,
+                inputCandidate))
+        {
+            return false;
+        }
+
+        HashSet<int> outputItemIds = new HashSet<int>();
+        if (!TryGetCandidateOutputItemIds(
+                outputCandidate.snapshot.anchorCoordinate,
+                outputCandidate.snapshot.mapObject,
+                outputItemIds))
+        {
+            return false;
+        }
+
+        if (InputOutputModule.IsInputItemBlockType(inputCandidate.blockType))
+        {
+            HashSet<int> inputItemIds = new HashSet<int>();
+            return TryGetCandidateInputItemIdsAtCoordinate(
+                    inputCandidate.snapshot.anchorCoordinate,
+                    inputCandidate.snapshot.mapObject,
+                    inputCandidate.snapshot.quarterTurns,
+                    inputCoordinate,
+                    inputItemIds)
+                && HasSharedItemId(outputItemIds, inputItemIds);
+        }
+
+        if (InputOutputModule.IsInputEnergyBlockType(inputCandidate.blockType))
+        {
+            HashSet<ItemDefinition.EnergyType> inputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+            return TryGetCandidateInputEnergyTypes(inputCandidate.snapshot.mapObject, inputEnergyTypes)
+                && HasOutputItemWithEnergyType(outputItemIds, inputEnergyTypes);
+        }
+
+        return false;
+    }
+
+    private bool PipeOutputDirectionMatchesPipeInput(
+        Vector2Int outputCoordinate,
+        PipeAreaBlockCandidate outputCandidate,
+        Vector2Int inputCoordinate,
+        PipeAreaBlockCandidate inputCandidate)
+    {
+        if (!TryGetInputOutputModule(outputCandidate.snapshot.mapObject, out InputOutputModule outputModule)
+            || !TryGetInputOutputModule(inputCandidate.snapshot.mapObject, out InputOutputModule inputModule)
+            || !TryGetRectGridPipeAreaConnectionDirection(
+                outputCandidate.snapshot.mapObject,
+                outputModule,
+                outputCandidate.snapshot.anchorCoordinate,
+                outputCandidate.snapshot.quarterTurns,
+                outputCoordinate,
+                out Vector2Int outputObjectDirection)
+            || !TryGetRectGridPipeAreaConnectionDirection(
+                inputCandidate.snapshot.mapObject,
+                inputModule,
+                inputCandidate.snapshot.anchorCoordinate,
+                inputCandidate.snapshot.quarterTurns,
+                inputCoordinate,
+                out Vector2Int inputObjectDirection))
+        {
+            return false;
+        }
+
+        Vector2Int outputFlowDirection = -outputObjectDirection;
+        if (outputFlowDirection == Vector2Int.zero || inputObjectDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2Int coordinateDelta = inputCoordinate - outputCoordinate;
+        if (IsBoilerSteamGeneratorDirectCenterOutputMatch(
+                outputCoordinate,
+                outputCandidate,
+                inputCoordinate,
+                inputCandidate,
+                outputFlowDirection,
+                inputObjectDirection))
+        {
+            return true;
+        }
+
+        return (coordinateDelta == Vector2Int.zero || coordinateDelta == outputFlowDirection)
+               && inputObjectDirection == outputFlowDirection;
+    }
+
+    private static bool IsBoilerSteamGeneratorDirectCenterOutputMatch(
+        Vector2Int outputCoordinate,
+        PipeAreaBlockCandidate outputCandidate,
+        Vector2Int inputCoordinate,
+        PipeAreaBlockCandidate inputCandidate,
+        Vector2Int outputFlowDirection,
+        Vector2Int inputObjectDirection)
+    {
+        return outputCandidate.snapshot != null
+               && inputCandidate.snapshot != null
+               && IsBoilerSource(outputCandidate.snapshot.mapObject)
+               && IsSteamGeneratorSource(inputCandidate.snapshot.mapObject)
+               && outputCoordinate == inputCandidate.snapshot.anchorCoordinate
+               && inputCoordinate == outputCoordinate - outputFlowDirection
+               && inputObjectDirection == outputFlowDirection
+               && TryGetMapSizeAdjacentDirectionFromCenter(
+                   inputCandidate.snapshot.mapObject,
+                   inputCandidate.snapshot.quarterTurns,
+                   out Vector2Int adjacentBodyDirection)
+               && adjacentBodyDirection == outputFlowDirection;
+    }
+
+    private bool TryGetBoilerPipeOutputDirectionAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        out Vector2Int outputDirection)
+    {
+        outputDirection = Vector2Int.zero;
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchA);
+
+        for (int i = 0; i < pipeAreaBlockCandidateScratchA.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchA[i];
+            if (candidate.snapshot == null
+                || !IsBoilerSource(candidate.snapshot.mapObject)
+                || !InputOutputModule.IsOutputBlockType(candidate.blockType)
+                || !TryGetInputOutputModule(candidate.snapshot.mapObject, out InputOutputModule outputModule)
+                || !TryGetRectGridPipeAreaConnectionDirection(
+                    candidate.snapshot.mapObject,
+                    outputModule,
+                    candidate.snapshot.anchorCoordinate,
+                    candidate.snapshot.quarterTurns,
+                    coordinate,
+                    out Vector2Int outputObjectDirection))
+            {
+                continue;
+            }
+
+            Vector2Int candidateOutputDirection = -outputObjectDirection;
+            if (candidateOutputDirection == Vector2Int.zero)
+            {
+                continue;
+            }
+
+            outputDirection = candidateOutputDirection;
+            pipeAreaBlockCandidateScratchA.Clear();
+            return true;
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return false;
+    }
+
+    private bool TryGetSteamGeneratorPipePassTailDirectionAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        out Vector2Int tailDirection,
+        out PipeAreaBlockCandidate pipePassCandidate)
+    {
+        tailDirection = Vector2Int.zero;
+        pipePassCandidate = default;
+        pipeAreaBlockCandidateScratchB.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchB);
+
+        for (int i = 0; i < pipeAreaBlockCandidateScratchB.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchB[i];
+            if (candidate.snapshot == null
+                || !IsSteamGeneratorSource(candidate.snapshot.mapObject)
+                || !IsPipePassBlockType(candidate.blockType)
+                || !TryGetPipeAreaObjectDirection(
+                    coordinate,
+                    candidate,
+                    out Vector2Int pipePassObjectDirection))
+            {
+                continue;
+            }
+
+            Vector2Int candidateTailDirection = -pipePassObjectDirection;
+            if (candidateTailDirection == Vector2Int.zero
+                || !TryGetMapSizeAdjacentDirectionFromCenter(
+                    candidate.snapshot.mapObject,
+                    candidate.snapshot.quarterTurns,
+                    out Vector2Int existingTailDirection)
+                || candidateTailDirection != existingTailDirection)
+            {
+                continue;
+            }
+
+            tailDirection = candidateTailDirection;
+            pipePassCandidate = candidate;
+            pipeAreaBlockCandidateScratchB.Clear();
+            return true;
+        }
+
+        pipeAreaBlockCandidateScratchB.Clear();
+        return false;
+    }
+
+    private static bool IsPipePassBlockType(InputOutputModule.RectGridBlockType blockType)
+    {
+        return blockType == InputOutputModule.RectGridBlockType.PipeInput;
+    }
+
+    private bool TryGetPreviewPlacementSnapshot(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        out PlacementSnapshot snapshot)
+    {
+        snapshot = null;
+        if (!TryGetInstallPreviewAtCoordinate(coordinate, out MapObject preview)
+            || preview == null
+            || preview == previewToIgnore
+            || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int previewAnchorCoordinate))
+        {
+            return false;
+        }
+
+        snapshot = new PlacementSnapshot
+        {
+            mapObject = preview,
+            rotation = preview.transform.rotation,
+            anchorCoordinate = previewAnchorCoordinate,
+            quarterTurns = GetPreviewAreaQuarterTurns(preview)
+        };
+        return true;
+    }
+
+    private bool TryGetInstalledPlacementSnapshot(Vector2Int coordinate, out PlacementSnapshot snapshot)
+    {
+        snapshot = null;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null
+            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
+            || block == null
+            || block.MapObject == null
+            || !block.MapObject.gameObject.activeInHierarchy
+            || !(block.MapObject is InstallationObject installationObject)
+            || !installationObject.TryGetPlacementRuntime(
+                out Vector2Int anchorCoordinate,
+                out int quarterTurns))
+        {
+            return false;
+        }
+
+        snapshot = new PlacementSnapshot
+        {
+            mapObject = block.MapObject,
+            rotation = block.MapObject.transform.rotation,
+            anchorCoordinate = anchorCoordinate,
+            quarterTurns = quarterTurns
+        };
+        return true;
+    }
+
+    private static bool TryGetRuntimeModulePlacementSnapshot(
+        InputOutputModule module,
+        out PlacementSnapshot snapshot)
+    {
+        snapshot = null;
+        if (module == null
+            || !module.gameObject.activeInHierarchy
+            || !module.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return false;
+        }
+
+        snapshot = new PlacementSnapshot
+        {
+            mapObject = module,
+            rotation = module.transform.rotation,
+            anchorCoordinate = anchorCoordinate,
+            quarterTurns = quarterTurns
+        };
+        return true;
+    }
+
+    private bool TryGetRuntimeGridPlacementSnapshot(Vector2Int coordinate, out PlacementSnapshot snapshot)
+    {
+        snapshot = null;
+        return InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(coordinate, out InputOutputModule module)
+               && TryGetRuntimeModulePlacementSnapshot(module, out snapshot);
+    }
+
+    private bool TryGetRuntimeAreaPlacementSnapshot(Vector2Int coordinate, out PlacementSnapshot snapshot)
+    {
+        snapshot = null;
+        return InputOutputModule.TryGetModuleAtRuntimeAreaCoordinate(coordinate, out InputOutputModule module)
+               && TryGetRuntimeModulePlacementSnapshot(module, out snapshot);
+    }
+
+    private bool TryGetSavedPlacementSnapshot(Vector2Int coordinate, out PlacementSnapshot snapshot)
+    {
+        snapshot = null;
+        if (!TryGetSavedInstallationPlacementAtCoordinate(
+                coordinate,
+                out MapObject savedSourcePrefab,
+                out Quaternion savedRotation,
+                out BlockStateStore.InstallationSaveState savedState)
+            || savedSourcePrefab == null
+            || savedState == null)
+        {
+            return false;
+        }
+
+        snapshot = new PlacementSnapshot
+        {
+            mapObject = savedSourcePrefab,
+            rotation = savedRotation,
+            anchorCoordinate = savedState.anchorCoordinate,
+            quarterTurns = savedState.quarterTurns
+        };
+        return true;
+    }
+
+    private bool TryAppendFixedFluidPipeConnectionDirections(
+        PlacementSnapshot snapshot,
+        Vector2Int coordinate,
+        List<Vector2Int> directions)
+    {
+        if (snapshot?.mapObject is Pump)
+        {
+            return TryAppendPumpPipeOutputDirection(snapshot, coordinate, directions);
+        }
+
+        return TryAppendRectGridPipeAreaConnectionDirection(snapshot, coordinate, directions);
+    }
+
+    private bool TryAppendPumpPipeOutputDirection(
+        PlacementSnapshot snapshot,
+        Vector2Int coordinate,
+        List<Vector2Int> directions)
+    {
+        if (snapshot == null
+            || !(snapshot.mapObject is Pump pump)
+            || directions == null
+            || !TryGetRectGridFootprintBlockType(
+                snapshot.anchorCoordinate,
+                snapshot.mapObject,
+                snapshot.quarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            || blockType != InputOutputModule.RectGridBlockType.PipeOutputItem)
+        {
+            return false;
+        }
+
+        if (TryGetInputOutputModule(snapshot.mapObject, out InputOutputModule inputOutputModule)
+            && TryGetRectGridPipeAreaConnectionDirection(
+                snapshot.mapObject,
+                inputOutputModule,
+                snapshot.anchorCoordinate,
+                snapshot.quarterTurns,
+                coordinate,
+                out Vector2Int connectionDirection))
+        {
+            AddPipeDirection(directions, connectionDirection);
+            return true;
+        }
+
+        if (pump.TryGetPipeConnectionDirection(snapshot.rotation, out Vector2Int pumpOutputDirection)
+            && pumpOutputDirection != Vector2Int.zero)
+        {
+            AddPipeDirection(directions, -pumpOutputDirection);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryAppendBoilerPipeAxisDirections(
+        PlacementSnapshot snapshot,
+        Vector2Int coordinate,
+        List<Vector2Int> directions)
+    {
+        if (snapshot == null || !(snapshot.mapObject is Boiler boiler))
+        {
+            return false;
+        }
+
+        return TryAppendBoilerPipeAxisDirectionsAtCoordinate(
+            boiler,
+            snapshot.anchorCoordinate,
+            snapshot.quarterTurns,
+            coordinate,
+            directions);
+    }
+
+    private bool TryAppendRectGridPipeAreaConnectionDirection(
+        PlacementSnapshot snapshot,
+        Vector2Int coordinate,
+        List<Vector2Int> directions)
+    {
+        if (snapshot == null
+            || snapshot.mapObject == null
+            || directions == null
+            || !TryGetInputOutputModule(snapshot.mapObject, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridFootprintBlockType(
+                snapshot.anchorCoordinate,
+                snapshot.mapObject,
+                snapshot.quarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            || !InputOutputModule.AllowsPipeAreaInteraction(blockType)
+            || !TryGetRectGridPipeAreaConnectionDirection(
+                snapshot.mapObject,
+                inputOutputModule,
+                snapshot.anchorCoordinate,
+                snapshot.quarterTurns,
+                coordinate,
+                out Vector2Int connectionDirection))
+        {
+            return false;
+        }
+
+        AddPipeDirection(directions, connectionDirection);
+        return true;
+    }
+
+    private bool TryGetRectGridPipeAreaConnectionDirection(
+        MapObject footprintSource,
+        InputOutputModule inputOutputModule,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (TryResolveSteamGenerator(footprintSource, out SteamGenerator steamGenerator)
+            && TryGetRectGridFootprintBlockType(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            && InputOutputModule.IsInputItemBlockType(blockType))
+        {
+            if (TryGetNearestRectGridObjectDirection(
+                    inputOutputModule,
+                    footprintSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    coordinate,
+                    out direction)
+                && direction != Vector2Int.zero)
+            {
+                return true;
+            }
+
+            return steamGenerator.TryGetPipeAreaConnectionDirection(
+                    GetPlacementObjectRotation(footprintSource, quarterTurns),
+                    out direction)
+                && direction != Vector2Int.zero;
+        }
+
+        return TryGetNearestRectGridObjectDirection(
+            inputOutputModule,
+            footprintSource,
+            anchorCoordinate,
+            quarterTurns,
+            coordinate,
+            out direction);
+    }
+
+    private bool TryGetNearestRectGridObjectDirection(
+        InputOutputModule inputOutputModule,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (inputOutputModule == null
+            || !TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        Vector2Int bestDelta = Vector2Int.zero;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
+            Vector2Int objectCoordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+            Vector2Int delta = objectCoordinate - coordinate;
+            int distance = Mathf.Abs(delta.x) + Mathf.Abs(delta.y);
+            if (distance <= 0 || distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            bestDelta = delta;
+        }
+
+        return TryGetDominantCardinalDirection(bestDelta, out direction);
+    }
+
+    private static bool TryGetDominantCardinalDirection(Vector2Int offset, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (offset == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (Mathf.Abs(offset.x) >= Mathf.Abs(offset.y))
+        {
+            direction = offset.x >= 0 ? Vector2Int.right : Vector2Int.left;
+            return true;
+        }
+
+        direction = offset.y >= 0 ? Vector2Int.up : Vector2Int.down;
+        return true;
     }
 
     private bool TryGetInstalledPipeVariantPreview(
@@ -5096,25 +7374,6 @@ public class InstallationPlacementController : MonoBehaviour
         previewPipe = pipePreview;
         previewRotation = pipePreview.transform.rotation;
         return true;
-    }
-
-    private static bool MapObjectHasPipeConnectionTowards(
-        MapObject mapObject,
-        Quaternion rotation,
-        Vector2Int directionToCandidate,
-        bool allowPotentialConnections)
-    {
-        if (mapObject is Pipe pipe)
-        {
-            return ShouldPipeNeighborContributeToVariant(
-                pipe,
-                rotation,
-                directionToCandidate,
-                allowPotentialConnections);
-        }
-
-        return mapObject is Pump pump
-               && pump.HasPipeConnectionTowards(rotation, directionToCandidate);
     }
 
     private static bool ShouldPipeNeighborContributeToVariant(
@@ -5253,145 +7512,26 @@ public class InstallationPlacementController : MonoBehaviour
                && ((firstDirection.x * secondDirection.x) + (firstDirection.y * secondDirection.y)) == 0;
     }
 
-    private bool TryResolveConveyorPlacementVariant(
-        ConveyorBelt conveyorPrototype,
-        Vector2Int inputDirection,
-        Vector2Int outputDirection,
-        out MapObject sourcePrefab,
-        out int quarterTurns)
-    {
-        sourcePrefab = null;
-        quarterTurns = 0;
-        if (conveyorPrototype == null)
-        {
-            return false;
-        }
-
-        if (inputDirection == Vector2Int.zero && outputDirection == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        inputDirection = inputDirection == Vector2Int.zero ? -outputDirection : inputDirection;
-        outputDirection = outputDirection == Vector2Int.zero ? -inputDirection : outputDirection;
-
-        List<MapObject> candidateSources = new List<MapObject>(4);
-        if (DirectionsArePerpendicular(inputDirection, outputDirection))
-        {
-            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.CornerVariantPrefab);
-            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.ReverseCornerVariantPrefab);
-            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.StraightVariantPrefab);
-        }
-        else
-        {
-            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.StraightVariantPrefab);
-            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.CornerVariantPrefab);
-            AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype.ReverseCornerVariantPrefab);
-        }
-
-        AddUniqueConveyorCandidateSource(candidateSources, conveyorPrototype);
-        return TryResolveConveyorPlacementVariantFromSources(
-                   candidateSources,
-                   inputDirection,
-                   outputDirection,
-                   true,
-                   true,
-                   out sourcePrefab,
-                   out quarterTurns)
-               || TryResolveConveyorPlacementVariantFromSources(
-                   candidateSources,
-                   inputDirection,
-                   outputDirection,
-                   false,
-                   true,
-                   out sourcePrefab,
-                   out quarterTurns)
-               || TryResolveConveyorPlacementVariantFromSources(
-                   candidateSources,
-                   inputDirection,
-                   outputDirection,
-                   true,
-                   false,
-                   out sourcePrefab,
-                   out quarterTurns);
-    }
-
-    private bool TryResolveConveyorPlacementVariantFromSources(
-        IReadOnlyList<MapObject> candidateSources,
-        Vector2Int inputDirection,
-        Vector2Int outputDirection,
-        bool requireInputMatch,
-        bool requireOutputMatch,
-        out MapObject sourcePrefab,
-        out int quarterTurns)
-    {
-        sourcePrefab = null;
-        quarterTurns = 0;
-        if (candidateSources == null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < candidateSources.Count; i++)
-        {
-            MapObject candidateSource = candidateSources[i];
-            if (!(candidateSource is ConveyorBelt candidateConveyor))
-            {
-                continue;
-            }
-
-            for (int candidateQuarterTurns = 0; candidateQuarterTurns < 4; candidateQuarterTurns++)
-            {
-                Quaternion candidateRotation = GetPlacementObjectRotation(candidateConveyor, candidateQuarterTurns);
-                if (!candidateConveyor.TryGetInputDirection(candidateRotation, out Vector2Int candidateInputDirection)
-                    || !candidateConveyor.TryGetOutputDirection(candidateRotation, out Vector2Int candidateOutputDirection))
-                {
-                    continue;
-                }
-
-                if (requireInputMatch && candidateInputDirection != inputDirection)
-                {
-                    continue;
-                }
-
-                if (requireOutputMatch && candidateOutputDirection != outputDirection)
-                {
-                    continue;
-                }
-
-                sourcePrefab = candidateSource;
-                quarterTurns = candidateQuarterTurns;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public Vector3 GetInstalledObjectWorldPosition(
         Vector2Int anchorCoordinate,
         ItemDefinition definition,
-        int quarterTurns,
-        float verticalOffset = 0f)
+        int quarterTurns)
     {
         return GetInstalledObjectWorldPosition(
             anchorCoordinate,
             definition != null ? definition.mapObject : null,
-            quarterTurns,
-            verticalOffset);
+            quarterTurns);
     }
 
     public Vector3 GetInstalledObjectWorldPosition(
         Vector2Int anchorCoordinate,
         MapObject sourcePrefab,
-        int quarterTurns,
-        float verticalOffset = 0f)
+        int quarterTurns)
     {
         return GetPlacementWorldPositionFromAnchorCoordinate(
             anchorCoordinate,
             sourcePrefab,
-            quarterTurns,
-            verticalOffset);
+            quarterTurns);
     }
 
     public MapObject ResolveInstalledObjectSourcePrefab(ItemDefinition definition, Vector2Int anchorCoordinate, int quarterTurns)
@@ -5910,151 +8050,6 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private Vector2Int[] GetValidConveyorIncomingDirections(Vector2Int anchorCoordinate, MapObject previewToIgnore)
-    {
-        List<Vector2Int> validIncomingDirections = new List<Vector2Int>(2);
-        Vector2Int[] sideDirections =
-        {
-            Vector2Int.up,
-            Vector2Int.right,
-            Vector2Int.down,
-            Vector2Int.left
-        };
-
-        for (int i = 0; i < sideDirections.Length; i++)
-        {
-            Vector2Int sideDirection = sideDirections[i];
-            if (!TryGetConveyorPlacementInfoAtCoordinate(
-                    anchorCoordinate + sideDirection,
-                    previewToIgnore,
-                    out _,
-                    out Vector2Int neighborOutputDirection))
-            {
-                continue;
-            }
-
-            if (neighborOutputDirection != -sideDirection)
-            {
-                continue;
-            }
-
-            validIncomingDirections.Add(sideDirection);
-        }
-
-        return validIncomingDirections.ToArray();
-    }
-
-    private bool TryConveyorCornerPrefabMatchesIncomingDirection(
-        ConveyorBelt candidatePrefab,
-        int quarterTurns,
-        IReadOnlyList<Vector2Int> validIncomingDirections)
-    {
-        if (candidatePrefab == null || validIncomingDirections == null || validIncomingDirections.Count <= 0)
-        {
-            return false;
-        }
-
-        if (!candidatePrefab.TryGetInputDirection(
-                GetPlacementObjectRotation(candidatePrefab, quarterTurns),
-                out Vector2Int candidateInputDirection))
-        {
-            return false;
-        }
-
-        for (int i = 0; i < validIncomingDirections.Count; i++)
-        {
-            if (validIncomingDirections[i] == candidateInputDirection)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool CanUseConveyorCornerVariantAtCoordinate(
-        ConveyorBelt conveyorPrototype,
-        Vector2Int anchorCoordinate,
-        int quarterTurns,
-        MapObject previewToIgnore)
-    {
-        if (conveyorPrototype == null)
-        {
-            return false;
-        }
-
-        ConveyorBelt[] candidates =
-        {
-            conveyorPrototype.CornerVariantPrefab,
-            conveyorPrototype.ReverseCornerVariantPrefab
-        };
-
-        for (int i = 0; i < candidates.Length; i++)
-        {
-            if (HasConveyorEndpointCandidateAtCoordinate(candidates[i], anchorCoordinate, quarterTurns, previewToIgnore))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool HasConveyorEndpointConnectionAtCoordinate(
-        ConveyorBelt candidatePrefab,
-        Vector2Int anchorCoordinate,
-        int quarterTurns,
-        MapObject previewToIgnore)
-    {
-        return TryGetConveyorEndpointConnectionsAtCoordinate(
-                   candidatePrefab,
-                   anchorCoordinate,
-                   quarterTurns,
-                   previewToIgnore,
-                   out bool inputConnected,
-                   out bool outputConnected)
-               && (inputConnected || outputConnected);
-    }
-
-    private bool HasConveyorEndpointCandidateAtCoordinate(
-        ConveyorBelt candidatePrefab,
-        Vector2Int anchorCoordinate,
-        int quarterTurns,
-        MapObject previewToIgnore)
-    {
-        return TryGetConveyorEndpointConnectionCandidatesAtCoordinate(
-            candidatePrefab,
-            anchorCoordinate,
-            quarterTurns,
-            previewToIgnore,
-            out _,
-            out _,
-            out _,
-            out _);
-    }
-
-    private bool TryGetConveyorEndpointConnectionsAtCoordinate(
-        ConveyorBelt candidatePrefab,
-        Vector2Int anchorCoordinate,
-        int quarterTurns,
-        MapObject previewToIgnore,
-        out bool inputConnected,
-        out bool outputConnected)
-    {
-        inputConnected = false;
-        outputConnected = false;
-        return TryGetConveyorEndpointConnectionCandidatesAtCoordinate(
-                   candidatePrefab,
-                   anchorCoordinate,
-                   quarterTurns,
-                   previewToIgnore,
-                   out inputConnected,
-                   out outputConnected,
-                   out _,
-                   out _)
-               && (inputConnected || outputConnected);
-    }
-
     private bool TryGetConveyorEndpointConnectionCandidatesAtCoordinate(
         ConveyorBelt candidatePrefab,
         Vector2Int anchorCoordinate,
@@ -6172,178 +8167,6 @@ public class InstallationPlacementController : MonoBehaviour
             && savedConveyor.TryGetOutputDirection(savedRotation, out outputDirection);
     }
 
-    private bool TryGetConveyorPlacementSequence(
-        MapObject conveyorObject,
-        Vector2Int anchorCoordinate,
-        out long placementSequence)
-    {
-        placementSequence = 0;
-        if (conveyorObject == null)
-        {
-            return false;
-        }
-
-        if (installPreviewPlacementSequencesByPreview.TryGetValue(conveyorObject, out long previewSequence)
-            && previewSequence > 0)
-        {
-            placementSequence = previewSequence;
-            return true;
-        }
-
-        if (conveyorObject is InstallationObject installationObject
-            && installationObject.RuntimePlacementSequence > 0)
-        {
-            placementSequence = installationObject.RuntimePlacementSequence;
-            return true;
-        }
-
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain != null
-            && terrain.TryGetInstallationStateAtCoordinate(anchorCoordinate, out BlockStateStore.InstallationSaveState savedState)
-            && savedState != null
-            && savedState.placementSequence > 0)
-        {
-            placementSequence = savedState.placementSequence;
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryGetConveyorPlacementDirectionsAndSequenceAtCoordinate(
-        Vector2Int coordinate,
-        MapObject previewToIgnore,
-        out ConveyorBelt conveyorBelt,
-        out Vector2Int inputDirection,
-        out Vector2Int outputDirection,
-        out long placementSequence)
-    {
-        conveyorBelt = null;
-        inputDirection = Vector2Int.zero;
-        outputDirection = Vector2Int.zero;
-        placementSequence = 0;
-
-        if (TryGetInstallPreviewAtCoordinate(coordinate, out MapObject preview)
-            && preview != null
-            && preview != previewToIgnore
-            && preview is ConveyorBelt previewConveyor)
-        {
-            conveyorBelt = previewConveyor;
-            placementSequence = installPreviewPlacementSequencesByPreview.TryGetValue(preview, out long previewSequence)
-                ? previewSequence
-                : 0;
-            return placementSequence > 0
-                   && previewConveyor.TryGetInputDirection(previewConveyor.transform.rotation, out inputDirection)
-                   && previewConveyor.TryGetOutputDirection(previewConveyor.transform.rotation, out outputDirection);
-        }
-
-        return TryGetInstalledConveyorPlacementDirectionsAtCoordinate(
-            coordinate,
-            out conveyorBelt,
-            out inputDirection,
-            out outputDirection,
-            out placementSequence);
-    }
-
-    private bool TryResolveConveyorSequenceDirections(
-        Vector2Int anchorCoordinate,
-        MapObject currentConveyor,
-        long currentPlacementSequence,
-        out Vector2Int inputDirection,
-        out Vector2Int outputDirection)
-    {
-        inputDirection = Vector2Int.zero;
-        outputDirection = Vector2Int.zero;
-        if (currentPlacementSequence <= 0)
-        {
-            return false;
-        }
-
-        bool foundPrevious = false;
-        bool foundNext = false;
-        long bestPreviousSequence = long.MinValue;
-        long bestNextSequence = long.MaxValue;
-        Vector2Int[] directions =
-        {
-            Vector2Int.up,
-            Vector2Int.right,
-            Vector2Int.down,
-            Vector2Int.left
-        };
-
-        for (int i = 0; i < directions.Length; i++)
-        {
-            Vector2Int sideDirection = directions[i];
-            if (!TryGetConveyorPlacementDirectionsAndSequenceAtCoordinate(
-                    anchorCoordinate + sideDirection,
-                    currentConveyor,
-                    out _,
-                    out _,
-                    out _,
-                    out long neighborSequence)
-                || neighborSequence <= 0
-                || neighborSequence == currentPlacementSequence)
-            {
-                continue;
-            }
-
-            if (neighborSequence < currentPlacementSequence)
-            {
-                if (foundPrevious && neighborSequence <= bestPreviousSequence)
-                {
-                    continue;
-                }
-
-                foundPrevious = true;
-                bestPreviousSequence = neighborSequence;
-                inputDirection = sideDirection;
-            }
-            else if (neighborSequence > currentPlacementSequence)
-            {
-                if (foundNext && neighborSequence >= bestNextSequence)
-                {
-                    continue;
-                }
-
-                foundNext = true;
-                bestNextSequence = neighborSequence;
-                outputDirection = sideDirection;
-            }
-        }
-
-        return foundPrevious || foundNext;
-    }
-
-    private bool TryResolveConveyorSequencePlacementVariant(
-        ConveyorBelt conveyorPrototype,
-        Vector2Int anchorCoordinate,
-        MapObject currentConveyor,
-        out MapObject sourcePrefab,
-        out int quarterTurns)
-    {
-        sourcePrefab = null;
-        quarterTurns = 0;
-        if (conveyorPrototype == null
-            || currentConveyor == null
-            || !TryGetConveyorPlacementSequence(currentConveyor, anchorCoordinate, out long currentPlacementSequence)
-            || !TryResolveConveyorSequenceDirections(
-                anchorCoordinate,
-                currentConveyor,
-                currentPlacementSequence,
-                out Vector2Int inputDirection,
-                out Vector2Int outputDirection))
-        {
-            return false;
-        }
-
-        return TryResolveConveyorPlacementVariant(
-            conveyorPrototype,
-            inputDirection,
-            outputDirection,
-            out sourcePrefab,
-            out quarterTurns);
-    }
-
     private bool TryResolveInitialConveyorPreviewQuarterTurns(
         Vector2Int anchorCoordinate,
         ConveyorBelt conveyorPrototype,
@@ -6454,186 +8277,6 @@ public class InstallationPlacementController : MonoBehaviour
             out placementSequence);
     }
 
-    private bool TryGetInstalledConveyorEndpointConnections(
-        ConveyorBelt conveyorBelt,
-        Vector2Int anchorCoordinate,
-        MapObject previewToIgnore,
-        out bool inputConnected,
-        out bool outputConnected)
-    {
-        inputConnected = false;
-        outputConnected = false;
-        if (conveyorBelt == null)
-        {
-            return false;
-        }
-
-        if (!conveyorBelt.TryGetInputDirection(conveyorBelt.transform.rotation, out Vector2Int inputDirection)
-            || !conveyorBelt.TryGetOutputDirection(conveyorBelt.transform.rotation, out Vector2Int outputDirection))
-        {
-            return false;
-        }
-
-        inputConnected = TryGetInstalledConveyorPlacementDirectionsAtCoordinate(
-                             anchorCoordinate + inputDirection,
-                             out _,
-                             out _,
-                             out Vector2Int neighborOutputDirection,
-                             out _)
-                         && neighborOutputDirection == -inputDirection;
-
-        if (!inputConnected)
-        {
-            inputConnected = TryGetConveyorPlacementDirectionsAtCoordinate(
-                                 anchorCoordinate + inputDirection,
-                                 previewToIgnore,
-                                 out _,
-                                 out _,
-                                 out neighborOutputDirection)
-                             && neighborOutputDirection == -inputDirection;
-        }
-
-        outputConnected = TryGetInstalledConveyorPlacementDirectionsAtCoordinate(
-                              anchorCoordinate + outputDirection,
-                              out _,
-                              out Vector2Int neighborInputDirection,
-                              out _,
-                              out _)
-                          && neighborInputDirection == -outputDirection;
-
-        if (!outputConnected)
-        {
-            outputConnected = TryGetConveyorPlacementDirectionsAtCoordinate(
-                                  anchorCoordinate + outputDirection,
-                                  previewToIgnore,
-                                  out _,
-                                  out neighborInputDirection,
-                                  out _)
-                              && neighborInputDirection == -outputDirection;
-        }
-
-        return inputConnected || outputConnected;
-    }
-
-    private static ConveyorChangeInfo FindConveyorChangeAtCoordinate(
-        IReadOnlyList<ConveyorChangeInfo> changes,
-        Vector2Int coordinate)
-    {
-        if (changes == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < changes.Count; i++)
-        {
-            ConveyorChangeInfo change = changes[i];
-            if (change == null)
-            {
-                continue;
-            }
-
-            if (change.coordinate == coordinate)
-            {
-                return change;
-            }
-
-            if (change.occupiedCoordinates == null)
-            {
-                continue;
-            }
-
-            for (int occupiedIndex = 0; occupiedIndex < change.occupiedCoordinates.Count; occupiedIndex++)
-            {
-                if (change.occupiedCoordinates[occupiedIndex] == coordinate)
-                {
-                    return change;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static List<ConveyorChangeInfo> BuildCoordinateOnlyConveyorChanges(IReadOnlyList<Vector2Int> coordinates)
-    {
-        List<ConveyorChangeInfo> changes = new List<ConveyorChangeInfo>();
-        if (coordinates == null)
-        {
-            return changes;
-        }
-
-        for (int i = 0; i < coordinates.Count; i++)
-        {
-            changes.Add(new ConveyorChangeInfo
-            {
-                coordinate = coordinates[i],
-                occupiedCoordinates = new List<Vector2Int> { coordinates[i] },
-                inputDirection = Vector2Int.zero,
-                outputDirection = Vector2Int.zero,
-                rotation = Quaternion.identity,
-                isCornerVariant = false
-            });
-        }
-
-        return changes;
-    }
-
-    private bool TryCreateConveyorChange(
-        Vector2Int anchorCoordinate,
-        IReadOnlyList<Vector2Int> occupiedCoordinates,
-        ConveyorBelt conveyor,
-        Quaternion rotation,
-        out ConveyorChangeInfo changeInfo)
-    {
-        changeInfo = null;
-        if (conveyor == null
-            || !conveyor.TryGetInputDirection(rotation, out Vector2Int inputDirection)
-            || !conveyor.TryGetOutputDirection(rotation, out Vector2Int outputDirection))
-        {
-            return false;
-        }
-
-        changeInfo = new ConveyorChangeInfo
-        {
-            coordinate = anchorCoordinate,
-            occupiedCoordinates = occupiedCoordinates != null ? new List<Vector2Int>(occupiedCoordinates) : new List<Vector2Int> { anchorCoordinate },
-            inputDirection = inputDirection,
-            outputDirection = outputDirection,
-            rotation = rotation,
-            isCornerVariant = conveyor.IsCornerVariant
-        };
-        return true;
-    }
-
-    private bool TryCreateOriginalEditConveyorChange(
-        InstallationEditSession editSession,
-        out ConveyorChangeInfo changeInfo)
-    {
-        changeInfo = null;
-        if (editSession == null
-            || !(editSession.definition?.mapObject is ConveyorBelt conveyorPrototype))
-        {
-            return false;
-        }
-
-        MapObject sourcePrefab = ResolveConveyorVariantPrefab(conveyorPrototype, editSession.originalConveyorVariantKind)
-            ?? editSession.definition.mapObject;
-        return TryCreateConveyorChange(
-            editSession.originalAnchorCoordinate,
-            editSession.originalOccupiedCoordinates,
-            sourcePrefab as ConveyorBelt,
-            editSession.originalRotation,
-            out changeInfo);
-    }
-
-    private void RefreshConveyorVariantsAroundActivePreview(
-        Vector2Int? previousAnchorCoordinate = null,
-        ConveyorChangeInfo previousChange = null,
-        bool refreshActivePreviewVariant = true)
-    {
-        // Belts keep the direction/variant chosen by the player. Walls still use neighbor auto-alignment.
-    }
-
     private void RefreshFencePreviewVariantsAroundActivePreview(
         Vector2Int? previousAnchorCoordinate = null,
         bool preserveActivePreviewQuarterTurns = false)
@@ -6667,188 +8310,60 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        List<Vector2Int> coordinates = new List<Vector2Int>(2);
+        HashSet<Vector2Int> coordinates = new HashSet<Vector2Int>();
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(activeInstallPreview)
+                                    ?? (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null)
+                                    ?? activeInstallPreview;
+        int quarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
         if (previousAnchorCoordinate.HasValue)
         {
-            coordinates.Add(previousAnchorCoordinate.Value);
+            AddPipeConnectorVariantRefreshCoordinates(
+                coordinates,
+                previousAnchorCoordinate.Value,
+                footprintSource,
+                quarterTurns,
+                true);
         }
 
         if (TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int currentAnchorCoordinate)
             && !coordinates.Contains(currentAnchorCoordinate))
         {
-            coordinates.Add(currentAnchorCoordinate);
+            AddPipeConnectorVariantRefreshCoordinates(
+                coordinates,
+                currentAnchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                true);
         }
 
-        RefreshPipePreviewVariants(coordinates);
-        RefreshInstalledPipeVariantPreviews(coordinates);
+        List<Vector2Int> coordinateList = new List<Vector2Int>(coordinates);
+        RefreshPipePreviewVariants(coordinateList);
+        RefreshInstalledPipeVariantPreviews(coordinateList);
     }
 
     private static bool IsPipeConnectorObject(MapObject mapObject)
     {
-        return mapObject is Pipe || mapObject is Pump;
+        return mapObject is Pipe || mapObject is Pump || mapObject is Boiler;
     }
 
-    private void NormalizeDisconnectedConveyorCornersAroundCoordinates(
-        IReadOnlyList<Vector2Int> coordinates,
-        bool includeSelf = true,
-        MapObject previewToIgnore = null,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates = null)
+    private static bool IsProtectedAnchorCoordinate(
+        Vector2Int anchorCoordinate,
+        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates)
     {
-        NormalizeDisconnectedConveyorCornersAroundChanges(
-            BuildCoordinateOnlyConveyorChanges(coordinates),
-            includeSelf,
-            previewToIgnore,
-            protectedAnchorCoordinates);
-    }
-
-    private void RefreshInstalledConveyorVariantsAroundCoordinates(
-        IReadOnlyList<Vector2Int> coordinates,
-        bool includeSelf = true,
-        MapObject previewToIgnore = null,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates = null)
-    {
-        RefreshInstalledConveyorVariantsAroundChanges(
-            BuildCoordinateOnlyConveyorChanges(coordinates),
-            includeSelf,
-            previewToIgnore,
-            protectedAnchorCoordinates);
-    }
-
-    private void RefreshInstalledConveyorVariantsAroundChanges(
-        IReadOnlyList<ConveyorChangeInfo> changes,
-        bool includeSelf = true,
-        MapObject previewToIgnore = null,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates = null)
-    {
-        if (changes == null || changes.Count <= 0)
+        if (protectedAnchorCoordinates == null)
         {
-            return;
+            return false;
         }
 
-        HashSet<Vector2Int> candidateCoordinates = new HashSet<Vector2Int>();
-        for (int i = 0; i < changes.Count; i++)
+        foreach (Vector2Int protectedAnchorCoordinate in protectedAnchorCoordinates)
         {
-            ConveyorChangeInfo change = changes[i];
-            if (change == null)
+            if (protectedAnchorCoordinate == anchorCoordinate)
             {
-                continue;
-            }
-
-            IReadOnlyList<Vector2Int> sourceCoordinates = change.occupiedCoordinates != null
-                && change.occupiedCoordinates.Count > 0
-                    ? change.occupiedCoordinates
-                    : new List<Vector2Int> { change.coordinate };
-
-            for (int sourceIndex = 0; sourceIndex < sourceCoordinates.Count; sourceIndex++)
-            {
-                Vector2Int sourceCoordinate = sourceCoordinates[sourceIndex];
-                if (includeSelf)
-                {
-                    candidateCoordinates.Add(sourceCoordinate);
-                }
-
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.up);
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.right);
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.down);
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.left);
+                return true;
             }
         }
 
-        if (candidateCoordinates.Count <= 0)
-        {
-            return;
-        }
-
-        List<Vector2Int> candidateList = new List<Vector2Int>(candidateCoordinates);
-        int maxPassCount = Mathf.Max(1, candidateList.Count);
-        for (int pass = 0; pass < maxPassCount; pass++)
-        {
-            bool anyChanged = false;
-            for (int i = 0; i < candidateList.Count; i++)
-            {
-                if (TryRefreshInstalledConveyorVariantAtCoordinate(
-                        candidateList[i],
-                        previewToIgnore,
-                        protectedAnchorCoordinates))
-                {
-                    anyChanged = true;
-                }
-            }
-
-            if (!anyChanged)
-            {
-                break;
-            }
-        }
-    }
-
-    private void NormalizeDisconnectedConveyorCornersAroundChanges(
-        IReadOnlyList<ConveyorChangeInfo> changes,
-        bool includeSelf = true,
-        MapObject previewToIgnore = null,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates = null)
-    {
-        if (changes == null || changes.Count <= 0)
-        {
-            return;
-        }
-
-        HashSet<Vector2Int> candidateCoordinates = new HashSet<Vector2Int>();
-        for (int i = 0; i < changes.Count; i++)
-        {
-            ConveyorChangeInfo change = changes[i];
-            if (change == null)
-            {
-                continue;
-            }
-
-            IReadOnlyList<Vector2Int> sourceCoordinates = change.occupiedCoordinates != null
-                && change.occupiedCoordinates.Count > 0
-                    ? change.occupiedCoordinates
-                    : new List<Vector2Int> { change.coordinate };
-
-            for (int sourceIndex = 0; sourceIndex < sourceCoordinates.Count; sourceIndex++)
-            {
-                Vector2Int sourceCoordinate = sourceCoordinates[sourceIndex];
-                if (includeSelf)
-                {
-                    candidateCoordinates.Add(sourceCoordinate);
-                }
-
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.up);
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.right);
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.down);
-                candidateCoordinates.Add(sourceCoordinate + Vector2Int.left);
-            }
-        }
-
-        if (candidateCoordinates.Count <= 0)
-        {
-            return;
-        }
-
-        List<Vector2Int> candidateList = new List<Vector2Int>(candidateCoordinates);
-        int maxPassCount = Mathf.Max(1, candidateList.Count);
-        for (int pass = 0; pass < maxPassCount; pass++)
-        {
-            bool anyChanged = false;
-            for (int i = 0; i < candidateList.Count; i++)
-            {
-                if (TryNormalizeDisconnectedConveyorCornerAtCoordinate(
-                        candidateList[i],
-                        changes,
-                        previewToIgnore,
-                        protectedAnchorCoordinates))
-                {
-                    anyChanged = true;
-                }
-            }
-
-            if (!anyChanged)
-            {
-                break;
-            }
-        }
+        return false;
     }
 
     private void NormalizeFenceCornersAroundCoordinates(
@@ -6865,16 +8380,11 @@ public class InstallationPlacementController : MonoBehaviour
         HashSet<Vector2Int> candidateCoordinates = new HashSet<Vector2Int>();
         for (int i = 0; i < coordinates.Count; i++)
         {
-            Vector2Int coordinate = coordinates[i];
-            if (includeSelf)
-            {
-                candidateCoordinates.Add(coordinate);
-            }
-
-            candidateCoordinates.Add(coordinate + Vector2Int.up);
-            candidateCoordinates.Add(coordinate + Vector2Int.right);
-            candidateCoordinates.Add(coordinate + Vector2Int.down);
-            candidateCoordinates.Add(coordinate + Vector2Int.left);
+            AddPipeConnectorVariantRefreshCoordinatesForWorldCoordinate(
+                candidateCoordinates,
+                coordinates[i],
+                includeSelf,
+                previewToIgnore);
         }
 
         if (candidateCoordinates.Count <= 0)
@@ -6962,7 +8472,8 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Vector3 desiredPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredFencePrefab, desiredQuarterTurns, 0f);
+        Vector3 desiredPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredFencePrefab, desiredQuarterTurns);
+        RemoveInstalledFenceVariantPreview(installedFence);
         if (sameVariant)
         {
             installedFence.transform.SetPositionAndRotation(desiredPosition, desiredRotation);
@@ -7016,16 +8527,11 @@ public class InstallationPlacementController : MonoBehaviour
         HashSet<Vector2Int> candidateCoordinates = new HashSet<Vector2Int>();
         for (int i = 0; i < coordinates.Count; i++)
         {
-            Vector2Int coordinate = coordinates[i];
-            if (includeSelf)
-            {
-                candidateCoordinates.Add(coordinate);
-            }
-
-            candidateCoordinates.Add(coordinate + Vector2Int.up);
-            candidateCoordinates.Add(coordinate + Vector2Int.right);
-            candidateCoordinates.Add(coordinate + Vector2Int.down);
-            candidateCoordinates.Add(coordinate + Vector2Int.left);
+            AddPipeConnectorVariantRefreshCoordinatesForWorldCoordinate(
+                candidateCoordinates,
+                coordinates[i],
+                includeSelf,
+                previewToIgnore);
         }
 
         if (candidateCoordinates.Count <= 0)
@@ -7102,7 +8608,8 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Vector3 desiredPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPipePrefab, desiredQuarterTurns, 0f);
+        Vector3 desiredPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPipePrefab, desiredQuarterTurns);
+        RemoveInstalledPipeVariantPreview(installedPipe);
         if (sameVariant)
         {
             installedPipe.transform.SetPositionAndRotation(desiredPosition, desiredRotation);
@@ -7186,408 +8693,6 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private bool TryRefreshInstalledConveyorVariantAtCoordinate(
-        Vector2Int coordinate,
-        MapObject previewToIgnore,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates)
-    {
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null
-            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is ConveyorBelt installedConveyor)
-            || installedConveyor == null
-            || !installedConveyor.gameObject.activeInHierarchy
-            || !installedConveyor.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
-        {
-            return false;
-        }
-
-        if (anchorCoordinate != coordinate || IsProtectedAnchorCoordinate(anchorCoordinate, protectedAnchorCoordinates))
-        {
-            return false;
-        }
-
-        int itemId = installedConveyor.ResolveItemId();
-        if (!TryGetInstallationDefinition(itemId, out ItemDefinition installedDefinition)
-            || !(installedDefinition?.mapObject is ConveyorBelt conveyorPrototype))
-        {
-            return false;
-        }
-
-        if (!TryResolveInstalledConveyorDesiredVariant(
-                installedConveyor,
-                conveyorPrototype,
-                anchorCoordinate,
-                previewToIgnore,
-                out MapObject desiredPrefab,
-                out int desiredQuarterTurns))
-        {
-            return false;
-        }
-
-        if (!(desiredPrefab is ConveyorBelt desiredConveyor))
-        {
-            return false;
-        }
-
-        int currentQuarterTurns = installedConveyor.RuntimeQuarterTurns;
-        Quaternion desiredRotation = GetInstalledObjectRotation(desiredPrefab, desiredQuarterTurns);
-        bool sameVariant = !RequiresConveyorPreviewReplacement(installedConveyor, desiredPrefab);
-        bool sameQuarterTurns = NormalizePlacementQuarterTurns(currentQuarterTurns) == NormalizePlacementQuarterTurns(desiredQuarterTurns);
-        bool sameRotation = Mathf.Abs(Quaternion.Dot(installedConveyor.transform.rotation, desiredRotation)) >= 0.9999f;
-        if (sameVariant && sameQuarterTurns && sameRotation)
-        {
-            return false;
-        }
-
-        Vector3 desiredPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPrefab, desiredQuarterTurns, 0f);
-        if (sameVariant)
-        {
-            installedConveyor.transform.SetPositionAndRotation(desiredPosition, desiredRotation);
-            block.SetMapObject(installedConveyor);
-            ConfigureInstalledObjectRuntime(installedConveyor, anchorCoordinate, desiredQuarterTurns);
-            RegisterInstalledObjectPersistence(installedConveyor);
-            return true;
-        }
-
-        MapObject replacementObject = CreateInstalledObjectInstance(desiredConveyor, terrain.transform, terrain);
-        if (!(replacementObject is ConveyorBelt replacementConveyor))
-        {
-            if (replacementObject is InstallationObject replacementInstallation)
-            {
-                ReleaseInstalledObjectInstance(replacementInstallation, desiredPrefab, terrain);
-            }
-
-            return false;
-        }
-
-        replacementConveyor.transform.SetPositionAndRotation(desiredPosition, desiredRotation);
-        replacementConveyor.ApplyItemFilterMask(
-            installedConveyor.CaptureItemFilterMaskWords(),
-            installedConveyor.IsItemFilterMaskInitialized);
-        block.SetMapObject(replacementConveyor);
-        ConfigureInstalledObjectRuntime(replacementConveyor, anchorCoordinate, desiredQuarterTurns);
-        RegisterInstalledObjectPersistence(replacementConveyor);
-
-        ReleaseInstalledObjectInstance(
-            installedConveyor,
-            ResolveInstallationSourcePrefab(
-                installedDefinition,
-                GetConveyorVariantKind(installedConveyor)),
-            terrain);
-
-        return true;
-    }
-
-    private static bool IsProtectedAnchorCoordinate(
-        Vector2Int anchorCoordinate,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates)
-    {
-        if (protectedAnchorCoordinates == null)
-        {
-            return false;
-        }
-
-        foreach (Vector2Int protectedAnchorCoordinate in protectedAnchorCoordinates)
-        {
-            if (protectedAnchorCoordinate == anchorCoordinate)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool TryResolveInstalledConveyorDesiredVariant(
-        ConveyorBelt installedConveyor,
-        ConveyorBelt conveyorPrototype,
-        Vector2Int anchorCoordinate,
-        MapObject previewToIgnore,
-        out MapObject desiredPrefab,
-        out int desiredQuarterTurns)
-    {
-        desiredPrefab = null;
-        desiredQuarterTurns = 0;
-        if (installedConveyor == null
-            || conveyorPrototype == null
-            || !installedConveyor.TryGetInputDirection(installedConveyor.transform.rotation, out Vector2Int currentInputDirection)
-            || !installedConveyor.TryGetOutputDirection(installedConveyor.transform.rotation, out Vector2Int currentOutputDirection))
-        {
-            return false;
-        }
-
-        int currentVariantKind = GetConveyorVariantKind(installedConveyor);
-        MapObject currentPrefab = ResolveConveyorVariantPrefab(conveyorPrototype, currentVariantKind) ?? installedConveyor;
-        int currentQuarterTurns = ResolvePlacementQuarterTurnsFromRotation(
-            currentPrefab,
-            installedConveyor.transform.rotation,
-            installedConveyor.RuntimeQuarterTurns);
-        if (TryResolveConveyorSequencePlacementVariant(
-                conveyorPrototype,
-                anchorCoordinate,
-                installedConveyor,
-                out MapObject sequencePrefab,
-                out int sequenceQuarterTurns))
-        {
-            desiredPrefab = sequencePrefab;
-            desiredQuarterTurns = sequenceQuarterTurns;
-            return desiredPrefab != null;
-        }
-
-        MapObject resolvedPrefab = currentPrefab;
-        int resolvedQuarterTurns = currentQuarterTurns;
-
-        int bestScore = GetCandidateConveyorEndpointConnectionScore(
-            currentPrefab,
-            anchorCoordinate,
-            currentQuarterTurns,
-            previewToIgnore);
-        bool bestIsCurrent = true;
-
-        ConsiderConveyorVariantCandidate(ResolveConveyorVariantPrefab(conveyorPrototype, 0), 0);
-        ConsiderConveyorVariantCandidate(ResolveConveyorVariantPrefab(conveyorPrototype, 1), 1);
-        ConsiderConveyorVariantCandidate(ResolveConveyorVariantPrefab(conveyorPrototype, 2), 2);
-
-        desiredPrefab = resolvedPrefab;
-        desiredQuarterTurns = resolvedQuarterTurns;
-        return desiredPrefab != null;
-
-        void ConsiderConveyorVariantCandidate(MapObject candidatePrefab, int candidateVariantKind)
-        {
-            if (!(candidatePrefab is ConveyorBelt candidateConveyor))
-            {
-                return;
-            }
-
-            if (candidateVariantKind > 0 && !candidateConveyor.IsCornerVariant)
-            {
-                return;
-            }
-
-            if (candidateVariantKind == 0 && candidateConveyor.IsCornerVariant)
-            {
-                return;
-            }
-
-            TryConsiderCandidateQuarterTurns(candidateConveyor, candidateVariantKind, currentOutputDirection, true);
-            TryConsiderCandidateQuarterTurns(candidateConveyor, candidateVariantKind, currentInputDirection, false);
-        }
-
-        void TryConsiderCandidateQuarterTurns(
-            ConveyorBelt candidateConveyor,
-            int candidateVariantKind,
-            Vector2Int preservedDirection,
-            bool preserveOutput)
-        {
-            if (candidateConveyor == null || preservedDirection == Vector2Int.zero)
-            {
-                return;
-            }
-
-            int candidateQuarterTurns;
-            bool resolved = preserveOutput
-                ? TryGetConveyorPlacementQuarterTurnsForOutput(candidateConveyor, preservedDirection, out candidateQuarterTurns)
-                : TryGetConveyorPlacementQuarterTurnsForInput(candidateConveyor, preservedDirection, out candidateQuarterTurns);
-            if (!resolved)
-            {
-                return;
-            }
-
-            int candidateScore = GetCandidateConveyorEndpointConnectionScore(
-                candidateConveyor,
-                anchorCoordinate,
-                candidateQuarterTurns,
-                previewToIgnore);
-
-            bool candidateIsCurrent = candidateVariantKind == currentVariantKind
-                                      && NormalizePlacementQuarterTurns(candidateQuarterTurns) == NormalizePlacementQuarterTurns(currentQuarterTurns);
-            if (candidateScore < bestScore)
-            {
-                return;
-            }
-
-            if (candidateScore == bestScore)
-            {
-                if (bestIsCurrent || !candidateIsCurrent)
-                {
-                    return;
-                }
-            }
-
-            resolvedPrefab = candidateConveyor;
-            resolvedQuarterTurns = NormalizePlacementQuarterTurns(candidateQuarterTurns);
-            bestScore = candidateScore;
-            bestIsCurrent = candidateIsCurrent;
-        }
-    }
-
-    private int GetCandidateConveyorEndpointConnectionScore(
-        MapObject candidatePrefab,
-        Vector2Int anchorCoordinate,
-        int quarterTurns,
-        MapObject previewToIgnore)
-    {
-        if (!(candidatePrefab is ConveyorBelt candidateConveyor))
-        {
-            return 0;
-        }
-
-        Quaternion candidateRotation = GetPlacementObjectRotation(candidateConveyor, quarterTurns);
-        if (!candidateConveyor.TryGetInputDirection(candidateRotation, out Vector2Int inputDirection)
-            || !candidateConveyor.TryGetOutputDirection(candidateRotation, out Vector2Int outputDirection))
-        {
-            return 0;
-        }
-
-        return GetConveyorEndpointConnectionCandidateScore(
-            anchorCoordinate,
-            inputDirection,
-            outputDirection,
-            previewToIgnore);
-    }
-
-    private bool TryNormalizeDisconnectedConveyorCornerAtCoordinate(
-        Vector2Int coordinate,
-        IReadOnlyList<ConveyorChangeInfo> changedConveyors,
-        MapObject previewToIgnore,
-        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates)
-    {
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null
-            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is ConveyorBelt installedConveyor)
-            || installedConveyor == null
-            || !installedConveyor.IsCornerVariant
-            || !installedConveyor.gameObject.activeInHierarchy
-            || !installedConveyor.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
-        {
-            return false;
-        }
-
-        if (anchorCoordinate != coordinate)
-        {
-            return false;
-        }
-
-        if (protectedAnchorCoordinates != null)
-        {
-            foreach (Vector2Int protectedAnchorCoordinate in protectedAnchorCoordinates)
-            {
-                if (protectedAnchorCoordinate == anchorCoordinate)
-                {
-                    return false;
-                }
-            }
-        }
-
-        if (!installedConveyor.TryGetInputDirection(installedConveyor.transform.rotation, out Vector2Int inputDirection)
-            || !installedConveyor.TryGetOutputDirection(installedConveyor.transform.rotation, out Vector2Int outputDirection))
-        {
-            return false;
-        }
-
-        if (!TryGetInstalledConveyorEndpointConnections(
-                installedConveyor,
-                anchorCoordinate,
-                previewToIgnore,
-                out bool inputConnected,
-                out bool outputConnected))
-        {
-            inputConnected = false;
-            outputConnected = false;
-        }
-
-        // Only straighten truly orphaned corners; a one-sided connection still means the corner is intentional.
-        if (inputConnected || outputConnected)
-        {
-            return false;
-        }
-
-        ConveyorChangeInfo changedInputSide = FindConveyorChangeAtCoordinate(changedConveyors, anchorCoordinate + inputDirection);
-        ConveyorChangeInfo changedOutputSide = FindConveyorChangeAtCoordinate(changedConveyors, anchorCoordinate + outputDirection);
-        if (changedInputSide != null || changedOutputSide != null)
-        {
-            // Removing an adjacent belt should not reinterpret the corner into the opposite side.
-            return false;
-        }
-
-        ConveyorBelt straightPrefab = installedConveyor.StraightVariantPrefab != null
-            ? installedConveyor.StraightVariantPrefab
-            : installedConveyor;
-        if (straightPrefab == null)
-        {
-            return false;
-        }
-
-        installedConveyor.RefreshInstalledDirectionFromCurrentTransform();
-        if (!TryGetInstallationFacingVector(installedConveyor.InstalledDirection, out Vector2Int desiredInputDirection)
-            || !TryGetConveyorPlacementQuarterTurnsForInput(
-                straightPrefab,
-                desiredInputDirection,
-                out int straightQuarterTurns))
-        {
-            return false;
-        }
-
-        MapObject desiredPrefab = straightPrefab;
-        int desiredQuarterTurns = straightQuarterTurns;
-
-        int currentQuarterTurns = installedConveyor.RuntimeQuarterTurns;
-        Quaternion desiredRotation = GetInstalledObjectRotation(desiredPrefab, desiredQuarterTurns);
-        bool sameVariant = !RequiresConveyorPreviewReplacement(installedConveyor, desiredPrefab);
-        bool sameQuarterTurns = ((currentQuarterTurns % 4) + 4) % 4 == ((desiredQuarterTurns % 4) + 4) % 4;
-        bool sameRotation = Mathf.Abs(Quaternion.Dot(installedConveyor.transform.rotation, desiredRotation)) >= 0.9999f;
-        if (sameVariant && sameQuarterTurns && sameRotation)
-        {
-            return false;
-        }
-
-        Transform installParent = terrain.transform;
-        if (!(desiredPrefab is ConveyorBelt replacementPrefab))
-        {
-            return false;
-        }
-
-        MapObject replacementObject = CreateInstalledObjectInstance(replacementPrefab, installParent, terrain);
-        if (!(replacementObject is ConveyorBelt replacementConveyor))
-        {
-            if (replacementObject is InstallationObject replacementInstallation)
-            {
-                ReleaseInstalledObjectInstance(replacementInstallation, replacementPrefab, terrain);
-            }
-
-            return false;
-        }
-
-        replacementConveyor.transform.SetPositionAndRotation(
-            GetInstalledObjectWorldPosition(anchorCoordinate, replacementPrefab, desiredQuarterTurns, 0f),
-            desiredRotation);
-        replacementConveyor.ApplyItemFilterMask(
-            installedConveyor.CaptureItemFilterMaskWords(),
-            installedConveyor.IsItemFilterMaskInitialized);
-
-        if (terrain.TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock) && anchorBlock != null)
-        {
-            anchorBlock.SetMapObject(replacementConveyor);
-        }
-
-        ConfigureInstalledObjectRuntime(replacementConveyor, anchorCoordinate, desiredQuarterTurns);
-        RegisterInstalledObjectPersistence(replacementConveyor);
-
-        TryGetInstallationDefinition(installedConveyor.ResolveItemId(), out ItemDefinition installedDefinition);
-        ReleaseInstalledObjectInstance(
-            installedConveyor,
-            ResolveInstallationSourcePrefab(
-                installedDefinition,
-                GetConveyorVariantKind(installedConveyor)),
-            terrain);
-
-        return true;
-    }
-
     private bool TryGetConveyorPlacementOutputDirection(ConveyorBelt conveyorPrototype, int quarterTurns, out Vector2Int outputDirection)
     {
         outputDirection = Vector2Int.zero;
@@ -7632,32 +8737,6 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             if (candidateOutputDirection != desiredOutputDirection)
-            {
-                continue;
-            }
-
-            resolvedQuarterTurns = candidateQuarterTurns;
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryGetConveyorPlacementQuarterTurnsForRotation(
-        MapObject sourcePrefab,
-        Quaternion desiredRotation,
-        out int resolvedQuarterTurns)
-    {
-        resolvedQuarterTurns = 0;
-        if (!(sourcePrefab is ConveyorBelt conveyorSource))
-        {
-            return false;
-        }
-
-        for (int candidateQuarterTurns = 0; candidateQuarterTurns < 4; candidateQuarterTurns++)
-        {
-            Quaternion candidateRotation = GetPlacementObjectRotation(conveyorSource, candidateQuarterTurns);
-            if (Mathf.Abs(Quaternion.Dot(candidateRotation, desiredRotation)) < 0.9999f)
             {
                 continue;
             }
@@ -7914,33 +8993,6 @@ public class InstallationPlacementController : MonoBehaviour
         return (normalizedCandidateQuarterTurns - normalizedPreferredQuarterTurns + 4) % 4;
     }
 
-    private static bool TryGetInstallationFacingVector(InstallationFacingDirection facingDirection, out Vector2Int direction)
-    {
-        direction = facingDirection switch
-        {
-            InstallationFacingDirection.PositiveX => Vector2Int.right,
-            InstallationFacingDirection.NegativeX => Vector2Int.left,
-            InstallationFacingDirection.NegativeZ => Vector2Int.down,
-            _ => Vector2Int.up
-        };
-
-        return direction != Vector2Int.zero;
-    }
-
-    private bool TryGetConveyorPlacementInfoAtCoordinate(
-        Vector2Int coordinate,
-        MapObject previewToIgnore,
-        out ConveyorBelt conveyorBelt,
-        out Vector2Int outputDirection)
-    {
-        return TryGetConveyorPlacementDirectionsAtCoordinate(
-            coordinate,
-            previewToIgnore,
-            out conveyorBelt,
-            out _,
-            out outputDirection);
-    }
-
     private bool TryGetConveyorPlacementDirectionsAtCoordinate(
         Vector2Int coordinate,
         MapObject previewToIgnore,
@@ -8013,112 +9065,6 @@ public class InstallationPlacementController : MonoBehaviour
         Quaternion savedRotation = GetPlacementObjectRotation(savedConveyor, savedState.quarterTurns);
         return savedConveyor.TryGetInputDirection(savedRotation, out inputDirection)
             && savedConveyor.TryGetOutputDirection(savedRotation, out outputDirection);
-    }
-
-    private bool HasAdjacentConveyorAtCoordinate(Vector2Int anchorCoordinate, MapObject previewToIgnore)
-    {
-        Vector2Int[] directions =
-        {
-            Vector2Int.up,
-            Vector2Int.right,
-            Vector2Int.down,
-            Vector2Int.left
-        };
-
-        for (int i = 0; i < directions.Length; i++)
-        {
-            if (TryGetConveyorPlacementInfoAtCoordinate(anchorCoordinate + directions[i], previewToIgnore, out _, out _))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private void RefreshConveyorPreviewVariants(
-        IReadOnlyList<ConveyorChangeInfo> changedConveyors = null,
-        MapObject previewToIgnore = null,
-        MapObject previewToSkip = null)
-    {
-        if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt))
-        {
-            return;
-        }
-
-        CleanupInstallPreviewReferences();
-        if (installPreviewInstances.Count <= 0)
-        {
-            return;
-        }
-
-        int maxPassCount = Mathf.Max(1, installPreviewInstances.Count);
-        for (int pass = 0; pass < maxPassCount; pass++)
-        {
-            bool anyChanged = false;
-            List<MapObject> previews = new List<MapObject>(installPreviewInstances);
-            for (int i = 0; i < previews.Count; i++)
-            {
-                MapObject preview = previews[i];
-                if (preview == null
-                    || preview == previewToSkip
-                    || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
-                {
-                    continue;
-                }
-
-                if (RefreshSingleConveyorPreviewVariant(preview, anchorCoordinate, changedConveyors, previewToIgnore))
-                {
-                    anyChanged = true;
-                }
-            }
-
-            if (!anyChanged)
-            {
-                break;
-            }
-        }
-    }
-
-    private static HashSet<Vector2Int> BuildConveyorVariantRefreshCoordinates(
-        IReadOnlyList<ConveyorChangeInfo> changedConveyors,
-        bool includeSelf)
-    {
-        if (changedConveyors == null || changedConveyors.Count <= 0)
-        {
-            return null;
-        }
-
-        HashSet<Vector2Int> coordinates = new HashSet<Vector2Int>();
-        for (int i = 0; i < changedConveyors.Count; i++)
-        {
-            ConveyorChangeInfo change = changedConveyors[i];
-            if (change == null)
-            {
-                continue;
-            }
-
-            IReadOnlyList<Vector2Int> sourceCoordinates = change.occupiedCoordinates != null
-                && change.occupiedCoordinates.Count > 0
-                    ? change.occupiedCoordinates
-                    : new List<Vector2Int> { change.coordinate };
-
-            for (int sourceIndex = 0; sourceIndex < sourceCoordinates.Count; sourceIndex++)
-            {
-                Vector2Int sourceCoordinate = sourceCoordinates[sourceIndex];
-                if (includeSelf)
-                {
-                    coordinates.Add(sourceCoordinate);
-                }
-
-                coordinates.Add(sourceCoordinate + Vector2Int.up);
-                coordinates.Add(sourceCoordinate + Vector2Int.right);
-                coordinates.Add(sourceCoordinate + Vector2Int.down);
-                coordinates.Add(sourceCoordinate + Vector2Int.left);
-            }
-        }
-
-        return coordinates.Count > 0 ? coordinates : null;
     }
 
     private void RefreshFencePreviewVariants(
@@ -8216,7 +9162,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        HashSet<Vector2Int> affectedPreviewCoordinates = BuildFenceVariantRefreshCoordinates(changedCoordinates, true);
+        HashSet<Vector2Int> affectedPreviewCoordinates = BuildPipeVariantRefreshCoordinates(changedCoordinates, true, previewToIgnore);
         int maxPassCount = Mathf.Max(1, installPreviewInstances.Count);
         for (int pass = 0; pass < maxPassCount; pass++)
         {
@@ -8467,8 +9413,7 @@ public class InstallationPlacementController : MonoBehaviour
             GetPlacementWorldPositionFromAnchorCoordinate(
                 coordinate,
                 preview,
-                normalizedQuarterTurns,
-                installPreviewVerticalOffset),
+                normalizedQuarterTurns),
             GetPlacementObjectRotation(preview, normalizedQuarterTurns));
         if (preview is InstallationObject installationPreview)
         {
@@ -8639,6 +9584,111 @@ public class InstallationPlacementController : MonoBehaviour
         coordinates.Add(coordinate + Vector2Int.left);
     }
 
+    private void AddPipeConnectorVariantRefreshCoordinatesForWorldCoordinate(
+        HashSet<Vector2Int> coordinates,
+        Vector2Int coordinate,
+        bool includeSelf,
+        MapObject previewToIgnore = null)
+    {
+        AddFenceVariantRefreshCoordinates(coordinates, coordinate, includeSelf);
+        if (coordinates == null)
+        {
+            return;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot)
+            && previewSnapshot?.mapObject != null
+            && IsPipeConnectorObject(previewSnapshot.mapObject))
+        {
+            AddPipeConnectorVariantRefreshCoordinates(
+                coordinates,
+                previewSnapshot.anchorCoordinate,
+                previewSnapshot.mapObject,
+                previewSnapshot.quarterTurns,
+                true);
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.MapObject != null
+            && IsPipeConnectorObject(block.MapObject)
+            && block.MapObject is InstallationObject installationObject
+            && installationObject.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            AddPipeConnectorVariantRefreshCoordinates(
+                coordinates,
+                anchorCoordinate,
+                block.MapObject,
+                quarterTurns,
+                true);
+        }
+
+        if (TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
+            && savedSnapshot?.mapObject != null
+            && IsPipeConnectorObject(savedSnapshot.mapObject))
+        {
+            AddPipeConnectorVariantRefreshCoordinates(
+                coordinates,
+                savedSnapshot.anchorCoordinate,
+                savedSnapshot.mapObject,
+                savedSnapshot.quarterTurns,
+                true);
+        }
+    }
+
+    private void AddPipeConnectorVariantRefreshCoordinates(
+        HashSet<Vector2Int> coordinates,
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        bool includeSelf)
+    {
+        AddFenceVariantRefreshCoordinates(coordinates, anchorCoordinate, includeSelf);
+        if (coordinates == null || footprintSource == null)
+        {
+            return;
+        }
+
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns);
+        for (int i = 0; i < footprintCoordinates.Count; i++)
+        {
+            AddFenceVariantRefreshCoordinates(coordinates, footprintCoordinates[i], true);
+        }
+
+        if (!TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    anchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int pipeAreaCoordinate))
+            {
+                continue;
+            }
+
+            AddFenceVariantRefreshCoordinates(coordinates, pipeAreaCoordinate, true);
+        }
+    }
+
     private bool TryResolveInstalledFenceVariantPreview(
         Vector2Int coordinate,
         Wall fencePrototype,
@@ -8679,7 +9729,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Quaternion desiredRotation = GetInstalledObjectRotation(desiredFencePrefab, desiredQuarterTurns);
-        Vector3 desiredFinalPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredFencePrefab, desiredQuarterTurns, 0f);
+        Vector3 desiredFinalPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredFencePrefab, desiredQuarterTurns);
         bool sameVariant = installedFence.VariantKind == desiredFencePrefab.VariantKind;
         bool sameRotation = Mathf.Abs(Quaternion.Dot(installedFence.transform.rotation, desiredRotation)) >= 0.9999f;
         bool samePosition = (installedFence.transform.position - desiredFinalPosition).sqrMagnitude <= 0.0001f;
@@ -8693,7 +9743,7 @@ public class InstallationPlacementController : MonoBehaviour
             installedFence = installedFence,
             sourcePrefab = desiredFencePrefab,
             quarterTurns = NormalizePlacementQuarterTurns(desiredQuarterTurns),
-            position = GetInstalledObjectWorldPosition(anchorCoordinate, desiredFencePrefab, desiredQuarterTurns, installPreviewVerticalOffset),
+            position = GetInstalledObjectWorldPosition(anchorCoordinate, desiredFencePrefab, desiredQuarterTurns),
             rotation = desiredRotation
         };
         return true;
@@ -8772,10 +9822,10 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void CleanupInstalledFenceVariantPreviewReferences()
     {
-        List<Wall> installedFences = new List<Wall>(installedFenceVariantPreviews.Keys);
-        for (int i = 0; i < installedFences.Count; i++)
+        CopyWallKeys(installedFenceVariantPreviews, cleanupWallScratch);
+        for (int i = 0; i < cleanupWallScratch.Count; i++)
         {
-            Wall installedFence = installedFences[i];
+            Wall installedFence = cleanupWallScratch[i];
             installedFenceVariantPreviews.TryGetValue(installedFence, out MapObject preview);
             bool ownerMissing = installedFence == null;
             bool ownerInactive = !ownerMissing && !installedFence.gameObject.activeInHierarchy;
@@ -8785,20 +9835,23 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        installedFences = new List<Wall>(installedFencePreviewRendererStates.Keys);
-        for (int i = 0; i < installedFences.Count; i++)
+        CopyWallKeys(installedFencePreviewRendererStates, cleanupWallScratch);
+        for (int i = 0; i < cleanupWallScratch.Count; i++)
         {
-            Wall installedFence = installedFences[i];
+            Wall installedFence = cleanupWallScratch[i];
             if (installedFence == null || !installedFenceVariantPreviews.ContainsKey(installedFence))
             {
                 RestoreInstalledObjectPreviewRenderers(installedFence, installedFencePreviewRendererStates);
             }
         }
+
+        cleanupWallScratch.Clear();
     }
 
     private void RefreshInstalledPipeVariantPreviews(
         IReadOnlyList<Vector2Int> changedCoordinates = null,
-        MapObject previewToIgnore = null)
+        MapObject previewToIgnore = null,
+        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates = null)
     {
         CleanupInstalledPipeVariantPreviewReferences();
         if (IsEditingInstallation()
@@ -8812,13 +9865,15 @@ public class InstallationPlacementController : MonoBehaviour
 
         Pipe pipePrototype = activeInstallDefinition.mapObject as Pipe;
 
-        HashSet<Vector2Int> affectedCoordinates = BuildFenceVariantRefreshCoordinates(changedCoordinates, true)
+        HashSet<Vector2Int> affectedCoordinates = BuildPipeVariantRefreshCoordinates(changedCoordinates, true, previewToIgnore)
                                                  ?? BuildInstalledPipeVariantPreviewRefreshCoordinates();
         if (affectedCoordinates == null || affectedCoordinates.Count <= 0)
         {
             RemoveInstalledPipeVariantPreviews(null);
             return;
         }
+
+        AddInstalledPipeVariantPreviewOwnerCoordinates(affectedCoordinates);
 
         Dictionary<Pipe, InstalledPipeVariantPreviewPlan> desiredPreviewsByPipe =
             new Dictionary<Pipe, InstalledPipeVariantPreviewPlan>();
@@ -8828,6 +9883,7 @@ public class InstallationPlacementController : MonoBehaviour
                     coordinate,
                     pipePrototype,
                     previewToIgnore,
+                    protectedAnchorCoordinates,
                     out InstalledPipeVariantPreviewPlan plan)
                 && plan != null
                 && plan.installedPipe != null)
@@ -8866,6 +9922,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             UpdateInstalledPipeVariantPreview(plan);
         }
+
+        RestorePipeRenderersWithoutRenderableVariantPreview();
     }
 
     private HashSet<Vector2Int> BuildInstalledPipeVariantPreviewRefreshCoordinates()
@@ -8881,7 +9939,48 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            AddFenceVariantRefreshCoordinates(coordinates, anchorCoordinate, true);
+            MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
+            AddPipeConnectorVariantRefreshCoordinates(
+                coordinates,
+                anchorCoordinate,
+                footprintSource,
+                GetPreviewQuarterTurns(preview),
+                true);
+        }
+
+        AddInstalledPipeVariantPreviewOwnerCoordinates(coordinates);
+
+        return coordinates.Count > 0 ? coordinates : null;
+    }
+
+    private HashSet<Vector2Int> BuildPipeVariantRefreshCoordinates(
+        IReadOnlyList<Vector2Int> changedCoordinates,
+        bool includeSelf,
+        MapObject previewToIgnore)
+    {
+        if (changedCoordinates == null || changedCoordinates.Count <= 0)
+        {
+            return null;
+        }
+
+        HashSet<Vector2Int> coordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < changedCoordinates.Count; i++)
+        {
+            AddPipeConnectorVariantRefreshCoordinatesForWorldCoordinate(
+                coordinates,
+                changedCoordinates[i],
+                includeSelf,
+                previewToIgnore);
+        }
+
+        return coordinates.Count > 0 ? coordinates : null;
+    }
+
+    private void AddInstalledPipeVariantPreviewOwnerCoordinates(HashSet<Vector2Int> coordinates)
+    {
+        if (coordinates == null)
+        {
+            return;
         }
 
         List<Pipe> existingPreviewOwners = new List<Pipe>(installedPipeVariantPreviews.Keys);
@@ -8896,14 +9995,13 @@ public class InstallationPlacementController : MonoBehaviour
 
             coordinates.Add(anchorCoordinate);
         }
-
-        return coordinates.Count > 0 ? coordinates : null;
     }
 
     private bool TryResolveInstalledPipeVariantPreview(
         Vector2Int coordinate,
         Pipe pipePrototype,
         MapObject previewToIgnore,
+        IReadOnlyCollection<Vector2Int> protectedAnchorCoordinates,
         out InstalledPipeVariantPreviewPlan plan)
     {
         plan = null;
@@ -8916,6 +10014,11 @@ public class InstallationPlacementController : MonoBehaviour
             || !installedPipe.gameObject.activeInHierarchy
             || !installedPipe.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int currentQuarterTurns)
             || anchorCoordinate != coordinate)
+        {
+            return false;
+        }
+
+        if (IsProtectedAnchorCoordinate(anchorCoordinate, protectedAnchorCoordinates))
         {
             return false;
         }
@@ -8940,7 +10043,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Quaternion desiredRotation = GetInstalledObjectRotation(desiredPipePrefab, desiredQuarterTurns);
-        Vector3 desiredFinalPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPipePrefab, desiredQuarterTurns, 0f);
+        Vector3 desiredFinalPosition = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPipePrefab, desiredQuarterTurns);
         bool sameVariant = installedPipe.VariantKind == desiredPipePrefab.VariantKind;
         bool sameRotation = Mathf.Abs(Quaternion.Dot(installedPipe.transform.rotation, desiredRotation)) >= 0.9999f;
         bool samePosition = (installedPipe.transform.position - desiredFinalPosition).sqrMagnitude <= 0.0001f;
@@ -8954,7 +10057,7 @@ public class InstallationPlacementController : MonoBehaviour
             installedPipe = installedPipe,
             sourcePrefab = desiredPipePrefab,
             quarterTurns = NormalizePlacementQuarterTurns(desiredQuarterTurns),
-            position = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPipePrefab, desiredQuarterTurns, installPreviewVerticalOffset),
+            position = GetInstalledObjectWorldPosition(anchorCoordinate, desiredPipePrefab, desiredQuarterTurns),
             rotation = desiredRotation
         };
         return true;
@@ -8977,26 +10080,36 @@ public class InstallationPlacementController : MonoBehaviour
                                    || RequiresPipePreviewReplacement(preview, plan.sourcePrefab);
         if (requiresReplacement)
         {
-            DestroyInstallPreviewObject(preview);
-            preview = Instantiate(plan.sourcePrefab);
-            if (preview == null)
+            MapObject previousPreview = preview;
+            MapObject replacementPreview = Instantiate(plan.sourcePrefab);
+            if (replacementPreview == null)
             {
                 RemoveInstalledPipeVariantPreview(installedPipe);
                 return;
             }
 
-            preview.name = $"{plan.sourcePrefab.name}_InstalledBlueprint";
-            ConfigureInstallPreview(preview);
-            installedPipeVariantPreviews[installedPipe] = preview;
+            replacementPreview.name = $"{plan.sourcePrefab.name}_InstalledBlueprint";
+            ConfigureInstallPreview(replacementPreview);
+            replacementPreview.transform.SetPositionAndRotation(plan.position, plan.rotation);
+            if (replacementPreview is InstallationObject replacementInstallation)
+            {
+                replacementInstallation.RefreshInstalledDirectionFromCurrentTransform();
+            }
+
+            installedPipeVariantPreviews[installedPipe] = replacementPreview;
             installedPipeVariantPreviewSourcePrefabs[installedPipe] = plan.sourcePrefab;
+            HideInstalledPipeForVariantPreview(installedPipe, replacementPreview);
+            DestroyInstallPreviewObject(previousPreview);
+            return;
         }
 
-        HideInstalledObjectForVariantPreview(installedPipe, installedPipePreviewRendererStates);
         preview.transform.SetPositionAndRotation(plan.position, plan.rotation);
         if (preview is InstallationObject previewInstallation)
         {
             previewInstallation.RefreshInstalledDirectionFromCurrentTransform();
         }
+
+        HideInstalledPipeForVariantPreview(installedPipe, preview);
     }
 
     private void RemoveInstalledPipeVariantPreviews(IReadOnlyCollection<Vector2Int> allowedCoordinates)
@@ -9025,18 +10138,18 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         installedPipeVariantPreviews.TryGetValue(installedPipe, out MapObject preview);
-        DestroyInstallPreviewObject(preview);
         installedPipeVariantPreviews.Remove(installedPipe);
         installedPipeVariantPreviewSourcePrefabs.Remove(installedPipe);
         RestoreInstalledObjectPreviewRenderers(installedPipe, installedPipePreviewRendererStates);
+        DestroyInstallPreviewObject(preview);
     }
 
     private void CleanupInstalledPipeVariantPreviewReferences()
     {
-        List<Pipe> installedPipes = new List<Pipe>(installedPipeVariantPreviews.Keys);
-        for (int i = 0; i < installedPipes.Count; i++)
+        CopyPipeKeys(installedPipeVariantPreviews, cleanupPipeScratch);
+        for (int i = 0; i < cleanupPipeScratch.Count; i++)
         {
-            Pipe installedPipe = installedPipes[i];
+            Pipe installedPipe = cleanupPipeScratch[i];
             installedPipeVariantPreviews.TryGetValue(installedPipe, out MapObject preview);
             bool ownerMissing = installedPipe == null;
             bool ownerInactive = !ownerMissing && !installedPipe.gameObject.activeInHierarchy;
@@ -9046,14 +10159,93 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        installedPipes = new List<Pipe>(installedPipePreviewRendererStates.Keys);
-        for (int i = 0; i < installedPipes.Count; i++)
+        CopyPipeKeys(installedPipePreviewRendererStates, cleanupPipeScratch);
+        for (int i = 0; i < cleanupPipeScratch.Count; i++)
         {
-            Pipe installedPipe = installedPipes[i];
+            Pipe installedPipe = cleanupPipeScratch[i];
             if (installedPipe == null || !installedPipeVariantPreviews.ContainsKey(installedPipe))
             {
                 RestoreInstalledObjectPreviewRenderers(installedPipe, installedPipePreviewRendererStates);
             }
+        }
+
+        cleanupPipeScratch.Clear();
+    }
+
+    private void HideInstalledPipeForVariantPreview(Pipe installedPipe, MapObject preview)
+    {
+        if (HasRenderableVariantPreview(preview))
+        {
+            HideInstalledObjectForVariantPreview(installedPipe, installedPipePreviewRendererStates);
+            return;
+        }
+
+        RestoreInstalledObjectPreviewRenderers(installedPipe, installedPipePreviewRendererStates);
+    }
+
+    private void RestorePipeRenderersWithoutRenderableVariantPreview()
+    {
+        CopyPipeKeys(installedPipePreviewRendererStates, cleanupPipeScratch);
+        for (int i = 0; i < cleanupPipeScratch.Count; i++)
+        {
+            Pipe installedPipe = cleanupPipeScratch[i];
+            bool hasRenderablePreview = installedPipe != null
+                                        && installedPipeVariantPreviews.TryGetValue(installedPipe, out MapObject preview)
+                                        && HasRenderableVariantPreview(preview);
+            if (!hasRenderablePreview)
+            {
+                RestoreInstalledObjectPreviewRenderers(installedPipe, installedPipePreviewRendererStates);
+            }
+        }
+
+        cleanupPipeScratch.Clear();
+    }
+
+    private static bool HasRenderableVariantPreview(MapObject preview)
+    {
+        if (preview == null || !preview.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = preview.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void CopyWallKeys<TValue>(Dictionary<Wall, TValue> dictionary, List<Wall> target)
+    {
+        target.Clear();
+        if (dictionary == null || dictionary.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Wall, TValue> entry in dictionary)
+        {
+            target.Add(entry.Key);
+        }
+    }
+
+    private static void CopyPipeKeys<TValue>(Dictionary<Pipe, TValue> dictionary, List<Pipe> target)
+    {
+        target.Clear();
+        if (dictionary == null || dictionary.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Pipe, TValue> entry in dictionary)
+        {
+            target.Add(entry.Key);
         }
     }
 
@@ -9236,8 +10428,7 @@ public class InstallationPlacementController : MonoBehaviour
             Vector3 desiredPosition = GetPlacementWorldPositionFromAnchorCoordinate(
                 anchorCoordinate,
                 preview,
-                normalizedResolvedQuarterTurns,
-                installPreviewVerticalOffset);
+                normalizedResolvedQuarterTurns);
             if ((preview.transform.position - desiredPosition).sqrMagnitude > 0.0001f)
             {
                 preview.transform.position = desiredPosition;
@@ -9336,8 +10527,7 @@ public class InstallationPlacementController : MonoBehaviour
             Vector3 desiredPosition = GetPlacementWorldPositionFromAnchorCoordinate(
                 anchorCoordinate,
                 desiredPrefab,
-                normalizedResolvedQuarterTurns,
-                installPreviewVerticalOffset);
+                normalizedResolvedQuarterTurns);
             if ((preview.transform.position - desiredPosition).sqrMagnitude > 0.0001f)
             {
                 preview.transform.position = desiredPosition;
@@ -9374,9 +10564,7 @@ public class InstallationPlacementController : MonoBehaviour
         return currentPipe.VariantKind != desiredPipe.VariantKind;
     }
 
-    private void RefreshActiveConveyorPreviewVariant(
-        IReadOnlyList<ConveyorChangeInfo> changedConveyors = null,
-        MapObject previewToIgnore = null)
+    private void RefreshActiveConveyorPreviewVariant(MapObject previewToIgnore = null)
     {
         if (activeInstallDefinition == null
             || !(activeInstallDefinition.mapObject is ConveyorBelt)
@@ -9393,14 +10581,12 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshSingleConveyorPreviewVariant(
             activeInstallPreview,
             anchorCoordinate,
-            changedConveyors,
             previewToIgnore);
     }
 
     private bool RefreshSingleConveyorPreviewVariant(
         MapObject preview,
         Vector2Int anchorCoordinate,
-        IReadOnlyList<ConveyorChangeInfo> changedConveyors = null,
         MapObject previewToIgnore = null)
     {
         if (preview == null || activeInstallDefinition == null)
@@ -9480,8 +10666,7 @@ public class InstallationPlacementController : MonoBehaviour
             Vector3 desiredPosition = GetPlacementWorldPositionFromAnchorCoordinate(
                 anchorCoordinate,
                 preview,
-                normalizedResolvedQuarterTurns,
-                installPreviewVerticalOffset);
+                normalizedResolvedQuarterTurns);
             if ((preview.transform.position - desiredPosition).sqrMagnitude > 0.0001f)
             {
                 preview.transform.position = desiredPosition;
@@ -9602,137 +10787,51 @@ public class InstallationPlacementController : MonoBehaviour
         DestroyInstallPreviewObject(currentPreview);
     }
 
-    private bool TryResolveDisconnectedConveyorStraightQuarterTurnsForPreview(
-        MapObject preview,
-        ConveyorBelt previewConveyor,
-        ConveyorBelt conveyorPrototype,
-        Vector2Int anchorCoordinate,
-        IReadOnlyList<ConveyorChangeInfo> changedConveyors,
-        MapObject previewToIgnore,
-        out int resolvedQuarterTurns)
-    {
-        resolvedQuarterTurns = installPreviewQuarterTurns;
-        if (preview == null || previewConveyor == null || conveyorPrototype == null)
-        {
-            return false;
-        }
-
-        ConveyorBelt straightPrefab = conveyorPrototype.StraightVariantPrefab != null
-            ? conveyorPrototype.StraightVariantPrefab
-            : conveyorPrototype;
-        if (straightPrefab == null
-            || !previewConveyor.TryGetInputDirection(preview.transform.rotation, out Vector2Int inputDirection)
-            || !previewConveyor.TryGetOutputDirection(preview.transform.rotation, out Vector2Int outputDirection))
-        {
-            return false;
-        }
-
-        bool inputConnected = TryGetConveyorPlacementDirectionsAtCoordinate(
-                                  anchorCoordinate + inputDirection,
-                                  previewToIgnore,
-                                  out _,
-                                  out _,
-                                  out Vector2Int neighborOutputDirection)
-                              && neighborOutputDirection == -inputDirection;
-
-        bool outputConnected = TryGetConveyorPlacementDirectionsAtCoordinate(
-                                   anchorCoordinate + outputDirection,
-                                   previewToIgnore,
-                                   out _,
-                                   out Vector2Int neighborInputDirection,
-                                   out _)
-                               && neighborInputDirection == -outputDirection;
-
-        ConveyorChangeInfo changedInputSide = FindConveyorChangeAtCoordinate(changedConveyors, anchorCoordinate + inputDirection);
-        ConveyorChangeInfo changedOutputSide = FindConveyorChangeAtCoordinate(changedConveyors, anchorCoordinate + outputDirection);
-
-        if ((changedInputSide != null) ^ (changedOutputSide != null))
-        {
-            ConveyorChangeInfo preferredChange = changedInputSide ?? changedOutputSide;
-            if (preferredChange != null
-                && !preferredChange.isCornerVariant
-                && TryGetConveyorPlacementQuarterTurnsForRotation(
-                    straightPrefab,
-                    preferredChange.rotation,
-                    out resolvedQuarterTurns))
-            {
-                return true;
-            }
-
-            if (preferredChange != null
-                && TryGetConveyorPlacementQuarterTurnsForOutput(
-                    straightPrefab,
-                    preferredChange.outputDirection,
-                    out resolvedQuarterTurns))
-            {
-                return true;
-            }
-
-            if (changedInputSide != null)
-            {
-                return TryGetConveyorPlacementQuarterTurnsForInput(
-                    straightPrefab,
-                    inputDirection,
-                    out resolvedQuarterTurns);
-            }
-
-            return TryGetConveyorPlacementQuarterTurnsForOutput(
-                straightPrefab,
-                outputDirection,
-                out resolvedQuarterTurns);
-        }
-
-        if (!inputConnected && outputConnected)
-        {
-            return TryGetConveyorPlacementQuarterTurnsForInput(
-                straightPrefab,
-                inputDirection,
-                out resolvedQuarterTurns);
-        }
-
-        if (inputConnected && !outputConnected)
-        {
-            return TryGetConveyorPlacementQuarterTurnsForOutput(
-                straightPrefab,
-                outputDirection,
-                out resolvedQuarterTurns);
-        }
-
-        return TryGetConveyorStraightQuarterTurnsFromPreview(preview, conveyorPrototype, out resolvedQuarterTurns);
-    }
-
     private bool TryGetOrderedInputItemAreaBindings(
         Vector2Int anchorCoordinate,
         MapObject footprintSource,
         int quarterTurns,
         InputOutputModule inputOutputModule,
-        out List<InputOutputModuleItemAreaBinding> bindings)
+        out List<InputOutputModuleItemAreaBinding> bindings,
+        bool directOnly = false)
     {
         bindings = new List<InputOutputModuleItemAreaBinding>();
         if (footprintSource == null
-            || inputOutputModule == null
-            || !TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell))
+            || inputOutputModule == null)
         {
             return false;
         }
 
-        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
-        List<InputOutputModule.RectGridBlockPlacement> inputItemPlacements = new List<InputOutputModule.RectGridBlockPlacement>();
-        for (int i = 0; i < placements.Count; i++)
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                null,
+                cells))
         {
-            InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType == InputOutputModule.RectGridBlockType.InputItem)
+            return false;
+        }
+
+        List<RectGridPlacementCell> inputItemCells = new List<RectGridPlacementCell>();
+        for (int i = 0; i < cells.Count; i++)
+        {
+            RectGridPlacementCell cell = cells[i];
+            if (!InputOutputModule.IsInputItemBlockType(cell.blockType)
+                || (directOnly && !InputOutputModule.AllowsDirectAreaInteraction(cell.blockType)))
             {
-                inputItemPlacements.Add(placement);
+                continue;
             }
+
+            inputItemCells.Add(cell);
         }
 
-        if (inputItemPlacements.Count <= 0)
+        if (inputItemCells.Count <= 0)
         {
             return false;
         }
 
-        inputItemPlacements.Sort(CompareInputItemPlacements);
+        inputItemCells.Sort(CompareInputItemPlacementCells);
 
         IReadOnlyList<InputOutputModule.ItemIoEntry> inputList = inputOutputModule.InputList;
         int recipeCount = inputList != null ? inputList.Count : 0;
@@ -9741,10 +10840,10 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        bool useSharedSingleInputArea = inputItemPlacements.Count == 1 && recipeCount > 1;
+        bool useSharedSingleInputArea = inputItemCells.Count == 1 && recipeCount > 1;
         int bindingCount = useSharedSingleInputArea
             ? recipeCount
-            : Mathf.Min(inputItemPlacements.Count, recipeCount);
+            : Mathf.Min(inputItemCells.Count, recipeCount);
 
         for (int i = 0; i < bindingCount; i++)
         {
@@ -9754,13 +10853,18 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            InputOutputModule.RectGridBlockPlacement placement = inputItemPlacements[useSharedSingleInputArea ? 0 : i];
-            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
-            Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
-            bindings.Add(new InputOutputModuleItemAreaBinding(coordinate, itemDefinition.id));
+            RectGridPlacementCell cell = inputItemCells[useSharedSingleInputArea ? 0 : i];
+            bindings.Add(new InputOutputModuleItemAreaBinding(cell.coordinate, itemDefinition.id));
         }
 
         return bindings.Count > 0;
+    }
+
+    private static int CompareInputItemPlacementCells(
+        RectGridPlacementCell left,
+        RectGridPlacementCell right)
+    {
+        return CompareInputItemPlacements(left.placement, right.placement);
     }
 
     private static int CompareInputItemPlacements(
@@ -9913,6 +11017,37 @@ public class InstallationPlacementController : MonoBehaviour
         return UIManager.Instance != null ? UIManager.Instance.ArrowImage : null;
     }
 
+    private Sprite ResolvePipePassMarkerIcon()
+    {
+        if (pipePassMarkerIcon != null)
+        {
+            return pipePassMarkerIcon;
+        }
+
+#if UNITY_EDITOR
+        pipePassMarkerIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(PipePassMarkerIconAssetPath);
+        if (pipePassMarkerIcon != null)
+        {
+            return pipePassMarkerIcon;
+        }
+#endif
+
+        List<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        if (definitions == null || definitions.Count <= 0)
+        {
+            return null;
+        }
+
+        ItemDefinition fluidDefinition = FindItemDefinitionByName(definitions, "Fluid");
+        if (fluidDefinition == null)
+        {
+            fluidDefinition = FindItemDefinitionByName(definitions, "Water");
+        }
+
+        pipePassMarkerIcon = fluidDefinition != null ? fluidDefinition.icon : null;
+        return pipePassMarkerIcon;
+    }
+
     private Sprite ResolveInputEnergyMarkerIcon(MapObject installedObject)
     {
         ItemDefinition installationDefinition = ResolveItemDefinition(installedObject);
@@ -10060,8 +11195,21 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         InputOutputModule.RectGridBlockType blockType)
     {
+        return GetRectGridBlockWorldPositions(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            new[] { blockType });
+    }
+
+    private List<Vector3> GetRectGridBlockWorldPositions(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        IReadOnlyList<InputOutputModule.RectGridBlockType> blockTypes)
+    {
         List<Vector3> worldPositions = new List<Vector3>();
-        if (!TryGetRectGridBlockCoordinates(anchorCoordinate, footprintSource, quarterTurns, blockType, out List<Vector2Int> coordinates))
+        if (!TryGetRectGridBlockCoordinates(anchorCoordinate, footprintSource, quarterTurns, blockTypes, out List<Vector2Int> coordinates))
         {
             return worldPositions;
         }
@@ -10142,6 +11290,64 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryBuildRectGridPlacementCells(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        IReadOnlyList<InputOutputModule.RectGridBlockType> blockTypes,
+        List<RectGridPlacementCell> cells)
+    {
+        if (cells == null)
+        {
+            return false;
+        }
+
+        cells.Clear();
+        if (!TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(footprintSource, quarterTurns);
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType == InputOutputModule.RectGridBlockType.None
+                || placement.x < 0
+                || placement.x >= rectGridWidth
+                || placement.y < 0
+                || placement.y >= rectGridHeight
+                || (blockTypes != null && !RectGridBlockTypeListContains(blockTypes, placement.blockType)))
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(
+                placement.x - objectAnchorCell.x,
+                placement.y - objectAnchorCell.y);
+            Vector2Int rotatedOffset = RotateFootprintOffset(localOffset, normalizedQuarterTurns);
+            cells.Add(new RectGridPlacementCell(
+                placement,
+                placement.blockType,
+                localOffset,
+                rotatedOffset,
+                anchorCoordinate + rotatedOffset));
+        }
+
+        return cells.Count > 0;
+    }
+
     private bool TryGetRectGridBlockCoordinates(
         Vector2Int anchorCoordinate,
         MapObject footprintSource,
@@ -10149,15 +11355,36 @@ public class InstallationPlacementController : MonoBehaviour
         InputOutputModule.RectGridBlockType blockType,
         out List<Vector2Int> coordinates)
     {
+        return TryGetRectGridBlockCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            new[] { blockType },
+            out coordinates);
+    }
+
+    private bool TryGetRectGridBlockCoordinates(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        IReadOnlyList<InputOutputModule.RectGridBlockType> blockTypes,
+        out List<Vector2Int> coordinates)
+    {
         coordinates = new List<Vector2Int>();
-        if (!TryGetRectGridBlockLocalOffsets(footprintSource, quarterTurns, blockType, out List<Vector2Int> localOffsets))
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                blockTypes,
+                cells))
         {
             return false;
         }
 
-        for (int i = 0; i < localOffsets.Count; i++)
+        for (int i = 0; i < cells.Count; i++)
         {
-            coordinates.Add(anchorCoordinate + localOffsets[i]);
+            coordinates.Add(cells[i].coordinate);
         }
 
         return coordinates.Count > 0;
@@ -10169,32 +11396,63 @@ public class InstallationPlacementController : MonoBehaviour
         InputOutputModule.RectGridBlockType blockType,
         out List<Vector2Int> localOffsets)
     {
+        return TryGetRectGridBlockLocalOffsets(
+            footprintSource,
+            quarterTurns,
+            new[] { blockType },
+            out localOffsets);
+    }
+
+    private bool TryGetRectGridBlockLocalOffsets(
+        MapObject footprintSource,
+        int quarterTurns,
+        IReadOnlyList<InputOutputModule.RectGridBlockType> blockTypes,
+        out List<Vector2Int> localOffsets)
+    {
         localOffsets = new List<Vector2Int>();
-        if (!TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell)
-            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                Vector2Int.zero,
+                footprintSource,
+                quarterTurns,
+                blockTypes,
+                cells))
         {
             return false;
         }
 
-        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
-        for (int i = 0; i < placements.Count; i++)
+        for (int i = 0; i < cells.Count; i++)
         {
-            InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType != blockType)
-            {
-                continue;
-            }
-
-            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
-            localOffsets.Add(RotateFootprintOffset(localOffset, quarterTurns));
+            localOffsets.Add(cells[i].rotatedOffset);
         }
 
         return localOffsets.Count > 0;
     }
 
+    private static bool RectGridBlockTypeListContains(
+        IReadOnlyList<InputOutputModule.RectGridBlockType> blockTypes,
+        InputOutputModule.RectGridBlockType blockType)
+    {
+        if (blockTypes == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < blockTypes.Count; i++)
+        {
+            if (blockTypes[i] == blockType)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void BeginInstallPreview(ItemDefinition definition)
     {
         ClearInstallPreview();
+        InvalidateInstallPreviewMoveCache();
 
         activeInstallDefinition = definition;
         activeInstallPreview = null;
@@ -10203,7 +11461,7 @@ public class InstallationPlacementController : MonoBehaviour
             ? GetPreferredFenceDoorStandaloneQuarterTurns(definition, null)
             : GetPreferredInstallPreviewQuarterTurns(definition, null);
         waitForPointerReleaseAfterPreviewSpawn = true;
-        installGridRefreshTimer = 0f;
+        InvalidateInstallGrid();
         GameManager.Instance?.SetInstallationPlacementActive(true);
         RefreshInstallOrEditWorkableRangeVisualRequest();
     }
@@ -10326,6 +11584,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             installPreviewPropertyBlock.Clear();
+            renderer.GetPropertyBlock(installPreviewPropertyBlock);
             bool hasColorProperty = false;
 
             if (sharedMaterial.HasProperty(BaseColorPropertyId))
@@ -10354,26 +11613,7 @@ public class InstallationPlacementController : MonoBehaviour
         SetInstallPreviewSelectionVisual(preview, false);
     }
 
-    private void TrySnapInstallPreviewToInitialBlock()
-    {
-        if (activeInstallPreview == null)
-        {
-            return;
-        }
-
-        if (TryGetPointerBlock(out Block pointerBlock))
-        {
-            MoveInstallPreviewToBlock(pointerBlock);
-            return;
-        }
-
-        if (TryGetPlayerBlock(out Block playerBlock))
-        {
-            MoveInstallPreviewToBlock(playerBlock);
-        }
-    }
-
-    private void TryMoveInstallPreview(Vector2 pointerPosition)
+    private void TryMoveInstallPreview(Vector2 pointerPosition, bool preserveRotation = false)
     {
         if (activeInstallPreview == null)
         {
@@ -10382,28 +11622,52 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (TryGetPointerBlock(pointerPosition, out Block block))
         {
-            MoveInstallPreviewToBlock(block);
+            MoveInstallPreviewToBlock(block, preserveRotation);
         }
     }
 
-    private bool MoveInstallPreviewToBlock(Block block)
+    private bool MoveInstallPreviewToBlock(Block block, bool preserveRotation = false)
     {
-        if (activeInstallPreview == null
-            || block == null
-            || !TryResolvePlaceableInstallPreviewTarget(
+        if (activeInstallPreview == null || block == null)
+        {
+            return false;
+        }
+
+        if (TryUseCachedInstallPreviewMove(block, preserveRotation, out bool cachedMoveResult))
+        {
+            return cachedMoveResult;
+        }
+
+        int preferredQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        bool allowWaterPumpAutoRotation = IsWaterPumpPreview(activeInstallPreview);
+        bool preserveRotationForTarget = preserveRotation && !allowWaterPumpAutoRotation;
+        Block anchorBlock;
+        int resolvedQuarterTurns;
+        bool hasPlacementTarget = preserveRotationForTarget
+            ? TryResolveFixedRotationInstallPreviewTarget(
                 block,
                 activeInstallPreview,
-                installPreviewQuarterTurns,
-                out Block anchorBlock,
-                out int resolvedQuarterTurns))
+                preferredQuarterTurns,
+                out anchorBlock,
+                out resolvedQuarterTurns)
+            : TryResolvePlaceableInstallPreviewTarget(
+                block,
+                activeInstallPreview,
+                preferredQuarterTurns,
+                false,
+                out anchorBlock,
+                out resolvedQuarterTurns);
+        if (!hasPlacementTarget)
         {
+            CacheInstallPreviewMoveResult(block, false, preserveRotation);
             return false;
         }
 
         MapObject waterPumpRotationSource = ResolveInstallPreviewFootprintSource(activeInstallPreview)
                                             ?? (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null)
                                             ?? activeInstallPreview;
-        if (TryResolveWaterPumpOutwardQuarterTurns(
+        if ((!preserveRotation || allowWaterPumpAutoRotation)
+            && TryResolveWaterPumpOutwardQuarterTurns(
                 anchorBlock.Coordinate,
                 waterPumpRotationSource,
                 resolvedQuarterTurns,
@@ -10412,31 +11676,25 @@ public class InstallationPlacementController : MonoBehaviour
             resolvedQuarterTurns = waterPumpQuarterTurns;
         }
 
-        installPreviewQuarterTurns = resolvedQuarterTurns;
-        installPreviewQuarterTurnsByPreview[activeInstallPreview] = resolvedQuarterTurns;
+        if (TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int currentAnchorCoordinate)
+            && currentAnchorCoordinate == anchorBlock.Coordinate
+            && GetPreviewQuarterTurns(activeInstallPreview) == resolvedQuarterTurns)
+        {
+            CacheInstallPreviewMoveResult(block, true, preserveRotation);
+            return true;
+        }
+
+        SetInstallPreviewQuarterTurns(activeInstallPreview, resolvedQuarterTurns);
 
         Vector2Int previousAnchorCoordinate = Vector2Int.zero;
         bool hadPreviousAnchorCoordinate = TryGetPreviewAnchorCoordinate(activeInstallPreview, out previousAnchorCoordinate);
-        ConveyorChangeInfo previousConveyorChange = null;
-        if (hadPreviousAnchorCoordinate && activeInstallPreview is ConveyorBelt previousPreviewConveyor)
-        {
-            List<Vector2Int> previousOccupiedCoordinates = GetFootprintCoordinates(
-                previousAnchorCoordinate,
-                activeInstallPreview,
-                GetPreviewQuarterTurns(activeInstallPreview));
-            TryCreateConveyorChange(
-                previousAnchorCoordinate,
-                previousOccupiedCoordinates,
-                previousPreviewConveyor,
-                activeInstallPreview.transform.rotation,
-                out previousConveyorChange);
-        }
 
         installPreviewAnchorCoordinates[activeInstallPreview] = anchorBlock.Coordinate;
         RefreshActiveConveyorPreviewVariant();
         RefreshActiveFencePreviewVariant(true);
         RefreshActivePipePreviewVariant();
-        Vector3 targetPosition = GetPreviewWorldPosition(anchorBlock, activeInstallPreview, installPreviewQuarterTurns, installPreviewVerticalOffset);
+        MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
+        Vector3 targetPosition = GetPreviewWorldPosition(anchorBlock, placementSource, installPreviewQuarterTurns);
         activeInstallPreview.transform.position = targetPosition;
         activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
         if (activeInstallPreview is InstallationObject movedInstallationPreview)
@@ -10446,9 +11704,6 @@ public class InstallationPlacementController : MonoBehaviour
 
         WorkableObject.RefreshAllRangeVisuals();
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
-        RefreshConveyorVariantsAroundActivePreview(
-            hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null,
-            previousConveyorChange);
         RefreshFencePreviewVariantsAroundActivePreview(
             hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null,
             true);
@@ -10456,7 +11711,21 @@ public class InstallationPlacementController : MonoBehaviour
             hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null);
         RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
         InvalidateInstallGrid();
+        CacheInstallPreviewMoveResult(block, true, preserveRotation);
         return true;
+    }
+
+    private bool IsWaterPumpPreview(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return false;
+        }
+
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview)
+                                    ?? (activeInstallDefinition != null ? activeInstallDefinition.mapObject : null)
+                                    ?? preview;
+        return IsWaterPumpSource(footprintSource);
     }
 
     private bool TryGetPointerBlock(out Block block)
@@ -10476,41 +11745,35 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
-        RaycastHit[] hits = Physics.RaycastAll(ray, 512f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-        if (hits != null && hits.Length > 0)
+        int hitCount = Physics.RaycastNonAlloc(
+            ray,
+            pointerRaycastHits,
+            512f,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hitCount > 0)
         {
-            System.Array.Sort(hits, CompareRaycastHits);
-            for (int i = 0; i < hits.Length; i++)
+            Block nearestBlock = null;
+            float nearestDistance = float.PositiveInfinity;
+            for (int i = 0; i < hitCount; i++)
             {
-                RaycastHit hit = hits[i];
+                RaycastHit hit = pointerRaycastHits[i];
                 Block hitBlock = hit.collider != null ? hit.collider.GetComponentInParent<Block>() : null;
-                if (hitBlock != null)
+                if (hitBlock != null && hit.distance < nearestDistance)
                 {
-                    block = hitBlock;
-                    return true;
+                    nearestBlock = hitBlock;
+                    nearestDistance = hit.distance;
                 }
+            }
+
+            if (nearestBlock != null)
+            {
+                block = nearestBlock;
+                return true;
             }
         }
 
         return TryGetBlockFromGroundPlane(ray, out block);
-    }
-
-    private bool TryGetPlayerBlock(out Block block)
-    {
-        block = null;
-
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null || GameManager.Instance == null || GameManager.Instance.Player == null)
-        {
-            return false;
-        }
-
-        Transform playerTransform = GameManager.Instance.Player.transform;
-        Vector2Int coordinate = new Vector2Int(
-            Mathf.RoundToInt(playerTransform.position.x),
-            Mathf.RoundToInt(playerTransform.position.z));
-
-        return terrain.TryGetLoadedBlock(coordinate, out block);
     }
 
     private Camera ResolveInstallPreviewCamera()
@@ -10550,7 +11813,7 @@ public class InstallationPlacementController : MonoBehaviour
         return installPreviewTerrain;
     }
 
-    private void UpdateInstallGrid(float deltaTime)
+    private void UpdateInstallGrid()
     {
         bool showFullGrid = IsInstallGridModeActive();
         bool showConveyorDebugOnly = !showFullGrid
@@ -10559,21 +11822,138 @@ public class InstallationPlacementController : MonoBehaviour
         if (!showFullGrid && !showConveyorDebugOnly)
         {
             SetInstallGridVisible(false);
-            installGridRefreshTimer = 0f;
+            ResetInstallGridRefreshState();
             return;
         }
 
-        EnsureInstallGridResources();
-        SetInstallGridVisible(true);
+        if (showFullGrid != installGridLastShowFullGrid
+            || showConveyorDebugOnly != installGridLastShowConveyorDebugOnly)
+        {
+            installGridDirty = true;
+            installGridLastShowFullGrid = showFullGrid;
+            installGridLastShowConveyorDebugOnly = showConveyorDebugOnly;
+        }
 
-        installGridRefreshTimer -= Mathf.Max(0f, deltaTime);
-        if (installGridRefreshTimer > 0f)
+        EnsureInstallGridResources();
+        bool wasVisible = installGridObject != null && installGridObject.activeSelf;
+        SetInstallGridVisible(true);
+        if (!wasVisible)
+        {
+            installGridDirty = true;
+        }
+
+        if (HaveInstallGridBoundsChanged())
+        {
+            installGridDirty = true;
+        }
+
+        if (!installGridDirty)
         {
             return;
         }
 
-        installGridRefreshTimer = Mathf.Max(0.05f, installGridRefreshInterval);
         RebuildInstallGridMesh();
+        installGridDirty = false;
+    }
+
+    private void ResetInstallGridRefreshState()
+    {
+        installGridDirty = true;
+        installGridBoundsInitialized = false;
+        installGridLastShowFullGrid = false;
+        installGridLastShowConveyorDebugOnly = false;
+    }
+
+    private bool HaveInstallGridBoundsChanged()
+    {
+        if (!TryGetInstallGridEffectiveBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate))
+        {
+            return installGridBoundsInitialized;
+        }
+
+        return !installGridBoundsInitialized
+               || installGridMinCoordinate != minCoordinate
+               || installGridMaxCoordinate != maxCoordinate;
+    }
+
+    private bool TryGetInstallGridEffectiveBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate)
+    {
+        minCoordinate = Vector2Int.zero;
+        maxCoordinate = Vector2Int.zero;
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || !terrain.TryGetLoadedBlockBounds(out Vector2Int loadedMin, out Vector2Int loadedMax))
+        {
+            return false;
+        }
+
+        minCoordinate = loadedMin;
+        maxCoordinate = loadedMax;
+        if (!TryGetInstallGridViewportBounds(terrain, out Vector2Int viewportMin, out Vector2Int viewportMax))
+        {
+            return true;
+        }
+
+        minCoordinate = new Vector2Int(
+            Mathf.Max(loadedMin.x, viewportMin.x),
+            Mathf.Max(loadedMin.y, viewportMin.y));
+        maxCoordinate = new Vector2Int(
+            Mathf.Min(loadedMax.x, viewportMax.x),
+            Mathf.Min(loadedMax.y, viewportMax.y));
+        return minCoordinate.x <= maxCoordinate.x && minCoordinate.y <= maxCoordinate.y;
+    }
+
+    private bool TryGetInstallGridViewportBounds(
+        TerrainGenerator terrain,
+        out Vector2Int minCoordinate,
+        out Vector2Int maxCoordinate)
+    {
+        minCoordinate = Vector2Int.zero;
+        maxCoordinate = Vector2Int.zero;
+        Camera targetCamera = ResolveInstallPreviewCamera();
+        if (targetCamera == null || terrain == null)
+        {
+            return false;
+        }
+
+        Plane groundPlane = new Plane(Vector3.up, new Vector3(0f, terrain.transform.position.y, 0f));
+        float minX = float.PositiveInfinity;
+        float maxX = float.NegativeInfinity;
+        float minZ = float.PositiveInfinity;
+        float maxZ = float.NegativeInfinity;
+        int hitCount = 0;
+
+        for (int y = 0; y <= 1; y++)
+        {
+            for (int x = 0; x <= 1; x++)
+            {
+                Ray ray = targetCamera.ViewportPointToRay(new Vector3(x, y, 0f));
+                if (!groundPlane.Raycast(ray, out float enter))
+                {
+                    continue;
+                }
+
+                Vector3 point = ray.GetPoint(enter);
+                minX = Mathf.Min(minX, point.x);
+                maxX = Mathf.Max(maxX, point.x);
+                minZ = Mathf.Min(minZ, point.z);
+                maxZ = Mathf.Max(maxZ, point.z);
+                hitCount++;
+            }
+        }
+
+        if (hitCount <= 0)
+        {
+            return false;
+        }
+
+        minCoordinate = new Vector2Int(
+            Mathf.FloorToInt(minX - 1f) - InstallGridViewportPaddingCells,
+            Mathf.FloorToInt(minZ - 1f) - InstallGridViewportPaddingCells);
+        maxCoordinate = new Vector2Int(
+            Mathf.CeilToInt(maxX + 1f) + InstallGridViewportPaddingCells,
+            Mathf.CeilToInt(maxZ + 1f) + InstallGridViewportPaddingCells);
+        return true;
     }
 
     private void EnsureInstallGridResources()
@@ -10654,14 +12034,16 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null || !terrain.TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate))
+        if (terrain == null || !TryGetInstallGridEffectiveBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate))
         {
             installGridMesh.Clear();
+            installGridBoundsInitialized = false;
             return;
         }
 
         installGridMinCoordinate = minCoordinate;
         installGridMaxCoordinate = maxCoordinate;
+        installGridBoundsInitialized = true;
 
         bool showFullGrid = IsInstallGridModeActive();
         bool showConveyorDebugOnly = !showFullGrid
@@ -10676,12 +12058,17 @@ public class InstallationPlacementController : MonoBehaviour
         float minZ = minCoordinate.y - 0.5f;
         float maxZ = maxCoordinate.y + 0.5f;
 
-        List<Vector3> vertices = new List<Vector3>();
-        List<int> triangles = new List<int>();
-        List<Color> colors = new List<Color>();
+        List<Vector3> vertices = installGridVertices;
+        List<int> triangles = installGridTriangles;
+        List<Color> colors = installGridColors;
+        vertices.Clear();
+        triangles.Clear();
+        colors.Clear();
 
         if (showFullGrid && activeInstallDefinition != null && activeInstallDefinition.mapObject != null)
         {
+            MapObject activeGridSource = activeInstallDefinition.mapObject;
+            bool useFastBoilerGridCheck = IsBoilerSource(activeGridSource);
             for (int z = minCoordinate.y; z <= maxCoordinate.y; z++)
             {
                 for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
@@ -10692,7 +12079,7 @@ public class InstallationPlacementController : MonoBehaviour
                         continue;
                     }
 
-                    if (CanPlaceActiveDefinitionFromGridCoordinate(block))
+                    if (CanPlaceActiveDefinitionFromGridCoordinate(block, useFastBoilerGridCheck))
                     {
                         continue;
                     }
@@ -10754,7 +12141,7 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMesh.RecalculateBounds();
     }
 
-    private bool CanPlaceActiveDefinitionFromGridCoordinate(Block block)
+    private bool CanPlaceActiveDefinitionFromGridCoordinate(Block block, bool useFastBoilerGridCheck = false)
     {
         if (block == null || activeInstallDefinition == null || activeInstallDefinition.mapObject == null)
         {
@@ -10762,12 +12149,118 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         MapObject footprintSource = activeInstallDefinition.mapObject;
+        if (useFastBoilerGridCheck)
+        {
+            return CanPlaceBoilerFromGridCoordinateFast(block, footprintSource);
+        }
+
         if (!IsBelt2F(footprintSource))
         {
+            if (footprintSource is Pipe pipePrototype)
+            {
+                return CanPlacePipeFromGridCoordinate(block, pipePrototype);
+            }
+
+            if (IsBoilerSource(footprintSource) && IsPumpOutputCoordinateForPlacement(block.Coordinate))
+            {
+                return true;
+            }
+
+            if (IsWaterPumpSource(footprintSource))
+            {
+                int preferredQuarterTurns = activeInstallPreview != null
+                    ? GetPreviewQuarterTurns(activeInstallPreview)
+                    : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, null);
+                return TryResolvePlaceableInstallPreviewTarget(
+                    block,
+                    activeInstallPreview,
+                    preferredQuarterTurns,
+                    false,
+                    out _,
+                    out _);
+            }
+
+            if (HasMultiCellMapSize(footprintSource))
+            {
+                int preferredQuarterTurns = activeInstallPreview != null
+                    ? GetPreviewQuarterTurns(activeInstallPreview)
+                    : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, null);
+                return TryResolvePlaceableInstallPreviewTarget(
+                    block,
+                    activeInstallPreview,
+                    preferredQuarterTurns,
+                    false,
+                    out _,
+                    out _);
+            }
+
             return CanPlacePreviewOnTargetBlockType(block, footprintSource);
         }
 
         return CanPlaceBelt2FGridTargetBlock(block, footprintSource);
+    }
+
+    private bool CanPlaceBoilerFromGridCoordinateFast(Block block, MapObject footprintSource)
+    {
+        if (block == null || !TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
+        {
+            return false;
+        }
+
+        InstallationMapFilter allowedFilter = ResolvePlacementMapFilter(footprintSource, installationObject);
+        if (!CanPlaceOnTerrainBiome(block, allowedFilter))
+        {
+            return false;
+        }
+
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+
+        return occupyingObject == null
+               || occupyingObject is Pump
+               || IsFluidStoragePlacementObject(occupyingObject);
+    }
+
+    private bool CanPlacePipeFromGridCoordinate(Block block, Pipe pipePrototype)
+    {
+        if (block == null || pipePrototype == null)
+        {
+            return false;
+        }
+
+        InstallationMapFilter allowedFilter = ResolvePlacementMapFilter(pipePrototype, pipePrototype);
+        if (!CanPlaceOnTerrainBiome(block, allowedFilter))
+        {
+            return false;
+        }
+
+        bool isInputOutputAreaBlock =
+            InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
+            || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
+            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(block.Coordinate);
+        bool isRuntimePipeAreaBlock = InputOutputModule.CoordinateAllowsRuntimePipeBlock(block.Coordinate);
+        if (isInputOutputAreaBlock && !isRuntimePipeAreaBlock)
+        {
+            return false;
+        }
+
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+
+        if (IsResourceAllowedForPlacement(block, occupyingObject, allowedFilter))
+        {
+            return true;
+        }
+
+        if (CanPlacePassthroughOnBelt2FBridgeCenter(
+                block,
+                pipePrototype,
+                occupyingObject,
+                0))
+        {
+            return true;
+        }
+
+        return occupyingObject == null;
     }
 
     private void AddInstallPreviewFootprintFill(List<Vector3> vertices, List<int> triangles, List<Color> colors, float fillY)
@@ -10784,7 +12277,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            int quarterTurns = GetPreviewQuarterTurns(preview);
+            int quarterTurns = GetPreviewAreaQuarterTurns(preview);
             bool isBlockedPreview = false;
             if (ResolveInstallPreviewTerrain() != null
                 && ResolveInstallPreviewTerrain().TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock)
@@ -10794,8 +12287,10 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             Color previewFillColor = isBlockedPreview ? installGridBlockedFillColor : installPreviewTint;
-            MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
-            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+            List<Vector2Int> occupiedCoordinates = GetInstallPreviewAreaDisplayCoordinates(
+                preview,
+                anchorCoordinate,
+                quarterTurns);
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
                 Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
@@ -10825,7 +12320,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            int quarterTurns = GetPreviewQuarterTurns(preview);
+            int quarterTurns = GetPreviewAreaQuarterTurns(preview);
             bool isBlockedPreview = false;
             if (terrain != null
                 && terrain.TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock)
@@ -10835,8 +12330,10 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             Color previewLineColor = isBlockedPreview ? installGridBlockedLineColor : installGridColor;
-            MapObject footprintSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
-            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+            List<Vector2Int> occupiedCoordinates = GetInstallPreviewAreaDisplayCoordinates(
+                preview,
+                anchorCoordinate,
+                quarterTurns);
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
                 Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
@@ -10857,34 +12354,6 @@ public class InstallationPlacementController : MonoBehaviour
         AddGridEdgeLine(vertices, triangles, colors, coordinate, Vector2Int.right, y, color);
         AddGridEdgeLine(vertices, triangles, colors, coordinate, Vector2Int.down, y, color);
         AddGridEdgeLine(vertices, triangles, colors, coordinate, Vector2Int.left, y, color);
-    }
-
-    private void AddConveyorInstallPreviewDebugEnds(List<Vector3> vertices, List<int> triangles, List<Color> colors, float lineY)
-    {
-        CleanupInstallPreviewReferences();
-        for (int i = 0; i < installPreviewInstances.Count; i++)
-        {
-            MapObject preview = installPreviewInstances[i];
-            if (preview != activeInstallPreview
-                || !(preview is ConveyorBelt conveyorPreview)
-                || !TryGetPreviewAnchorCoordinate(preview, out Vector2Int anchorCoordinate))
-            {
-                continue;
-            }
-
-            Quaternion previewRotation = preview.transform.rotation;
-            if (!conveyorPreview.TryGetOutputDirection(previewRotation, out Vector2Int outputDirection))
-            {
-                continue;
-            }
-
-            if (!conveyorPreview.TryGetInputDirection(previewRotation, out Vector2Int inputDirection))
-            {
-                inputDirection = -outputDirection;
-            }
-
-            AddConveyorFlowArrow(vertices, triangles, colors, anchorCoordinate, inputDirection, outputDirection, lineY, installGridConveyorEndDebugColor);
-        }
     }
 
     private void AddInstalledConveyorDebugEnds(List<Vector3> vertices, List<int> triangles, List<Color> colors, Vector2Int minCoordinate, Vector2Int maxCoordinate, float lineY)
@@ -11219,29 +12688,6 @@ public class InstallationPlacementController : MonoBehaviour
         return terrain.TryGetLoadedBlock(coordinate, out block) && block != null;
     }
 
-    private bool TryGetPrimaryPointerDragPosition(out Vector2 pointerPosition)
-    {
-        pointerPosition = Vector2.zero;
-
-        if (Input.touchCount > 0)
-        {
-            Touch touch = Input.GetTouch(0);
-            if (touch.phase == TouchPhase.Began || touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
-            {
-                pointerPosition = touch.position;
-                return true;
-            }
-        }
-
-        if (Input.GetMouseButton(0))
-        {
-            pointerPosition = Input.mousePosition;
-            return true;
-        }
-
-        return false;
-    }
-
     private void UpdateInstallPreviewPointerInput()
     {
         if (Input.touchCount > 0)
@@ -11343,7 +12789,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (previewPointerDragged && (IsEditingInstallation() || previewPointerOriginPreview != null))
         {
-            TryMoveInstallPreview(pointerPosition);
+            TryHandleInstallPreviewDrag(pointerPosition);
         }
     }
 
@@ -11360,7 +12806,7 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 if (previewPointerDragged)
                 {
-                    TryMoveInstallPreview(pointerPosition);
+                    TryMoveInstallPreview(pointerPosition, true);
                 }
                 else
                 {
@@ -11375,7 +12821,7 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 if (previewPointerOriginPreview != null)
                 {
-                    TryMoveInstallPreview(pointerPosition);
+                    TryHandleInstallPreviewDrag(pointerPosition);
                 }
             }
             else
@@ -11385,6 +12831,23 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ResetPreviewPointerTracking();
+    }
+
+    private void TryHandleInstallPreviewDrag(Vector2 pointerPosition)
+    {
+        if (IsEditingInstallation())
+        {
+            TryMoveInstallPreview(pointerPosition, true);
+            return;
+        }
+
+        if (previewPointerOriginPreview != null
+            && previewPointerOriginPreview != activeInstallPreview)
+        {
+            SelectInstallPreview(previewPointerOriginPreview);
+        }
+
+        TryMoveInstallPreview(pointerPosition, true);
     }
 
     private void HandleInstallationEditClick(Vector2 pointerPosition)
@@ -11466,24 +12929,15 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        InvalidateInstallPreviewMoveCache();
+
+        int previousQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
         Block anchorBlock = null;
         bool hasAnchorBlock = TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate)
                             && ResolveInstallPreviewTerrain() != null
                             && ResolveInstallPreviewTerrain().TryGetLoadedBlock(anchorCoordinate, out anchorBlock);
-        ConveyorChangeInfo previousConveyorChange = null;
-        if (hasAnchorBlock && activeInstallPreview is ConveyorBelt existingPreviewConveyor)
-        {
-            List<Vector2Int> previousOccupiedCoordinates = GetFootprintCoordinates(
-                anchorCoordinate,
-                activeInstallPreview,
-                GetPreviewQuarterTurns(activeInstallPreview));
-            TryCreateConveyorChange(
-                anchorCoordinate,
-                previousOccupiedCoordinates,
-                existingPreviewConveyor,
-                activeInstallPreview.transform.rotation,
-                out previousConveyorChange);
-        }
+        Vector2Int previousAnchorCoordinate = anchorCoordinate;
+        bool shouldReanchorRotatedMultiCellPreview = false;
 
         if (IsActiveBelt2FPreview())
         {
@@ -11561,6 +13015,25 @@ public class InstallationPlacementController : MonoBehaviour
                 }
             }
         }
+        else if (TryRotateWaterPumpPreviewAtShore(
+                     hasAnchorBlock,
+                     anchorBlock,
+                     anchorCoordinate,
+                     out int waterPumpQuarterTurns))
+        {
+            installPreviewQuarterTurns = waterPumpQuarterTurns;
+        }
+        else if (TryRotateSteamGeneratorPreviewInPlaceOnStraightPipe(
+                     hasAnchorBlock,
+                     anchorCoordinate,
+                     out _,
+                     out anchorBlock,
+                     out anchorCoordinate,
+                     out int steamGeneratorQuarterTurns))
+        {
+            hasAnchorBlock = anchorBlock != null;
+            installPreviewQuarterTurns = steamGeneratorQuarterTurns;
+        }
         else
         {
             int nextQuarterTurns = GetNextInstallPreviewQuarterTurns(
@@ -11571,44 +13044,30 @@ public class InstallationPlacementController : MonoBehaviour
                     activeInstallPreview,
                     hasAnchorBlock,
                     anchorCoordinate);
-            bool hadPreviousFenceDoorStandaloneQuarterTurns = false;
-            int previousFenceDoorStandaloneQuarterTurns = 0;
             if (shouldRememberFenceDoorStandaloneQuarterTurns)
             {
-                hadPreviousFenceDoorStandaloneQuarterTurns =
-                    installPreviewFenceDoorStandaloneQuarterTurnsByPreview.TryGetValue(
-                        activeInstallPreview,
-                        out previousFenceDoorStandaloneQuarterTurns);
                 installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
                     NormalizePlacementQuarterTurnsForObject(activeInstallPreview, nextQuarterTurns);
             }
 
-            if (hasAnchorBlock)
-            {
-                if (!TryFindPlaceableInstallPreviewQuarterTurns(
-                    anchorBlock,
-                    activeInstallPreview,
-                    nextQuarterTurns,
-                    out nextQuarterTurns))
-                {
-                    if (shouldRememberFenceDoorStandaloneQuarterTurns)
-                    {
-                        if (hadPreviousFenceDoorStandaloneQuarterTurns)
-                        {
-                            installPreviewFenceDoorStandaloneQuarterTurnsByPreview[activeInstallPreview] =
-                                previousFenceDoorStandaloneQuarterTurns;
-                        }
-                        else
-                        {
-                            installPreviewFenceDoorStandaloneQuarterTurnsByPreview.Remove(activeInstallPreview);
-                        }
-                    }
+            installPreviewQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+                activeInstallPreview,
+                nextQuarterTurns);
+            shouldReanchorRotatedMultiCellPreview = hasAnchorBlock;
+        }
 
-                    return;
-                }
-            }
-
-            installPreviewQuarterTurns = nextQuarterTurns;
+        if (shouldReanchorRotatedMultiCellPreview
+            && hasAnchorBlock
+            && TryResolveRotatedMultiCellInstallPreviewAnchor(
+                activeInstallPreview,
+                previousAnchorCoordinate,
+                previousQuarterTurns,
+                installPreviewQuarterTurns,
+                out Block reanchoredBlock,
+                out Vector2Int reanchoredCoordinate))
+        {
+            anchorBlock = reanchoredBlock;
+            anchorCoordinate = reanchoredCoordinate;
         }
 
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
@@ -11637,26 +13096,404 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (hasAnchorBlock)
         {
+            MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
             activeInstallPreview.transform.position = GetPreviewWorldPosition(
                 anchorBlock,
-                activeInstallPreview,
-                installPreviewQuarterTurns,
-                installPreviewVerticalOffset);
+                placementSource,
+                installPreviewQuarterTurns);
         }
 
         WorkableObject.RefreshAllRangeVisuals();
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
-        RefreshConveyorVariantsAroundActivePreview(
-            hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null,
-            previousConveyorChange,
-            false);
         RefreshFencePreviewVariantsAroundActivePreview(
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null,
             true);
         RefreshPipePreviewVariantsAroundActivePreview(
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null);
         InvalidateInstallGrid();
+        UpdateInstallGrid();
+    }
+
+    private bool TryRotateWaterPumpPreviewAtShore(
+        bool hasAnchorBlock,
+        Block anchorBlock,
+        Vector2Int anchorCoordinate,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        if (!hasAnchorBlock
+            || anchorBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(activeInstallPreview, out MapObject footprintSource)
+            || !IsWaterPumpSource(footprintSource))
+        {
+            return false;
+        }
+
+        int preferredQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            footprintSource,
+            resolvedQuarterTurns + 1);
+        if (TryResolveWaterPumpOutwardQuarterTurns(
+                anchorCoordinate,
+                footprintSource,
+                preferredQuarterTurns,
+                out int waterPumpQuarterTurns)
+            && CanPlacePreviewOnBlock(anchorBlock, activeInstallPreview, waterPumpQuarterTurns))
+        {
+            resolvedQuarterTurns = waterPumpQuarterTurns;
+        }
+
+        return true;
+    }
+
+    private bool TryResolveRotatedMultiCellInstallPreviewAnchor(
+        MapObject preview,
+        Vector2Int currentAnchorCoordinate,
+        int previousQuarterTurns,
+        int targetQuarterTurns,
+        out Block resolvedAnchorBlock,
+        out Vector2Int resolvedAnchorCoordinate)
+    {
+        resolvedAnchorBlock = null;
+        resolvedAnchorCoordinate = currentAnchorCoordinate;
+
+        MapObject footprintSource = ResolveInstallPreviewPlacementSource(preview);
+        if (footprintSource == null
+            || !HasMultiCellPlacementFootprint(footprintSource)
+            || IsBelt2F(footprintSource))
+        {
+            return false;
+        }
+
+        int normalizedPreviousQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            footprintSource,
+            previousQuarterTurns);
+        int normalizedTargetQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            footprintSource,
+            targetQuarterTurns);
+        if (normalizedPreviousQuarterTurns == normalizedTargetQuarterTurns)
+        {
+            return false;
+        }
+
+        List<Vector2Int> previousOffsets = GetFootprintLocalOffsets(
+            footprintSource,
+            normalizedPreviousQuarterTurns);
+        List<Vector2Int> targetOffsets = GetFootprintLocalOffsets(
+            footprintSource,
+            normalizedTargetQuarterTurns);
+        if (previousOffsets.Count <= 1 || targetOffsets.Count <= 1)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector2 previousAverageOffset = GetAverageLocalOffset(previousOffsets);
+        Vector2 targetAverageOffset = GetAverageLocalOffset(targetOffsets);
+        Vector2 desiredCenter = new Vector2(currentAnchorCoordinate.x, currentAnchorCoordinate.y) + previousAverageOffset;
+        Vector2 idealAnchor = desiredCenter - targetAverageOffset;
+
+        HashSet<Vector2Int> previousCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < previousOffsets.Count; i++)
+        {
+            previousCoordinates.Add(currentAnchorCoordinate + previousOffsets[i]);
+        }
+
+        List<Vector2Int> candidates = new List<Vector2Int>();
+        HashSet<Vector2Int> candidateSet = new HashSet<Vector2Int>();
+        void AddCandidate(Vector2Int candidate)
+        {
+            if (candidateSet.Add(candidate))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        int roundedX = RoundGridCoordinate(idealAnchor.x);
+        int roundedY = RoundGridCoordinate(idealAnchor.y);
+        AddCandidate(new Vector2Int(roundedX, roundedY));
+
+        int floorX = Mathf.FloorToInt(idealAnchor.x);
+        int ceilX = Mathf.CeilToInt(idealAnchor.x);
+        int floorY = Mathf.FloorToInt(idealAnchor.y);
+        int ceilY = Mathf.CeilToInt(idealAnchor.y);
+        AddCandidate(new Vector2Int(floorX, floorY));
+        AddCandidate(new Vector2Int(ceilX, floorY));
+        AddCandidate(new Vector2Int(floorX, ceilY));
+        AddCandidate(new Vector2Int(ceilX, ceilY));
+        AddCandidate(currentAnchorCoordinate);
+
+        for (int previousIndex = 0; previousIndex < previousOffsets.Count; previousIndex++)
+        {
+            Vector2Int previousCoordinate = currentAnchorCoordinate + previousOffsets[previousIndex];
+            for (int targetIndex = 0; targetIndex < targetOffsets.Count; targetIndex++)
+            {
+                AddCandidate(previousCoordinate - targetOffsets[targetIndex]);
+            }
+        }
+
+        Vector2Int bestCoordinate = currentAnchorCoordinate;
+        Block bestBlock = null;
+        float bestCenterDistance = float.MaxValue;
+        int bestOverlap = -1;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            Vector2Int candidateCoordinate = candidates[i];
+            if (!terrain.TryGetLoadedBlock(candidateCoordinate, out Block candidateBlock)
+                || candidateBlock == null
+                || !CanPlacePreviewOnBlock(candidateBlock, preview, normalizedTargetQuarterTurns))
+            {
+                continue;
+            }
+
+            Vector2 candidateCenter =
+                new Vector2(candidateCoordinate.x, candidateCoordinate.y) + targetAverageOffset;
+            float centerDistance = (candidateCenter - desiredCenter).sqrMagnitude;
+            int overlap = CountRotatedFootprintOverlap(
+                candidateCoordinate,
+                targetOffsets,
+                previousCoordinates);
+            if (centerDistance > bestCenterDistance + 0.0001f
+                || (Mathf.Abs(centerDistance - bestCenterDistance) <= 0.0001f
+                    && overlap <= bestOverlap))
+            {
+                continue;
+            }
+
+            bestCenterDistance = centerDistance;
+            bestOverlap = overlap;
+            bestCoordinate = candidateCoordinate;
+            bestBlock = candidateBlock;
+        }
+
+        if (bestBlock == null || bestCoordinate == currentAnchorCoordinate)
+        {
+            return false;
+        }
+
+        resolvedAnchorBlock = bestBlock;
+        resolvedAnchorCoordinate = bestCoordinate;
+        return true;
+    }
+
+    private static Vector2 GetAverageLocalOffset(IReadOnlyList<Vector2Int> offsets)
+    {
+        if (offsets == null || offsets.Count <= 0)
+        {
+            return Vector2.zero;
+        }
+
+        Vector2 averageOffset = Vector2.zero;
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            averageOffset += offsets[i];
+        }
+
+        return averageOffset / offsets.Count;
+    }
+
+    private static int CountRotatedFootprintOverlap(
+        Vector2Int anchorCoordinate,
+        IReadOnlyList<Vector2Int> localOffsets,
+        ISet<Vector2Int> previousCoordinates)
+    {
+        if (localOffsets == null || previousCoordinates == null || previousCoordinates.Count <= 0)
+        {
+            return 0;
+        }
+
+        int overlap = 0;
+        for (int i = 0; i < localOffsets.Count; i++)
+        {
+            if (previousCoordinates.Contains(anchorCoordinate + localOffsets[i]))
+            {
+                overlap++;
+            }
+        }
+
+        return overlap;
+    }
+
+    private static int RoundGridCoordinate(float value)
+    {
+        return Mathf.FloorToInt(value + 0.5f);
+    }
+
+    private bool TryRotateSteamGeneratorPreviewInPlaceOnStraightPipe(
+        bool hasAnchorBlock,
+        Vector2Int anchorCoordinate,
+        out bool handled,
+        out Block resolvedAnchorBlock,
+        out Vector2Int resolvedAnchorCoordinate,
+        out int resolvedQuarterTurns)
+    {
+        handled = false;
+        resolvedAnchorBlock = null;
+        resolvedAnchorCoordinate = anchorCoordinate;
+        resolvedQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        if (!hasAnchorBlock
+            || activeInstallPreview == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(activeInstallPreview, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        if (!TryGetRectGridFootprintSettings(
+                footprintSource,
+                out _,
+                out _,
+                out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        int currentQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
+        int targetQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            footprintSource,
+            currentQuarterTurns + 2);
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    anchorCoordinate,
+                    footprintSource,
+                    currentQuarterTurns,
+                    placement,
+                    out Vector2Int pipeCoordinate)
+                || !TryGetPipePlacementAtCoordinate(
+                    pipeCoordinate,
+                    out Pipe pipe,
+                    out Quaternion pipeRotation)
+                || !TryGetStraightPipeAxis(pipe, pipeRotation, out _))
+            {
+                continue;
+            }
+
+            handled = true;
+
+            for (int targetPlacementIndex = 0; targetPlacementIndex < placements.Count; targetPlacementIndex++)
+            {
+                InputOutputModule.RectGridBlockPlacement targetPlacement = placements[targetPlacementIndex];
+                if (!InputOutputModule.AllowsPipeAreaInteraction(targetPlacement.blockType))
+                {
+                    continue;
+                }
+
+                Vector2Int localOffset = new Vector2Int(
+                    targetPlacement.x - objectAnchorCell.x,
+                    targetPlacement.y - objectAnchorCell.y);
+                Vector2Int candidateAnchorCoordinate =
+                    pipeCoordinate - RotateFootprintOffset(localOffset, targetQuarterTurns);
+                if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                    || candidateAnchorBlock == null
+                    || !RectGridObjectCoordinatesMatch(
+                        placements,
+                        objectAnchorCell,
+                        anchorCoordinate,
+                        currentQuarterTurns,
+                        candidateAnchorCoordinate,
+                        targetQuarterTurns))
+                {
+                    continue;
+                }
+
+                resolvedAnchorBlock = candidateAnchorBlock;
+                resolvedAnchorCoordinate = candidateAnchorCoordinate;
+                resolvedQuarterTurns = targetQuarterTurns;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool RectGridObjectCoordinatesMatch(
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements,
+        Vector2Int objectAnchorCell,
+        Vector2Int firstAnchorCoordinate,
+        int firstQuarterTurns,
+        Vector2Int secondAnchorCoordinate,
+        int secondQuarterTurns)
+    {
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        int firstObjectCount = 0;
+        int secondObjectCount = 0;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            if (placements[i].blockType == InputOutputModule.RectGridBlockType.Object)
+            {
+                firstObjectCount++;
+                secondObjectCount++;
+            }
+        }
+
+        if (firstObjectCount <= 0 || firstObjectCount != secondObjectCount)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement firstPlacement = placements[i];
+            if (firstPlacement.blockType != InputOutputModule.RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            Vector2Int firstOffset = new Vector2Int(
+                firstPlacement.x - objectAnchorCell.x,
+                firstPlacement.y - objectAnchorCell.y);
+            Vector2Int firstCoordinate =
+                firstAnchorCoordinate + RotateFootprintOffset(firstOffset, firstQuarterTurns);
+            bool foundMatchingSecondCoordinate = false;
+            for (int j = 0; j < placements.Count; j++)
+            {
+                InputOutputModule.RectGridBlockPlacement secondPlacement = placements[j];
+                if (secondPlacement.blockType != InputOutputModule.RectGridBlockType.Object)
+                {
+                    continue;
+                }
+
+                Vector2Int secondOffset = new Vector2Int(
+                    secondPlacement.x - objectAnchorCell.x,
+                    secondPlacement.y - objectAnchorCell.y);
+                Vector2Int secondCoordinate =
+                    secondAnchorCoordinate + RotateFootprintOffset(secondOffset, secondQuarterTurns);
+                if (secondCoordinate != firstCoordinate)
+                {
+                    continue;
+                }
+
+                foundMatchingSecondCoordinate = true;
+                break;
+            }
+
+            if (!foundMatchingSecondCoordinate)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private bool IsActiveBelt2FPreview()
@@ -12036,14 +13873,20 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (TryGetInstallPreviewAtBlock(clickedBlock, out MapObject clickedPreview) && clickedPreview != null)
         {
+            if (IsPreviewObjectCell(clickedPreview, clickedBlock))
+            {
+                RemoveInstallPreview(clickedPreview);
+                return;
+            }
+
             if (CanCreateAdditionalPreview()
                 && CoordinateHasInputOutputAreaForPlacement(clickedBlock.Coordinate, null)
-                && TryCreateAndPlaceInstallPreview(clickedBlock, null))
+                && TryCreateAndPlaceInstallPreview(clickedBlock, clickedPreview))
             {
                 return;
             }
 
-            RemoveInstallPreview(clickedPreview);
+            SelectInstallPreview(clickedPreview);
             return;
         }
 
@@ -12053,41 +13896,6 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private bool TryDuplicateInstallPreview(Vector2 pointerPosition)
-    {
-        if (previewPointerOriginPreview == null || activeInstallDefinition == null || !CanCreateAdditionalPreview())
-        {
-            return false;
-        }
-
-        if (!TryGetPointerBlock(pointerPosition, out Block targetBlock) || targetBlock == null)
-        {
-            return false;
-        }
-
-        if (TryGetInstallPreviewAtBlock(targetBlock, out MapObject existingPreview) && existingPreview != null)
-        {
-            if (CoordinateHasInputOutputAreaForPlacement(targetBlock.Coordinate, previewPointerOriginPreview)
-                && TryCreateAndPlaceInstallPreview(targetBlock, previewPointerOriginPreview))
-            {
-                return true;
-            }
-
-            SelectInstallPreview(existingPreview);
-            return true;
-        }
-
-        return TryCreateAndPlaceInstallPreview(targetBlock, previewPointerOriginPreview);
-    }
-
-    private bool IsPreviewOnBlock(Block block)
-    {
-        return activeInstallPreview != null
-               && block != null
-               && TryGetInstallPreviewAtBlock(block, out MapObject preview)
-               && preview == activeInstallPreview;
-    }
-
     private void SelectInstallPreview(MapObject preview)
     {
         if (preview == null)
@@ -12095,6 +13903,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        InvalidateInstallPreviewMoveCache();
         activeInstallPreview = preview;
         installPreviewQuarterTurns = GetPreviewQuarterTurns(preview);
         installPreviewConveyorVariantMode = GetConveyorPreviewVariantMode(preview);
@@ -12124,7 +13933,64 @@ public class InstallationPlacementController : MonoBehaviour
                 storedQuarterTurns);
         }
 
+        if (preview == activeInstallPreview)
+        {
+            return NormalizePlacementQuarterTurnsForObject(
+                ResolveInstallPreviewRotationSource(preview),
+                installPreviewQuarterTurns);
+        }
+
         return 0;
+    }
+
+    private int GetPreviewAreaQuarterTurns(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return 0;
+        }
+
+        MapObject placementSource = ResolveInstallPreviewPlacementSource(preview);
+        if (installPreviewQuarterTurnsByPreview.TryGetValue(preview, out int storedQuarterTurns))
+        {
+            return NormalizePlacementQuarterTurnsForObject(
+                placementSource,
+                storedQuarterTurns);
+        }
+
+        if (preview == activeInstallPreview)
+        {
+            return NormalizePlacementQuarterTurnsForObject(placementSource, installPreviewQuarterTurns);
+        }
+
+        if (TryResolvePlacementQuarterTurnsFromRotation(
+                placementSource,
+                preview.transform.rotation,
+                out int transformQuarterTurns))
+        {
+            return NormalizePlacementQuarterTurnsForObject(
+                placementSource,
+                transformQuarterTurns);
+        }
+
+        return 0;
+    }
+
+    private void SetInstallPreviewQuarterTurns(MapObject preview, int quarterTurns)
+    {
+        if (preview == null)
+        {
+            return;
+        }
+
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            ResolveInstallPreviewRotationSource(preview),
+            quarterTurns);
+        installPreviewQuarterTurnsByPreview[preview] = normalizedQuarterTurns;
+        if (preview == activeInstallPreview)
+        {
+            installPreviewQuarterTurns = normalizedQuarterTurns;
+        }
     }
 
     private MapObject ResolveInstallPreviewRotationSource(MapObject preview)
@@ -12184,7 +14050,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        if (bestQuarterTurns >= 0 && bestDot >= 0.9999f)
+        if (bestQuarterTurns >= 0 && bestDot >= PlacementRotationNearestDotThreshold)
         {
             return bestQuarterTurns % 2;
         }
@@ -12379,24 +14245,6 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
-    private int ResolvePlacementQuarterTurnsFromRotation(MapObject sourcePrefab, Quaternion worldRotation, int fallbackQuarterTurns)
-    {
-        if (UsesTwoStateWallRotation(sourcePrefab))
-        {
-            return ResolveTwoStateWallQuarterTurnsFromRotation(
-                sourcePrefab,
-                worldRotation,
-                fallbackQuarterTurns);
-        }
-
-        if (TryResolvePlacementQuarterTurnsFromRotation(sourcePrefab, worldRotation, out int resolvedQuarterTurns))
-        {
-            return resolvedQuarterTurns;
-        }
-
-        return NormalizePlacementQuarterTurns(fallbackQuarterTurns);
-    }
-
     private bool TryResolvePlacementQuarterTurnsFromRotation(MapObject sourcePrefab, Quaternion worldRotation, out int resolvedQuarterTurns)
     {
         resolvedQuarterTurns = 0;
@@ -12415,14 +14263,29 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         int candidateCount = GetPlacementRotationCandidateCount(sourcePrefab);
+        int bestQuarterTurns = -1;
+        float bestDot = -1f;
         for (int candidateQuarterTurns = 0; candidateQuarterTurns < candidateCount; candidateQuarterTurns++)
         {
             Quaternion candidateRotation = GetPlacementObjectRotation(sourcePrefab, candidateQuarterTurns);
-            if (Mathf.Abs(Quaternion.Dot(candidateRotation, worldRotation)) >= 0.9999f)
+            float dot = Mathf.Abs(Quaternion.Dot(candidateRotation, worldRotation));
+            if (dot >= PlacementRotationExactDotThreshold)
             {
                 resolvedQuarterTurns = candidateQuarterTurns;
                 return true;
             }
+
+            if (dot > bestDot)
+            {
+                bestDot = dot;
+                bestQuarterTurns = candidateQuarterTurns;
+            }
+        }
+
+        if (bestQuarterTurns >= 0 && bestDot >= PlacementRotationNearestDotThreshold)
+        {
+            resolvedQuarterTurns = bestQuarterTurns;
+            return true;
         }
 
         return false;
@@ -12529,6 +14392,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        InvalidateInstallPreviewMoveCache();
         CleanupInstallPreviewReferences();
         if (!installPreviewInstances.Contains(preview))
         {
@@ -12565,113 +14429,94 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewInstances.RemoveAt(i);
         }
 
-        List<MapObject> previews = new List<MapObject>(installPreviewQuarterTurnsByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewQuarterTurnsByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewAnchorCoordinates.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewAnchorCoordinates.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewFenceDoorStandaloneQuarterTurnsByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewFenceDoorStandaloneQuarterTurnsByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewBaseRotationsByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewBaseRotationsByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewSourcePrefabsByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewSourcePrefabsByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewPlacementSequencesByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewPlacementSequencesByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewConveyorRotationSequenceIndexesByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            installPreviewConveyorRotationSequenceIndexesByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(installPreviewItemReservationsByPreview.Keys);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null)
-            {
-                continue;
-            }
-
-            if (installPreviewItemReservationsByPreview.TryGetValue(
-                    previews[i],
-                    out InstallPreviewItemReservation reservation))
-            {
-                RefundInstallPreviewReservation(reservation);
-            }
-
-            installPreviewItemReservationsByPreview.Remove(previews[i]);
-        }
-
-        previews = new List<MapObject>(automaticFenceCornerPreviews);
-        for (int i = 0; i < previews.Count; i++)
-        {
-            if (previews[i] != null && installPreviewInstances.Contains(previews[i]))
-            {
-                continue;
-            }
-
-            automaticFenceCornerPreviews.Remove(previews[i]);
-        }
+        RemoveMissingPreviewKeys(installPreviewQuarterTurnsByPreview);
+        RemoveMissingPreviewKeys(installPreviewAnchorCoordinates);
+        RemoveMissingPreviewKeys(installPreviewFenceDoorStandaloneQuarterTurnsByPreview);
+        RemoveMissingPreviewKeys(installPreviewBaseRotationsByPreview);
+        RemoveMissingPreviewKeys(installPreviewSourcePrefabsByPreview);
+        RemoveMissingPreviewKeys(installPreviewPlacementSequencesByPreview);
+        RemoveMissingPreviewKeys(installPreviewConveyorRotationSequenceIndexesByPreview);
+        RemoveMissingPreviewItemReservations();
+        RemoveMissingAutomaticFenceCornerPreviews();
 
         CleanupInstalledFenceVariantPreviewReferences();
+    }
+
+    private void RemoveMissingPreviewKeys<TValue>(Dictionary<MapObject, TValue> dictionary)
+    {
+        if (dictionary == null || dictionary.Count <= 0)
+        {
+            return;
+        }
+
+        cleanupMapObjectScratch.Clear();
+        foreach (KeyValuePair<MapObject, TValue> entry in dictionary)
+        {
+            if (entry.Key == null)
+            {
+                cleanupMapObjectScratch.Add(entry.Key);
+            }
+        }
+
+        for (int i = 0; i < cleanupMapObjectScratch.Count; i++)
+        {
+            dictionary.Remove(cleanupMapObjectScratch[i]);
+        }
+
+        cleanupMapObjectScratch.Clear();
+    }
+
+    private void RemoveMissingPreviewItemReservations()
+    {
+        if (installPreviewItemReservationsByPreview.Count <= 0)
+        {
+            return;
+        }
+
+        cleanupMapObjectScratch.Clear();
+        foreach (KeyValuePair<MapObject, InstallPreviewItemReservation> entry in installPreviewItemReservationsByPreview)
+        {
+            if (entry.Key != null)
+            {
+                continue;
+            }
+
+            RefundInstallPreviewReservation(entry.Value);
+            cleanupMapObjectScratch.Add(entry.Key);
+        }
+
+        for (int i = 0; i < cleanupMapObjectScratch.Count; i++)
+        {
+            installPreviewItemReservationsByPreview.Remove(cleanupMapObjectScratch[i]);
+        }
+
+        cleanupMapObjectScratch.Clear();
+    }
+
+    private void RemoveMissingAutomaticFenceCornerPreviews()
+    {
+        if (automaticFenceCornerPreviews.Count <= 0)
+        {
+            return;
+        }
+
+        cleanupMapObjectScratch.Clear();
+        foreach (MapObject preview in automaticFenceCornerPreviews)
+        {
+            if (preview != null && installPreviewInstances.Contains(preview))
+            {
+                continue;
+            }
+
+            cleanupMapObjectScratch.Add(preview);
+        }
+
+        for (int i = 0; i < cleanupMapObjectScratch.Count; i++)
+        {
+            automaticFenceCornerPreviews.Remove(cleanupMapObjectScratch[i]);
+        }
+
+        cleanupMapObjectScratch.Clear();
     }
 
     private bool TryCreateAndPlaceInstallPreview(Block block, MapObject sourcePreview)
@@ -12696,8 +14541,9 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!TryResolvePlaceableInstallPreviewTarget(
                 block,
-                null,
+                sourcePreview,
                 quarterTurns,
+                sourcePreview != null,
                 out Block anchorBlock,
                 out quarterTurns))
         {
@@ -12733,6 +14579,12 @@ public class InstallationPlacementController : MonoBehaviour
 
             RefreshActiveConveyorPreviewVariant();
         }
+
+        if (sourcePreview != null)
+        {
+            return ApplyResolvedInstallPreviewPlacement(anchorBlock, quarterTurns);
+        }
+
         Block initialPreviewBlock = IsBelt2F(activeInstallDefinition.mapObject) ? block : anchorBlock;
         if (MoveInstallPreviewToBlock(initialPreviewBlock))
         {
@@ -12743,6 +14595,41 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private bool ApplyResolvedInstallPreviewPlacement(Block anchorBlock, int resolvedQuarterTurns)
+    {
+        if (activeInstallPreview == null || anchorBlock == null)
+        {
+            return false;
+        }
+
+        installPreviewQuarterTurns = NormalizePlacementQuarterTurnsForObject(activeInstallPreview, resolvedQuarterTurns);
+        installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
+        installPreviewAnchorCoordinates[activeInstallPreview] = anchorBlock.Coordinate;
+
+        RefreshActiveConveyorPreviewVariant();
+        RefreshActiveFencePreviewVariant(true);
+        RefreshActivePipePreviewVariant();
+
+        MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
+        activeInstallPreview.transform.position = GetPreviewWorldPosition(
+            anchorBlock,
+            placementSource,
+            installPreviewQuarterTurns);
+        activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        if (activeInstallPreview is InstallationObject movedInstallationPreview)
+        {
+            movedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
+        }
+
+        WorkableObject.RefreshAllRangeVisuals();
+        RefreshInstallPreviewAreaMarkers(activeInstallPreview);
+        RefreshFencePreviewVariantsAroundActivePreview(null, true);
+        RefreshPipePreviewVariantsAroundActivePreview(null);
+        RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
+        InvalidateInstallGrid();
+        return true;
+    }
+
     private void RemoveInstallPreview(MapObject preview)
     {
         if (preview == null)
@@ -12750,6 +14637,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        InvalidateInstallPreviewMoveCache();
         RefundInstallPreviewReservation(preview);
 
         Vector2Int removedFenceAnchorCoordinate = Vector2Int.zero;
@@ -12783,16 +14671,16 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (hadRemovedFenceAnchorCoordinate)
         {
-            List<Vector2Int> changedFenceCoordinates = new List<Vector2Int> { removedFenceAnchorCoordinate };
-            RefreshFencePreviewVariants(changedFenceCoordinates, preview);
-            RefreshAutomaticFenceCornerPreviews(changedFenceCoordinates);
-            RefreshInstalledFenceVariantPreviews(changedFenceCoordinates, preview);
+            RefreshActiveFencePreviewVariant();
+            RefreshFencePreviewVariants();
+            RefreshAutomaticFenceCornerPreviews();
+            RefreshInstalledFenceVariantPreviews();
         }
         else if (hadRemovedPipeAnchorCoordinate)
         {
-            List<Vector2Int> changedPipeCoordinates = new List<Vector2Int> { removedPipeAnchorCoordinate };
-            RefreshPipePreviewVariants(changedPipeCoordinates, preview);
-            RefreshInstalledPipeVariantPreviews(changedPipeCoordinates, preview);
+            RefreshActivePipePreviewVariant();
+            RefreshPipePreviewVariants();
+            RefreshInstalledPipeVariantPreviews();
         }
         else
         {
@@ -12814,6 +14702,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        InvalidateInstallPreviewMoveCache();
         for (int i = 0; i < placedPreviews.Count; i++)
         {
             MapObject preview = placedPreviews[i];
@@ -12884,7 +14773,51 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void InvalidateInstallGrid()
     {
-        installGridRefreshTimer = 0f;
+        installGridDirty = true;
+    }
+
+    private void InvalidateInstallPreviewMoveCache()
+    {
+        cachedInstallPreviewMovePreview = null;
+        cachedInstallPreviewMoveBlock = null;
+        cachedInstallPreviewMoveQuarterTurns = 0;
+        cachedInstallPreviewMovePreviewCount = 0;
+        cachedInstallPreviewMovePreserveRotation = false;
+        cachedInstallPreviewMoveResult = false;
+    }
+
+    private bool TryUseCachedInstallPreviewMove(Block block, bool preserveRotation, out bool result)
+    {
+        result = false;
+        if (activeInstallPreview == null
+            || block == null
+            || cachedInstallPreviewMovePreview != activeInstallPreview
+            || cachedInstallPreviewMoveBlock != block
+            || cachedInstallPreviewMoveQuarterTurns != installPreviewQuarterTurns
+            || cachedInstallPreviewMovePreviewCount != installPreviewInstances.Count
+            || cachedInstallPreviewMovePreserveRotation != preserveRotation)
+        {
+            return false;
+        }
+
+        result = cachedInstallPreviewMoveResult;
+        return true;
+    }
+
+    private void CacheInstallPreviewMoveResult(Block block, bool result, bool preserveRotation)
+    {
+        if (activeInstallPreview == null || block == null)
+        {
+            InvalidateInstallPreviewMoveCache();
+            return;
+        }
+
+        cachedInstallPreviewMovePreview = activeInstallPreview;
+        cachedInstallPreviewMoveBlock = block;
+        cachedInstallPreviewMoveQuarterTurns = installPreviewQuarterTurns;
+        cachedInstallPreviewMovePreviewCount = installPreviewInstances.Count;
+        cachedInstallPreviewMovePreserveRotation = preserveRotation;
+        cachedInstallPreviewMoveResult = result;
     }
 
     private bool TryGetInstallPreviewAtBlock(Block block, out MapObject preview)
@@ -12920,7 +14853,11 @@ public class InstallationPlacementController : MonoBehaviour
         return terrain.TryGetLoadedBlock(coordinate, out block) && block != null;
     }
 
-    private bool CanPlacePreviewOnBlock(Block block, MapObject previewToIgnore = null, int? quarterTurnsOverride = null)
+    private bool CanPlacePreviewOnBlock(
+        Block block,
+        MapObject previewToIgnore = null,
+        int? quarterTurnsOverride = null,
+        bool includeIgnoredPreviewAsConnector = false)
     {
         if (block == null)
         {
@@ -12961,16 +14898,50 @@ public class InstallationPlacementController : MonoBehaviour
             footprintSource = fenceSourcePrefab ?? footprintSource;
             quarterTurns = fenceQuarterTurns;
         }
+        else if (activeInstallDefinition != null
+                 && activeInstallDefinition.mapObject is Pipe pipePrototype)
+        {
+            footprintSource = ResolveInstallPreviewFootprintSource(previewToIgnore)
+                              ?? pipePrototype.StraightVariantPrefab
+                              ?? footprintSource;
+        }
 
         if (footprintSource == null)
         {
             return false;
         }
 
-        if (!TryGetFootprintBlocks(block.Coordinate, footprintSource, quarterTurns, previewToIgnore, out _))
+        if (!TryGetFootprintBlocks(
+                block.Coordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore,
+                out _,
+                false,
+                includeIgnoredPreviewAsConnector))
         {
             return !IsBelt2F(footprintSource)
                    && CanPlaceStraightConveyorPreviewOnBlock(block, previewToIgnore, quarterTurns);
+        }
+
+        if (IsBoilerSource(footprintSource)
+            && TryGetBoilerPumpOutputAxisMatch(
+                footprintSource,
+                block.Coordinate,
+                quarterTurns,
+                out bool pumpOutputAxisMatches))
+        {
+            return pumpOutputAxisMatches;
+        }
+
+        if (!CanProposedFluidStoragePipeAreaConnectionsMatchExisting(
+                block.Coordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore,
+                includeIgnoredPreviewAsConnector))
+        {
+            return false;
         }
 
         if (activeInstallDefinition == null || !(activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype))
@@ -13095,7 +15066,25 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (TryResolveSteamGeneratorPipeAlignedQuarterTurns(
+                block,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out int steamGeneratorPipeQuarterTurns))
+        {
+            resolvedQuarterTurns = steamGeneratorPipeQuarterTurns;
+            return true;
+        }
+
         if (CanPlacePreviewOnBlock(block, previewToIgnore, resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (CanPlaceDisconnectedFluidStoragePreviewOnBlock(
+                block,
+                previewToIgnore,
+                resolvedQuarterTurns))
         {
             return true;
         }
@@ -13118,7 +15107,11 @@ public class InstallationPlacementController : MonoBehaviour
             int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
                 previewToIgnore,
                 resolvedQuarterTurns + offset);
-            if (!CanPlacePreviewOnBlock(block, previewToIgnore, candidateQuarterTurns))
+            if (!CanPlacePreviewOnBlock(block, previewToIgnore, candidateQuarterTurns)
+                && !CanPlaceDisconnectedFluidStoragePreviewOnBlock(
+                    block,
+                    previewToIgnore,
+                    candidateQuarterTurns))
             {
                 continue;
             }
@@ -13130,10 +15123,333 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private bool CanPlaceDisconnectedFluidStoragePreviewOnBlock(
+        Block block,
+        MapObject previewToIgnore,
+        int quarterTurns)
+    {
+        if (block == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
+            || installationObject is Pipe
+            || installationObject is Pump
+            || !installationObject.CanStoreFluid
+            || PlacementHasExternalFluidConnector(
+                block.Coordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore))
+        {
+            return false;
+        }
+
+        return TryGetFootprintBlocks(
+            block.Coordinate,
+            footprintSource,
+            quarterTurns,
+            previewToIgnore,
+            out _);
+    }
+
+    private bool PlacementHasExternalFluidConnector(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (footprintSource == null
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    anchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int pipeAreaCoordinate))
+            {
+                continue;
+            }
+
+            if (CoordinateHasExternalFluidConnector(pipeAreaCoordinate, previewToIgnore))
+            {
+                return true;
+            }
+
+            for (int directionIndex = 0; directionIndex < PipeCardinalDirections.Length; directionIndex++)
+            {
+                if (CoordinateHasExternalFluidConnector(
+                        pipeAreaCoordinate + PipeCardinalDirections[directionIndex],
+                        previewToIgnore))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool CoordinateHasExternalFluidConnector(Vector2Int coordinate, MapObject previewToIgnore)
+    {
+        if (TryGetPipePlacementAtCoordinate(coordinate, out _, out _))
+        {
+            return true;
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchA);
+        bool hasConnector = false;
+        for (int i = 0; i < pipeAreaBlockCandidateScratchA.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchA[i];
+            if (IsIgnoredFluidConnectorSnapshot(candidate.snapshot, previewToIgnore))
+            {
+                continue;
+            }
+
+            hasConnector = true;
+            break;
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return hasConnector;
+    }
+
+    private bool IsIgnoredFluidConnectorSnapshot(PlacementSnapshot snapshot, MapObject previewToIgnore)
+    {
+        if (snapshot == null || snapshot.mapObject == null)
+        {
+            return true;
+        }
+
+        if (SnapshotBelongsToMapObject(snapshot, previewToIgnore))
+        {
+            return true;
+        }
+
+        InstallationObject originalInstallation = activeInstallationEditSession != null
+            ? activeInstallationEditSession.originalInstallation
+            : null;
+        return SnapshotBelongsToMapObject(snapshot, originalInstallation);
+    }
+
+    private static bool SnapshotBelongsToMapObject(PlacementSnapshot snapshot, MapObject mapObject)
+    {
+        if (snapshot == null || snapshot.mapObject == null || mapObject == null)
+        {
+            return false;
+        }
+
+        if (snapshot.mapObject == mapObject)
+        {
+            return true;
+        }
+
+        Transform snapshotTransform = snapshot.mapObject.transform;
+        Transform mapObjectTransform = mapObject.transform;
+        if (snapshotTransform == null || mapObjectTransform == null)
+        {
+            return false;
+        }
+
+        return snapshotTransform == mapObjectTransform
+               || snapshotTransform.IsChildOf(mapObjectTransform)
+               || mapObjectTransform.IsChildOf(snapshotTransform);
+    }
+
+    private bool TryResolveFixedRotationInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = clickedBlock;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource))
+        {
+            return false;
+        }
+
+        if (IsBelt2F(footprintSource))
+        {
+            TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+            Vector2Int bridgeCenterOffset = GetBelt2FBridgeCenterOffset(footprintSource, resolvedQuarterTurns);
+            Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - bridgeCenterOffset;
+            if (terrain != null
+                && terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                && candidateAnchorBlock != null
+                && CanPlacePreviewOnBlock(candidateAnchorBlock, previewToIgnore, resolvedQuarterTurns))
+            {
+                anchorBlock = candidateAnchorBlock;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (CanPlacePreviewOnBlock(clickedBlock, previewToIgnore, resolvedQuarterTurns))
+        {
+            anchorBlock = clickedBlock;
+            return true;
+        }
+
+        if (TryFindFixedRotationItemAreaOverlapInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out anchorBlock))
+        {
+            return true;
+        }
+
+        return TryFindFixedRotationMultiCellInstallPreviewTarget(
+            clickedBlock,
+            previewToIgnore,
+            resolvedQuarterTurns,
+            out anchorBlock);
+    }
+
+    private bool TryFindFixedRotationItemAreaOverlapInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int quarterTurns,
+        out Block anchorBlock)
+    {
+        anchorBlock = null;
+        if (clickedBlock == null
+            || !CoordinateHasInputOutputAreaForPlacement(clickedBlock.Coordinate, null)
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            bool canUsePlacementForAreaOverlap = IsRectGridAreaBlockType(placement.blockType)
+                || CanUseObjectPlacementForFluidStorageAreaOverlap(
+                    footprintSource,
+                    placement.blockType,
+                    clickedBlock.Coordinate);
+            if (!canUsePlacementForAreaOverlap
+                || placement.x < 0
+                || placement.x >= rectGridWidth
+                || placement.y < 0
+                || placement.y >= rectGridHeight)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(
+                placement.x - objectAnchorCell.x,
+                placement.y - objectAnchorCell.y);
+            Vector2Int candidateAnchorCoordinate =
+                clickedBlock.Coordinate - RotateFootprintOffset(localOffset, quarterTurns);
+            if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                || candidateAnchorBlock == null
+                || PlacementHasNormalInputOutputAreaPipeOverlap(
+                    candidateAnchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    previewToIgnore)
+                || !CanPlacePreviewOnBlock(candidateAnchorBlock, previewToIgnore, quarterTurns))
+            {
+                continue;
+            }
+
+            anchorBlock = candidateAnchorBlock;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryFindFixedRotationMultiCellInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int quarterTurns,
+        out Block anchorBlock)
+    {
+        anchorBlock = null;
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !HasMultiCellMapSize(footprintSource)
+            || IsBelt2F(footprintSource))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        List<Vector2Int> localOffsets = GetFootprintLocalOffsets(footprintSource, quarterTurns);
+        for (int i = 0; i < localOffsets.Count; i++)
+        {
+            Vector2Int localOffset = localOffsets[i];
+            if (localOffset == Vector2Int.zero)
+            {
+                continue;
+            }
+
+            Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - localOffset;
+            if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                || candidateAnchorBlock == null
+                || PlacementHasNormalInputOutputAreaPipeOverlap(
+                    candidateAnchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    previewToIgnore)
+                || !CanPlacePreviewOnBlock(candidateAnchorBlock, previewToIgnore, quarterTurns))
+            {
+                continue;
+            }
+
+            anchorBlock = candidateAnchorBlock;
+            return true;
+        }
+
+        return false;
+    }
+
     private bool TryResolvePlaceableInstallPreviewTarget(
         Block clickedBlock,
         MapObject previewToIgnore,
         int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
         out Block anchorBlock,
         out int resolvedQuarterTurns)
     {
@@ -13165,6 +15481,88 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (TryResolveSteamGeneratorOnBoilerOutputInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveSteamGeneratorOnPipePassInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveSteamGeneratorOnPipeInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveSteamGeneratorBesidePipeInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveBoilerOnSteamGeneratorInputInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveBoilerOnBoilerPipePassInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (includeIgnoredPreviewAsConnector
+            && CoordinateHasInputOutputAreaForPlacement(clickedBlock.Coordinate, null))
+        {
+            return TryFindPlaceableItemAreaOverlapInstallPreviewTarget(
+                clickedBlock,
+                null,
+                preferredQuarterTurns,
+                out anchorBlock,
+                out resolvedQuarterTurns);
+        }
+
+        bool isMultiCellPreview =
+            TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject previewFootprintSource)
+            && HasMultiCellMapSize(previewFootprintSource)
+            && !IsBelt2F(previewFootprintSource);
+
         if (TryFindPlaceableInstallPreviewQuarterTurns(
                 clickedBlock,
                 previewToIgnore,
@@ -13175,12 +15573,57 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        return TryFindPlaceableItemAreaOverlapInstallPreviewTarget(
-            clickedBlock,
-            previewToIgnore,
-            preferredQuarterTurns,
-            out anchorBlock,
-            out resolvedQuarterTurns);
+        if (isMultiCellPreview)
+        {
+            if (TryFindPlaceableItemAreaOverlapInstallPreviewTarget(
+                    clickedBlock,
+                    previewToIgnore,
+                    preferredQuarterTurns,
+                    out anchorBlock,
+                    out resolvedQuarterTurns))
+            {
+                return true;
+            }
+
+            if (TryFindPlaceableMultiCellInstallPreviewTarget(
+                    clickedBlock,
+                    previewToIgnore,
+                    preferredQuarterTurns,
+                    out anchorBlock,
+                    out resolvedQuarterTurns))
+            {
+                return true;
+            }
+        }
+
+        if (TryFindPlaceableItemAreaOverlapInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveSteamGeneratorChainInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        return !isMultiCellPreview
+               && TryFindPlaceableMultiCellInstallPreviewTarget(
+                   clickedBlock,
+                   previewToIgnore,
+                   preferredQuarterTurns,
+                   out anchorBlock,
+                   out resolvedQuarterTurns);
     }
 
     private bool TryResolveBelt2FBridgeCenterInstallPreviewTarget(
@@ -13228,6 +15671,925 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private bool TryResolveSteamGeneratorChainInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out _))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        int searchRadius = Mathf.Max(4, Mathf.Max(rectGridWidth, rectGridHeight) + 1);
+        bool foundCandidate = false;
+        int bestScore = int.MaxValue;
+        Block bestAnchorBlock = null;
+        int bestQuarterTurns = resolvedQuarterTurns;
+        for (int z = -searchRadius; z <= searchRadius; z++)
+        {
+            for (int x = -searchRadius; x <= searchRadius; x++)
+            {
+                Vector2Int connectorCoordinate = clickedBlock.Coordinate + new Vector2Int(x, z);
+                pipeAreaBlockCandidateScratchC.Clear();
+                CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+                    connectorCoordinate,
+                    connectorPreviewToIgnore,
+                    pipeAreaBlockCandidateScratchC);
+
+                for (int candidateIndex = 0; candidateIndex < pipeAreaBlockCandidateScratchC.Count; candidateIndex++)
+                {
+                    PipeAreaBlockCandidate existingCandidate = pipeAreaBlockCandidateScratchC[candidateIndex];
+                    if (!TryResolveSteamGeneratorStraightChainCandidate(
+                            clickedBlock.Coordinate,
+                            connectorCoordinate,
+                            existingCandidate,
+                            footprintSource,
+                            terrain,
+                            previewToIgnore,
+                            out Block candidateAnchorBlock,
+                            out int candidateQuarterTurns))
+                    {
+                        continue;
+                    }
+
+                    int score = Mathf.Abs(connectorCoordinate.x - clickedBlock.Coordinate.x)
+                        + Mathf.Abs(connectorCoordinate.y - clickedBlock.Coordinate.y);
+                    if (!foundCandidate || score < bestScore)
+                    {
+                        foundCandidate = true;
+                        bestScore = score;
+                        bestAnchorBlock = candidateAnchorBlock;
+                        bestQuarterTurns = candidateQuarterTurns;
+                    }
+                }
+            }
+        }
+
+        pipeAreaBlockCandidateScratchC.Clear();
+        if (!foundCandidate)
+        {
+            return false;
+        }
+
+        anchorBlock = bestAnchorBlock;
+        resolvedQuarterTurns = bestQuarterTurns;
+        return anchorBlock != null;
+    }
+
+    private bool TryResolveSteamGeneratorStraightChainCandidate(
+        Vector2Int clickedCoordinate,
+        Vector2Int connectorCoordinate,
+        PipeAreaBlockCandidate existingCandidate,
+        MapObject footprintSource,
+        TerrainGenerator terrain,
+        MapObject previewToIgnore,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = 0;
+        if (existingCandidate.snapshot == null
+            || !IsSteamGeneratorSource(existingCandidate.snapshot.mapObject)
+            || !IsPipePassBlockType(existingCandidate.blockType)
+            || terrain == null)
+        {
+            return false;
+        }
+
+        resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+            footprintSource,
+            existingCandidate.snapshot.quarterTurns);
+
+        if (!TryGetPipeAreaObjectDirection(
+                connectorCoordinate,
+                existingCandidate,
+                out Vector2Int pipePassObjectDirection))
+        {
+            return false;
+        }
+
+        Vector2Int existingTailDirection = -pipePassObjectDirection;
+        if (existingTailDirection == Vector2Int.zero
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                footprintSource,
+                resolvedQuarterTurns,
+                out Vector2Int proposedTailDirection)
+            || proposedTailDirection != existingTailDirection)
+        {
+            return false;
+        }
+
+        Vector2Int candidateAnchorCoordinate = connectorCoordinate;
+        if (!SteamGeneratorChainPlacementContainsCoordinate(
+                clickedCoordinate,
+                candidateAnchorCoordinate,
+                footprintSource,
+                resolvedQuarterTurns)
+            || !terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+            || candidateAnchorBlock == null)
+        {
+            return false;
+        }
+
+        if (!CanPlacePreviewOnBlock(
+                candidateAnchorBlock,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                true))
+        {
+            return false;
+        }
+
+        anchorBlock = candidateAnchorBlock;
+        return true;
+    }
+
+    private bool SteamGeneratorChainPlacementContainsCoordinate(
+        Vector2Int coordinate,
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        if (coordinate == anchorCoordinate)
+        {
+            return true;
+        }
+
+        List<Vector2Int> visualCoordinates = GetPlacementVisualCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns);
+        for (int i = 0; i < visualCoordinates.Count; i++)
+        {
+            if (visualCoordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return TryGetRectGridFootprintBlockType(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            coordinate,
+            out InputOutputModule.RectGridBlockType blockType)
+            && blockType != InputOutputModule.RectGridBlockType.None;
+    }
+
+    private bool TryResolveSteamGeneratorOnBoilerOutputInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetBoilerPipeOutputDirectionAtCoordinate(
+                clickedBlock.Coordinate,
+                connectorPreviewToIgnore,
+                out Vector2Int boilerOutputDirection))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null
+            || !terrain.TryGetLoadedBlock(clickedBlock.Coordinate, out Block candidateAnchorBlock)
+            || candidateAnchorBlock == null)
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                footprintSource,
+                preferredQuarterTurns + offset);
+            if (!TryGetMapSizeAdjacentDirectionFromCenter(
+                    footprintSource,
+                    candidateQuarterTurns,
+                    out Vector2Int adjacentBodyDirection)
+                || adjacentBodyDirection != boilerOutputDirection
+                || !CanPlacePreviewOnBlock(
+                    candidateAnchorBlock,
+                    previewToIgnore,
+                    candidateQuarterTurns,
+                    includeIgnoredPreviewAsConnector))
+            {
+                continue;
+            }
+
+            anchorBlock = candidateAnchorBlock;
+            resolvedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveSteamGeneratorOnPipePassInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        List<PipeAreaBlockCandidate> pipePassCandidates =
+            CollectPipePassCandidatesAtCoordinate(clickedBlock.Coordinate, connectorPreviewToIgnore);
+        if (pipePassCandidates.Count <= 0)
+        {
+            return false;
+        }
+
+        if (!TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int passIndex = 0; passIndex < pipePassCandidates.Count; passIndex++)
+        {
+            PipeAreaBlockCandidate pipePassCandidate = pipePassCandidates[passIndex];
+            if (pipePassCandidate.snapshot != null
+                && IsSteamGeneratorSource(pipePassCandidate.snapshot.mapObject))
+            {
+                continue;
+            }
+
+            if (!TryGetPipeAreaObjectDirection(
+                    clickedBlock.Coordinate,
+                    pipePassCandidate,
+                    out Vector2Int pipePassObjectDirection))
+            {
+                continue;
+            }
+
+            Vector2Int requiredInputDirection = -pipePassObjectDirection;
+            for (int offset = 0; offset < candidateCount; offset++)
+            {
+                int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                    footprintSource,
+                    preferredQuarterTurns + offset);
+                if (!TryGetMapSizeAdjacentDirectionFromCenter(
+                        footprintSource,
+                        candidateQuarterTurns,
+                        out Vector2Int adjacentBodyDirection)
+                    || adjacentBodyDirection != requiredInputDirection)
+                {
+                    continue;
+                }
+
+                for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+                {
+                    InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                    if (!InputOutputModule.IsInputItemBlockType(placement.blockType)
+                        || placement.x < 0
+                        || placement.x >= rectGridWidth
+                        || placement.y < 0
+                        || placement.y >= rectGridHeight)
+                    {
+                        continue;
+                    }
+
+                    Vector2Int localOffset = new Vector2Int(
+                        placement.x - objectAnchorCell.x,
+                        placement.y - objectAnchorCell.y);
+                    Vector2Int candidateAnchorCoordinate =
+                        clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
+                    if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                        || candidateAnchorBlock == null)
+                    {
+                        continue;
+                    }
+
+                    PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+                    {
+                        mapObject = footprintSource,
+                        rotation = GetPlacementObjectRotation(footprintSource, candidateQuarterTurns),
+                        anchorCoordinate = candidateAnchorCoordinate,
+                        quarterTurns = candidateQuarterTurns
+                    };
+                    PipeAreaBlockCandidate proposedInputCandidate =
+                        new PipeAreaBlockCandidate(proposedSnapshot, placement.blockType);
+                    if (!CanPipeAreaBlockCandidatesConnect(
+                            clickedBlock.Coordinate,
+                            pipePassCandidate,
+                            clickedBlock.Coordinate,
+                            proposedInputCandidate)
+                        || !CanPlacePreviewOnBlock(
+                            candidateAnchorBlock,
+                            previewToIgnore,
+                            candidateQuarterTurns,
+                            includeIgnoredPreviewAsConnector))
+                    {
+                        continue;
+                    }
+
+                    anchorBlock = candidateAnchorBlock;
+                    resolvedQuarterTurns = candidateQuarterTurns;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveSteamGeneratorOnPipeInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(clickedBlock);
+
+        if (!TryGetPipePlacementAtBlock(clickedBlock, occupyingObject, out Pipe pipe, out Quaternion pipeRotation))
+        {
+            return false;
+        }
+
+        if (!TryGetStraightPipeAxis(pipe, pipeRotation, out Vector2Int pipeAxisDirection))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                footprintSource,
+                preferredQuarterTurns + offset);
+            if (!TryGetMapSizeAdjacentDirectionFromCenter(
+                    footprintSource,
+                    candidateQuarterTurns,
+                    out Vector2Int bodyDirection)
+                || !DirectionsShareAxis(bodyDirection, pipeAxisDirection))
+            {
+                continue;
+            }
+
+            for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+            {
+                InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                    || placement.x < 0
+                    || placement.x >= rectGridWidth
+                    || placement.y < 0
+                    || placement.y >= rectGridHeight)
+                {
+                    continue;
+                }
+
+                Vector2Int localOffset = new Vector2Int(
+                    placement.x - objectAnchorCell.x,
+                    placement.y - objectAnchorCell.y);
+                Vector2Int candidateAnchorCoordinate =
+                    clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
+                if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                    || candidateAnchorBlock == null
+                    || !SteamGeneratorPipeAreaDirectionMatchesPipe(
+                        footprintSource,
+                        inputOutputModule,
+                        candidateAnchorCoordinate,
+                        candidateQuarterTurns,
+                        clickedBlock.Coordinate,
+                        pipeAxisDirection)
+                    || !CanPlacePreviewOnBlock(
+                        candidateAnchorBlock,
+                        previewToIgnore,
+                        candidateQuarterTurns,
+                        includeIgnoredPreviewAsConnector))
+                {
+                    continue;
+                }
+
+                anchorBlock = candidateAnchorBlock;
+                resolvedQuarterTurns = candidateQuarterTurns;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveSteamGeneratorBesidePipeInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        const int maxSteamGeneratorCenterPipeProbeDistance = 2;
+        for (int distance = 1; distance <= maxSteamGeneratorCenterPipeProbeDistance; distance++)
+        {
+            for (int directionIndex = 0; directionIndex < PipeCardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int directionToPipe = PipeCardinalDirections[directionIndex];
+                Vector2Int pipeCoordinate = clickedBlock.Coordinate
+                    + new Vector2Int(directionToPipe.x * distance, directionToPipe.y * distance);
+                if (!terrain.TryGetLoadedBlock(pipeCoordinate, out Block pipeBlock)
+                    || pipeBlock == null)
+                {
+                    continue;
+                }
+
+                MapObject occupyingObject = GetOccupyingObjectForPlacement(pipeBlock);
+
+                if (!TryGetPipePlacementAtBlock(pipeBlock, occupyingObject, out Pipe pipe, out Quaternion pipeRotation)
+                    || !TryGetStraightPipeAxis(pipe, pipeRotation, out Vector2Int pipeAxisDirection)
+                    || !DirectionsShareAxis(pipeAxisDirection, directionToPipe)
+                    || !TryResolveSteamGeneratorCenterAtPipeCoordinate(
+                        terrain,
+                        footprintSource,
+                        inputOutputModule,
+                        placements,
+                        rectGridWidth,
+                        rectGridHeight,
+                        objectAnchorCell,
+                        clickedBlock,
+                        pipeCoordinate,
+                        pipeAxisDirection,
+                        previewToIgnore,
+                        preferredQuarterTurns,
+                        includeIgnoredPreviewAsConnector,
+                        out anchorBlock,
+                        out resolvedQuarterTurns))
+                {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveSteamGeneratorCenterAtPipeCoordinate(
+        TerrainGenerator terrain,
+        MapObject footprintSource,
+        InputOutputModule inputOutputModule,
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements,
+        int rectGridWidth,
+        int rectGridHeight,
+        Vector2Int objectAnchorCell,
+        Block centerBlock,
+        Vector2Int pipeCoordinate,
+        Vector2Int pipeAxisDirection,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (terrain == null
+            || footprintSource == null
+            || inputOutputModule == null
+            || placements == null
+            || placements.Count <= 0
+            || centerBlock == null
+            || pipeAxisDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2Int centerToPipe = pipeCoordinate - centerBlock.Coordinate;
+        if (!TryGetCardinalDirectionAndDistance(
+                centerToPipe,
+                out Vector2Int directionToPipe,
+                out int pipeDistance)
+            || pipeDistance > 2
+            || !DirectionsShareAxis(directionToPipe, pipeAxisDirection))
+        {
+            return false;
+        }
+
+        Vector2Int requiredBodyDirection = pipeDistance == 1
+            ? -directionToPipe
+            : directionToPipe;
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                footprintSource,
+                preferredQuarterTurns + offset);
+            if (!TryGetMapSizeAdjacentDirectionFromCenter(
+                    footprintSource,
+                    candidateQuarterTurns,
+                    out Vector2Int bodyDirection)
+                || bodyDirection != requiredBodyDirection)
+            {
+                continue;
+            }
+
+            for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+            {
+                InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                    || placement.x < 0
+                    || placement.x >= rectGridWidth
+                    || placement.y < 0
+                    || placement.y >= rectGridHeight)
+                {
+                    continue;
+                }
+
+                Vector2Int localOffset = new Vector2Int(
+                    placement.x - objectAnchorCell.x,
+                    placement.y - objectAnchorCell.y);
+                Vector2Int candidatePipeCoordinate =
+                    centerBlock.Coordinate + RotateFootprintOffset(localOffset, candidateQuarterTurns);
+                if (candidatePipeCoordinate != pipeCoordinate
+                    || !PlacementHasRectGridObjectCoordinate(
+                        centerBlock.Coordinate,
+                        footprintSource,
+                        candidateQuarterTurns,
+                        centerBlock.Coordinate)
+                    || !CanPlacePreviewOnBlock(
+                        centerBlock,
+                        previewToIgnore,
+                        candidateQuarterTurns,
+                        includeIgnoredPreviewAsConnector))
+                {
+                    continue;
+                }
+
+                anchorBlock = centerBlock;
+                resolvedQuarterTurns = candidateQuarterTurns;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetCardinalDirectionAndDistance(
+        Vector2Int offset,
+        out Vector2Int direction,
+        out int distance)
+    {
+        direction = Vector2Int.zero;
+        distance = Mathf.Abs(offset.x) + Mathf.Abs(offset.y);
+        if (distance <= 0 || (offset.x != 0 && offset.y != 0))
+        {
+            return false;
+        }
+
+        direction = offset.x != 0
+            ? new Vector2Int(offset.x > 0 ? 1 : -1, 0)
+            : new Vector2Int(0, offset.y > 0 ? 1 : -1);
+        return true;
+    }
+
+    private bool PlacementHasRectGridObjectCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        Vector2Int coordinate)
+    {
+        return TryGetRectGridFootprintBlockType(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns,
+                   coordinate,
+                   out InputOutputModule.RectGridBlockType blockType)
+               && blockType == InputOutputModule.RectGridBlockType.Object;
+    }
+
+    private bool TryResolveBoilerOnSteamGeneratorInputInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsBoilerSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out _))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        int bestScore = int.MaxValue;
+        Block bestAnchorBlock = null;
+        int bestQuarterTurns = resolvedQuarterTurns;
+        bool foundCandidate = false;
+        int searchRadius = 2;
+        for (int z = -searchRadius; z <= searchRadius; z++)
+        {
+            for (int x = -searchRadius; x <= searchRadius; x++)
+            {
+                Vector2Int connectorCoordinate = clickedBlock.Coordinate + new Vector2Int(x, z);
+                pipeAreaBlockCandidateScratchC.Clear();
+                CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+                    connectorCoordinate,
+                    connectorPreviewToIgnore,
+                    pipeAreaBlockCandidateScratchC);
+
+                for (int existingIndex = 0; existingIndex < pipeAreaBlockCandidateScratchC.Count; existingIndex++)
+                {
+                    PipeAreaBlockCandidate existingInputCandidate = pipeAreaBlockCandidateScratchC[existingIndex];
+                    if (existingInputCandidate.snapshot == null
+                        || !IsSteamGeneratorSource(existingInputCandidate.snapshot.mapObject)
+                        || !InputOutputModule.IsInputItemBlockType(existingInputCandidate.blockType)
+                        || !TryGetMapSizeAdjacentDirectionFromCenter(
+                            existingInputCandidate.snapshot.mapObject,
+                            existingInputCandidate.snapshot.quarterTurns,
+                            out Vector2Int steamBodyDirection)
+                        || steamBodyDirection == Vector2Int.zero
+                        || connectorCoordinate != existingInputCandidate.snapshot.anchorCoordinate - steamBodyDirection)
+                    {
+                        continue;
+                    }
+
+                    for (int offset = 0; offset < candidateCount; offset++)
+                    {
+                        int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                            footprintSource,
+                            preferredQuarterTurns + offset);
+
+                        Vector2Int candidateAnchorCoordinate = connectorCoordinate;
+                        if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                            || candidateAnchorBlock == null)
+                        {
+                            continue;
+                        }
+
+                        if (!CanBoilerDirectSteamGeneratorInputConnection(
+                                candidateAnchorCoordinate,
+                                footprintSource,
+                                candidateQuarterTurns,
+                                previewToIgnore)
+                            || !CanPlacePreviewOnBlock(
+                                candidateAnchorBlock,
+                                previewToIgnore,
+                                candidateQuarterTurns,
+                                includeIgnoredPreviewAsConnector))
+                        {
+                            continue;
+                        }
+
+                        int score = Mathf.Abs(x) + Mathf.Abs(z);
+                        if (!foundCandidate || score < bestScore)
+                        {
+                            foundCandidate = true;
+                            bestScore = score;
+                            bestAnchorBlock = candidateAnchorBlock;
+                            bestQuarterTurns = candidateQuarterTurns;
+                        }
+                    }
+                }
+            }
+        }
+
+        pipeAreaBlockCandidateScratchC.Clear();
+        if (!foundCandidate)
+        {
+            return false;
+        }
+
+        anchorBlock = bestAnchorBlock;
+        resolvedQuarterTurns = bestQuarterTurns;
+        return anchorBlock != null;
+    }
+
+    private bool TryResolveBoilerOnBoilerPipePassInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        bool includeIgnoredPreviewAsConnector,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsBoilerSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        if (!HasBoilerPipePassAtCoordinate(clickedBlock.Coordinate, connectorPreviewToIgnore))
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                footprintSource,
+                preferredQuarterTurns + offset);
+            for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+            {
+                InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                if (placement.blockType != InputOutputModule.RectGridBlockType.Object
+                    || placement.x < 0
+                    || placement.x >= rectGridWidth
+                    || placement.y < 0
+                    || placement.y >= rectGridHeight)
+                {
+                    continue;
+                }
+
+                Vector2Int localOffset = new Vector2Int(
+                    placement.x - objectAnchorCell.x,
+                    placement.y - objectAnchorCell.y);
+                Vector2Int candidateAnchorCoordinate =
+                    clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
+                if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                    || candidateAnchorBlock == null
+                    || !CanPlacePreviewOnBlock(
+                        candidateAnchorBlock,
+                        previewToIgnore,
+                        candidateQuarterTurns,
+                        includeIgnoredPreviewAsConnector))
+                {
+                    continue;
+                }
+
+                anchorBlock = candidateAnchorBlock;
+                resolvedQuarterTurns = candidateQuarterTurns;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private List<PipeAreaBlockCandidate> CollectPipePassCandidatesAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        List<PipeAreaBlockCandidate> pipePassCandidates = new List<PipeAreaBlockCandidate>(2);
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchA);
+
+        for (int i = 0; i < pipeAreaBlockCandidateScratchA.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchA[i];
+            if (IsPipePassBlockType(candidate.blockType))
+            {
+                pipePassCandidates.Add(candidate);
+            }
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return pipePassCandidates;
+    }
+
+    private bool HasBoilerPipePassAtCoordinate(Vector2Int coordinate, MapObject previewToIgnore)
+    {
+        List<PipeAreaBlockCandidate> pipePassCandidates = CollectPipePassCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore);
+        for (int i = 0; i < pipePassCandidates.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipePassCandidates[i];
+            if (candidate.snapshot != null && IsBoilerSource(candidate.snapshot.mapObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TryFindPlaceableItemAreaOverlapInstallPreviewTarget(
         Block clickedBlock,
         MapObject previewToIgnore,
@@ -13238,7 +16600,7 @@ public class InstallationPlacementController : MonoBehaviour
         anchorBlock = null;
         resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
         if (clickedBlock == null
-            || !CoordinateHasInputOutputAreaForPlacement(clickedBlock.Coordinate, previewToIgnore)
+            || !CoordinateHasInputOutputAreaForPlacement(clickedBlock.Coordinate, null)
             || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
             || !TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell)
             || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
@@ -13259,7 +16621,12 @@ public class InstallationPlacementController : MonoBehaviour
             for (int i = 0; i < placements.Count; i++)
             {
                 InputOutputModule.RectGridBlockPlacement placement = placements[i];
-                if (!IsRectGridAreaBlockType(placement.blockType)
+                bool canUsePlacementForAreaOverlap = IsRectGridAreaBlockType(placement.blockType)
+                    || CanUseObjectPlacementForFluidStorageAreaOverlap(
+                        footprintSource,
+                        placement.blockType,
+                        clickedBlock.Coordinate);
+                if (!canUsePlacementForAreaOverlap
                     || placement.x < 0
                     || placement.x >= rectGridWidth
                     || placement.y < 0
@@ -13273,6 +16640,78 @@ public class InstallationPlacementController : MonoBehaviour
                     clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
                 if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
                     || candidateAnchorBlock == null
+                    || PlacementHasNormalInputOutputAreaPipeOverlap(
+                        candidateAnchorCoordinate,
+                        footprintSource,
+                        candidateQuarterTurns,
+                        previewToIgnore)
+                    || !CanPlacePreviewOnBlock(candidateAnchorBlock, previewToIgnore, candidateQuarterTurns))
+                {
+                    continue;
+                }
+
+                anchorBlock = candidateAnchorBlock;
+                resolvedQuarterTurns = candidateQuarterTurns;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryFindPlaceableMultiCellInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !HasMultiCellMapSize(footprintSource)
+            || IsBelt2F(footprintSource))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        int candidateCount = UsesTwoStateInstallPreviewRotation(previewToIgnore)
+            ? 2
+            : GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+                previewToIgnore,
+                resolvedQuarterTurns + offset);
+            List<Vector2Int> localOffsets = GetFootprintLocalOffsets(footprintSource, candidateQuarterTurns);
+            if (localOffsets.Count <= 1)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < localOffsets.Count; i++)
+            {
+                Vector2Int localOffset = localOffsets[i];
+                if (localOffset == Vector2Int.zero)
+                {
+                    continue;
+                }
+
+                Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - localOffset;
+                if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                    || candidateAnchorBlock == null
+                    || PlacementHasNormalInputOutputAreaPipeOverlap(
+                        candidateAnchorCoordinate,
+                        footprintSource,
+                        candidateQuarterTurns,
+                        previewToIgnore)
                     || !CanPlacePreviewOnBlock(candidateAnchorBlock, previewToIgnore, candidateQuarterTurns))
                 {
                     continue;
@@ -13300,14 +16739,90 @@ public class InstallationPlacementController : MonoBehaviour
         return footprintSource != null;
     }
 
+    private bool PlacementHasNormalInputOutputAreaPipeOverlap(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (footprintSource == null
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!IsNormalInputOutputAreaBlockType(placement.blockType)
+                || placement.x < 0
+                || placement.x >= rectGridWidth
+                || placement.y < 0
+                || placement.y >= rectGridHeight)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(
+                placement.x - objectAnchorCell.x,
+                placement.y - objectAnchorCell.y);
+            Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            {
+                continue;
+            }
+
+            MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
+
+            if (TryGetPipePlacementAtBlock(block, occupyingObject, out _, out _))
+            {
+                return true;
+            }
+
+            if (TryGetInstallPreviewAtCoordinate(coordinate, out MapObject existingPreview)
+                && existingPreview != null
+                && existingPreview != previewToIgnore
+                && IsPipePlacementSource(existingPreview))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsPipePlacementSource(MapObject mapObject)
+    {
+        MapObject source = ResolveInstallPreviewFootprintSource(mapObject) ?? mapObject;
+        return source is Pipe;
+    }
+
+    private static bool IsNormalInputOutputAreaBlockType(InputOutputModule.RectGridBlockType blockType)
+    {
+        return InputOutputModule.AllowsDirectAreaInteraction(blockType)
+               && !InputOutputModule.AllowsPipeAreaInteraction(blockType);
+    }
+
     private bool CoordinateHasInputOutputAreaForPlacement(Vector2Int coordinate, MapObject previewToIgnore)
     {
         if (InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
             || InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
             || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(coordinate, InputOutputModule.RectGridBlockType.InputEnergy)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(coordinate, InputOutputModule.RectGridBlockType.InputItem)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(coordinate, InputOutputModule.RectGridBlockType.Output))
+            || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate)
+            || HasPipeAreaFluidStorageAtCoordinate(coordinate)
+            || IsPumpOutputCoordinateForPlacement(coordinate))
         {
             return true;
         }
@@ -13327,7 +16842,7 @@ public class InstallationPlacementController : MonoBehaviour
             if (IsRectGridAreaBlockType(GetRectGridBlockTypeAtCoordinate(
                     previewAnchorCoordinate,
                     previewFootprintSource,
-                    GetPreviewQuarterTurns(preview),
+                    GetPreviewAreaQuarterTurns(preview),
                     coordinate)))
             {
                 return true;
@@ -13335,6 +16850,21 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return false;
+    }
+
+    private bool CanUseObjectPlacementForFluidStorageAreaOverlap(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType blockType,
+        Vector2Int coordinate)
+    {
+        return blockType == InputOutputModule.RectGridBlockType.Object
+               && TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
+               && installationObject.CanStoreFluid
+               && !(installationObject is Pipe)
+               && !(installationObject is Pump)
+               && !IsSteamGeneratorSource(footprintSource)
+               && (IsPumpOutputCoordinateForPlacement(coordinate)
+                   || HasPipeAreaFluidStorageAtCoordinate(coordinate));
     }
 
     private bool IsConveyorInstallPreview(MapObject previewToIgnore)
@@ -13365,7 +16895,11 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, candidate, GetPreviewQuarterTurns(candidate));
+            MapObject footprintSource = ResolveInstallPreviewFootprintSource(candidate) ?? candidate;
+            List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(
+                anchorCoordinate,
+                footprintSource,
+                GetPreviewAreaQuarterTurns(candidate));
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
                 if (occupiedCoordinates[coordinateIndex] != coordinate)
@@ -13397,6 +16931,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return preview;
+    }
+
+    private MapObject ResolveInstallPreviewPlacementSource(MapObject preview)
+    {
+        return ResolveInstallPreviewFootprintSource(preview) ?? preview;
     }
 
     private bool CanOverlapCompatibleInstallPreview(
@@ -13431,31 +16970,6 @@ public class InstallationPlacementController : MonoBehaviour
             existingQuarterTurns);
     }
 
-    private Vector2Int GetFootprintSize(MapObject footprintSource, int quarterTurns)
-    {
-        List<Vector2Int> offsets = GetFootprintLocalOffsets(footprintSource, quarterTurns);
-        if (offsets.Count <= 0)
-        {
-            return Vector2Int.one;
-        }
-
-        int minX = offsets[0].x;
-        int maxX = offsets[0].x;
-        int minY = offsets[0].y;
-        int maxY = offsets[0].y;
-
-        for (int i = 1; i < offsets.Count; i++)
-        {
-            Vector2Int offset = offsets[i];
-            minX = Mathf.Min(minX, offset.x);
-            maxX = Mathf.Max(maxX, offset.x);
-            minY = Mathf.Min(minY, offset.y);
-            maxY = Mathf.Max(maxY, offset.y);
-        }
-
-        return new Vector2Int(maxX - minX + 1, maxY - minY + 1);
-    }
-
     private List<Vector2Int> GetFootprintCoordinates(Vector2Int anchorCoordinate, MapObject footprintSource, int quarterTurns)
     {
         List<Vector2Int> offsets = GetFootprintLocalOffsets(footprintSource, quarterTurns);
@@ -13468,29 +16982,137 @@ public class InstallationPlacementController : MonoBehaviour
         return coordinates;
     }
 
+    private List<Vector2Int> GetPlacementValidationCoordinates(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        List<Vector2Int> rectGridCoordinates = GetRectGridPlacementCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns);
+        return rectGridCoordinates.Count > 0
+            ? rectGridCoordinates
+            : GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+    }
+
+    private List<Vector2Int> GetInstallPreviewAreaDisplayCoordinates(
+        MapObject preview,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        MapObject footprintSource = ResolveInstallPreviewPlacementSource(preview);
+        if (TryGetTransformBasedInstallPreviewAreaDisplayCoordinates(
+                preview,
+                footprintSource,
+                quarterTurns,
+                out List<Vector2Int> transformBasedCoordinates))
+        {
+            return transformBasedCoordinates;
+        }
+
+        List<Vector2Int> rectGridCoordinates = GetRectGridPlacementCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns);
+        return rectGridCoordinates.Count > 0
+            ? rectGridCoordinates
+            : GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+    }
+
+    private bool TryGetTransformBasedInstallPreviewAreaDisplayCoordinates(
+        MapObject preview,
+        MapObject footprintSource,
+        int fallbackQuarterTurns,
+        out List<Vector2Int> coordinates)
+    {
+        coordinates = null;
+        if (preview == null || footprintSource == null)
+        {
+            return false;
+        }
+
+        int quarterTurns = fallbackQuarterTurns;
+
+        Vector2 averageObjectOffset = GetAverageLocalOffset(GetPlacementVisualLocalOffsets(footprintSource, quarterTurns));
+        Vector2Int transformAnchorCoordinate = new Vector2Int(
+            RoundGridCoordinate(preview.transform.position.x - averageObjectOffset.x),
+            RoundGridCoordinate(preview.transform.position.z - averageObjectOffset.y));
+
+        List<Vector2Int> rectGridCoordinates = GetRectGridPlacementCoordinates(
+            transformAnchorCoordinate,
+            footprintSource,
+            quarterTurns);
+        if (rectGridCoordinates.Count > 0)
+        {
+            coordinates = rectGridCoordinates;
+            return true;
+        }
+
+        List<Vector2Int> footprintCoordinates = GetFootprintCoordinates(
+            transformAnchorCoordinate,
+            footprintSource,
+            quarterTurns);
+        if (footprintCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        coordinates = footprintCoordinates;
+        return true;
+    }
+
+    private List<Vector2Int> GetRectGridPlacementCoordinates(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        List<Vector2Int> coordinates = new List<Vector2Int>();
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                null,
+                cells))
+        {
+            return coordinates;
+        }
+
+        HashSet<Vector2Int> occupiedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < cells.Count; i++)
+        {
+            Vector2Int coordinate = cells[i].coordinate;
+            if (occupiedCoordinates.Add(coordinate))
+            {
+                coordinates.Add(coordinate);
+            }
+        }
+
+        return coordinates;
+    }
+
     private List<Vector2Int> GetFootprintLocalOffsets(MapObject footprintSource, int quarterTurns)
     {
-        if (TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell)
-            && TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        if (ShouldUseMapSizeFootprint(footprintSource))
         {
-            IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
-            List<Vector2Int> rectGridOffsets = new List<Vector2Int>(placements.Count);
+            return GetMapSizeFootprintLocalOffsets(footprintSource, quarterTurns);
+        }
+
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (TryBuildRectGridPlacementCells(
+                Vector2Int.zero,
+                footprintSource,
+                quarterTurns,
+                null,
+                cells))
+        {
+            List<Vector2Int> rectGridOffsets = new List<Vector2Int>(cells.Count);
             HashSet<Vector2Int> occupiedOffsets = new HashSet<Vector2Int>();
 
-            for (int i = 0; i < placements.Count; i++)
+            for (int i = 0; i < cells.Count; i++)
             {
-                InputOutputModule.RectGridBlockPlacement placement = placements[i];
-                if (placement.blockType == InputOutputModule.RectGridBlockType.None
-                    || placement.x < 0
-                    || placement.x >= rectGridWidth
-                    || placement.y < 0
-                    || placement.y >= rectGridHeight)
-                {
-                    continue;
-                }
-
-                Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
-                Vector2Int rotatedOffset = RotateFootprintOffset(localOffset, quarterTurns);
+                Vector2Int rotatedOffset = cells[i].rotatedOffset;
                 if (occupiedOffsets.Add(rotatedOffset))
                 {
                     rectGridOffsets.Add(rotatedOffset);
@@ -13503,6 +17125,19 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
+        return GetMapSizeFootprintLocalOffsets(footprintSource, quarterTurns);
+    }
+
+    private static bool ShouldUseMapSizeFootprint(MapObject footprintSource)
+    {
+        return footprintSource is InstallationObject installationObject
+               && installationObject.CanStoreFluid
+               && !(installationObject is Pipe)
+               && !(installationObject is Pump);
+    }
+
+    private List<Vector2Int> GetMapSizeFootprintLocalOffsets(MapObject footprintSource, int quarterTurns)
+    {
         int sizeX = 1;
         int sizeY = 1;
         if (footprintSource != null)
@@ -13528,6 +17163,89 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return offsets;
+    }
+
+    private static bool HasMultiCellMapSize(MapObject footprintSource)
+    {
+        return footprintSource != null
+            && (Mathf.Max(1, footprintSource.Status.mapSizeX) > 1
+                || Mathf.Max(1, footprintSource.Status.mapSizeY) > 1);
+    }
+
+    private bool HasMultiCellPlacementFootprint(MapObject footprintSource)
+    {
+        if (HasMultiCellMapSize(footprintSource))
+        {
+            return true;
+        }
+
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                Vector2Int.zero,
+                footprintSource,
+                0,
+                null,
+                cells))
+        {
+            return false;
+        }
+
+        HashSet<Vector2Int> coordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < cells.Count; i++)
+        {
+            coordinates.Add(cells[i].coordinate);
+            if (coordinates.Count > 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetMapSizeAdjacentDirectionFromCenter(
+        MapObject footprintSource,
+        int quarterTurns,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (footprintSource == null)
+        {
+            return false;
+        }
+
+        int sizeX = Mathf.Max(1, footprintSource.Status.mapSizeX);
+        int sizeY = Mathf.Max(1, footprintSource.Status.mapSizeY);
+        Vector2Int centerCell = footprintSource.PlacementCenterCell;
+        centerCell = new Vector2Int(
+            Mathf.Clamp(centerCell.x, 0, sizeX - 1),
+            Mathf.Clamp(centerCell.y, 0, sizeY - 1));
+
+        Vector2Int adjacentOffset = Vector2Int.zero;
+        int bestDistance = int.MaxValue;
+        for (int y = 0; y < sizeY; y++)
+        {
+            for (int x = 0; x < sizeX; x++)
+            {
+                Vector2Int offset = new Vector2Int(x - centerCell.x, y - centerCell.y);
+                int distance = Mathf.Abs(offset.x) + Mathf.Abs(offset.y);
+                if (distance <= 0 || distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                adjacentOffset = offset;
+            }
+        }
+
+        if (bestDistance != 1)
+        {
+            return false;
+        }
+
+        direction = RotateFootprintOffset(adjacentOffset, quarterTurns);
+        return direction != Vector2Int.zero;
     }
 
     private static Vector2Int GetFootprintAnchorCell(MapObject footprintSource)
@@ -13619,10 +17337,13 @@ public class InstallationPlacementController : MonoBehaviour
 
         rectGridWidth = Mathf.Max(1, inputOutputModule.RectGridWidth);
         rectGridHeight = Mathf.Max(1, inputOutputModule.RectGridHeight);
-        return TryGetRectGridObjectAnchorCell(inputOutputModule, out objectAnchorCell);
+        return TryGetRectGridObjectAnchorCell(inputOutputModule, footprintSource, out objectAnchorCell);
     }
 
-    private bool TryGetRectGridObjectAnchorCell(InputOutputModule inputOutputModule, out Vector2Int objectAnchorCell)
+    private bool TryGetRectGridObjectAnchorCell(
+        InputOutputModule inputOutputModule,
+        MapObject footprintSource,
+        out Vector2Int objectAnchorCell)
     {
         objectAnchorCell = Vector2Int.zero;
         if (inputOutputModule == null)
@@ -13630,7 +17351,78 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        return inputOutputModule.TryGetPrimaryObjectCell(out objectAnchorCell);
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundObject = false;
+        int minX = int.MaxValue;
+        int maxX = int.MinValue;
+        int minY = int.MaxValue;
+        int maxY = int.MinValue;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            foundObject = true;
+            minX = Mathf.Min(minX, placement.x);
+            maxX = Mathf.Max(maxX, placement.x);
+            minY = Mathf.Min(minY, placement.y);
+            maxY = Mathf.Max(maxY, placement.y);
+        }
+
+        if (!foundObject)
+        {
+            return false;
+        }
+
+        Vector2Int centerCell = footprintSource != null
+            ? footprintSource.PlacementCenterCell
+            : Vector2Int.zero;
+        Vector2Int desiredCell = new Vector2Int(
+            minX + Mathf.Clamp(centerCell.x, 0, Mathf.Max(0, maxX - minX)),
+            minY + Mathf.Clamp(centerCell.y, 0, Mathf.Max(0, maxY - minY)));
+        if (inputOutputModule.GetRectGridBlockAt(desiredCell.x, desiredCell.y)
+            == InputOutputModule.RectGridBlockType.Object)
+        {
+            objectAnchorCell = desiredCell;
+            return true;
+        }
+
+        int bestIndex = -1;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            int distance = Mathf.Abs(placement.x - desiredCell.x) + Mathf.Abs(placement.y - desiredCell.y);
+            if (distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            bestIndex = i;
+        }
+
+        if (bestIndex < 0)
+        {
+            return false;
+        }
+
+        InputOutputModule.RectGridBlockPlacement nearestObjectPlacement = placements[bestIndex];
+        objectAnchorCell = new Vector2Int(nearestObjectPlacement.x, nearestObjectPlacement.y);
+        return true;
     }
 
     private static Vector2Int RotateFootprintOffset(Vector2Int offset, int quarterTurns)
@@ -13667,7 +17459,8 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         MapObject previewToIgnore,
         out List<Block> footprintBlocks,
-        bool ignoreOtherPreviews = false)
+        bool ignoreOtherPreviews = false,
+        bool includeIgnoredPreviewAsConnector = false)
     {
         footprintBlocks = new List<Block>();
 
@@ -13677,7 +17470,19 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        List<Vector2Int> occupiedCoordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
+        if (PlacementHasNormalInputOutputAreaPipeOverlap(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore))
+        {
+            return false;
+        }
+
+        List<Vector2Int> occupiedCoordinates = GetPlacementValidationCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns);
         for (int i = 0; i < occupiedCoordinates.Count; i++)
         {
             Vector2Int coordinate = occupiedCoordinates[i];
@@ -13697,7 +17502,9 @@ public class InstallationPlacementController : MonoBehaviour
                     footprintSource,
                     rectGridBlockType,
                     anchorCoordinate,
-                    quarterTurns))
+                    quarterTurns,
+                    previewToIgnore,
+                    includeIgnoredPreviewAsConnector))
             {
                 return false;
             }
@@ -13734,33 +17541,26 @@ public class InstallationPlacementController : MonoBehaviour
         out InputOutputModule.RectGridBlockType blockType)
     {
         blockType = InputOutputModule.RectGridBlockType.None;
-        if (!TryGetRectGridFootprintSettings(footprintSource, out int rectGridWidth, out int rectGridHeight, out Vector2Int objectAnchorCell)
-            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                null,
+                cells))
         {
             return false;
         }
 
-        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
-        for (int i = 0; i < placements.Count; i++)
+        for (int i = 0; i < cells.Count; i++)
         {
-            InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType == InputOutputModule.RectGridBlockType.None
-                || placement.x < 0
-                || placement.x >= rectGridWidth
-                || placement.y < 0
-                || placement.y >= rectGridHeight)
+            RectGridPlacementCell cell = cells[i];
+            if (cell.coordinate != coordinate)
             {
                 continue;
             }
 
-            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
-            Vector2Int rotatedCoordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
-            if (rotatedCoordinate != coordinate)
-            {
-                continue;
-            }
-
-            blockType = placement.blockType;
+            blockType = cell.blockType;
             return true;
         }
 
@@ -13814,23 +17614,16 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType = InputOutputModule.RectGridBlockType.None,
         Vector2Int? anchorCoordinate = null,
-        int quarterTurns = 0)
+        int quarterTurns = 0,
+        MapObject previewToIgnore = null,
+        bool includeIgnoredPreviewAsConnector = false)
     {
         if (block == null)
         {
             return false;
         }
 
-        MapObject occupyingObject = GetBlockingMapObject(block);
-        if (occupyingObject == null
-            && TryGetSavedInstallationPlacementAtCoordinate(
-                block.Coordinate,
-                out MapObject savedOccupyingObject,
-                out _,
-                out _))
-        {
-            occupyingObject = savedOccupyingObject;
-        }
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
 
         if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
         {
@@ -13838,7 +17631,140 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InstallationMapFilter allowedFilter = ResolvePlacementMapFilter(footprintSource, installationObject);
-        if (!CanPlaceOnTerrainBiome(block, allowedFilter))
+        InstallationMapFilter rectGridTerrainFilter =
+            ResolveRectGridTerrainFilter(footprintSource, rectGridBlockType, allowedFilter);
+        if (footprintSource is Pipe && IsFixedRectGridObjectBlockCoordinate(block.Coordinate))
+        {
+            return false;
+        }
+
+        bool isRectGridAreaBlock = IsRectGridAreaBlockType(rectGridBlockType);
+        bool isInputOutputEnergyAreaBlock = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeInputEnergyBlock(block.Coordinate);
+        bool isInputOutputItemAreaBlock = InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
+            || InputOutputModule.CoordinateIsRuntimeInputItemBlock(block.Coordinate);
+        bool isPumpRuntimeOutputAreaBlock = IsPumpOutputCoordinateForPlacement(block.Coordinate);
+        bool isInputOutputOutputAreaBlock = InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
+            || (InputOutputModule.CoordinateIsRuntimeOutputBlock(block.Coordinate)
+                && !isPumpRuntimeOutputAreaBlock);
+        bool isInputOutputAreaBlock = isInputOutputEnergyAreaBlock
+            || isInputOutputItemAreaBlock
+            || isInputOutputOutputAreaBlock
+            || isPumpRuntimeOutputAreaBlock;
+        bool isRuntimePipeAreaBlock = InputOutputModule.CoordinateAllowsRuntimePipeBlock(block.Coordinate);
+        bool isFluidStoragePipeNodeBlock = HasPipeAreaFluidStorageAtCoordinate(block.Coordinate);
+        bool canPlacePipeOnFixedConnectorArea = footprintSource is Pipe
+            && CanPlacePipeOnFixedFluidConnectorArea(
+                block,
+                occupyingObject,
+                footprintSource,
+                quarterTurns);
+        bool isCandidateNormalInputOutputAreaBlock = IsNormalInputOutputAreaBlockType(rectGridBlockType);
+        bool isExistingDirectInputOutputAreaBlock = isInputOutputEnergyAreaBlock
+            || isInputOutputItemAreaBlock
+            || isInputOutputOutputAreaBlock;
+        bool isExistingNormalInputOutputAreaBlock = isExistingDirectInputOutputAreaBlock
+            && !isRuntimePipeAreaBlock
+            && !isPumpRuntimeOutputAreaBlock
+            && !isFluidStoragePipeNodeBlock;
+        if ((isCandidateNormalInputOutputAreaBlock || isExistingNormalInputOutputAreaBlock)
+            && TryGetPipePlacementAtBlock(block, occupyingObject, out _, out _))
+        {
+            return false;
+        }
+
+        if (rectGridBlockType != InputOutputModule.RectGridBlockType.None
+            && !CanPlaceOnTerrainBiome(block, rectGridTerrainFilter))
+        {
+            return false;
+        }
+
+        if (CanPlaceBoilerConnectorOnPumpBody(
+                footprintSource,
+                rectGridBlockType,
+                occupyingObject,
+                anchorCoordinate,
+                quarterTurns))
+        {
+            return true;
+        }
+
+        if (CanPlaceBoilerObjectOnPumpOutputArea(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                occupyingObject,
+                isPumpRuntimeOutputAreaBlock))
+        {
+            return true;
+        }
+
+        MapObject boilerPipePassPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        if (CanPlaceBoilerObjectOnBoilerPipePassArea(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                occupyingObject,
+                allowedFilter,
+                anchorCoordinate,
+                quarterTurns,
+                boilerPipePassPreviewToIgnore))
+        {
+            return true;
+        }
+
+        if (CanPlaceSteamGeneratorCenterOnBoilerPipeOutput(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                occupyingObject,
+                allowedFilter,
+                anchorCoordinate,
+                quarterTurns,
+                previewToIgnore))
+        {
+            return true;
+        }
+
+        if (CanPlaceBoilerCenterOnSteamGeneratorPipeInput(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                occupyingObject,
+                allowedFilter,
+                anchorCoordinate,
+                quarterTurns,
+                previewToIgnore))
+        {
+            return true;
+        }
+
+        if (CanPlaceSteamGeneratorStraightChainBlock(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                anchorCoordinate,
+                quarterTurns,
+                previewToIgnore,
+                includeIgnoredPreviewAsConnector))
+        {
+            return true;
+        }
+
+        bool canPlaceFluidStorageObjectOnPipeNode = CanPlaceFluidStorageObjectOnPipeNode(
+            footprintSource,
+            rectGridBlockType,
+            block,
+            occupyingObject,
+            anchorCoordinate,
+            quarterTurns,
+            isPumpRuntimeOutputAreaBlock,
+            isFluidStoragePipeNodeBlock,
+            previewToIgnore);
+        if (!isRectGridAreaBlock
+            && !canPlaceFluidStorageObjectOnPipeNode
+            && !canPlacePipeOnFixedConnectorArea
+            && !CanPlaceOnTerrainBiome(block, allowedFilter))
         {
             return false;
         }
@@ -13849,15 +17775,57 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        bool isInputOutputEnergyAreaBlock = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputEnergy);
-        bool isInputOutputItemAreaBlock = InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputItem);
-        bool isInputOutputOutputAreaBlock = InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.Output);
-        bool isInputOutputAreaBlock = isInputOutputEnergyAreaBlock || isInputOutputItemAreaBlock || isInputOutputOutputAreaBlock;
+        if (canPlaceFluidStorageObjectOnPipeNode)
+        {
+            return true;
+        }
+
+        if (canPlacePipeOnFixedConnectorArea)
+        {
+            return true;
+        }
+
+        if (footprintSource is Pipe pipeOnRuntimeArea
+            && isRuntimePipeAreaBlock
+            && occupyingObject == null)
+        {
+            return CanResolvedPipePlacementMatchFixedFluidConnectors(
+                block.Coordinate,
+                pipeOnRuntimeArea,
+                quarterTurns);
+        }
+
+        if (footprintSource is Pipe pipeFootprint
+            && !CanResolvedPipePlacementMatchFixedFluidConnectors(
+                block.Coordinate,
+                pipeFootprint,
+                quarterTurns))
+        {
+            return false;
+        }
 
         if (IsResourceAllowedForPlacement(block, occupyingObject, allowedFilter))
+        {
+            return true;
+        }
+
+        if (CanPlacePassthroughOnBelt2FBridgeCenter(
+                block,
+                footprintSource,
+                occupyingObject,
+                quarterTurns))
+        {
+            return true;
+        }
+
+        if (!isRectGridAreaBlock
+            && IsPipeAllowedForPlacement(
+                block,
+                occupyingObject,
+                footprintSource,
+                anchorCoordinate,
+                quarterTurns,
+                allowedFilter))
         {
             return true;
         }
@@ -13874,8 +17842,60 @@ public class InstallationPlacementController : MonoBehaviour
                 allowedFilter);
         }
 
-        if (IsRectGridAreaBlockType(rectGridBlockType))
+        if (isRectGridAreaBlock)
         {
+            if (CanPlaceBoilerOnPumpOutputArea(
+                    footprintSource,
+                    rectGridBlockType,
+                    block,
+                    occupyingObject,
+                    isPumpRuntimeOutputAreaBlock,
+                    allowedFilter,
+                    anchorCoordinate,
+                    quarterTurns))
+            {
+                return true;
+            }
+
+            if (CanPlaceBoilerAreaBesidePumpOutput(
+                    footprintSource,
+                    rectGridBlockType,
+                    block,
+                    occupyingObject,
+                    anchorCoordinate,
+                    quarterTurns))
+            {
+                return true;
+            }
+
+            if (CanPlaceFluidStorageAreaOnPipeNode(
+                    installationObject,
+                    rectGridBlockType,
+                    block,
+                    occupyingObject,
+                    anchorCoordinate,
+                    quarterTurns,
+                    isPumpRuntimeOutputAreaBlock,
+                    isFluidStoragePipeNodeBlock,
+                    allowedFilter,
+                    previewToIgnore))
+            {
+                return true;
+            }
+
+            if (CanPlaceSteamGeneratorInputOnBoilerBodyForDirectOutput(
+                    footprintSource,
+                    rectGridBlockType,
+                    block,
+                    occupyingObject,
+                    rectGridTerrainFilter,
+                    anchorCoordinate,
+                    quarterTurns,
+                    previewToIgnore))
+            {
+                return true;
+            }
+
             return CanPlaceRectGridAreaBlock(
                 block,
                 occupyingObject,
@@ -13885,11 +17905,49 @@ public class InstallationPlacementController : MonoBehaviour
                 quarterTurns,
                 isInputOutputEnergyAreaBlock,
                 isInputOutputItemAreaBlock,
-                isInputOutputOutputAreaBlock);
+                isInputOutputOutputAreaBlock,
+                rectGridTerrainFilter);
         }
 
         if (isInputOutputAreaBlock)
         {
+            if ((isRuntimePipeAreaBlock || isPumpRuntimeOutputAreaBlock || isFluidStoragePipeNodeBlock)
+                && CanPlaceFluidStorageOnRuntimePipeArea(
+                    installationObject,
+                    block,
+                    occupyingObject,
+                    isPumpRuntimeOutputAreaBlock,
+                    isRuntimePipeAreaBlock,
+                    isRectGridAreaBlock,
+                    isFluidStoragePipeNodeBlock,
+                    allowedFilter))
+            {
+                return true;
+            }
+
+            if (isRuntimePipeAreaBlock
+                && CanPlacePipeOnFixedFluidConnectorArea(
+                    block,
+                    occupyingObject,
+                    footprintSource,
+                    quarterTurns))
+            {
+                return true;
+            }
+
+            if (CanPlaceBoilerOnPumpOutputArea(
+                    footprintSource,
+                    rectGridBlockType,
+                    block,
+                    occupyingObject,
+                    isPumpRuntimeOutputAreaBlock,
+                    allowedFilter,
+                    anchorCoordinate,
+                    quarterTurns))
+            {
+                return true;
+            }
+
             return CanPlaceInstallationOnInputOutputAreaBlock(
                 installationObject,
                 block,
@@ -13909,6 +17967,1531 @@ public class InstallationPlacementController : MonoBehaviour
             Block.BlockType.Ground => true,
             _ => false
         };
+    }
+
+    private bool CanPlaceFluidStorageOnRuntimePipeArea(
+        InstallationObject installationObject,
+        Block block,
+        MapObject occupyingObject,
+        bool isPumpRuntimeOutputAreaBlock,
+        bool isRuntimePipeAreaBlock,
+        bool isRectGridAreaBlock,
+        bool isFluidStoragePipeNodeBlock,
+        InstallationMapFilter allowedFilter)
+    {
+        if (installationObject is Boiler && isPumpRuntimeOutputAreaBlock && !isRectGridAreaBlock)
+        {
+            return false;
+        }
+
+        if (installationObject is Boiler && isRuntimePipeAreaBlock && !isRectGridAreaBlock)
+        {
+            return false;
+        }
+
+        return installationObject != null
+               && installationObject.CanStoreFluid
+               && !(installationObject is Pipe)
+               && !(installationObject is Pump)
+               && block != null
+               && CanPlaceOnTerrainBiome(block, allowedFilter)
+               && (occupyingObject == null
+                   || (isPumpRuntimeOutputAreaBlock && occupyingObject is Pump));
+    }
+
+    private bool CanPlaceFluidStorageObjectOnPipeNode(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        bool isPumpRuntimeOutputAreaBlock,
+        bool isFluidStoragePipeNodeBlock,
+        MapObject previewToIgnore)
+    {
+        if (IsBoilerSource(footprintSource)
+            && block != null
+            && isFluidStoragePipeNodeBlock
+            && TryGetSteamGeneratorPipePassTailDirectionAtCoordinate(
+                block.Coordinate,
+                previewToIgnore,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        return TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
+               && installationObject.CanStoreFluid
+               && !(installationObject is Pipe)
+               && !(installationObject is Pump)
+               && !IsSteamGeneratorSource(footprintSource)
+               && rectGridBlockType == InputOutputModule.RectGridBlockType.Object
+               && block != null
+                && block.Type == Block.BlockType.Ground
+                && (occupyingObject == null
+                    || (isPumpRuntimeOutputAreaBlock && occupyingObject is Pump))
+                && (isPumpRuntimeOutputAreaBlock || isFluidStoragePipeNodeBlock);
+    }
+
+    private bool CanPlaceSteamGeneratorCenterOnBoilerPipeOutput(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        InstallationMapFilter allowedFilter,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        return rectGridBlockType == InputOutputModule.RectGridBlockType.Object
+               && block != null
+               && anchorCoordinate.HasValue
+               && block.Coordinate == anchorCoordinate.Value
+               && (occupyingObject == null || IsBoilerSource(occupyingObject))
+               && CanPlaceOnTerrainBiome(block, allowedFilter)
+               && TryGetSteamGeneratorDirectBoilerOutputPlacement(
+                   anchorCoordinate.Value,
+                   footprintSource,
+                   quarterTurns,
+                   previewToIgnore,
+                   out _,
+                   out _);
+    }
+
+    private bool CanPlaceSteamGeneratorInputOnBoilerBodyForDirectOutput(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        InstallationMapFilter allowedFilter,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!InputOutputModule.IsInputItemBlockType(rectGridBlockType)
+            || block == null
+            || !anchorCoordinate.HasValue
+            || !IsBoilerSource(occupyingObject)
+            || !CanPlaceOnTerrainBiome(block, allowedFilter)
+            || !TryGetSteamGeneratorDirectBoilerOutputPlacement(
+                anchorCoordinate.Value,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore,
+                out _,
+                out Vector2Int steamInputCoordinate)
+            || block.Coordinate != steamInputCoordinate)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool CanPlaceBoilerCenterOnSteamGeneratorPipeInput(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        InstallationMapFilter allowedFilter,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsBoilerSource(footprintSource)
+            || rectGridBlockType != InputOutputModule.RectGridBlockType.Object
+            || block == null
+            || !anchorCoordinate.HasValue
+            || block.Coordinate != anchorCoordinate.Value
+            || (occupyingObject != null && !IsSteamGeneratorSource(occupyingObject))
+            || !CanPlaceOnTerrainBiome(block, allowedFilter))
+        {
+            return false;
+        }
+
+        return CanBoilerDirectSteamGeneratorInputConnection(
+            anchorCoordinate.Value,
+            footprintSource,
+            quarterTurns,
+            previewToIgnore);
+    }
+
+    private bool CanPlaceSteamGeneratorStraightChainBlock(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore,
+        bool includeIgnoredPreviewAsConnector)
+    {
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        if (!IsSteamGeneratorSource(footprintSource)
+            || block == null
+            || block.Type != Block.BlockType.Ground
+            || !anchorCoordinate.HasValue
+            || !TryGetSteamGeneratorPipePassTailDirectionAtCoordinate(
+                anchorCoordinate.Value,
+                connectorPreviewToIgnore,
+                out Vector2Int existingTailDirection,
+                out PipeAreaBlockCandidate existingPipePassCandidate)
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                footprintSource,
+                quarterTurns,
+                out Vector2Int proposedTailDirection)
+            || proposedTailDirection != existingTailDirection)
+        {
+            return false;
+        }
+
+        if (rectGridBlockType == InputOutputModule.RectGridBlockType.Object
+            && block.Coordinate == anchorCoordinate.Value)
+        {
+            return true;
+        }
+
+        if (!InputOutputModule.IsInputItemBlockType(rectGridBlockType)
+            || block.Coordinate != anchorCoordinate.Value - proposedTailDirection)
+        {
+            return false;
+        }
+
+        return existingPipePassCandidate.snapshot != null
+               && TryGetRectGridFootprintBlockType(
+                   existingPipePassCandidate.snapshot.anchorCoordinate,
+                   existingPipePassCandidate.snapshot.mapObject,
+                   existingPipePassCandidate.snapshot.quarterTurns,
+                   block.Coordinate,
+                   out InputOutputModule.RectGridBlockType existingBlockType)
+               && existingBlockType == InputOutputModule.RectGridBlockType.Object;
+    }
+
+    private bool CanPlaceFluidStorageAreaOnPipeNode(
+        InstallationObject installationObject,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        bool isPumpRuntimeOutputAreaBlock,
+        bool isFluidStoragePipeNodeBlock,
+        InstallationMapFilter allowedFilter,
+        MapObject previewToIgnore)
+    {
+        if (installationObject is Boiler
+            && block != null
+            && isFluidStoragePipeNodeBlock
+            && TryGetSteamGeneratorPipePassTailDirectionAtCoordinate(
+                block.Coordinate,
+                previewToIgnore,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        if (installationObject is Boiler
+            && isPumpRuntimeOutputAreaBlock
+            && rectGridBlockType == InputOutputModule.RectGridBlockType.PipeInput
+            && !BoilerPipePassMatchesPumpOutput(
+                installationObject,
+                block != null ? block.Coordinate : Vector2Int.zero,
+                anchorCoordinate,
+                quarterTurns))
+        {
+            return false;
+        }
+
+        if (isFluidStoragePipeNodeBlock
+            && InputOutputModule.AllowsPipeAreaInteraction(rectGridBlockType)
+            && !CanProposedPipeAreaBlockConnectExisting(
+                block != null ? block.Coordinate : Vector2Int.zero,
+                installationObject,
+                rectGridBlockType,
+                anchorCoordinate,
+                quarterTurns))
+        {
+            return false;
+        }
+
+        return installationObject != null
+               && installationObject.CanStoreFluid
+               && !(installationObject is Pipe)
+               && !(installationObject is Pump)
+               && IsRectGridAreaBlockType(rectGridBlockType)
+               && block != null
+               && CanPlaceOnTerrainBiome(block, allowedFilter)
+               && (occupyingObject == null
+                   || (isPumpRuntimeOutputAreaBlock && occupyingObject is Pump)
+                   || (isFluidStoragePipeNodeBlock && IsFluidStoragePlacementObject(occupyingObject)))
+               && (isPumpRuntimeOutputAreaBlock || isFluidStoragePipeNodeBlock);
+    }
+
+    private bool CanProposedPipeAreaBlockConnectExisting(
+        Vector2Int coordinate,
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns)
+    {
+        if (footprintSource == null
+            || !anchorCoordinate.HasValue
+            || !InputOutputModule.AllowsPipeAreaInteraction(rectGridBlockType))
+        {
+            return false;
+        }
+
+        PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+        {
+            mapObject = footprintSource,
+            rotation = GetPlacementObjectRotation(footprintSource, quarterTurns),
+            anchorCoordinate = anchorCoordinate.Value,
+            quarterTurns = quarterTurns
+        };
+        PipeAreaBlockCandidate proposedCandidate =
+            new PipeAreaBlockCandidate(proposedSnapshot, rectGridBlockType);
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(coordinate, null, pipeAreaBlockCandidateScratchA);
+        bool foundExistingCandidate = false;
+        bool canConnect = false;
+        for (int i = 0; i < pipeAreaBlockCandidateScratchA.Count; i++)
+        {
+            PipeAreaBlockCandidate existingCandidate = pipeAreaBlockCandidateScratchA[i];
+            if (existingCandidate.snapshot == null
+                || existingCandidate.snapshot.mapObject == footprintSource)
+            {
+                continue;
+            }
+
+            foundExistingCandidate = true;
+            if (CanPipeAreaBlockCandidatesConnect(
+                    coordinate,
+                    proposedCandidate,
+                    coordinate,
+                    existingCandidate))
+            {
+                canConnect = true;
+                break;
+            }
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return foundExistingCandidate && canConnect;
+    }
+
+    private bool CanProposedFluidStoragePipeAreaConnectionsMatchExisting(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore,
+        bool includeIgnoredPreviewAsConnector = false)
+    {
+        if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
+            || installationObject is Pipe
+            || installationObject is Pump
+            || !installationObject.CanStoreFluid
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return true;
+        }
+
+        MapObject connectorPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
+        PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+        {
+            mapObject = footprintSource,
+            rotation = GetPlacementObjectRotation(footprintSource, quarterTurns),
+            anchorCoordinate = anchorCoordinate,
+            quarterTurns = quarterTurns
+        };
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return true;
+        }
+
+        if (TryGetSteamGeneratorDirectBoilerOutputPlacement(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                connectorPreviewToIgnore,
+                out _,
+                out _))
+        {
+            return true;
+        }
+
+        if (CanSteamGeneratorDirectSteamGeneratorPipePassConnection(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                connectorPreviewToIgnore))
+        {
+            return true;
+        }
+
+        if (CanBoilerDirectSteamGeneratorInputConnection(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                connectorPreviewToIgnore))
+        {
+            return true;
+        }
+
+        if (CanBoilerObjectOnBoilerPipePassConnection(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                connectorPreviewToIgnore))
+        {
+            return true;
+        }
+
+        if (IsSteamGeneratorSource(footprintSource)
+            && !SteamGeneratorPlacementPipeOverlapsMatch(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                false))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    anchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int pipeAreaCoordinate))
+            {
+                continue;
+            }
+
+            PipeAreaBlockCandidate proposedCandidate =
+                new PipeAreaBlockCandidate(proposedSnapshot, placement.blockType);
+            if (!PipeAreaConnectionAtCoordinateIsCompatible(
+                    pipeAreaCoordinate,
+                    proposedCandidate,
+                    pipeAreaCoordinate,
+                    connectorPreviewToIgnore))
+            {
+                return false;
+            }
+
+            for (int directionIndex = 0; directionIndex < PipeCardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int connectorCoordinate = pipeAreaCoordinate + PipeCardinalDirections[directionIndex];
+                if (!PipeAreaConnectionAtCoordinateIsCompatible(
+                        pipeAreaCoordinate,
+                        proposedCandidate,
+                        connectorCoordinate,
+                        connectorPreviewToIgnore))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryGetSteamGeneratorDirectBoilerOutputPlacement(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore,
+        out Vector2Int boilerOutputDirection,
+        out Vector2Int steamInputCoordinate)
+    {
+        boilerOutputDirection = Vector2Int.zero;
+        steamInputCoordinate = Vector2Int.zero;
+        if (!IsSteamGeneratorSource(footprintSource)
+            || !TryGetBoilerPipeOutputDirectionAtCoordinate(
+                anchorCoordinate,
+                previewToIgnore,
+                out boilerOutputDirection)
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                footprintSource,
+                quarterTurns,
+                out Vector2Int adjacentBodyDirection)
+            || adjacentBodyDirection != boilerOutputDirection)
+        {
+            return false;
+        }
+
+        steamInputCoordinate = anchorCoordinate - boilerOutputDirection;
+        return SteamGeneratorInputItemsMatchBoilerOutput(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            steamInputCoordinate,
+            previewToIgnore);
+    }
+
+    private bool SteamGeneratorInputItemsMatchBoilerOutput(
+        Vector2Int boilerOutputCoordinate,
+        MapObject steamGeneratorSource,
+        int steamGeneratorQuarterTurns,
+        Vector2Int steamInputCoordinate,
+        MapObject previewToIgnore)
+    {
+        HashSet<int> outputItemIds = new HashSet<int>();
+        if (!TryGetBoilerOutputItemIdsAtCoordinate(
+                boilerOutputCoordinate,
+                previewToIgnore,
+                outputItemIds))
+        {
+            return false;
+        }
+
+        HashSet<int> inputItemIds = new HashSet<int>();
+        return TryGetCandidateInputItemIdsAtCoordinate(
+                boilerOutputCoordinate,
+                steamGeneratorSource,
+                steamGeneratorQuarterTurns,
+                steamInputCoordinate,
+                inputItemIds)
+            && HasSharedItemId(outputItemIds, inputItemIds);
+    }
+
+    private bool CanSteamGeneratorDirectSteamGeneratorPipePassConnection(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsSteamGeneratorSource(footprintSource)
+            || !TryGetSteamGeneratorPipePassTailDirectionAtCoordinate(
+                anchorCoordinate,
+                previewToIgnore,
+                out Vector2Int existingTailDirection,
+                out PipeAreaBlockCandidate pipePassCandidate)
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                footprintSource,
+                quarterTurns,
+                out Vector2Int proposedTailDirection)
+            || proposedTailDirection != existingTailDirection)
+        {
+            return false;
+        }
+
+        Vector2Int proposedInputCoordinate = anchorCoordinate - proposedTailDirection;
+        HashSet<int> pipePassItemIds = new HashSet<int>();
+        HashSet<int> proposedInputItemIds = new HashSet<int>();
+        bool hasPipePassItems = TryGetCandidatePipePassItemIds(pipePassCandidate, pipePassItemIds);
+        bool hasInputItems = TryGetCandidateInputItemIdsAtCoordinate(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            proposedInputCoordinate,
+            proposedInputItemIds);
+        return !hasPipePassItems || !hasInputItems || HasSharedItemId(pipePassItemIds, proposedInputItemIds);
+    }
+
+    private bool CanBoilerDirectSteamGeneratorInputConnection(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsBoilerSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+        {
+            mapObject = footprintSource,
+            rotation = GetPlacementObjectRotation(footprintSource, quarterTurns),
+            anchorCoordinate = anchorCoordinate,
+            quarterTurns = quarterTurns
+        };
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            anchorCoordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchA);
+
+        bool canConnect = false;
+        for (int existingIndex = 0; existingIndex < pipeAreaBlockCandidateScratchA.Count; existingIndex++)
+        {
+            PipeAreaBlockCandidate existingInputCandidate = pipeAreaBlockCandidateScratchA[existingIndex];
+            if (existingInputCandidate.snapshot == null
+                || !IsSteamGeneratorSource(existingInputCandidate.snapshot.mapObject)
+                || !InputOutputModule.IsInputItemBlockType(existingInputCandidate.blockType)
+                || !TryGetMapSizeAdjacentDirectionFromCenter(
+                    existingInputCandidate.snapshot.mapObject,
+                    existingInputCandidate.snapshot.quarterTurns,
+                    out Vector2Int steamBodyDirection)
+                || steamBodyDirection == Vector2Int.zero
+                || anchorCoordinate != existingInputCandidate.snapshot.anchorCoordinate - steamBodyDirection)
+            {
+                continue;
+            }
+
+            Vector2Int requiredOutputCoordinate = existingInputCandidate.snapshot.anchorCoordinate;
+            for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+            {
+                InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                if (!InputOutputModule.IsOutputBlockType(placement.blockType)
+                    || !TryGetRectGridCoordinate(
+                        anchorCoordinate,
+                        footprintSource,
+                        quarterTurns,
+                        placement,
+                        out Vector2Int proposedOutputCoordinate))
+                {
+                    continue;
+                }
+
+                if (proposedOutputCoordinate != requiredOutputCoordinate
+                    || !TryGetDominantCardinalDirection(
+                        proposedOutputCoordinate - anchorCoordinate,
+                        out Vector2Int boilerOutputFlowDirection)
+                    || boilerOutputFlowDirection != steamBodyDirection)
+                {
+                    continue;
+                }
+
+                if (BoilerOutputItemsMatchSteamGeneratorInput(
+                        anchorCoordinate,
+                        footprintSource,
+                        anchorCoordinate,
+                        existingInputCandidate))
+                {
+                    canConnect = true;
+                    break;
+                }
+            }
+
+            if (canConnect)
+            {
+                break;
+            }
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return canConnect;
+    }
+
+    private bool CanBoilerObjectOnBoilerPipePassConnection(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsBoilerSource(footprintSource)
+            || !TryGetRectGridBlockCoordinates(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                InputOutputModule.RectGridBlockType.Object,
+                out List<Vector2Int> objectCoordinates))
+        {
+            return false;
+        }
+
+        PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+        {
+            mapObject = footprintSource,
+            rotation = GetPlacementObjectRotation(footprintSource, quarterTurns),
+            anchorCoordinate = anchorCoordinate,
+            quarterTurns = quarterTurns
+        };
+
+        for (int i = 0; i < objectCoordinates.Count; i++)
+        {
+            if (BoilerObjectMatchesExistingBoilerPipePassDirection(
+                    objectCoordinates[i],
+                    proposedSnapshot,
+                    previewToIgnore))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool BoilerObjectMatchesExistingBoilerPipePassDirection(
+        Vector2Int objectCoordinate,
+        PlacementSnapshot proposedSnapshot,
+        MapObject previewToIgnore)
+    {
+        if (proposedSnapshot == null || !IsBoilerSource(proposedSnapshot.mapObject))
+        {
+            return false;
+        }
+
+        List<PipeAreaBlockCandidate> pipePassCandidates = CollectPipePassCandidatesAtCoordinate(
+            objectCoordinate,
+            previewToIgnore);
+        for (int i = 0; i < pipePassCandidates.Count; i++)
+        {
+            PipeAreaBlockCandidate existingCandidate = pipePassCandidates[i];
+            if (existingCandidate.snapshot == null
+                || !IsBoilerSource(existingCandidate.snapshot.mapObject)
+                || !TryGetPipeAreaObjectDirection(
+                    objectCoordinate,
+                    existingCandidate,
+                    out Vector2Int existingPipePassDirection))
+            {
+                continue;
+            }
+
+            Vector2Int proposedPipePassCoordinate = objectCoordinate + existingPipePassDirection;
+            if (!TryGetBoilerPipePassDirectionAtCoordinate(
+                    proposedSnapshot.mapObject,
+                    proposedSnapshot.anchorCoordinate,
+                    proposedSnapshot.quarterTurns,
+                    proposedPipePassCoordinate,
+                    out Vector2Int proposedPipePassDirection)
+                || proposedPipePassDirection != -existingPipePassDirection)
+            {
+                continue;
+            }
+
+            PipeAreaBlockCandidate proposedCandidate = new PipeAreaBlockCandidate(
+                proposedSnapshot,
+                InputOutputModule.RectGridBlockType.PipeInput);
+            if (PipePassItemsMatchPipePass(existingCandidate, proposedCandidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool BoilerOutputItemsMatchSteamGeneratorInput(
+        Vector2Int boilerAnchorCoordinate,
+        MapObject boilerSource,
+        Vector2Int steamInputCoordinate,
+        PipeAreaBlockCandidate steamInputCandidate)
+    {
+        HashSet<int> outputItemIds = new HashSet<int>();
+        HashSet<int> inputItemIds = new HashSet<int>();
+        return TryGetCandidateOutputItemIds(
+                boilerAnchorCoordinate,
+                boilerSource,
+                outputItemIds)
+            && steamInputCandidate.snapshot != null
+            && TryGetCandidateInputItemIdsAtCoordinate(
+                steamInputCandidate.snapshot.anchorCoordinate,
+                steamInputCandidate.snapshot.mapObject,
+                steamInputCandidate.snapshot.quarterTurns,
+                steamInputCoordinate,
+                inputItemIds)
+            && HasSharedItemId(outputItemIds, inputItemIds);
+    }
+
+    private bool TryGetBoilerOutputItemIdsAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null)
+        {
+            return false;
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchA);
+
+        for (int i = 0; i < pipeAreaBlockCandidateScratchA.Count; i++)
+        {
+            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchA[i];
+            if (candidate.snapshot == null
+                || !IsBoilerSource(candidate.snapshot.mapObject)
+                || !InputOutputModule.IsOutputBlockType(candidate.blockType))
+            {
+                continue;
+            }
+
+            bool foundOutput = TryGetCandidateOutputItemIds(
+                candidate.snapshot.anchorCoordinate,
+                candidate.snapshot.mapObject,
+                outputItemIds);
+            pipeAreaBlockCandidateScratchA.Clear();
+            return foundOutput;
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return false;
+    }
+
+    private bool PipeAreaConnectionAtCoordinateIsCompatible(
+        Vector2Int proposedCoordinate,
+        PipeAreaBlockCandidate proposedCandidate,
+        Vector2Int connectorCoordinate,
+        MapObject previewToIgnore)
+    {
+        pipeAreaBlockCandidateScratchA.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            connectorCoordinate,
+            previewToIgnore,
+            pipeAreaBlockCandidateScratchA);
+
+        bool hasConnector = false;
+        bool hasCompatibleConnector = false;
+        for (int i = 0; i < pipeAreaBlockCandidateScratchA.Count; i++)
+        {
+            PipeAreaBlockCandidate connectorCandidate = pipeAreaBlockCandidateScratchA[i];
+            if (connectorCandidate.snapshot == null
+                || connectorCandidate.snapshot.mapObject == proposedCandidate.snapshot.mapObject)
+            {
+                continue;
+            }
+
+            hasConnector = true;
+            if (CanPipeAreaBlockCandidatesConnect(
+                    proposedCoordinate,
+                    proposedCandidate,
+                    connectorCoordinate,
+                    connectorCandidate))
+            {
+                hasCompatibleConnector = true;
+                break;
+            }
+        }
+
+        pipeAreaBlockCandidateScratchA.Clear();
+        return !hasConnector || hasCompatibleConnector;
+    }
+
+    private static bool IsFluidStoragePlacementObject(MapObject mapObject)
+    {
+        return mapObject is InstallationObject installationObject
+               && installationObject.CanStoreFluid
+               && !(installationObject is Pipe)
+               && !(installationObject is Pump);
+    }
+
+    private bool CanPlacePipeNearFixedFluidConnectors(
+        Vector2Int pipeCoordinate,
+        Pipe pipePrefab,
+        int quarterTurns)
+    {
+        if (pipePrefab == null)
+        {
+            return true;
+        }
+
+        Quaternion pipeRotation = GetPlacementObjectRotation(pipePrefab, quarterTurns);
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionToConnector = PipeCardinalDirections[i];
+            Vector2Int connectorCoordinate = pipeCoordinate + directionToConnector;
+            Vector2Int directionToPipe = -directionToConnector;
+
+            if (!TryGetFixedFluidConnectorCompatibilityAtCoordinate(
+                    connectorCoordinate,
+                    directionToPipe,
+                    out bool connectorCanConnect))
+            {
+                continue;
+            }
+
+            if (connectorCanConnect
+                && !CanPipeAreaBlocksConnect(pipeCoordinate, connectorCoordinate))
+            {
+                return false;
+            }
+
+            if (connectorCanConnect
+                && !pipePrefab.HasConnectionTowards(pipeRotation, directionToConnector))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool CanResolvedPipePlacementMatchFixedFluidConnectors(
+        Vector2Int pipeCoordinate,
+        Pipe pipePrefab,
+        int quarterTurns)
+    {
+        if (pipePrefab == null)
+        {
+            return true;
+        }
+
+        if (TryGetFixedFluidPipeConnectionDirectionsAtCoordinate(pipeCoordinate, null, out _))
+        {
+            return CanPlacePipeOnFixedFluidConnectorCoordinate(
+                pipeCoordinate,
+                pipePrefab,
+                quarterTurns);
+        }
+
+        return CanPlacePipeNearFixedFluidConnectors(
+            pipeCoordinate,
+            pipePrefab,
+            quarterTurns);
+    }
+
+    private bool CanPlacePipeOnFixedFluidConnectorCoordinate(
+        Vector2Int pipeCoordinate,
+        Pipe pipePrefab,
+        int quarterTurns)
+    {
+        if (pipePrefab == null)
+        {
+            return true;
+        }
+
+        if (!TryGetFixedFluidPipeConnectionDirectionsAtCoordinate(
+                pipeCoordinate,
+                null,
+                out List<Vector2Int> pipeConnectionDirections))
+        {
+            return true;
+        }
+
+        Quaternion pipeRotation = GetPlacementObjectRotation(pipePrefab, quarterTurns);
+        return PipeHasConnectionTowardsAnyDirection(pipePrefab, pipeRotation, pipeConnectionDirections);
+    }
+
+    private bool CanPlacePipeOnFixedFluidConnectorArea(
+        Block block,
+        MapObject occupyingObject,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        if (block == null
+            || block.Type != Block.BlockType.Ground
+            || !(footprintSource is Pipe pipePrefab))
+        {
+            return false;
+        }
+
+        if (IsFixedRectGridObjectBlockCoordinate(block.Coordinate))
+        {
+            return false;
+        }
+
+        if (occupyingObject != null && !IsPipePlacementAreaCoordinate(block.Coordinate))
+        {
+            return false;
+        }
+
+        if (TryGetFixedFluidPipeConnectionDirectionsAtCoordinate(
+                block.Coordinate,
+                null,
+                out List<Vector2Int> pipeConnectionDirections))
+        {
+            Quaternion pipeRotation = GetPlacementObjectRotation(pipePrefab, quarterTurns);
+            return PipeHasConnectionTowardsAnyDirection(pipePrefab, pipeRotation, pipeConnectionDirections);
+        }
+
+        return HasCompatibleFixedFluidConnectorAdjacentToPipe(
+            block.Coordinate,
+                pipePrefab,
+                quarterTurns);
+    }
+
+    private bool IsFixedRectGridObjectBlockCoordinate(Vector2Int coordinate)
+    {
+        if (InputOutputModule.CoordinateIsRuntimeRectGridBlockType(
+                coordinate,
+                InputOutputModule.RectGridBlockType.Object))
+        {
+            return true;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(coordinate, null, out PlacementSnapshot previewSnapshot)
+            && SnapshotHasRectGridObjectBlock(previewSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot)
+            && SnapshotHasRectGridObjectBlock(installedSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        if (TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
+            && SnapshotHasRectGridObjectBlock(savedSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool SnapshotHasRectGridObjectBlock(PlacementSnapshot snapshot, Vector2Int coordinate)
+    {
+        if (snapshot == null || snapshot.mapObject == null)
+        {
+            return false;
+        }
+
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(snapshot.mapObject) ?? snapshot.mapObject;
+        return TryGetRectGridFootprintBlockType(
+                   snapshot.anchorCoordinate,
+                   footprintSource,
+                   snapshot.quarterTurns,
+                   coordinate,
+                   out InputOutputModule.RectGridBlockType blockType)
+               && blockType == InputOutputModule.RectGridBlockType.Object;
+    }
+
+    private bool IsPipePlacementAreaCoordinate(Vector2Int coordinate)
+    {
+        if (InputOutputModule.CoordinateAllowsRuntimePipeBlock(coordinate)
+            || IsPumpOutputCoordinateForPlacement(coordinate)
+            || HasPipeAreaFluidStorageAtCoordinate(coordinate))
+        {
+            return true;
+        }
+
+        pipeAreaBlockCandidateScratchC.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            null,
+            pipeAreaBlockCandidateScratchC);
+        bool hasPipeArea = pipeAreaBlockCandidateScratchC.Count > 0;
+        pipeAreaBlockCandidateScratchC.Clear();
+        return hasPipeArea;
+    }
+
+    private bool HasCompatibleFixedFluidConnectorAdjacentToPipe(
+        Vector2Int pipeCoordinate,
+        Pipe pipePrefab,
+        int quarterTurns)
+    {
+        if (pipePrefab == null)
+        {
+            return false;
+        }
+
+        Quaternion pipeRotation = GetPlacementObjectRotation(pipePrefab, quarterTurns);
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionToConnector = PipeCardinalDirections[i];
+            Vector2Int connectorCoordinate = pipeCoordinate + directionToConnector;
+            Vector2Int directionToPipe = -directionToConnector;
+
+            if (TryGetFixedFluidConnectorCompatibilityAtCoordinate(
+                    connectorCoordinate,
+                    directionToPipe,
+                    out bool connectorCanConnect)
+                && connectorCanConnect
+                && CanPipeAreaBlocksConnect(pipeCoordinate, connectorCoordinate)
+                && pipePrefab.HasConnectionTowards(pipeRotation, directionToConnector))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetFixedFluidPipeConnectionDirectionsAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        out List<Vector2Int> pipeConnectionDirections)
+    {
+        pipeConnectionDirections = new List<Vector2Int>(4);
+        AppendFixedFluidPipeConnectionDirections(coordinate, previewToIgnore, pipeConnectionDirections);
+        return pipeConnectionDirections.Count > 0;
+    }
+
+    private static bool PipeHasConnectionTowardsAnyDirection(
+        Pipe pipePrefab,
+        Quaternion pipeRotation,
+        IReadOnlyList<Vector2Int> directions)
+    {
+        if (pipePrefab == null || directions == null || directions.Count <= 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < directions.Count; i++)
+        {
+            Vector2Int direction = directions[i];
+            if (direction == Vector2Int.zero)
+            {
+                continue;
+            }
+
+            if (pipePrefab.HasConnectionTowards(pipeRotation, direction))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetBoilerFixedFluidConnectorCompatibilityAtCoordinate(
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe,
+        out bool connectorCanConnect)
+    {
+        connectorCanConnect = false;
+        if (directionToPipe == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(connectorCoordinate, null, out PlacementSnapshot previewSnapshot)
+            && TryResolveBoilerFixedFluidConnectorCompatibility(
+                previewSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(connectorCoordinate, out PlacementSnapshot installedSnapshot)
+            && TryResolveBoilerFixedFluidConnectorCompatibility(
+                installedSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (TryGetRuntimeGridPlacementSnapshot(connectorCoordinate, out PlacementSnapshot runtimeGridSnapshot)
+            && TryResolveBoilerFixedFluidConnectorCompatibility(
+                runtimeGridSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (TryGetRuntimeAreaPlacementSnapshot(connectorCoordinate, out PlacementSnapshot runtimeAreaSnapshot)
+            && TryResolveBoilerFixedFluidConnectorCompatibility(
+                runtimeAreaSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        return TryGetSavedPlacementSnapshot(connectorCoordinate, out PlacementSnapshot savedSnapshot)
+               && TryResolveBoilerFixedFluidConnectorCompatibility(
+                   savedSnapshot,
+                   connectorCoordinate,
+                   directionToPipe,
+                   out connectorCanConnect);
+    }
+
+    private bool TryResolveBoilerFixedFluidConnectorCompatibility(
+        PlacementSnapshot connectorSnapshot,
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe,
+        out bool connectorCanConnect)
+    {
+        connectorCanConnect = false;
+        if (!(connectorSnapshot?.mapObject is Boiler))
+        {
+            return false;
+        }
+
+        return TryResolveFixedFluidConnectorCompatibility(
+            connectorSnapshot,
+            connectorCoordinate,
+            directionToPipe,
+            out connectorCanConnect);
+    }
+
+    private bool TryGetFixedFluidConnectorCompatibilityAtCoordinate(
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe,
+        out bool connectorCanConnect)
+    {
+        connectorCanConnect = false;
+        if (directionToPipe == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(connectorCoordinate, null, out PlacementSnapshot previewSnapshot)
+            && TryResolveFixedFluidConnectorCompatibility(
+                previewSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(connectorCoordinate, out PlacementSnapshot installedSnapshot)
+            && TryResolveFixedFluidConnectorCompatibility(
+                installedSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (TryGetRuntimeGridPlacementSnapshot(connectorCoordinate, out PlacementSnapshot runtimeGridSnapshot)
+            && TryResolveFixedFluidConnectorCompatibility(
+                runtimeGridSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (TryGetRuntimeAreaPlacementSnapshot(connectorCoordinate, out PlacementSnapshot runtimeAreaSnapshot)
+            && TryResolveFixedFluidConnectorCompatibility(
+                runtimeAreaSnapshot,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect))
+        {
+            return true;
+        }
+
+        return TryGetSavedPlacementSnapshot(connectorCoordinate, out PlacementSnapshot savedSnapshot)
+               && TryResolveFixedFluidConnectorCompatibility(
+                   savedSnapshot,
+                   connectorCoordinate,
+                   directionToPipe,
+                   out connectorCanConnect);
+    }
+
+    private bool TryResolveFixedFluidConnectorCompatibility(
+        PlacementSnapshot connectorSnapshot,
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe,
+        out bool connectorCanConnect)
+    {
+        connectorCanConnect = false;
+        if (connectorSnapshot == null)
+        {
+            return false;
+        }
+
+        return TryResolveFixedFluidConnectorCompatibility(
+            connectorSnapshot.mapObject,
+            connectorSnapshot.rotation,
+            connectorSnapshot.anchorCoordinate,
+            connectorSnapshot.quarterTurns,
+            connectorCoordinate,
+            directionToPipe,
+            out connectorCanConnect);
+    }
+
+    private bool TryResolveFixedFluidConnectorCompatibility(
+        MapObject connector,
+        Quaternion connectorRotation,
+        Vector2Int connectorAnchorCoordinate,
+        int connectorQuarterTurns,
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe,
+        out bool connectorCanConnect)
+    {
+        connectorCanConnect = false;
+        if (connector == null || directionToPipe == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (connector is Pump pump)
+        {
+            return TryResolvePumpFixedFluidConnectorCompatibility(
+                pump,
+                connectorRotation,
+                connectorAnchorCoordinate,
+                connectorQuarterTurns,
+                connectorCoordinate,
+                directionToPipe,
+                out connectorCanConnect);
+        }
+
+        if (connector is Boiler boiler)
+        {
+            connectorCanConnect = CanBoilerConnectorBlockConnectPipeTowards(
+                boiler,
+                connectorAnchorCoordinate,
+                connectorQuarterTurns,
+                connectorCoordinate,
+                directionToPipe);
+            return connectorCanConnect;
+        }
+
+        if (TryGetInputOutputModule(connector, out InputOutputModule inputOutputModule))
+        {
+            if (!TryGetRectGridFootprintBlockType(
+                    connectorAnchorCoordinate,
+                    connector,
+                    connectorQuarterTurns,
+                    connectorCoordinate,
+                    out InputOutputModule.RectGridBlockType blockType)
+                || !InputOutputModule.AllowsPipeAreaInteraction(blockType)
+                || !TryGetRectGridPipeAreaConnectionDirection(
+                    connector,
+                    inputOutputModule,
+                    connectorAnchorCoordinate,
+                    connectorQuarterTurns,
+                    connectorCoordinate,
+                    out Vector2Int connectionDirection))
+            {
+                return false;
+            }
+
+            connectorCanConnect = directionToPipe == connectionDirection;
+            return true;
+        }
+
+        if (connector is InstallationObject fluidStorage
+            && !(connector is Pipe)
+            && !(connector is InputOutputModule)
+            && fluidStorage.CanStoreFluid)
+        {
+            connectorCanConnect = IsCardinalPipeDirection(directionToPipe);
+            return connectorCanConnect;
+        }
+
+        return false;
+    }
+
+    private bool TryResolvePumpFixedFluidConnectorCompatibility(
+        Pump pump,
+        Quaternion pumpRotation,
+        Vector2Int pumpAnchorCoordinate,
+        int pumpQuarterTurns,
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe,
+        out bool connectorCanConnect)
+    {
+        connectorCanConnect = false;
+        if (pump == null || directionToPipe == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (TryGetRectGridFootprintBlockType(
+                pumpAnchorCoordinate,
+                pump,
+                pumpQuarterTurns,
+                connectorCoordinate,
+                out InputOutputModule.RectGridBlockType blockType))
+        {
+            if (blockType != InputOutputModule.RectGridBlockType.PipeOutputItem)
+            {
+                return false;
+            }
+
+            connectorCanConnect = pump.TryGetPipeConnectionDirection(
+                pumpRotation,
+                out Vector2Int pumpOutputDirection)
+                && directionToPipe == pumpOutputDirection;
+            return connectorCanConnect;
+        }
+
+        connectorCanConnect = pump.HasPipeConnectionTowards(pumpRotation, directionToPipe);
+        return connectorCanConnect;
+    }
+
+    private bool CanBoilerConnectorBlockConnectPipeTowards(
+        Boiler boiler,
+        Vector2Int boilerAnchorCoordinate,
+        int boilerQuarterTurns,
+        Vector2Int connectorCoordinate,
+        Vector2Int directionToPipe)
+    {
+        if (boiler == null || directionToPipe == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        return TryGetBoilerPipePassDirectionAtCoordinate(
+            boiler,
+            boilerAnchorCoordinate,
+            boilerQuarterTurns,
+            connectorCoordinate,
+            out Vector2Int pipePassDirection)
+               && directionToPipe == -pipePassDirection;
+    }
+
+    private bool TryAppendBoilerPipeAxisDirectionsAtCoordinate(
+        Boiler boiler,
+        Vector2Int boilerAnchorCoordinate,
+        int boilerQuarterTurns,
+        Vector2Int coordinate,
+        List<Vector2Int> directions)
+    {
+        if (boiler == null || directions == null)
+        {
+            return false;
+        }
+
+        if (!TryGetRectGridFootprintBlockType(
+                boilerAnchorCoordinate,
+                boiler,
+                boilerQuarterTurns,
+                coordinate,
+                out InputOutputModule.RectGridBlockType blockType)
+            || blockType == InputOutputModule.RectGridBlockType.None)
+        {
+            return false;
+        }
+
+        if (blockType == InputOutputModule.RectGridBlockType.Object)
+        {
+            return false;
+        }
+
+        if (TryGetBoilerPipePassDirectionAtCoordinate(
+                boiler,
+                boilerAnchorCoordinate,
+                boilerQuarterTurns,
+                coordinate,
+                out Vector2Int pipePassDirection))
+        {
+            AddPipeDirection(directions, pipePassDirection);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool CanBoilerPipePassOverlapPipe(
+        Block block,
+        MapObject occupyingObject,
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (block == null
+            || !IsPipePassBlockType(rectGridBlockType)
+            || !TryGetPipePlacementAtBlock(block, occupyingObject, out Pipe pipe, out Quaternion pipeRotation)
+            || !TryGetBoilerPipePassDirectionAtCoordinate(
+                footprintSource,
+                anchorCoordinate,
+                quarterTurns,
+                block.Coordinate,
+                out Vector2Int pipePassDirection))
+        {
+            return false;
+        }
+
+        return pipe.HasConnectionTowards(pipeRotation, pipePassDirection);
+    }
+
+    private bool TryGetBoilerPipePassDirectionAtCoordinate(
+        MapObject boilerSource,
+        Vector2Int boilerAnchorCoordinate,
+        int boilerQuarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int pipePassDirection)
+    {
+        pipePassDirection = Vector2Int.zero;
+        return IsBoilerSource(boilerSource)
+               && TryGetRectGridFootprintBlockType(
+                   boilerAnchorCoordinate,
+                   boilerSource,
+                   boilerQuarterTurns,
+                   coordinate,
+                   out InputOutputModule.RectGridBlockType blockType)
+               && IsPipePassBlockType(blockType)
+               && TryGetInputOutputModule(boilerSource, out InputOutputModule inputOutputModule)
+               && TryGetRectGridPipeAreaConnectionDirection(
+                   boilerSource,
+                   inputOutputModule,
+                   boilerAnchorCoordinate,
+                   boilerQuarterTurns,
+                   coordinate,
+                   out pipePassDirection)
+               && pipePassDirection != Vector2Int.zero;
+    }
+
+    private static bool IsCardinalPipeDirection(Vector2Int direction)
+    {
+        return PipeDirectionsContain(PipeCardinalDirections, direction);
+    }
+
+    private void PrepareBelt2FBridgeCenterForPassthroughPlacement(Block block, MapObject passthroughSource)
+    {
+        if (!IsBelt2FPassthroughPlacementSource(passthroughSource)
+            || block == null
+            || !(block.MapObject is ConvayorBelt2F belt2F)
+            || !belt2F.IsBridgeCenterCoordinate(block.Coordinate)
+            || !belt2F.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        terrain?.RemoveInstallationPersistence(belt2F);
+
+        List<Vector2Int> blockingCoordinates = GetFootprintCoordinates(anchorCoordinate, belt2F, quarterTurns);
+        blockingCoordinates.Remove(block.Coordinate);
+        belt2F.ConfigurePlacementRuntime(
+            anchorCoordinate,
+            quarterTurns,
+            blockingCoordinates,
+            belt2F.RuntimePlacementSequence);
+
+        ConvayorBelt2F.MarkCoverageDirty();
+        belt2F.RefreshCoveredConveyorTopology();
+        terrain?.RegisterLiveInstallationObject(belt2F);
+    }
+
+    private bool CanPlacePassthroughOnBelt2FBridgeCenter(
+        Block block,
+        MapObject footprintSource,
+        MapObject occupyingObject,
+        int quarterTurns)
+    {
+        if (!IsBelt2FPassthroughPlacementSource(footprintSource)
+            || block == null
+            || block.Type != Block.BlockType.Ground
+            || !(occupyingObject is ConvayorBelt2F belt2F)
+            || !belt2F.IsBridgeCenterCoordinate(block.Coordinate))
+        {
+            return false;
+        }
+
+        if (footprintSource is Pipe pipeFootprint)
+        {
+            return CanResolvedPipePlacementMatchFixedFluidConnectors(
+                block.Coordinate,
+                pipeFootprint,
+                quarterTurns);
+        }
+
+        return true;
+    }
+
+    private static bool IsBelt2FPassthroughPlacementSource(MapObject mapObject)
+    {
+        return mapObject is Pipe || IsBaseConveyorBelt(mapObject);
     }
 
     private bool CanPlaceBelt2FBlock(
@@ -13944,7 +19527,13 @@ public class InstallationPlacementController : MonoBehaviour
                 return false;
             }
 
-            return occupyingObject == null || IsBaseConveyorBelt(occupyingObject);
+            if (occupyingObject == null || IsBaseConveyorBelt(occupyingObject))
+            {
+                return true;
+            }
+
+            return TryGetPipePlacementAtBlock(block, occupyingObject, out Pipe pipe, out Quaternion pipeRotation)
+                   && IsBelt2FCrossingPipeDirectionAllowed(footprintSource, quarterTurns, pipe, pipeRotation);
         }
 
         return occupyingObject == null && !isInputOutputAreaBlock;
@@ -13957,16 +19546,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetBlockingMapObject(block);
-        if (occupyingObject == null
-            && TryGetSavedInstallationPlacementAtCoordinate(
-                block.Coordinate,
-                out MapObject savedOccupyingObject,
-                out _,
-                out _))
-        {
-            occupyingObject = savedOccupyingObject;
-        }
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
 
         InstallationMapFilter allowedFilter = TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
             ? ResolvePlacementMapFilter(footprintSource, installationObject)
@@ -13985,19 +19565,29 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (IsPipeAllowedForAnyBelt2FPlacementRotation(
+                block,
+                occupyingObject,
+                footprintSource,
+                allowedFilter))
+        {
+            return true;
+        }
+
         bool isInputOutputAreaBlock =
             InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
             || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
             || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputEnergy)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.InputItem)
-            || InputOutputModule.CoordinateIsRuntimeRectGridBlockType(block.Coordinate, InputOutputModule.RectGridBlockType.Output);
+            || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(block.Coordinate);
         if (isInputOutputAreaBlock)
         {
             return false;
         }
 
-        return occupyingObject == null || IsBaseConveyorBelt(occupyingObject);
+        return occupyingObject == null
+               || IsBaseConveyorBelt(occupyingObject)
+               || (TryGetPipePlacementAtBlock(block, occupyingObject, out Pipe pipe, out Quaternion pipeRotation)
+                   && IsBelt2FCrossingPipeDirectionAllowed(footprintSource, 0, pipe, pipeRotation));
     }
 
     private bool ShouldSkipBelt2FBridgeCenterBinding(
@@ -14013,7 +19603,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        return IsBelt2FBridgeCenterBlockedByBaseConveyor(block);
+        return IsBelt2FBridgeCenterBlockedByPassthroughObject(block);
     }
 
     private bool ShouldSkipBelt2FBridgeCenterBinding(
@@ -14033,27 +19623,18 @@ public class InstallationPlacementController : MonoBehaviour
         return terrain != null
                && terrain.TryGetLoadedBlock(bridgeCenterCoordinate, out Block bridgeCenterBlock)
                && bridgeCenterBlock != null
-               && IsBelt2FBridgeCenterBlockedByBaseConveyor(bridgeCenterBlock);
+               && IsBelt2FBridgeCenterBlockedByPassthroughObject(bridgeCenterBlock);
     }
 
-    private bool IsBelt2FBridgeCenterBlockedByBaseConveyor(Block block)
+    private bool IsBelt2FBridgeCenterBlockedByPassthroughObject(Block block)
     {
         if (block == null)
         {
             return false;
         }
 
-        if (IsBaseConveyorBelt(GetBlockingMapObject(block)))
-        {
-            return true;
-        }
-
-        return TryGetSavedInstallationPlacementAtCoordinate(
-                   block.Coordinate,
-                   out MapObject savedSourcePrefab,
-                   out _,
-                   out _)
-               && IsBaseConveyorBelt(savedSourcePrefab);
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+        return IsBaseConveyorBelt(occupyingObject) || occupyingObject is Pipe;
     }
 
     private static bool IsBaseConveyorBelt(MapObject mapObject)
@@ -14258,14 +19839,9 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (sourcePrefab.ResolvedItemId == WaterPumpItemId)
-        {
-            return true;
-        }
-
-        string sourceName = sourcePrefab.name;
-        return !string.IsNullOrEmpty(sourceName)
-               && sourceName.IndexOf("Water pump", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        return sourcePrefab is Pump
+               || sourcePrefab.GetComponent<Pump>() != null
+               || sourcePrefab.GetComponentInChildren<Pump>(true) != null;
     }
 
     private static bool TryGetQuarterTurnsForCardinalDirection(
@@ -14333,6 +19909,36 @@ public class InstallationPlacementController : MonoBehaviour
             : InstallationMapFilter.Ground;
     }
 
+    private static InstallationMapFilter ResolveRectGridTerrainFilter(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        InstallationMapFilter fallbackFilter)
+    {
+        if (!IsWaterPumpSource(footprintSource))
+        {
+            return fallbackFilter;
+        }
+
+        if (IsWaterPumpPipeInputBlockType(rectGridBlockType))
+        {
+            return InstallationMapFilter.Water;
+        }
+
+        if (rectGridBlockType == InputOutputModule.RectGridBlockType.PipeOutputItem)
+        {
+            return InstallationMapFilter.Ground | InstallationMapFilter.WaterOutline;
+        }
+
+        return fallbackFilter;
+    }
+
+    private static bool IsWaterPumpPipeInputBlockType(InputOutputModule.RectGridBlockType blockType)
+    {
+        return blockType == InputOutputModule.RectGridBlockType.PipeInput
+               || blockType == InputOutputModule.RectGridBlockType.PipeInputItem
+               || blockType == InputOutputModule.RectGridBlockType.PipeInputEnergy;
+    }
+
     private bool CanPlaceRectGridAreaBlock(
         Block block,
         MapObject occupyingObject,
@@ -14342,9 +19948,10 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         bool hasExistingInputOutputEnergyAreaBlock,
         bool hasExistingInputOutputItemAreaBlock,
-        bool hasExistingInputOutputOutputAreaBlock)
+        bool hasExistingInputOutputOutputAreaBlock,
+        InstallationMapFilter allowedFilter)
     {
-        if (block == null || block.Type != Block.BlockType.Ground)
+        if (!CanPlaceOnTerrainBiome(block, allowedFilter))
         {
             return false;
         }
@@ -14372,8 +19979,31 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (occupyingObject is Pipe
+            && InputOutputModule.AllowsPipeAreaInteraction(rectGridBlockType))
+        {
+            if (IsSteamGeneratorSource(footprintSource))
+            {
+                return SteamGeneratorPipeAreaOverlapsPipeDirection(
+                    block,
+                    footprintSource,
+                    occupyingObject,
+                    anchorCoordinate,
+                    quarterTurns);
+            }
+
+            return !IsBoilerSource(footprintSource)
+                   || CanBoilerPipePassOverlapPipe(
+                       block,
+                       occupyingObject,
+                       footprintSource,
+                       rectGridBlockType,
+                       anchorCoordinate,
+                       quarterTurns);
+        }
+
         return occupyingObject is Resource resource
-            && IsResourceAllowedByMapFilter(resource, InstallationMapFilter.Ore);
+            && IsResourceAllowedByMapFilter(resource, allowedFilter);
     }
 
     private bool CanOverlapCompatibleItemArea(
@@ -14386,32 +20016,41 @@ public class InstallationPlacementController : MonoBehaviour
         bool hasExistingInputOutputItemAreaBlock,
         bool hasExistingInputOutputOutputAreaBlock)
     {
-        switch (rectGridBlockType)
+        if (IsBoilerSource(footprintSource)
+            && IsPumpOutputCoordinateForPlacement(coordinate)
+            && IsBoilerPumpInputBlockType(rectGridBlockType))
         {
-            case InputOutputModule.RectGridBlockType.InputItem:
-                return hasExistingInputOutputOutputAreaBlock
-                    && CandidateInputItemsMatchExistingOutput(
-                        coordinate,
-                        footprintSource,
-                        anchorCoordinate,
-                        quarterTurns);
+            return true;
+        }
 
-            case InputOutputModule.RectGridBlockType.InputEnergy:
-                return hasExistingInputOutputOutputAreaBlock
-                    && CandidateInputEnergyMatchesExistingOutput(coordinate, footprintSource);
-
-            case InputOutputModule.RectGridBlockType.Output:
-                return CandidateOutputMatchesExistingInputAreas(
+        if (InputOutputModule.IsInputItemBlockType(rectGridBlockType))
+        {
+            return hasExistingInputOutputOutputAreaBlock
+                && CandidateInputItemsMatchExistingOutput(
                     coordinate,
                     footprintSource,
                     anchorCoordinate,
-                    quarterTurns,
-                    hasExistingInputOutputItemAreaBlock,
-                    hasExistingInputOutputEnergyAreaBlock);
-
-            default:
-                return false;
+                    quarterTurns);
         }
+
+        if (InputOutputModule.IsInputEnergyBlockType(rectGridBlockType))
+        {
+            return hasExistingInputOutputOutputAreaBlock
+                && CandidateInputEnergyMatchesExistingOutput(coordinate, footprintSource);
+        }
+
+        if (InputOutputModule.IsOutputBlockType(rectGridBlockType))
+        {
+            return CandidateOutputMatchesExistingInputAreas(
+                coordinate,
+                footprintSource,
+                anchorCoordinate,
+                quarterTurns,
+                hasExistingInputOutputItemAreaBlock,
+                hasExistingInputOutputEnergyAreaBlock);
+        }
+
+        return false;
     }
 
     private bool CandidateInputItemsMatchExistingOutput(
@@ -14491,7 +20130,37 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int existingAnchorCoordinate,
         int existingQuarterTurns)
     {
-        if (candidateBlockType == InputOutputModule.RectGridBlockType.Output)
+        if (InputOutputModule.AllowsPipeAreaInteraction(candidateBlockType)
+            && InputOutputModule.AllowsPipeAreaInteraction(existingBlockType))
+        {
+            PlacementSnapshot candidateSnapshot = new PlacementSnapshot
+            {
+                mapObject = candidateFootprintSource,
+                rotation = GetPlacementObjectRotation(candidateFootprintSource, candidateQuarterTurns),
+                anchorCoordinate = candidateAnchorCoordinate,
+                quarterTurns = candidateQuarterTurns
+            };
+            PlacementSnapshot existingSnapshot = new PlacementSnapshot
+            {
+                mapObject = existingFootprintSource,
+                rotation = GetPlacementObjectRotation(existingFootprintSource, existingQuarterTurns),
+                anchorCoordinate = existingAnchorCoordinate,
+                quarterTurns = existingQuarterTurns
+            };
+
+            return CanPipeAreaBlockCandidatesConnect(
+                coordinate,
+                new PipeAreaBlockCandidate(candidateSnapshot, candidateBlockType),
+                coordinate,
+                new PipeAreaBlockCandidate(existingSnapshot, existingBlockType));
+        }
+
+        if (IsPipePassBlockType(candidateBlockType) && IsPipePassBlockType(existingBlockType))
+        {
+            return true;
+        }
+
+        if (InputOutputModule.IsOutputBlockType(candidateBlockType))
         {
             HashSet<int> candidateOutputItemIds = new HashSet<int>();
             if (!TryGetCandidateOutputItemIds(
@@ -14511,7 +20180,7 @@ public class InstallationPlacementController : MonoBehaviour
                 candidateOutputItemIds);
         }
 
-        if (existingBlockType != InputOutputModule.RectGridBlockType.Output)
+        if (!InputOutputModule.IsOutputBlockType(existingBlockType))
         {
             return false;
         }
@@ -14542,7 +20211,7 @@ public class InstallationPlacementController : MonoBehaviour
         int inputQuarterTurns,
         ISet<int> outputItemIds)
     {
-        if (inputBlockType == InputOutputModule.RectGridBlockType.InputItem)
+        if (InputOutputModule.IsInputItemBlockType(inputBlockType))
         {
             HashSet<int> inputItemIds = new HashSet<int>();
             return TryGetCandidateInputItemIdsAtCoordinate(
@@ -14554,11 +20223,957 @@ public class InstallationPlacementController : MonoBehaviour
                 && HasSharedItemId(outputItemIds, inputItemIds);
         }
 
-        if (inputBlockType == InputOutputModule.RectGridBlockType.InputEnergy)
+        if (InputOutputModule.IsInputEnergyBlockType(inputBlockType))
         {
             HashSet<ItemDefinition.EnergyType> inputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
             return TryGetCandidateInputEnergyTypes(inputFootprintSource, inputEnergyTypes)
                 && HasOutputItemWithEnergyType(outputItemIds, inputEnergyTypes);
+        }
+
+        return false;
+    }
+
+    private bool CanPlaceBoilerOnPumpOutputArea(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        bool isPumpRuntimeOutputAreaBlock,
+        InstallationMapFilter allowedFilter,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns)
+    {
+        return IsBoilerSource(footprintSource)
+               && IsBoilerPumpInputBlockType(rectGridBlockType)
+               && block != null
+               && CanPlaceOnTerrainBiome(block, allowedFilter)
+               && (occupyingObject == null || occupyingObject is Pump)
+               && isPumpRuntimeOutputAreaBlock
+               && BoilerPipePassMatchesPumpOutput(
+                   footprintSource,
+                   block.Coordinate,
+                   anchorCoordinate,
+                   quarterTurns);
+    }
+
+    private bool CanPlaceBoilerObjectOnPumpOutputArea(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        bool isPumpRuntimeOutputAreaBlock)
+    {
+        return IsBoilerSource(footprintSource)
+               && rectGridBlockType == InputOutputModule.RectGridBlockType.Object
+               && block != null
+               && block.Type == Block.BlockType.Ground
+               && (occupyingObject == null || occupyingObject is Pump)
+               && isPumpRuntimeOutputAreaBlock;
+    }
+
+    private bool CanPlaceBoilerObjectOnBoilerPipePassArea(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        InstallationMapFilter allowedFilter,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsBoilerSource(footprintSource)
+            || rectGridBlockType != InputOutputModule.RectGridBlockType.Object
+            || block == null
+            || block.Type != Block.BlockType.Ground
+            || occupyingObject != null
+            || !CanPlaceOnTerrainBiome(block, allowedFilter))
+        {
+            return false;
+        }
+
+        if (!anchorCoordinate.HasValue)
+        {
+            return HasBoilerPipePassAtCoordinate(block.Coordinate, previewToIgnore);
+        }
+
+        PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+        {
+            mapObject = footprintSource,
+            rotation = GetPlacementObjectRotation(footprintSource, quarterTurns),
+            anchorCoordinate = anchorCoordinate.Value,
+            quarterTurns = quarterTurns
+        };
+        return BoilerObjectMatchesExistingBoilerPipePassDirection(
+            block.Coordinate,
+            proposedSnapshot,
+            previewToIgnore);
+    }
+
+    private bool CanPlaceBoilerConnectorOnPumpBody(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        MapObject occupyingObject,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns)
+    {
+        return IsBoilerSource(footprintSource)
+               && rectGridBlockType == InputOutputModule.RectGridBlockType.PipeInput
+               && occupyingObject is Pump
+               && anchorCoordinate.HasValue
+               && IsPumpOutputCoordinateForPlacement(anchorCoordinate.Value)
+               && TryGetBoilerPumpOutputAxisMatch(
+                   footprintSource,
+                   anchorCoordinate.Value,
+                   quarterTurns,
+                   out bool matches)
+               && matches;
+    }
+
+    private bool CanPlaceBoilerAreaBesidePumpOutput(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns)
+    {
+        return IsBoilerSource(footprintSource)
+               && IsRectGridAreaBlockType(rectGridBlockType)
+               && block != null
+               && block.Type == Block.BlockType.Ground
+               && occupyingObject is Pump
+               && anchorCoordinate.HasValue
+               && IsPumpOutputCoordinateForPlacement(anchorCoordinate.Value)
+               && BoilerPipePassMatchesPumpOutput(
+                   footprintSource,
+                   block.Coordinate,
+                   anchorCoordinate,
+                   quarterTurns);
+    }
+
+    private static bool IsBoilerSource(MapObject footprintSource)
+    {
+        return footprintSource is Boiler
+               || (footprintSource != null
+                   && (footprintSource.GetComponent<Boiler>() != null
+                       || footprintSource.GetComponentInChildren<Boiler>(true) != null));
+    }
+
+    private static bool IsSteamGeneratorSource(MapObject footprintSource)
+    {
+        return footprintSource is SteamGenerator
+               || (footprintSource != null
+                   && (footprintSource.GetComponent<SteamGenerator>() != null
+                       || footprintSource.GetComponentInChildren<SteamGenerator>(true) != null));
+    }
+
+    private static bool TryResolveSteamGenerator(MapObject footprintSource, out SteamGenerator steamGenerator)
+    {
+        steamGenerator = footprintSource as SteamGenerator;
+        if (steamGenerator != null)
+        {
+            return true;
+        }
+
+        if (footprintSource == null)
+        {
+            return false;
+        }
+
+        steamGenerator = footprintSource.GetComponent<SteamGenerator>();
+        if (steamGenerator != null)
+        {
+            return true;
+        }
+
+        steamGenerator = footprintSource.GetComponentInChildren<SteamGenerator>(true);
+        return steamGenerator != null;
+    }
+
+    private bool TryResolveSteamGeneratorPipeAlignedQuarterTurns(
+        Block anchorBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out int resolvedQuarterTurns)
+    {
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (anchorBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource))
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                footprintSource,
+                preferredQuarterTurns + offset);
+            if (!SteamGeneratorPlacementHasMatchingPipeOverlap(
+                    anchorBlock.Coordinate,
+                    footprintSource,
+                    candidateQuarterTurns)
+                || !CanPlacePreviewOnBlock(anchorBlock, previewToIgnore, candidateQuarterTurns))
+            {
+                continue;
+            }
+
+            resolvedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool SteamGeneratorPlacementHasMatchingPipeOverlap(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns)
+    {
+        return SteamGeneratorPlacementPipeOverlapsMatch(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            true);
+    }
+
+    private bool SteamGeneratorPlacementPipeOverlapsMatch(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        bool requirePipeOverlap)
+    {
+        if (!IsSteamGeneratorSource(footprintSource)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return !requirePipeOverlap;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (terrain == null || placements == null || placements.Count <= 0)
+        {
+            return !requirePipeOverlap;
+        }
+
+        bool foundPipeOverlap = false;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!InputOutputModule.AllowsPipeAreaInteraction(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    anchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int pipeAreaCoordinate)
+                || !terrain.TryGetLoadedBlock(pipeAreaCoordinate, out Block pipeAreaBlock)
+                || pipeAreaBlock == null)
+            {
+                continue;
+            }
+
+            if (!TryGetRectGridPipeAreaConnectionDirection(
+                    footprintSource,
+                    inputOutputModule,
+                    anchorCoordinate,
+                    quarterTurns,
+                    pipeAreaCoordinate,
+                    out Vector2Int pipeAreaDirection))
+            {
+                continue;
+            }
+
+            if (!SteamGeneratorPipeAreaPipeConnectionsMatch(
+                    pipeAreaCoordinate,
+                    pipeAreaDirection,
+                    out bool hasPipeConnection))
+            {
+                return false;
+            }
+
+            foundPipeOverlap |= hasPipeConnection;
+        }
+
+        return requirePipeOverlap ? foundPipeOverlap : true;
+    }
+
+    private bool SteamGeneratorPipeAreaOverlapsPipeDirection(
+        Block block,
+        MapObject footprintSource,
+        MapObject occupyingObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        return block != null
+               && IsSteamGeneratorSource(footprintSource)
+               && TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+               && TryGetRectGridPipeAreaConnectionDirection(
+                   footprintSource,
+                   inputOutputModule,
+                   anchorCoordinate,
+                   quarterTurns,
+                   block.Coordinate,
+                   out Vector2Int pipeAreaDirection)
+               && SteamGeneratorPipeAreaPipeConnectionsMatch(
+                   block.Coordinate,
+                   pipeAreaDirection,
+                   out bool hasPipeConnection)
+               && hasPipeConnection;
+    }
+
+    private bool SteamGeneratorPipeAreaPipeConnectionsMatch(
+        Vector2Int pipeAreaCoordinate,
+        Vector2Int pipeAreaDirection,
+        out bool hasPipeConnection)
+    {
+        hasPipeConnection = false;
+        if (pipeAreaDirection == Vector2Int.zero)
+        {
+            return true;
+        }
+
+        if (TryGetPipePlacementAtCoordinate(
+                pipeAreaCoordinate,
+                out Pipe overlappingPipe,
+                out Quaternion overlappingPipeRotation))
+        {
+            hasPipeConnection = true;
+            if (!PipeIsStraightAxis(overlappingPipe, overlappingPipeRotation, pipeAreaDirection))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionToPipe = PipeCardinalDirections[i];
+            Vector2Int pipeCoordinate = pipeAreaCoordinate + directionToPipe;
+            if (!TryGetPipePlacementAtCoordinate(
+                    pipeCoordinate,
+                    out Pipe pipe,
+                    out Quaternion pipeRotation))
+            {
+                continue;
+            }
+
+            Vector2Int directionFromPipeToArea = -directionToPipe;
+            bool pipeFacesArea = pipe.HasConnectionTowards(pipeRotation, directionFromPipeToArea);
+            bool pipeCouldConnectToArea = pipeFacesArea
+                                          || CanPipePotentiallyConnectTowards(
+                                              pipe,
+                                              pipeRotation,
+                                              directionFromPipeToArea);
+            if (!pipeCouldConnectToArea)
+            {
+                continue;
+            }
+
+            if (!TryGetStraightPipeAxis(pipe, pipeRotation, out Vector2Int pipeAxisDirection)
+                || !DirectionsShareAxis(pipeAxisDirection, pipeAreaDirection)
+                || directionFromPipeToArea != pipeAreaDirection)
+            {
+                return false;
+            }
+
+            hasPipeConnection = true;
+        }
+
+        return true;
+    }
+
+    private bool TryGetPipePlacementAtCoordinate(
+        Vector2Int coordinate,
+        out Pipe pipe,
+        out Quaternion pipeRotation)
+    {
+        pipe = null;
+        pipeRotation = Quaternion.identity;
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        Block block = null;
+        if (terrain != null)
+        {
+            terrain.TryGetLoadedBlock(coordinate, out block);
+        }
+
+        MapObject occupyingObject = null;
+        if (block != null)
+        {
+            occupyingObject = GetBlockingMapObject(block);
+        }
+
+        if (TryGetPipePlacementAtBlock(block, occupyingObject, out pipe, out pipeRotation))
+        {
+            return true;
+        }
+
+        if (TryGetSavedInstallationPlacementAtCoordinate(
+                coordinate,
+                out MapObject savedSourcePrefab,
+                out Quaternion savedRotation,
+                out _)
+            && savedSourcePrefab is Pipe savedPipe)
+        {
+            pipe = savedPipe;
+            pipeRotation = savedRotation;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool SteamGeneratorPipeAreaDirectionMatchesPipe(
+        MapObject footprintSource,
+        InputOutputModule inputOutputModule,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int pipeAreaCoordinate,
+        Vector2Int pipeAxisDirection)
+    {
+        return TryGetRectGridPipeAreaConnectionDirection(
+                   footprintSource,
+                   inputOutputModule,
+                   anchorCoordinate,
+                   quarterTurns,
+                   pipeAreaCoordinate,
+                   out Vector2Int pipeAreaDirection)
+               && DirectionsShareAxis(pipeAxisDirection, pipeAreaDirection);
+    }
+
+    private static bool PipeIsStraightAxis(Pipe pipe, Quaternion pipeRotation, Vector2Int axisDirection)
+    {
+        return TryGetStraightPipeAxis(pipe, pipeRotation, out Vector2Int pipeAxisDirection)
+               && DirectionsShareAxis(pipeAxisDirection, axisDirection);
+    }
+
+    private static bool TryGetStraightPipeAxis(Pipe pipe, Quaternion pipeRotation, out Vector2Int axisDirection)
+    {
+        axisDirection = Vector2Int.zero;
+        if (pipe == null
+            || pipe.IsCornerVariant
+            || pipe.IsTeeVariant
+            || pipe.IsCrossVariant)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int direction = PipeCardinalDirections[i];
+            if (!pipe.HasConnectionTowards(pipeRotation, direction)
+                || !pipe.HasConnectionTowards(pipeRotation, -direction))
+            {
+                continue;
+            }
+
+            axisDirection = NormalizeCardinalAxis(direction);
+            return axisDirection != Vector2Int.zero;
+        }
+
+        return false;
+    }
+
+    private static bool DirectionsShareAxis(Vector2Int firstDirection, Vector2Int secondDirection)
+    {
+        return firstDirection != Vector2Int.zero
+               && secondDirection != Vector2Int.zero
+               && NormalizeCardinalAxis(firstDirection) == NormalizeCardinalAxis(secondDirection);
+    }
+
+    private static Vector2Int NormalizeCardinalAxis(Vector2Int direction)
+    {
+        if (direction.x != 0)
+        {
+            return Vector2Int.right;
+        }
+
+        if (direction.y != 0)
+        {
+            return Vector2Int.up;
+        }
+
+        return Vector2Int.zero;
+    }
+
+    private static bool IsBoilerPumpInputBlockType(InputOutputModule.RectGridBlockType blockType)
+    {
+        return blockType == InputOutputModule.RectGridBlockType.PipeInput;
+    }
+
+    private bool BoilerPipePassMatchesPumpOutput(
+        MapObject boilerSource,
+        Vector2Int coordinate,
+        Vector2Int? boilerAnchorCoordinate,
+        int boilerQuarterTurns)
+    {
+        if (boilerSource == null
+            || !boilerAnchorCoordinate.HasValue
+            || !TryGetPumpOutputDirectionForPlacement(coordinate, out Vector2Int pumpOutputDirection)
+            || !BoilerHasPipePassAxis(
+                boilerSource,
+                boilerAnchorCoordinate.Value,
+                boilerQuarterTurns,
+                pumpOutputDirection))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool BoilerHasPipePassAxis(
+        MapObject boilerSource,
+        Vector2Int boilerAnchorCoordinate,
+        int boilerQuarterTurns,
+        Vector2Int targetAxis)
+    {
+        if (targetAxis == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (!IsBoilerSource(boilerSource)
+            || !TryGetInputOutputModule(boilerSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.PipeInput)
+            {
+                continue;
+            }
+
+            if (!TryGetRectGridCoordinate(
+                    boilerAnchorCoordinate,
+                    boilerSource,
+                    boilerQuarterTurns,
+                    placement,
+                    out Vector2Int pipeInputCoordinate)
+                || !TryGetRectGridPipeAreaConnectionDirection(
+                    boilerSource,
+                    inputOutputModule,
+                    boilerAnchorCoordinate,
+                    boilerQuarterTurns,
+                    pipeInputCoordinate,
+                    out Vector2Int pipeInputDirection))
+            {
+                continue;
+            }
+
+            if (pipeInputDirection == targetAxis || pipeInputDirection == -targetAxis)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetBoilerPumpOutputAxisMatch(
+        MapObject boilerSource,
+        Vector2Int boilerAnchorCoordinate,
+        int boilerQuarterTurns,
+        out bool matches)
+    {
+        matches = false;
+        if (!IsBoilerSource(boilerSource)
+            || !TryGetInputOutputModule(boilerSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        bool foundPumpOutput = false;
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != InputOutputModule.RectGridBlockType.PipeInput
+                || !TryGetRectGridCoordinate(
+                    boilerAnchorCoordinate,
+                    boilerSource,
+                    boilerQuarterTurns,
+                    placement,
+                    out Vector2Int pipePassCoordinate)
+                || !TryGetPumpOutputAxisForBoilerPipePass(
+                    pipePassCoordinate,
+                    out Vector2Int pumpOutputAxis))
+            {
+                continue;
+            }
+
+            foundPumpOutput = true;
+            if (BoilerHasPipePassAxis(
+                    boilerSource,
+                    boilerAnchorCoordinate,
+                    boilerQuarterTurns,
+                    pumpOutputAxis))
+            {
+                matches = true;
+                return true;
+            }
+        }
+
+        return foundPumpOutput;
+    }
+
+    private bool TryGetPumpOutputAxisForBoilerPipePass(Vector2Int pipePassCoordinate, out Vector2Int axis)
+    {
+        axis = Vector2Int.zero;
+        if (TryGetPumpOutputDirectionForPlacement(pipePassCoordinate, out axis))
+        {
+            return axis != Vector2Int.zero;
+        }
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionFromPumpOutput = PipeCardinalDirections[i];
+            Vector2Int pumpOutputCoordinate = pipePassCoordinate - directionFromPumpOutput;
+            if (!IsPumpOutputCoordinateForPlacement(pumpOutputCoordinate)
+                || !TryGetPumpOutputDirectionForPlacement(
+                    pumpOutputCoordinate,
+                    out Vector2Int pumpOutputDirection)
+                || pumpOutputDirection != directionFromPumpOutput)
+            {
+                continue;
+            }
+
+            axis = pumpOutputDirection;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetRectGridCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        InputOutputModule.RectGridBlockPlacement placement,
+        out Vector2Int coordinate)
+    {
+        coordinate = Vector2Int.zero;
+        if (placement.blockType == InputOutputModule.RectGridBlockType.None)
+        {
+            return false;
+        }
+
+        List<RectGridPlacementCell> cells = new List<RectGridPlacementCell>();
+        if (!TryBuildRectGridPlacementCells(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                null,
+                cells))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < cells.Count; i++)
+        {
+            RectGridPlacementCell cell = cells[i];
+            if (cell.placement.x != placement.x
+                || cell.placement.y != placement.y
+                || cell.placement.blockType != placement.blockType)
+            {
+                continue;
+            }
+
+            coordinate = cell.coordinate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsPumpRuntimeOutputCoordinate(Vector2Int coordinate)
+    {
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out _))
+        {
+            return true;
+        }
+
+        return InputOutputModule.TryGetModuleAtRuntimeRectGridBlockType(
+                   coordinate,
+                   InputOutputModule.RectGridBlockType.PipeOutputItem,
+                   out InputOutputModule pipeOutputModule)
+               && pipeOutputModule is Pump;
+    }
+
+    private bool IsPumpOutputCoordinateForPlacement(Vector2Int coordinate)
+    {
+        return IsPumpRuntimeOutputCoordinate(coordinate)
+               || IsPumpRectGridOutputCoordinateForPlacement(coordinate)
+               || IsAdjacentPumpOutputCoordinate(coordinate);
+    }
+
+    private bool TryGetPumpOutputDirectionForPlacement(Vector2Int coordinate, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump runtimePump)
+            && runtimePump != null
+            && runtimePump.TryGetPipeConnectionDirection(runtimePump.transform.rotation, out direction))
+        {
+            return true;
+        }
+
+        if (TryGetPumpRectGridOutputDirectionForPlacement(coordinate, out direction))
+        {
+            return true;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionFromPump = PipeCardinalDirections[i];
+            Vector2Int pumpCoordinate = coordinate - directionFromPump;
+            if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
+                || pumpBlock == null)
+            {
+                continue;
+            }
+
+            MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+            Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
+            if (pumpObject == null
+                && !TryGetSavedInstallationPlacementAtCoordinate(
+                    pumpCoordinate,
+                    out pumpObject,
+                    out pumpRotation,
+                    out _))
+            {
+                pumpObject = null;
+            }
+
+            if (pumpObject is Pump pump
+                && pump.TryGetPipeConnectionDirection(
+                    pumpRotation,
+                    out Vector2Int pumpOutputDirection)
+                && pumpOutputDirection == directionFromPump)
+            {
+                direction = pumpOutputDirection;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsPumpRectGridOutputCoordinateForPlacement(Vector2Int coordinate)
+    {
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        for (int x = -2; x <= 2; x++)
+        {
+            for (int y = -2; y <= 2; y++)
+            {
+                Vector2Int pumpCoordinate = coordinate + new Vector2Int(x, y);
+                if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
+                    || pumpBlock == null)
+                {
+                    continue;
+                }
+
+                MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+                bool hasSavedPumpPlacement = false;
+                Vector2Int savedPumpAnchorCoordinate = Vector2Int.zero;
+                int savedPumpQuarterTurns = 0;
+                if (pumpObject == null
+                    && TryGetSavedInstallationPlacementAtCoordinate(
+                        pumpCoordinate,
+                        out pumpObject,
+                        out _,
+                        out BlockStateStore.InstallationSaveState savedPumpState)
+                    && savedPumpState != null)
+                {
+                    hasSavedPumpPlacement = true;
+                    savedPumpAnchorCoordinate = savedPumpState.anchorCoordinate;
+                    savedPumpQuarterTurns = savedPumpState.quarterTurns;
+                }
+
+                if (pumpObject == null)
+                {
+                    continue;
+                }
+
+                Vector2Int pumpAnchorCoordinate;
+                int pumpQuarterTurns;
+                if (hasSavedPumpPlacement)
+                {
+                    pumpAnchorCoordinate = savedPumpAnchorCoordinate;
+                    pumpQuarterTurns = savedPumpQuarterTurns;
+                }
+                else if (!TryGetPumpPlacementRuntime(
+                             pumpObject,
+                             out pumpAnchorCoordinate,
+                             out pumpQuarterTurns))
+                {
+                    continue;
+                }
+
+                if (TryGetRectGridFootprintBlockType(
+                        pumpAnchorCoordinate,
+                        pumpObject,
+                        pumpQuarterTurns,
+                        coordinate,
+                        out InputOutputModule.RectGridBlockType blockType)
+                    && blockType == InputOutputModule.RectGridBlockType.PipeOutputItem)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetPumpRectGridOutputDirectionForPlacement(Vector2Int coordinate, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        for (int x = -2; x <= 2; x++)
+        {
+            for (int y = -2; y <= 2; y++)
+            {
+                Vector2Int pumpCoordinate = coordinate + new Vector2Int(x, y);
+                if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
+                    || pumpBlock == null)
+                {
+                    continue;
+                }
+
+                MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+                Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
+                bool hasSavedPumpPlacement = false;
+                Vector2Int savedPumpAnchorCoordinate = Vector2Int.zero;
+                int savedPumpQuarterTurns = 0;
+                if (pumpObject == null
+                    && TryGetSavedInstallationPlacementAtCoordinate(
+                        pumpCoordinate,
+                        out pumpObject,
+                        out pumpRotation,
+                        out BlockStateStore.InstallationSaveState savedPumpState)
+                    && savedPumpState != null)
+                {
+                    hasSavedPumpPlacement = true;
+                    savedPumpAnchorCoordinate = savedPumpState.anchorCoordinate;
+                    savedPumpQuarterTurns = savedPumpState.quarterTurns;
+                }
+
+                if (!(pumpObject is Pump pump))
+                {
+                    continue;
+                }
+
+                Vector2Int pumpAnchorCoordinate;
+                int pumpQuarterTurns;
+                if (hasSavedPumpPlacement)
+                {
+                    pumpAnchorCoordinate = savedPumpAnchorCoordinate;
+                    pumpQuarterTurns = savedPumpQuarterTurns;
+                }
+                else if (!TryGetPumpPlacementRuntime(
+                             pumpObject,
+                             out pumpAnchorCoordinate,
+                             out pumpQuarterTurns))
+                {
+                    continue;
+                }
+
+                if (TryGetRectGridFootprintBlockType(
+                        pumpAnchorCoordinate,
+                        pumpObject,
+                        pumpQuarterTurns,
+                        coordinate,
+                        out InputOutputModule.RectGridBlockType blockType)
+                    && blockType == InputOutputModule.RectGridBlockType.PipeOutputItem
+                    && pump.TryGetPipeConnectionDirection(pumpRotation, out direction))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetPumpPlacementRuntime(
+        MapObject pumpObject,
+        out Vector2Int anchorCoordinate,
+        out int quarterTurns)
+    {
+        anchorCoordinate = Vector2Int.zero;
+        quarterTurns = 0;
+        if (!(pumpObject is Pump pump))
+        {
+            return false;
+        }
+
+        if (pump.TryGetPlacementRuntime(out anchorCoordinate, out quarterTurns))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsAdjacentPumpOutputCoordinate(Vector2Int coordinate)
+    {
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionFromPump = PipeCardinalDirections[i];
+            Vector2Int pumpCoordinate = coordinate - directionFromPump;
+            if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
+                || pumpBlock == null)
+            {
+                continue;
+            }
+
+            MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+            Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
+            if (pumpObject == null
+                && !TryGetSavedInstallationPlacementAtCoordinate(
+                    pumpCoordinate,
+                    out pumpObject,
+                    out pumpRotation,
+                    out _))
+            {
+                pumpObject = null;
+            }
+
+            if (pumpObject is Pump pump
+                && pump.TryGetPipeConnectionDirection(
+                    pumpRotation,
+                    out Vector2Int pumpOutputDirection)
+                && pumpOutputDirection == directionFromPump)
+            {
+                return true;
+            }
         }
 
         return false;
@@ -14659,6 +21274,11 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool TryGetExistingOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
+        if (IsPumpRuntimeOutputCoordinate(coordinate))
+        {
+            return false;
+        }
+
         return InputOutputModule.TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, outputItemIds);
     }
 
@@ -14824,11 +21444,205 @@ public class InstallationPlacementController : MonoBehaviour
         return IsResourceAllowedByMapFilter(resource, allowedFilter);
     }
 
+    private bool IsPipeAllowedForPlacement(
+        Block block,
+        MapObject occupyingObject,
+        MapObject footprintSource,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        InstallationMapFilter allowedFilter)
+    {
+        if ((allowedFilter & InstallationMapFilter.Pipe) == 0
+            || !TryGetPipePlacementAtBlock(block, occupyingObject, out Pipe pipe, out Quaternion pipeRotation))
+        {
+            return false;
+        }
+
+        if (!IsBelt2F(footprintSource))
+        {
+            return true;
+        }
+
+        return anchorCoordinate.HasValue
+               && block != null
+               && block.Coordinate == GetBelt2FBridgeCenterCoordinate(
+                   anchorCoordinate.Value,
+                   footprintSource,
+                   quarterTurns)
+               && IsBelt2FCrossingPipeDirectionAllowed(footprintSource, quarterTurns, pipe, pipeRotation);
+    }
+
+    private bool IsPipeAllowedForPlacement(
+        Block block,
+        MapObject occupyingObject,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        InstallationMapFilter allowedFilter)
+    {
+        return IsPipeAllowedForPlacement(
+            block,
+            occupyingObject,
+            footprintSource,
+            anchorCoordinate,
+            0,
+            allowedFilter);
+    }
+
+    private bool IsPipeAllowedForAnyBelt2FPlacementRotation(
+        Block block,
+        MapObject occupyingObject,
+        MapObject footprintSource,
+        InstallationMapFilter allowedFilter)
+    {
+        if (!IsBelt2F(footprintSource) || block == null)
+        {
+            return IsPipeAllowedForPlacement(
+                block,
+                occupyingObject,
+                footprintSource,
+                block != null ? block.Coordinate : Vector2Int.zero,
+                0,
+                allowedFilter);
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int i = 0; i < candidateCount; i++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(footprintSource, i);
+            if (IsPipeAllowedForPlacement(
+                    block,
+                    occupyingObject,
+                    footprintSource,
+                    block.Coordinate,
+                    candidateQuarterTurns,
+                    allowedFilter))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetPipePlacementAtBlock(
+        Block block,
+        MapObject occupyingObject,
+        out Pipe pipe,
+        out Quaternion pipeRotation)
+    {
+        pipe = null;
+        pipeRotation = Quaternion.identity;
+
+        if (block != null && block.MapObject is Pipe activePipe)
+        {
+            if (TryGetInstalledPipeVariantPreview(
+                    activePipe,
+                    out Pipe previewPipe,
+                    out Quaternion previewRotation))
+            {
+                pipe = previewPipe;
+                pipeRotation = previewRotation;
+                return true;
+            }
+
+            pipe = activePipe;
+            pipeRotation = activePipe.transform.rotation;
+            return true;
+        }
+
+        if (block != null
+            && TryGetSavedInstallationPlacementAtCoordinate(
+                block.Coordinate,
+                out MapObject savedSourcePrefab,
+                out Quaternion savedRotation,
+                out _)
+            && savedSourcePrefab is Pipe savedPipe)
+        {
+            pipe = savedPipe;
+            pipeRotation = savedRotation;
+            return true;
+        }
+
+        if (occupyingObject is Pipe occupyingPipe)
+        {
+            if (TryGetInstalledPipeVariantPreview(
+                    occupyingPipe,
+                    out Pipe previewPipe,
+                    out Quaternion previewRotation))
+            {
+                pipe = previewPipe;
+                pipeRotation = previewRotation;
+                return true;
+            }
+
+            pipe = occupyingPipe;
+            pipeRotation = occupyingPipe.transform.rotation;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsBelt2FCrossingPipeDirectionAllowed(
+        MapObject footprintSource,
+        int quarterTurns,
+        Pipe pipe,
+        Quaternion pipeRotation)
+    {
+        if (!(footprintSource is ConveyorBelt belt2F)
+            || pipe == null)
+        {
+            return false;
+        }
+
+        Quaternion beltRotation = GetPlacementObjectRotation(footprintSource, quarterTurns);
+        if (!belt2F.TryGetOutputDirection(beltRotation, out Vector2Int beltDirection)
+            || beltDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (pipe.HasConnectionTowards(pipeRotation, beltDirection)
+            || pipe.HasConnectionTowards(pipeRotation, -beltDirection))
+        {
+            return false;
+        }
+
+        Vector2Int crossingDirection = ConveyorBelt.RotateDirectionClockwise(beltDirection);
+        return pipe.HasConnectionTowards(pipeRotation, crossingDirection)
+               || pipe.HasConnectionTowards(pipeRotation, -crossingDirection);
+    }
+
     private static bool IsRectGridAreaBlockType(InputOutputModule.RectGridBlockType blockType)
     {
-        return blockType == InputOutputModule.RectGridBlockType.InputEnergy
-            || blockType == InputOutputModule.RectGridBlockType.InputItem
-            || blockType == InputOutputModule.RectGridBlockType.Output;
+        return InputOutputModule.IsInputOutputAreaBlockType(blockType);
+    }
+
+    private MapObject GetOccupyingObjectForPlacement(Block block, MapObject previewToIgnore = null)
+    {
+        if (block == null)
+        {
+            return null;
+        }
+
+        MapObject occupyingObject = GetBlockingMapObject(block);
+        if (occupyingObject == previewToIgnore)
+        {
+            occupyingObject = null;
+        }
+
+        if (occupyingObject == null
+            && TryGetSavedInstallationPlacementAtCoordinate(
+                block.Coordinate,
+                out MapObject savedOccupyingObject,
+                out _,
+                out _)
+            && savedOccupyingObject != previewToIgnore)
+        {
+            occupyingObject = savedOccupyingObject;
+        }
+
+        return occupyingObject;
     }
 
     private MapObject GetBlockingMapObject(Block block)
@@ -14859,7 +21673,7 @@ public class InstallationPlacementController : MonoBehaviour
         return occupyingObject;
     }
 
-    private Vector3 GetPreviewWorldPosition(Block anchorBlock, MapObject footprintSource, int quarterTurns, float verticalOffset)
+    private Vector3 GetPreviewWorldPosition(Block anchorBlock, MapObject footprintSource, int quarterTurns)
     {
         Vector3 position = anchorBlock.transform.position;
         List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
@@ -14876,15 +21690,13 @@ public class InstallationPlacementController : MonoBehaviour
             position.z += averageOffset.y;
         }
 
-        position.y += verticalOffset;
         return position;
     }
 
     private Vector3 GetPlacementWorldPositionFromAnchorCoordinate(
         Vector2Int anchorCoordinate,
         MapObject footprintSource,
-        int quarterTurns,
-        float verticalOffset)
+        int quarterTurns)
     {
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         float baseHeight = terrain != null ? terrain.transform.position.y : 0f;
@@ -14908,12 +21720,16 @@ public class InstallationPlacementController : MonoBehaviour
             position.z += averageOffset.y;
         }
 
-        position.y += verticalOffset;
         return position;
     }
 
     private List<Vector2Int> GetPlacementVisualLocalOffsets(MapObject footprintSource, int quarterTurns)
     {
+        if (ShouldUseMapSizeFootprint(footprintSource))
+        {
+            return GetMapSizeFootprintLocalOffsets(footprintSource, quarterTurns);
+        }
+
         if (TryGetRectGridObjectLocalOffsets(footprintSource, quarterTurns, out List<Vector2Int> objectOffsets)
             && objectOffsets.Count > 0)
         {
@@ -14926,43 +21742,11 @@ public class InstallationPlacementController : MonoBehaviour
     private bool TryGetRectGridObjectLocalOffsets(MapObject footprintSource, int quarterTurns, out List<Vector2Int> objectOffsets)
     {
         objectOffsets = null;
-        if (!TryGetRectGridFootprintSettings(footprintSource, out _, out _, out Vector2Int objectAnchorCell))
-        {
-            return false;
-        }
-
-        InputOutputModule inputOutputModule = footprintSource as InputOutputModule;
-        if (inputOutputModule == null)
-        {
-            inputOutputModule = footprintSource.GetComponent<InputOutputModule>();
-        }
-
-        if (inputOutputModule == null)
-        {
-            inputOutputModule = footprintSource.GetComponentInChildren<InputOutputModule>(true);
-        }
-
-        if (inputOutputModule == null)
-        {
-            return false;
-        }
-
-        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
-        objectOffsets = new List<Vector2Int>();
-
-        for (int i = 0; i < placements.Count; i++)
-        {
-            InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType != InputOutputModule.RectGridBlockType.Object)
-            {
-                continue;
-            }
-
-            Vector2Int localOffset = new Vector2Int(placement.x - objectAnchorCell.x, placement.y - objectAnchorCell.y);
-            objectOffsets.Add(RotateFootprintOffset(localOffset, quarterTurns));
-        }
-
-        return objectOffsets.Count > 0;
+        return TryGetRectGridBlockLocalOffsets(
+            footprintSource,
+            quarterTurns,
+            InputOutputModule.RectGridBlockType.Object,
+            out objectOffsets);
     }
 
     private bool IsPreviewObjectCell(MapObject preview, Block block)
@@ -14972,7 +21756,10 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        List<Vector2Int> visualCoordinates = GetPlacementVisualCoordinates(anchorCoordinate, preview, GetPreviewQuarterTurns(preview));
+        List<Vector2Int> visualCoordinates = GetPlacementVisualCoordinates(
+            anchorCoordinate,
+            ResolveInstallPreviewPlacementSource(preview),
+            GetPreviewAreaQuarterTurns(preview));
         for (int i = 0; i < visualCoordinates.Count; i++)
         {
             if (visualCoordinates[i] == block.Coordinate)
@@ -15025,6 +21812,16 @@ public class InstallationPlacementController : MonoBehaviour
         if (installationObject == null)
         {
             return;
+        }
+
+        if (installationObject is Wall installedFence)
+        {
+            RemoveInstalledFenceVariantPreview(installedFence);
+        }
+
+        if (installationObject is Pipe installedPipe)
+        {
+            RemoveInstalledPipeVariantPreview(installedPipe);
         }
 
         if (terrain != null)
@@ -15261,21 +22058,25 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsPointerOverBlockingUi(Vector2 pointerPosition)
     {
-        if (EventSystem.current == null)
+        EventSystem currentEventSystem = EventSystem.current;
+        if (currentEventSystem == null)
         {
             return false;
         }
 
-        PointerEventData pointerData = new PointerEventData(EventSystem.current)
+        if (pointerRaycastEventData == null || pointerRaycastEventSystem != currentEventSystem)
         {
-            position = pointerPosition
-        };
+            pointerRaycastEventSystem = currentEventSystem;
+            pointerRaycastEventData = new PointerEventData(currentEventSystem);
+        }
 
-        List<RaycastResult> results = new List<RaycastResult>();
-        EventSystem.current.RaycastAll(pointerData, results);
-        for (int i = 0; i < results.Count; i++)
+        pointerRaycastEventData.Reset();
+        pointerRaycastEventData.position = pointerPosition;
+        pointerRaycastResults.Clear();
+        currentEventSystem.RaycastAll(pointerRaycastEventData, pointerRaycastResults);
+        for (int i = 0; i < pointerRaycastResults.Count; i++)
         {
-            GameObject hitObject = results[i].gameObject;
+            GameObject hitObject = pointerRaycastResults[i].gameObject;
             if (IsBlockingButtonObject(hitObject))
             {
                 return true;
@@ -15302,6 +22103,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ClearInstallPreview()
     {
+        InvalidateInstallPreviewMoveCache();
         RefundAllInstallPreviewReservations();
         RemoveInstalledFenceVariantPreviews(null);
         RemoveInstalledPipeVariantPreviews(null);
@@ -15320,7 +22122,7 @@ public class InstallationPlacementController : MonoBehaviour
         else
         {
             SetInstallGridVisible(false);
-            installGridRefreshTimer = 0f;
+            ResetInstallGridRefreshState();
         }
 
         CleanupInstallPreviewReferences();

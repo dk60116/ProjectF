@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_9_Charcoal
   m_EditorClassIdentifier: 
   itemName: Charcoal
-  id: 8
+  id: 11
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 984c040f3a6583b4b980d2dabf30525a, type: 2}
   portableMat: {fileID: 2100000, guid: 18b6e63bb38afe440a0d47b49fdee14d, type: 2}
@@ -22,6 +22,8 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
   energyType: 1
   energyAmount: 30
   useEnergyType: 0

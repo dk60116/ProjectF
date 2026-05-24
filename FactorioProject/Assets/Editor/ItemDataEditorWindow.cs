@@ -22,7 +22,14 @@ public class ItemDataEditorWindow : EditorWindow
         new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.Object, "Object", "Object", new Color(0.35f, 0.45f, 0.62f, 1f)),
         new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.InputEnergy, "Input Energy", "Input\nEnergy", new Color(0.55f, 0.44f, 0.18f, 1f)),
         new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.InputItem, "Input Item", "Input\nItem", new Color(0.23f, 0.48f, 0.32f, 1f)),
-        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.Output, "Output", "Output", new Color(0.48f, 0.28f, 0.28f, 1f))
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.Output, "Output", "Output", new Color(0.48f, 0.28f, 0.28f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.PipeInputEnergy, "Pipe Input Energy", "Pipe\nEnergy", new Color(0.35f, 0.5f, 0.72f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.PipeInputItem, "Pipe Input Item", "Pipe\nInput", new Color(0.18f, 0.52f, 0.5f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.PipeOutputItem, "Pipe Output Item", "Pipe\nOutput", new Color(0.54f, 0.34f, 0.55f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.PipeInput, "Pipe Input", "Pipe\nPass", new Color(0.22f, 0.58f, 0.68f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.DoubleEnergy, "Double Energy", "Double\nEnergy", new Color(0.68f, 0.56f, 0.2f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.DoubleInputItem, "Double Input Item", "Double\nInput", new Color(0.28f, 0.62f, 0.38f, 1f)),
+        new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.DoublePipeOutputItem, "Double Pipe Output Item", "Double\nOutput", new Color(0.62f, 0.36f, 0.36f, 1f))
     };
 
     private Vector2 listScroll;
@@ -73,6 +80,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int size;
         public bool itemFilter;
         public int capacity = -1;
+        public bool storesFluid;
+        public float fluidStorageLiters;
         public float craftingDurationSeconds = -1f;
         public float craftingTime = -1f;
         public string energyType;
@@ -90,6 +99,7 @@ public class ItemDataEditorWindow : EditorWindow
         public float workableFocusRadius = -1f;
         public int workableRangeCells = -1;
         public float conveyorSpeed = -1f;
+        public float waterLitersPerSecond = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
         public string mapFilter;
@@ -697,6 +707,8 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty sizeProperty = serializedObject.FindProperty("size");
         SerializedProperty itemFilterProperty = serializedObject.FindProperty("itemFilter");
         SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
+        SerializedProperty storesFluidProperty = serializedObject.FindProperty("storesFluid");
+        SerializedProperty fluidStorageLitersProperty = serializedObject.FindProperty("fluidStorageLiters");
         SerializedProperty energyTypeProperty = serializedObject.FindProperty("energyType");
         SerializedProperty energyAmountProperty = serializedObject.FindProperty("energyAmount");
         SerializedProperty useEnergyTypeProperty = serializedObject.FindProperty("useEnergyType");
@@ -743,6 +755,24 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             EditorGUILayout.PropertyField(capacityProperty, new GUIContent("Capacity"));
+        }
+        if (storesFluidProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(storesFluidProperty, new GUIContent("Store Fluid"));
+            if (storesFluidProperty.boolValue)
+            {
+                if (fluidStorageLitersProperty != null)
+                {
+                    fluidStorageLitersProperty.floatValue = Mathf.Max(0f, fluidStorageLitersProperty.floatValue);
+                    EditorGUILayout.PropertyField(fluidStorageLitersProperty, new GUIContent("Fluid Storage Liters"));
+                }
+            }
+            else if (fluidStorageLitersProperty != null)
+            {
+                fluidStorageLitersProperty.floatValue = 0f;
+            }
         }
         if (craftingDurationSecondsProperty != null)
         {
@@ -968,6 +998,11 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
+        if (mapObject is Pump)
+        {
+            DrawPumpFields(mapObjectSerializedObject);
+        }
+
         if (mapObject is InstallationObject)
         {
             SerializedProperty mapFilterProperty = mapObjectSerializedObject.FindProperty("mapFilter");
@@ -1025,6 +1060,25 @@ public class ItemDataEditorWindow : EditorWindow
 
             Repaint();
         }
+    }
+
+    private static void DrawPumpFields(SerializedObject mapObjectSerializedObject)
+    {
+        if (mapObjectSerializedObject == null)
+        {
+            return;
+        }
+
+        SerializedProperty waterLitersPerSecondProperty = mapObjectSerializedObject.FindProperty("waterLitersPerSecond");
+        if (waterLitersPerSecondProperty == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Pump", EditorStyles.miniBoldLabel);
+        waterLitersPerSecondProperty.floatValue = Mathf.Max(0f, waterLitersPerSecondProperty.floatValue);
+        EditorGUILayout.PropertyField(waterLitersPerSecondProperty, new GUIContent("Water Liters / s"));
     }
 
     private void DrawPlacementCenterGridFields(
@@ -1593,11 +1647,21 @@ public class ItemDataEditorWindow : EditorWindow
 
         GUILayout.Space(8f);
         EditorGUILayout.LabelField("Blocks", EditorStyles.miniBoldLabel);
-        EditorGUILayout.BeginHorizontal();
         for (int i = 0; i < RectGridPaletteEntries.Length; i++)
         {
+            if (i % 4 == 0)
+            {
+                if (i > 0)
+                {
+                    EditorGUILayout.EndHorizontal();
+                    GUILayout.Space(spacing);
+                }
+
+                EditorGUILayout.BeginHorizontal();
+            }
+
             DrawRectGridPaletteBlock(RectGridPaletteEntries[i], RectGridPaletteBlockWidth, cellSize);
-            if (i < RectGridPaletteEntries.Length - 1)
+            if (i % 4 < 3 && i < RectGridPaletteEntries.Length - 1)
             {
                 GUILayout.Space(spacing);
             }
@@ -1763,7 +1827,7 @@ public class ItemDataEditorWindow : EditorWindow
         InputOutputModule.RectGridBlockType blockType,
         Vector2Int cell)
     {
-        if (blockType == InputOutputModule.RectGridBlockType.InputItem)
+        if (InputOutputModule.IsInputItemBlockType(blockType))
         {
             int numberedIndex = GetInputItemBlockIndex(inputOutputModule, cell);
             return numberedIndex > 0
@@ -1788,7 +1852,7 @@ public class ItemDataEditorWindow : EditorWindow
         for (int i = 0; i < placements.Count; i++)
         {
             InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType != InputOutputModule.RectGridBlockType.InputItem)
+            if (!InputOutputModule.IsInputItemBlockType(placement.blockType))
             {
                 continue;
             }
@@ -2498,6 +2562,8 @@ public class ItemDataEditorWindow : EditorWindow
             size = Mathf.Max(0, (int)definition.size),
             itemFilter = definition.itemFilter,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
+            storesFluid = definition.storesFluid,
+            fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
             craftingDurationSeconds = definition.CraftingDurationSeconds,
             craftingTime = definition.CraftingDurationSeconds,
             energyType = definition.energyType.ToString(),
@@ -2552,6 +2618,11 @@ public class ItemDataEditorWindow : EditorWindow
             if (conveyorBelt != null)
             {
                 entry.conveyorSpeed = conveyorBelt.ConveyorSpeed;
+            }
+
+            if (definition.mapObject is Pump pump)
+            {
+                entry.waterLitersPerSecond = pump.WaterLitersPerSecond;
             }
 
             if (definition.mapObject is InstallationObject installationObject)
@@ -2759,6 +2830,8 @@ public class ItemDataEditorWindow : EditorWindow
         {
             definition.capacity = Mathf.Max(1, entry.capacity);
         }
+        definition.storesFluid = entry.storesFluid;
+        definition.fluidStorageLiters = entry.storesFluid ? Mathf.Max(0f, entry.fluidStorageLiters) : 0f;
         float savedCraftingDuration = entry.craftingDurationSeconds > 0f ? entry.craftingDurationSeconds : entry.craftingTime;
         if (savedCraftingDuration > 0f)
         {
@@ -2939,6 +3012,15 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 conveyorSpeedProperty.floatValue = Mathf.Max(0f, entry.conveyorSpeed);
                 shouldSyncConveyorVariantSpeed = true;
+            }
+        }
+
+        if (entry.waterLitersPerSecond >= 0f && mapObject is Pump)
+        {
+            SerializedProperty waterLitersPerSecondProperty = serializedMapObject.FindProperty("waterLitersPerSecond");
+            if (waterLitersPerSecondProperty != null)
+            {
+                waterLitersPerSecondProperty.floatValue = Mathf.Max(0f, entry.waterLitersPerSecond);
             }
         }
 

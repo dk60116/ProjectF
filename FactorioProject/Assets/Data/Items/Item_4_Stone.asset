@@ -23,6 +23,8 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

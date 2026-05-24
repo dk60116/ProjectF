@@ -127,6 +127,12 @@ public class ObjectInfoPanel : MonoBehaviour
             ShowInputOutputModuleInfo(inputOutputModule, underlyingResource);
             return;
         }
+
+        if (mapObject is InstallationObject installationObject && installationObject.CanStoreFluid)
+        {
+            ShowInstallationObjectInfo(installationObject, underlyingResource);
+            return;
+        }
     }
 
     private void RefreshFocusedInfoPanels(MapObject mapObject, Resource underlyingResource)
@@ -319,6 +325,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowInputOutputModule(inputOutputModule, underlyingResource);
+    }
+
+    private void ShowInstallationObjectInfo(InstallationObject installationObject, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowInstallationObject(installationObject, underlyingResource);
     }
 
     private static Resource ResolveUnderlyingResource(MapObject mapObject)

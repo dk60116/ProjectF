@@ -3,7 +3,17 @@ using UnityEngine;
 
 public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 {
+    private const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
+    private static readonly Vector2Int[] FluidCardinalDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeGridCoordinates
+        = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
+    private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
     private static readonly HashSet<InputOutputModule> activeRuntimeModules
         = new HashSet<InputOutputModule>();
@@ -25,7 +35,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         Object = 1,
         InputEnergy = 2,
         InputItem = 3,
-        Output = 4
+        Output = 4,
+        PipeInputEnergy = 5,
+        PipeInputItem = 6,
+        PipeOutputItem = 7,
+        DoubleEnergy = 8,
+        DoubleInputItem = 9,
+        DoublePipeOutputItem = 10,
+        PipeInput = 11
     }
 
     public enum RectGridDirection
@@ -109,6 +126,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         public List<Vector2Int> inputEnergyCoordinates = new List<Vector2Int>();
         public List<PersistentInputItemAreaState> inputItemAreas = new List<PersistentInputItemAreaState>();
         public List<Vector2Int> outputCoordinates = new List<Vector2Int>();
+        public List<Vector2Int> pipeInputCoordinates = new List<Vector2Int>();
         public List<Vector2Int> gridCoordinates = new List<Vector2Int>();
         public List<Vector2Int> focusCoordinates = new List<Vector2Int>();
         public float storedEnergy;
@@ -128,6 +146,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                 inputEnergyCoordinates = new List<Vector2Int>(inputEnergyCoordinates ?? new List<Vector2Int>()),
                 inputItemAreas = new List<PersistentInputItemAreaState>(inputItemAreas ?? new List<PersistentInputItemAreaState>()),
                 outputCoordinates = new List<Vector2Int>(outputCoordinates ?? new List<Vector2Int>()),
+                pipeInputCoordinates = new List<Vector2Int>(pipeInputCoordinates ?? new List<Vector2Int>()),
                 gridCoordinates = new List<Vector2Int>(gridCoordinates ?? new List<Vector2Int>()),
                 focusCoordinates = new List<Vector2Int>(focusCoordinates ?? new List<Vector2Int>()),
                 storedEnergy = storedEnergy,
@@ -182,6 +201,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     [SerializeField]
     private List<Vector2Int> runtimeOutputCoordinates = new List<Vector2Int>();
     [SerializeField]
+    private List<Vector2Int> runtimePipeInputCoordinates = new List<Vector2Int>();
+    [SerializeField]
     private List<Vector2Int> runtimeGridCoordinates = new List<Vector2Int>();
     [SerializeField]
     private List<Vector2Int> runtimeFocusCoordinates = new List<Vector2Int>();
@@ -211,6 +232,10 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private DefaultGauge activeCraftProgressGauge;
     private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
     private readonly List<Vector2Int> objectInfoInputAreaCoordinates = new List<Vector2Int>();
+    private readonly Queue<Vector2Int> connectedFluidSearchQueue = new Queue<Vector2Int>(32);
+    private readonly HashSet<Vector2Int> connectedFluidSearchVisited = new HashSet<Vector2Int>();
+    private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
+    private readonly List<Vector2Int> connectedFluidSeedCoordinates = new List<Vector2Int>(8);
     private bool energyGaugeRenderersResolved;
 
     public IReadOnlyList<ItemIoEntry> InputList
@@ -291,14 +316,18 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     public void ConfigureRuntimeAreas(
         IReadOnlyList<Vector2Int> inputEnergyCoordinates,
         IReadOnlyList<InputOutputModuleItemAreaBinding> inputItemBindings,
-        IReadOnlyList<Vector2Int> outputCoordinates)
+        IReadOnlyList<Vector2Int> outputCoordinates,
+        IReadOnlyList<Vector2Int> pipeInputCoordinates)
     {
+        UnregisterRuntimeAreaCoordinates();
         runtimeInputEnergyCoordinates.Clear();
         runtimeInputItemAreas.Clear();
         runtimeOutputCoordinates.Clear();
+        runtimePipeInputCoordinates.Clear();
 
         AddUniqueCoordinates(inputEnergyCoordinates, runtimeInputEnergyCoordinates);
         AddUniqueCoordinates(outputCoordinates, runtimeOutputCoordinates);
+        AddUniqueCoordinates(pipeInputCoordinates, runtimePipeInputCoordinates);
 
         if (inputItemBindings != null)
         {
@@ -314,6 +343,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
         }
 
+        RegisterRuntimeAreaCoordinates();
         cachedTerrain = null;
     }
 
@@ -349,6 +379,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         AddUniqueCoordinates(runtimeInputEnergyCoordinates, state.inputEnergyCoordinates);
         AddUniqueCoordinates(runtimeOutputCoordinates, state.outputCoordinates);
+        AddUniqueCoordinates(runtimePipeInputCoordinates, state.pipeInputCoordinates);
         AddUniqueCoordinates(runtimeGridCoordinates, state.gridCoordinates);
         AddUniqueCoordinates(runtimeFocusCoordinates, state.focusCoordinates);
 
@@ -368,13 +399,16 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
+        UnregisterRuntimeAreaCoordinates();
         runtimeInputEnergyCoordinates.Clear();
         runtimeInputItemAreas.Clear();
         runtimeOutputCoordinates.Clear();
+        runtimePipeInputCoordinates.Clear();
         runtimeFocusCoordinates.Clear();
 
         AddUniqueCoordinates(state.inputEnergyCoordinates, runtimeInputEnergyCoordinates);
         AddUniqueCoordinates(state.outputCoordinates, runtimeOutputCoordinates);
+        AddUniqueCoordinates(state.pipeInputCoordinates, runtimePipeInputCoordinates);
         AddUniqueCoordinates(state.focusCoordinates, runtimeFocusCoordinates);
 
         if (state.inputItemAreas != null)
@@ -391,6 +425,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
         }
 
+        RegisterRuntimeAreaCoordinates();
         ConfigureRuntimeGridCoordinates(state.gridCoordinates);
 
         storedEnergy = Mathf.Max(0f, state.storedEnergy);
@@ -414,10 +449,12 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     public override void PrepareForPool()
     {
         UnregisterRuntimeGridCoordinates();
+        UnregisterRuntimeAreaCoordinates();
         ReleaseEnergyGaugeVisual();
         runtimeInputEnergyCoordinates.Clear();
         runtimeInputItemAreas.Clear();
         runtimeOutputCoordinates.Clear();
+        runtimePipeInputCoordinates.Clear();
         runtimeGridCoordinates.Clear();
         runtimeFocusCoordinates.Clear();
         storedEnergy = 0f;
@@ -459,10 +496,70 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
+    public static bool CollectModulesAtRuntimeGridCoordinate(Vector2Int coordinate, List<InputOutputModule> results)
+    {
+        if (results == null
+            || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        bool added = false;
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || results.Contains(candidate))
+            {
+                continue;
+            }
+
+            results.Add(candidate);
+            added = true;
+        }
+
+        return added;
+    }
+
+    public static bool TryGetModuleAtRuntimeRectGridBlockType(
+        Vector2Int coordinate,
+        RectGridBlockType blockType,
+        out InputOutputModule module)
+    {
+        module = null;
+        if (blockType == RectGridBlockType.None
+            || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!candidate.ContainsRuntimeRectGridBlockType(coordinate, blockType))
+            {
+                continue;
+            }
+
+            module = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
     public static bool TryGetModuleAtRuntimeAreaCoordinate(Vector2Int coordinate, out InputOutputModule module)
     {
         module = null;
-        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+        if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
             || modules == null
             || modules.Count <= 0)
         {
@@ -479,6 +576,161 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
 
             module = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    public static bool CollectModulesAtRuntimeAreaCoordinate(Vector2Int coordinate, List<InputOutputModule> results)
+    {
+        if (results == null
+            || !registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null
+            || modules.Count <= 0)
+        {
+            return false;
+        }
+
+        bool added = false;
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.ContainsRuntimeAreaCoordinate(coordinate)
+                || results.Contains(candidate))
+            {
+                continue;
+            }
+
+            results.Add(candidate);
+            added = true;
+        }
+
+        return added;
+    }
+
+    public static bool TryGetRuntimePipeFluidStorageAtCoordinate(
+        Vector2Int coordinate,
+        InputOutputModule excludedModule,
+        out InstallationObject storage)
+    {
+        return TryGetRuntimePipeFluidStorageAtCoordinate(
+            coordinate,
+            excludedModule,
+            true,
+            out storage);
+    }
+
+    public static bool TryGetRuntimePipeFluidStorageAtCoordinate(
+        Vector2Int coordinate,
+        InputOutputModule excludedModule,
+        bool requireStorageSpace,
+        out InstallationObject storage)
+    {
+        storage = null;
+        if (TryGetRuntimePipeFluidStorageAtCoordinate(
+                registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+                    ? modules
+                    : null,
+                coordinate,
+                excludedModule,
+                requireStorageSpace,
+                null,
+                out storage))
+        {
+            return true;
+        }
+
+        return TryGetRuntimePipeFluidStorageAtCoordinate(
+            activeRuntimeModules,
+            coordinate,
+            excludedModule,
+            requireStorageSpace,
+            null,
+            out storage);
+    }
+
+    public static bool TryGetRuntimePipeSourceAtCoordinate(Vector2Int coordinate, out Pump pump)
+    {
+        pump = null;
+        if (TryGetRuntimePipeSourceAtCoordinate(
+                registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+                    ? modules
+                    : null,
+                coordinate,
+                null,
+                out pump))
+        {
+            return true;
+        }
+
+        return TryGetRuntimePipeSourceAtCoordinate(
+            activeRuntimeModules,
+            coordinate,
+            null,
+            out pump);
+    }
+
+    private static bool TryGetRuntimePipeFluidStorageAtCoordinate(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        InputOutputModule excludedModule,
+        bool requireStorageSpace,
+        ISet<InputOutputModule> visitedModules,
+        out InstallationObject storage)
+    {
+        storage = null;
+        if (modules == null)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || candidate == excludedModule
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.ContainsRuntimePipeAreaBlockCoordinate(coordinate)
+                || !candidate.CanStoreFluid
+                || (requireStorageSpace && !candidate.HasFluidStorageSpace)
+                || (visitedModules != null && !visitedModules.Add(candidate)))
+            {
+                continue;
+            }
+
+            storage = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetRuntimePipeSourceAtCoordinate(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ISet<InputOutputModule> visitedModules,
+        out Pump pump)
+    {
+        pump = null;
+        if (modules == null)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || (visitedModules != null && !visitedModules.Add(candidate))
+                || !(candidate is Pump candidatePump)
+                || !candidate.ContainsRuntimePipeAreaBlockCoordinate(coordinate)
+                || !candidate.ContainsRuntimeOutputCoordinate(coordinate))
+            {
+                continue;
+            }
+
+            pump = candidatePump;
             return true;
         }
 
@@ -885,7 +1137,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         if (energyTypes == null
             || runtimeInputEnergyCoordinates == null
             || runtimeInputEnergyCoordinates.Count <= 0
-            || !ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.InputEnergy))
+            || !ContainsRuntimeInputEnergyCoordinate(coordinate))
         {
             return false;
         }
@@ -908,6 +1160,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         EnsurePairData();
+        if (CanStoreFluid)
+        {
+            PullFluidFromConnectedStorage(deltaTime);
+        }
+
         if (hasActiveCraft)
         {
             UpdateActiveCraft(deltaTime);
@@ -920,11 +1177,360 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         UpdateEnergyGaugeVisual();
     }
 
+    private void PullFluidFromConnectedStorage(float deltaTime)
+    {
+        if (deltaTime <= 0f || !CanStoreFluid || !HasFluidStorageSpace)
+        {
+            return;
+        }
+
+        if (!TryFindConnectedFluidSource(out InstallationObject sourceStorage)
+            || sourceStorage == null)
+        {
+            return;
+        }
+
+        float transferLiters = Mathf.Min(
+            AvailableFluidStorageLiters,
+            sourceStorage.StoredFluidLiters,
+            ConnectedFluidStorageTransferLitersPerSecond * deltaTime);
+        if (transferLiters <= 0.0001f
+            || !sourceStorage.TryConsumeFluidLiters(transferLiters, out float consumedLiters)
+            || consumedLiters <= 0.0001f)
+        {
+            return;
+        }
+
+        if (TryAddFluidLiters(consumedLiters, out float acceptedLiters)
+            && acceptedLiters + 0.0001f >= consumedLiters)
+        {
+            return;
+        }
+
+        float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
+        if (rejectedLiters > 0.0001f)
+        {
+            sourceStorage.TryAddFluidLiters(rejectedLiters, out _);
+        }
+    }
+
+    private bool TryFindConnectedFluidSource(out InstallationObject sourceStorage)
+    {
+        sourceStorage = null;
+        connectedFluidSearchQueue.Clear();
+        connectedFluidSearchVisited.Clear();
+        connectedFluidStorageCandidates.Clear();
+        connectedFluidSeedCoordinates.Clear();
+
+        CollectRuntimePipeAreaCoordinates(connectedFluidSeedCoordinates);
+        if (connectedFluidSeedCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < connectedFluidSeedCoordinates.Count; i++)
+        {
+            EnqueueConnectedFluidSearchCoordinate(connectedFluidSeedCoordinates[i]);
+        }
+
+        float currentFillRatio = GetFluidStorageFillRatio(this);
+        float bestFillRatio = currentFillRatio;
+        while (connectedFluidSearchQueue.Count > 0)
+        {
+            Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
+            bool hasFluidStorageBody = TryResolveConnectedFluidStorageBodyAtCoordinate(
+                coordinate,
+                out InstallationObject fluidStorage);
+            if (!hasFluidStorageBody && hasPipe)
+            {
+                TryResolveConnectedFluidStorageAtCoordinate(
+                    coordinate,
+                    out fluidStorage);
+            }
+
+            ConsiderConnectedFluidSource(
+                fluidStorage,
+                currentFillRatio,
+                ref sourceStorage,
+                ref bestFillRatio);
+
+            if (!hasPipe && !hasFluidStorageBody)
+            {
+                continue;
+            }
+
+            for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int direction = FluidCardinalDirections[directionIndex];
+                if (hasPipe && !pipe.HasConnectionTowards(pipeRotation, direction))
+                {
+                    continue;
+                }
+
+                Vector2Int nextCoordinate = coordinate + direction;
+                if (!TryGetConnectedFluidNodeAtCoordinate(
+                        nextCoordinate,
+                        -direction,
+                        out InstallationObject nextStorage,
+                        out bool canContinueRoute))
+                {
+                    continue;
+                }
+
+                ConsiderConnectedFluidSource(
+                    nextStorage,
+                    currentFillRatio,
+                    ref sourceStorage,
+                    ref bestFillRatio);
+
+                if (canContinueRoute)
+                {
+                    EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
+                }
+            }
+        }
+
+        return sourceStorage != null;
+    }
+
+    private void CollectRuntimePipeAreaCoordinates(List<Vector2Int> coordinates)
+    {
+        if (coordinates == null)
+        {
+            return;
+        }
+
+        int originalCount = coordinates.Count;
+        AddRuntimePipeAreaCoordinates(runtimeInputEnergyCoordinates, coordinates);
+        if (runtimeInputItemAreas != null)
+        {
+            for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+            {
+                AddRuntimePipeAreaCoordinate(runtimeInputItemAreas[i].coordinate, coordinates);
+            }
+        }
+
+        AddRuntimePipeAreaCoordinates(runtimeOutputCoordinates, coordinates);
+        AddRuntimePipeAreaCoordinates(runtimePipeInputCoordinates, coordinates);
+
+        if (CanStoreFluid && coordinates.Count == originalCount)
+        {
+            AddRuntimeFluidStoragePipeNodeCoordinates(RuntimeOccupiedCoordinates, coordinates);
+        }
+    }
+
+    private static void AddRuntimeFluidStoragePipeNodeCoordinates(
+        IReadOnlyList<Vector2Int> source,
+        List<Vector2Int> target)
+    {
+        if (source == null || target == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            Vector2Int coordinate = source[i];
+            if (!target.Contains(coordinate))
+            {
+                target.Add(coordinate);
+            }
+        }
+    }
+
+    private void AddRuntimePipeAreaCoordinates(IReadOnlyList<Vector2Int> source, List<Vector2Int> target)
+    {
+        if (source == null || target == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            AddRuntimePipeAreaCoordinate(source[i], target);
+        }
+    }
+
+    private void AddRuntimePipeAreaCoordinate(Vector2Int coordinate, List<Vector2Int> target)
+    {
+        if (target == null
+            || !ContainsRuntimePipeAreaBlockCoordinate(coordinate)
+            || target.Contains(coordinate))
+        {
+            return;
+        }
+
+        target.Add(coordinate);
+    }
+
+    private bool TryGetConnectedFluidNodeAtCoordinate(
+        Vector2Int coordinate,
+        Vector2Int directionToPrevious,
+        out InstallationObject storage,
+        out bool canContinueRoute)
+    {
+        storage = null;
+        canContinueRoute = false;
+
+        if (TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation))
+        {
+            if (!pipe.HasConnectionTowards(pipeRotation, directionToPrevious))
+            {
+                return false;
+            }
+
+            TryResolveConnectedFluidStorageAtCoordinate(coordinate, out storage);
+            canContinueRoute = true;
+            return true;
+        }
+
+        if (TryResolveConnectedFluidStorageBodyAtCoordinate(coordinate, out storage))
+        {
+            canContinueRoute = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetConnectedPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe, out Quaternion pipeRotation)
+    {
+        pipe = null;
+        pipeRotation = Quaternion.identity;
+        if (!TryGetLoadedBlock(coordinate, out Block block)
+            || block == null
+            || !(block.MapObject is Pipe candidatePipe)
+            || !candidatePipe.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        pipe = candidatePipe;
+        pipeRotation = candidatePipe.transform.rotation;
+        return true;
+    }
+
+    private bool TryResolveConnectedFluidStorageAtCoordinate(
+        Vector2Int coordinate,
+        out InstallationObject storage)
+    {
+        if (TryGetRuntimePipeFluidStorageAtCoordinate(coordinate, this, false, out storage))
+        {
+            return true;
+        }
+
+        storage = null;
+        if (!TryGetLoadedBlock(coordinate, out Block block)
+            || block == null
+            || !(block.MapObject is InstallationObject installationObject)
+            || installationObject == this
+            || installationObject is Pipe
+            || installationObject is Pump
+            || !installationObject.gameObject.activeInHierarchy
+            || !installationObject.CanStoreFluid)
+        {
+            return false;
+        }
+
+        storage = installationObject;
+        return true;
+    }
+
+    private bool TryResolveConnectedFluidStorageBodyAtCoordinate(
+        Vector2Int coordinate,
+        out InstallationObject storage)
+    {
+        storage = null;
+        if (!TryGetLoadedBlock(coordinate, out Block block)
+            || block == null
+            || !(block.MapObject is InstallationObject installationObject)
+            || installationObject == this
+            || installationObject is Pipe
+            || installationObject is Pump
+            || !installationObject.gameObject.activeInHierarchy
+            || !installationObject.CanStoreFluid
+            || !ContainsRuntimeOccupiedCoordinate(installationObject, coordinate))
+        {
+            return false;
+        }
+
+        storage = installationObject;
+        return true;
+    }
+
+    private static bool ContainsRuntimeOccupiedCoordinate(InstallationObject installationObject, Vector2Int coordinate)
+    {
+        IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject != null
+            ? installationObject.RuntimeOccupiedCoordinates
+            : null;
+        if (occupiedCoordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (occupiedCoordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ConsiderConnectedFluidSource(
+        InstallationObject storage,
+        float currentFillRatio,
+        ref InstallationObject sourceStorage,
+        ref float bestFillRatio)
+    {
+        if (storage == null
+            || storage == this
+            || storage.StoredFluidLiters <= 0.0001f
+            || !connectedFluidStorageCandidates.Add(storage))
+        {
+            return;
+        }
+
+        float fillRatio = GetFluidStorageFillRatio(storage);
+        if (fillRatio <= currentFillRatio + 0.001f || fillRatio <= bestFillRatio)
+        {
+            return;
+        }
+
+        sourceStorage = storage;
+        bestFillRatio = fillRatio;
+    }
+
+    private void EnqueueConnectedFluidSearchCoordinate(Vector2Int coordinate)
+    {
+        if (connectedFluidSearchVisited.Add(coordinate))
+        {
+            connectedFluidSearchQueue.Enqueue(coordinate);
+        }
+    }
+
+    private static float GetFluidStorageFillRatio(InstallationObject storage)
+    {
+        if (storage == null)
+        {
+            return 0f;
+        }
+
+        float capacity = Mathf.Max(0f, storage.FluidStorageCapacityLiters);
+        return capacity > 0.0001f
+            ? Mathf.Clamp01(storage.StoredFluidLiters / capacity)
+            : 0f;
+    }
+
     protected override void OnEnable()
     {
         base.OnEnable();
         activeRuntimeModules.Add(this);
         RegisterRuntimeGridCoordinates();
+        RegisterRuntimeAreaCoordinates();
         MapObjectTickManager.RegisterUpdateTick(this);
     }
 
@@ -932,6 +1538,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     {
         MapObjectTickManager.UnregisterUpdateTick(this);
         UnregisterRuntimeGridCoordinates();
+        UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
         base.OnDisable();
@@ -941,6 +1548,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     {
         MapObjectTickManager.UnregisterUpdateTick(this);
         UnregisterRuntimeGridCoordinates();
+        UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
     }
@@ -998,6 +1606,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate)
     {
         return ContainsCoordinate(runtimeOutputCoordinates, coordinate);
+    }
+
+    private bool ContainsRuntimePipeInputCoordinate(Vector2Int coordinate)
+    {
+        return ContainsCoordinate(runtimePipeInputCoordinates, coordinate);
     }
 
     protected virtual bool AppendOutputItemIds(ISet<int> outputItemIds)
@@ -1107,12 +1720,31 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
+    public bool TryGetOutputRectGridBlockCell(out Vector2Int cell)
+    {
+        EnsureRectGridPlacementData();
+        for (int i = 0; i < rectGridPlacements.Count; i++)
+        {
+            RectGridBlockPlacement placement = rectGridPlacements[i];
+            if (!IsOutputBlockType(placement.blockType))
+            {
+                continue;
+            }
+
+            cell = new Vector2Int(placement.x, placement.y);
+            return true;
+        }
+
+        cell = default;
+        return false;
+    }
+
     public bool TryGetInitialOutputDirection(out RectGridDirection direction)
     {
         EnsureRectGridPlacementData();
         direction = RectGridDirection.Right;
         if (!TryGetPrimaryObjectCell(out Vector2Int objectCell)
-            || !TryGetRectGridBlockCell(RectGridBlockType.Output, out Vector2Int outputCell))
+            || !TryGetOutputRectGridBlockCell(out Vector2Int outputCell))
         {
             return false;
         }
@@ -1132,7 +1764,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         EnsureRectGridPlacementData();
         direction = RectGridDirection.Right;
         if (!TryGetPrimaryObjectCell(out Vector2Int objectCell)
-            || !TryGetRectGridBlockCell(RectGridBlockType.Output, out Vector2Int outputCell))
+            || !TryGetOutputRectGridBlockCell(out Vector2Int outputCell))
         {
             return false;
         }
@@ -1777,7 +2409,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         if (IsUniqueRectGridBlock(blockType))
         {
-            RemoveRectGridBlock(blockType);
+            RemoveUniqueRectGridBlockGroup(blockType);
         }
 
         if (blockType == RectGridBlockType.Object && GetRectGridObjectCount() >= GetMaxObjectBlockCount())
@@ -1917,7 +2549,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
                 objectCount++;
             }
-            else if (placement.blockType == RectGridBlockType.InputEnergy)
+            else if (IsInputEnergyBlockType(placement.blockType))
             {
                 if (hasInputEnergy)
                 {
@@ -1926,7 +2558,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
                 hasInputEnergy = true;
             }
-            else if (placement.blockType == RectGridBlockType.Output)
+            else if (IsOutputBlockType(placement.blockType))
             {
                 if (hasOutput)
                 {
@@ -1995,6 +2627,39 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
     }
 
+    private void RemoveUniqueRectGridBlockGroup(RectGridBlockType blockType)
+    {
+        if (IsInputEnergyBlockType(blockType))
+        {
+            RemoveRectGridBlocks(IsInputEnergyBlockType);
+            return;
+        }
+
+        if (IsOutputBlockType(blockType))
+        {
+            RemoveRectGridBlocks(IsOutputBlockType);
+            return;
+        }
+
+        RemoveRectGridBlock(blockType);
+    }
+
+    private void RemoveRectGridBlocks(System.Predicate<RectGridBlockType> predicate)
+    {
+        if (predicate == null)
+        {
+            return;
+        }
+
+        for (int i = rectGridPlacements.Count - 1; i >= 0; i--)
+        {
+            if (predicate(rectGridPlacements[i].blockType))
+            {
+                rectGridPlacements.RemoveAt(i);
+            }
+        }
+    }
+
     private void SetRectGridBlockInternal(int x, int y, RectGridBlockType blockType)
     {
         int placementIndex = FindRectGridPlacementIndex(x, y);
@@ -2020,8 +2685,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     private static bool IsUniqueRectGridBlock(RectGridBlockType blockType)
     {
-        return blockType == RectGridBlockType.InputEnergy
-            || blockType == RectGridBlockType.Output;
+        return IsInputEnergyBlockType(blockType)
+            || IsOutputBlockType(blockType);
     }
 
     private int GetRectGridObjectCount()
@@ -2362,7 +3027,10 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     protected bool TryResolveOutputBlock(int outputItemId, int outputCount, out Block targetBlock)
     {
         targetBlock = null;
-        if (outputItemId < 0 || outputCount <= 0 || runtimeOutputCoordinates.Count <= 0)
+        if (outputItemId < 0
+            || outputCount <= 0
+            || runtimeOutputCoordinates.Count <= 0
+            || IsFluidItemId(outputItemId))
         {
             return false;
         }
@@ -2549,7 +3217,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return cachedInstalledDefinition;
     }
 
-    private static ItemDefinition ResolveItemDefinition(int itemId)
+    public static ItemDefinition ResolveItemDefinition(int itemId)
     {
         if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
@@ -2572,6 +3240,23 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         return null;
+    }
+
+    public static bool IsFluidItemId(int itemId)
+    {
+        return IsFluidItemDefinition(ResolveItemDefinition(itemId));
+    }
+
+    public static bool IsFluidItemDefinition(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return false;
+        }
+
+        string itemName = definition.itemName;
+        return string.Equals(itemName, "Water", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "Steam", System.StringComparison.OrdinalIgnoreCase);
     }
 
     protected static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
@@ -2621,6 +3306,215 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         return false;
+    }
+
+    protected bool TryResolveFluidOutputStorage(int fluidItemId, int fluidLiters, out InstallationObject targetStorage)
+    {
+        targetStorage = null;
+        if (!IsFluidItemId(fluidItemId)
+            || fluidLiters <= 0
+            || runtimeOutputCoordinates == null
+            || runtimeOutputCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        connectedFluidSearchQueue.Clear();
+        connectedFluidSearchVisited.Clear();
+
+        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        {
+            EnqueueConnectedFluidSearchCoordinate(runtimeOutputCoordinates[i]);
+        }
+
+        while (connectedFluidSearchQueue.Count > 0)
+        {
+            Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            if (TryResolveFluidOutputStorageAtCoordinate(coordinate, fluidLiters, out targetStorage))
+            {
+                return true;
+            }
+
+            bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);
+            bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
+            bool hasFluidStorageBody = TryResolveConnectedFluidStorageBodyAtCoordinate(
+                coordinate,
+                out _);
+
+            if (!isOutputSeed && !hasPipe && !hasFluidStorageBody)
+            {
+                continue;
+            }
+
+            for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int direction = FluidCardinalDirections[directionIndex];
+                if (hasPipe && !pipe.HasConnectionTowards(pipeRotation, direction))
+                {
+                    continue;
+                }
+
+                Vector2Int nextCoordinate = coordinate + direction;
+                if (TryResolveFluidOutputStorageAtCoordinate(nextCoordinate, fluidLiters, out targetStorage))
+                {
+                    return true;
+                }
+
+                if (!TryGetConnectedFluidNodeAtCoordinate(
+                        nextCoordinate,
+                        -direction,
+                        out _,
+                        out bool canContinueRoute))
+                {
+                    continue;
+                }
+
+                if (canContinueRoute)
+                {
+                    EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    protected bool TryEmitFluidOutputToConnectedStorage(int fluidItemId, int fluidLiters)
+    {
+        if (!TryResolveFluidOutputStorage(fluidItemId, fluidLiters, out InstallationObject targetStorage)
+            || targetStorage == null
+            || !targetStorage.TryAddFluidLiters(fluidLiters, out float acceptedLiters))
+        {
+            return false;
+        }
+
+        return acceptedLiters + 0.0001f >= fluidLiters;
+    }
+
+    private bool TryResolveFluidOutputStorageAtCoordinate(
+        Vector2Int coordinate,
+        int fluidLiters,
+        out InstallationObject targetStorage)
+    {
+        targetStorage = null;
+        if (TryResolveConnectedFluidStorageBodyAtCoordinate(coordinate, out InstallationObject bodyStorage)
+            && CanUseFluidOutputStorage(bodyStorage, fluidLiters))
+        {
+            targetStorage = bodyStorage;
+            return true;
+        }
+
+        if (TryResolveConnectedFluidStorageAtCoordinate(coordinate, out InstallationObject areaStorage)
+            && CanUseFluidOutputStorage(areaStorage, fluidLiters))
+        {
+            targetStorage = areaStorage;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool CanUseFluidOutputStorage(InstallationObject storage, int fluidLiters)
+    {
+        return storage != null
+               && storage != this
+               && storage.CanStoreFluid
+               && storage.AvailableFluidStorageLiters + 0.0001f >= fluidLiters;
+    }
+
+    public static bool CoordinateIsRuntimeInputEnergyBlock(Vector2Int coordinate)
+    {
+        return CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.InputEnergy)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputEnergy)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoubleEnergy);
+    }
+
+    public static bool CoordinateIsRuntimeInputItemBlock(Vector2Int coordinate)
+    {
+        return CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.InputItem)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputItem)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoubleInputItem);
+    }
+
+    public static bool CoordinateIsRuntimeOutputBlock(Vector2Int coordinate)
+    {
+        return CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.Output)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeOutputItem)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoublePipeOutputItem);
+    }
+
+    public static bool CoordinateIsRuntimePipeInputBlock(Vector2Int coordinate)
+    {
+        return CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInput);
+    }
+
+    public static bool CoordinateIsRuntimeInputOutputAreaBlock(Vector2Int coordinate)
+    {
+        return CoordinateIsRuntimeInputEnergyBlock(coordinate)
+            || CoordinateIsRuntimeInputItemBlock(coordinate)
+            || CoordinateIsRuntimeOutputBlock(coordinate)
+            || CoordinateIsRuntimePipeInputBlock(coordinate);
+    }
+
+    public static bool CoordinateAllowsRuntimePipeBlock(Vector2Int coordinate)
+    {
+        return CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputEnergy)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputItem)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeOutputItem)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInput)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoubleEnergy)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoubleInputItem)
+            || CoordinateIsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoublePipeOutputItem);
+    }
+
+    public static bool IsInputEnergyBlockType(RectGridBlockType blockType)
+    {
+        return blockType == RectGridBlockType.InputEnergy
+            || blockType == RectGridBlockType.PipeInputEnergy
+            || blockType == RectGridBlockType.DoubleEnergy;
+    }
+
+    public static bool IsInputItemBlockType(RectGridBlockType blockType)
+    {
+        return blockType == RectGridBlockType.InputItem
+            || blockType == RectGridBlockType.PipeInputItem
+            || blockType == RectGridBlockType.DoubleInputItem;
+    }
+
+    public static bool IsOutputBlockType(RectGridBlockType blockType)
+    {
+        return blockType == RectGridBlockType.Output
+            || blockType == RectGridBlockType.PipeOutputItem
+            || blockType == RectGridBlockType.DoublePipeOutputItem;
+    }
+
+    public static bool IsInputOutputAreaBlockType(RectGridBlockType blockType)
+    {
+        return IsInputEnergyBlockType(blockType)
+            || IsInputItemBlockType(blockType)
+            || IsOutputBlockType(blockType)
+            || blockType == RectGridBlockType.PipeInput;
+    }
+
+    public static bool AllowsDirectAreaInteraction(RectGridBlockType blockType)
+    {
+        return blockType == RectGridBlockType.InputEnergy
+            || blockType == RectGridBlockType.InputItem
+            || blockType == RectGridBlockType.Output
+            || blockType == RectGridBlockType.DoubleEnergy
+            || blockType == RectGridBlockType.DoubleInputItem
+            || blockType == RectGridBlockType.DoublePipeOutputItem;
+    }
+
+    public static bool AllowsPipeAreaInteraction(RectGridBlockType blockType)
+    {
+        return blockType == RectGridBlockType.PipeInputEnergy
+            || blockType == RectGridBlockType.PipeInputItem
+            || blockType == RectGridBlockType.PipeOutputItem
+            || blockType == RectGridBlockType.PipeInput
+            || blockType == RectGridBlockType.DoubleEnergy
+            || blockType == RectGridBlockType.DoubleInputItem
+            || blockType == RectGridBlockType.DoublePipeOutputItem;
     }
 
     private float ResolveCompleteEnergy(ItemDefinition installedDefinition)
@@ -2959,6 +3853,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     protected int ActiveOutputCount => activeOutputCount;
     protected bool IsActiveCraftRunning => hasActiveCraft;
     protected bool IsWaitingForOutput => waitingForOutput;
+    protected bool HasRuntimeOutputCoordinates => runtimeOutputCoordinates != null && runtimeOutputCoordinates.Count > 0;
+    protected IReadOnlyList<Vector2Int> RuntimeOutputCoordinates => runtimeOutputCoordinates;
 
     protected virtual bool IsRecipeOutputAllowedByItemFilter(int outputItemId)
     {
@@ -3008,7 +3904,19 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     {
         return ContainsRuntimeInputItemAreaCoordinate(coordinate)
             || ContainsRuntimeInputEnergyCoordinate(coordinate)
-            || ContainsRuntimeOutputCoordinate(coordinate);
+            || ContainsRuntimeOutputCoordinate(coordinate)
+            || ContainsRuntimePipeInputCoordinate(coordinate);
+    }
+
+    private bool ContainsRuntimePipeAreaBlockCoordinate(Vector2Int coordinate)
+    {
+        return ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputEnergy)
+            || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputItem)
+            || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeOutputItem)
+            || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInput)
+            || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoubleEnergy)
+            || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoubleInputItem)
+            || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.DoublePipeOutputItem);
     }
 
     private bool ContainsRuntimeInputItemAreaCoordinate(Vector2Int coordinate)
@@ -3078,15 +3986,41 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         for (int i = 0; i < runtimeGridCoordinates.Count; i++)
         {
-            Vector2Int coordinate = runtimeGridCoordinates[i];
-            if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-                || modules == null)
-            {
-                modules = new HashSet<InputOutputModule>();
-                registeredRuntimeGridCoordinates[coordinate] = modules;
-            }
+            RegisterRuntimeCoordinate(registeredRuntimeGridCoordinates, runtimeGridCoordinates[i], this);
+        }
+    }
 
-            modules.Add(this);
+    private void RegisterRuntimeAreaCoordinates()
+    {
+        RegisterRuntimeAreaCoordinates(runtimeInputEnergyCoordinates);
+        RegisterRuntimeInputItemAreaCoordinates();
+        RegisterRuntimeAreaCoordinates(runtimeOutputCoordinates);
+        RegisterRuntimeAreaCoordinates(runtimePipeInputCoordinates);
+    }
+
+    private void RegisterRuntimeAreaCoordinates(IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            RegisterRuntimeCoordinate(registeredRuntimeAreaCoordinates, coordinates[i], this);
+        }
+    }
+
+    private void RegisterRuntimeInputItemAreaCoordinates()
+    {
+        if (runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RegisterRuntimeCoordinate(registeredRuntimeAreaCoordinates, runtimeInputItemAreas[i].coordinate, this);
         }
     }
 
@@ -3099,18 +4033,84 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         for (int i = 0; i < runtimeGridCoordinates.Count; i++)
         {
-            Vector2Int coordinate = runtimeGridCoordinates[i];
-            if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-                || modules == null)
-            {
-                continue;
-            }
+            UnregisterRuntimeCoordinate(registeredRuntimeGridCoordinates, runtimeGridCoordinates[i], this);
+        }
+    }
 
-            modules.Remove(this);
-            if (modules.Count <= 0)
-            {
-                registeredRuntimeGridCoordinates.Remove(coordinate);
-            }
+    private void UnregisterRuntimeAreaCoordinates()
+    {
+        UnregisterRuntimeAreaCoordinates(runtimeInputEnergyCoordinates);
+        UnregisterRuntimeInputItemAreaCoordinates();
+        UnregisterRuntimeAreaCoordinates(runtimeOutputCoordinates);
+        UnregisterRuntimeAreaCoordinates(runtimePipeInputCoordinates);
+    }
+
+    private void UnregisterRuntimeAreaCoordinates(IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            UnregisterRuntimeCoordinate(registeredRuntimeAreaCoordinates, coordinates[i], this);
+        }
+    }
+
+    private void UnregisterRuntimeInputItemAreaCoordinates()
+    {
+        if (runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            UnregisterRuntimeCoordinate(registeredRuntimeAreaCoordinates, runtimeInputItemAreas[i].coordinate, this);
+        }
+    }
+
+    private static void RegisterRuntimeCoordinate(
+        Dictionary<Vector2Int, HashSet<InputOutputModule>> registry,
+        Vector2Int coordinate,
+        InputOutputModule module)
+    {
+        if (registry == null || module == null)
+        {
+            return;
+        }
+
+        if (!registry.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null)
+        {
+            modules = new HashSet<InputOutputModule>();
+            registry[coordinate] = modules;
+        }
+
+        modules.Add(module);
+    }
+
+    private static void UnregisterRuntimeCoordinate(
+        Dictionary<Vector2Int, HashSet<InputOutputModule>> registry,
+        Vector2Int coordinate,
+        InputOutputModule module)
+    {
+        if (registry == null || module == null)
+        {
+            return;
+        }
+
+        if (!registry.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || modules == null)
+        {
+            return;
+        }
+
+        modules.Remove(module);
+        if (modules.Count <= 0)
+        {
+            registry.Remove(coordinate);
         }
     }
 #if UNITY_EDITOR

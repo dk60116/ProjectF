@@ -116,6 +116,9 @@ public class Block : BaseObject
     private MaterialPropertyBlock conveyorSlotDotPropertyBlock;
     private static Material conveyorSlotDotMaterial;
     private static Mesh beltDirectionArrowMesh;
+    private readonly List<Vector2Int> fluidDirectionConnectedDirections = new List<Vector2Int>(4);
+    private readonly Queue<FluidSourceSearchNode> fluidDirectionSourceSearchQueue = new Queue<FluidSourceSearchNode>(32);
+    private readonly HashSet<Vector2Int> fluidDirectionSourceSearchVisited = new HashSet<Vector2Int>();
     private PortableObjectPool floorObjectPool;
     private TerrainGenerator cachedTerrainGenerator;
     private Transform inputAreaCenterAnchor;
@@ -165,6 +168,18 @@ public class Block : BaseObject
         public float startProgress;
         public float pathLength;
         public float durationPathLength;
+    }
+
+    private struct FluidSourceSearchNode
+    {
+        public Vector2Int coordinate;
+        public Vector2Int firstDirection;
+
+        public FluidSourceSearchNode(Vector2Int coordinate, Vector2Int firstDirection)
+        {
+            this.coordinate = coordinate;
+            this.firstDirection = firstDirection;
+        }
     }
 
     private struct ConveyorLinearMotionState
@@ -458,6 +473,7 @@ public class Block : BaseObject
     public void SetMapObject(MapObject value)
     {
         bool wasConveyor = IsConveyorStackingEnabled();
+        bool wasFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
 
         if (mapObject is Resource existingResource && existingResource != value)
         {
@@ -472,6 +488,7 @@ public class Block : BaseObject
         }
 
         bool isConveyor = IsConveyorStackingEnabled();
+        bool isFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
         if (wasConveyor || isConveyor)
         {
             InvalidateConveyorRuntimeCachesAround();
@@ -486,6 +503,17 @@ public class Block : BaseObject
                 RefreshConveyorSlotDotVisuals();
                 RefreshBeltDirectionDebugVisuals();
             }
+        }
+        else if (wasFluidDirectionObject || isFluidDirectionObject)
+        {
+            RefreshBeltDirectionDebugVisuals();
+        }
+
+        if ((wasFluidDirectionObject || isFluidDirectionObject)
+            && GameManager.Instance != null
+            && GameManager.Instance.ShowDirections)
+        {
+            TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
         }
 
         RobotArm.WakeAroundCoordinate(coordinate);
@@ -1057,7 +1085,9 @@ public class Block : BaseObject
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
-        if (objectId < 0 || !ResolveFloorObjectPool())
+        if (objectId < 0
+            || InputOutputModule.IsFluidItemId(objectId)
+            || !ResolveFloorObjectPool())
         {
             return false;
         }
@@ -3280,6 +3310,25 @@ public class Block : BaseObject
         return itemId >= 0;
     }
 
+    public bool TryGetRuntimeConveyorItemSlotIdAtLane(int laneIndex, out int itemId)
+    {
+        itemId = -1;
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        EnsureFloorObjectsInitialized();
+        CleanupConveyorStack();
+        if (!IsValidConveyorLaneIndex(laneIndex))
+        {
+            return false;
+        }
+
+        itemId = GetConveyorItemIdAtLane(laneIndex);
+        return true;
+    }
+
     public bool TryGetRuntimeConveyorSuccessorLane(
         int sourceLaneIndex,
         out Block destinationBlock,
@@ -4789,9 +4838,26 @@ public class Block : BaseObject
         TerrainGenerator.Active?.SetBeltDirectionVisualActive(
             this,
             Application.isPlaying
-            && IsConveyorStackingEnabled()
             && ShouldShowBeltDirections()
-            && TryGetBeltDirectionArrowPose(out _, out _));
+            && (TryGetBeltDirectionArrowPose(out _, out _)
+                || HasFluidDirectionArrow()));
+    }
+
+    public int AppendDirectionArrowMatrices(List<Matrix4x4> matrices)
+    {
+        if (matrices == null)
+        {
+            return 0;
+        }
+
+        int startCount = matrices.Count;
+        if (TryGetBeltDirectionArrowMatrix(out Matrix4x4 beltMatrix))
+        {
+            matrices.Add(beltMatrix);
+        }
+
+        AppendFluidDirectionArrowMatrices(matrices);
+        return matrices.Count - startCount;
     }
 
     public bool TryGetBeltDirectionArrowMatrix(out Matrix4x4 matrix)
@@ -4811,7 +4877,7 @@ public class Block : BaseObject
 
     private static bool ShouldShowBeltDirections()
     {
-        return GameManager.Instance != null && GameManager.Instance.ShowBeltDirections;
+        return GameManager.Instance != null && GameManager.Instance.ShowDirections;
     }
 
     private bool TryGetBeltDirectionArrowPose(out Vector3 worldPosition, out Quaternion worldRotation)
@@ -4832,6 +4898,343 @@ public class Block : BaseObject
         worldPosition = GetBeltDirectionArrowWorldPosition();
         worldRotation = Quaternion.LookRotation(flowWorldDirection.normalized, Vector3.up);
         return true;
+    }
+
+    private bool HasFluidDirectionArrow()
+    {
+        if (!IsFluidDirectionMapObject(mapObject))
+        {
+            return false;
+        }
+
+        if (mapObject is Pump pump)
+        {
+            return pump.TryGetPipeConnectionDirection(pump.transform.rotation, out Vector2Int pumpDirection)
+                   && pumpDirection != Vector2Int.zero;
+        }
+
+        if (!(mapObject is Pipe pipe) || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator))
+        {
+            return false;
+        }
+
+        return TryFindFluidSourceDirection(pipe, terrainGenerator, out _, out _)
+               && CollectFluidConnectedDirections(pipe, terrainGenerator, fluidDirectionConnectedDirections) > 0;
+    }
+
+    private int AppendFluidDirectionArrowMatrices(List<Matrix4x4> matrices)
+    {
+        if (matrices == null
+            || !Application.isPlaying
+            || !ShouldShowBeltDirections()
+            || !IsFluidDirectionMapObject(mapObject))
+        {
+            return 0;
+        }
+
+        if (mapObject is Pump pump)
+        {
+            if (!pump.TryGetPipeConnectionDirection(pump.transform.rotation, out Vector2Int pumpDirection)
+                || pumpDirection == Vector2Int.zero)
+            {
+                return 0;
+            }
+
+            matrices.Add(CreateFluidDirectionArrowMatrix(pumpDirection, 0, 1));
+            return 1;
+        }
+
+        if (!(mapObject is Pipe pipe)
+            || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
+            || !TryFindFluidSourceDirection(pipe, terrainGenerator, out Vector2Int sourceDirection, out Vector2Int sourceFlowDirection))
+        {
+            return 0;
+        }
+
+        int connectedDirectionCount = CollectFluidConnectedDirections(pipe, terrainGenerator, fluidDirectionConnectedDirections);
+        if (connectedDirectionCount <= 0)
+        {
+            if (sourceFlowDirection == Vector2Int.zero)
+            {
+                return 0;
+            }
+
+            matrices.Add(CreateFluidDirectionArrowMatrix(sourceFlowDirection, 0, 1));
+            return 1;
+        }
+
+        int addedCount = 0;
+        int outgoingIndex = 0;
+        int outgoingCount = CountFluidOutgoingDirections(fluidDirectionConnectedDirections, sourceDirection);
+        for (int i = 0; i < fluidDirectionConnectedDirections.Count; i++)
+        {
+            Vector2Int direction = fluidDirectionConnectedDirections[i];
+            if (direction == Vector2Int.zero || direction == sourceDirection)
+            {
+                continue;
+            }
+
+            matrices.Add(CreateFluidDirectionArrowMatrix(direction, outgoingIndex, outgoingCount));
+            outgoingIndex++;
+            addedCount++;
+        }
+
+        if (addedCount <= 0 && sourceDirection != Vector2Int.zero)
+        {
+            matrices.Add(CreateFluidDirectionArrowMatrix(-sourceDirection, 0, 1));
+            addedCount = 1;
+        }
+
+        return addedCount;
+    }
+
+    private static int CountFluidOutgoingDirections(IReadOnlyList<Vector2Int> directions, Vector2Int sourceDirection)
+    {
+        if (directions == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < directions.Count; i++)
+        {
+            Vector2Int direction = directions[i];
+            if (direction != Vector2Int.zero && direction != sourceDirection)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private Matrix4x4 CreateFluidDirectionArrowMatrix(Vector2Int flowDirection, int arrowIndex, int arrowCount)
+    {
+        Vector3 flowWorldDirection = new Vector3(flowDirection.x, 0f, flowDirection.y);
+        if (flowWorldDirection.sqrMagnitude <= 0.0001f)
+        {
+            return Matrix4x4.identity;
+        }
+
+        flowWorldDirection.Normalize();
+        Vector3 worldPosition = GetFluidDirectionArrowWorldPosition(flowWorldDirection, arrowIndex, arrowCount);
+        Quaternion worldRotation = Quaternion.LookRotation(flowWorldDirection, Vector3.up);
+        return Matrix4x4.TRS(worldPosition, worldRotation, Vector3.one);
+    }
+
+    private Vector3 GetFluidDirectionArrowWorldPosition(Vector3 flowWorldDirection, int arrowIndex, int arrowCount)
+    {
+        Vector3 center = transform.position;
+        float verticalOffset = mapObject is Pump ? 0.42f : 0.28f;
+        center.y = Mathf.Max(
+            center.y + verticalOffset,
+            transform.position.y + BeltDirectionArrowMinimumWorldHeight);
+
+        if (arrowCount > 1)
+        {
+            Vector3 perpendicular = Vector3.Cross(Vector3.up, flowWorldDirection).normalized;
+            float normalizedIndex = arrowIndex - ((arrowCount - 1) * 0.5f);
+            center += perpendicular * (normalizedIndex * 0.18f);
+        }
+
+        return center;
+    }
+
+    private bool TryFindFluidSourceDirection(
+        Pipe originPipe,
+        TerrainGenerator terrainGenerator,
+        out Vector2Int sourceDirection,
+        out Vector2Int sourceFlowDirection)
+    {
+        sourceDirection = Vector2Int.zero;
+        sourceFlowDirection = Vector2Int.zero;
+        if (originPipe == null || terrainGenerator == null)
+        {
+            return false;
+        }
+
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump sameCoordinatePump)
+            && sameCoordinatePump != null
+            && sameCoordinatePump.TryGetPipeConnectionDirection(sameCoordinatePump.transform.rotation, out sourceFlowDirection)
+            && sourceFlowDirection != Vector2Int.zero)
+        {
+            sourceDirection = -sourceFlowDirection;
+            return true;
+        }
+
+        fluidDirectionSourceSearchQueue.Clear();
+        fluidDirectionSourceSearchVisited.Clear();
+        fluidDirectionSourceSearchQueue.Enqueue(new FluidSourceSearchNode(coordinate, Vector2Int.zero));
+        fluidDirectionSourceSearchVisited.Add(coordinate);
+
+        while (fluidDirectionSourceSearchQueue.Count > 0)
+        {
+            FluidSourceSearchNode node = fluidDirectionSourceSearchQueue.Dequeue();
+            if (!terrainGenerator.TryGetLoadedBlock(node.coordinate, out Block currentBlock)
+                || currentBlock == null
+                || !(currentBlock.MapObject is Pipe currentPipe))
+            {
+                continue;
+            }
+
+            Quaternion currentPipeRotation = currentPipe.transform.rotation;
+            for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
+            {
+                Vector2Int direction = ConveyorNeighborDirections[i];
+                if (!currentPipe.HasConnectionTowards(currentPipeRotation, direction))
+                {
+                    continue;
+                }
+
+                Vector2Int nextCoordinate = node.coordinate + direction;
+                if (TryGetFluidSourceAtNeighbor(
+                        terrainGenerator,
+                        nextCoordinate,
+                        -direction,
+                        out Pump sourcePump)
+                    && sourcePump != null)
+                {
+                    sourceDirection = node.firstDirection != Vector2Int.zero
+                        ? node.firstDirection
+                        : direction;
+                    sourceFlowDirection = -sourceDirection;
+                    return true;
+                }
+
+                if (!terrainGenerator.TryGetLoadedBlock(nextCoordinate, out Block nextBlock)
+                    || nextBlock == null
+                    || !(nextBlock.MapObject is Pipe nextPipe)
+                    || !nextPipe.gameObject.activeInHierarchy
+                    || !nextPipe.HasConnectionTowards(nextPipe.transform.rotation, -direction)
+                    || !fluidDirectionSourceSearchVisited.Add(nextCoordinate))
+                {
+                    continue;
+                }
+
+                Vector2Int firstDirection = node.firstDirection != Vector2Int.zero
+                    ? node.firstDirection
+                    : direction;
+                fluidDirectionSourceSearchQueue.Enqueue(new FluidSourceSearchNode(nextCoordinate, firstDirection));
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetFluidSourceAtNeighbor(
+        TerrainGenerator terrainGenerator,
+        Vector2Int sourceCoordinate,
+        Vector2Int directionFromSourceToPipe,
+        out Pump sourcePump)
+    {
+        sourcePump = null;
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(sourceCoordinate, out sourcePump)
+            && sourcePump != null)
+        {
+            if (directionFromSourceToPipe == Vector2Int.zero
+                || sourcePump.HasPipeConnectionTowards(sourcePump.transform.rotation, directionFromSourceToPipe))
+            {
+                return true;
+            }
+        }
+
+        if (terrainGenerator == null
+            || !terrainGenerator.TryGetLoadedBlock(sourceCoordinate, out Block sourceBlock)
+            || sourceBlock == null
+            || !(sourceBlock.MapObject is Pump directPump)
+            || !directPump.gameObject.activeInHierarchy
+            || !directPump.HasPipeConnectionTowards(directPump.transform.rotation, directionFromSourceToPipe))
+        {
+            return false;
+        }
+
+        sourcePump = directPump;
+        return true;
+    }
+
+    private int CollectFluidConnectedDirections(
+        Pipe pipe,
+        TerrainGenerator terrainGenerator,
+        List<Vector2Int> connectedDirections)
+    {
+        if (connectedDirections == null)
+        {
+            return 0;
+        }
+
+        connectedDirections.Clear();
+        if (pipe == null || terrainGenerator == null)
+        {
+            return 0;
+        }
+
+        Quaternion pipeRotation = pipe.transform.rotation;
+        for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
+        {
+            Vector2Int direction = ConveyorNeighborDirections[i];
+            if (!pipe.HasConnectionTowards(pipeRotation, direction)
+                || !IsFluidConnectedDirection(pipe, terrainGenerator, direction))
+            {
+                continue;
+            }
+
+            connectedDirections.Add(direction);
+        }
+
+        return connectedDirections.Count;
+    }
+
+    private bool IsFluidConnectedDirection(Pipe pipe, TerrainGenerator terrainGenerator, Vector2Int direction)
+    {
+        if (pipe == null || terrainGenerator == null || direction == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2Int neighborCoordinate = coordinate + direction;
+        if (InputOutputModule.TryGetRuntimePipeFluidStorageAtCoordinate(
+                neighborCoordinate,
+                null,
+                false,
+                out _))
+        {
+            return true;
+        }
+
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(neighborCoordinate, out Pump sourcePump)
+            && sourcePump != null
+            && sourcePump.HasPipeConnectionTowards(sourcePump.transform.rotation, -direction))
+        {
+            return true;
+        }
+
+        if (!terrainGenerator.TryGetLoadedBlock(neighborCoordinate, out Block neighborBlock)
+            || neighborBlock == null
+            || neighborBlock.MapObject == null)
+        {
+            return false;
+        }
+
+        if (neighborBlock.MapObject is Pipe neighborPipe)
+        {
+            return neighborPipe.gameObject.activeInHierarchy
+                   && neighborPipe.HasConnectionTowards(neighborPipe.transform.rotation, -direction);
+        }
+
+        if (neighborBlock.MapObject is Pump pump)
+        {
+            return pump.gameObject.activeInHierarchy
+                   && pump.HasPipeConnectionTowards(pump.transform.rotation, -direction);
+        }
+
+        return neighborBlock.MapObject is InstallationObject installationObject
+               && installationObject.gameObject.activeInHierarchy
+               && installationObject.CanStoreFluid;
+    }
+
+    private static bool IsFluidDirectionMapObject(MapObject candidate)
+    {
+        return candidate is Pipe || candidate is Pump;
     }
 
     private Vector3 GetBeltDirectionArrowWorldPosition()
@@ -11033,7 +11436,9 @@ public class Block : BaseObject
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
-        if (objectId < 0 || !ResolveFloorObjectPool())
+        if (objectId < 0
+            || InputOutputModule.IsFluidItemId(objectId)
+            || !ResolveFloorObjectPool())
         {
             return false;
         }

@@ -1253,7 +1253,8 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 continue;
             }
 
-            if (!TryResolveOutputCoordinate(stateStore, state, templateModule, outputItemId, outputCount, out _))
+            if (InputOutputModule.IsFluidItemId(outputItemId)
+                || !TryResolveOutputCoordinate(stateStore, state, templateModule, outputItemId, outputCount, out _))
             {
                 continue;
             }
@@ -1330,7 +1331,8 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
-        if (!TryResolveOutputCoordinate(
+        if (InputOutputModule.IsFluidItemId(state.activeOutputItemId)
+            || !TryResolveOutputCoordinate(
                 stateStore,
                 state,
                 templateModule,

@@ -23,6 +23,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private readonly List<IMapObjectUpdateTick> updateTicks = new List<IMapObjectUpdateTick>();
     private readonly HashSet<IMapObjectUpdateTick> updateTickSet = new HashSet<IMapObjectUpdateTick>();
+    private readonly Dictionary<IMapObjectUpdateTick, float> updateTickLastTimes =
+        new Dictionary<IMapObjectUpdateTick, float>();
     private readonly List<IMapObjectLateTick> lateTicks = new List<IMapObjectLateTick>();
     private readonly HashSet<IMapObjectLateTick> lateTickSet = new HashSet<IMapObjectLateTick>();
     private float updateTickQuota;
@@ -131,6 +133,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         updateTicks.Add(tick);
+        updateTickLastTimes[tick] = Time.time;
         enabled = true;
     }
 
@@ -142,6 +145,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         updateTicksDirty = true;
+        updateTickLastTimes.Remove(tick);
     }
 
     private void AddLateTick(IMapObjectLateTick tick)
@@ -219,6 +223,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
             if (!IsTickAlive(tick))
             {
                 updateTickSet.Remove(tick);
+                updateTickLastTimes.Remove(tick);
                 updateTicksDirty = true;
                 continue;
             }
@@ -228,7 +233,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 continue;
             }
 
-            tick.ManagedUpdateTick(managedDeltaTime);
+            tick.ManagedUpdateTick(ResolveUpdateTickDeltaTime(tick, managedDeltaTime));
         }
 
         if (updateTicksDirty)
@@ -284,6 +289,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
             }
 
             updateTicks.RemoveAt(i);
+            updateTickLastTimes.Remove(tick);
         }
 
         updateTicksDirty = false;
@@ -296,6 +302,26 @@ public sealed class MapObjectTickManager : MonoBehaviour
         {
             updateTickCursor %= updateTicks.Count;
         }
+    }
+
+    private float ResolveUpdateTickDeltaTime(IMapObjectUpdateTick tick, float fallbackDeltaTime)
+    {
+        float now = Time.time;
+        float safeFallback = Mathf.Max(0f, fallbackDeltaTime);
+        if (tick == null)
+        {
+            return safeFallback;
+        }
+
+        if (!updateTickLastTimes.TryGetValue(tick, out float lastTime))
+        {
+            updateTickLastTimes[tick] = now;
+            return safeFallback;
+        }
+
+        updateTickLastTimes[tick] = now;
+        float elapsedTime = now - lastTime;
+        return elapsedTime > 0f ? elapsedTime : safeFallback;
     }
 
     private void CompactLateTicks()

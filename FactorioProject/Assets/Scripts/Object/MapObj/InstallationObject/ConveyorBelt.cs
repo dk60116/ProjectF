@@ -5,6 +5,8 @@ using UnityEngine.Rendering;
 public class ConveyorBelt : InstallationObject
 {
     private const float UvLengthReferenceAspect = 1.4285714f;
+    protected static readonly int[] ObjectInfoMainLaneIndices = { 0, 2 };
+    protected static readonly int[] ObjectInfoBridgeLaneIndices = { 1, 3 };
 
     private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
@@ -89,7 +91,7 @@ public class ConveyorBelt : InstallationObject
         return StraightVariantPrefab != null ? StraightVariantPrefab : this;
     }
 
-    public void CopyObjectInfoItemIds(List<int> results, int maxCount)
+    public virtual void CopyObjectInfoItemIds(List<int> results, int maxCount)
     {
         if (results == null || maxCount <= 0)
         {
@@ -110,14 +112,26 @@ public class ConveyorBelt : InstallationObject
                 continue;
             }
 
-            int laneCount = block.GetRuntimeConveyorLaneCount();
-            for (int laneIndex = 0; laneIndex < laneCount && results.Count < maxCount; laneIndex++)
-            {
-                if (block.TryGetRuntimeConveyorItemIdAtLane(laneIndex, out int itemId))
-                {
-                    results.Add(itemId);
-                }
-            }
+            AppendObjectInfoLaneItemIds(results, maxCount, block, ObjectInfoMainLaneIndices);
+        }
+    }
+
+    protected static void AppendObjectInfoLaneItemIds(
+        List<int> results,
+        int maxCount,
+        Block block,
+        IReadOnlyList<int> laneIndices)
+    {
+        if (results == null || laneIndices == null || maxCount <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < laneIndices.Count && results.Count < maxCount; i++)
+        {
+            int itemId = -1;
+            block?.TryGetRuntimeConveyorItemSlotIdAtLane(laneIndices[i], out itemId);
+            results.Add(itemId);
         }
     }
 
@@ -346,6 +360,12 @@ public class ConveyorBelt : InstallationObject
         virtualRenderingSuppressed = isSuppressed;
         virtualRenderingSuppressBeltTopOnly = isSuppressed && beltTopOnly;
         ApplyVirtualRenderingSuppression();
+    }
+
+    public void RefreshBeltTopShaderProperties()
+    {
+        RefreshBeltTopRenderInfo();
+        ApplyBeltTopShaderProperties();
     }
 
     private void RefreshBeltTopRenderInfo()

@@ -1,0 +1,136 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!687078895 &4343727234628468602
+SpriteAtlas:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: UIImageAtlas
+  m_EditorData:
+    serializedVersion: 2
+    textureSettings:
+      serializedVersion: 2
+      anisoLevel: 1
+      compressionQuality: 50
+      maxTextureSize: 2048
+      textureCompression: 0
+      filterMode: 1
+      generateMipMaps: 0
+      readable: 0
+      crunchedCompression: 0
+      sRGB: 1
+    platformSettings:
+    - serializedVersion: 3
+      m_BuildTarget: DefaultTexturePlatform
+      m_MaxTextureSize: 4096
+      m_ResizeAlgorithm: 0
+      m_TextureFormat: -1
+      m_TextureCompression: 1
+      m_CompressionQuality: 50
+      m_CrunchedCompression: 0
+      m_AllowsAlphaSplitting: 0
+      m_Overridden: 0
+      m_IgnorePlatformSupport: 0
+      m_AndroidETC2FallbackOverride: 0
+      m_ForceMaximumCompressionQuality_BC6H_BC7: 0
+    packingSettings:
+      serializedVersion: 2
+      padding: 4
+      blockOffset: 1
+      allowAlphaSplitting: 0
+      enableRotation: 1
+      enableTightPacking: 0
+      enableAlphaDilation: 0
+    secondaryTextureSettings: {}
+    variantMultiplier: 1
+    packables:
+    - {fileID: 102900000, guid: a7450445676f37d4ba243b852fa4a066, type: 3}
+    bindAsDefault: 1
+    isAtlasV2: 0
+    cachedData: {fileID: 0}
+    packedSpriteRenderDataKeys:
+    - bacc4821c915e294497a4cf5e07b9c8b: 21300000
+    - ccec6bf1042e8224fabd72bd24a63449: 21300000
+    - 0659bfe28f45c70449a184fe600b50b9: 21300000
+    - 007d509387447b443a65381bf19b3bb4: 21300000
+    - 06b84cb3d4c5a3c4cb3d19f2a2e2ad71: 21300000
+    - 7720e005806f85b418062ee10ace0761: 21300000
+    - ef2f61a6d6e4ba74d8864a5f8d382e78: 21300000
+    - 4022dda644b694f48ac27a7551dcdb50: 21300000
+    - 9a5f9007774453d4790b24975971f175: 21300000
+    - 39e009b731267ad429d62ed1ad782ceb: 21300000
+    - c4ff3d087eed94b4489b53527fd275f9: 21300000
+    - 5af14359cd5ad9f49aa3257d75f72597: 21300000
+    - 6ad6a3690f6902b498cb60f6b7eb8eb8: 21300000
+    - e3eca5a98f76c04459f95cc80d7b6cfa: 21300000
+    - 77bc3dba3ef216f44a219ad19527ad7a: 21300000
+    - 53b614db4495ff1438de789a3148fdcf: 21300000
+    - 484d6bdbe8441c64d945b40a797dea5b: 21300000
+    - fc822d0cc5d46cd4787402139c809b1a: 21300000
+    - f333914c999d1d74eaf7443d160ca2de: 21300000
+    - 04d2474cf6c71a54fb08ea3b29a7d0b7: 21300000
+    - 630e8a9c0ccf22b4289a51e3b13ca096: 21300000
+    - c6a06b0d53be27848bf3976a181c4f1b: 21300000
+    - 31327ebd121222444ac8157997d7998c: 21300000
+    - 0f933bbee2c18a748a8f0acd1d55acf8: 21300000
+    - 2582507f70a72ed4d97ad5da96f8f4da: 21300000
+    - 226cf5cfacb9efd4caca33b4511dcd9c: 21300000
+  m_MasterAtlas: {fileID: 0}
+  m_PackedSprites:
+  - {fileID: 21300000, guid: bacc4821c915e294497a4cf5e07b9c8b, type: 3}
+  - {fileID: 21300000, guid: ccec6bf1042e8224fabd72bd24a63449, type: 3}
+  - {fileID: 21300000, guid: 0659bfe28f45c70449a184fe600b50b9, type: 3}
+  - {fileID: 21300000, guid: 007d509387447b443a65381bf19b3bb4, type: 3}
+  - {fileID: 21300000, guid: 06b84cb3d4c5a3c4cb3d19f2a2e2ad71, type: 3}
+  - {fileID: 21300000, guid: 7720e005806f85b418062ee10ace0761, type: 3}
+  - {fileID: 21300000, guid: ef2f61a6d6e4ba74d8864a5f8d382e78, type: 3}
+  - {fileID: 21300000, guid: 4022dda644b694f48ac27a7551dcdb50, type: 3}
+  - {fileID: 21300000, guid: 9a5f9007774453d4790b24975971f175, type: 3}
+  - {fileID: 21300000, guid: 39e009b731267ad429d62ed1ad782ceb, type: 3}
+  - {fileID: 21300000, guid: c4ff3d087eed94b4489b53527fd275f9, type: 3}
+  - {fileID: 21300000, guid: 5af14359cd5ad9f49aa3257d75f72597, type: 3}
+  - {fileID: 21300000, guid: 6ad6a3690f6902b498cb60f6b7eb8eb8, type: 3}
+  - {fileID: 21300000, guid: e3eca5a98f76c04459f95cc80d7b6cfa, type: 3}
+  - {fileID: 21300000, guid: 77bc3dba3ef216f44a219ad19527ad7a, type: 3}
+  - {fileID: 21300000, guid: 53b614db4495ff1438de789a3148fdcf, type: 3}
+  - {fileID: 21300000, guid: 484d6bdbe8441c64d945b40a797dea5b, type: 3}
+  - {fileID: 21300000, guid: fc822d0cc5d46cd4787402139c809b1a, type: 3}
+  - {fileID: 21300000, guid: f333914c999d1d74eaf7443d160ca2de, type: 3}
+  - {fileID: 21300000, guid: 04d2474cf6c71a54fb08ea3b29a7d0b7, type: 3}
+  - {fileID: 21300000, guid: 630e8a9c0ccf22b4289a51e3b13ca096, type: 3}
+  - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
+  - {fileID: 21300000, guid: 31327ebd121222444ac8157997d7998c, type: 3}
+  - {fileID: 21300000, guid: 0f933bbee2c18a748a8f0acd1d55acf8, type: 3}
+  - {fileID: 21300000, guid: 2582507f70a72ed4d97ad5da96f8f4da, type: 3}
+  - {fileID: 21300000, guid: 226cf5cfacb9efd4caca33b4511dcd9c, type: 3}
+  m_PackedSpriteNamesToIndex:
+  - SignCircle
+  - WoodBox
+  - PaperBox
+  - Area
+  - Arrow
+  - MapFocus
+  - Axe
+  - WoodBox_Circle
+  - Filter
+  - JoyStick_BG
+  - WoodBox_Circle_Dark
+  - Fluid
+  - CanaNot
+  - WoodBox_Fill
+  - Rotation
+  - GaugeBar
+  - WoodBox_Fill 1
+  - HandIcon
+  - WoodBox_Dark
+  - BagIcon
+  - Undo
+  - Pickaxe
+  - Pack
+  - Cancel
+  - CreateIcon
+  - Check
+  m_RenderDataMap: {}
+  m_Tag: UIImageAtlas
+  m_IsVariant: 0

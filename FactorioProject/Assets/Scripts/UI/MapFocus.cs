@@ -3,7 +3,6 @@ using UnityEngine;
 public class MapFocus : MonoBehaviour
 {
     private const string OverlayShaderName = "Custom/MapFocusOverlay";
-    private const string LineShaderName = "Sprites/Default";
     private const int AreaLineCount = 8;
     public static readonly Color DefaultFocusColor = new Color(1f, 0.86f, 0f, 0.45f);
     public static readonly Color MouseFocusColor = new Color(1f, 1f, 1f, 0.45f);
@@ -201,7 +200,12 @@ public class MapFocus : MonoBehaviour
             return lineMaterial;
         }
 
-        Shader lineShader = Shader.Find(LineShaderName);
+        Shader lineShader = Shader.Find(OverlayShaderName);
+        if (lineShader == null)
+        {
+            lineShader = Shader.Find("Sprites/Default");
+        }
+
         if (lineShader == null)
         {
             lineShader = Shader.Find("Universal Render Pipeline/Unlit");
@@ -213,6 +217,7 @@ public class MapFocus : MonoBehaviour
             {
                 name = "MapFocusAreaLine (Runtime)"
             };
+            lineMaterial.renderQueue = 5000;
         }
 
         return lineMaterial;

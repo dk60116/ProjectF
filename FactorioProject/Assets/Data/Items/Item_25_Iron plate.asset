@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_25_Iron plate
   m_EditorClassIdentifier: 
   itemName: Iron plate
-  id: 10
+  id: 13
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
   portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
@@ -22,6 +22,8 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

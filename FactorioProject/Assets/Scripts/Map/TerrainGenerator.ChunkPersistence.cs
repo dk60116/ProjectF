@@ -1016,11 +1016,28 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        int restoreQuarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
+        if (placementController != null
+            && placementController.TryResolvePipeLoadPlacement(
+                definition,
+                savedState.anchorCoordinate,
+                restoreQuarterTurns,
+                out MapObject resolvedPipePrefab,
+                out int resolvedPipeQuarterTurns,
+                out int resolvedPipeVariantKind)
+            && resolvedPipePrefab != null)
+        {
+            sourcePrefab = resolvedPipePrefab;
+            restoreQuarterTurns = resolvedPipeQuarterTurns;
+            savedState.quarterTurns = restoreQuarterTurns;
+            savedState.conveyorVariantKind = resolvedPipeVariantKind;
+        }
+
         Quaternion rotation = placementController != null
-            ? placementController.GetInstalledObjectRotation(sourcePrefab, savedState.quarterTurns)
-            : sourcePrefab.transform.rotation * Quaternion.Euler(0f, (((savedState.quarterTurns % 4) + 4) % 4) * 90f, 0f);
+            ? placementController.GetInstalledObjectRotation(sourcePrefab, restoreQuarterTurns)
+            : sourcePrefab.transform.rotation * Quaternion.Euler(0f, restoreQuarterTurns * 90f, 0f);
         Vector3 position = placementController != null
-            ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, sourcePrefab, savedState.quarterTurns, 0f)
+            ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, sourcePrefab, restoreQuarterTurns)
             : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
 
         bool reusedSleepingView = TryTakeSleepingInstallationView(savedState, out InstallationObject restoredInstallation);
@@ -1045,7 +1062,7 @@ public partial class TerrainGenerator : MonoBehaviour
         List<Vector2Int> occupiedCoordinates = savedState.occupiedCoordinates != null && savedState.occupiedCoordinates.Count > 0
             ? new List<Vector2Int>(savedState.occupiedCoordinates)
             : placementController != null
-                ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, sourcePrefab, savedState.quarterTurns)
+                ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, sourcePrefab, restoreQuarterTurns)
                 : new List<Vector2Int> { savedState.anchorCoordinate };
         savedState.occupiedCoordinates = occupiedCoordinates;
 
@@ -1054,7 +1071,7 @@ public partial class TerrainGenerator : MonoBehaviour
             placementController.ConfigureInstalledObjectRuntime(
                 restoredInstallation,
                 savedState.anchorCoordinate,
-                savedState.quarterTurns,
+                restoreQuarterTurns,
                 savedState.inputOutputState,
                 savedState.placementSequence);
         }
@@ -1062,7 +1079,7 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             restoredInstallation.ConfigurePlacementRuntime(
                 savedState.anchorCoordinate,
-                savedState.quarterTurns,
+                restoreQuarterTurns,
                 occupiedCoordinates,
                 savedState.placementSequence);
             if (restoredInstallation is ConvayorBelt2F restoredBelt2F)
@@ -1090,6 +1107,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
+        restoredInstallation.SetStoredFluidLiters(savedState.storedFluidLiters);
 
         if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
         {
@@ -1476,8 +1494,52 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (!SleepingInstallationMatchesSavedVariant(cachedInstallation, savedState, definition))
+        {
+            sleepingInstallationViews.Remove(storageKey);
+            ReleaseInstallationObject(cachedInstallation);
+            return false;
+        }
+
         sleepingInstallationViews.Remove(storageKey);
         installationObject = cachedInstallation;
+        return true;
+    }
+
+    private static bool SleepingInstallationMatchesSavedVariant(
+        InstallationObject cachedInstallation,
+        BlockStateStore.InstallationSaveState savedState,
+        ItemDefinition definition)
+    {
+        if (cachedInstallation == null || savedState == null || savedState.conveyorVariantKind < 0)
+        {
+            return true;
+        }
+
+        MapObject sourcePrefab = definition != null ? definition.mapObject : null;
+        if (sourcePrefab is Pipe)
+        {
+            return cachedInstallation is Pipe pipe && pipe.VariantKindId == savedState.conveyorVariantKind;
+        }
+
+        if (sourcePrefab is Wall)
+        {
+            return cachedInstallation is Wall wall && wall.VariantKindId == savedState.conveyorVariantKind;
+        }
+
+        if (sourcePrefab is ConveyorBelt && !ItemDefinitionLookup.IsConveyorBelt2FDefinition(definition))
+        {
+            if (!(cachedInstallation is ConveyorBelt conveyorBelt))
+            {
+                return false;
+            }
+
+            int cachedVariantKind = conveyorBelt.IsReverseCornerVariant
+                ? 2
+                : (conveyorBelt.IsCornerVariant ? 1 : 0);
+            return cachedVariantKind == savedState.conveyorVariantKind;
+        }
+
         return true;
     }
 

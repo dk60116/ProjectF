@@ -612,7 +612,7 @@ public class PlayerHUD : BagSlot
         installButton = ResolveButtonReference(installButton, "InstallButton");
         Transform installRoot = installButton != null ? installButton.transform.parent : null;
         installCancelButton = ResolveButtonReferenceInRoot(installCancelButton, installRoot, "InstallCancelButton", "CancelButton");
-        installRotationButton = ResolveButtonReferenceInRoot(installRotationButton, installRoot, "InstallRotationButton", "RotationButton");
+        installRotationButton = ResolveButtonReferenceInRoot(installRotationButton, installRoot, "InstallRotationButton", "RotateButton", "RotationButton");
         installCompleteButton = ResolveButtonReferenceInRoot(installCompleteButton, installRoot, "InstallCompleteButton", "CompleteButton");
 
         if (cachedMapEditRoot == null)

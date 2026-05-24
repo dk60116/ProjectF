@@ -227,6 +227,13 @@ public class PortableObject : MonoBehaviour
     
     public bool SetItem(int id)
     {
+        if (InputOutputModule.IsFluidItemId(id))
+        {
+            this.id = -1;
+            SetVisualRenderingSuppressed(true);
+            return false;
+        }
+
         this.id = id;
 
         if (body == null)

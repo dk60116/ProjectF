@@ -13,6 +13,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int MaxConveyorSlotDotRefreshesPerFrame = 64;
     private const int MaxConveyorSlotDotInstancesPerBatch = 1023;
     private const int MaxBeltDirectionArrowInstancesPerBatch = 1023;
+    private const int BeltDirectionArrowRenderQueue = 5000;
     private const int MaxBeltItemLineDebugRefreshesPerFrame = 128;
     private const float ConveyorSlotDotInstancedDiameter = 0.08f;
     private static readonly Color ConveyorSlotDotInstancedColor = new Color(1f, 0.36f, 0.08f, 1f);
@@ -204,7 +205,7 @@ public partial class TerrainGenerator : MonoBehaviour
             RefreshBeltItemLineRuntimeVisibility();
         }
 
-        if (GameManager.Instance != null && GameManager.Instance.ShowBeltDirections)
+        if (GameManager.Instance != null && GameManager.Instance.ShowDirections)
         {
             RefreshBeltDirectionRuntimeVisibility();
         }
@@ -441,7 +442,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void SyncBeltDirectionRuntimeVisibility()
     {
-        bool showBeltDirections = GameManager.Instance != null && GameManager.Instance.ShowBeltDirections;
+        bool showBeltDirections = GameManager.Instance != null && GameManager.Instance.ShowDirections;
         if (beltDirectionVisibilityInitialized && lastShowBeltDirections == showBeltDirections)
         {
             return;
@@ -452,7 +453,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RefreshBeltDirectionRuntimeVisibility()
     {
-        bool showBeltDirections = GameManager.Instance != null && GameManager.Instance.ShowBeltDirections;
+        bool showBeltDirections = GameManager.Instance != null && GameManager.Instance.ShowDirections;
         ApplyBeltDirectionRuntimeVisibility(showBeltDirections);
     }
 
@@ -1858,7 +1859,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (activeBeltDirectionVisualList.Count == 0
             || GameManager.Instance == null
-            || !GameManager.Instance.ShowBeltDirections)
+            || !GameManager.Instance.ShowDirections)
         {
             return;
         }
@@ -1870,19 +1871,39 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             Block block = activeBeltDirectionVisualList[index];
             if (block == null
-                || !block.IsConveyorStackingEnabled()
-                || !block.TryGetBeltDirectionArrowMatrix(out Matrix4x4 matrix))
+                || !TryAppendDirectionArrowMatrices(block))
             {
                 activeBeltDirectionVisuals.Remove(block);
                 RemoveBeltDirectionVisualAt(index);
                 continue;
             }
 
-            AddBeltDirectionArrowInstance(matrix);
             index++;
         }
 
         EndBeltDirectionArrowInstancedRendering();
+    }
+
+    private bool TryAppendDirectionArrowMatrices(Block block)
+    {
+        if (block == null)
+        {
+            return false;
+        }
+
+        directionArrowMatrixScratch.Clear();
+        int matrixCount = block.AppendDirectionArrowMatrices(directionArrowMatrixScratch);
+        if (matrixCount <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < directionArrowMatrixScratch.Count; i++)
+        {
+            AddBeltDirectionArrowInstance(directionArrowMatrixScratch[i]);
+        }
+
+        return true;
     }
 
     private void AddBeltDirectionArrowInstance(Matrix4x4 matrix)
@@ -1967,7 +1988,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (beltDirectionArrowInstancedMaterial != null && beltDirectionArrowInstancedMaterial.shader == shader)
         {
-            beltDirectionArrowInstancedMaterial.enableInstancing = true;
+            ConfigureBeltDirectionArrowInstancedMaterial(shader);
             return;
         }
 
@@ -1981,8 +2002,21 @@ public partial class TerrainGenerator : MonoBehaviour
             name = "BeltDirectionArrowInstancedMaterial",
             enableInstancing = true,
             hideFlags = HideFlags.DontSave,
-            renderQueue = 5000
+            renderQueue = BeltDirectionArrowRenderQueue
         };
+
+        ConfigureBeltDirectionArrowInstancedMaterial(shader);
+    }
+
+    private void ConfigureBeltDirectionArrowInstancedMaterial(Shader shader)
+    {
+        if (beltDirectionArrowInstancedMaterial == null || shader == null)
+        {
+            return;
+        }
+
+        beltDirectionArrowInstancedMaterial.enableInstancing = true;
+        beltDirectionArrowInstancedMaterial.renderQueue = BeltDirectionArrowRenderQueue;
 
         Color materialColor = shader.name == "Custom/InstallGridOverlay" || shader.name == "Sprites/Default"
             ? Color.white
@@ -2001,6 +2035,18 @@ public partial class TerrainGenerator : MonoBehaviour
         if (beltDirectionArrowInstancedMaterial.HasProperty("_Cull"))
         {
             beltDirectionArrowInstancedMaterial.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        }
+
+        if (beltDirectionArrowInstancedMaterial.HasProperty("_ZTest"))
+        {
+            beltDirectionArrowInstancedMaterial.SetFloat(
+                "_ZTest",
+                (float)UnityEngine.Rendering.CompareFunction.Always);
+        }
+
+        if (beltDirectionArrowInstancedMaterial.HasProperty("_ZWrite"))
+        {
+            beltDirectionArrowInstancedMaterial.SetFloat("_ZWrite", 0f);
         }
     }
 

@@ -153,6 +153,35 @@ public class ItemSlot : MonoBehaviour
         SetItemNameText(null, false);
     }
 
+    public void SetCustomDisplay(Sprite displayIcon, string displayName, string countText)
+    {
+        ResolveReferences();
+        id = -1;
+
+        bool hasIcon = displayIcon != null;
+        if (icon != null)
+        {
+            icon.sprite = displayIcon;
+            icon.enabled = hasIcon;
+            if (icon.gameObject.activeSelf != hasIcon)
+            {
+                icon.gameObject.SetActive(hasIcon);
+            }
+        }
+
+        bool hasCountText = !string.IsNullOrWhiteSpace(countText);
+        if (count != null)
+        {
+            count.text = hasCountText ? countText : string.Empty;
+            if (count.gameObject.activeSelf != hasCountText)
+            {
+                count.gameObject.SetActive(hasCountText);
+            }
+        }
+
+        SetItemNameText(displayName, !string.IsNullOrWhiteSpace(displayName));
+    }
+
     public virtual void Clear()
     {
         SetItem(-1, 0, 0);
