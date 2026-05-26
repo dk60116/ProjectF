@@ -56,6 +56,10 @@ public class InstallationObject : MapObject
     private long runtimePlacementSequence;
     [SerializeField, HideInInspector, Min(0f)]
     private float storedFluidLiters;
+    [SerializeField, HideInInspector]
+    private int storedFluidItemId = -1;
+    [SerializeField, HideInInspector]
+    private float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
 
     private float fluidInSampleLiters;
     private float fluidInSampleStartTime = -1f;
@@ -75,6 +79,7 @@ public class InstallationObject : MapObject
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
     public long RuntimePlacementSequence => runtimePlacementSequence;
     public float StoredFluidLiters => Mathf.Max(0f, storedFluidLiters);
+    public int StoredFluidItemId => StoredFluidLiters > 0.0001f ? storedFluidItemId : -1;
     public float FluidStorageCapacityLiters
     {
         get
@@ -197,12 +202,36 @@ public class InstallationObject : MapObject
 
         ApplyItemFilterMask(null, false);
         storedFluidLiters = 0f;
+        storedFluidItemId = -1;
+        storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         ClearFluidInRate();
         transform.localPosition = Vector3.zero;
         RefreshInstalledDirectionFromCurrentTransform();
     }
 
     public bool TryAddFluidLiters(float requestedLiters, out float acceptedLiters)
+    {
+        return TryAddFluidLiters(
+            storedFluidItemId,
+            requestedLiters,
+            GetStoredFluidTemperatureCelsius(storedFluidItemId),
+            out acceptedLiters);
+    }
+
+    public bool TryAddFluidLiters(int fluidItemId, float requestedLiters, out float acceptedLiters)
+    {
+        return TryAddFluidLiters(
+            fluidItemId,
+            requestedLiters,
+            MapClimate.CurrentTemperatureCelsius,
+            out acceptedLiters);
+    }
+
+    public bool TryAddFluidLiters(
+        int fluidItemId,
+        float requestedLiters,
+        float incomingTemperatureCelsius,
+        out float acceptedLiters)
     {
         acceptedLiters = 0f;
         if (requestedLiters <= 0f)
@@ -214,23 +243,57 @@ public class InstallationObject : MapObject
         if (capacity <= 0f)
         {
             storedFluidLiters = 0f;
+            storedFluidItemId = -1;
+            storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+            return false;
+        }
+
+        if (!CanAcceptFluidItem(fluidItemId))
+        {
             return false;
         }
 
         storedFluidLiters = Mathf.Clamp(storedFluidLiters, 0f, capacity);
+        if (storedFluidLiters <= 0.0001f)
+        {
+            storedFluidLiters = 0f;
+            storedFluidItemId = -1;
+            storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        }
+        else if (fluidItemId >= 0 && storedFluidItemId >= 0 && storedFluidItemId != fluidItemId)
+        {
+            return false;
+        }
+
         float availableLiters = capacity - storedFluidLiters;
         if (availableLiters <= 0.0001f)
         {
             return false;
         }
 
+        float previousStoredLiters = storedFluidLiters;
         acceptedLiters = Mathf.Min(requestedLiters, availableLiters);
         storedFluidLiters += acceptedLiters;
+        if (acceptedLiters > 0.0001f && fluidItemId >= 0)
+        {
+            storedFluidItemId = fluidItemId;
+        }
+
         RecordFluidIn(acceptedLiters);
+        OnStoredFluidAccepted(
+            fluidItemId,
+            previousStoredLiters,
+            acceptedLiters,
+            NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius));
         return acceptedLiters > 0f;
     }
 
     public bool TryConsumeFluidLiters(float requestedLiters, out float consumedLiters)
+    {
+        return TryConsumeFluidLiters(-1, requestedLiters, out consumedLiters);
+    }
+
+    public bool TryConsumeFluidLiters(int fluidItemId, float requestedLiters, out float consumedLiters)
     {
         consumedLiters = 0f;
         if (requestedLiters <= 0f)
@@ -242,26 +305,142 @@ public class InstallationObject : MapObject
         if (capacity <= 0f)
         {
             storedFluidLiters = 0f;
+            storedFluidItemId = -1;
+            storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
             return false;
         }
 
         storedFluidLiters = Mathf.Clamp(storedFluidLiters, 0f, capacity);
         if (storedFluidLiters <= 0.0001f)
         {
+            storedFluidLiters = 0f;
+            storedFluidItemId = -1;
+            storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
             return false;
+        }
+
+        if (fluidItemId >= 0 && storedFluidItemId >= 0 && storedFluidItemId != fluidItemId)
+        {
+            return false;
+        }
+
+        if (fluidItemId >= 0 && storedFluidItemId < 0)
+        {
+            storedFluidItemId = fluidItemId;
         }
 
         consumedLiters = Mathf.Min(requestedLiters, storedFluidLiters);
         storedFluidLiters = Mathf.Max(0f, storedFluidLiters - consumedLiters);
+        if (storedFluidLiters <= 0.0001f)
+        {
+            storedFluidLiters = 0f;
+            storedFluidItemId = -1;
+            storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        }
+
         return consumedLiters > 0f;
     }
 
     public void SetStoredFluidLiters(float liters)
     {
+        SetStoredFluid(storedFluidItemId, liters);
+    }
+
+    public void SetStoredFluid(int fluidItemId, float liters)
+    {
+        SetStoredFluid(fluidItemId, liters, GetStoredFluidTemperatureCelsius(fluidItemId));
+    }
+
+    public void SetStoredFluid(int fluidItemId, float liters, float temperatureCelsius)
+    {
         float capacity = FluidStorageCapacityLiters;
         storedFluidLiters = capacity > 0f
             ? Mathf.Clamp(liters, 0f, capacity)
             : 0f;
+        storedFluidItemId = storedFluidLiters > 0.0001f && fluidItemId >= 0
+            ? fluidItemId
+            : -1;
+        storedFluidTemperatureCelsius = storedFluidItemId >= 0
+            ? NormalizeFluidTemperatureCelsius(temperatureCelsius)
+            : MapClimate.CurrentTemperatureCelsius;
+    }
+
+    public virtual bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
+    {
+        if (!CanStoreFluid || (requestedLiters > 0f && AvailableFluidStorageLiters + 0.0001f < requestedLiters))
+        {
+            return false;
+        }
+
+        return storedFluidLiters <= 0.0001f
+               || storedFluidItemId < 0
+               || fluidItemId < 0
+               || storedFluidItemId == fluidItemId;
+    }
+
+    public virtual bool CanProvideFluidItem(int fluidItemId, float requestedLiters = 0f)
+    {
+        if (!CanStoreFluid || StoredFluidLiters <= 0.0001f)
+        {
+            return false;
+        }
+
+        if (requestedLiters > 0f && StoredFluidLiters + 0.0001f < requestedLiters)
+        {
+            return false;
+        }
+
+        return storedFluidItemId < 0
+               || fluidItemId < 0
+               || storedFluidItemId == fluidItemId;
+    }
+
+    public virtual float GetStoredFluidTemperatureCelsius(int fluidItemId)
+    {
+        return StoredFluidLiters > 0.0001f
+               && storedFluidItemId >= 0
+               && (fluidItemId < 0 || storedFluidItemId == fluidItemId)
+            ? NormalizeFluidTemperatureCelsius(storedFluidTemperatureCelsius)
+            : MapClimate.CurrentTemperatureCelsius;
+    }
+
+    protected virtual void OnStoredFluidAccepted(
+        int fluidItemId,
+        float previousStoredLiters,
+        float acceptedLiters,
+        float incomingTemperatureCelsius)
+    {
+        if (acceptedLiters <= 0.0001f)
+        {
+            return;
+        }
+
+        float previousLiters = Mathf.Max(0f, previousStoredLiters);
+        float totalLiters = previousLiters + acceptedLiters;
+        if (totalLiters <= 0.0001f)
+        {
+            storedFluidTemperatureCelsius = NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius);
+            return;
+        }
+
+        float previousTemperature = previousLiters > 0.0001f
+            ? NormalizeFluidTemperatureCelsius(storedFluidTemperatureCelsius)
+            : NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius);
+        storedFluidTemperatureCelsius = NormalizeFluidTemperatureCelsius(
+            ((previousTemperature * previousLiters)
+             + (NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius) * acceptedLiters)) / totalLiters);
+    }
+
+    protected void SetStoredFluidTemperatureCelsius(float temperatureCelsius)
+    {
+        storedFluidTemperatureCelsius = NormalizeFluidTemperatureCelsius(temperatureCelsius);
+    }
+
+    protected static float NormalizeFluidTemperatureCelsius(float temperatureCelsius)
+    {
+        return float.IsNaN(temperatureCelsius) || float.IsInfinity(temperatureCelsius)
+            ? MapClimate.CurrentTemperatureCelsius
+            : temperatureCelsius;
     }
 
     private void RecordFluidIn(float liters)
@@ -435,7 +614,7 @@ public class InstallationObject : MapObject
             installationFocusRadius = 0f;
         }
 
-        SetStoredFluidLiters(storedFluidLiters);
+        SetStoredFluid(storedFluidItemId, storedFluidLiters);
 
         globalMaxFocusActivationRadiusDirty = true;
         RefreshInstalledDirectionFromCurrentTransform();

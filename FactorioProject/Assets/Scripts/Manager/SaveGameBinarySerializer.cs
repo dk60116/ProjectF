@@ -220,6 +220,8 @@ public static class SaveGameBinarySerializer
         writer.Write(state.itemFilterMaskInitialized);
         WriteUlongList(writer, state.itemFilterMaskWords);
         writer.Write(state.storedFluidLiters);
+        writer.Write(state.storedFluidItemId);
+        writer.Write(state.storedFluidTemperatureCelsius);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -253,6 +255,18 @@ public static class SaveGameBinarySerializer
         {
             state.storedFluidLiters = reader.ReadSingle();
         }
+        if (version >= 6)
+        {
+            state.storedFluidItemId = reader.ReadInt32();
+        }
+        if (version >= 8)
+        {
+            state.storedFluidTemperatureCelsius = reader.ReadSingle();
+        }
+        else
+        {
+            state.storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        }
         return state;
     }
 
@@ -278,6 +292,8 @@ public static class SaveGameBinarySerializer
         writer.Write(state.activeRecipeIndex);
         writer.Write(state.activeOutputItemId);
         writer.Write(state.activeOutputCount);
+        writer.Write(state.boilerWaterTemperatureCelsius);
+        writer.Write(state.boilerSteamLiterAccumulator);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -287,7 +303,7 @@ public static class SaveGameBinarySerializer
             return null;
         }
 
-        return new InputOutputModule.PersistentState
+        InputOutputModule.PersistentState state = new InputOutputModule.PersistentState
         {
             inputEnergyCoordinates = ReadVector2IntList(reader),
             inputItemAreas = ReadInputItemAreaList(reader),
@@ -304,6 +320,14 @@ public static class SaveGameBinarySerializer
             activeOutputItemId = reader.ReadInt32(),
             activeOutputCount = reader.ReadInt32()
         };
+
+        if (version >= 7)
+        {
+            state.boilerWaterTemperatureCelsius = reader.ReadSingle();
+            state.boilerSteamLiterAccumulator = reader.ReadSingle();
+        }
+
+        return state;
     }
 
     private static void WriteRobotArmState(BinaryWriter writer, RobotArm.PersistentState state)

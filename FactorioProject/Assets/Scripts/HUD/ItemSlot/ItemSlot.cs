@@ -155,8 +155,13 @@ public class ItemSlot : MonoBehaviour
 
     public void SetCustomDisplay(Sprite displayIcon, string displayName, string countText)
     {
+        SetCustomDisplay(-1, displayIcon, displayName, countText);
+    }
+
+    public void SetCustomDisplay(int itemId, Sprite displayIcon, string displayName, string countText)
+    {
         ResolveReferences();
-        id = -1;
+        id = itemId;
 
         bool hasIcon = displayIcon != null;
         if (icon != null)

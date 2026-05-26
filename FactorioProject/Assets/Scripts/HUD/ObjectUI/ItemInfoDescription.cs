@@ -81,6 +81,25 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    public void ShowPipe(Pipe pipe, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+
+        if (pipe != null && pipe.TryGetObjectInfoFluidInfo(out int fluidItemId, out float temperatureCelsius))
+        {
+            SetDefaultText(
+                defaultStatusLineIndex,
+                $"Fluid: {ResolveItemDisplayName(fluidItemId, temperatureCelsius)}",
+                true);
+            SetDefaultSign(defaultStatusLineIndex, false, Color.white);
+            SetDefaultItemSlot(0, fluidItemId, 1, 0, true, false, false, temperatureCelsius);
+            return;
+        }
+
+        SetDefaultText(defaultStatusLineIndex, "Fluid: None", true);
+        SetDefaultSign(defaultStatusLineIndex, false, Color.white);
+    }
+
     public void ShowBoxObject(BoxObject boxObject, Resource underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
@@ -119,7 +138,17 @@ public class ItemInfoDescription : MonoBehaviour
     {
         BeginObjectDisplay(underlyingResource);
 
-        if (module is Boiler && module.CanStoreFluid)
+        Pump pump = module as Pump;
+        if (pump != null)
+        {
+            pump.GetObjectInfoStatus(out string pumpStatusText, out bool isPumpProducing);
+            SetDefaultStatus(pumpStatusText, isPumpProducing);
+            SetPumpOutputRateDefaultItemSlot(0, pump);
+            return;
+        }
+
+        Boiler boiler = module as Boiler;
+        if (boiler != null && module.CanStoreFluid)
         {
             SetFluidStorageGauge(module);
             SetGauge(
@@ -127,10 +156,10 @@ public class ItemInfoDescription : MonoBehaviour
                 workFill,
                 workText,
                 true,
-                module.ObjectInfoEnergyGaugeFillAmount,
-                module.ObjectInfoEnergyGaugeFillColor,
-                module.ObjectInfoStoredEnergy,
-                module.ObjectInfoEnergyGaugeCapacity,
+                boiler.ObjectInfoBoilerTemperatureFillAmount,
+                boiler.ObjectInfoBoilerTemperatureGaugeFillColor,
+                boiler.WaterTemperatureCelsius,
+                boiler.MaxWaterTemperatureCelsius,
                 true);
         }
         else
@@ -165,6 +194,7 @@ public class ItemInfoDescription : MonoBehaviour
 
         module.GetObjectInfoStatus(out string statusText, out bool isProducing);
         SetDefaultStatus(statusText, isProducing);
+
         SetFluidStorageDefaultItemSlot(0, module);
 
         if (module.TryGetObjectInfoEnergyInput(
@@ -172,7 +202,15 @@ public class ItemInfoDescription : MonoBehaviour
             out int energyAreaCount,
             out int energyAreaCapacity))
         {
-            SetItemSlot(energyItem, energyItemSlot, energyItemId, energyAreaCount, energyAreaCapacity, true);
+            SetItemSlot(
+                energyItem,
+                energyItemSlot,
+                energyItemId,
+                energyAreaCount,
+                energyAreaCapacity,
+                true,
+                false,
+                ResolveModuleFluidTemperature(module, energyItemId));
         }
 
         if (module.TryGetObjectInfoItemPair(
@@ -183,8 +221,28 @@ public class ItemInfoDescription : MonoBehaviour
                 out int outputAreaCount,
                 out int outputAreaCapacity))
         {
-            SetItemSlot(inputItem, inputItemSlot, inputItemId, inputAreaCount, inputAreaCapacity, true, true);
-            SetItemSlot(outputItem, outputItemSlot, outputItemId, outputAreaCount, outputAreaCapacity, true, true);
+            SetItemSlot(
+                inputItem,
+                inputItemSlot,
+                inputItemId,
+                inputAreaCount,
+                inputAreaCapacity,
+                true,
+                true,
+                ResolveModuleFluidTemperature(module, inputItemId));
+            if (!TrySetBoilerOutputRateItemSlot(outputItem, outputItemSlot, boiler))
+            {
+                SetItemSlot(
+                    outputItem,
+                    outputItemSlot,
+                    outputItemId,
+                    outputAreaCount,
+                    outputAreaCapacity,
+                    true,
+                    true,
+                    ResolveModuleFluidTemperature(module, outputItemId));
+            }
+
             return;
         }
 
@@ -194,7 +252,18 @@ public class ItemInfoDescription : MonoBehaviour
                 out outputAreaCapacity,
                 out bool displayZeroOutputItem))
         {
-            SetItemSlot(outputItem, outputItemSlot, outputItemId, outputAreaCount, outputAreaCapacity, true, displayZeroOutputItem);
+            if (!TrySetBoilerOutputRateItemSlot(outputItem, outputItemSlot, boiler))
+            {
+                SetItemSlot(
+                    outputItem,
+                    outputItemSlot,
+                    outputItemId,
+                    outputAreaCount,
+                    outputAreaCapacity,
+                    true,
+                    displayZeroOutputItem,
+                    ResolveModuleFluidTemperature(module, outputItemId));
+            }
         }
     }
 
@@ -222,6 +291,62 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultSign(index, false, Color.white);
     }
 
+    private void SetPumpOutputRateDefaultItemSlot(int index, Pump pump)
+    {
+        GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
+        ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return;
+        }
+
+        int outputItemId = -1;
+        float litersPerSecond = 0f;
+        if (pump != null)
+        {
+            pump.TryGetObjectInfoOutputRate(out outputItemId, out litersPerSecond);
+        }
+
+        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(outputItemId);
+        string displayName = ResolveFluidDisplayName(
+            string.IsNullOrWhiteSpace(fluidItemSet.name) ? DefaultFluidItemName : fluidItemSet.name,
+            pump != null
+                ? pump.GetStoredFluidTemperatureCelsius(outputItemId)
+                : MapClimate.CurrentWaterTemperatureCelsius);
+        slot.SetCustomDisplay(
+            outputItemId,
+            fluidItemSet.icon,
+            displayName,
+            $"{FormatGaugeNumber(litersPerSecond, false)} L/s");
+    }
+
+    private bool TrySetBoilerOutputRateItemSlot(GameObject root, ItemSlot slot, Boiler boiler)
+    {
+        if (boiler == null
+            || !boiler.TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond))
+        {
+            return false;
+        }
+
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return true;
+        }
+
+        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(outputItemId);
+        string displayName = ResolveFluidDisplayName(
+            string.IsNullOrWhiteSpace(fluidItemSet.name) ? ResolveItemDisplayName(outputItemId) : fluidItemSet.name,
+            boiler.GetStoredFluidTemperatureCelsius(outputItemId));
+        slot.SetCustomDisplay(
+            outputItemId,
+            fluidItemSet.icon,
+            displayName,
+            $"{FormatGaugeNumber(litersPerSecond, false)} L/s");
+        return true;
+    }
+
     private void SetFluidStorageDefaultItemSlot(int index, InstallationObject installationObject)
     {
         if (installationObject == null || !installationObject.CanStoreFluid)
@@ -237,13 +362,21 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        if (installationObject is SteamGenerator && installationObject.StoredFluidItemId < 0)
+        {
+            slot.SetCustomDisplay(-1, null, string.Empty, string.Empty);
+            return;
+        }
+
         float storedLiters = installationObject.StoredFluidLiters;
         float capacityLiters = installationObject.FluidStorageCapacityLiters;
-        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet();
+        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(installationObject.StoredFluidItemId);
+        string displayName = ResolveFluidStorageDisplayName(installationObject, fluidItemSet);
         slot.SetCustomDisplay(
+            fluidItemSet.id,
             fluidItemSet.icon,
-            null,
-            $"{fluidItemSet.name}\n{FormatGaugeNumber(storedLiters, true)} / {FormatGaugeNumber(capacityLiters, true)} L");
+            displayName,
+            $"{FormatGaugeNumber(storedLiters, true)} / {FormatGaugeNumber(capacityLiters, true)} L");
     }
 
     private void SetFluidStorageGauge(InstallationObject installationObject)
@@ -269,12 +402,12 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetDefaultItemSlot(int index, int itemId, bool forceRootActive)
     {
-        SetDefaultItemSlot(index, itemId, 1, 0, forceRootActive, false);
+        SetDefaultItemSlot(index, itemId, 1, 0, forceRootActive, false, false, null);
     }
 
     private void SetDefaultItemSlot(int index, int itemId, int count, int maxCount, bool forceRootActive, bool showCount)
     {
-        SetDefaultItemSlot(index, itemId, count, maxCount, forceRootActive, showCount, false);
+        SetDefaultItemSlot(index, itemId, count, maxCount, forceRootActive, showCount, false, null);
     }
 
     private void SetDefaultItemSlot(
@@ -285,6 +418,19 @@ public class ItemInfoDescription : MonoBehaviour
         bool forceRootActive,
         bool showCount,
         bool showEmptyCount)
+    {
+        SetDefaultItemSlot(index, itemId, count, maxCount, forceRootActive, showCount, showEmptyCount, null);
+    }
+
+    private void SetDefaultItemSlot(
+        int index,
+        int itemId,
+        int count,
+        int maxCount,
+        bool forceRootActive,
+        bool showCount,
+        bool showEmptyCount,
+        float? fluidTemperatureCelsius)
     {
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
@@ -297,7 +443,21 @@ public class ItemInfoDescription : MonoBehaviour
 
         if (itemId >= 0)
         {
-            slot.SetItemDisplay(itemId, Mathf.Max(0, count), Mathf.Max(0, maxCount), true, showCount);
+            if (InputOutputModule.IsFluidItemId(itemId))
+            {
+                SetFluidItemSlotDisplay(
+                    slot,
+                    itemId,
+                    Mathf.Max(0, count),
+                    Mathf.Max(0, maxCount),
+                    true,
+                    showCount,
+                    fluidTemperatureCelsius);
+            }
+            else
+            {
+                slot.SetItemDisplay(itemId, Mathf.Max(0, count), Mathf.Max(0, maxCount), true, showCount);
+            }
         }
         else
         {
@@ -399,7 +559,8 @@ public class ItemInfoDescription : MonoBehaviour
         int count,
         int maxCount,
         bool forceRootActive = false,
-        bool displayZeroCount = false)
+        bool displayZeroCount = false,
+        float? fluidTemperatureCelsius = null)
     {
         bool hasItem = itemId >= 0 && (displayZeroCount || count > 0);
         SetActiveIfNeeded(root, forceRootActive || hasItem);
@@ -413,12 +574,53 @@ public class ItemInfoDescription : MonoBehaviour
         {
             int displayCount = Mathf.Max(0, count);
             int displayMaxCount = Mathf.Max(1, maxCount, displayCount);
-            slot.SetItemDisplay(itemId, displayCount, displayMaxCount, displayZeroCount);
+            if (InputOutputModule.IsFluidItemId(itemId))
+            {
+                SetFluidItemSlotDisplay(
+                    slot,
+                    itemId,
+                    displayCount,
+                    displayMaxCount,
+                    displayZeroCount,
+                    true,
+                    fluidTemperatureCelsius);
+            }
+            else
+            {
+                slot.SetItemDisplay(itemId, displayCount, displayMaxCount, displayZeroCount);
+            }
         }
         else
         {
             slot.Clear();
         }
+    }
+
+    private static void SetFluidItemSlotDisplay(
+        ItemSlot slot,
+        int itemId,
+        int count,
+        int maxCount,
+        bool allowZeroCount,
+        bool showCount,
+        float? fluidTemperatureCelsius)
+    {
+        if (slot == null)
+        {
+            return;
+        }
+
+        ItemManager.ItemSet itemSet = ResolveItemSet(itemId);
+        string countText = showCount
+            ? (maxCount > 0 ? $"{Mathf.Max(0, count)} / {Mathf.Max(1, maxCount)}" : Mathf.Max(0, count).ToString())
+            : string.Empty;
+        slot.SetCustomDisplay(
+            itemId,
+            itemSet.icon,
+            ResolveFluidDisplayName(
+                string.IsNullOrWhiteSpace(itemSet.name) ? ResolveItemDisplayName(itemId) : itemSet.name,
+                fluidTemperatureCelsius ?? MapClimate.CurrentTemperatureCelsius),
+            countText);
     }
 
     private static void ClearItemSlots(List<GameObject> roots, List<ItemSlot> slots)
@@ -459,6 +661,46 @@ public class ItemInfoDescription : MonoBehaviour
             id = -1,
             name = DefaultFluidItemName
         };
+    }
+
+    private static ItemManager.ItemSet ResolveFluidItemSet(int fluidItemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (fluidItemId >= 0
+            && itemManager != null
+            && itemManager.TryGetItemSetById(fluidItemId, out ItemManager.ItemSet itemSet))
+        {
+            return itemSet;
+        }
+
+        return ResolveFluidItemSet();
+    }
+
+    private static string ResolveFluidStorageDisplayName(
+        InstallationObject installationObject,
+        ItemManager.ItemSet fluidItemSet)
+    {
+        string displayName = string.IsNullOrWhiteSpace(fluidItemSet.name)
+            ? DefaultFluidItemName
+            : fluidItemSet.name;
+        float temperatureCelsius = installationObject != null
+            ? installationObject.GetStoredFluidTemperatureCelsius(fluidItemSet.id)
+            : MapClimate.CurrentTemperatureCelsius;
+
+        return ResolveFluidDisplayName(displayName, temperatureCelsius);
+    }
+
+    private static string ResolveFluidDisplayName(string displayName, float temperatureCelsius)
+    {
+        string resolvedDisplayName = string.IsNullOrWhiteSpace(displayName)
+            ? DefaultFluidItemName
+            : displayName;
+        return $"{resolvedDisplayName} [{FormatTemperatureCelsius(temperatureCelsius)}]";
+    }
+
+    private static string FormatTemperatureCelsius(float value)
+    {
+        return $"{Mathf.RoundToInt(Mathf.Max(0f, value))}\u2103";
     }
 
     private static bool TryResolveItemSetByName(ItemManager itemManager, string itemName, out ItemManager.ItemSet itemSet)
@@ -518,6 +760,53 @@ public class ItemInfoDescription : MonoBehaviour
         return !string.IsNullOrWhiteSpace(value)
             && !string.IsNullOrWhiteSpace(target)
             && string.Equals(value.Trim(), target.Trim(), System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveItemDisplayName(int itemId)
+    {
+        return ResolveItemDisplayName(itemId, null);
+    }
+
+    private static string ResolveItemDisplayName(int itemId, float? fluidTemperatureCelsius)
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (itemManager != null
+            && itemManager.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet)
+            && !string.IsNullOrWhiteSpace(itemSet.name))
+        {
+            return InputOutputModule.IsFluidItemId(itemId)
+                ? ResolveFluidDisplayName(itemSet.name, fluidTemperatureCelsius ?? MapClimate.CurrentTemperatureCelsius)
+                : itemSet.name;
+        }
+
+        string fallbackName = itemId >= 0 ? $"Item {itemId}" : "None";
+        return InputOutputModule.IsFluidItemId(itemId)
+            ? ResolveFluidDisplayName(fallbackName, fluidTemperatureCelsius ?? MapClimate.CurrentTemperatureCelsius)
+            : fallbackName;
+    }
+
+    private static ItemManager.ItemSet ResolveItemSet(int itemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (itemId >= 0
+            && itemManager != null
+            && itemManager.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet))
+        {
+            return itemSet;
+        }
+
+        return new ItemManager.ItemSet
+        {
+            id = itemId,
+            name = itemId >= 0 ? $"Item {itemId}" : "None"
+        };
+    }
+
+    private static float? ResolveModuleFluidTemperature(InputOutputModule module, int itemId)
+    {
+        return module != null && itemId >= 0 && InputOutputModule.IsFluidItemId(itemId)
+            ? module.GetStoredFluidTemperatureCelsius(itemId)
+            : (float?)null;
     }
 
     private void ResolveDefaultItemSlotReferences()

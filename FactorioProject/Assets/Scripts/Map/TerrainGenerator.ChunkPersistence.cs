@@ -1107,7 +1107,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
-        restoredInstallation.SetStoredFluidLiters(savedState.storedFluidLiters);
+        restoredInstallation.SetStoredFluid(
+            savedState.storedFluidItemId,
+            savedState.storedFluidLiters,
+            savedState.storedFluidTemperatureCelsius);
 
         if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
         {

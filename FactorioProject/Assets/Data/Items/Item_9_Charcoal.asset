@@ -25,7 +25,7 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   energyType: 1
-  energyAmount: 30
+  energyAmount: 40
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

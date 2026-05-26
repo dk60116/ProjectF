@@ -3,7 +3,8 @@ using UnityEngine;
 public class MapFocus : MonoBehaviour
 {
     private const string OverlayShaderName = "Custom/MapFocusOverlay";
-    private const int AreaLineCount = 8;
+    private const int AreaLineCount = 4;
+    private const float SingleMarkerCornerVisibleLengthRatio = 131f / 512f;
     public static readonly Color DefaultFocusColor = new Color(1f, 0.86f, 0f, 0.45f);
     public static readonly Color MouseFocusColor = new Color(1f, 1f, 1f, 0.45f);
 
@@ -101,7 +102,7 @@ public class MapFocus : MonoBehaviour
             lineObject.transform.SetParent(transform, false);
             LineRenderer line = lineObject.AddComponent<LineRenderer>();
             line.useWorldSpace = true;
-            line.positionCount = 2;
+            line.positionCount = 3;
             line.textureMode = LineTextureMode.Stretch;
             line.alignment = LineAlignment.View;
             line.numCapVertices = 0;
@@ -123,31 +124,102 @@ public class MapFocus : MonoBehaviour
 
         focusColor = NormalizeFocusColor(focusColor, DefaultFocusColor);
 
-        float width = Mathf.Max(0.01f, worldSize.x);
-        float depth = Mathf.Max(0.01f, worldSize.y);
-        float length = Mathf.Min(Mathf.Max(0.01f, areaCornerLength), width * 0.5f, depth * 0.5f);
+        Vector2 markerMatchedSize = MatchAreaSizeToSingleMarker(worldSize);
+        float width = Mathf.Max(0.01f, markerMatchedSize.x);
+        float depth = Mathf.Max(0.01f, markerMatchedSize.y);
         float y = worldCenter.y;
         if (transform.parent != null)
         {
             y = transform.parent.TransformPoint(defaultLocalPosition).y;
         }
 
-        float minX = worldCenter.x - width * 0.5f;
-        float maxX = worldCenter.x + width * 0.5f;
-        float minZ = worldCenter.z - depth * 0.5f;
-        float maxZ = worldCenter.z + depth * 0.5f;
+        // LineRenderer draws around its centerline. Keep the outside edge aligned
+        // with the single-cell sprite marker by moving multi-cell corners inward.
+        float strokeInset = Mathf.Max(0f, areaLineWidth * 0.5f);
+        float minX = worldCenter.x - width * 0.5f + strokeInset;
+        float maxX = worldCenter.x + width * 0.5f - strokeInset;
+        float minZ = worldCenter.z - depth * 0.5f + strokeInset;
+        float maxZ = worldCenter.z + depth * 0.5f - strokeInset;
+        float length = Mathf.Min(
+            ResolveMatchedCornerCenterlineLength(strokeInset),
+            width * 0.5f,
+            depth * 0.5f);
 
-        SetAreaLine(0, new Vector3(minX, y, minZ), new Vector3(minX + length, y, minZ));
-        SetAreaLine(1, new Vector3(minX, y, minZ), new Vector3(minX, y, minZ + length));
-        SetAreaLine(2, new Vector3(maxX, y, minZ), new Vector3(maxX - length, y, minZ));
-        SetAreaLine(3, new Vector3(maxX, y, minZ), new Vector3(maxX, y, minZ + length));
-        SetAreaLine(4, new Vector3(minX, y, maxZ), new Vector3(minX + length, y, maxZ));
-        SetAreaLine(5, new Vector3(minX, y, maxZ), new Vector3(minX, y, maxZ - length));
-        SetAreaLine(6, new Vector3(maxX, y, maxZ), new Vector3(maxX - length, y, maxZ));
-        SetAreaLine(7, new Vector3(maxX, y, maxZ), new Vector3(maxX, y, maxZ - length));
+        SetAreaCornerLine(
+            0,
+            new Vector3(minX + length, y, minZ),
+            new Vector3(minX, y, minZ),
+            new Vector3(minX, y, minZ + length));
+        SetAreaCornerLine(
+            1,
+            new Vector3(maxX - length, y, minZ),
+            new Vector3(maxX, y, minZ),
+            new Vector3(maxX, y, minZ + length));
+        SetAreaCornerLine(
+            2,
+            new Vector3(minX + length, y, maxZ),
+            new Vector3(minX, y, maxZ),
+            new Vector3(minX, y, maxZ - length));
+        SetAreaCornerLine(
+            3,
+            new Vector3(maxX - length, y, maxZ),
+            new Vector3(maxX, y, maxZ),
+            new Vector3(maxX, y, maxZ - length));
     }
 
-    private void SetAreaLine(int index, Vector3 start, Vector3 end)
+    private Vector2 MatchAreaSizeToSingleMarker(Vector2 worldSize)
+    {
+        Vector2 singleMarkerSize = GetSingleMarkerWorldSize();
+        return new Vector2(
+            MatchAreaAxisSizeToSingleMarker(worldSize.x, singleMarkerSize.x),
+            MatchAreaAxisSizeToSingleMarker(worldSize.y, singleMarkerSize.y));
+    }
+
+    private static float MatchAreaAxisSizeToSingleMarker(float worldSize, float singleMarkerSize)
+    {
+        float normalizedWorldSize = Mathf.Max(0.01f, worldSize);
+        float normalizedMarkerSize = Mathf.Max(0.01f, singleMarkerSize);
+        return normalizedWorldSize <= 1f
+            ? normalizedMarkerSize
+            : Mathf.Max(normalizedMarkerSize, normalizedWorldSize - 1f + normalizedMarkerSize);
+    }
+
+    private Vector2 GetSingleMarkerWorldSize()
+    {
+        if (render == null)
+        {
+            render = GetComponent<SpriteRenderer>();
+        }
+
+        if (render == null || render.sprite == null)
+        {
+            return Vector2.one;
+        }
+
+        Bounds spriteBounds = render.sprite.bounds;
+        Transform renderTransform = render.transform;
+        Vector3 spriteXAxis = renderTransform.TransformVector(new Vector3(spriteBounds.size.x, 0f, 0f));
+        Vector3 spriteYAxis = renderTransform.TransformVector(new Vector3(0f, spriteBounds.size.y, 0f));
+        Vector2 worldSize = new Vector2(
+            Mathf.Abs(spriteXAxis.x) + Mathf.Abs(spriteYAxis.x),
+            Mathf.Abs(spriteXAxis.z) + Mathf.Abs(spriteYAxis.z));
+
+        return worldSize.x > 0.01f && worldSize.y > 0.01f
+            ? worldSize
+            : Vector2.one;
+    }
+
+    private float ResolveMatchedCornerCenterlineLength(float strokeInset)
+    {
+        Vector2 singleMarkerSize = GetSingleMarkerWorldSize();
+        float singleMarkerVisibleLength =
+            Mathf.Min(singleMarkerSize.x, singleMarkerSize.y)
+            * SingleMarkerCornerVisibleLengthRatio;
+        float matchedCenterlineLength = Mathf.Max(0.01f, singleMarkerVisibleLength - Mathf.Max(0f, strokeInset));
+        return Mathf.Min(Mathf.Max(0.01f, areaCornerLength), matchedCenterlineLength);
+    }
+
+    private void SetAreaCornerLine(int index, Vector3 start, Vector3 corner, Vector3 end)
     {
         LineRenderer line = areaLines[index];
         if (line == null)
@@ -160,8 +232,14 @@ public class MapFocus : MonoBehaviour
         line.endWidth = areaLineWidth;
         line.startColor = focusColor;
         line.endColor = focusColor;
+        if (line.positionCount != 3)
+        {
+            line.positionCount = 3;
+        }
+
         line.SetPosition(0, start);
-        line.SetPosition(1, end);
+        line.SetPosition(1, corner);
+        line.SetPosition(2, end);
     }
 
     private void SetAreaLinesVisible(bool isVisible)

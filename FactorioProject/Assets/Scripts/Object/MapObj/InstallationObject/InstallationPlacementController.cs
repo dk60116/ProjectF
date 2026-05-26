@@ -223,6 +223,8 @@ public class InstallationPlacementController : MonoBehaviour
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public float storedFluidLiters;
+        public int storedFluidItemId = -1;
+        public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
     }
 
     private sealed class AreaAttachedBoxState
@@ -2439,6 +2441,9 @@ public class InstallationPlacementController : MonoBehaviour
         editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
         editSession.storedFluidLiters = installationObject.StoredFluidLiters;
+        editSession.storedFluidItemId = installationObject.StoredFluidItemId;
+        editSession.storedFluidTemperatureCelsius =
+            installationObject.GetStoredFluidTemperatureCelsius(editSession.storedFluidItemId);
 
         CaptureAttachedAreaBoxes(editSession);
         CaptureInstallationBlockStates(editSession);
@@ -3303,7 +3308,10 @@ public class InstallationPlacementController : MonoBehaviour
         restoredObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
         if (restoredObject is InstallationObject restoredInstallationObject)
         {
-            restoredInstallationObject.SetStoredFluidLiters(editSession.storedFluidLiters);
+            restoredInstallationObject.SetStoredFluid(
+                editSession.storedFluidItemId,
+                editSession.storedFluidLiters,
+                editSession.storedFluidTemperatureCelsius);
         }
         if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
         {
@@ -3539,7 +3547,10 @@ public class InstallationPlacementController : MonoBehaviour
         replacementObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
         if (replacementObject is InstallationObject replacementInstallation)
         {
-            replacementInstallation.SetStoredFluidLiters(editSession.storedFluidLiters);
+            replacementInstallation.SetStoredFluid(
+                editSession.storedFluidItemId,
+                editSession.storedFluidLiters,
+                editSession.storedFluidTemperatureCelsius);
         }
 
         ReleaseInstalledObjectInstance(
@@ -4226,7 +4237,7 @@ public class InstallationPlacementController : MonoBehaviour
         AddAreaMarkerRequests(
             markerRequests,
             pipeInputWorldPositions,
-            ResolvePipePassMarkerIcon());
+            ResolvePipePassMarkerIcon(footprintSource));
 
         if (markerRequests.Count <= 0)
         {
@@ -6999,24 +7010,10 @@ public class InstallationPlacementController : MonoBehaviour
         for (int i = 0; i < pipeAreaBlockCandidateScratchB.Count; i++)
         {
             PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchB[i];
-            if (candidate.snapshot == null
-                || !IsSteamGeneratorSource(candidate.snapshot.mapObject)
-                || !IsPipePassBlockType(candidate.blockType)
-                || !TryGetPipeAreaObjectDirection(
+            if (!TryGetSteamGeneratorPipePassTailDirection(
                     coordinate,
                     candidate,
-                    out Vector2Int pipePassObjectDirection))
-            {
-                continue;
-            }
-
-            Vector2Int candidateTailDirection = -pipePassObjectDirection;
-            if (candidateTailDirection == Vector2Int.zero
-                || !TryGetMapSizeAdjacentDirectionFromCenter(
-                    candidate.snapshot.mapObject,
-                    candidate.snapshot.quarterTurns,
-                    out Vector2Int existingTailDirection)
-                || candidateTailDirection != existingTailDirection)
+                    out Vector2Int candidateTailDirection))
             {
                 continue;
             }
@@ -7029,6 +7026,38 @@ public class InstallationPlacementController : MonoBehaviour
 
         pipeAreaBlockCandidateScratchB.Clear();
         return false;
+    }
+
+    private bool TryGetSteamGeneratorPipePassTailDirection(
+        Vector2Int coordinate,
+        PipeAreaBlockCandidate candidate,
+        out Vector2Int tailDirection)
+    {
+        tailDirection = Vector2Int.zero;
+        if (candidate.snapshot == null
+            || !IsSteamGeneratorSource(candidate.snapshot.mapObject)
+            || !IsPipePassBlockType(candidate.blockType)
+            || !TryGetPipeAreaObjectDirection(
+                coordinate,
+                candidate,
+                out Vector2Int pipePassObjectDirection))
+        {
+            return false;
+        }
+
+        Vector2Int candidateTailDirection = -pipePassObjectDirection;
+        if (candidateTailDirection == Vector2Int.zero
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                candidate.snapshot.mapObject,
+                candidate.snapshot.quarterTurns,
+                out Vector2Int existingTailDirection)
+            || candidateTailDirection != existingTailDirection)
+        {
+            return false;
+        }
+
+        tailDirection = candidateTailDirection;
+        return true;
     }
 
     private static bool IsPipePassBlockType(InputOutputModule.RectGridBlockType blockType)
@@ -11017,7 +11046,48 @@ public class InstallationPlacementController : MonoBehaviour
         return UIManager.Instance != null ? UIManager.Instance.ArrowImage : null;
     }
 
-    private Sprite ResolvePipePassMarkerIcon()
+    private Sprite ResolvePipePassMarkerIcon(MapObject footprintSource)
+    {
+        if (TryResolvePipePassFluidIcon(footprintSource, out Sprite icon))
+        {
+            return icon;
+        }
+
+        return ResolveFallbackPipePassMarkerIcon();
+    }
+
+    private bool TryResolvePipePassFluidIcon(MapObject footprintSource, out Sprite icon)
+    {
+        icon = null;
+        if (!TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.ItemIoEntry> inputList = inputOutputModule.InputList;
+        if (inputList == null || inputList.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < inputList.Count; i++)
+        {
+            ItemDefinition itemDefinition = inputList[i].itemDefinition;
+            if (itemDefinition == null
+                || itemDefinition.icon == null
+                || !InputOutputModule.IsFluidItemDefinition(itemDefinition))
+            {
+                continue;
+            }
+
+            icon = itemDefinition.icon;
+            return true;
+        }
+
+        return false;
+    }
+
+    private Sprite ResolveFallbackPipePassMarkerIcon()
     {
         if (pipePassMarkerIcon != null)
         {
@@ -12161,7 +12231,7 @@ public class InstallationPlacementController : MonoBehaviour
                 return CanPlacePipeFromGridCoordinate(block, pipePrototype);
             }
 
-            if (IsBoilerSource(footprintSource) && IsPumpOutputCoordinateForPlacement(block.Coordinate))
+            if (IsBoilerSource(footprintSource) && IsExactPumpOutputCoordinateForPlacement(block.Coordinate))
             {
                 return true;
             }
@@ -12229,6 +12299,11 @@ public class InstallationPlacementController : MonoBehaviour
 
         InstallationMapFilter allowedFilter = ResolvePlacementMapFilter(pipePrototype, pipePrototype);
         if (!CanPlaceOnTerrainBiome(block, allowedFilter))
+        {
+            return false;
+        }
+
+        if (CoordinateHasBoilerEnergyInputBlockForPlacement(block.Coordinate, null))
         {
             return false;
         }
@@ -13058,6 +13133,13 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (shouldReanchorRotatedMultiCellPreview
             && hasAnchorBlock
+            && ShouldKeepInstallPreviewAnchorOnRotation(activeInstallPreview, anchorCoordinate))
+        {
+            shouldReanchorRotatedMultiCellPreview = false;
+        }
+
+        if (shouldReanchorRotatedMultiCellPreview
+            && hasAnchorBlock
             && TryResolveRotatedMultiCellInstallPreviewAnchor(
                 activeInstallPreview,
                 previousAnchorCoordinate,
@@ -13068,6 +13150,23 @@ public class InstallationPlacementController : MonoBehaviour
         {
             anchorBlock = reanchoredBlock;
             anchorCoordinate = reanchoredCoordinate;
+        }
+
+        if (hasAnchorBlock
+            && PlacementHasBoilerPlacementRotationConflictForActivePreview(
+                anchorCoordinate,
+                installPreviewQuarterTurns)
+            && !TryFindBoilerRotationSkippingPlacementConflicts(
+                activeInstallPreview,
+                previousAnchorCoordinate,
+                previousQuarterTurns,
+                installPreviewQuarterTurns,
+                out anchorBlock,
+                out anchorCoordinate,
+                out installPreviewQuarterTurns))
+        {
+            installPreviewQuarterTurns = previousQuarterTurns;
+            return;
         }
 
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
@@ -13144,6 +13243,139 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private bool PlacementHasBoilerEnergyInputPipeConflictForActivePreview(
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        return TryResolveInstallPreviewFootprintSourceForPlacement(
+                   activeInstallPreview,
+                   out MapObject footprintSource)
+               && IsBoilerSource(footprintSource)
+               && PlacementHasBoilerEnergyInputPipeConflict(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns,
+                   activeInstallPreview);
+    }
+
+    private bool PlacementHasBoilerPlacementRotationConflictForActivePreview(
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        return TryResolveInstallPreviewFootprintSourceForPlacement(
+                   activeInstallPreview,
+                   out MapObject footprintSource)
+               && IsBoilerSource(footprintSource)
+               && PlacementHasBoilerPlacementRotationConflict(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns,
+                   activeInstallPreview);
+    }
+
+    private bool PlacementHasBoilerPlacementRotationConflict(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject preview)
+    {
+        return PlacementHasBoilerEnergyInputPipeConflict(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns,
+                   preview)
+               || PlacementHasBoilerPumpOutputDirectionMismatch(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns);
+    }
+
+    private bool TryFindBoilerRotationSkippingPlacementConflicts(
+        MapObject preview,
+        Vector2Int previousAnchorCoordinate,
+        int previousQuarterTurns,
+        int startQuarterTurns,
+        out Block resolvedAnchorBlock,
+        out Vector2Int resolvedAnchorCoordinate,
+        out int resolvedQuarterTurns)
+    {
+        resolvedAnchorBlock = null;
+        resolvedAnchorCoordinate = previousAnchorCoordinate;
+        resolvedQuarterTurns = startQuarterTurns;
+
+        if (!TryResolveInstallPreviewFootprintSourceForPlacement(preview, out MapObject footprintSource)
+            || !IsBoilerSource(footprintSource))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        bool keepPumpOutputAnchor = IsExactPumpOutputCoordinateForPlacement(previousAnchorCoordinate);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+                preview,
+                startQuarterTurns + offset);
+            Vector2Int candidateAnchorCoordinate = previousAnchorCoordinate;
+            Block candidateAnchorBlock = null;
+
+            if (!keepPumpOutputAnchor
+                && TryResolveRotatedMultiCellInstallPreviewAnchor(
+                    preview,
+                    previousAnchorCoordinate,
+                    previousQuarterTurns,
+                    candidateQuarterTurns,
+                    out Block reanchoredBlock,
+                    out Vector2Int reanchoredCoordinate))
+            {
+                candidateAnchorBlock = reanchoredBlock;
+                candidateAnchorCoordinate = reanchoredCoordinate;
+            }
+            else if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out candidateAnchorBlock)
+                     || candidateAnchorBlock == null)
+            {
+                continue;
+            }
+
+            if (PlacementHasBoilerPlacementRotationConflict(
+                    candidateAnchorCoordinate,
+                    footprintSource,
+                    candidateQuarterTurns,
+                    preview))
+            {
+                continue;
+            }
+
+            resolvedAnchorBlock = candidateAnchorBlock;
+            resolvedAnchorCoordinate = candidateAnchorCoordinate;
+            resolvedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool ShouldKeepInstallPreviewAnchorOnRotation(MapObject preview, Vector2Int anchorCoordinate)
+    {
+        if (!TryResolveInstallPreviewFootprintSourceForPlacement(preview, out MapObject footprintSource))
+        {
+            return false;
+        }
+
+        // SteamGenerator's logical Center is a concrete RectGrid object cell. Rotating
+        // it by preserving the footprint centroid moves that Center between grid cells,
+        // so keep the anchor cell fixed and rotate the second body cell around it.
+        return IsSteamGeneratorSource(footprintSource)
+               || (IsBoilerSource(footprintSource)
+                   && IsExactPumpOutputCoordinateForPlacement(anchorCoordinate));
     }
 
     private bool TryResolveRotatedMultiCellInstallPreviewAnchor(
@@ -13873,6 +14105,13 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (TryGetInstallPreviewAtBlock(clickedBlock, out MapObject clickedPreview) && clickedPreview != null)
         {
+            if (CanCreateAdditionalPreview()
+                && ShouldTryCreateSteamGeneratorChainFromPreviewObjectClick(clickedBlock, clickedPreview)
+                && TryCreateAndPlaceInstallPreview(clickedBlock, clickedPreview))
+            {
+                return;
+            }
+
             if (IsPreviewObjectCell(clickedPreview, clickedBlock))
             {
                 RemoveInstallPreview(clickedPreview);
@@ -13894,6 +14133,29 @@ public class InstallationPlacementController : MonoBehaviour
         {
             TryCreateAndPlaceInstallPreview(clickedBlock, null);
         }
+    }
+
+    private bool ShouldTryCreateSteamGeneratorChainFromPreviewObjectClick(Block clickedBlock, MapObject clickedPreview)
+    {
+        if (clickedBlock == null
+            || clickedPreview == null
+            || activeInstallDefinition == null
+            || !IsSteamGeneratorSource(activeInstallDefinition.mapObject)
+            || !IsPreviewObjectCell(clickedPreview, clickedBlock))
+        {
+            return false;
+        }
+
+        MapObject clickedFootprintSource = ResolveInstallPreviewFootprintSource(clickedPreview) ?? clickedPreview;
+        if (!IsSteamGeneratorSource(clickedFootprintSource))
+        {
+            return false;
+        }
+
+        // SteamGenerator chaining can intentionally place the next generator's
+        // input area over the previous blueprint's tail object cell. Try that
+        // attachment before treating an object-cell click as a delete request.
+        return true;
     }
 
     private void SelectInstallPreview(MapObject preview)
@@ -14925,13 +15187,13 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (IsBoilerSource(footprintSource)
-            && TryGetBoilerPumpOutputAxisMatch(
+            && TryGetBoilerPumpOutputDirectionMatch(
                 footprintSource,
                 block.Coordinate,
                 quarterTurns,
-                out bool pumpOutputAxisMatches))
+                out bool pumpOutputDirectionMatches))
         {
-            return pumpOutputAxisMatches;
+            return pumpOutputDirectionMatches;
         }
 
         if (!CanProposedFluidStoragePipeAreaConnectionsMatchExisting(
@@ -15076,12 +15338,14 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (CanPlacePreviewOnBlock(block, previewToIgnore, resolvedQuarterTurns))
+        if (CanUseBoilerEnergyInputRotationCandidate(block.Coordinate, previewToIgnore, resolvedQuarterTurns)
+            && CanPlacePreviewOnBlock(block, previewToIgnore, resolvedQuarterTurns))
         {
             return true;
         }
 
-        if (CanPlaceDisconnectedFluidStoragePreviewOnBlock(
+        if (CanUseBoilerEnergyInputRotationCandidate(block.Coordinate, previewToIgnore, resolvedQuarterTurns)
+            && CanPlaceDisconnectedFluidStoragePreviewOnBlock(
                 block,
                 previewToIgnore,
                 resolvedQuarterTurns))
@@ -15107,11 +15371,12 @@ public class InstallationPlacementController : MonoBehaviour
             int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
                 previewToIgnore,
                 resolvedQuarterTurns + offset);
-            if (!CanPlacePreviewOnBlock(block, previewToIgnore, candidateQuarterTurns)
+            if (!CanUseBoilerEnergyInputRotationCandidate(block.Coordinate, previewToIgnore, candidateQuarterTurns)
+                || (!CanPlacePreviewOnBlock(block, previewToIgnore, candidateQuarterTurns)
                 && !CanPlaceDisconnectedFluidStoragePreviewOnBlock(
                     block,
                     previewToIgnore,
-                    candidateQuarterTurns))
+                    candidateQuarterTurns)))
             {
                 continue;
             }
@@ -15305,6 +15570,15 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        if (TryResolveFixedRotationSteamGeneratorChainTarget(
+                clickedBlock,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out anchorBlock))
+        {
+            return true;
+        }
+
         if (CanPlacePreviewOnBlock(clickedBlock, previewToIgnore, resolvedQuarterTurns))
         {
             anchorBlock = clickedBlock;
@@ -15325,6 +15599,126 @@ public class InstallationPlacementController : MonoBehaviour
             previewToIgnore,
             resolvedQuarterTurns,
             out anchorBlock);
+    }
+
+    private bool TryResolveFixedRotationSteamGeneratorChainTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int quarterTurns,
+        out Block anchorBlock)
+    {
+        anchorBlock = null;
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsSteamGeneratorSource(footprintSource)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out _))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        int searchRadius = Mathf.Max(4, Mathf.Max(rectGridWidth, rectGridHeight) + 1);
+        int bestScore = int.MaxValue;
+        Block bestAnchorBlock = null;
+        for (int z = -searchRadius; z <= searchRadius; z++)
+        {
+            for (int x = -searchRadius; x <= searchRadius; x++)
+            {
+                Vector2Int connectorCoordinate = clickedBlock.Coordinate + new Vector2Int(x, z);
+                pipeAreaBlockCandidateScratchC.Clear();
+                CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+                    connectorCoordinate,
+                    previewToIgnore,
+                    pipeAreaBlockCandidateScratchC);
+
+                for (int candidateIndex = 0; candidateIndex < pipeAreaBlockCandidateScratchC.Count; candidateIndex++)
+                {
+                    PipeAreaBlockCandidate existingCandidate = pipeAreaBlockCandidateScratchC[candidateIndex];
+                    if (!TryResolveFixedRotationSteamGeneratorChainCandidate(
+                            clickedBlock.Coordinate,
+                            connectorCoordinate,
+                            existingCandidate,
+                            footprintSource,
+                            terrain,
+                            previewToIgnore,
+                            quarterTurns,
+                            out Block candidateAnchorBlock))
+                    {
+                        continue;
+                    }
+
+                    int score = Mathf.Abs(connectorCoordinate.x - clickedBlock.Coordinate.x)
+                        + Mathf.Abs(connectorCoordinate.y - clickedBlock.Coordinate.y);
+                    if (bestAnchorBlock != null && score >= bestScore)
+                    {
+                        continue;
+                    }
+
+                    bestScore = score;
+                    bestAnchorBlock = candidateAnchorBlock;
+                }
+            }
+        }
+
+        pipeAreaBlockCandidateScratchC.Clear();
+        anchorBlock = bestAnchorBlock;
+        return anchorBlock != null;
+    }
+
+    private bool TryResolveFixedRotationSteamGeneratorChainCandidate(
+        Vector2Int clickedCoordinate,
+        Vector2Int connectorCoordinate,
+        PipeAreaBlockCandidate existingCandidate,
+        MapObject footprintSource,
+        TerrainGenerator terrain,
+        MapObject previewToIgnore,
+        int quarterTurns,
+        out Block anchorBlock)
+    {
+        anchorBlock = null;
+        if (existingCandidate.snapshot == null
+            || !IsSteamGeneratorSource(existingCandidate.snapshot.mapObject)
+            || !TryGetSteamGeneratorPipePassTailDirection(
+                connectorCoordinate,
+                existingCandidate,
+                out Vector2Int existingTailDirection)
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                footprintSource,
+                quarterTurns,
+                out Vector2Int proposedTailDirection)
+            || proposedTailDirection != existingTailDirection)
+        {
+            return false;
+        }
+
+        Vector2Int candidateAnchorCoordinate = connectorCoordinate;
+        if (!SteamGeneratorChainPlacementContainsCoordinate(
+                clickedCoordinate,
+                candidateAnchorCoordinate,
+                footprintSource,
+                quarterTurns)
+            || !terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+            || candidateAnchorBlock == null
+            || !CanPlacePreviewOnBlock(
+                candidateAnchorBlock,
+                previewToIgnore,
+                quarterTurns,
+                true))
+        {
+            return false;
+        }
+
+        anchorBlock = candidateAnchorBlock;
+        return true;
     }
 
     private bool TryFindFixedRotationItemAreaOverlapInstallPreviewTarget(
@@ -15378,6 +15772,11 @@ public class InstallationPlacementController : MonoBehaviour
                 clickedBlock.Coordinate - RotateFootprintOffset(localOffset, quarterTurns);
             if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
                 || candidateAnchorBlock == null
+                || PlacementHasBoilerEnergyInputPipeConflict(
+                    candidateAnchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    previewToIgnore)
                 || PlacementHasNormalInputOutputAreaPipeOverlap(
                     candidateAnchorCoordinate,
                     footprintSource,
@@ -15428,6 +15827,11 @@ public class InstallationPlacementController : MonoBehaviour
             Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - localOffset;
             if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
                 || candidateAnchorBlock == null
+                || PlacementHasBoilerEnergyInputPipeConflict(
+                    candidateAnchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    previewToIgnore)
                 || PlacementHasNormalInputOutputAreaPipeOverlap(
                     candidateAnchorCoordinate,
                     footprintSource,
@@ -15525,11 +15929,32 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (TryResolveSteamGeneratorChainInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
+                includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
         if (TryResolveBoilerOnSteamGeneratorInputInstallPreviewTarget(
                 clickedBlock,
                 previewToIgnore,
                 preferredQuarterTurns,
                 includeIgnoredPreviewAsConnector,
+                out anchorBlock,
+                out resolvedQuarterTurns))
+        {
+            return true;
+        }
+
+        if (TryResolveBoilerOnPumpOutputInstallPreviewTarget(
+                clickedBlock,
+                previewToIgnore,
+                preferredQuarterTurns,
                 out anchorBlock,
                 out resolvedQuarterTurns))
         {
@@ -15600,17 +16025,6 @@ public class InstallationPlacementController : MonoBehaviour
                 clickedBlock,
                 previewToIgnore,
                 preferredQuarterTurns,
-                out anchorBlock,
-                out resolvedQuarterTurns))
-        {
-            return true;
-        }
-
-        if (TryResolveSteamGeneratorChainInstallPreviewTarget(
-                clickedBlock,
-                previewToIgnore,
-                preferredQuarterTurns,
-                includeIgnoredPreviewAsConnector,
                 out anchorBlock,
                 out resolvedQuarterTurns))
         {
@@ -16437,6 +16851,11 @@ public class InstallationPlacementController : MonoBehaviour
                                 footprintSource,
                                 candidateQuarterTurns,
                                 previewToIgnore)
+                            || PlacementHasBoilerEnergyInputPipeConflict(
+                                candidateAnchorCoordinate,
+                                footprintSource,
+                                candidateQuarterTurns,
+                                previewToIgnore)
                             || !CanPlacePreviewOnBlock(
                                 candidateAnchorBlock,
                                 previewToIgnore,
@@ -16468,6 +16887,66 @@ public class InstallationPlacementController : MonoBehaviour
         anchorBlock = bestAnchorBlock;
         resolvedQuarterTurns = bestQuarterTurns;
         return anchorBlock != null;
+    }
+
+    private bool TryResolveBoilerOnPumpOutputInstallPreviewTarget(
+        Block clickedBlock,
+        MapObject previewToIgnore,
+        int preferredQuarterTurns,
+        out Block anchorBlock,
+        out int resolvedQuarterTurns)
+    {
+        anchorBlock = null;
+        resolvedQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (clickedBlock == null
+            || !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+            || !IsBoilerSource(footprintSource)
+            || !TryGetExactPumpOutputDirectionForPlacement(
+                clickedBlock.Coordinate,
+                out Vector2Int pumpOutputDirection)
+            || pumpOutputDirection == Vector2Int.zero
+            || !TryGetRectGridFootprintSettings(footprintSource, out _, out _, out _))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        // CRITICAL: Pump -> Boiler is an adjacent fluid-direction connection, not a
+        // PipeOutput/PipePass same-cell overlap. The Boiler Object/anchor is allowed on
+        // the pump OutputArea so the two machines are visually flush. Do not "fix"
+        // this by separating the machines; only the pump-side Boiler PipePass direction
+        // is allowed to constrain rotation.
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+                previewToIgnore,
+                preferredQuarterTurns + offset);
+            if (!BoilerPumpSidePipePassMatchesOutputDirection(
+                    footprintSource,
+                    clickedBlock.Coordinate,
+                    clickedBlock.Coordinate,
+                    candidateQuarterTurns,
+                    pumpOutputDirection)
+                || !CanPlacePreviewOnBlock(
+                    clickedBlock,
+                    previewToIgnore,
+                    candidateQuarterTurns))
+            {
+                continue;
+            }
+
+            anchorBlock = clickedBlock;
+            resolvedQuarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryResolveBoilerOnBoilerPipePassInstallPreviewTarget(
@@ -16531,6 +17010,11 @@ public class InstallationPlacementController : MonoBehaviour
                     clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
                 if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
                     || candidateAnchorBlock == null
+                    || PlacementHasBoilerEnergyInputPipeConflict(
+                        candidateAnchorCoordinate,
+                        footprintSource,
+                        candidateQuarterTurns,
+                        previewToIgnore)
                     || !CanPlacePreviewOnBlock(
                         candidateAnchorBlock,
                         previewToIgnore,
@@ -16640,6 +17124,11 @@ public class InstallationPlacementController : MonoBehaviour
                     clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
                 if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
                     || candidateAnchorBlock == null
+                    || PlacementHasBoilerEnergyInputPipeConflict(
+                        candidateAnchorCoordinate,
+                        footprintSource,
+                        candidateQuarterTurns,
+                        previewToIgnore)
                     || PlacementHasNormalInputOutputAreaPipeOverlap(
                         candidateAnchorCoordinate,
                         footprintSource,
@@ -16707,6 +17196,11 @@ public class InstallationPlacementController : MonoBehaviour
                 Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - localOffset;
                 if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
                     || candidateAnchorBlock == null
+                    || PlacementHasBoilerEnergyInputPipeConflict(
+                        candidateAnchorCoordinate,
+                        footprintSource,
+                        candidateQuarterTurns,
+                        previewToIgnore)
                     || PlacementHasNormalInputOutputAreaPipeOverlap(
                         candidateAnchorCoordinate,
                         footprintSource,
@@ -16803,10 +17297,304 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
+    private bool PlacementHasBoilerEnergyInputPipeConflict(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsBoilerSource(footprintSource)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!InputOutputModule.IsInputEnergyBlockType(placement.blockType)
+                || placement.x < 0
+                || placement.x >= rectGridWidth
+                || placement.y < 0
+                || placement.y >= rectGridHeight)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(
+                placement.x - objectAnchorCell.x,
+                placement.y - objectAnchorCell.y);
+            Vector2Int energyCoordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+            if (TryGetPipePlacementAtCoordinate(energyCoordinate, previewToIgnore, out _, out _)
+                || BoilerEnergyInputHasIncomingPipeConnection(energyCoordinate, previewToIgnore))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool CanUseBoilerEnergyInputRotationCandidate(
+        Vector2Int anchorCoordinate,
+        MapObject previewToIgnore,
+        int quarterTurns)
+    {
+        return !TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject footprintSource)
+               || !IsBoilerSource(footprintSource)
+               || !PlacementHasBoilerEnergyInputPipeConflict(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns,
+                   previewToIgnore);
+    }
+
+    private bool BoilerEnergyInputHasIncomingPipeConnection(Vector2Int energyCoordinate, MapObject previewToIgnore)
+    {
+        for (int i = 0; i < PipeCardinalDirections.Length; i++)
+        {
+            Vector2Int directionToPipe = PipeCardinalDirections[i];
+            Vector2Int pipeCoordinate = energyCoordinate + directionToPipe;
+            Vector2Int directionToEnergyInput = -directionToPipe;
+            if (TryGetPipePlacementAtCoordinate(
+                    pipeCoordinate,
+                    previewToIgnore,
+                    out Pipe pipe,
+                    out Quaternion pipeRotation)
+                && pipe.HasConnectionTowards(pipeRotation, directionToEnergyInput))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetPipePlacementAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        out Pipe pipe,
+        out Quaternion pipeRotation)
+    {
+        pipe = null;
+        pipeRotation = Quaternion.identity;
+
+        if (TryGetInstallPreviewAtCoordinate(coordinate, out MapObject preview)
+            && preview != null
+            && preview != previewToIgnore)
+        {
+            MapObject previewSource = ResolveInstallPreviewFootprintSource(preview) ?? preview;
+            pipe = preview as Pipe ?? previewSource as Pipe;
+            if (pipe != null)
+            {
+                pipeRotation = preview.transform.rotation;
+                return true;
+            }
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null
+            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
+            || block == null)
+        {
+            return false;
+        }
+
+        return TryGetPipePlacementAtBlock(
+            block,
+            GetOccupyingObjectForPlacement(block, previewToIgnore),
+            out pipe,
+            out pipeRotation);
+    }
+
     private bool IsPipePlacementSource(MapObject mapObject)
     {
         MapObject source = ResolveInstallPreviewFootprintSource(mapObject) ?? mapObject;
         return source is Pipe;
+    }
+
+    private bool CoordinateHasNormalInputOutputAreaBlockForPlacement(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        if (InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
+            || InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
+            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate))
+        {
+            return true;
+        }
+
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot)
+            && SnapshotHasNormalInputOutputAreaBlock(previewSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot)
+            && SnapshotHasNormalInputOutputAreaBlock(installedSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        runtimeGridModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
+        {
+            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeGridModuleScratch[i],
+                        out PlacementSnapshot runtimeGridSnapshot)
+                    && SnapshotHasNormalInputOutputAreaBlock(runtimeGridSnapshot, coordinate))
+                {
+                    runtimeGridModuleScratch.Clear();
+                    return true;
+                }
+            }
+
+            runtimeGridModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot)
+                 && SnapshotHasNormalInputOutputAreaBlock(runtimeGridSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        runtimeAreaModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
+        {
+            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeAreaModuleScratch[i],
+                        out PlacementSnapshot runtimeAreaSnapshot)
+                    && SnapshotHasNormalInputOutputAreaBlock(runtimeAreaSnapshot, coordinate))
+                {
+                    runtimeAreaModuleScratch.Clear();
+                    return true;
+                }
+            }
+
+            runtimeAreaModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot)
+                 && SnapshotHasNormalInputOutputAreaBlock(runtimeAreaSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        return TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
+               && SnapshotHasNormalInputOutputAreaBlock(savedSnapshot, coordinate);
+    }
+
+    private bool CoordinateHasBoilerEnergyInputBlockForPlacement(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot)
+            && SnapshotHasBoilerEnergyInputBlock(previewSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot)
+            && SnapshotHasBoilerEnergyInputBlock(installedSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        runtimeGridModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
+        {
+            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeGridModuleScratch[i],
+                        out PlacementSnapshot runtimeGridSnapshot)
+                    && SnapshotHasBoilerEnergyInputBlock(runtimeGridSnapshot, coordinate))
+                {
+                    runtimeGridModuleScratch.Clear();
+                    return true;
+                }
+            }
+
+            runtimeGridModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot)
+                 && SnapshotHasBoilerEnergyInputBlock(runtimeGridSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        runtimeAreaModuleScratch.Clear();
+        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
+        {
+            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
+            {
+                if (TryGetRuntimeModulePlacementSnapshot(
+                        runtimeAreaModuleScratch[i],
+                        out PlacementSnapshot runtimeAreaSnapshot)
+                    && SnapshotHasBoilerEnergyInputBlock(runtimeAreaSnapshot, coordinate))
+                {
+                    runtimeAreaModuleScratch.Clear();
+                    return true;
+                }
+            }
+
+            runtimeAreaModuleScratch.Clear();
+        }
+        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot)
+                 && SnapshotHasBoilerEnergyInputBlock(runtimeAreaSnapshot, coordinate))
+        {
+            return true;
+        }
+
+        return TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
+               && SnapshotHasBoilerEnergyInputBlock(savedSnapshot, coordinate);
+    }
+
+    private bool SnapshotHasNormalInputOutputAreaBlock(PlacementSnapshot snapshot, Vector2Int coordinate)
+    {
+        if (snapshot == null || snapshot.mapObject == null)
+        {
+            return false;
+        }
+
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(snapshot.mapObject) ?? snapshot.mapObject;
+        return TryGetRectGridFootprintBlockType(
+                   snapshot.anchorCoordinate,
+                   footprintSource,
+                   snapshot.quarterTurns,
+                   coordinate,
+                   out InputOutputModule.RectGridBlockType blockType)
+               && IsNormalInputOutputAreaBlockType(blockType);
+    }
+
+    private bool SnapshotHasBoilerEnergyInputBlock(PlacementSnapshot snapshot, Vector2Int coordinate)
+    {
+        if (snapshot == null || !IsBoilerSource(snapshot.mapObject))
+        {
+            return false;
+        }
+
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(snapshot.mapObject) ?? snapshot.mapObject;
+        return TryGetRectGridFootprintBlockType(
+                   snapshot.anchorCoordinate,
+                   footprintSource,
+                   snapshot.quarterTurns,
+                   coordinate,
+                   out InputOutputModule.RectGridBlockType blockType)
+               && InputOutputModule.IsInputEnergyBlockType(blockType);
     }
 
     private static bool IsNormalInputOutputAreaBlockType(InputOutputModule.RectGridBlockType blockType)
@@ -16863,6 +17651,7 @@ public class InstallationPlacementController : MonoBehaviour
                && !(installationObject is Pipe)
                && !(installationObject is Pump)
                && !IsSteamGeneratorSource(footprintSource)
+               && !(IsBoilerSource(footprintSource) && IsPumpOutputCoordinateForPlacement(coordinate))
                && (IsPumpOutputCoordinateForPlacement(coordinate)
                    || HasPipeAreaFluidStorageAtCoordinate(coordinate));
     }
@@ -17667,6 +18456,13 @@ public class InstallationPlacementController : MonoBehaviour
             && !isRuntimePipeAreaBlock
             && !isPumpRuntimeOutputAreaBlock
             && !isFluidStoragePipeNodeBlock;
+        if (footprintSource is Pipe
+            && (isExistingNormalInputOutputAreaBlock
+                || CoordinateHasNormalInputOutputAreaBlockForPlacement(block.Coordinate, previewToIgnore)))
+        {
+            return false;
+        }
+
         if ((isCandidateNormalInputOutputAreaBlock || isExistingNormalInputOutputAreaBlock)
             && TryGetPipePlacementAtBlock(block, occupyingObject, out _, out _))
         {
@@ -17679,12 +18475,26 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        MapObject boilerPipePassPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
         if (CanPlaceBoilerConnectorOnPumpBody(
                 footprintSource,
                 rectGridBlockType,
+                block,
                 occupyingObject,
                 anchorCoordinate,
                 quarterTurns))
+        {
+            return true;
+        }
+
+        if (CanPlaceBoilerConnectorOnBoilerBody(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                occupyingObject,
+                anchorCoordinate,
+                quarterTurns,
+                boilerPipePassPreviewToIgnore))
         {
             return true;
         }
@@ -17694,12 +18504,13 @@ public class InstallationPlacementController : MonoBehaviour
                 rectGridBlockType,
                 block,
                 occupyingObject,
-                isPumpRuntimeOutputAreaBlock))
+                isPumpRuntimeOutputAreaBlock,
+                anchorCoordinate,
+                quarterTurns))
         {
             return true;
         }
 
-        MapObject boilerPipePassPreviewToIgnore = includeIgnoredPreviewAsConnector ? null : previewToIgnore;
         if (CanPlaceBoilerObjectOnBoilerPipePassArea(
                 footprintSource,
                 rectGridBlockType,
@@ -17727,6 +18538,19 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (CanPlaceBoilerCenterOnSteamGeneratorPipeInput(
+                footprintSource,
+                rectGridBlockType,
+                block,
+                occupyingObject,
+                allowedFilter,
+                anchorCoordinate,
+                quarterTurns,
+                previewToIgnore))
+        {
+            return true;
+        }
+
+        if (CanPlaceBoilerOutputOnSteamGeneratorBodyForDirectInput(
                 footprintSource,
                 rectGridBlockType,
                 block,
@@ -18011,6 +18835,23 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject previewToIgnore)
     {
         if (IsBoilerSource(footprintSource)
+            && isPumpRuntimeOutputAreaBlock
+            && rectGridBlockType == InputOutputModule.RectGridBlockType.Object)
+        {
+            return anchorCoordinate.HasValue
+                   && IsExactPumpOutputCoordinateForPlacement(block.Coordinate)
+                   && TryGetExactPumpOutputDirectionForPlacement(
+                       block.Coordinate,
+                       out Vector2Int pumpOutputDirection)
+                   && BoilerPumpSidePipePassMatchesOutputDirection(
+                       footprintSource,
+                       anchorCoordinate.Value,
+                       block.Coordinate,
+                       quarterTurns,
+                       pumpOutputDirection);
+        }
+
+        if (IsBoilerSource(footprintSource)
             && block != null
             && isFluidStoragePipeNodeBlock
             && TryGetSteamGeneratorPipePassTailDirectionAtCoordinate(
@@ -18116,6 +18957,36 @@ public class InstallationPlacementController : MonoBehaviour
             footprintSource,
             quarterTurns,
             previewToIgnore);
+    }
+
+    private bool CanPlaceBoilerOutputOnSteamGeneratorBodyForDirectInput(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        InstallationMapFilter allowedFilter,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        // Boiler -> SteamGenerator is a flush direct connection: the Boiler Object/body
+        // sits on the SteamGenerator PipeInputArea, and the Boiler PipeOutput reaches
+        // over the SteamGenerator body cell. Do not fall back to same-cell PipeOutput/
+        // PipeInput overlap because that separates the machines by one tile.
+        return IsBoilerSource(footprintSource)
+               && InputOutputModule.IsOutputBlockType(rectGridBlockType)
+               && block != null
+               && anchorCoordinate.HasValue
+               && (occupyingObject == null || IsSteamGeneratorSource(occupyingObject))
+               && CanPlaceOnTerrainBiome(block, allowedFilter)
+               && TryGetBoilerDirectSteamGeneratorInputPlacement(
+                   anchorCoordinate.Value,
+                   footprintSource,
+                   quarterTurns,
+                   previewToIgnore,
+                   out Vector2Int boilerOutputCoordinate,
+                   out _)
+               && block.Coordinate == boilerOutputCoordinate;
     }
 
     private bool CanPlaceSteamGeneratorStraightChainBlock(
@@ -18502,6 +19373,25 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         MapObject previewToIgnore)
     {
+        return TryGetBoilerDirectSteamGeneratorInputPlacement(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            previewToIgnore,
+            out _,
+            out _);
+    }
+
+    private bool TryGetBoilerDirectSteamGeneratorInputPlacement(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore,
+        out Vector2Int boilerOutputCoordinate,
+        out Vector2Int steamInputCoordinate)
+    {
+        boilerOutputCoordinate = Vector2Int.zero;
+        steamInputCoordinate = Vector2Int.zero;
         if (!IsBoilerSource(footprintSource)
             || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
         {
@@ -18528,7 +19418,6 @@ public class InstallationPlacementController : MonoBehaviour
             previewToIgnore,
             pipeAreaBlockCandidateScratchA);
 
-        bool canConnect = false;
         for (int existingIndex = 0; existingIndex < pipeAreaBlockCandidateScratchA.Count; existingIndex++)
         {
             PipeAreaBlockCandidate existingInputCandidate = pipeAreaBlockCandidateScratchA[existingIndex];
@@ -18575,19 +19464,16 @@ public class InstallationPlacementController : MonoBehaviour
                         anchorCoordinate,
                         existingInputCandidate))
                 {
-                    canConnect = true;
-                    break;
+                    boilerOutputCoordinate = proposedOutputCoordinate;
+                    steamInputCoordinate = anchorCoordinate;
+                    pipeAreaBlockCandidateScratchA.Clear();
+                    return true;
                 }
-            }
-
-            if (canConnect)
-            {
-                break;
             }
         }
 
         pipeAreaBlockCandidateScratchA.Clear();
-        return canConnect;
+        return false;
     }
 
     private bool CanBoilerObjectOnBoilerPipePassConnection(
@@ -18634,6 +19520,19 @@ public class InstallationPlacementController : MonoBehaviour
         PlacementSnapshot proposedSnapshot,
         MapObject previewToIgnore)
     {
+        return BoilerObjectMatchesExistingBoilerPipePassDirection(
+            objectCoordinate,
+            proposedSnapshot,
+            previewToIgnore,
+            null);
+    }
+
+    private bool BoilerObjectMatchesExistingBoilerPipePassDirection(
+        Vector2Int objectCoordinate,
+        PlacementSnapshot proposedSnapshot,
+        MapObject previewToIgnore,
+        Vector2Int? requiredProposedPipePassCoordinate)
+    {
         if (proposedSnapshot == null || !IsBoilerSource(proposedSnapshot.mapObject))
         {
             return false;
@@ -18656,6 +19555,12 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             Vector2Int proposedPipePassCoordinate = objectCoordinate + existingPipePassDirection;
+            if (requiredProposedPipePassCoordinate.HasValue
+                && proposedPipePassCoordinate != requiredProposedPipePassCoordinate.Value)
+            {
+                continue;
+            }
+
             if (!TryGetBoilerPipePassDirectionAtCoordinate(
                     proposedSnapshot.mapObject,
                     proposedSnapshot.anchorCoordinate,
@@ -19117,11 +20022,26 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        return TryResolveFixedFluidConnectorCompatibility(
+        if (TryResolveFixedFluidConnectorCompatibility(
             connectorSnapshot,
             connectorCoordinate,
             directionToPipe,
-            out connectorCanConnect);
+            out connectorCanConnect))
+        {
+            return true;
+        }
+
+        if (!SnapshotHasRectGridObjectBlock(connectorSnapshot, connectorCoordinate))
+        {
+            return false;
+        }
+
+        connectorCanConnect = BoilerHasPipePassFacingDirection(
+            connectorSnapshot.mapObject,
+            connectorSnapshot.anchorCoordinate,
+            connectorSnapshot.quarterTurns,
+            -directionToPipe);
+        return connectorCanConnect;
     }
 
     private bool TryGetFixedFluidConnectorCompatibilityAtCoordinate(
@@ -19402,6 +20322,33 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return pipe.HasConnectionTowards(pipeRotation, pipePassDirection);
+    }
+
+    private bool CanBoilerPipeOutputOverlapPipe(
+        Block block,
+        MapObject occupyingObject,
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (block == null
+            || !IsBoilerSource(footprintSource)
+            || !InputOutputModule.IsOutputBlockType(rectGridBlockType)
+            || !TryGetPipePlacementAtBlock(block, occupyingObject, out Pipe pipe, out Quaternion pipeRotation)
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridPipeAreaConnectionDirection(
+                footprintSource,
+                inputOutputModule,
+                anchorCoordinate,
+                quarterTurns,
+                block.Coordinate,
+                out Vector2Int outputObjectDirection))
+        {
+            return false;
+        }
+
+        return pipe.HasConnectionTowards(pipeRotation, outputObjectDirection);
     }
 
     private bool TryGetBoilerPipePassDirectionAtCoordinate(
@@ -19999,6 +20946,13 @@ public class InstallationPlacementController : MonoBehaviour
                        footprintSource,
                        rectGridBlockType,
                        anchorCoordinate,
+                       quarterTurns)
+                   || CanBoilerPipeOutputOverlapPipe(
+                       block,
+                       occupyingObject,
+                       footprintSource,
+                       rectGridBlockType,
+                       anchorCoordinate,
                        quarterTurns);
         }
 
@@ -20017,10 +20971,14 @@ public class InstallationPlacementController : MonoBehaviour
         bool hasExistingInputOutputOutputAreaBlock)
     {
         if (IsBoilerSource(footprintSource)
-            && IsPumpOutputCoordinateForPlacement(coordinate)
+            && IsExactPumpOutputCoordinateForPlacement(coordinate)
             && IsBoilerPumpInputBlockType(rectGridBlockType))
         {
-            return true;
+            return BoilerPipePassMatchesPumpOutput(
+                footprintSource,
+                coordinate,
+                anchorCoordinate,
+                quarterTurns);
         }
 
         if (InputOutputModule.IsInputItemBlockType(rectGridBlockType))
@@ -20130,24 +21088,54 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int existingAnchorCoordinate,
         int existingQuarterTurns)
     {
+        PlacementSnapshot candidateSnapshot = new PlacementSnapshot
+        {
+            mapObject = candidateFootprintSource,
+            rotation = GetPlacementObjectRotation(candidateFootprintSource, candidateQuarterTurns),
+            anchorCoordinate = candidateAnchorCoordinate,
+            quarterTurns = candidateQuarterTurns
+        };
+        PlacementSnapshot existingSnapshot = new PlacementSnapshot
+        {
+            mapObject = existingFootprintSource,
+            rotation = GetPlacementObjectRotation(existingFootprintSource, existingQuarterTurns),
+            anchorCoordinate = existingAnchorCoordinate,
+            quarterTurns = existingQuarterTurns
+        };
+
+        if (BoilerObjectPipePassOverlapCanConnect(
+                coordinate,
+                candidateSnapshot,
+                candidateBlockType,
+                existingSnapshot,
+                existingBlockType))
+        {
+            return true;
+        }
+
+        if (SteamGeneratorObjectPipePassOverlapCanConnect(
+                coordinate,
+                candidateSnapshot,
+                candidateBlockType,
+                existingSnapshot,
+                existingBlockType))
+        {
+            return true;
+        }
+
+        if (SteamGeneratorInputObjectOverlapCanConnect(
+                coordinate,
+                candidateSnapshot,
+                candidateBlockType,
+                existingSnapshot,
+                existingBlockType))
+        {
+            return true;
+        }
+
         if (InputOutputModule.AllowsPipeAreaInteraction(candidateBlockType)
             && InputOutputModule.AllowsPipeAreaInteraction(existingBlockType))
         {
-            PlacementSnapshot candidateSnapshot = new PlacementSnapshot
-            {
-                mapObject = candidateFootprintSource,
-                rotation = GetPlacementObjectRotation(candidateFootprintSource, candidateQuarterTurns),
-                anchorCoordinate = candidateAnchorCoordinate,
-                quarterTurns = candidateQuarterTurns
-            };
-            PlacementSnapshot existingSnapshot = new PlacementSnapshot
-            {
-                mapObject = existingFootprintSource,
-                rotation = GetPlacementObjectRotation(existingFootprintSource, existingQuarterTurns),
-                anchorCoordinate = existingAnchorCoordinate,
-                quarterTurns = existingQuarterTurns
-            };
-
             return CanPipeAreaBlockCandidatesConnect(
                 coordinate,
                 new PipeAreaBlockCandidate(candidateSnapshot, candidateBlockType),
@@ -20203,6 +21191,243 @@ public class InstallationPlacementController : MonoBehaviour
             existingOutputItemIds);
     }
 
+    private bool BoilerObjectPipePassOverlapCanConnect(
+        Vector2Int coordinate,
+        PlacementSnapshot candidateSnapshot,
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        PlacementSnapshot existingSnapshot,
+        InputOutputModule.RectGridBlockType existingBlockType)
+    {
+        if (candidateSnapshot == null
+            || existingSnapshot == null
+            || !IsBoilerSource(candidateSnapshot.mapObject)
+            || !IsBoilerSource(existingSnapshot.mapObject))
+        {
+            return false;
+        }
+
+        if (candidateBlockType == InputOutputModule.RectGridBlockType.Object
+            && IsPipePassBlockType(existingBlockType))
+        {
+            return BoilerObjectMatchesPipePassDirection(
+                coordinate,
+                candidateSnapshot,
+                new PipeAreaBlockCandidate(existingSnapshot, existingBlockType));
+        }
+
+        if (existingBlockType == InputOutputModule.RectGridBlockType.Object
+            && IsPipePassBlockType(candidateBlockType))
+        {
+            return BoilerObjectMatchesPipePassDirection(
+                coordinate,
+                existingSnapshot,
+                new PipeAreaBlockCandidate(candidateSnapshot, candidateBlockType));
+        }
+
+        return false;
+    }
+
+    private bool BoilerObjectMatchesPipePassDirection(
+        Vector2Int objectCoordinate,
+        PlacementSnapshot objectSnapshot,
+        PipeAreaBlockCandidate pipePassCandidate)
+    {
+        if (objectSnapshot == null
+            || !IsBoilerSource(objectSnapshot.mapObject)
+            || pipePassCandidate.snapshot == null
+            || !IsBoilerSource(pipePassCandidate.snapshot.mapObject)
+            || !IsPipePassBlockType(pipePassCandidate.blockType)
+            || !TryGetPipeAreaObjectDirection(
+                objectCoordinate,
+                pipePassCandidate,
+                out Vector2Int pipePassDirection))
+        {
+            return false;
+        }
+
+        Vector2Int objectPipePassCoordinate = objectCoordinate + pipePassDirection;
+        if (!TryGetBoilerPipePassDirectionAtCoordinate(
+                objectSnapshot.mapObject,
+                objectSnapshot.anchorCoordinate,
+                objectSnapshot.quarterTurns,
+                objectPipePassCoordinate,
+                out Vector2Int objectPipePassDirection)
+            || objectPipePassDirection != -pipePassDirection)
+        {
+            return false;
+        }
+
+        return PipePassItemsMatchPipePass(
+            pipePassCandidate,
+            new PipeAreaBlockCandidate(objectSnapshot, InputOutputModule.RectGridBlockType.PipeInput));
+    }
+
+    private bool SteamGeneratorObjectPipePassOverlapCanConnect(
+        Vector2Int coordinate,
+        PlacementSnapshot candidateSnapshot,
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        PlacementSnapshot existingSnapshot,
+        InputOutputModule.RectGridBlockType existingBlockType)
+    {
+        if (candidateSnapshot == null
+            || existingSnapshot == null
+            || !IsSteamGeneratorSource(candidateSnapshot.mapObject)
+            || !IsSteamGeneratorSource(existingSnapshot.mapObject))
+        {
+            return false;
+        }
+
+        if (candidateBlockType == InputOutputModule.RectGridBlockType.Object
+            && IsPipePassBlockType(existingBlockType))
+        {
+            return SteamGeneratorObjectMatchesPipePassDirection(
+                coordinate,
+                candidateSnapshot,
+                new PipeAreaBlockCandidate(existingSnapshot, existingBlockType));
+        }
+
+        if (existingBlockType == InputOutputModule.RectGridBlockType.Object
+            && IsPipePassBlockType(candidateBlockType))
+        {
+            return SteamGeneratorObjectMatchesPipePassDirection(
+                coordinate,
+                existingSnapshot,
+                new PipeAreaBlockCandidate(candidateSnapshot, candidateBlockType));
+        }
+
+        return false;
+    }
+
+    private bool SteamGeneratorInputObjectOverlapCanConnect(
+        Vector2Int coordinate,
+        PlacementSnapshot candidateSnapshot,
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        PlacementSnapshot existingSnapshot,
+        InputOutputModule.RectGridBlockType existingBlockType)
+    {
+        if (candidateSnapshot == null
+            || existingSnapshot == null
+            || !IsSteamGeneratorSource(candidateSnapshot.mapObject)
+            || !IsSteamGeneratorSource(existingSnapshot.mapObject))
+        {
+            return false;
+        }
+
+        if (InputOutputModule.IsInputItemBlockType(candidateBlockType)
+            && existingBlockType == InputOutputModule.RectGridBlockType.Object)
+        {
+            return SteamGeneratorInputMatchesExistingTailObject(
+                coordinate,
+                candidateSnapshot,
+                candidateBlockType,
+                existingSnapshot);
+        }
+
+        if (InputOutputModule.IsInputItemBlockType(existingBlockType)
+            && candidateBlockType == InputOutputModule.RectGridBlockType.Object)
+        {
+            return SteamGeneratorInputMatchesExistingTailObject(
+                coordinate,
+                existingSnapshot,
+                existingBlockType,
+                candidateSnapshot);
+        }
+
+        return false;
+    }
+
+    private bool SteamGeneratorInputMatchesExistingTailObject(
+        Vector2Int inputCoordinate,
+        PlacementSnapshot inputSnapshot,
+        InputOutputModule.RectGridBlockType inputBlockType,
+        PlacementSnapshot existingSnapshot)
+    {
+        if (inputSnapshot == null
+            || existingSnapshot == null
+            || !IsSteamGeneratorSource(inputSnapshot.mapObject)
+            || !IsSteamGeneratorSource(existingSnapshot.mapObject)
+            || !InputOutputModule.IsInputItemBlockType(inputBlockType)
+            || !SnapshotHasRectGridObjectBlock(existingSnapshot, inputCoordinate)
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                inputSnapshot.mapObject,
+                inputSnapshot.quarterTurns,
+                out Vector2Int proposedTailDirection))
+        {
+            return false;
+        }
+
+        Vector2Int pipePassCoordinate = inputSnapshot.anchorCoordinate;
+        if (inputCoordinate != pipePassCoordinate - proposedTailDirection
+            || !TryGetRectGridFootprintBlockType(
+                existingSnapshot.anchorCoordinate,
+                existingSnapshot.mapObject,
+                existingSnapshot.quarterTurns,
+                pipePassCoordinate,
+                out InputOutputModule.RectGridBlockType existingPipePassBlockType)
+            || !IsPipePassBlockType(existingPipePassBlockType))
+        {
+            return false;
+        }
+
+        PipeAreaBlockCandidate existingPipePassCandidate =
+            new PipeAreaBlockCandidate(existingSnapshot, existingPipePassBlockType);
+        if (!TryGetSteamGeneratorPipePassTailDirection(
+                pipePassCoordinate,
+                existingPipePassCandidate,
+                out Vector2Int existingTailDirection)
+            || existingTailDirection != proposedTailDirection)
+        {
+            return false;
+        }
+
+        return PipePassItemsMatchInput(
+            existingPipePassCandidate,
+            new PipeAreaBlockCandidate(inputSnapshot, inputBlockType),
+            inputCoordinate);
+    }
+
+    private bool SteamGeneratorObjectMatchesPipePassDirection(
+        Vector2Int objectCoordinate,
+        PlacementSnapshot objectSnapshot,
+        PipeAreaBlockCandidate pipePassCandidate)
+    {
+        if (objectSnapshot == null
+            || !IsSteamGeneratorSource(objectSnapshot.mapObject)
+            || objectCoordinate != objectSnapshot.anchorCoordinate
+            || pipePassCandidate.snapshot == null
+            || !IsSteamGeneratorSource(pipePassCandidate.snapshot.mapObject)
+            || !TryGetSteamGeneratorPipePassTailDirection(
+                objectCoordinate,
+                pipePassCandidate,
+                out Vector2Int existingTailDirection)
+            || !TryGetMapSizeAdjacentDirectionFromCenter(
+                objectSnapshot.mapObject,
+                objectSnapshot.quarterTurns,
+                out Vector2Int proposedTailDirection)
+            || proposedTailDirection != existingTailDirection)
+        {
+            return false;
+        }
+
+        Vector2Int proposedInputCoordinate = objectCoordinate - proposedTailDirection;
+        if (!SnapshotHasRectGridObjectBlock(pipePassCandidate.snapshot, proposedInputCoordinate)
+            || !TryGetRectGridFootprintBlockType(
+                objectSnapshot.anchorCoordinate,
+                objectSnapshot.mapObject,
+                objectSnapshot.quarterTurns,
+                proposedInputCoordinate,
+                out InputOutputModule.RectGridBlockType proposedInputBlockType)
+            || !InputOutputModule.IsInputItemBlockType(proposedInputBlockType))
+        {
+            return false;
+        }
+
+        return PipePassItemsMatchInput(
+            pipePassCandidate,
+            new PipeAreaBlockCandidate(objectSnapshot, proposedInputBlockType),
+            proposedInputCoordinate);
+    }
+
     private bool PlacementInputAreaMatchesOutput(
         Vector2Int coordinate,
         MapObject inputFootprintSource,
@@ -20249,6 +21474,7 @@ public class InstallationPlacementController : MonoBehaviour
                && CanPlaceOnTerrainBiome(block, allowedFilter)
                && (occupyingObject == null || occupyingObject is Pump)
                && isPumpRuntimeOutputAreaBlock
+               && IsExactPumpOutputCoordinateForPlacement(block.Coordinate)
                && BoilerPipePassMatchesPumpOutput(
                    footprintSource,
                    block.Coordinate,
@@ -20261,14 +21487,32 @@ public class InstallationPlacementController : MonoBehaviour
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
         MapObject occupyingObject,
-        bool isPumpRuntimeOutputAreaBlock)
+        bool isPumpRuntimeOutputAreaBlock,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns)
     {
+        // CRITICAL: Boiler may sit directly on the pump OutputArea. Do not require
+        // Pump PipeOutput and Boiler PipePass to overlap the same cell; this is an
+        // adjacent fluid-direction connection. Do not move the Boiler one cell away.
+        // The only hard rule here is that the pump-side Boiler PipePass faces the
+        // pump output flow direction.
         return IsBoilerSource(footprintSource)
                && rectGridBlockType == InputOutputModule.RectGridBlockType.Object
                && block != null
                && block.Type == Block.BlockType.Ground
                && (occupyingObject == null || occupyingObject is Pump)
-               && isPumpRuntimeOutputAreaBlock;
+               && isPumpRuntimeOutputAreaBlock
+               && IsExactPumpOutputCoordinateForPlacement(block.Coordinate)
+               && anchorCoordinate.HasValue
+               && TryGetExactPumpOutputDirectionForPlacement(
+                   block.Coordinate,
+                   out Vector2Int pumpOutputDirection)
+               && BoilerPumpSidePipePassMatchesOutputDirection(
+                   footprintSource,
+                   anchorCoordinate.Value,
+                   block.Coordinate,
+                   quarterTurns,
+                   pumpOutputDirection);
     }
 
     private bool CanPlaceBoilerObjectOnBoilerPipePassArea(
@@ -20312,21 +21556,84 @@ public class InstallationPlacementController : MonoBehaviour
     private bool CanPlaceBoilerConnectorOnPumpBody(
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
         MapObject occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns)
     {
-        return IsBoilerSource(footprintSource)
-               && rectGridBlockType == InputOutputModule.RectGridBlockType.PipeInput
-               && occupyingObject is Pump
-               && anchorCoordinate.HasValue
-               && IsPumpOutputCoordinateForPlacement(anchorCoordinate.Value)
-               && TryGetBoilerPumpOutputAxisMatch(
-                   footprintSource,
-                   anchorCoordinate.Value,
-                   quarterTurns,
-                   out bool matches)
-               && matches;
+        if (!IsBoilerSource(footprintSource)
+            || rectGridBlockType != InputOutputModule.RectGridBlockType.PipeInput
+            || block == null
+            || !(occupyingObject is Pump)
+            || !anchorCoordinate.HasValue
+            || !TryGetExactPumpOutputDirectionForPlacement(
+                anchorCoordinate.Value,
+                out Vector2Int pumpOutputDirection))
+        {
+            return false;
+        }
+
+        // When Boiler Object is anchored on Pump OutputArea, its PipeInput marker can
+        // geometrically fall over the pump body. Treat that marker as a virtual port,
+        // not a placement blocker, as long as the boiler's pipe direction faces the pump flow.
+        return BoilerPumpSidePipePassMatchesOutputDirection(
+            footprintSource,
+            anchorCoordinate.Value,
+            anchorCoordinate.Value,
+            quarterTurns,
+            pumpOutputDirection);
+    }
+
+    private bool CanPlaceBoilerConnectorOnBoilerBody(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType rectGridBlockType,
+        Block block,
+        MapObject occupyingObject,
+        Vector2Int? anchorCoordinate,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!IsBoilerSource(footprintSource)
+            || rectGridBlockType != InputOutputModule.RectGridBlockType.PipeInput
+            || block == null
+            || !anchorCoordinate.HasValue
+            || !IsBoilerSource(occupyingObject)
+            || !TryGetRectGridBlockCoordinates(
+                anchorCoordinate.Value,
+                footprintSource,
+                quarterTurns,
+                InputOutputModule.RectGridBlockType.Object,
+                out List<Vector2Int> objectCoordinates))
+        {
+            return false;
+        }
+
+        PlacementSnapshot proposedSnapshot = new PlacementSnapshot
+        {
+            mapObject = footprintSource,
+            rotation = GetPlacementObjectRotation(footprintSource, quarterTurns),
+            anchorCoordinate = anchorCoordinate.Value,
+            quarterTurns = quarterTurns
+        };
+
+        // CRITICAL: Boiler -> Boiler is the same flush-adjacent rule as Pump -> Boiler.
+        // The new Boiler Object may sit on the existing Boiler PipePass cell, while the
+        // new Boiler PipePass marker may fall over the existing Boiler body. Do not
+        // separate the machines by one tile; only allow this when the two PipePass
+        // directions face each other.
+        for (int i = 0; i < objectCoordinates.Count; i++)
+        {
+            if (BoilerObjectMatchesExistingBoilerPipePassDirection(
+                    objectCoordinates[i],
+                    proposedSnapshot,
+                    previewToIgnore,
+                    block.Coordinate))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool CanPlaceBoilerAreaBesidePumpOutput(
@@ -20337,18 +21644,8 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int? anchorCoordinate,
         int quarterTurns)
     {
-        return IsBoilerSource(footprintSource)
-               && IsRectGridAreaBlockType(rectGridBlockType)
-               && block != null
-               && block.Type == Block.BlockType.Ground
-               && occupyingObject is Pump
-               && anchorCoordinate.HasValue
-               && IsPumpOutputCoordinateForPlacement(anchorCoordinate.Value)
-               && BoilerPipePassMatchesPumpOutput(
-                   footprintSource,
-                   block.Coordinate,
-                   anchorCoordinate,
-                   quarterTurns);
+        // Same rule as above: pump body cells are not boiler connection cells.
+        return false;
     }
 
     private static bool IsBoilerSource(MapObject footprintSource)
@@ -20708,13 +22005,17 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int? boilerAnchorCoordinate,
         int boilerQuarterTurns)
     {
+        // Same-cell PipePass/PipeOutput overlap is still valid, but it is not required
+        // for pump-to-boiler attachment. Direct flush placement is handled by the
+        // Boiler Object-on-OutputArea path above.
         if (boilerSource == null
             || !boilerAnchorCoordinate.HasValue
-            || !TryGetPumpOutputDirectionForPlacement(coordinate, out Vector2Int pumpOutputDirection)
-            || !BoilerHasPipePassAxis(
+            || !TryGetExactPumpOutputDirectionForPlacement(coordinate, out Vector2Int pumpOutputDirection)
+            || !BoilerPipePassAtCoordinateMatchesDirection(
                 boilerSource,
                 boilerAnchorCoordinate.Value,
                 boilerQuarterTurns,
+                coordinate,
                 pumpOutputDirection))
         {
             return false;
@@ -20723,13 +22024,51 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
-    private bool BoilerHasPipePassAxis(
+    private bool PlacementHasBoilerPumpOutputDirectionMismatch(
+        Vector2Int boilerAnchorCoordinate,
+        MapObject boilerSource,
+        int boilerQuarterTurns)
+    {
+        return TryGetExactPumpOutputDirectionForPlacement(
+                   boilerAnchorCoordinate,
+                   out Vector2Int pumpOutputDirection)
+               && !BoilerPumpSidePipePassMatchesOutputDirection(
+                   boilerSource,
+                   boilerAnchorCoordinate,
+                   boilerAnchorCoordinate,
+                   boilerQuarterTurns,
+                   pumpOutputDirection);
+    }
+
+    private bool BoilerPumpSidePipePassMatchesOutputDirection(
+        MapObject boilerSource,
+        Vector2Int boilerAnchorCoordinate,
+        Vector2Int pumpOutputCoordinate,
+        int boilerQuarterTurns,
+        Vector2Int pumpOutputDirection)
+    {
+        if (pumpOutputDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2Int pumpSidePipePassCoordinate = pumpOutputCoordinate - pumpOutputDirection;
+        return BoilerPipePassAtCoordinateMatchesDirection(
+            boilerSource,
+            boilerAnchorCoordinate,
+            boilerQuarterTurns,
+            pumpSidePipePassCoordinate,
+            pumpOutputDirection);
+    }
+
+    private bool BoilerPipePassAtCoordinateMatchesDirection(
         MapObject boilerSource,
         Vector2Int boilerAnchorCoordinate,
         int boilerQuarterTurns,
-        Vector2Int targetAxis)
+        Vector2Int pipePassCoordinate,
+        Vector2Int targetDirection)
     {
-        if (targetAxis == Vector2Int.zero)
+        if (targetDirection == Vector2Int.zero)
         {
             return false;
         }
@@ -20755,6 +22094,7 @@ public class InstallationPlacementController : MonoBehaviour
                     boilerQuarterTurns,
                     placement,
                     out Vector2Int pipeInputCoordinate)
+                || pipeInputCoordinate != pipePassCoordinate
                 || !TryGetRectGridPipeAreaConnectionDirection(
                     boilerSource,
                     inputOutputModule,
@@ -20766,7 +22106,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            if (pipeInputDirection == targetAxis || pipeInputDirection == -targetAxis)
+            if (pipeInputDirection == targetDirection)
             {
                 return true;
             }
@@ -20775,7 +22115,56 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private bool TryGetBoilerPumpOutputAxisMatch(
+    private bool BoilerHasPipePassFacingDirection(
+        MapObject boilerSource,
+        Vector2Int boilerAnchorCoordinate,
+        int boilerQuarterTurns,
+        Vector2Int targetDirection)
+    {
+        if (targetDirection == Vector2Int.zero
+            || !IsBoilerSource(boilerSource)
+            || !TryGetInputOutputModule(boilerSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[i];
+            if (!IsBoilerPumpInputBlockType(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    boilerAnchorCoordinate,
+                    boilerSource,
+                    boilerQuarterTurns,
+                    placement,
+                    out Vector2Int pipePassCoordinate)
+                || !TryGetRectGridPipeAreaConnectionDirection(
+                    boilerSource,
+                    inputOutputModule,
+                    boilerAnchorCoordinate,
+                    boilerQuarterTurns,
+                    pipePassCoordinate,
+                    out Vector2Int pipePassDirection))
+            {
+                continue;
+            }
+
+            if (pipePassDirection == targetDirection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetBoilerPumpOutputDirectionMatch(
         MapObject boilerSource,
         Vector2Int boilerAnchorCoordinate,
         int boilerQuarterTurns,
@@ -20786,6 +22175,19 @@ public class InstallationPlacementController : MonoBehaviour
             || !TryGetInputOutputModule(boilerSource, out InputOutputModule inputOutputModule))
         {
             return false;
+        }
+
+        if (TryGetExactPumpOutputDirectionForPlacement(
+                boilerAnchorCoordinate,
+                out Vector2Int directPumpOutputDirection))
+        {
+            matches = BoilerPumpSidePipePassMatchesOutputDirection(
+                boilerSource,
+                boilerAnchorCoordinate,
+                boilerAnchorCoordinate,
+                boilerQuarterTurns,
+                directPumpOutputDirection);
+            return true;
         }
 
         bool foundPumpOutput = false;
@@ -20800,19 +22202,26 @@ public class InstallationPlacementController : MonoBehaviour
                     boilerQuarterTurns,
                     placement,
                     out Vector2Int pipePassCoordinate)
-                || !TryGetPumpOutputAxisForBoilerPipePass(
+                || !TryGetPumpOutputDirectionForBoilerPipePass(
                     pipePassCoordinate,
-                    out Vector2Int pumpOutputAxis))
+                    out Vector2Int pumpOutputDirection))
+            {
+                continue;
+            }
+
+            if (!TryGetRectGridPipeAreaConnectionDirection(
+                    boilerSource,
+                    inputOutputModule,
+                    boilerAnchorCoordinate,
+                    boilerQuarterTurns,
+                    pipePassCoordinate,
+                    out Vector2Int pipePassDirection))
             {
                 continue;
             }
 
             foundPumpOutput = true;
-            if (BoilerHasPipePassAxis(
-                    boilerSource,
-                    boilerAnchorCoordinate,
-                    boilerQuarterTurns,
-                    pumpOutputAxis))
+            if (pipePassDirection == pumpOutputDirection)
             {
                 matches = true;
                 return true;
@@ -20822,20 +22231,21 @@ public class InstallationPlacementController : MonoBehaviour
         return foundPumpOutput;
     }
 
-    private bool TryGetPumpOutputAxisForBoilerPipePass(Vector2Int pipePassCoordinate, out Vector2Int axis)
+    private bool TryGetPumpOutputDirectionForBoilerPipePass(Vector2Int pipePassCoordinate, out Vector2Int direction)
     {
-        axis = Vector2Int.zero;
-        if (TryGetPumpOutputDirectionForPlacement(pipePassCoordinate, out axis))
+        direction = Vector2Int.zero;
+        if (TryGetExactPumpOutputDirectionForPlacement(pipePassCoordinate, out direction))
         {
-            return axis != Vector2Int.zero;
+            return direction != Vector2Int.zero;
         }
 
+        // Pump/boiler fluid connectors may be adjacent. Do not require PipeOutput and
+        // PipePass to occupy the same cell; only the flow direction has to line up.
         for (int i = 0; i < PipeCardinalDirections.Length; i++)
         {
             Vector2Int directionFromPumpOutput = PipeCardinalDirections[i];
             Vector2Int pumpOutputCoordinate = pipePassCoordinate - directionFromPumpOutput;
-            if (!IsPumpOutputCoordinateForPlacement(pumpOutputCoordinate)
-                || !TryGetPumpOutputDirectionForPlacement(
+            if (!TryGetExactPumpOutputDirectionForPlacement(
                     pumpOutputCoordinate,
                     out Vector2Int pumpOutputDirection)
                 || pumpOutputDirection != directionFromPumpOutput)
@@ -20843,7 +22253,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            axis = pumpOutputDirection;
+            direction = pumpOutputDirection;
             return true;
         }
 
@@ -20905,11 +22315,30 @@ public class InstallationPlacementController : MonoBehaviour
                && pipeOutputModule is Pump;
     }
 
+    private bool IsExactPumpOutputCoordinateForPlacement(Vector2Int coordinate)
+    {
+        return IsPumpRuntimeOutputCoordinate(coordinate)
+               || IsPumpRectGridOutputCoordinateForPlacement(coordinate);
+    }
+
     private bool IsPumpOutputCoordinateForPlacement(Vector2Int coordinate)
     {
         return IsPumpRuntimeOutputCoordinate(coordinate)
                || IsPumpRectGridOutputCoordinateForPlacement(coordinate)
                || IsAdjacentPumpOutputCoordinate(coordinate);
+    }
+
+    private bool TryGetExactPumpOutputDirectionForPlacement(Vector2Int coordinate, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump runtimePump)
+            && runtimePump != null
+            && runtimePump.TryGetPipeConnectionDirection(runtimePump.transform.rotation, out direction))
+        {
+            return true;
+        }
+
+        return TryGetPumpRectGridOutputDirectionForPlacement(coordinate, out direction);
     }
 
     private bool TryGetPumpOutputDirectionForPlacement(Vector2Int coordinate, out Vector2Int direction)
@@ -21676,20 +23105,9 @@ public class InstallationPlacementController : MonoBehaviour
     private Vector3 GetPreviewWorldPosition(Block anchorBlock, MapObject footprintSource, int quarterTurns)
     {
         Vector3 position = anchorBlock.transform.position;
-        List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
-        if (offsets.Count > 0)
-        {
-            Vector2 averageOffset = Vector2.zero;
-            for (int i = 0; i < offsets.Count; i++)
-            {
-                averageOffset += offsets[i];
-            }
-
-            averageOffset /= offsets.Count;
-            position.x += averageOffset.x;
-            position.z += averageOffset.y;
-        }
-
+        Vector2 positionOffset = GetPlacementWorldPositionOffset(footprintSource, quarterTurns);
+        position.x += positionOffset.x;
+        position.z += positionOffset.y;
         return position;
     }
 
@@ -21706,21 +23124,40 @@ public class InstallationPlacementController : MonoBehaviour
             position = anchorBlock.transform.position;
         }
 
-        List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
-        if (offsets.Count > 0)
-        {
-            Vector2 averageOffset = Vector2.zero;
-            for (int i = 0; i < offsets.Count; i++)
-            {
-                averageOffset += offsets[i];
-            }
+        Vector2 positionOffset = GetPlacementWorldPositionOffset(footprintSource, quarterTurns);
+        position.x += positionOffset.x;
+        position.z += positionOffset.y;
+        return position;
+    }
 
-            averageOffset /= offsets.Count;
-            position.x += averageOffset.x;
-            position.z += averageOffset.y;
+    private Vector2 GetPlacementWorldPositionOffset(MapObject footprintSource, int quarterTurns)
+    {
+        if (ShouldUseAnchorCellWorldPosition(footprintSource))
+        {
+            return Vector2.zero;
         }
 
-        return position;
+        List<Vector2Int> offsets = GetPlacementVisualLocalOffsets(footprintSource, quarterTurns);
+        if (offsets.Count <= 0)
+        {
+            return Vector2.zero;
+        }
+
+        Vector2 averageOffset = Vector2.zero;
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            averageOffset += offsets[i];
+        }
+
+        return averageOffset / offsets.Count;
+    }
+
+    private static bool ShouldUseAnchorCellWorldPosition(MapObject footprintSource)
+    {
+        // SteamGenerator placement uses one RectGrid Object cell as the user-visible
+        // Center. Using the average of its two body cells puts the preview on the grid
+        // line between them after rotation.
+        return IsSteamGeneratorSource(footprintSource);
     }
 
     private List<Vector2Int> GetPlacementVisualLocalOffsets(MapObject footprintSource, int quarterTurns)

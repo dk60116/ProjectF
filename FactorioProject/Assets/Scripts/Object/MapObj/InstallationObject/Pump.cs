@@ -31,6 +31,20 @@ public class Pump : InputOutputModule
     public InstallationFacingDirection LocalPipeConnectionDirection => localPipeConnectionDirection;
     public float WaterLitersPerSecond => Mathf.Max(0f, waterLitersPerSecond);
 
+    public bool TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
+    {
+        outputItemId = ResolveWaterItemId();
+        litersPerSecond = WaterLitersPerSecond;
+        return outputItemId >= 0;
+    }
+
+    public override float GetStoredFluidTemperatureCelsius(int fluidItemId)
+    {
+        return fluidItemId >= 0 && fluidItemId == ResolveWaterItemId()
+            ? MapClimate.CurrentWaterTemperatureCelsius
+            : base.GetStoredFluidTemperatureCelsius(fluidItemId);
+    }
+
     public bool HasPipeConnectionTowards(Quaternion rotation, Vector2Int direction)
     {
         return direction != Vector2Int.zero
@@ -100,34 +114,6 @@ public class Pump : InputOutputModule
 
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
-        isProducing = false;
-
-        if (ResolveWaterItemId() < 0)
-        {
-            return "No water";
-        }
-
-        if (WaterLitersPerSecond <= 0f)
-        {
-            return "Stopped";
-        }
-
-        if (!HasRuntimeOutputCoordinates)
-        {
-            return "No output area";
-        }
-
-        if (HasConnectedFluidStorageSpace())
-        {
-            isProducing = true;
-            return "Working";
-        }
-
-        if (!TryResolveOutputBlock(ResolveWaterItemId(), 1, out _))
-        {
-            return "Output full";
-        }
-
         isProducing = true;
         return "Working";
     }
@@ -179,7 +165,8 @@ public class Pump : InputOutputModule
     private bool TryRouteWaterToFluidStorage(float requestedLiters, bool commit, out float acceptedLiters)
     {
         acceptedLiters = 0f;
-        if (!HasRuntimeOutputCoordinates)
+        int waterItemId = ResolveWaterItemId();
+        if (waterItemId < 0 || !HasRuntimeOutputCoordinates)
         {
             return false;
         }
@@ -216,16 +203,25 @@ public class Pump : InputOutputModule
                 coordinate,
                 false,
                 out InstallationObject fluidStorage);
+            if (hasFluidStorageBody
+                && !CanResolveFluidStorageCandidate(fluidStorage, waterItemId, false))
+            {
+                hasFluidStorageBody = false;
+                fluidStorage = null;
+            }
+
             if (!hasFluidStorageBody && hasPipe)
             {
                 TryResolveFluidStorageAtCoordinate(
                     coordinate,
+                    waterItemId,
                     false,
                     out fluidStorage);
             }
 
             ConsiderFluidStorageCandidate(
                 fluidStorage,
+                waterItemId,
                 ref targetStorage,
                 ref targetStorageFillRatio);
 
@@ -246,6 +242,7 @@ public class Pump : InputOutputModule
                 if (!TryGetFluidNetworkConnectionAtCoordinate(
                         nextCoordinate,
                         -direction,
+                        waterItemId,
                         out InstallationObject nextStorage,
                         out bool canContinueRoute))
                 {
@@ -254,6 +251,7 @@ public class Pump : InputOutputModule
 
                 ConsiderFluidStorageCandidate(
                     nextStorage,
+                    waterItemId,
                     ref targetStorage,
                     ref targetStorageFillRatio);
 
@@ -280,6 +278,7 @@ public class Pump : InputOutputModule
     private bool TryGetFluidNetworkConnectionAtCoordinate(
         Vector2Int coordinate,
         Vector2Int directionToPrevious,
+        int fluidItemId,
         out InstallationObject storage,
         out bool canContinueRoute)
     {
@@ -293,12 +292,13 @@ public class Pump : InputOutputModule
                 return false;
             }
 
-            TryResolveFluidStorageAtCoordinate(coordinate, false, out storage);
+            TryResolveFluidStorageAtCoordinate(coordinate, fluidItemId, false, out storage);
             canContinueRoute = true;
             return true;
         }
 
-        if (TryResolveFluidStorageBodyAtCoordinate(coordinate, false, out storage))
+        if (TryResolveFluidStorageBodyAtCoordinate(coordinate, false, out storage)
+            && CanResolveFluidStorageCandidate(storage, fluidItemId, false))
         {
             canContinueRoute = true;
             return true;
@@ -326,12 +326,13 @@ public class Pump : InputOutputModule
 
     private void ConsiderFluidStorageCandidate(
         InstallationObject storage,
+        int fluidItemId,
         ref InstallationObject targetStorage,
         ref float targetStorageFillRatio)
     {
         if (storage == null
             || storage == this
-            || !storage.HasFluidStorageSpace
+            || !storage.CanAcceptFluidItem(fluidItemId, 0.0001f)
             || !fluidSearchStorageCandidates.Add(storage))
         {
             return;
@@ -371,20 +372,30 @@ public class Pump : InputOutputModule
             return acceptedLiters > 0.0001f;
         }
 
-        return storage.TryAddFluidLiters(requestedLiters, out acceptedLiters);
+        return storage.TryAddFluidLiters(
+            ResolveWaterItemId(),
+            requestedLiters,
+            MapClimate.CurrentWaterTemperatureCelsius,
+            out acceptedLiters);
     }
 
     private bool TryResolveFluidStorageAtCoordinate(Vector2Int coordinate, out InstallationObject storage)
     {
-        return TryResolveFluidStorageAtCoordinate(coordinate, true, out storage);
+        return TryResolveFluidStorageAtCoordinate(coordinate, -1, true, out storage);
     }
 
     private bool TryResolveFluidStorageAtCoordinate(
         Vector2Int coordinate,
+        int fluidItemId,
         bool requireStorageSpace,
         out InstallationObject storage)
     {
-        if (TryGetRuntimePipeFluidStorageAtCoordinate(coordinate, this, requireStorageSpace, out storage))
+        if (TryGetRuntimePipeFluidStorageAtCoordinate(
+                coordinate,
+                this,
+                requireStorageSpace,
+                candidate => CanResolveFluidStorageCandidate(candidate, fluidItemId, requireStorageSpace),
+                out storage))
         {
             return true;
         }
@@ -398,13 +409,24 @@ public class Pump : InputOutputModule
             || installationObject is Pump
             || !installationObject.gameObject.activeInHierarchy
             || !installationObject.CanStoreFluid
-            || (requireStorageSpace && !installationObject.HasFluidStorageSpace))
+            || (requireStorageSpace && !installationObject.HasFluidStorageSpace)
+            || !CanResolveFluidStorageCandidate(installationObject, fluidItemId, requireStorageSpace))
         {
             return false;
         }
 
         storage = installationObject;
         return true;
+    }
+
+    private static bool CanResolveFluidStorageCandidate(
+        InstallationObject storage,
+        int fluidItemId,
+        bool requireStorageSpace)
+    {
+        return storage != null
+               && storage.CanStoreFluid
+               && storage.CanAcceptFluidItem(fluidItemId, requireStorageSpace ? 0.0001f : 0f);
     }
 
     private bool TryResolveFluidStorageBodyAtCoordinate(

@@ -116,6 +116,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is Pipe pipe)
+        {
+            ShowPipeInfo(pipe, underlyingResource);
+            return;
+        }
+
         if (mapObject is RobotArm robotArm)
         {
             ShowRobotArmInfo(robotArm, underlyingResource);
@@ -295,6 +301,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowConveyorBelt(conveyorBelt, underlyingResource);
+    }
+
+    private void ShowPipeInfo(Pipe pipe, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowPipe(pipe, underlyingResource);
     }
 
     private void ShowRobotArmInfo(RobotArm robotArm, Resource underlyingResource)

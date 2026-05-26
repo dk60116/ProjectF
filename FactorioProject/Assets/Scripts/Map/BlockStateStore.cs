@@ -19,6 +19,8 @@ public partial class BlockStateStore : MonoBehaviour
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public float storedFluidLiters;
+        public int storedFluidItemId = -1;
+        public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
 
         public InstallationSaveState Clone()
         {
@@ -36,7 +38,9 @@ public partial class BlockStateStore : MonoBehaviour
                 boxIsOpen = boxIsOpen,
                 itemFilterMaskInitialized = itemFilterMaskInitialized,
                 itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>()),
-                storedFluidLiters = storedFluidLiters
+                storedFluidLiters = storedFluidLiters,
+                storedFluidItemId = storedFluidItemId,
+                storedFluidTemperatureCelsius = storedFluidTemperatureCelsius
             };
         }
     }
@@ -708,6 +712,8 @@ public partial class BlockStateStore : MonoBehaviour
         state.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         state.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
         state.storedFluidLiters = installationObject.StoredFluidLiters;
+        state.storedFluidItemId = installationObject.StoredFluidItemId;
+        state.storedFluidTemperatureCelsius = installationObject.GetStoredFluidTemperatureCelsius(state.storedFluidItemId);
 
         return true;
     }

@@ -138,6 +138,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         public int activeRecipeIndex = -1;
         public int activeOutputItemId = -1;
         public int activeOutputCount;
+        public float boilerWaterTemperatureCelsius;
+        public float boilerSteamLiterAccumulator;
 
         public PersistentState Clone()
         {
@@ -157,7 +159,9 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                 activeCraftConsumedEnergy = activeCraftConsumedEnergy,
                 activeRecipeIndex = activeRecipeIndex,
                 activeOutputItemId = activeOutputItemId,
-                activeOutputCount = activeOutputCount
+                activeOutputCount = activeOutputCount,
+                boilerWaterTemperatureCelsius = boilerWaterTemperatureCelsius,
+                boilerSteamLiterAccumulator = boilerSteamLiterAccumulator
             };
         }
     }
@@ -362,7 +366,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         AddUniqueCoordinates(coordinates, runtimeFocusCoordinates);
     }
 
-    public PersistentState CapturePersistentState()
+    public virtual PersistentState CapturePersistentState()
     {
         PersistentState state = new PersistentState
         {
@@ -392,7 +396,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return state;
     }
 
-    public void ApplyPersistentState(PersistentState state)
+    public virtual void ApplyPersistentState(PersistentState state)
     {
         if (state == null)
         {
@@ -628,7 +632,23 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         bool requireStorageSpace,
         out InstallationObject storage)
     {
+        return TryGetRuntimePipeFluidStorageAtCoordinate(
+            coordinate,
+            excludedModule,
+            requireStorageSpace,
+            null,
+            out storage);
+    }
+
+    public static bool TryGetRuntimePipeFluidStorageAtCoordinate(
+        Vector2Int coordinate,
+        InputOutputModule excludedModule,
+        bool requireStorageSpace,
+        System.Predicate<InstallationObject> storageFilter,
+        out InstallationObject storage)
+    {
         storage = null;
+        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
         if (TryGetRuntimePipeFluidStorageAtCoordinate(
                 registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
                     ? modules
@@ -636,7 +656,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                 coordinate,
                 excludedModule,
                 requireStorageSpace,
-                null,
+                storageFilter,
+                visitedModules,
                 out storage))
         {
             return true;
@@ -647,7 +668,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             coordinate,
             excludedModule,
             requireStorageSpace,
-            null,
+            storageFilter,
+            visitedModules,
             out storage);
     }
 
@@ -677,6 +699,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         Vector2Int coordinate,
         InputOutputModule excludedModule,
         bool requireStorageSpace,
+        System.Predicate<InstallationObject> storageFilter,
         ISet<InputOutputModule> visitedModules,
         out InstallationObject storage)
     {
@@ -695,6 +718,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                 || !candidate.CanStoreFluid
                 || (requireStorageSpace && !candidate.HasFluidStorageSpace)
                 || (visitedModules != null && !visitedModules.Add(candidate)))
+            {
+                continue;
+            }
+
+            if (storageFilter != null && !storageFilter(candidate))
             {
                 continue;
             }
@@ -766,6 +794,34 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
         return TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIds);
+    }
+
+    public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+        Vector2Int coordinate,
+        out int fluidItemId,
+        out float temperatureCelsius)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+
+        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
+        if (registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            && TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+                modules,
+                coordinate,
+                visitedModules,
+                out fluidItemId,
+                out temperatureCelsius))
+        {
+            return true;
+        }
+
+        return TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+            activeRuntimeModules,
+            coordinate,
+            visitedModules,
+            out fluidItemId,
+            out temperatureCelsius);
     }
 
     public static bool TryGetInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
@@ -844,6 +900,53 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         return foundAny;
+    }
+
+    private static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ISet<InputOutputModule> visitedModules,
+        out int fluidItemId,
+        out float temperatureCelsius)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        if (modules == null)
+        {
+            return false;
+        }
+
+        HashSet<int> outputItemIds = new HashSet<int>();
+        foreach (InputOutputModule module in modules)
+        {
+            if (module == null
+                || !module.gameObject.activeInHierarchy
+                || (visitedModules != null && !visitedModules.Add(module))
+                || !module.ContainsRuntimeOutputCoordinate(coordinate))
+            {
+                continue;
+            }
+
+            outputItemIds.Clear();
+            if (!module.AppendOutputItemIds(outputItemIds))
+            {
+                continue;
+            }
+
+            foreach (int itemId in outputItemIds)
+            {
+                if (!IsFluidItemId(itemId))
+                {
+                    continue;
+                }
+
+                fluidItemId = itemId;
+                temperatureCelsius = module.GetStoredFluidTemperatureCelsius(itemId);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryAppendRuntimeOutputItemIds(
@@ -1162,6 +1265,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         EnsurePairData();
         if (CanStoreFluid)
         {
+            DiscardIncompatibleStoredFluid();
             PullFluidFromConnectedStorage(deltaTime);
         }
 
@@ -1184,37 +1288,114 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        if (!TryFindConnectedFluidSource(out InstallationObject sourceStorage)
-            || sourceStorage == null)
-        {
-            return;
-        }
-
-        float transferLiters = Mathf.Min(
-            AvailableFluidStorageLiters,
-            sourceStorage.StoredFluidLiters,
-            ConnectedFluidStorageTransferLitersPerSecond * deltaTime);
-        if (transferLiters <= 0.0001f
-            || !sourceStorage.TryConsumeFluidLiters(transferLiters, out float consumedLiters)
-            || consumedLiters <= 0.0001f)
-        {
-            return;
-        }
-
-        if (TryAddFluidLiters(consumedLiters, out float acceptedLiters)
-            && acceptedLiters + 0.0001f >= consumedLiters)
-        {
-            return;
-        }
-
-        float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
-        if (rejectedLiters > 0.0001f)
-        {
-            sourceStorage.TryAddFluidLiters(rejectedLiters, out _);
-        }
+        int requiredFluidItemId = ResolvePreferredFluidInputItemId();
+        TryPullFluidFromConnectedStorage(
+            requiredFluidItemId,
+            ConnectedFluidStorageTransferLitersPerSecond * deltaTime,
+            out _);
     }
 
-    private bool TryFindConnectedFluidSource(out InstallationObject sourceStorage)
+    protected bool HasConnectedFluidSource(int requiredFluidItemId)
+    {
+        return TryFindConnectedFluidSource(requiredFluidItemId, out _);
+    }
+
+    protected bool TryPullFluidFromConnectedStorage(
+        int requiredFluidItemId,
+        float maxTransferLiters,
+        out float acceptedLiters)
+    {
+        acceptedLiters = 0f;
+        if (maxTransferLiters <= 0.0001f || !CanStoreFluid || !HasFluidStorageSpace)
+        {
+            return false;
+        }
+
+        int maxAttempts = Mathf.Max(1, activeRuntimeModules.Count);
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            float remainingLiters = Mathf.Min(
+                maxTransferLiters - acceptedLiters,
+                AvailableFluidStorageLiters);
+            if (remainingLiters <= 0.0001f)
+            {
+                break;
+            }
+
+            if (!TryFindConnectedFluidSource(requiredFluidItemId, out InstallationObject sourceStorage)
+                || sourceStorage == null)
+            {
+                break;
+            }
+
+            int transferFluidItemId = requiredFluidItemId >= 0
+                ? requiredFluidItemId
+                : sourceStorage.StoredFluidItemId;
+            if (transferFluidItemId < 0)
+            {
+                break;
+            }
+
+            float transferLiters = Mathf.Min(
+                remainingLiters,
+                sourceStorage.StoredFluidLiters,
+                CalculateFluidEqualizationTransferLiters(sourceStorage, this));
+            float transferTemperatureCelsius = sourceStorage.GetStoredFluidTemperatureCelsius(transferFluidItemId);
+            if (transferLiters <= 0.0001f
+                || !sourceStorage.TryConsumeFluidLiters(transferFluidItemId, transferLiters, out float consumedLiters)
+                || consumedLiters <= 0.0001f)
+            {
+                break;
+            }
+
+            TryAddFluidLiters(
+                transferFluidItemId,
+                consumedLiters,
+                transferTemperatureCelsius,
+                out float acceptedThisAttempt);
+            acceptedThisAttempt = Mathf.Max(0f, acceptedThisAttempt);
+            acceptedLiters += acceptedThisAttempt;
+
+            float rejectedLiters = consumedLiters - acceptedThisAttempt;
+            if (rejectedLiters > 0.0001f)
+            {
+                sourceStorage.TryAddFluidLiters(
+                    transferFluidItemId,
+                    rejectedLiters,
+                    transferTemperatureCelsius,
+                    out _);
+                break;
+            }
+        }
+
+        return acceptedLiters > 0.0001f;
+    }
+
+    private static float CalculateFluidEqualizationTransferLiters(
+        InstallationObject sourceStorage,
+        InstallationObject targetStorage)
+    {
+        if (sourceStorage == null || targetStorage == null)
+        {
+            return 0f;
+        }
+
+        float sourceCapacity = Mathf.Max(0f, sourceStorage.FluidStorageCapacityLiters);
+        float targetCapacity = Mathf.Max(0f, targetStorage.FluidStorageCapacityLiters);
+        if (sourceCapacity <= 0.0001f || targetCapacity <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        float sourceLiters = Mathf.Clamp(sourceStorage.StoredFluidLiters, 0f, sourceCapacity);
+        float targetLiters = Mathf.Clamp(targetStorage.StoredFluidLiters, 0f, targetCapacity);
+        float equalizingTransfer =
+            ((sourceLiters * targetCapacity) - (targetLiters * sourceCapacity))
+            / (sourceCapacity + targetCapacity);
+        return Mathf.Max(0f, equalizingTransfer);
+    }
+
+    private bool TryFindConnectedFluidSource(int requiredFluidItemId, out InstallationObject sourceStorage)
     {
         sourceStorage = null;
         connectedFluidSearchQueue.Clear();
@@ -1238,24 +1419,21 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         while (connectedFluidSearchQueue.Count > 0)
         {
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            bool isSeedCoordinate = ContainsCoordinate(connectedFluidSeedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
-            bool hasFluidStorageBody = TryResolveConnectedFluidStorageBodyAtCoordinate(
+            TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
-                out InstallationObject fluidStorage);
-            if (!hasFluidStorageBody && hasPipe)
-            {
-                TryResolveConnectedFluidStorageAtCoordinate(
-                    coordinate,
-                    out fluidStorage);
-            }
+                out InstallationObject fluidStorage,
+                out bool storageIsPipeArea);
 
             ConsiderConnectedFluidSource(
                 fluidStorage,
+                requiredFluidItemId,
                 currentFillRatio,
                 ref sourceStorage,
                 ref bestFillRatio);
 
-            if (!hasPipe && !hasFluidStorageBody)
+            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea)
             {
                 continue;
             }
@@ -1264,6 +1442,17 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
                 if (hasPipe && !pipe.HasConnectionTowards(pipeRotation, direction))
+                {
+                    continue;
+                }
+
+                if (!hasPipe
+                    && !CanFluidSearchLeaveCoordinate(
+                        coordinate,
+                        isSeedCoordinate,
+                        fluidStorage,
+                        storageIsPipeArea,
+                        direction))
                 {
                     continue;
                 }
@@ -1280,6 +1469,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
                 ConsiderConnectedFluidSource(
                     nextStorage,
+                    requiredFluidItemId,
                     currentFillRatio,
                     ref sourceStorage,
                     ref bestFillRatio);
@@ -1292,6 +1482,102 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         return sourceStorage != null;
+    }
+
+    private int ResolvePreferredFluidInputItemId()
+    {
+        EnsurePairData();
+        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+        {
+            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out int outputItemId, out _)
+                || !IsFluidItemId(inputItemId)
+                || !IsRecipeOutputAllowedByItemFilter(outputItemId))
+            {
+                continue;
+            }
+
+            return inputItemId;
+        }
+
+        return -1;
+    }
+
+    public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
+    {
+        if (!base.CanAcceptFluidItem(fluidItemId, requestedLiters))
+        {
+            return false;
+        }
+
+        if (fluidItemId < 0)
+        {
+            return true;
+        }
+
+        if (!HasFluidInputRecipe())
+        {
+            return true;
+        }
+
+        return CanAcceptFluidInputItem(fluidItemId);
+    }
+
+    private bool HasFluidInputRecipe()
+    {
+        EnsurePairData();
+        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+        {
+            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out _, out _))
+            {
+                continue;
+            }
+
+            if (IsFluidItemId(inputItemId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool CanAcceptFluidInputItem(int fluidItemId)
+    {
+        EnsurePairData();
+        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+        {
+            if (!TryGetRecipePair(
+                    recipeIndex,
+                    out int inputItemId,
+                    out _,
+                    out _,
+                    out _)
+                || !IsFluidItemId(inputItemId)
+                || inputItemId != fluidItemId)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void DiscardIncompatibleStoredFluid()
+    {
+        int storedFluidItemId = StoredFluidItemId;
+        if (storedFluidItemId < 0
+            || !HasFluidInputRecipe()
+            || CanAcceptFluidInputItem(storedFluidItemId))
+        {
+            return;
+        }
+
+        SetStoredFluid(-1, 0f);
     }
 
     private void CollectRuntimePipeAreaCoordinates(List<Vector2Int> coordinates)
@@ -1380,14 +1666,30 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                 return false;
             }
 
-            TryResolveConnectedFluidStorageAtCoordinate(coordinate, out storage);
+            TryResolveConnectedFluidSearchStorageAtCoordinate(coordinate, out storage, out _);
+            if (storage != null
+                && !CanFluidStorageConnectToDirection(storage, coordinate, directionToPrevious))
+            {
+                storage = null;
+            }
+
             canContinueRoute = true;
             return true;
         }
 
-        if (TryResolveConnectedFluidStorageBodyAtCoordinate(coordinate, out storage))
+        if (TryResolveConnectedFluidSearchStorageAtCoordinate(
+                coordinate,
+                out storage,
+                out bool storageIsPipeArea))
         {
-            canContinueRoute = true;
+            if (storageIsPipeArea
+                && !CanFluidStorageConnectToDirection(storage, coordinate, directionToPrevious))
+            {
+                storage = null;
+                return false;
+            }
+
+            canContinueRoute = storageIsPipeArea;
             return true;
         }
 
@@ -1415,7 +1717,20 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         Vector2Int coordinate,
         out InstallationObject storage)
     {
-        if (TryGetRuntimePipeFluidStorageAtCoordinate(coordinate, this, false, out storage))
+        return TryResolveConnectedFluidStorageAtCoordinate(coordinate, null, out storage);
+    }
+
+    private bool TryResolveConnectedFluidStorageAtCoordinate(
+        Vector2Int coordinate,
+        System.Predicate<InstallationObject> storageFilter,
+        out InstallationObject storage)
+    {
+        if (TryGetRuntimePipeFluidStorageAtCoordinate(
+                coordinate,
+                this,
+                false,
+                storageFilter,
+                out storage))
         {
             return true;
         }
@@ -1428,13 +1743,136 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             || installationObject is Pipe
             || installationObject is Pump
             || !installationObject.gameObject.activeInHierarchy
-            || !installationObject.CanStoreFluid)
+            || !installationObject.CanStoreFluid
+            || (storageFilter != null && !storageFilter(installationObject)))
         {
             return false;
         }
 
         storage = installationObject;
         return true;
+    }
+
+    private bool TryResolveConnectedFluidSearchStorageAtCoordinate(
+        Vector2Int coordinate,
+        out InstallationObject storage,
+        out bool storageIsPipeArea)
+    {
+        storageIsPipeArea = false;
+        if (TryGetRuntimePipeFluidStorageAtCoordinate(coordinate, this, false, out storage))
+        {
+            storageIsPipeArea = true;
+            return true;
+        }
+
+        if (!TryResolveConnectedFluidStorageBodyAtCoordinate(coordinate, out storage))
+        {
+            return false;
+        }
+
+        // A generator body is not a pipe. Steam generators may share steam only
+        // through their PipeArea/PipePass cells, otherwise parallel bodies leak
+        // steam into each other without a real connector.
+        if (storage is SteamGenerator)
+        {
+            storage = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool CanFluidSearchLeaveCoordinate(
+        Vector2Int coordinate,
+        bool isSeedCoordinate,
+        InstallationObject storage,
+        bool storageIsPipeArea,
+        Vector2Int direction)
+    {
+        if (direction == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (storageIsPipeArea)
+        {
+            return CanFluidStorageConnectToDirection(storage, coordinate, direction);
+        }
+
+        if (isSeedCoordinate && TryGetRuntimePipeAreaExternalDirection(coordinate, out Vector2Int seedDirection))
+        {
+            return seedDirection == direction;
+        }
+
+        return true;
+    }
+
+    private static bool CanFluidStorageConnectToDirection(
+        InstallationObject storage,
+        Vector2Int coordinate,
+        Vector2Int direction)
+    {
+        return storage is InputOutputModule module
+               && module.TryGetRuntimePipeAreaExternalDirection(coordinate, out Vector2Int externalDirection)
+               && externalDirection == direction;
+    }
+
+    private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (!ContainsRuntimePipeAreaBlockCoordinate(coordinate)
+            || !TryGetNearestRuntimeObjectDirectionFromCoordinate(coordinate, out Vector2Int objectDirection)
+            || objectDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        direction = -objectDirection;
+        return direction != Vector2Int.zero;
+    }
+
+    private bool TryGetNearestRuntimeObjectDirectionFromCoordinate(Vector2Int coordinate, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+            || !TryGetPrimaryObjectCell(out Vector2Int primaryObjectCell))
+        {
+            return false;
+        }
+
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(
+                placement.x - primaryObjectCell.x,
+                placement.y - primaryObjectCell.y);
+            Vector2Int objectCoordinate = anchorCoordinate + RotateCellOffset(localOffset, quarterTurns);
+            Vector2Int candidateDirection = objectCoordinate - coordinate;
+            int distance = Mathf.Abs(candidateDirection.x) + Mathf.Abs(candidateDirection.y);
+            if (distance <= 0 || distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            if (Mathf.Abs(candidateDirection.x) >= Mathf.Abs(candidateDirection.y))
+            {
+                direction = new Vector2Int(candidateDirection.x >= 0 ? 1 : -1, 0);
+            }
+            else
+            {
+                direction = new Vector2Int(0, candidateDirection.y >= 0 ? 1 : -1);
+            }
+        }
+
+        return direction != Vector2Int.zero;
     }
 
     private bool TryResolveConnectedFluidStorageBodyAtCoordinate(
@@ -1482,13 +1920,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     private void ConsiderConnectedFluidSource(
         InstallationObject storage,
+        int requiredFluidItemId,
         float currentFillRatio,
         ref InstallationObject sourceStorage,
         ref float bestFillRatio)
     {
         if (storage == null
             || storage == this
-            || storage.StoredFluidLiters <= 0.0001f
+            || !storage.CanProvideFluidItem(requiredFluidItemId)
             || !connectedFluidStorageCandidates.Add(storage))
         {
             return;
@@ -2897,7 +3336,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return true;
     }
 
-    private bool TryConsumeOperatingEnergy(float deltaTime, out float consumedEnergy)
+    protected bool TryConsumeOperatingEnergy(float deltaTime, out float consumedEnergy)
     {
         consumedEnergy = 0f;
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
@@ -3308,11 +3747,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
-    protected bool TryResolveFluidOutputStorage(int fluidItemId, int fluidLiters, out InstallationObject targetStorage)
+    protected bool TryResolveFluidOutputStorage(int fluidItemId, float fluidLiters, out InstallationObject targetStorage)
     {
         targetStorage = null;
         if (!IsFluidItemId(fluidItemId)
-            || fluidLiters <= 0
+            || fluidLiters <= 0f
             || runtimeOutputCoordinates == null
             || runtimeOutputCoordinates.Count <= 0)
         {
@@ -3321,6 +3760,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         connectedFluidSearchQueue.Clear();
         connectedFluidSearchVisited.Clear();
+        connectedFluidStorageCandidates.Clear();
+        float bestTargetFillRatio = float.PositiveInfinity;
 
         for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
         {
@@ -3330,18 +3771,28 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         while (connectedFluidSearchQueue.Count > 0)
         {
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
-            if (TryResolveFluidOutputStorageAtCoordinate(coordinate, fluidLiters, out targetStorage))
+            if (TryResolveFluidOutputStorageAtCoordinate(
+                    coordinate,
+                    fluidItemId,
+                    fluidLiters,
+                    out InstallationObject coordinateTargetStorage))
             {
-                return true;
+                ConsiderFluidOutputStorage(
+                    coordinateTargetStorage,
+                    fluidItemId,
+                    fluidLiters,
+                    ref targetStorage,
+                    ref bestTargetFillRatio);
             }
 
             bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
-            bool hasFluidStorageBody = TryResolveConnectedFluidStorageBodyAtCoordinate(
+            TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
-                out _);
+                out InstallationObject fluidStorage,
+                out bool storageIsPipeArea);
 
-            if (!isOutputSeed && !hasPipe && !hasFluidStorageBody)
+            if (!isOutputSeed && !hasPipe && !storageIsPipeArea)
             {
                 continue;
             }
@@ -3354,19 +3805,35 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
                     continue;
                 }
 
-                Vector2Int nextCoordinate = coordinate + direction;
-                if (TryResolveFluidOutputStorageAtCoordinate(nextCoordinate, fluidLiters, out targetStorage))
+                if (!hasPipe
+                    && !CanFluidSearchLeaveCoordinate(
+                        coordinate,
+                        isOutputSeed,
+                        fluidStorage,
+                        storageIsPipeArea,
+                        direction))
                 {
-                    return true;
+                    continue;
                 }
 
+                Vector2Int nextCoordinate = coordinate + direction;
                 if (!TryGetConnectedFluidNodeAtCoordinate(
                         nextCoordinate,
                         -direction,
-                        out _,
+                        out InstallationObject nextStorage,
                         out bool canContinueRoute))
                 {
                     continue;
+                }
+
+                if (CanUseFluidOutputStorage(nextStorage, fluidItemId, fluidLiters))
+                {
+                    ConsiderFluidOutputStorage(
+                        nextStorage,
+                        fluidItemId,
+                        fluidLiters,
+                        ref targetStorage,
+                        ref bestTargetFillRatio);
                 }
 
                 if (canContinueRoute)
@@ -3376,14 +3843,18 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
         }
 
-        return false;
+        return targetStorage != null;
     }
 
     protected bool TryEmitFluidOutputToConnectedStorage(int fluidItemId, int fluidLiters)
     {
         if (!TryResolveFluidOutputStorage(fluidItemId, fluidLiters, out InstallationObject targetStorage)
             || targetStorage == null
-            || !targetStorage.TryAddFluidLiters(fluidLiters, out float acceptedLiters))
+            || !targetStorage.TryAddFluidLiters(
+                fluidItemId,
+                fluidLiters,
+                GetStoredFluidTemperatureCelsius(fluidItemId),
+                out float acceptedLiters))
         {
             return false;
         }
@@ -3393,19 +3864,22 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     private bool TryResolveFluidOutputStorageAtCoordinate(
         Vector2Int coordinate,
-        int fluidLiters,
+        int fluidItemId,
+        float fluidLiters,
         out InstallationObject targetStorage)
     {
         targetStorage = null;
         if (TryResolveConnectedFluidStorageBodyAtCoordinate(coordinate, out InstallationObject bodyStorage)
-            && CanUseFluidOutputStorage(bodyStorage, fluidLiters))
+            && CanUseFluidOutputStorage(bodyStorage, fluidItemId, fluidLiters))
         {
             targetStorage = bodyStorage;
             return true;
         }
 
-        if (TryResolveConnectedFluidStorageAtCoordinate(coordinate, out InstallationObject areaStorage)
-            && CanUseFluidOutputStorage(areaStorage, fluidLiters))
+        if (TryResolveConnectedFluidStorageAtCoordinate(
+                coordinate,
+                storage => CanUseFluidOutputStorage(storage, fluidItemId, fluidLiters),
+                out InstallationObject areaStorage))
         {
             targetStorage = areaStorage;
             return true;
@@ -3414,12 +3888,35 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
-    private bool CanUseFluidOutputStorage(InstallationObject storage, int fluidLiters)
+    private bool CanUseFluidOutputStorage(InstallationObject storage, int fluidItemId, float fluidLiters)
     {
         return storage != null
                && storage != this
                && storage.CanStoreFluid
-               && storage.AvailableFluidStorageLiters + 0.0001f >= fluidLiters;
+               && storage.CanAcceptFluidItem(fluidItemId, fluidLiters);
+    }
+
+    private void ConsiderFluidOutputStorage(
+        InstallationObject storage,
+        int fluidItemId,
+        float fluidLiters,
+        ref InstallationObject targetStorage,
+        ref float bestFillRatio)
+    {
+        if (!CanUseFluidOutputStorage(storage, fluidItemId, fluidLiters)
+            || !connectedFluidStorageCandidates.Add(storage))
+        {
+            return;
+        }
+
+        float fillRatio = GetFluidStorageFillRatio(storage);
+        if (targetStorage != null && fillRatio >= bestFillRatio)
+        {
+            return;
+        }
+
+        targetStorage = storage;
+        bestFillRatio = fillRatio;
     }
 
     public static bool CoordinateIsRuntimeInputEnergyBlock(Vector2Int coordinate)
