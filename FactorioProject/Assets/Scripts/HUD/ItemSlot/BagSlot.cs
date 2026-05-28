@@ -546,6 +546,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         HandleHeldSlotInput();
 
+        if (Input.GetKeyDown(KeyCode.H))
+        {
+            TryHandleHandShortcut();
+        }
+
         if (Input.GetKeyDown(KeyCode.F) && CanDragItem())
         {
             DropItem();
@@ -2096,7 +2101,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool TryTransferToSlot(BagSlot targetSlot)
     {
-        if (IsInventoryUiLocked() || targetSlot == null || targetSlot == this)
+        if (targetSlot == null || targetSlot == this)
+        {
+            return false;
+        }
+
+        return TryTransferToBagSlot(targetSlot.boundBag, targetSlot.slotIndex);
+    }
+
+    private bool TryTransferToBagSlot(PlayerBag targetBag, int targetIndex)
+    {
+        if (IsInventoryUiLocked())
         {
             return false;
         }
@@ -2106,9 +2121,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        PlayerBag targetBag = targetSlot.boundBag;
-        int targetIndex = targetSlot.slotIndex;
         if (targetBag == null || targetIndex < 0)
+        {
+            return false;
+        }
+
+        if (boundBag == targetBag && slotIndex == targetIndex)
         {
             return false;
         }
@@ -2127,7 +2145,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         {
             int targetMax = targetBag.GetSlotMaxCount(targetIndex);
             int moveCount = Mathf.Min(sourceCount, Mathf.Max(0, targetMax));
-            return moveCount > 0 && TryMoveStack(boundBag, slotIndex, sourceItemId, moveCount, targetBag, targetIndex);
+            return TryTransferStackToBagSlot(sourceItemId, moveCount, targetBag, targetIndex);
         }
 
         if (targetItemId == sourceItemId)
@@ -2139,7 +2157,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 return false;
             }
 
-            return TryMoveStack(boundBag, slotIndex, sourceItemId, moveCount, targetBag, targetIndex);
+            return TryTransferStackToBagSlot(sourceItemId, moveCount, targetBag, targetIndex);
         }
 
         int sourceMax = boundBag.GetSlotMaxCount(slotIndex);
@@ -2149,7 +2167,59 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        return TrySwapStacks(boundBag, slotIndex, targetBag, targetIndex);
+        bool transferred = TrySwapStacks(boundBag, slotIndex, targetBag, targetIndex);
+        RefreshCarryStateAfterTransfer(boundBag, targetBag, transferred);
+        return transferred;
+    }
+
+    private bool TryTransferStackToBagSlot(int sourceItemId, int moveCount, PlayerBag targetBag, int targetIndex)
+    {
+        bool transferred = moveCount > 0 && TryMoveStack(boundBag, slotIndex, sourceItemId, moveCount, targetBag, targetIndex);
+        RefreshCarryStateAfterTransfer(boundBag, targetBag, transferred);
+        return transferred;
+    }
+
+    private bool TryHandleHandShortcut()
+    {
+        Player player = ResolvePlayer();
+        if (player == null)
+        {
+            return false;
+        }
+
+        if (this is HandSlot)
+        {
+            return player.TryStoreHandItemsInBag();
+        }
+
+        PlayerBag handBag = player.GetHandBag();
+        if (handBag == null)
+        {
+            return false;
+        }
+
+        handBag.RefreshExternalStackCounts(false);
+        return TryTransferToBagSlot(handBag, 0);
+    }
+
+    private static void RefreshCarryStateAfterTransfer(PlayerBag sourceBag, PlayerBag targetBag, bool transferred)
+    {
+        if (!transferred)
+        {
+            return;
+        }
+
+        Player player = ResolvePlayer();
+        if (player == null)
+        {
+            return;
+        }
+
+        PlayerBag handBag = player.GetHandBag();
+        if (sourceBag == handBag || targetBag == handBag)
+        {
+            player.UpdateCarryState();
+        }
     }
 
     private bool TryMoveStack(PlayerBag sourceBag, int sourceIndex, int itemId, int itemCount, PlayerBag targetBag, int targetIndex)

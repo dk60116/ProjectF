@@ -404,7 +404,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Pipe
-  objId: 23
+  objId: 26
   itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -424,6 +424,8 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   storedFluidLiters: 0
+  storedFluidItemId: -1
+  storedFluidTemperatureCelsius: 20
   straightVariantPrefab: {fileID: 196921536911978296}
   cornerVariantPrefab: {fileID: 196921536911978296, guid: f6ccfba36f5945b2976243dc344727aa, type: 3}
   teeVariantPrefab: {fileID: 196921536911978296, guid: 5e9b8838cf4843a681b803efe7f9aa37, type: 3}

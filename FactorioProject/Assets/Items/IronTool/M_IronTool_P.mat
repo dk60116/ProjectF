@@ -33,6 +33,6 @@ Material:
     - _SpecularSmoothness: 0.3
     - _UseSpecular: 1
     m_Colors:
-    - _BaseColor: {r: 0.509434, g: 0.509434, b: 0.509434, a: 1}
+    - _BaseColor: {r: 0.6415094, g: 0.6415094, b: 0.6415094, a: 1}
     - _ShadowColor: {r: 0.7924528, g: 0.7924528, b: 0.7924528, a: 1}
   m_BuildTextureStacks: []

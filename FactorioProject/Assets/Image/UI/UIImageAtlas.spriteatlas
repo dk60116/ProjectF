@@ -45,7 +45,9 @@ SpriteAtlas:
     secondaryTextureSettings: {}
     variantMultiplier: 1
     packables:
-    - {fileID: 102900000, guid: a7450445676f37d4ba243b852fa4a066, type: 3}
+    - {fileID: 102900000, guid: f6a21d232e1e5d3409d0f6868c364e06, type: 3}
+    - {fileID: 21300000, guid: 007d509387447b443a65381bf19b3bb4, type: 3}
+    - {fileID: 21300000, guid: 06b84cb3d4c5a3c4cb3d19f2a2e2ad71, type: 3}
     bindAsDefault: 1
     isAtlasV2: 0
     cachedData: {fileID: 0}
@@ -56,12 +58,9 @@ SpriteAtlas:
     - 007d509387447b443a65381bf19b3bb4: 21300000
     - 06b84cb3d4c5a3c4cb3d19f2a2e2ad71: 21300000
     - 7720e005806f85b418062ee10ace0761: 21300000
-    - ef2f61a6d6e4ba74d8864a5f8d382e78: 21300000
     - 4022dda644b694f48ac27a7551dcdb50: 21300000
-    - 9a5f9007774453d4790b24975971f175: 21300000
     - 39e009b731267ad429d62ed1ad782ceb: 21300000
     - c4ff3d087eed94b4489b53527fd275f9: 21300000
-    - 5af14359cd5ad9f49aa3257d75f72597: 21300000
     - 6ad6a3690f6902b498cb60f6b7eb8eb8: 21300000
     - e3eca5a98f76c04459f95cc80d7b6cfa: 21300000
     - 77bc3dba3ef216f44a219ad19527ad7a: 21300000
@@ -71,7 +70,6 @@ SpriteAtlas:
     - f333914c999d1d74eaf7443d160ca2de: 21300000
     - 04d2474cf6c71a54fb08ea3b29a7d0b7: 21300000
     - 630e8a9c0ccf22b4289a51e3b13ca096: 21300000
-    - c6a06b0d53be27848bf3976a181c4f1b: 21300000
     - 31327ebd121222444ac8157997d7998c: 21300000
     - 0f933bbee2c18a748a8f0acd1d55acf8: 21300000
     - 2582507f70a72ed4d97ad5da96f8f4da: 21300000
@@ -84,12 +82,9 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 007d509387447b443a65381bf19b3bb4, type: 3}
   - {fileID: 21300000, guid: 06b84cb3d4c5a3c4cb3d19f2a2e2ad71, type: 3}
   - {fileID: 21300000, guid: 7720e005806f85b418062ee10ace0761, type: 3}
-  - {fileID: 21300000, guid: ef2f61a6d6e4ba74d8864a5f8d382e78, type: 3}
   - {fileID: 21300000, guid: 4022dda644b694f48ac27a7551dcdb50, type: 3}
-  - {fileID: 21300000, guid: 9a5f9007774453d4790b24975971f175, type: 3}
   - {fileID: 21300000, guid: 39e009b731267ad429d62ed1ad782ceb, type: 3}
   - {fileID: 21300000, guid: c4ff3d087eed94b4489b53527fd275f9, type: 3}
-  - {fileID: 21300000, guid: 5af14359cd5ad9f49aa3257d75f72597, type: 3}
   - {fileID: 21300000, guid: 6ad6a3690f6902b498cb60f6b7eb8eb8, type: 3}
   - {fileID: 21300000, guid: e3eca5a98f76c04459f95cc80d7b6cfa, type: 3}
   - {fileID: 21300000, guid: 77bc3dba3ef216f44a219ad19527ad7a, type: 3}
@@ -99,7 +94,6 @@ SpriteAtlas:
   - {fileID: 21300000, guid: f333914c999d1d74eaf7443d160ca2de, type: 3}
   - {fileID: 21300000, guid: 04d2474cf6c71a54fb08ea3b29a7d0b7, type: 3}
   - {fileID: 21300000, guid: 630e8a9c0ccf22b4289a51e3b13ca096, type: 3}
-  - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
   - {fileID: 21300000, guid: 31327ebd121222444ac8157997d7998c, type: 3}
   - {fileID: 21300000, guid: 0f933bbee2c18a748a8f0acd1d55acf8, type: 3}
   - {fileID: 21300000, guid: 2582507f70a72ed4d97ad5da96f8f4da, type: 3}
@@ -111,12 +105,9 @@ SpriteAtlas:
   - Area
   - Arrow
   - MapFocus
-  - Axe
   - WoodBox_Circle
-  - Filter
   - JoyStick_BG
   - WoodBox_Circle_Dark
-  - Fluid
   - CanaNot
   - WoodBox_Fill
   - Rotation
@@ -126,7 +117,6 @@ SpriteAtlas:
   - WoodBox_Dark
   - BagIcon
   - Undo
-  - Pickaxe
   - Pack
   - Cancel
   - CreateIcon

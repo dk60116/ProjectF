@@ -17,7 +17,8 @@ public class Resource : MapObject
     {
         Auto,
         Mining,
-        Logging
+        Logging,
+        Cut
     }
 
     [Serializable]
@@ -113,6 +114,11 @@ public class Resource : MapObject
             }
 
             string sourceName = $"{objectName} {gameObject.name}";
+            if (sourceName.IndexOf("reed", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return HarvestMode.Cut;
+            }
+
             return sourceName.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0
                 ? HarvestMode.Logging
                 : HarvestMode.Mining;
@@ -764,22 +770,18 @@ public class Resource : MapObject
 
     private int ResolveOutputItemId()
     {
+        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
+        {
+            resourceStatus.outputId = definitionOutputItemId;
+            resourceStatus.outputItemName = definitionOutputItemName;
+            return definitionOutputItemId;
+        }
+
         if (TryResolveOutputItemNameToId(resourceStatus.outputItemName, out int namedOutputItemId))
         {
             resourceStatus.outputId = namedOutputItemId;
             resourceStatus.outputItemName = resourceStatus.outputItemName.Trim();
             return namedOutputItemId;
-        }
-
-        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
-        {
-            resourceStatus.outputId = definitionOutputItemId;
-            if (string.IsNullOrWhiteSpace(resourceStatus.outputItemName))
-            {
-                resourceStatus.outputItemName = definitionOutputItemName;
-            }
-
-            return definitionOutputItemId;
         }
 
         if (resourceStatus.outputId >= 0)
@@ -792,6 +794,13 @@ public class Resource : MapObject
 
     private void MigrateOutputItemNameIfNeeded()
     {
+        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
+        {
+            resourceStatus.outputId = definitionOutputItemId;
+            resourceStatus.outputItemName = definitionOutputItemName;
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(resourceStatus.outputItemName))
         {
             resourceStatus.outputItemName = resourceStatus.outputItemName.Trim();
@@ -800,13 +809,6 @@ public class Resource : MapObject
                 resourceStatus.outputId = namedOutputItemId;
             }
 
-            return;
-        }
-
-        if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
-        {
-            resourceStatus.outputId = definitionOutputItemId;
-            resourceStatus.outputItemName = definitionOutputItemName;
             return;
         }
 
@@ -1193,10 +1195,7 @@ public class Resource : MapObject
             resourceStatus.resourceCount = Mathf.Max(1, definition.defaultResourceCount);
         }
 
-        if (resourceStatus.getCount <= 0)
-        {
-            resourceStatus.getCount = Mathf.Max(1, definition.defaultGetCount);
-        }
+        resourceStatus.getCount = Mathf.Max(1, definition.defaultGetCount);
 
         if (resourceStatus.maxGauge <= 0)
         {
@@ -1410,7 +1409,8 @@ public class Resource : MapObject
         layer = meshRenderer != null ? meshRenderer.gameObject.layer : gameObject.layer;
         shadowCastingMode = meshRenderer != null ? meshRenderer.shadowCastingMode : ShadowCastingMode.Off;
         receiveShadows = meshRenderer != null && meshRenderer.receiveShadows;
-        useGlobalBatch = ResolvedHarvestMode == HarvestMode.Logging;
+        HarvestMode harvestMode = ResolvedHarvestMode;
+        useGlobalBatch = harvestMode == HarvestMode.Logging || harvestMode == HarvestMode.Cut;
 
         return useBatchedRendering
                && bodyPresentationVisible

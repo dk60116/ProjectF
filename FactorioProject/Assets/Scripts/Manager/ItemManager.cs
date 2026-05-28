@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -198,87 +197,7 @@ public class ItemManager : MonoBehaviour
     [ContextMenu("Rebuild Items From Assets (Definitions)")]
     public void RebuildItemDefinitionsFromAssets()
     {
-        if (itemDefinitions == null)
-        {
-            itemDefinitions = new List<ItemDefinition>();
-        }
-
-        if (items == null)
-        {
-            items = new List<ItemSet>();
-        }
-
-        Dictionary<string, ItemSet> previousItemsByName = new Dictionary<string, ItemSet>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < items.Count; i++)
-        {
-            ItemSet existingItem = items[i];
-            if (!string.IsNullOrWhiteSpace(existingItem.name))
-            {
-                previousItemsByName[existingItem.name] = existingItem;
-            }
-        }
-
-        List<string> itemFolders = CollectItemFolderPaths();
-        Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
-        Dictionary<string, ItemDefinition> existingDefinitionsByName = BuildExistingItemDefinitionLookupByName();
-        HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
-
-        List<ItemSet> rebuiltItems = new List<ItemSet>();
-
-        for (int i = 0; i < itemFolders.Count; i++)
-        {
-            string itemFolder = itemFolders[i];
-            string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
-            if (string.IsNullOrWhiteSpace(itemName))
-            {
-                continue;
-            }
-
-            bool hasPreviousItem = previousItemsByName.TryGetValue(itemName, out ItemSet previousItem);
-            PropObj propObject = FindPropObjInFolder(itemFolder, out GameObject prefabRoot);
-
-            ResolvePortableAssets(itemFolder, prefabRoot, out Mesh portableMesh, out Material portableMaterial);
-
-            TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
-
-            int itemId = preservedIdsByItemName.TryGetValue(itemName, out int preservedId)
-                ? preservedId
-                : GetNextAvailableId(usedIds);
-            usedIds.Add(itemId);
-
-            Sprite resolvedIcon = ResolveItemIcon(itemFolder, itemName, hasPreviousItem ? previousItem.icon : null);
-
-            ItemSet itemSet = new ItemSet
-            {
-                id = itemId,
-                name = itemName,
-                prefab = propObject,
-                portableMesh = portableMesh,
-                portableMat = portableMaterial,
-                icon = resolvedIcon,
-                size = ResolvePreservedItemSize(itemName, hasPreviousItem ? previousItem.size : 0, existingDefinitionsByName)
-            };
-
-            rebuiltItems.Add(itemSet);
-        }
-
-        rebuiltItems.Sort((left, right) =>
-        {
-            int idCompare = left.id.CompareTo(right.id);
-            if (idCompare != 0)
-            {
-                return idCompare;
-            }
-
-            return string.Compare(left.name, right.name, StringComparison.OrdinalIgnoreCase);
-        });
-
-        items = rebuiltItems;
-        RecreateItemDefinitionsFromItems(rebuiltItems);
-        SortItemDefinitionsById(itemDefinitions);
-        MigrateResourceDefinitionsFromResources();
-        SyncTerrainGeneratorResourceDefinitions();
-        EditorUtility.SetDirty(this);
+        RebuildItemsFromAssetFolders();
     }
 
     [ContextMenu("Migrate Item + Resource Definitions")]
@@ -291,21 +210,22 @@ public class ItemManager : MonoBehaviour
 
     public void RebuildItemsFromAssets()
     {
+        RebuildItemsFromAssetFolders();
+    }
+
+    private void RebuildItemsFromAssetFolders()
+    {
+        if (itemDefinitions == null)
+        {
+            itemDefinitions = new List<ItemDefinition>();
+        }
+
         if (items == null)
         {
             items = new List<ItemSet>();
         }
 
-        Dictionary<string, ItemSet> previousItemsByName = new Dictionary<string, ItemSet>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < items.Count; i++)
-        {
-            ItemSet existingItem = items[i];
-            if (!string.IsNullOrWhiteSpace(existingItem.name))
-            {
-                previousItemsByName[existingItem.name] = existingItem;
-            }
-        }
-
+        Dictionary<string, ItemSet> previousItemsByName = BuildItemSetLookupByName(items);
         List<string> itemFolders = CollectItemFolderPaths();
         Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
         Dictionary<string, ItemDefinition> existingDefinitionsByName = BuildExistingItemDefinitionLookupByName();
@@ -350,23 +270,49 @@ public class ItemManager : MonoBehaviour
             rebuiltItems.Add(itemSet);
         }
 
-        rebuiltItems.Sort((left, right) =>
-        {
-            int idCompare = left.id.CompareTo(right.id);
-            if (idCompare != 0)
-            {
-                return idCompare;
-            }
-
-            return string.Compare(left.name, right.name, StringComparison.OrdinalIgnoreCase);
-        });
-
+        SortItemSetsByIdThenName(rebuiltItems);
         items = rebuiltItems;
         RecreateItemDefinitionsFromItems(rebuiltItems);
         SortItemDefinitionsById(itemDefinitions);
         MigrateResourceDefinitionsFromResources();
         SyncTerrainGeneratorResourceDefinitions();
         EditorUtility.SetDirty(this);
+    }
+
+    private static Dictionary<string, ItemSet> BuildItemSetLookupByName(List<ItemSet> sourceItems)
+    {
+        Dictionary<string, ItemSet> results = new Dictionary<string, ItemSet>(StringComparer.OrdinalIgnoreCase);
+        if (sourceItems == null)
+        {
+            return results;
+        }
+
+        for (int i = 0; i < sourceItems.Count; i++)
+        {
+            ItemSet itemSet = sourceItems[i];
+            if (!string.IsNullOrWhiteSpace(itemSet.name))
+            {
+                results[itemSet.name] = itemSet;
+            }
+        }
+
+        return results;
+    }
+
+    private static void SortItemSetsByIdThenName(List<ItemSet> targetItems)
+    {
+        if (targetItems == null || targetItems.Count <= 1)
+        {
+            return;
+        }
+
+        targetItems.Sort((left, right) =>
+        {
+            int idCompare = left.id.CompareTo(right.id);
+            return idCompare != 0
+                ? idCompare
+                : string.Compare(left.name, right.name, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static int GetNextAvailableId(HashSet<int> usedIds)
@@ -2382,34 +2328,6 @@ public class ItemManager : MonoBehaviour
         }
 
         return AssetDatabase.IsValidFolder(folderPath);
-    }
-
-    private void ClearItemDefinitionAssets()
-    {
-        string targetDirectory = "Assets/Data/Items";
-        if (!EnsureAssetFolder(targetDirectory))
-        {
-            Debug.LogError($"ItemManager: Failed to create item definition folder at '{targetDirectory}'.");
-            return;
-        }
-
-        string[] guids = AssetDatabase.FindAssets("t:ItemDefinition", new[] { targetDirectory });
-        for (int i = 0; i < guids.Length; i++)
-        {
-            string assetPath = AssetDatabase.GUIDToAssetPath(guids[i]);
-            if (string.IsNullOrWhiteSpace(assetPath))
-            {
-                continue;
-            }
-
-            if (!AssetDatabase.DeleteAsset(assetPath))
-            {
-                Debug.LogWarning($"ItemManager: Failed to delete item definition asset at '{assetPath}'.");
-            }
-        }
-
-        itemDefinitions?.Clear();
-        EditorUtility.SetDirty(this);
     }
 
     private void RecreateItemDefinitionsFromItems(List<ItemSet> sourceItems)

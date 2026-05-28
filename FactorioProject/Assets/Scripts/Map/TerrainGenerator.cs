@@ -232,6 +232,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private List<ResourceEntry> oreResources = new List<ResourceEntry>();
     [SerializeField]
     private List<ResourceEntry> treeResources = new List<ResourceEntry>();
+    [SerializeField]
+    private List<ResourceEntry> reedResources = new List<ResourceEntry>();
 
     private Resource stone;
     private Resource coal;
@@ -591,6 +593,12 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Range(1f, 3f)]
     private float treePatchSizeMultiplier = 1.35f;
 
+    [SerializeField, Min(1)]
+    private int reedWaterSearchRadius = 2;
+
+    [SerializeField, Range(0f, 1f)]
+    private float reedDensityMultiplier = 0.65f;
+
     private readonly Dictionary<Vector2Int, Transform> loadedChunks = new Dictionary<Vector2Int, Transform>();
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
     private readonly Dictionary<Vector2Int, Transform> sleepingChunkViews = new Dictionary<Vector2Int, Transform>();
@@ -718,6 +726,7 @@ public partial class TerrainGenerator : MonoBehaviour
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         InvalidateStarterTreeCache();
 #if UNITY_EDITOR
@@ -752,6 +761,7 @@ public partial class TerrainGenerator : MonoBehaviour
         NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
@@ -957,6 +967,7 @@ public partial class TerrainGenerator : MonoBehaviour
         NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
@@ -1249,6 +1260,7 @@ public partial class TerrainGenerator : MonoBehaviour
         NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
         InitializeSeedForGeneration();
@@ -1276,6 +1288,7 @@ public partial class TerrainGenerator : MonoBehaviour
         NormalizeOreBodyScaleSettings();
         NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
+        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
         EnsureResourceStateStore();
         InvalidateStarterTreeCache();
@@ -1443,8 +1456,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
 
                 ApplyBlockBiomeVisuals(block, visualData);
-                if (CanSpawnResourceOnBiome(visualData.primaryBiome)
-                    && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab)
+                if (TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab)
                     && CanSpawnResourceAtGeneratedCoordinate(worldCoordinate, resourcePrefab))
                 {
                     SpawnResourceOnBlock(block, resourcePrefab, worldCoordinate);

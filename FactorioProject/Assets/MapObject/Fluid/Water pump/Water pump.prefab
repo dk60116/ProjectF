@@ -132,7 +132,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 25
+  objId: 28
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -288,7 +288,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 9fc4b8ce8acb0294897ee68ea46705d2, type: 2}
+  - {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

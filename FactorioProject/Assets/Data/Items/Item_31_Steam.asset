@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_31_Steam
   m_EditorClassIdentifier: 
   itemName: Steam
-  id: 5
+  id: 6
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}

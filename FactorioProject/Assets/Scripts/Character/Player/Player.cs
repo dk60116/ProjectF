@@ -12,6 +12,7 @@ public class Player : Character
     private const string PickStateName = "Pick";
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
+    private const float PlayerRootY = 0f;
 
     [Serializable]
     public struct PlayerState
@@ -364,16 +365,17 @@ public class Player : Character
             return;
         }
 
+        Vector3 rootPosition = ClampRootPositionToGroundY(saveData.position);
         Rigidbody rigidbody = GetComponent<Rigidbody>();
         if (rigidbody != null)
         {
-            rigidbody.position = saveData.position;
+            rigidbody.position = rootPosition;
             rigidbody.rotation = saveData.rotation;
             rigidbody.velocity = Vector3.zero;
             rigidbody.angularVelocity = Vector3.zero;
         }
 
-        transform.SetPositionAndRotation(saveData.position, saveData.rotation);
+        transform.SetPositionAndRotation(rootPosition, saveData.rotation);
         Physics.SyncTransforms();
         StopImmediateActions();
         dropExitPending = false;
@@ -383,7 +385,13 @@ public class Player : Character
     private Vector3 ResolveSavePosition()
     {
         Rigidbody rigidbody = GetComponent<Rigidbody>();
-        return rigidbody != null ? rigidbody.position : transform.position;
+        return ClampRootPositionToGroundY(rigidbody != null ? rigidbody.position : transform.position);
+    }
+
+    private static Vector3 ClampRootPositionToGroundY(Vector3 position)
+    {
+        position.y = PlayerRootY;
+        return position;
     }
 
     private Quaternion ResolveSaveRotation()

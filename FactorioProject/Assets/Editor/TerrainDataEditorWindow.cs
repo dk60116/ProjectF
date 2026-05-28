@@ -141,6 +141,8 @@ public class TerrainDataEditorWindow : EditorWindow
         "starterTreeMinCount",
         "starterTreeMaxCount",
         "starterTreeDistanceFromCenter",
+        "reedWaterSearchRadius",
+        "reedDensityMultiplier",
         "oreMinimumBodyScaleRatio",
         "oreMaximumBodyScaleRatio",
         "oreScaleAtResourceCount"
@@ -228,6 +230,7 @@ public class TerrainDataEditorWindow : EditorWindow
         DrawPropertySection(serializedGenerator, "Start Area", StartAreaPropertyPaths);
         DrawPropertySection(serializedGenerator, "Ore Resources", "oreResources");
         DrawPropertySection(serializedGenerator, "Tree Resources", "treeResources");
+        DrawPropertySection(serializedGenerator, "Reed Resources", "reedResources");
         DrawPropertySection(serializedGenerator, "Resource Generation", ResourceGenerationPropertyPaths);
 
         if (EditorGUI.EndChangeCheck())

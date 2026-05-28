@@ -193,7 +193,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Brick wall
-  objId: 32
+  objId: 35
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -213,6 +213,8 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   storedFluidLiters: 0
+  storedFluidItemId: -1
+  storedFluidTemperatureCelsius: 20
   straightVariantPrefab: {fileID: 2276685300360839919}
   cornerVariantPrefab: {fileID: 7796861901037811338, guid: b8dea79df8c04e799bebbbf5823b9077, type: 3}
   triCornerVariantPrefab: {fileID: 7796861901037811338, guid: 82a1b5190fad469a97d620e5ace1e702, type: 3}

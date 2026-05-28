@@ -135,6 +135,12 @@ internal static class ItemDefinitionDragAndDropUtility
         return false;
     }
 
+    public static bool TryGetDraggedDefinition(out ItemDefinition draggedDefinition)
+    {
+        draggedDefinition = GetDraggedDefinition();
+        return draggedDefinition != null;
+    }
+
     private static ItemDefinition GetDraggedDefinition()
     {
         object draggedData = DragAndDrop.GetGenericData(DragDataKey);

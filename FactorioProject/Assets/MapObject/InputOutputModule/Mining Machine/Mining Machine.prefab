@@ -132,7 +132,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Mining machine
-  objId: 24
+  objId: 27
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -152,6 +152,8 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   storedFluidLiters: 0
+  storedFluidItemId: -1
+  storedFluidTemperatureCelsius: 20
   inputList: []
   outputList: []
   output:

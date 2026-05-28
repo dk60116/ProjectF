@@ -16,7 +16,10 @@ Shader "Custom/ToonCharacter"
         _Surface("__surface", Float) = 0.0
         _Blend("__blend", Float) = 0.0
         _Cull("__cull", Float) = 2.0
-        [ToggleUI] _AlphaClip("__clip", Float) = 0.0
+        [ToggleUI] _AlphaClip("Alpha Cutout", Float) = 0.0
+        _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
+        [ToggleUI] _UseBlackCutout("Black Texture Cutout", Float) = 0.0
+        _BlackCutoutThreshold("Black Cutout Threshold", Range(0.0, 1.0)) = 0.02
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
         [HideInInspector] _SrcBlendAlpha("__srcA", Float) = 1.0
@@ -29,7 +32,6 @@ Shader "Custom/ToonCharacter"
 
         [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
         [HideInInspector] _Color("Base Color", Color) = (1, 1, 1, 1)
-        [HideInInspector] _Cutoff("Alpha Clipping", Range(0.0, 1.0)) = 0.5
         [HideInInspector][NoScaleOffset] unity_Lightmaps("unity_Lightmaps", 2DArray) = "" {}
         [HideInInspector][NoScaleOffset] unity_LightmapsInd("unity_LightmapsInd", 2DArray) = "" {}
         [HideInInspector][NoScaleOffset] unity_ShadowMasks("unity_ShadowMasks", 2DArray) = "" {}
@@ -44,6 +46,46 @@ Shader "Custom/ToonCharacter"
             "IgnoreProjector" = "True"
         }
         LOD 300
+
+        HLSLINCLUDE
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            TEXTURE2D(_BaseMap);
+            SAMPLER(sampler_BaseMap);
+
+            CBUFFER_START(UnityPerMaterial)
+                float4 _BaseMap_ST;
+                float4 _BaseColor;
+                float4 _ShadowColor;
+                float4 _SpecularColor;
+                half _ShadeThreshold;
+                half _ShadeSmoothness;
+                half _UseSpecular;
+                half _SpecularIntensity;
+                half _SpecularPower;
+                half _SpecularThreshold;
+                half _SpecularSmoothness;
+                half _Surface;
+                half _AlphaClip;
+                half _Cutoff;
+                half _UseBlackCutout;
+                half _BlackCutoutThreshold;
+            CBUFFER_END
+
+            half4 SampleToonBase(float2 uv, out half4 rawSample)
+            {
+                rawSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
+                return rawSample * _BaseColor;
+            }
+
+            void ApplyToonCutout(half4 rawSample, half4 baseSample)
+            {
+                clip(lerp(1.0h, baseSample.a - _Cutoff, saturate(_AlphaClip)));
+
+                half maxTextureChannel = max(max(rawSample.r, rawSample.g), rawSample.b);
+                clip(lerp(1.0h, maxTextureChannel - _BlackCutoutThreshold, saturate(_UseBlackCutout)));
+            }
+        ENDHLSL
 
         Pass
         {
@@ -109,24 +151,6 @@ Shader "Custom/ToonCharacter"
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
-
-            TEXTURE2D(_BaseMap);
-            SAMPLER(sampler_BaseMap);
-
-            CBUFFER_START(UnityPerMaterial)
-                float4 _BaseMap_ST;
-                float4 _BaseColor;
-                float4 _ShadowColor;
-                float4 _SpecularColor;
-                half _ShadeThreshold;
-                half _ShadeSmoothness;
-                half _UseSpecular;
-                half _SpecularIntensity;
-                half _SpecularPower;
-                half _SpecularThreshold;
-                half _SpecularSmoothness;
-                half _Surface;
-            CBUFFER_END
 
             Varyings vert(Attributes input)
             {
@@ -219,10 +243,13 @@ Shader "Custom/ToonCharacter"
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
+                half4 rawBaseSample;
+                half4 baseSample = SampleToonBase(input.uv, rawBaseSample);
+                ApplyToonCutout(rawBaseSample, baseSample);
+
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
 
-                half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv) * _BaseColor;
                 Light mainLight = GetMainLight(inputData.shadowCoord);
 
                 half NdotL = saturate(dot(inputData.normalWS, mainLight.direction));
@@ -261,9 +288,202 @@ Shader "Custom/ToonCharacter"
             ENDHLSL
         }
 
-        UsePass "Universal Render Pipeline/Simple Lit/ShadowCaster"
-        UsePass "Universal Render Pipeline/Simple Lit/DepthOnly"
-        UsePass "Universal Render Pipeline/Simple Lit/DepthNormals"
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags { "LightMode" = "ShadowCaster" }
+
+            ZWrite On
+            ZTest LEqual
+            ColorMask 0
+            Cull[_Cull]
+
+            HLSLPROGRAM
+            #pragma target 2.0
+            #pragma vertex ShadowPassVertex
+            #pragma fragment ShadowPassFragment
+            #pragma multi_compile_instancing
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+            float3 _LightDirection;
+            float3 _LightPosition;
+
+            struct ShadowAttributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct ShadowVaryings
+            {
+                float2 uv : TEXCOORD0;
+                float4 positionCS : SV_POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            float4 GetToonShadowPositionHClip(ShadowAttributes input)
+            {
+                float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
+                float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
+
+#if _CASTING_PUNCTUAL_LIGHT_SHADOW
+                float3 lightDirectionWS = normalize(_LightPosition - positionWS);
+#else
+                float3 lightDirectionWS = _LightDirection;
+#endif
+
+                float4 positionCS = TransformWorldToHClip(ApplyShadowBias(positionWS, normalWS, lightDirectionWS));
+
+#if UNITY_REVERSED_Z
+                positionCS.z = min(positionCS.z, UNITY_NEAR_CLIP_VALUE);
+#else
+                positionCS.z = max(positionCS.z, UNITY_NEAR_CLIP_VALUE);
+#endif
+
+                return positionCS;
+            }
+
+            ShadowVaryings ShadowPassVertex(ShadowAttributes input)
+            {
+                ShadowVaryings output = (ShadowVaryings)0;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_TRANSFER_INSTANCE_ID(input, output);
+
+                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
+                output.positionCS = GetToonShadowPositionHClip(input);
+                return output;
+            }
+
+            half4 ShadowPassFragment(ShadowVaryings input) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+
+                half4 rawBaseSample;
+                half4 baseSample = SampleToonBase(input.uv, rawBaseSample);
+                ApplyToonCutout(rawBaseSample, baseSample);
+                return 0;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode" = "DepthOnly" }
+
+            ZWrite On
+            ColorMask 0
+            Cull[_Cull]
+
+            HLSLPROGRAM
+            #pragma target 2.0
+            #pragma vertex DepthOnlyVertex
+            #pragma fragment DepthOnlyFragment
+            #pragma multi_compile_instancing
+
+            struct DepthOnlyAttributes
+            {
+                float4 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct DepthOnlyVaryings
+            {
+                float2 uv : TEXCOORD0;
+                float4 positionCS : SV_POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+
+            DepthOnlyVaryings DepthOnlyVertex(DepthOnlyAttributes input)
+            {
+                DepthOnlyVaryings output = (DepthOnlyVaryings)0;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_TRANSFER_INSTANCE_ID(input, output);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                return output;
+            }
+
+            half DepthOnlyFragment(DepthOnlyVaryings input) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                half4 rawBaseSample;
+                half4 baseSample = SampleToonBase(input.uv, rawBaseSample);
+                ApplyToonCutout(rawBaseSample, baseSample);
+                return input.positionCS.z;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            ZWrite On
+            Cull[_Cull]
+
+            HLSLPROGRAM
+            #pragma target 2.0
+            #pragma vertex DepthNormalsVertex
+            #pragma fragment DepthNormalsFragment
+            #pragma multi_compile_instancing
+
+            struct DepthNormalsAttributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct DepthNormalsVaryings
+            {
+                float2 uv : TEXCOORD0;
+                half3 normalWS : TEXCOORD1;
+                float4 positionCS : SV_POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+
+            DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
+            {
+                DepthNormalsVaryings output = (DepthNormalsVaryings)0;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_TRANSFER_INSTANCE_ID(input, output);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.normalWS = NormalizeNormalPerVertex(TransformObjectToWorldNormal(input.normalOS));
+                return output;
+            }
+
+            half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                half4 rawBaseSample;
+                half4 baseSample = SampleToonBase(input.uv, rawBaseSample);
+                ApplyToonCutout(rawBaseSample, baseSample);
+
+                half3 normalWS = NormalizeNormalPerPixel(input.normalWS);
+                return half4(normalWS, 0.0h);
+            }
+            ENDHLSL
+        }
+
         UsePass "Universal Render Pipeline/Simple Lit/Meta"
     }
 }

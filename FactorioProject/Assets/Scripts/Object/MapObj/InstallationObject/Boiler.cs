@@ -232,6 +232,169 @@ public class Boiler : InputOutputModule
         return false;
     }
 
+    public bool TryGetPipePassDirectionAtCoordinate(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int pipePassDirection)
+    {
+        pipePassDirection = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        return TryGetRectGridBlockTypeAtCoordinate(
+                   anchorSource,
+                   anchorCoordinate,
+                   quarterTurns,
+                   coordinate,
+                   out RectGridBlockType blockType)
+               && blockType == RectGridBlockType.PipeInput
+               && TryGetNearestRectGridObjectDirection(
+                   anchorSource,
+                   anchorCoordinate,
+                   quarterTurns,
+                   coordinate,
+                   out pipePassDirection)
+               && pipePassDirection != Vector2Int.zero;
+    }
+
+    public bool PipePassAtCoordinateMatchesDirection(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int pipePassCoordinate,
+        Vector2Int targetDirection)
+    {
+        return targetDirection != Vector2Int.zero
+               && TryGetPipePassDirectionAtCoordinate(
+                   footprintSource,
+                   anchorCoordinate,
+                   quarterTurns,
+                   pipePassCoordinate,
+                   out Vector2Int pipePassDirection)
+               && pipePassDirection == targetDirection;
+    }
+
+    public bool HasPipePassFacingDirection(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int targetDirection)
+    {
+        if (targetDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != RectGridBlockType.PipeInput
+                || !TryGetRectGridPlacementCoordinate(
+                    anchorSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int pipePassCoordinate)
+                || !TryGetPipePassDirectionAtCoordinate(
+                    anchorSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    pipePassCoordinate,
+                    out Vector2Int pipePassDirection))
+            {
+                continue;
+            }
+
+            if (pipePassDirection == targetDirection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryGetOutputDirectionAtCoordinate(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int outputCoordinate,
+        out Vector2Int outputDirection)
+    {
+        outputDirection = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        if (!TryGetRectGridBlockTypeAtCoordinate(
+                anchorSource,
+                anchorCoordinate,
+                quarterTurns,
+                outputCoordinate,
+                out RectGridBlockType blockType)
+            || !IsOutputBlockType(blockType)
+            || !TryGetNearestRectGridObjectDirection(
+                anchorSource,
+                anchorCoordinate,
+                quarterTurns,
+                outputCoordinate,
+                out Vector2Int outputObjectDirection))
+        {
+            return false;
+        }
+
+        outputDirection = -outputObjectDirection;
+        return outputDirection != Vector2Int.zero;
+    }
+
+    public bool TryGetOutputCoordinateAndDirection(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        out Vector2Int outputCoordinate,
+        out Vector2Int outputDirection)
+    {
+        outputCoordinate = Vector2Int.zero;
+        outputDirection = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (!IsOutputBlockType(placement.blockType)
+                || !TryGetRectGridPlacementCoordinate(
+                    anchorSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int candidateCoordinate)
+                || !TryGetOutputDirectionAtCoordinate(
+                    anchorSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    candidateCoordinate,
+                    out Vector2Int candidateDirection))
+            {
+                continue;
+            }
+
+            outputCoordinate = candidateCoordinate;
+            outputDirection = candidateDirection;
+            return true;
+        }
+
+        return false;
+    }
+
     protected override bool TryCompleteActiveCraft()
     {
         if (!IsActiveCraftRunning || ActiveOutputItemId < 0 || ActiveOutputCount <= 0)

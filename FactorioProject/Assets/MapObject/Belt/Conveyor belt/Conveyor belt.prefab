@@ -326,7 +326,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Conveyor belt
-  objId: 21
+  objId: 24
   itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -346,6 +346,8 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   storedFluidLiters: 0
+  storedFluidItemId: -1
+  storedFluidTemperatureCelsius: 20
   straightVariantPrefab: {fileID: 7247929509108097568}
   cornerVariantPrefab: {fileID: 7247929509108097568, guid: 2951280184e64c841a0a3752bda94b24, type: 3}
   reverseCornerVariantPrefab: {fileID: 7247929509108097568, guid: 8f0cf7fe48c14db4a2d646e5f9b44a61, type: 3}

@@ -769,30 +769,7 @@ public class PlayerHUD : BagSlot
             return currentButton;
         }
 
-        if (candidateNames == null || candidateNames.Length == 0)
-        {
-            return null;
-        }
-
-        Button[] buttons = GetComponentsInChildren<Button>(true);
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            Button candidate = buttons[i];
-            if (candidate == null)
-            {
-                continue;
-            }
-
-            for (int nameIndex = 0; nameIndex < candidateNames.Length; nameIndex++)
-            {
-                if (candidate.name == candidateNames[nameIndex])
-                {
-                    return candidate;
-                }
-            }
-        }
-
-        return null;
+        return ResolveButtonReferenceInRoot(null, transform, candidateNames);
     }
 
     private void EnsureHudButtonHoverTweens()
@@ -1914,7 +1891,7 @@ public class PlayerHUD : BagSlot
             && GameManager.Instance.Player != null
             && !GameManager.Instance.PlayerInteractionLocked)
         {
-            PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+            PlayerController playerController = ResolvePlayerController();
             if (playerController != null && playerController.TryGetFocusedItemFilterMapObject(out _))
             {
                 isVisible = true;
@@ -1972,6 +1949,12 @@ public class PlayerHUD : BagSlot
             return null;
         }
 
+        Sprite harvestModeIcon = ResolveHarvestModeInteractionIcon(resource);
+        if (harvestModeIcon != null)
+        {
+            return harvestModeIcon;
+        }
+
         if (resource.TryPeekHarvestOutput(out int outputItemId, out _))
         {
             Sprite outputIcon = ResolveInteractionIcon(outputItemId, 0, true);
@@ -1984,6 +1967,27 @@ public class PlayerHUD : BagSlot
         return ResolveInteractionIcon(resource.ResolveItemId(), 0, true);
     }
 
+    private static Sprite ResolveHarvestModeInteractionIcon(Resource resource)
+    {
+        if (resource == null)
+        {
+            return null;
+        }
+
+        if (resource.ResolvedHarvestMode != Resource.HarvestMode.Cut)
+        {
+            return null;
+        }
+
+        Sprite boundIcon = ResolveInteractionIcon(resource.BoundItemDefinition, 0, false);
+        if (boundIcon != null)
+        {
+            return boundIcon;
+        }
+
+        return ResolveInteractionIcon(resource.ResolveItemId(), 0, false);
+    }
+
     private static Sprite ResolveInteractionIcon(int itemId, int preferredIconIndex)
     {
         return ResolveInteractionIcon(itemId, preferredIconIndex, false);
@@ -1991,58 +1995,49 @@ public class PlayerHUD : BagSlot
 
     private static Sprite ResolveInteractionIcon(int itemId, int preferredIconIndex, bool allowItemIconFallback)
     {
-        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        return ResolveInteractionIcon(GetItemDefinition(itemId), preferredIconIndex, allowItemIconFallback);
+    }
+
+    private static Sprite ResolveInteractionIcon(
+        ItemDefinition definition,
+        int preferredIconIndex,
+        bool allowItemIconFallback)
+    {
+        if (definition == null)
         {
             return null;
         }
 
-        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
-        if (definitions == null)
+        if (definition.interactionButtonList == null || definition.interactionButtonList.Count <= 0)
         {
-            return null;
-        }
-
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition == null || definition.id != itemId)
-            {
-                continue;
-            }
-
-            if (definition.interactionButtonList == null || definition.interactionButtonList.Count <= 0)
-            {
-                return allowItemIconFallback ? definition.icon : null;
-            }
-
-            if (preferredIconIndex >= 0 && preferredIconIndex < definition.interactionButtonList.Count)
-            {
-                Sprite preferredIcon = definition.interactionButtonList[preferredIconIndex];
-                if (preferredIcon != null)
-                {
-                    return preferredIcon;
-                }
-            }
-
-            Sprite closedIcon = definition.interactionButtonList[0];
-            if (closedIcon != null)
-            {
-                return closedIcon;
-            }
-
-            for (int iconIndex = 0; iconIndex < definition.interactionButtonList.Count; iconIndex++)
-            {
-                Sprite fallbackIcon = definition.interactionButtonList[iconIndex];
-                if (fallbackIcon != null)
-                {
-                    return fallbackIcon;
-                }
-            }
-
             return allowItemIconFallback ? definition.icon : null;
         }
 
-        return null;
+        if (preferredIconIndex >= 0 && preferredIconIndex < definition.interactionButtonList.Count)
+        {
+            Sprite preferredIcon = definition.interactionButtonList[preferredIconIndex];
+            if (preferredIcon != null)
+            {
+                return preferredIcon;
+            }
+        }
+
+        Sprite closedIcon = definition.interactionButtonList[0];
+        if (closedIcon != null)
+        {
+            return closedIcon;
+        }
+
+        for (int iconIndex = 0; iconIndex < definition.interactionButtonList.Count; iconIndex++)
+        {
+            Sprite fallbackIcon = definition.interactionButtonList[iconIndex];
+            if (fallbackIcon != null)
+            {
+                return fallbackIcon;
+            }
+        }
+
+        return allowItemIconFallback ? definition.icon : null;
     }
 
     private static Button ResolveButtonReferenceInRoot(Button currentButton, Transform root, params string[] candidateNames)
@@ -2057,8 +2052,17 @@ public class PlayerHUD : BagSlot
             return null;
         }
 
-        Button[] buttons = root.GetComponentsInChildren<Button>(true);
-        for (int i = 0; i < buttons.Length; i++)
+        return FindButtonByName(root.GetComponentsInChildren<Button>(true), candidateNames);
+    }
+
+    private static Button FindButtonByName(IReadOnlyList<Button> buttons, string[] candidateNames)
+    {
+        if (buttons == null || candidateNames == null || candidateNames.Length == 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < buttons.Count; i++)
         {
             Button candidate = buttons[i];
             if (candidate == null)
@@ -2066,12 +2070,9 @@ public class PlayerHUD : BagSlot
                 continue;
             }
 
-            for (int nameIndex = 0; nameIndex < candidateNames.Length; nameIndex++)
+            if (Array.IndexOf(candidateNames, candidate.name) >= 0)
             {
-                if (candidate.name == candidateNames[nameIndex])
-                {
-                    return candidate;
-                }
+                return candidate;
             }
         }
 
@@ -2207,9 +2208,7 @@ public class PlayerHUD : BagSlot
         bool shouldOpen = !itemFilterUI.gameObject.activeSelf;
         if (shouldOpen)
         {
-            PlayerController playerController = GameManager.Instance != null && GameManager.Instance.Player != null
-                ? GameManager.Instance.Player.GetComponent<PlayerController>()
-                : null;
+            PlayerController playerController = ResolvePlayerController();
             if (playerController == null || !playerController.TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
             {
                 return;
@@ -2225,12 +2224,7 @@ public class PlayerHUD : BagSlot
     private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
     {
         focusedBoxObject = null;
-        if (GameManager.Instance == null || GameManager.Instance.Player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
         {
             return false;
@@ -2242,12 +2236,7 @@ public class PlayerHUD : BagSlot
     private bool TryGetFocusedFenceDoor(out FenceDoor focusedFenceDoor)
     {
         focusedFenceDoor = null;
-        if (GameManager.Instance == null || GameManager.Instance.Player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
         {
             return false;
@@ -2259,12 +2248,7 @@ public class PlayerHUD : BagSlot
     private bool TryGetFocusedResource(out Resource focusedResource)
     {
         focusedResource = null;
-        if (GameManager.Instance == null || GameManager.Instance.Player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
+        PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
         {
             return false;
@@ -2798,37 +2782,6 @@ public class PlayerHUD : BagSlot
         }
 
         return !CanCraftItem(itemId);
-    }
-
-    private bool IsHandBlocked(int itemId)
-    {
-        if (GameManager.Instance == null || GameManager.Instance.Player == null)
-        {
-            return true;
-        }
-
-        Player player = GameManager.Instance.Player;
-        PlayerBag handBag = player.GetHandBag();
-        if (handBag == null)
-        {
-            return true;
-        }
-
-        handBag.RefreshExternalStackCounts(false);
-        int handCount = handBag.GetSlotCount(0);
-        if (handCount <= 0)
-        {
-            return false;
-        }
-
-        int handItemId = handBag.GetSlotItemId(0);
-        if (handItemId >= 0 && handItemId != itemId)
-        {
-            return true;
-        }
-
-        int reservedHandItemId = player.GetReservedHandItemId();
-        return reservedHandItemId >= 0 && reservedHandItemId != itemId;
     }
 
     private bool IsCraftOutputBlocked(int itemId)

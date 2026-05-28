@@ -493,7 +493,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (Mk1)
-  objId: 29
+  objId: 32
   itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -513,9 +513,13 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   storedFluidLiters: 0
+  storedFluidItemId: -1
+  storedFluidTemperatureCelsius: 20
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
+    count: 3
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 6
   - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
@@ -539,6 +543,8 @@ MonoBehaviour:
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 2
+  - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}

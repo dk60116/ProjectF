@@ -19,35 +19,48 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (generateStarterResourcePatches && TryGetStarterResourcePrefab(worldCoordinate, out prefab))
-        {
-            return true;
-        }
-
-        if (generateStarterTrees && TryGetStarterTreePrefab(worldCoordinate, out prefab))
-        {
-            return true;
-        }
-
+        TerrainBiome biome = GetTileBiome(worldCoordinate);
         float bestScore = float.MinValue;
-
-        for (int i = 0; i < oreResources.Count; i++)
+        if (CanSpawnResourceOnBiome(biome))
         {
-            if (!TryEvaluateResourceEntry(worldCoordinate, oreResources[i], false, out float score))
+            if (generateStarterResourcePatches && TryGetStarterResourcePrefab(worldCoordinate, out prefab))
             {
-                continue;
+                return true;
             }
 
-            if (score > bestScore)
+            if (generateStarterTrees && TryGetStarterTreePrefab(worldCoordinate, out prefab))
             {
-                bestScore = score;
-                prefab = oreResources[i].Prefab;
+                return true;
+            }
+
+            for (int i = 0; i < oreResources.Count; i++)
+            {
+                if (!TryEvaluateResourceEntry(worldCoordinate, oreResources[i], false, out float score))
+                {
+                    continue;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    prefab = oreResources[i].Prefab;
+                }
+            }
+
+            if (prefab != null)
+            {
+                return true;
             }
         }
 
-        if (prefab != null)
+        if (TryGetReedResourcePrefab(worldCoordinate, biome, out prefab))
         {
             return true;
+        }
+
+        if (!CanSpawnResourceOnBiome(biome))
+        {
+            return false;
         }
 
         for (int i = 0; i < treeResources.Count; i++)
@@ -65,6 +78,115 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return prefab != null;
+    }
+
+    private bool TryGetReedResourcePrefab(Vector2Int worldCoordinate, TerrainBiome biome, out Resource prefab)
+    {
+        prefab = null;
+        if (reedResources == null || reedResources.Count <= 0)
+        {
+            return false;
+        }
+
+        float bestScore = float.MinValue;
+        for (int i = 0; i < reedResources.Count; i++)
+        {
+            if (!TryEvaluateReedResourceEntry(worldCoordinate, reedResources[i], biome, out float score))
+            {
+                continue;
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                prefab = reedResources[i].Prefab;
+            }
+        }
+
+        return prefab != null;
+    }
+
+    private bool TryEvaluateReedResourceEntry(
+        Vector2Int worldCoordinate,
+        ResourceEntry entry,
+        TerrainBiome biome,
+        out float score)
+    {
+        score = float.MinValue;
+        if (entry.Prefab == null
+            || entry.spawnChance <= 0f
+            || !CanSpawnReedOnBiome(biome))
+        {
+            return false;
+        }
+
+        int waterDistance = GetNearestReedWaterDistance(worldCoordinate);
+        if (waterDistance < 0)
+        {
+            return false;
+        }
+
+        int radius = Mathf.Max(1, reedWaterSearchRadius);
+        float proximity = Mathf.Clamp01(1f - ((waterDistance - 1f) / radius));
+        float patch = SampleNoise(
+            worldCoordinate,
+            Mathf.Max(0.001f, resourcePatchScale),
+            entry.patchOffset + new Vector2(719.3f, 144.7f));
+        float detail = SampleNoise(
+            worldCoordinate,
+            Mathf.Max(0.001f, resourceDetailScale),
+            entry.detailOffset + new Vector2(23.5f, 882.1f));
+        float chance = Mathf.Clamp01(
+            entry.spawnChance
+            * reedDensityMultiplier
+            * Mathf.Lerp(0.45f, 1f, proximity)
+            * Mathf.Lerp(0.55f, 1.35f, patch)
+            * Mathf.Lerp(0.75f, 1.15f, detail));
+
+        if (Hash01(worldCoordinate.x, worldCoordinate.y, entry.salt ^ 11977) > chance)
+        {
+            return false;
+        }
+
+        score = chance + proximity + (patch * 0.2f) + (detail * 0.1f);
+        return true;
+    }
+
+    private int GetNearestReedWaterDistance(Vector2Int worldCoordinate)
+    {
+        int radius = Mathf.Max(1, reedWaterSearchRadius);
+        int bestDistance = int.MaxValue;
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                if (offsetX == 0 && offsetY == 0)
+                {
+                    continue;
+                }
+
+                int distance = Mathf.Max(Mathf.Abs(offsetX), Mathf.Abs(offsetY));
+                if (distance >= bestDistance || distance > radius)
+                {
+                    continue;
+                }
+
+                if (GetTileBiome(worldCoordinate + new Vector2Int(offsetX, offsetY)) == TerrainBiome.Water)
+                {
+                    bestDistance = distance;
+                }
+            }
+        }
+
+        return bestDistance == int.MaxValue ? -1 : bestDistance;
+    }
+
+    private static bool CanSpawnReedOnBiome(TerrainBiome biome)
+    {
+        return biome == TerrainBiome.Sand
+               || biome == TerrainBiome.Dirt
+               || biome == TerrainBiome.Grass
+               || biome == TerrainBiome.Forest;
     }
 
     private bool TryEvaluateResourceEntry(Vector2Int worldCoordinate, ResourceEntry entry, bool isTreeEntry, out float score)
@@ -120,6 +242,11 @@ public partial class TerrainGenerator : MonoBehaviour
             return GetDeterministicRandomRange(worldCoordinate, prefab, treeEntry.minResourceCount, treeEntry.maxResourceCount);
         }
 
+        if (TryGetMatchingResourceEntry(prefab, reedResources, out ResourceEntry reedEntry, out _))
+        {
+            return GetDeterministicRandomRange(worldCoordinate, prefab, reedEntry.minResourceCount, reedEntry.maxResourceCount);
+        }
+
         return 1;
     }
 
@@ -139,6 +266,17 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
+        if (reedResources != null)
+        {
+            for (int i = 0; i < reedResources.Count; i++)
+            {
+                if (reedResources[i].Prefab == prefab)
+                {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -148,6 +286,13 @@ public partial class TerrainGenerator : MonoBehaviour
         out ResourceEntry entry,
         out int entryIndex)
     {
+        if (entries == null)
+        {
+            entry = default;
+            entryIndex = -1;
+            return false;
+        }
+
         for (int i = 0; i < entries.Count; i++)
         {
             if (entries[i].Prefab == prefab)
@@ -1026,6 +1171,7 @@ public partial class TerrainGenerator : MonoBehaviour
 #if UNITY_EDITOR
         SyncResourceEntryDefinitions(oreResources);
         SyncResourceEntryDefinitions(treeResources);
+        SyncResourceEntryDefinitions(reedResources);
 #endif
     }
 

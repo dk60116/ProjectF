@@ -24,6 +24,210 @@ public class SteamGenerator : InputOutputModule
         return TryResolveDirection(rotation, localPipeAreaConnectionDirection, out direction);
     }
 
+    public bool TryGetBodyDirectionFromCenter(
+        MapObject footprintSource,
+        int quarterTurns,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        if (anchorSource == null)
+        {
+            return false;
+        }
+
+        int sizeX = Mathf.Max(1, anchorSource.Status.mapSizeX);
+        int sizeY = Mathf.Max(1, anchorSource.Status.mapSizeY);
+        Vector2Int centerCell = anchorSource.PlacementCenterCell;
+        centerCell = new Vector2Int(
+            Mathf.Clamp(centerCell.x, 0, sizeX - 1),
+            Mathf.Clamp(centerCell.y, 0, sizeY - 1));
+
+        Vector2Int adjacentOffset = Vector2Int.zero;
+        int bestDistance = int.MaxValue;
+        for (int y = 0; y < sizeY; y++)
+        {
+            for (int x = 0; x < sizeX; x++)
+            {
+                Vector2Int offset = new Vector2Int(x - centerCell.x, y - centerCell.y);
+                int distance = Mathf.Abs(offset.x) + Mathf.Abs(offset.y);
+                if (distance <= 0 || distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                adjacentOffset = offset;
+            }
+        }
+
+        if (bestDistance != 1)
+        {
+            return false;
+        }
+
+        direction = RotateRectGridOffset(adjacentOffset, quarterTurns);
+        return direction != Vector2Int.zero;
+    }
+
+    public bool TryGetInputDirectionAtCoordinate(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int inputCoordinate,
+        out Vector2Int inputDirection)
+    {
+        inputDirection = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        return TryGetRectGridBlockTypeAtCoordinate(
+                   anchorSource,
+                   anchorCoordinate,
+                   quarterTurns,
+                   inputCoordinate,
+                   out RectGridBlockType blockType)
+               && IsInputItemBlockType(blockType)
+               && TryGetNearestRectGridObjectDirection(
+                   anchorSource,
+                   anchorCoordinate,
+                   quarterTurns,
+                   inputCoordinate,
+                   out inputDirection)
+               && inputDirection != Vector2Int.zero;
+    }
+
+    public bool TryGetInputCoordinateAndDirection(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        out Vector2Int inputCoordinate,
+        out Vector2Int inputDirection)
+    {
+        inputCoordinate = Vector2Int.zero;
+        inputDirection = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (!IsInputItemBlockType(placement.blockType)
+                || !TryGetRectGridPlacementCoordinate(
+                    anchorSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int candidateCoordinate)
+                || !TryGetInputDirectionAtCoordinate(
+                    anchorSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    candidateCoordinate,
+                    out Vector2Int candidateDirection))
+            {
+                continue;
+            }
+
+            inputCoordinate = candidateCoordinate;
+            inputDirection = candidateDirection;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetPipePassTailDirectionAtCoordinate(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int pipePassCoordinate,
+        out Vector2Int tailDirection)
+    {
+        tailDirection = Vector2Int.zero;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        if (!TryGetRectGridBlockTypeAtCoordinate(
+                anchorSource,
+                anchorCoordinate,
+                quarterTurns,
+                pipePassCoordinate,
+                out RectGridBlockType blockType)
+            || blockType != RectGridBlockType.PipeInput
+            || !TryGetNearestRectGridObjectDirection(
+                anchorSource,
+                anchorCoordinate,
+                quarterTurns,
+                pipePassCoordinate,
+                out Vector2Int pipePassObjectDirection))
+        {
+            return false;
+        }
+
+        Vector2Int candidateTailDirection = -pipePassObjectDirection;
+        if (candidateTailDirection == Vector2Int.zero
+            || !TryGetBodyDirectionFromCenter(anchorSource, quarterTurns, out Vector2Int bodyDirection)
+            || candidateTailDirection != bodyDirection)
+        {
+            return false;
+        }
+
+        tailDirection = candidateTailDirection;
+        return true;
+    }
+
+    public bool TryGetObjectInfoOutputRate(out int outputItemId, out float wattsPerSecond)
+    {
+        outputItemId = -1;
+        wattsPerSecond = 0f;
+        if (!TryGetSteamGenerationRecipe(
+                out _,
+                out _,
+                out outputItemId,
+                out int outputWattsPerSecond)
+            || outputItemId < 0)
+        {
+            return false;
+        }
+
+        wattsPerSecond = Mathf.Max(0f, outputWattsPerSecond);
+        return true;
+    }
+
+    public override bool TryGetObjectInfoOutput(
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity,
+        out bool displayZeroCountItem)
+    {
+        if (base.TryGetObjectInfoOutput(
+                out outputItemId,
+                out outputAreaCount,
+                out outputAreaCapacity,
+                out displayZeroCountItem))
+        {
+            return true;
+        }
+
+        outputItemId = -1;
+        outputAreaCount = 0;
+        outputAreaCapacity = 0;
+        displayZeroCountItem = false;
+
+        if (!TryGetObjectInfoOutputRate(out outputItemId, out float wattsPerSecond))
+        {
+            return false;
+        }
+
+        displayZeroCountItem = true;
+        return TryResolveObjectInfoOutputAreaCounts(
+            outputItemId,
+            Mathf.Max(1, Mathf.CeilToInt(wattsPerSecond)),
+            out outputAreaCount,
+            out outputAreaCapacity);
+    }
+
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;
@@ -125,8 +329,23 @@ public class SteamGenerator : InputOutputModule
 
     private bool TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
     {
+        return TryGetSteamGenerationRecipe(
+            out inputItemId,
+            out inputLitersPerSecond,
+            out _,
+            out _);
+    }
+
+    private bool TryGetSteamGenerationRecipe(
+        out int inputItemId,
+        out int inputLitersPerSecond,
+        out int outputItemId,
+        out int outputWattsPerSecond)
+    {
         inputItemId = -1;
         inputLitersPerSecond = 0;
+        outputItemId = -1;
+        outputWattsPerSecond = 0;
 
         IReadOnlyList<ItemIoEntry> inputs = InputList;
         if (inputs == null || inputs.Count <= 0)
@@ -147,7 +366,8 @@ public class SteamGenerator : InputOutputModule
             if (outputs != null && i < outputs.Count)
             {
                 ItemIoEntry output = outputs[i];
-                int outputItemId = output.itemDefinition != null ? output.itemDefinition.id : -1;
+                outputItemId = output.itemDefinition != null ? output.itemDefinition.id : -1;
+                outputWattsPerSecond = outputItemId >= 0 ? Mathf.Max(0, output.count) : 0;
                 if (outputItemId >= 0 && !IsRecipeOutputAllowedByItemFilter(outputItemId))
                 {
                     continue;

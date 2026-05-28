@@ -10,6 +10,8 @@ public class PlayerController : MonoBehaviour
     private const int Belt2FDefaultFootprintWidth = 1;
     private const int Belt2FDefaultFootprintLength = 3;
 
+    private const float PlayerRootY = 0f;
+    private const float PlayerRootYEpsilon = 0.0001f;
     private const float ConveyorStandingHeight = 0.2f;
     private const float ConveyorStandingSmoothTime = 0.08f;
     private const float ConveyorStandingEnterDistance = 0.08f;
@@ -159,6 +161,8 @@ public class PlayerController : MonoBehaviour
         {
             cachedRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
         }
+
+        SnapRootToGroundY();
     }
 
     private void Start()
@@ -263,6 +267,8 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        SnapRootToGroundY();
+
         player?.UpdateDropExitGate(transform.position);
 
         bool isInteractionLocked = GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
@@ -317,7 +323,8 @@ public class PlayerController : MonoBehaviour
         {
             if (cachedRigidbody == null)
             {
-                transform.position += moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime;
+                transform.position = ClampRootPositionToGroundY(
+                    transform.position + moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime);
             }
         }
 
@@ -338,6 +345,8 @@ public class PlayerController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        SnapRootToGroundY();
+
         if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
         {
             pendingMoveDirection = Vector3.zero;
@@ -434,6 +443,7 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
+        SnapRootToGroundY();
         ApplyStandingOffset();
     }
 
@@ -444,6 +454,8 @@ public class PlayerController : MonoBehaviour
 
     private void MoveRigidbody(Vector3 delta, float maxSweepBuffer)
     {
+        delta.y = 0f;
+
         float distance = delta.magnitude;
         if (distance <= MinPhysicsMoveDistance)
         {
@@ -453,7 +465,7 @@ public class PlayerController : MonoBehaviour
         float sweepBuffer = Mathf.Min(maxSweepBuffer, distance * 0.25f);
 
         Vector3 direction = delta / distance;
-        Vector3 startPosition = cachedRigidbody.position;
+        Vector3 startPosition = ClampRootPositionToGroundY(cachedRigidbody.position);
         Vector3 finalMove = Vector3.zero;
 
         if (TryGetBlockingSweepHit(direction, distance + sweepBuffer, out RaycastHit hit))
@@ -485,11 +497,58 @@ public class PlayerController : MonoBehaviour
             finalMove = delta;
         }
 
-        Vector3 finalPosition = startPosition + finalMove;
+        Vector3 finalPosition = ClampRootPositionToGroundY(startPosition + finalMove);
         if (finalMove.sqrMagnitude > MinPhysicsMoveDistanceSqr)
         {
             cachedRigidbody.MovePosition(finalPosition);
         }
+    }
+
+    private void SnapRootToGroundY()
+    {
+        if (cachedRigidbody == null)
+        {
+            Vector3 transformPosition = transform.position;
+            if (Mathf.Abs(transformPosition.y - PlayerRootY) > PlayerRootYEpsilon)
+            {
+                transform.position = ClampRootPositionToGroundY(transformPosition);
+            }
+
+            return;
+        }
+
+        Vector3 rigidbodyPosition = cachedRigidbody.position;
+        Vector3 transformPositionWithRigidbody = transform.position;
+        bool rigidbodyNeedsSnap = Mathf.Abs(rigidbodyPosition.y - PlayerRootY) > PlayerRootYEpsilon;
+        bool transformNeedsSnap = Mathf.Abs(transformPositionWithRigidbody.y - PlayerRootY) > PlayerRootYEpsilon;
+        if (!rigidbodyNeedsSnap && !transformNeedsSnap)
+        {
+            return;
+        }
+
+        Vector3 snappedPosition = ClampRootPositionToGroundY(rigidbodyPosition);
+        if (rigidbodyNeedsSnap)
+        {
+            cachedRigidbody.position = snappedPosition;
+            transform.position = snappedPosition;
+        }
+        else if (transformNeedsSnap)
+        {
+            transform.position = ClampRootPositionToGroundY(transformPositionWithRigidbody);
+        }
+
+        Vector3 velocity = cachedRigidbody.velocity;
+        if (Mathf.Abs(velocity.y) > PlayerRootYEpsilon)
+        {
+            velocity.y = 0f;
+            cachedRigidbody.velocity = velocity;
+        }
+    }
+
+    private static Vector3 ClampRootPositionToGroundY(Vector3 position)
+    {
+        position.y = PlayerRootY;
+        return position;
     }
 
     private bool TryGetBlockingSweepHit(Vector3 direction, float distance, out RaycastHit blockingHit)
@@ -1123,9 +1182,14 @@ public class PlayerController : MonoBehaviour
             return 1;
         }
 
-        return resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
-            ? player.State.LoggingPower
-            : player.State.MiningPower;
+        switch (resource.ResolvedHarvestMode)
+        {
+            case Resource.HarvestMode.Logging:
+            case Resource.HarvestMode.Cut:
+                return player.State.LoggingPower;
+            default:
+                return player.State.MiningPower;
+        }
     }
 
     private void RefreshInteractionFocus(bool hasMovement)

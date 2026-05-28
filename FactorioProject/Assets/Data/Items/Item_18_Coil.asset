@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_18_Coil
   m_EditorClassIdentifier: 
   itemName: Coil
-  id: 20
+  id: 22
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: f8f6fe632b6192645ad55463e16606bc, type: 2}
   portableMat: {fileID: 2100000, guid: 750a1b1cd0486ef40b28f8b42514797f, type: 2}

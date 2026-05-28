@@ -12,7 +12,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 1,
+            "itemId": 2,
             "itemName": "Coal",
             "definitionAssetPath": "Assets/Data/Items/Item_21_Coal.asset",
             "outputCount": 1,
@@ -21,7 +21,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 2,
+            "itemId": 3,
             "itemName": "Stone",
             "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
             "outputCount": 1,
@@ -30,7 +30,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 3,
+            "itemId": 4,
             "itemName": "Cooper ore",
             "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
             "outputCount": 1,
@@ -39,7 +39,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 6,
+            "itemId": 8,
             "itemName": "Woodplank",
             "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
             "outputCount": 2,
@@ -53,27 +53,27 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 7,
+            "itemId": 9,
             "itemName": "Wooden Box",
             "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
+                    "itemId": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 6
@@ -81,21 +81,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 8,
+            "itemId": 10,
             "itemName": "Workbench",
             "definitionAssetPath": "Assets/Data/Items/Item_7_Workbench.asset",
             "outputCount": 1,
@@ -107,7 +107,7 @@
                     "count": 6
                 },
                 {
-                    "itemId": 2,
+                    "itemId": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 3
@@ -117,13 +117,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 9,
+            "itemId": 11,
             "itemName": "Funance",
             "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 2,
+                    "itemId": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
@@ -131,21 +131,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 10,
+            "itemId": 12,
             "itemName": "Charcoal",
             "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
             "outputCount": 1,
@@ -159,21 +159,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ]
         },
         {
-            "itemId": 11,
+            "itemId": 13,
             "itemName": "Iron ore",
             "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
             "outputCount": 1,
@@ -182,13 +182,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 12,
+            "itemId": 14,
             "itemName": "Iron plate",
             "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 11,
+                    "itemId": 13,
                     "itemName": "Iron ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                     "count": 1
@@ -196,70 +196,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 13,
-            "itemName": "CooperPlate",
-            "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 3,
-                    "itemName": "Cooper ore",
-                    "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
-                    "count": 1
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 14,
-            "itemName": "Brick",
-            "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 2,
-                    "itemName": "Stone",
-                    "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
-                    "count": 1
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
@@ -267,40 +211,68 @@
         },
         {
             "itemId": 15,
-            "itemName": "Nail",
-            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
-            "outputCount": 2,
+            "itemName": "CooperPlate",
+            "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "itemId": 4,
+                    "itemName": "Cooper ore",
+                    "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ]
         },
         {
             "itemId": 16,
-            "itemName": "Gear",
-            "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+            "itemName": "Brick",
+            "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
+                    "itemId": 3,
+                    "itemName": "Stone",
+                    "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 17,
+            "itemName": "Nail",
+            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
@@ -308,42 +280,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 17,
-            "itemName": "Drill",
-            "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -351,18 +295,74 @@
         },
         {
             "itemId": 18,
+            "itemName": "Gear",
+            "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 19,
+            "itemName": "Drill",
+            "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 20,
             "itemName": "Mortor",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 16,
+                    "itemId": 18,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                     "count": 2
                 },
                 {
-                    "itemId": 19,
+                    "itemId": 21,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 2
@@ -372,13 +372,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 19,
+            "itemId": 21,
             "itemName": "Coil",
             "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 13,
+                    "itemId": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
@@ -386,82 +386,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 20,
-            "itemName": "Pickaxe",
-            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
-            "outputCount": 2,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
-                },
-                {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 21,
-            "itemName": "Conveyor belt",
-            "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 2
-                },
-                {
-                    "itemId": 16,
-                    "itemName": "Gear",
-                    "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -469,27 +401,33 @@
         },
         {
             "itemId": 22,
-            "itemName": "Conveyor belt 2F",
-            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
-            "outputCount": 1,
+            "itemName": "Pickaxe",
+            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
+            "outputCount": 2,
             "ingredients": [
                 {
-                    "itemId": 21,
-                    "itemName": "Conveyor belt",
-                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
+                },
+                {
+                    "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -497,27 +435,33 @@
         },
         {
             "itemId": 23,
-            "itemName": "Pipe",
-            "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+            "itemName": "Conveyor belt",
+            "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
+                    "count": 2
+                },
+                {
+                    "itemId": 18,
+                    "itemName": "Gear",
+                    "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -525,39 +469,27 @@
         },
         {
             "itemId": 24,
-            "itemName": "Mining machine",
-            "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
+            "itemName": "Conveyor belt 2F",
+            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 2
-                },
-                {
-                    "itemId": 17,
-                    "itemName": "Drill",
-                    "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 2
+                    "itemId": 23,
+                    "itemName": "Conveyor belt",
+                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -565,52 +497,12 @@
         },
         {
             "itemId": 25,
-            "itemName": "Water pump",
-            "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
+            "itemName": "Pipe",
+            "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 23,
-                    "itemName": "Pipe",
-                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
-                    "count": 4
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 28,
-            "itemName": "Robot arm",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 12,
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
@@ -618,14 +510,122 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 26,
+            "itemName": "Mining machine",
+            "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
                     "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 19,
+                    "itemName": "Drill",
+                    "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 27,
+            "itemName": "Water pump",
+            "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 28,
+            "itemName": "Boiler",
+            "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
+                },
+                {
+                    "itemId": 11,
+                    "itemName": "Funance",
+                    "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -633,33 +633,33 @@
         },
         {
             "itemId": 29,
-            "itemName": "Production machine (Mk1)",
-            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+            "itemName": "Steam generator",
+            "definitionAssetPath": "Assets/Data/Items/Item_32_Steam generator.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 3
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
                 },
                 {
                     "itemId": 28,
-                    "itemName": "Robot arm",
-                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+                    "itemName": "Boiler",
+                    "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
                     "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -667,27 +667,33 @@
         },
         {
             "itemId": 30,
-            "itemName": "Wooden fence",
-            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
-            "outputCount": 2,
+            "itemName": "Robot arm",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 4
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -695,33 +701,33 @@
         },
         {
             "itemId": 31,
-            "itemName": "Wooden fence door",
-            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "itemName": "Production machine (Mk1)",
+            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 30,
-                    "itemName": "Wooden fence",
-                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
-                    "count": 2
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 3
                 },
                 {
-                    "itemId": 15,
-                    "itemName": "Nail",
-                    "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+                    "itemId": 30,
+                    "itemName": "Robot arm",
+                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
                     "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -729,12 +735,74 @@
         },
         {
             "itemId": 32,
+            "itemName": "Wooden fence",
+            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 33,
+            "itemName": "Wooden fence door",
+            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 32,
+                    "itemName": "Wooden fence",
+                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 17,
+                    "itemName": "Nail",
+                    "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 34,
             "itemName": "Brick wall",
             "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 14,
+                    "itemId": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 6
@@ -742,14 +810,48 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 35,
+            "itemName": "Utility pole",
+            "definitionAssetPath": "Assets/Data/Items/Item_34_Utility pole.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 21,
+                    "itemName": "Coil",
+                    "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 0,
+                    "itemName": "Log",
+                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -767,7 +869,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 1,
+            "itemId": 2,
             "itemName": "Coal",
             "definitionAssetPath": "Assets/Data/Items/Item_21_Coal.asset",
             "outputCount": 1,
@@ -776,7 +878,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 2,
+            "itemId": 3,
             "itemName": "Stone",
             "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
             "outputCount": 1,
@@ -785,7 +887,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 3,
+            "itemId": 4,
             "itemName": "Cooper ore",
             "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
             "outputCount": 1,
@@ -794,7 +896,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 6,
+            "itemId": 8,
             "itemName": "Woodplank",
             "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
             "outputCount": 2,
@@ -808,27 +910,27 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 7,
+            "itemId": 9,
             "itemName": "Wooden Box",
             "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
+                    "itemId": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 6
@@ -836,21 +938,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 8,
+            "itemId": 10,
             "itemName": "Workbench",
             "definitionAssetPath": "Assets/Data/Items/Item_7_Workbench.asset",
             "outputCount": 1,
@@ -862,7 +964,7 @@
                     "count": 6
                 },
                 {
-                    "itemId": 2,
+                    "itemId": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 3
@@ -872,13 +974,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 9,
+            "itemId": 11,
             "itemName": "Funance",
             "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 2,
+                    "itemId": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
@@ -886,21 +988,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 10,
+            "itemId": 12,
             "itemName": "Charcoal",
             "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
             "outputCount": 1,
@@ -914,21 +1016,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ]
         },
         {
-            "itemId": 11,
+            "itemId": 13,
             "itemName": "Iron ore",
             "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
             "outputCount": 1,
@@ -937,13 +1039,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 12,
+            "itemId": 14,
             "itemName": "Iron plate",
             "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 11,
+                    "itemId": 13,
                     "itemName": "Iron ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                     "count": 1
@@ -951,70 +1053,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 13,
-            "itemName": "CooperPlate",
-            "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 3,
-                    "itemName": "Cooper ore",
-                    "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
-                    "count": 1
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 14,
-            "itemName": "Brick",
-            "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 2,
-                    "itemName": "Stone",
-                    "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
-                    "count": 1
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
@@ -1022,40 +1068,68 @@
         },
         {
             "itemId": 15,
-            "itemName": "Nail",
-            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
-            "outputCount": 2,
+            "itemName": "CooperPlate",
+            "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "itemId": 4,
+                    "itemName": "Cooper ore",
+                    "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ]
         },
         {
             "itemId": 16,
-            "itemName": "Gear",
-            "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+            "itemName": "Brick",
+            "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
+                    "itemId": 3,
+                    "itemName": "Stone",
+                    "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 17,
+            "itemName": "Nail",
+            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
@@ -1063,42 +1137,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 17,
-            "itemName": "Drill",
-            "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1106,18 +1152,74 @@
         },
         {
             "itemId": 18,
+            "itemName": "Gear",
+            "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 19,
+            "itemName": "Drill",
+            "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 20,
             "itemName": "Mortor",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 16,
+                    "itemId": 18,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                     "count": 2
                 },
                 {
-                    "itemId": 19,
+                    "itemId": 21,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 2
@@ -1127,13 +1229,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 19,
+            "itemId": 21,
             "itemName": "Coil",
             "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 13,
+                    "itemId": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
@@ -1141,82 +1243,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 20,
-            "itemName": "Pickaxe",
-            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
-            "outputCount": 2,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
-                },
-                {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 21,
-            "itemName": "Conveyor belt",
-            "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 2
-                },
-                {
-                    "itemId": 16,
-                    "itemName": "Gear",
-                    "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1224,27 +1258,33 @@
         },
         {
             "itemId": 22,
-            "itemName": "Conveyor belt 2F",
-            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
-            "outputCount": 1,
+            "itemName": "Pickaxe",
+            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
+            "outputCount": 2,
             "ingredients": [
                 {
-                    "itemId": 21,
-                    "itemName": "Conveyor belt",
-                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
+                },
+                {
+                    "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1252,27 +1292,33 @@
         },
         {
             "itemId": 23,
-            "itemName": "Pipe",
-            "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+            "itemName": "Conveyor belt",
+            "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
+                    "count": 2
+                },
+                {
+                    "itemId": 18,
+                    "itemName": "Gear",
+                    "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1280,39 +1326,27 @@
         },
         {
             "itemId": 24,
-            "itemName": "Mining machine",
-            "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
+            "itemName": "Conveyor belt 2F",
+            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 2
-                },
-                {
-                    "itemId": 17,
-                    "itemName": "Drill",
-                    "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 2
+                    "itemId": 23,
+                    "itemName": "Conveyor belt",
+                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1320,52 +1354,12 @@
         },
         {
             "itemId": 25,
-            "itemName": "Water pump",
-            "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
+            "itemName": "Pipe",
+            "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 23,
-                    "itemName": "Pipe",
-                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
-                    "count": 4
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 28,
-            "itemName": "Robot arm",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 12,
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
@@ -1373,14 +1367,122 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 26,
+            "itemName": "Mining machine",
+            "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
                     "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 19,
+                    "itemName": "Drill",
+                    "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 27,
+            "itemName": "Water pump",
+            "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 28,
+            "itemName": "Boiler",
+            "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
+                },
+                {
+                    "itemId": 11,
+                    "itemName": "Funance",
+                    "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1388,33 +1490,33 @@
         },
         {
             "itemId": 29,
-            "itemName": "Production machine (Mk1)",
-            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+            "itemName": "Steam generator",
+            "definitionAssetPath": "Assets/Data/Items/Item_32_Steam generator.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 3
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
                 },
                 {
                     "itemId": 28,
-                    "itemName": "Robot arm",
-                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+                    "itemName": "Boiler",
+                    "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
                     "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1422,27 +1524,33 @@
         },
         {
             "itemId": 30,
-            "itemName": "Wooden fence",
-            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
-            "outputCount": 2,
+            "itemName": "Robot arm",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 4
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1450,33 +1558,33 @@
         },
         {
             "itemId": 31,
-            "itemName": "Wooden fence door",
-            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "itemName": "Production machine (Mk1)",
+            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 30,
-                    "itemName": "Wooden fence",
-                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
-                    "count": 2
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 3
                 },
                 {
-                    "itemId": 15,
-                    "itemName": "Nail",
-                    "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+                    "itemId": 30,
+                    "itemName": "Robot arm",
+                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
                     "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1484,12 +1592,74 @@
         },
         {
             "itemId": 32,
+            "itemName": "Wooden fence",
+            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 33,
+            "itemName": "Wooden fence door",
+            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 32,
+                    "itemName": "Wooden fence",
+                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 17,
+                    "itemName": "Nail",
+                    "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 34,
             "itemName": "Brick wall",
             "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 14,
+                    "itemId": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 6
@@ -1497,14 +1667,48 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 35,
+            "itemName": "Utility pole",
+            "definitionAssetPath": "Assets/Data/Items/Item_34_Utility pole.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 21,
+                    "itemName": "Coil",
+                    "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 0,
+                    "itemName": "Log",
+                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1522,7 +1726,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 1,
+            "itemId": 2,
             "itemName": "Coal",
             "definitionAssetPath": "Assets/Data/Items/Item_21_Coal.asset",
             "outputCount": 1,
@@ -1531,7 +1735,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 2,
+            "itemId": 3,
             "itemName": "Stone",
             "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
             "outputCount": 1,
@@ -1540,7 +1744,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 3,
+            "itemId": 4,
             "itemName": "Cooper ore",
             "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
             "outputCount": 1,
@@ -1549,7 +1753,7 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 6,
+            "itemId": 8,
             "itemName": "Woodplank",
             "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
             "outputCount": 2,
@@ -1563,27 +1767,27 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 7,
+            "itemId": 9,
             "itemName": "Wooden Box",
             "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
+                    "itemId": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 6
@@ -1591,21 +1795,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 8,
+            "itemId": 10,
             "itemName": "Workbench",
             "definitionAssetPath": "Assets/Data/Items/Item_7_Workbench.asset",
             "outputCount": 1,
@@ -1617,7 +1821,7 @@
                     "count": 6
                 },
                 {
-                    "itemId": 2,
+                    "itemId": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 3
@@ -1627,13 +1831,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 9,
+            "itemId": 11,
             "itemName": "Funance",
             "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 2,
+                    "itemId": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
@@ -1641,21 +1845,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
         },
         {
-            "itemId": 10,
+            "itemId": 12,
             "itemName": "Charcoal",
             "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
             "outputCount": 1,
@@ -1669,21 +1873,21 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ]
         },
         {
-            "itemId": 11,
+            "itemId": 13,
             "itemName": "Iron ore",
             "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
             "outputCount": 1,
@@ -1692,13 +1896,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 12,
+            "itemId": 14,
             "itemName": "Iron plate",
             "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 11,
+                    "itemId": 13,
                     "itemName": "Iron ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                     "count": 1
@@ -1706,70 +1910,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 13,
-            "itemName": "CooperPlate",
-            "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 3,
-                    "itemName": "Cooper ore",
-                    "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
-                    "count": 1
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 14,
-            "itemName": "Brick",
-            "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 2,
-                    "itemName": "Stone",
-                    "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
-                    "count": 1
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 9,
-                    "mapObjectName": "Furnace",
-                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 9,
+                    "itemId": 11,
                     "mapObjectName": "Furnace",
                     "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
@@ -1777,40 +1925,68 @@
         },
         {
             "itemId": 15,
-            "itemName": "Nail",
-            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
-            "outputCount": 2,
+            "itemName": "CooperPlate",
+            "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "itemId": 4,
+                    "itemName": "Cooper ore",
+                    "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
                 }
             ]
         },
         {
             "itemId": 16,
-            "itemName": "Gear",
-            "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+            "itemName": "Brick",
+            "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
+                    "itemId": 3,
+                    "itemName": "Stone",
+                    "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 11,
+                    "mapObjectName": "Furnace",
+                    "assetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 17,
+            "itemName": "Nail",
+            "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
@@ -1818,42 +1994,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 17,
-            "itemName": "Drill",
-            "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1861,18 +2009,74 @@
         },
         {
             "itemId": 18,
+            "itemName": "Gear",
+            "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 19,
+            "itemName": "Drill",
+            "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 20,
             "itemName": "Mortor",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 16,
+                    "itemId": 18,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                     "count": 2
                 },
                 {
-                    "itemId": 19,
+                    "itemId": 21,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 2
@@ -1882,13 +2086,13 @@
             "requiredMapObjects": []
         },
         {
-            "itemId": 19,
+            "itemId": 21,
             "itemName": "Coil",
             "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 13,
+                    "itemId": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
@@ -1896,82 +2100,14 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 20,
-            "itemName": "Pickaxe",
-            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
-            "outputCount": 2,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
-                },
-                {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 21,
-            "itemName": "Conveyor belt",
-            "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 2
-                },
-                {
-                    "itemId": 16,
-                    "itemName": "Gear",
-                    "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 2
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -1979,27 +2115,33 @@
         },
         {
             "itemId": 22,
-            "itemName": "Conveyor belt 2F",
-            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
-            "outputCount": 1,
+            "itemName": "Pickaxe",
+            "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
+            "outputCount": 2,
             "ingredients": [
                 {
-                    "itemId": 21,
-                    "itemName": "Conveyor belt",
-                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
+                },
+                {
+                    "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2007,27 +2149,33 @@
         },
         {
             "itemId": 23,
-            "itemName": "Pipe",
-            "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+            "itemName": "Conveyor belt",
+            "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 12,
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 3
+                    "count": 2
+                },
+                {
+                    "itemId": 18,
+                    "itemName": "Gear",
+                    "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
+                    "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2035,39 +2183,27 @@
         },
         {
             "itemId": 24,
-            "itemName": "Mining machine",
-            "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
+            "itemName": "Conveyor belt 2F",
+            "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 2
-                },
-                {
-                    "itemId": 17,
-                    "itemName": "Drill",
-                    "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 12,
-                    "itemName": "Iron plate",
-                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
-                    "count": 2
+                    "itemId": 23,
+                    "itemName": "Conveyor belt",
+                    "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2075,52 +2211,12 @@
         },
         {
             "itemId": 25,
-            "itemName": "Water pump",
-            "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
+            "itemName": "Pipe",
+            "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 23,
-                    "itemName": "Pipe",
-                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
-                    "count": 4
-                }
-            ],
-            "craftingMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ],
-            "requiredMapObjects": [
-                {
-                    "itemId": 8,
-                    "mapObjectName": "Workbench",
-                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
-                }
-            ]
-        },
-        {
-            "itemId": 28,
-            "itemName": "Robot arm",
-            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
-            "outputCount": 1,
-            "ingredients": [
-                {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 1
-                },
-                {
-                    "itemId": 12,
+                    "itemId": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
@@ -2128,14 +2224,122 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 26,
+            "itemName": "Mining machine",
+            "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
                     "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 19,
+                    "itemName": "Drill",
+                    "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 27,
+            "itemName": "Water pump",
+            "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 28,
+            "itemName": "Boiler",
+            "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
+                },
+                {
+                    "itemId": 11,
+                    "itemName": "Funance",
+                    "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
+                    "count": 1
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2143,33 +2347,33 @@
         },
         {
             "itemId": 29,
-            "itemName": "Production machine (Mk1)",
-            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
+            "itemName": "Steam generator",
+            "definitionAssetPath": "Assets/Data/Items/Item_32_Steam generator.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 18,
-                    "itemName": "Mortor",
-                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
-                    "count": 3
+                    "itemId": 25,
+                    "itemName": "Pipe",
+                    "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
+                    "count": 4
                 },
                 {
                     "itemId": 28,
-                    "itemName": "Robot arm",
-                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+                    "itemName": "Boiler",
+                    "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
                     "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2177,27 +2381,33 @@
         },
         {
             "itemId": 30,
-            "itemName": "Wooden fence",
-            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
-            "outputCount": 2,
+            "itemName": "Robot arm",
+            "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
+            "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 6,
-                    "itemName": "Woodplank",
-                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
-                    "count": 4
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 14,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2205,33 +2415,33 @@
         },
         {
             "itemId": 31,
-            "itemName": "Wooden fence door",
-            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "itemName": "Production machine (Mk1)",
+            "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 30,
-                    "itemName": "Wooden fence",
-                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
-                    "count": 2
+                    "itemId": 20,
+                    "itemName": "Mortor",
+                    "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
+                    "count": 3
                 },
                 {
-                    "itemId": 15,
-                    "itemName": "Nail",
-                    "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+                    "itemId": 30,
+                    "itemName": "Robot arm",
+                    "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
                     "count": 2
                 }
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
@@ -2239,12 +2449,74 @@
         },
         {
             "itemId": 32,
+            "itemName": "Wooden fence",
+            "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+            "outputCount": 2,
+            "ingredients": [
+                {
+                    "itemId": 8,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 33,
+            "itemName": "Wooden fence door",
+            "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 32,
+                    "itemName": "Wooden fence",
+                    "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 17,
+                    "itemName": "Nail",
+                    "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 34,
             "itemName": "Brick wall",
             "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "outputCount": 1,
             "ingredients": [
                 {
-                    "itemId": 14,
+                    "itemId": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 6
@@ -2252,14 +2524,48 @@
             ],
             "craftingMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ],
             "requiredMapObjects": [
                 {
-                    "itemId": 8,
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 35,
+            "itemName": "Utility pole",
+            "definitionAssetPath": "Assets/Data/Items/Item_34_Utility pole.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 21,
+                    "itemName": "Coil",
+                    "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
+                    "count": 2
+                },
+                {
+                    "itemId": 0,
+                    "itemName": "Log",
+                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 10,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 10,
                     "mapObjectName": "Workbench",
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }

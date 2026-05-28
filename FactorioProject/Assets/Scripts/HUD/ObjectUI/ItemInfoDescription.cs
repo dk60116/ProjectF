@@ -147,8 +147,14 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        SteamGenerator steamGenerator = module as SteamGenerator;
         Boiler boiler = module as Boiler;
-        if (boiler != null && module.CanStoreFluid)
+        if (steamGenerator != null && module.CanStoreFluid)
+        {
+            SetFluidStorageGauge(module);
+            SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        }
+        else if (boiler != null && module.CanStoreFluid)
         {
             SetFluidStorageGauge(module);
             SetGauge(
@@ -230,7 +236,8 @@ public class ItemInfoDescription : MonoBehaviour
                 true,
                 true,
                 ResolveModuleFluidTemperature(module, inputItemId));
-            if (!TrySetBoilerOutputRateItemSlot(outputItem, outputItemSlot, boiler))
+            if (!TrySetSteamGeneratorOutputRateItemSlot(outputItem, outputItemSlot, steamGenerator)
+                && !TrySetBoilerOutputRateItemSlot(outputItem, outputItemSlot, boiler))
             {
                 SetItemSlot(
                     outputItem,
@@ -252,7 +259,8 @@ public class ItemInfoDescription : MonoBehaviour
                 out outputAreaCapacity,
                 out bool displayZeroOutputItem))
         {
-            if (!TrySetBoilerOutputRateItemSlot(outputItem, outputItemSlot, boiler))
+            if (!TrySetSteamGeneratorOutputRateItemSlot(outputItem, outputItemSlot, steamGenerator)
+                && !TrySetBoilerOutputRateItemSlot(outputItem, outputItemSlot, boiler))
             {
                 SetItemSlot(
                     outputItem,
@@ -344,6 +352,32 @@ public class ItemInfoDescription : MonoBehaviour
             fluidItemSet.icon,
             displayName,
             $"{FormatGaugeNumber(litersPerSecond, false)} L/s");
+        return true;
+    }
+
+    private bool TrySetSteamGeneratorOutputRateItemSlot(GameObject root, ItemSlot slot, SteamGenerator steamGenerator)
+    {
+        if (steamGenerator == null
+            || !steamGenerator.TryGetObjectInfoOutputRate(out int outputItemId, out float wattsPerSecond))
+        {
+            return false;
+        }
+
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return true;
+        }
+
+        ItemManager.ItemSet itemSet = ResolveItemSet(outputItemId);
+        string displayName = string.IsNullOrWhiteSpace(itemSet.name)
+            ? ResolveItemDisplayName(outputItemId)
+            : itemSet.name;
+        slot.SetCustomDisplay(
+            outputItemId,
+            itemSet.icon,
+            displayName,
+            $"{FormatGaugeNumber(wattsPerSecond, false)} W/s");
         return true;
     }
 

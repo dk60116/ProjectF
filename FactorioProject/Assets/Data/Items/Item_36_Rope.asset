@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_36_Rope
+  m_EditorClassIdentifier: 
+  itemName: Rope
+  id: 9
+  mapObject: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: 24f38b2c87025d445884f269a31a304a, type: 2}
+  portableMat: {fileID: 2100000, guid: 82420e5b9bea8574db85d211db2703f4, type: 2}
+  icon: {fileID: 21300000, guid: 29bf3b2c94e4edb4d8c79242fcbbdf7f, type: 3}
+  interactionButtonList: []
+  size: 0
+  itemFilter: 0
+  capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 0
+  useEnergyAmount: 0
+  completeEnergy: 0
+  craftingDurationSeconds: 5

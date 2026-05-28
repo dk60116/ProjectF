@@ -59,6 +59,61 @@
         },
         {
             "id": 1,
+            "itemName": "Reed",
+            "definitionAssetPath": "Assets/Data/Items/Item_35_Reed.asset",
+            "mapObjectAssetPath": "Assets/MapObject/Tree/Reed/Reed.prefab",
+            "portableMeshAssetPath": "",
+            "portableMaterialAssetPath": "",
+            "iconAssetPath": "Assets/Items/Tree/Reed/Reed_Icon.png",
+            "interactionButtonAssetPaths": [
+                "Assets/Image/UI/Item/Knife.png"
+            ],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": 1,
+            "mapSizeY": 1,
+            "placementCenterX": 0,
+            "placementCenterY": 0,
+            "focusRadius": -1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
+            "mapFilter": "",
+            "mapFilterValue": -1,
+            "mapObjectName": "Reed",
+            "mapObjectType": "Resource",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 2,
             "itemName": "Coal",
             "definitionAssetPath": "Assets/Data/Items/Item_21_Coal.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Coal/Coal.prefab",
@@ -77,7 +132,7 @@
             "craftingTime": 5.0,
             "energyType": "Burn",
             "energyTypeValue": 1,
-            "energyAmount": 30,
+            "energyAmount": 40,
             "useEnergyType": "None",
             "useEnergyTypeValue": 0,
             "useEnergyAmount": 0.0,
@@ -91,8 +146,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Coal",
@@ -113,7 +168,7 @@
             }
         },
         {
-            "id": 2,
+            "id": 3,
             "itemName": "Stone",
             "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Stone/Stone.prefab",
@@ -146,8 +201,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Stone",
@@ -168,7 +223,7 @@
             }
         },
         {
-            "id": 3,
+            "id": 4,
             "itemName": "Cooper ore",
             "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Cooper Ore/Cooper Ore.prefab",
@@ -201,8 +256,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Cooper Ore",
@@ -223,7 +278,7 @@
             }
         },
         {
-            "id": 4,
+            "id": 5,
             "itemName": "Water",
             "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
             "mapObjectAssetPath": "",
@@ -276,7 +331,7 @@
             }
         },
         {
-            "id": 5,
+            "id": 6,
             "itemName": "Steam",
             "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
             "mapObjectAssetPath": "",
@@ -329,7 +384,60 @@
             }
         },
         {
-            "id": 6,
+            "id": 7,
+            "itemName": "Electricity",
+            "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+            "mapObjectAssetPath": "",
+            "portableMeshAssetPath": "",
+            "portableMaterialAssetPath": "",
+            "iconAssetPath": "Assets/Items/Fluid/Electricity/Electricity_Icon.png",
+            "interactionButtonAssetPaths": [],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": -1,
+            "mapSizeY": -1,
+            "placementCenterX": -1,
+            "placementCenterY": -1,
+            "focusRadius": -1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "",
+            "multiFocusModeValue": -1,
+            "mapFilter": "",
+            "mapFilterValue": -1,
+            "mapObjectName": "",
+            "mapObjectType": "",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 8,
             "itemName": "Woodplank",
             "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
             "mapObjectAssetPath": "",
@@ -382,7 +490,7 @@
             }
         },
         {
-            "id": 7,
+            "id": 9,
             "itemName": "Wooden Box",
             "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "mapObjectAssetPath": "Assets/MapObject/Box/Wooden Box/Wooden Box.prefab",
@@ -438,7 +546,7 @@
             }
         },
         {
-            "id": 8,
+            "id": 10,
             "itemName": "Workbench",
             "definitionAssetPath": "Assets/Data/Items/Item_7_Workbench.asset",
             "mapObjectAssetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab",
@@ -491,7 +599,7 @@
             }
         },
         {
-            "id": 9,
+            "id": 11,
             "itemName": "Funance",
             "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab",
@@ -580,7 +688,7 @@
                         "count": 1
                     },
                     "output": {
-                        "id": 10,
+                        "id": 12,
                         "itemName": "Charcoal",
                         "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                         "count": 2
@@ -588,13 +696,13 @@
                 },
                 {
                     "input": {
-                        "id": 11,
+                        "id": 13,
                         "itemName": "Iron ore",
                         "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
@@ -602,13 +710,13 @@
                 },
                 {
                     "input": {
-                        "id": 3,
+                        "id": 4,
                         "itemName": "Cooper ore",
                         "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 13,
+                        "id": 15,
                         "itemName": "CooperPlate",
                         "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                         "count": 1
@@ -616,13 +724,13 @@
                 },
                 {
                     "input": {
-                        "id": 2,
+                        "id": 3,
                         "itemName": "Stone",
                         "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 14,
+                        "id": 16,
                         "itemName": "Brick",
                         "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                         "count": 1
@@ -637,19 +745,19 @@
                     "count": 1
                 },
                 {
-                    "id": 11,
+                    "id": 13,
                     "itemName": "Iron ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 3,
+                    "id": 4,
                     "itemName": "Cooper ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
                 },
                 {
-                    "id": 2,
+                    "id": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 1
@@ -657,39 +765,39 @@
             ],
             "outputList": [
                 {
-                    "id": 10,
+                    "id": 12,
                     "itemName": "Charcoal",
                     "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                     "count": 2
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 13,
+                    "id": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 14,
+                    "id": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 1
                 }
             ],
             "output": {
-                "id": 10,
+                "id": 12,
                 "itemName": "Charcoal",
                 "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                 "count": 2
             }
         },
         {
-            "id": 10,
+            "id": 12,
             "itemName": "Charcoal",
             "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
             "mapObjectAssetPath": "",
@@ -706,7 +814,7 @@
             "craftingTime": 5.0,
             "energyType": "Burn",
             "energyTypeValue": 1,
-            "energyAmount": 30,
+            "energyAmount": 40,
             "useEnergyType": "None",
             "useEnergyTypeValue": 0,
             "useEnergyAmount": 0.0,
@@ -742,7 +850,7 @@
             }
         },
         {
-            "id": 11,
+            "id": 13,
             "itemName": "Iron ore",
             "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Iron ore/Iron ore.prefab",
@@ -797,7 +905,7 @@
             }
         },
         {
-            "id": 12,
+            "id": 14,
             "itemName": "Iron plate",
             "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
             "mapObjectAssetPath": "",
@@ -850,7 +958,7 @@
             }
         },
         {
-            "id": 13,
+            "id": 15,
             "itemName": "CooperPlate",
             "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
             "mapObjectAssetPath": "",
@@ -903,7 +1011,7 @@
             }
         },
         {
-            "id": 14,
+            "id": 16,
             "itemName": "Brick",
             "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
             "mapObjectAssetPath": "",
@@ -956,7 +1064,7 @@
             }
         },
         {
-            "id": 15,
+            "id": 17,
             "itemName": "Nail",
             "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
             "mapObjectAssetPath": "",
@@ -1009,7 +1117,7 @@
             }
         },
         {
-            "id": 16,
+            "id": 18,
             "itemName": "Gear",
             "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
             "mapObjectAssetPath": "",
@@ -1062,7 +1170,7 @@
             }
         },
         {
-            "id": 17,
+            "id": 19,
             "itemName": "Drill",
             "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
             "mapObjectAssetPath": "",
@@ -1115,7 +1223,7 @@
             }
         },
         {
-            "id": 18,
+            "id": 20,
             "itemName": "Mortor",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
             "mapObjectAssetPath": "",
@@ -1168,7 +1276,7 @@
             }
         },
         {
-            "id": 19,
+            "id": 21,
             "itemName": "Coil",
             "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
             "mapObjectAssetPath": "",
@@ -1221,7 +1329,7 @@
             }
         },
         {
-            "id": 20,
+            "id": 22,
             "itemName": "Pickaxe",
             "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
             "mapObjectAssetPath": "",
@@ -1274,7 +1382,7 @@
             }
         },
         {
-            "id": 21,
+            "id": 23,
             "itemName": "Conveyor belt",
             "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
             "mapObjectAssetPath": "Assets/MapObject/Belt/Conveyor belt/Conveyor belt.prefab",
@@ -1327,7 +1435,7 @@
             }
         },
         {
-            "id": 22,
+            "id": 24,
             "itemName": "Conveyor belt 2F",
             "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "mapObjectAssetPath": "Assets/MapObject/Belt/Conveyor belt 2F/Conveyor belt 2F.prefab",
@@ -1380,7 +1488,7 @@
             }
         },
         {
-            "id": 23,
+            "id": 25,
             "itemName": "Pipe",
             "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Pipe/Pipe.prefab",
@@ -1433,7 +1541,7 @@
             }
         },
         {
-            "id": 24,
+            "id": 26,
             "itemName": "Mining machine",
             "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Mining machine/Mining machine.prefab",
@@ -1515,7 +1623,7 @@
             }
         },
         {
-            "id": 25,
+            "id": 27,
             "itemName": "Water pump",
             "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Water pump/Water pump.prefab",
@@ -1545,7 +1653,7 @@
             "workableFocusRadius": -1.0,
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
-            "waterLitersPerSecond": 1.0,
+            "waterLitersPerSecond": 5.0,
             "multiFocusMode": "NearOne",
             "multiFocusModeValue": 1,
             "mapFilter": "WaterOutline",
@@ -1597,7 +1705,7 @@
             }
         },
         {
-            "id": 26,
+            "id": 28,
             "itemName": "Boiler",
             "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Boiler/Boiler.prefab",
@@ -1705,44 +1813,44 @@
             "ioPairs": [
                 {
                     "input": {
-                        "id": 4,
+                        "id": 5,
                         "itemName": "Water",
                         "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
-                        "count": 1
+                        "count": 5
                     },
                     "output": {
-                        "id": 5,
+                        "id": 6,
                         "itemName": "Steam",
                         "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                        "count": 1
+                        "count": 30
                     }
                 }
             ],
             "inputList": [
                 {
-                    "id": 4,
+                    "id": 5,
                     "itemName": "Water",
                     "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
-                    "count": 1
+                    "count": 5
                 }
             ],
             "outputList": [
                 {
-                    "id": 5,
+                    "id": 6,
                     "itemName": "Steam",
                     "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                    "count": 1
+                    "count": 30
                 }
             ],
             "output": {
-                "id": 5,
+                "id": 6,
                 "itemName": "Steam",
                 "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                "count": 1
+                "count": 30
             }
         },
         {
-            "id": 27,
+            "id": 29,
             "itemName": "Steam generator",
             "definitionAssetPath": "Assets/Data/Items/Item_32_Steam generator.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Steam generator/Steam generator.prefab",
@@ -1825,44 +1933,44 @@
             "ioPairs": [
                 {
                     "input": {
-                        "id": 5,
+                        "id": 6,
                         "itemName": "Steam",
                         "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                        "count": 1
+                        "count": 10
                     },
                     "output": {
-                        "id": -1,
-                        "itemName": "",
-                        "definitionAssetPath": "",
-                        "count": 1
+                        "id": 7,
+                        "itemName": "Electricity",
+                        "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                        "count": 300
                     }
                 }
             ],
             "inputList": [
                 {
-                    "id": 5,
+                    "id": 6,
                     "itemName": "Steam",
                     "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                    "count": 1
+                    "count": 10
                 }
             ],
             "outputList": [
                 {
-                    "id": -1,
-                    "itemName": "",
-                    "definitionAssetPath": "",
-                    "count": 1
+                    "id": 7,
+                    "itemName": "Electricity",
+                    "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                    "count": 300
                 }
             ],
             "output": {
-                "id": -1,
-                "itemName": "",
-                "definitionAssetPath": "",
-                "count": 1
+                "id": 7,
+                "itemName": "Electricity",
+                "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                "count": 300
             }
         },
         {
-            "id": 28,
+            "id": 30,
             "itemName": "Robot arm",
             "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
             "mapObjectAssetPath": "Assets/MapObject/Robot arm/Robot arm.prefab",
@@ -1915,7 +2023,7 @@
             }
         },
         {
-            "id": 29,
+            "id": 31,
             "itemName": "Production machine (Mk1)",
             "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Production machine/Production machine (Mk1).prefab",
@@ -1995,7 +2103,7 @@
                         "count": 1
                     },
                     "output": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 2
@@ -2003,13 +2111,13 @@
                 },
                 {
                     "input": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 6
                     },
                     "output": {
-                        "id": 7,
+                        "id": 9,
                         "itemName": "Wooden Box",
                         "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
                         "count": 1
@@ -2017,13 +2125,13 @@
                 },
                 {
                     "input": {
-                        "id": 2,
+                        "id": 3,
                         "itemName": "Stone",
                         "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                         "count": 8
                     },
                     "output": {
-                        "id": 9,
+                        "id": 11,
                         "itemName": "Funance",
                         "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
                         "count": 1
@@ -2031,13 +2139,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 15,
+                        "id": 17,
                         "itemName": "Nail",
                         "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
                         "count": 2
@@ -2045,13 +2153,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 16,
+                        "id": 18,
                         "itemName": "Gear",
                         "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                         "count": 1
@@ -2059,13 +2167,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 17,
+                        "id": 19,
                         "itemName": "Drill",
                         "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
                         "count": 1
@@ -2073,13 +2181,13 @@
                 },
                 {
                     "input": {
-                        "id": 13,
+                        "id": 15,
                         "itemName": "CooperPlate",
                         "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 19,
+                        "id": 21,
                         "itemName": "Coil",
                         "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                         "count": 1
@@ -2087,13 +2195,13 @@
                 },
                 {
                     "input": {
-                        "id": 21,
+                        "id": 23,
                         "itemName": "Conveyor belt",
                         "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 22,
+                        "id": 24,
                         "itemName": "Conveyor belt 2F",
                         "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
                         "count": 1
@@ -2101,13 +2209,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 23,
+                        "id": 25,
                         "itemName": "Pipe",
                         "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
                         "count": 1
@@ -2115,13 +2223,13 @@
                 },
                 {
                     "input": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 4
                     },
                     "output": {
-                        "id": 30,
+                        "id": 32,
                         "itemName": "Wooden fence",
                         "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
                         "count": 2
@@ -2129,13 +2237,13 @@
                 },
                 {
                     "input": {
-                        "id": 14,
+                        "id": 16,
                         "itemName": "Brick",
                         "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                         "count": 6
                     },
                     "output": {
-                        "id": 32,
+                        "id": 34,
                         "itemName": "Brick wall",
                         "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
                         "count": 1
@@ -2150,61 +2258,61 @@
                     "count": 1
                 },
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 6
                 },
                 {
-                    "id": 2,
+                    "id": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
                 },
                 {
-                    "id": 13,
+                    "id": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 21,
+                    "id": 23,
                     "itemName": "Conveyor belt",
                     "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
                     "count": 3
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
                 },
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 },
                 {
-                    "id": 14,
+                    "id": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 6
@@ -2212,81 +2320,81 @@
             ],
             "outputList": [
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 2
                 },
                 {
-                    "id": 7,
+                    "id": 9,
                     "itemName": "Wooden Box",
                     "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
                     "count": 1
                 },
                 {
-                    "id": 9,
+                    "id": 11,
                     "itemName": "Funance",
                     "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
                     "count": 1
                 },
                 {
-                    "id": 15,
+                    "id": 17,
                     "itemName": "Nail",
                     "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
                     "count": 2
                 },
                 {
-                    "id": 16,
+                    "id": 18,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                     "count": 1
                 },
                 {
-                    "id": 17,
+                    "id": 19,
                     "itemName": "Drill",
                     "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
                     "count": 1
                 },
                 {
-                    "id": 19,
+                    "id": 21,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 1
                 },
                 {
-                    "id": 22,
+                    "id": 24,
                     "itemName": "Conveyor belt 2F",
                     "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
                     "count": 1
                 },
                 {
-                    "id": 23,
+                    "id": 25,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
                     "count": 1
                 },
                 {
-                    "id": 30,
+                    "id": 32,
                     "itemName": "Wooden fence",
                     "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
                     "count": 2
                 },
                 {
-                    "id": 32,
+                    "id": 34,
                     "itemName": "Brick wall",
                     "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
                     "count": 1
                 }
             ],
             "output": {
-                "id": 6,
+                "id": 8,
                 "itemName": "Woodplank",
                 "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                 "count": 2
             }
         },
         {
-            "id": 30,
+            "id": 32,
             "itemName": "Wooden fence",
             "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Wooden fence/Wooden fence.prefab",
@@ -2339,7 +2447,7 @@
             }
         },
         {
-            "id": 31,
+            "id": 33,
             "itemName": "Wooden fence door",
             "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Wooden Fence door/Wooden fence door.prefab",
@@ -2395,7 +2503,7 @@
             }
         },
         {
-            "id": 32,
+            "id": 34,
             "itemName": "Brick wall",
             "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Brick Wall/Brick Wall.prefab",
@@ -2432,6 +2540,59 @@
             "mapFilterValue": 37,
             "mapObjectName": "Brick Wall",
             "mapObjectType": "Wall",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 35,
+            "itemName": "Utility pole",
+            "definitionAssetPath": "Assets/Data/Items/Item_34_Utility pole.asset",
+            "mapObjectAssetPath": "Assets/MapObject/Electro/Utility pole/Utility pole.prefab",
+            "portableMeshAssetPath": "Assets/MapObject/Package_P.mesh",
+            "portableMaterialAssetPath": "Assets/MapObject/M_Package_P.mat",
+            "iconAssetPath": "Assets/Items/Electro/Utility pole/Utility pole_Icon.png",
+            "interactionButtonAssetPaths": [],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": 1,
+            "mapSizeY": 1,
+            "placementCenterX": 0,
+            "placementCenterY": 0,
+            "focusRadius": 1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
+            "mapFilter": "Ground, Ore, WaterOutline",
+            "mapFilterValue": 37,
+            "mapObjectName": "Utility pole",
+            "mapObjectType": "UtilityPole",
             "inputOutputLayoutType": "",
             "rectGridWidth": 0,
             "rectGridHeight": 0,
@@ -2506,6 +2667,61 @@
         },
         {
             "id": 1,
+            "itemName": "Reed",
+            "definitionAssetPath": "Assets/Data/Items/Item_35_Reed.asset",
+            "mapObjectAssetPath": "Assets/MapObject/Tree/Reed/Reed.prefab",
+            "portableMeshAssetPath": "",
+            "portableMaterialAssetPath": "",
+            "iconAssetPath": "Assets/Items/Tree/Reed/Reed_Icon.png",
+            "interactionButtonAssetPaths": [
+                "Assets/Image/UI/Item/Knife.png"
+            ],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": 1,
+            "mapSizeY": 1,
+            "placementCenterX": 0,
+            "placementCenterY": 0,
+            "focusRadius": -1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
+            "mapFilter": "",
+            "mapFilterValue": -1,
+            "mapObjectName": "Reed",
+            "mapObjectType": "Resource",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 2,
             "itemName": "Coal",
             "definitionAssetPath": "Assets/Data/Items/Item_21_Coal.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Coal/Coal.prefab",
@@ -2524,7 +2740,7 @@
             "craftingTime": 5.0,
             "energyType": "Burn",
             "energyTypeValue": 1,
-            "energyAmount": 30,
+            "energyAmount": 40,
             "useEnergyType": "None",
             "useEnergyTypeValue": 0,
             "useEnergyAmount": 0.0,
@@ -2538,8 +2754,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Coal",
@@ -2560,7 +2776,7 @@
             }
         },
         {
-            "id": 2,
+            "id": 3,
             "itemName": "Stone",
             "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Stone/Stone.prefab",
@@ -2593,8 +2809,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Stone",
@@ -2615,7 +2831,7 @@
             }
         },
         {
-            "id": 3,
+            "id": 4,
             "itemName": "Cooper ore",
             "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Cooper Ore/Cooper Ore.prefab",
@@ -2648,8 +2864,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Cooper Ore",
@@ -2670,7 +2886,7 @@
             }
         },
         {
-            "id": 4,
+            "id": 5,
             "itemName": "Water",
             "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
             "mapObjectAssetPath": "",
@@ -2723,7 +2939,7 @@
             }
         },
         {
-            "id": 5,
+            "id": 6,
             "itemName": "Steam",
             "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
             "mapObjectAssetPath": "",
@@ -2776,7 +2992,60 @@
             }
         },
         {
-            "id": 6,
+            "id": 7,
+            "itemName": "Electricity",
+            "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+            "mapObjectAssetPath": "",
+            "portableMeshAssetPath": "",
+            "portableMaterialAssetPath": "",
+            "iconAssetPath": "Assets/Items/Fluid/Electricity/Electricity_Icon.png",
+            "interactionButtonAssetPaths": [],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": -1,
+            "mapSizeY": -1,
+            "placementCenterX": -1,
+            "placementCenterY": -1,
+            "focusRadius": -1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "",
+            "multiFocusModeValue": -1,
+            "mapFilter": "",
+            "mapFilterValue": -1,
+            "mapObjectName": "",
+            "mapObjectType": "",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 8,
             "itemName": "Woodplank",
             "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
             "mapObjectAssetPath": "",
@@ -2829,7 +3098,7 @@
             }
         },
         {
-            "id": 7,
+            "id": 9,
             "itemName": "Wooden Box",
             "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "mapObjectAssetPath": "Assets/MapObject/Box/Wooden Box/Wooden Box.prefab",
@@ -2885,7 +3154,7 @@
             }
         },
         {
-            "id": 8,
+            "id": 10,
             "itemName": "Workbench",
             "definitionAssetPath": "Assets/Data/Items/Item_7_Workbench.asset",
             "mapObjectAssetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab",
@@ -2938,7 +3207,7 @@
             }
         },
         {
-            "id": 9,
+            "id": 11,
             "itemName": "Funance",
             "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab",
@@ -3027,7 +3296,7 @@
                         "count": 1
                     },
                     "output": {
-                        "id": 10,
+                        "id": 12,
                         "itemName": "Charcoal",
                         "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                         "count": 2
@@ -3035,13 +3304,13 @@
                 },
                 {
                     "input": {
-                        "id": 11,
+                        "id": 13,
                         "itemName": "Iron ore",
                         "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
@@ -3049,13 +3318,13 @@
                 },
                 {
                     "input": {
-                        "id": 3,
+                        "id": 4,
                         "itemName": "Cooper ore",
                         "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 13,
+                        "id": 15,
                         "itemName": "CooperPlate",
                         "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                         "count": 1
@@ -3063,13 +3332,13 @@
                 },
                 {
                     "input": {
-                        "id": 2,
+                        "id": 3,
                         "itemName": "Stone",
                         "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 14,
+                        "id": 16,
                         "itemName": "Brick",
                         "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                         "count": 1
@@ -3084,19 +3353,19 @@
                     "count": 1
                 },
                 {
-                    "id": 11,
+                    "id": 13,
                     "itemName": "Iron ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 3,
+                    "id": 4,
                     "itemName": "Cooper ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
                 },
                 {
-                    "id": 2,
+                    "id": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 1
@@ -3104,39 +3373,39 @@
             ],
             "outputList": [
                 {
-                    "id": 10,
+                    "id": 12,
                     "itemName": "Charcoal",
                     "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                     "count": 2
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 13,
+                    "id": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 14,
+                    "id": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 1
                 }
             ],
             "output": {
-                "id": 10,
+                "id": 12,
                 "itemName": "Charcoal",
                 "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                 "count": 2
             }
         },
         {
-            "id": 10,
+            "id": 12,
             "itemName": "Charcoal",
             "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
             "mapObjectAssetPath": "",
@@ -3153,7 +3422,7 @@
             "craftingTime": 5.0,
             "energyType": "Burn",
             "energyTypeValue": 1,
-            "energyAmount": 30,
+            "energyAmount": 40,
             "useEnergyType": "None",
             "useEnergyTypeValue": 0,
             "useEnergyAmount": 0.0,
@@ -3189,7 +3458,7 @@
             }
         },
         {
-            "id": 11,
+            "id": 13,
             "itemName": "Iron ore",
             "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Iron ore/Iron ore.prefab",
@@ -3244,7 +3513,7 @@
             }
         },
         {
-            "id": 12,
+            "id": 14,
             "itemName": "Iron plate",
             "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
             "mapObjectAssetPath": "",
@@ -3297,7 +3566,7 @@
             }
         },
         {
-            "id": 13,
+            "id": 15,
             "itemName": "CooperPlate",
             "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
             "mapObjectAssetPath": "",
@@ -3350,7 +3619,7 @@
             }
         },
         {
-            "id": 14,
+            "id": 16,
             "itemName": "Brick",
             "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
             "mapObjectAssetPath": "",
@@ -3403,7 +3672,7 @@
             }
         },
         {
-            "id": 15,
+            "id": 17,
             "itemName": "Nail",
             "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
             "mapObjectAssetPath": "",
@@ -3456,7 +3725,7 @@
             }
         },
         {
-            "id": 16,
+            "id": 18,
             "itemName": "Gear",
             "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
             "mapObjectAssetPath": "",
@@ -3509,7 +3778,7 @@
             }
         },
         {
-            "id": 17,
+            "id": 19,
             "itemName": "Drill",
             "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
             "mapObjectAssetPath": "",
@@ -3562,7 +3831,7 @@
             }
         },
         {
-            "id": 18,
+            "id": 20,
             "itemName": "Mortor",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
             "mapObjectAssetPath": "",
@@ -3615,7 +3884,7 @@
             }
         },
         {
-            "id": 19,
+            "id": 21,
             "itemName": "Coil",
             "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
             "mapObjectAssetPath": "",
@@ -3668,7 +3937,7 @@
             }
         },
         {
-            "id": 20,
+            "id": 22,
             "itemName": "Pickaxe",
             "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
             "mapObjectAssetPath": "",
@@ -3721,7 +3990,7 @@
             }
         },
         {
-            "id": 21,
+            "id": 23,
             "itemName": "Conveyor belt",
             "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
             "mapObjectAssetPath": "Assets/MapObject/Belt/Conveyor belt/Conveyor belt.prefab",
@@ -3774,7 +4043,7 @@
             }
         },
         {
-            "id": 22,
+            "id": 24,
             "itemName": "Conveyor belt 2F",
             "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "mapObjectAssetPath": "Assets/MapObject/Belt/Conveyor belt 2F/Conveyor belt 2F.prefab",
@@ -3827,7 +4096,7 @@
             }
         },
         {
-            "id": 23,
+            "id": 25,
             "itemName": "Pipe",
             "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Pipe/Pipe.prefab",
@@ -3880,7 +4149,7 @@
             }
         },
         {
-            "id": 24,
+            "id": 26,
             "itemName": "Mining machine",
             "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Mining machine/Mining machine.prefab",
@@ -3962,7 +4231,7 @@
             }
         },
         {
-            "id": 25,
+            "id": 27,
             "itemName": "Water pump",
             "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Water pump/Water pump.prefab",
@@ -3992,7 +4261,7 @@
             "workableFocusRadius": -1.0,
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
-            "waterLitersPerSecond": 1.0,
+            "waterLitersPerSecond": 5.0,
             "multiFocusMode": "NearOne",
             "multiFocusModeValue": 1,
             "mapFilter": "WaterOutline",
@@ -4044,7 +4313,7 @@
             }
         },
         {
-            "id": 26,
+            "id": 28,
             "itemName": "Boiler",
             "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Boiler/Boiler.prefab",
@@ -4152,44 +4421,44 @@
             "ioPairs": [
                 {
                     "input": {
-                        "id": 4,
+                        "id": 5,
                         "itemName": "Water",
                         "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
-                        "count": 1
+                        "count": 5
                     },
                     "output": {
-                        "id": 5,
+                        "id": 6,
                         "itemName": "Steam",
                         "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                        "count": 1
+                        "count": 30
                     }
                 }
             ],
             "inputList": [
                 {
-                    "id": 4,
+                    "id": 5,
                     "itemName": "Water",
                     "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
-                    "count": 1
+                    "count": 5
                 }
             ],
             "outputList": [
                 {
-                    "id": 5,
+                    "id": 6,
                     "itemName": "Steam",
                     "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                    "count": 1
+                    "count": 30
                 }
             ],
             "output": {
-                "id": 5,
+                "id": 6,
                 "itemName": "Steam",
                 "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                "count": 1
+                "count": 30
             }
         },
         {
-            "id": 27,
+            "id": 29,
             "itemName": "Steam generator",
             "definitionAssetPath": "Assets/Data/Items/Item_32_Steam generator.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Steam generator/Steam generator.prefab",
@@ -4272,44 +4541,44 @@
             "ioPairs": [
                 {
                     "input": {
-                        "id": 5,
+                        "id": 6,
                         "itemName": "Steam",
                         "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                        "count": 1
+                        "count": 10
                     },
                     "output": {
-                        "id": -1,
-                        "itemName": "",
-                        "definitionAssetPath": "",
-                        "count": 1
+                        "id": 7,
+                        "itemName": "Electricity",
+                        "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                        "count": 300
                     }
                 }
             ],
             "inputList": [
                 {
-                    "id": 5,
+                    "id": 6,
                     "itemName": "Steam",
                     "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                    "count": 1
+                    "count": 10
                 }
             ],
             "outputList": [
                 {
-                    "id": -1,
-                    "itemName": "",
-                    "definitionAssetPath": "",
-                    "count": 1
+                    "id": 7,
+                    "itemName": "Electricity",
+                    "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                    "count": 300
                 }
             ],
             "output": {
-                "id": -1,
-                "itemName": "",
-                "definitionAssetPath": "",
-                "count": 1
+                "id": 7,
+                "itemName": "Electricity",
+                "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                "count": 300
             }
         },
         {
-            "id": 28,
+            "id": 30,
             "itemName": "Robot arm",
             "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
             "mapObjectAssetPath": "Assets/MapObject/Robot arm/Robot arm.prefab",
@@ -4362,7 +4631,7 @@
             }
         },
         {
-            "id": 29,
+            "id": 31,
             "itemName": "Production machine (Mk1)",
             "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Production machine/Production machine (Mk1).prefab",
@@ -4442,7 +4711,7 @@
                         "count": 1
                     },
                     "output": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 2
@@ -4450,13 +4719,13 @@
                 },
                 {
                     "input": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 6
                     },
                     "output": {
-                        "id": 7,
+                        "id": 9,
                         "itemName": "Wooden Box",
                         "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
                         "count": 1
@@ -4464,13 +4733,13 @@
                 },
                 {
                     "input": {
-                        "id": 2,
+                        "id": 3,
                         "itemName": "Stone",
                         "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                         "count": 8
                     },
                     "output": {
-                        "id": 9,
+                        "id": 11,
                         "itemName": "Funance",
                         "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
                         "count": 1
@@ -4478,13 +4747,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 15,
+                        "id": 17,
                         "itemName": "Nail",
                         "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
                         "count": 2
@@ -4492,13 +4761,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 16,
+                        "id": 18,
                         "itemName": "Gear",
                         "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                         "count": 1
@@ -4506,13 +4775,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 17,
+                        "id": 19,
                         "itemName": "Drill",
                         "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
                         "count": 1
@@ -4520,13 +4789,13 @@
                 },
                 {
                     "input": {
-                        "id": 13,
+                        "id": 15,
                         "itemName": "CooperPlate",
                         "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 19,
+                        "id": 21,
                         "itemName": "Coil",
                         "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                         "count": 1
@@ -4534,13 +4803,13 @@
                 },
                 {
                     "input": {
-                        "id": 21,
+                        "id": 23,
                         "itemName": "Conveyor belt",
                         "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 22,
+                        "id": 24,
                         "itemName": "Conveyor belt 2F",
                         "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
                         "count": 1
@@ -4548,13 +4817,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 23,
+                        "id": 25,
                         "itemName": "Pipe",
                         "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
                         "count": 1
@@ -4562,13 +4831,13 @@
                 },
                 {
                     "input": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 4
                     },
                     "output": {
-                        "id": 30,
+                        "id": 32,
                         "itemName": "Wooden fence",
                         "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
                         "count": 2
@@ -4576,13 +4845,13 @@
                 },
                 {
                     "input": {
-                        "id": 14,
+                        "id": 16,
                         "itemName": "Brick",
                         "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                         "count": 6
                     },
                     "output": {
-                        "id": 32,
+                        "id": 34,
                         "itemName": "Brick wall",
                         "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
                         "count": 1
@@ -4597,61 +4866,61 @@
                     "count": 1
                 },
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 6
                 },
                 {
-                    "id": 2,
+                    "id": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
                 },
                 {
-                    "id": 13,
+                    "id": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 21,
+                    "id": 23,
                     "itemName": "Conveyor belt",
                     "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
                     "count": 3
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
                 },
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 },
                 {
-                    "id": 14,
+                    "id": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 6
@@ -4659,81 +4928,81 @@
             ],
             "outputList": [
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 2
                 },
                 {
-                    "id": 7,
+                    "id": 9,
                     "itemName": "Wooden Box",
                     "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
                     "count": 1
                 },
                 {
-                    "id": 9,
+                    "id": 11,
                     "itemName": "Funance",
                     "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
                     "count": 1
                 },
                 {
-                    "id": 15,
+                    "id": 17,
                     "itemName": "Nail",
                     "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
                     "count": 2
                 },
                 {
-                    "id": 16,
+                    "id": 18,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                     "count": 1
                 },
                 {
-                    "id": 17,
+                    "id": 19,
                     "itemName": "Drill",
                     "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
                     "count": 1
                 },
                 {
-                    "id": 19,
+                    "id": 21,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 1
                 },
                 {
-                    "id": 22,
+                    "id": 24,
                     "itemName": "Conveyor belt 2F",
                     "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
                     "count": 1
                 },
                 {
-                    "id": 23,
+                    "id": 25,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
                     "count": 1
                 },
                 {
-                    "id": 30,
+                    "id": 32,
                     "itemName": "Wooden fence",
                     "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
                     "count": 2
                 },
                 {
-                    "id": 32,
+                    "id": 34,
                     "itemName": "Brick wall",
                     "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
                     "count": 1
                 }
             ],
             "output": {
-                "id": 6,
+                "id": 8,
                 "itemName": "Woodplank",
                 "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                 "count": 2
             }
         },
         {
-            "id": 30,
+            "id": 32,
             "itemName": "Wooden fence",
             "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Wooden fence/Wooden fence.prefab",
@@ -4786,7 +5055,7 @@
             }
         },
         {
-            "id": 31,
+            "id": 33,
             "itemName": "Wooden fence door",
             "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Wooden Fence door/Wooden fence door.prefab",
@@ -4842,7 +5111,7 @@
             }
         },
         {
-            "id": 32,
+            "id": 34,
             "itemName": "Brick wall",
             "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Brick Wall/Brick Wall.prefab",
@@ -4879,6 +5148,59 @@
             "mapFilterValue": 37,
             "mapObjectName": "Brick Wall",
             "mapObjectType": "Wall",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 35,
+            "itemName": "Utility pole",
+            "definitionAssetPath": "Assets/Data/Items/Item_34_Utility pole.asset",
+            "mapObjectAssetPath": "Assets/MapObject/Electro/Utility pole/Utility pole.prefab",
+            "portableMeshAssetPath": "Assets/MapObject/Package_P.mesh",
+            "portableMaterialAssetPath": "Assets/MapObject/M_Package_P.mat",
+            "iconAssetPath": "Assets/Items/Electro/Utility pole/Utility pole_Icon.png",
+            "interactionButtonAssetPaths": [],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": 1,
+            "mapSizeY": 1,
+            "placementCenterX": 0,
+            "placementCenterY": 0,
+            "focusRadius": 1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
+            "mapFilter": "Ground, Ore, WaterOutline",
+            "mapFilterValue": 37,
+            "mapObjectName": "Utility pole",
+            "mapObjectType": "UtilityPole",
             "inputOutputLayoutType": "",
             "rectGridWidth": 0,
             "rectGridHeight": 0,
@@ -4953,6 +5275,61 @@
         },
         {
             "id": 1,
+            "itemName": "Reed",
+            "definitionAssetPath": "Assets/Data/Items/Item_35_Reed.asset",
+            "mapObjectAssetPath": "Assets/MapObject/Tree/Reed/Reed.prefab",
+            "portableMeshAssetPath": "",
+            "portableMaterialAssetPath": "",
+            "iconAssetPath": "Assets/Items/Tree/Reed/Reed_Icon.png",
+            "interactionButtonAssetPaths": [
+                "Assets/Image/UI/Item/Knife.png"
+            ],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": 1,
+            "mapSizeY": 1,
+            "placementCenterX": 0,
+            "placementCenterY": 0,
+            "focusRadius": -1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
+            "mapFilter": "",
+            "mapFilterValue": -1,
+            "mapObjectName": "Reed",
+            "mapObjectType": "Resource",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 2,
             "itemName": "Coal",
             "definitionAssetPath": "Assets/Data/Items/Item_21_Coal.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Coal/Coal.prefab",
@@ -4971,7 +5348,7 @@
             "craftingTime": 5.0,
             "energyType": "Burn",
             "energyTypeValue": 1,
-            "energyAmount": 30,
+            "energyAmount": 40,
             "useEnergyType": "None",
             "useEnergyTypeValue": 0,
             "useEnergyAmount": 0.0,
@@ -4985,8 +5362,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Coal",
@@ -5007,7 +5384,7 @@
             }
         },
         {
-            "id": 2,
+            "id": 3,
             "itemName": "Stone",
             "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Stone/Stone.prefab",
@@ -5040,8 +5417,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Stone",
@@ -5062,7 +5439,7 @@
             }
         },
         {
-            "id": 3,
+            "id": 4,
             "itemName": "Cooper ore",
             "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Cooper Ore/Cooper Ore.prefab",
@@ -5095,8 +5472,8 @@
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
             "waterLitersPerSecond": -1.0,
-            "multiFocusMode": "All",
-            "multiFocusModeValue": 0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
             "mapFilter": "",
             "mapFilterValue": -1,
             "mapObjectName": "Cooper Ore",
@@ -5117,7 +5494,7 @@
             }
         },
         {
-            "id": 4,
+            "id": 5,
             "itemName": "Water",
             "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
             "mapObjectAssetPath": "",
@@ -5170,7 +5547,7 @@
             }
         },
         {
-            "id": 5,
+            "id": 6,
             "itemName": "Steam",
             "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
             "mapObjectAssetPath": "",
@@ -5223,7 +5600,60 @@
             }
         },
         {
-            "id": 6,
+            "id": 7,
+            "itemName": "Electricity",
+            "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+            "mapObjectAssetPath": "",
+            "portableMeshAssetPath": "",
+            "portableMaterialAssetPath": "",
+            "iconAssetPath": "Assets/Items/Fluid/Electricity/Electricity_Icon.png",
+            "interactionButtonAssetPaths": [],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": -1,
+            "mapSizeY": -1,
+            "placementCenterX": -1,
+            "placementCenterY": -1,
+            "focusRadius": -1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "",
+            "multiFocusModeValue": -1,
+            "mapFilter": "",
+            "mapFilterValue": -1,
+            "mapObjectName": "",
+            "mapObjectType": "",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 8,
             "itemName": "Woodplank",
             "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
             "mapObjectAssetPath": "",
@@ -5276,7 +5706,7 @@
             }
         },
         {
-            "id": 7,
+            "id": 9,
             "itemName": "Wooden Box",
             "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
             "mapObjectAssetPath": "Assets/MapObject/Box/Wooden Box/Wooden Box.prefab",
@@ -5332,7 +5762,7 @@
             }
         },
         {
-            "id": 8,
+            "id": 10,
             "itemName": "Workbench",
             "definitionAssetPath": "Assets/Data/Items/Item_7_Workbench.asset",
             "mapObjectAssetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab",
@@ -5385,7 +5815,7 @@
             }
         },
         {
-            "id": 9,
+            "id": 11,
             "itemName": "Funance",
             "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Funance/Furnace.prefab",
@@ -5474,7 +5904,7 @@
                         "count": 1
                     },
                     "output": {
-                        "id": 10,
+                        "id": 12,
                         "itemName": "Charcoal",
                         "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                         "count": 2
@@ -5482,13 +5912,13 @@
                 },
                 {
                     "input": {
-                        "id": 11,
+                        "id": 13,
                         "itemName": "Iron ore",
                         "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
@@ -5496,13 +5926,13 @@
                 },
                 {
                     "input": {
-                        "id": 3,
+                        "id": 4,
                         "itemName": "Cooper ore",
                         "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 13,
+                        "id": 15,
                         "itemName": "CooperPlate",
                         "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                         "count": 1
@@ -5510,13 +5940,13 @@
                 },
                 {
                     "input": {
-                        "id": 2,
+                        "id": 3,
                         "itemName": "Stone",
                         "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 14,
+                        "id": 16,
                         "itemName": "Brick",
                         "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                         "count": 1
@@ -5531,19 +5961,19 @@
                     "count": 1
                 },
                 {
-                    "id": 11,
+                    "id": 13,
                     "itemName": "Iron ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 3,
+                    "id": 4,
                     "itemName": "Cooper ore",
                     "definitionAssetPath": "Assets/Data/Items/Item_2_CooperOre.asset",
                     "count": 1
                 },
                 {
-                    "id": 2,
+                    "id": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 1
@@ -5551,39 +5981,39 @@
             ],
             "outputList": [
                 {
-                    "id": 10,
+                    "id": 12,
                     "itemName": "Charcoal",
                     "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                     "count": 2
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 13,
+                    "id": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 14,
+                    "id": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 1
                 }
             ],
             "output": {
-                "id": 10,
+                "id": 12,
                 "itemName": "Charcoal",
                 "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
                 "count": 2
             }
         },
         {
-            "id": 10,
+            "id": 12,
             "itemName": "Charcoal",
             "definitionAssetPath": "Assets/Data/Items/Item_9_Charcoal.asset",
             "mapObjectAssetPath": "",
@@ -5600,7 +6030,7 @@
             "craftingTime": 5.0,
             "energyType": "Burn",
             "energyTypeValue": 1,
-            "energyAmount": 30,
+            "energyAmount": 40,
             "useEnergyType": "None",
             "useEnergyTypeValue": 0,
             "useEnergyAmount": 0.0,
@@ -5636,7 +6066,7 @@
             }
         },
         {
-            "id": 11,
+            "id": 13,
             "itemName": "Iron ore",
             "definitionAssetPath": "Assets/Data/Items/Item_10_IronPlate.asset",
             "mapObjectAssetPath": "Assets/MapObject/Ore/Iron ore/Iron ore.prefab",
@@ -5691,7 +6121,7 @@
             }
         },
         {
-            "id": 12,
+            "id": 14,
             "itemName": "Iron plate",
             "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
             "mapObjectAssetPath": "",
@@ -5744,7 +6174,7 @@
             }
         },
         {
-            "id": 13,
+            "id": 15,
             "itemName": "CooperPlate",
             "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
             "mapObjectAssetPath": "",
@@ -5797,7 +6227,7 @@
             }
         },
         {
-            "id": 14,
+            "id": 16,
             "itemName": "Brick",
             "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
             "mapObjectAssetPath": "",
@@ -5850,7 +6280,7 @@
             }
         },
         {
-            "id": 15,
+            "id": 17,
             "itemName": "Nail",
             "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
             "mapObjectAssetPath": "",
@@ -5903,7 +6333,7 @@
             }
         },
         {
-            "id": 16,
+            "id": 18,
             "itemName": "Gear",
             "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
             "mapObjectAssetPath": "",
@@ -5956,7 +6386,7 @@
             }
         },
         {
-            "id": 17,
+            "id": 19,
             "itemName": "Drill",
             "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
             "mapObjectAssetPath": "",
@@ -6009,7 +6439,7 @@
             }
         },
         {
-            "id": 18,
+            "id": 20,
             "itemName": "Mortor",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Mortor.asset",
             "mapObjectAssetPath": "",
@@ -6062,7 +6492,7 @@
             }
         },
         {
-            "id": 19,
+            "id": 21,
             "itemName": "Coil",
             "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
             "mapObjectAssetPath": "",
@@ -6115,7 +6545,7 @@
             }
         },
         {
-            "id": 20,
+            "id": 22,
             "itemName": "Pickaxe",
             "definitionAssetPath": "Assets/Data/Items/Item_0_Pickaxe.asset",
             "mapObjectAssetPath": "",
@@ -6168,7 +6598,7 @@
             }
         },
         {
-            "id": 21,
+            "id": 23,
             "itemName": "Conveyor belt",
             "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
             "mapObjectAssetPath": "Assets/MapObject/Belt/Conveyor belt/Conveyor belt.prefab",
@@ -6221,7 +6651,7 @@
             }
         },
         {
-            "id": 22,
+            "id": 24,
             "itemName": "Conveyor belt 2F",
             "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
             "mapObjectAssetPath": "Assets/MapObject/Belt/Conveyor belt 2F/Conveyor belt 2F.prefab",
@@ -6274,7 +6704,7 @@
             }
         },
         {
-            "id": 23,
+            "id": 25,
             "itemName": "Pipe",
             "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Pipe/Pipe.prefab",
@@ -6327,7 +6757,7 @@
             }
         },
         {
-            "id": 24,
+            "id": 26,
             "itemName": "Mining machine",
             "definitionAssetPath": "Assets/Data/Items/Item_17_Mining Machine.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Mining machine/Mining machine.prefab",
@@ -6409,7 +6839,7 @@
             }
         },
         {
-            "id": 25,
+            "id": 27,
             "itemName": "Water pump",
             "definitionAssetPath": "Assets/Data/Items/Item_27_Water pump.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Water pump/Water pump.prefab",
@@ -6439,7 +6869,7 @@
             "workableFocusRadius": -1.0,
             "workableRangeCells": -1,
             "conveyorSpeed": -1.0,
-            "waterLitersPerSecond": 1.0,
+            "waterLitersPerSecond": 5.0,
             "multiFocusMode": "NearOne",
             "multiFocusModeValue": 1,
             "mapFilter": "WaterOutline",
@@ -6491,7 +6921,7 @@
             }
         },
         {
-            "id": 26,
+            "id": 28,
             "itemName": "Boiler",
             "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Boiler/Boiler.prefab",
@@ -6599,44 +7029,44 @@
             "ioPairs": [
                 {
                     "input": {
-                        "id": 4,
+                        "id": 5,
                         "itemName": "Water",
                         "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
-                        "count": 1
+                        "count": 5
                     },
                     "output": {
-                        "id": 5,
+                        "id": 6,
                         "itemName": "Steam",
                         "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                        "count": 1
+                        "count": 30
                     }
                 }
             ],
             "inputList": [
                 {
-                    "id": 4,
+                    "id": 5,
                     "itemName": "Water",
                     "definitionAssetPath": "Assets/Data/Items/Item_30_Water.asset",
-                    "count": 1
+                    "count": 5
                 }
             ],
             "outputList": [
                 {
-                    "id": 5,
+                    "id": 6,
                     "itemName": "Steam",
                     "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                    "count": 1
+                    "count": 30
                 }
             ],
             "output": {
-                "id": 5,
+                "id": 6,
                 "itemName": "Steam",
                 "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                "count": 1
+                "count": 30
             }
         },
         {
-            "id": 27,
+            "id": 29,
             "itemName": "Steam generator",
             "definitionAssetPath": "Assets/Data/Items/Item_32_Steam generator.asset",
             "mapObjectAssetPath": "Assets/MapObject/Fluid/Steam generator/Steam generator.prefab",
@@ -6719,44 +7149,44 @@
             "ioPairs": [
                 {
                     "input": {
-                        "id": 5,
+                        "id": 6,
                         "itemName": "Steam",
                         "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                        "count": 1
+                        "count": 10
                     },
                     "output": {
-                        "id": -1,
-                        "itemName": "",
-                        "definitionAssetPath": "",
-                        "count": 1
+                        "id": 7,
+                        "itemName": "Electricity",
+                        "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                        "count": 300
                     }
                 }
             ],
             "inputList": [
                 {
-                    "id": 5,
+                    "id": 6,
                     "itemName": "Steam",
                     "definitionAssetPath": "Assets/Data/Items/Item_31_Steam.asset",
-                    "count": 1
+                    "count": 10
                 }
             ],
             "outputList": [
                 {
-                    "id": -1,
-                    "itemName": "",
-                    "definitionAssetPath": "",
-                    "count": 1
+                    "id": 7,
+                    "itemName": "Electricity",
+                    "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                    "count": 300
                 }
             ],
             "output": {
-                "id": -1,
-                "itemName": "",
-                "definitionAssetPath": "",
-                "count": 1
+                "id": 7,
+                "itemName": "Electricity",
+                "definitionAssetPath": "Assets/Data/Items/Item_33_Electricity.asset",
+                "count": 300
             }
         },
         {
-            "id": 28,
+            "id": 30,
             "itemName": "Robot arm",
             "definitionAssetPath": "Assets/Data/Items/Item_1_Coal.asset",
             "mapObjectAssetPath": "Assets/MapObject/Robot arm/Robot arm.prefab",
@@ -6809,7 +7239,7 @@
             }
         },
         {
-            "id": 29,
+            "id": 31,
             "itemName": "Production machine (Mk1)",
             "definitionAssetPath": "Assets/Data/Items/Item_3_IronOre.asset",
             "mapObjectAssetPath": "Assets/MapObject/InputOutputModule/Production machine/Production machine (Mk1).prefab",
@@ -6889,7 +7319,7 @@
                         "count": 1
                     },
                     "output": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 2
@@ -6897,13 +7327,13 @@
                 },
                 {
                     "input": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 6
                     },
                     "output": {
-                        "id": 7,
+                        "id": 9,
                         "itemName": "Wooden Box",
                         "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
                         "count": 1
@@ -6911,13 +7341,13 @@
                 },
                 {
                     "input": {
-                        "id": 2,
+                        "id": 3,
                         "itemName": "Stone",
                         "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                         "count": 8
                     },
                     "output": {
-                        "id": 9,
+                        "id": 11,
                         "itemName": "Funance",
                         "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
                         "count": 1
@@ -6925,13 +7355,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 15,
+                        "id": 17,
                         "itemName": "Nail",
                         "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
                         "count": 2
@@ -6939,13 +7369,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 16,
+                        "id": 18,
                         "itemName": "Gear",
                         "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                         "count": 1
@@ -6953,13 +7383,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 17,
+                        "id": 19,
                         "itemName": "Drill",
                         "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
                         "count": 1
@@ -6967,13 +7397,13 @@
                 },
                 {
                     "input": {
-                        "id": 13,
+                        "id": 15,
                         "itemName": "CooperPlate",
                         "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                         "count": 1
                     },
                     "output": {
-                        "id": 19,
+                        "id": 21,
                         "itemName": "Coil",
                         "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                         "count": 1
@@ -6981,13 +7411,13 @@
                 },
                 {
                     "input": {
-                        "id": 21,
+                        "id": 23,
                         "itemName": "Conveyor belt",
                         "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 22,
+                        "id": 24,
                         "itemName": "Conveyor belt 2F",
                         "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
                         "count": 1
@@ -6995,13 +7425,13 @@
                 },
                 {
                     "input": {
-                        "id": 12,
+                        "id": 14,
                         "itemName": "Iron plate",
                         "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                         "count": 3
                     },
                     "output": {
-                        "id": 23,
+                        "id": 25,
                         "itemName": "Pipe",
                         "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
                         "count": 1
@@ -7009,13 +7439,13 @@
                 },
                 {
                     "input": {
-                        "id": 6,
+                        "id": 8,
                         "itemName": "Woodplank",
                         "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                         "count": 4
                     },
                     "output": {
-                        "id": 30,
+                        "id": 32,
                         "itemName": "Wooden fence",
                         "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
                         "count": 2
@@ -7023,13 +7453,13 @@
                 },
                 {
                     "input": {
-                        "id": 14,
+                        "id": 16,
                         "itemName": "Brick",
                         "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                         "count": 6
                     },
                     "output": {
-                        "id": 32,
+                        "id": 34,
                         "itemName": "Brick wall",
                         "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
                         "count": 1
@@ -7044,61 +7474,61 @@
                     "count": 1
                 },
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 6
                 },
                 {
-                    "id": 2,
+                    "id": 3,
                     "itemName": "Stone",
                     "definitionAssetPath": "Assets/Data/Items/Item_4_Stone.asset",
                     "count": 8
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 1
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
                 },
                 {
-                    "id": 13,
+                    "id": 15,
                     "itemName": "CooperPlate",
                     "definitionAssetPath": "Assets/Data/Items/Item_11_CooperPlate.asset",
                     "count": 1
                 },
                 {
-                    "id": 21,
+                    "id": 23,
                     "itemName": "Conveyor belt",
                     "definitionAssetPath": "Assets/Data/Items/Item_16_Conveyor Belt.asset",
                     "count": 3
                 },
                 {
-                    "id": 12,
+                    "id": 14,
                     "itemName": "Iron plate",
                     "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
                     "count": 3
                 },
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 },
                 {
-                    "id": 14,
+                    "id": 16,
                     "itemName": "Brick",
                     "definitionAssetPath": "Assets/Data/Items/Item_12_Brick.asset",
                     "count": 6
@@ -7106,81 +7536,81 @@
             ],
             "outputList": [
                 {
-                    "id": 6,
+                    "id": 8,
                     "itemName": "Woodplank",
                     "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 2
                 },
                 {
-                    "id": 7,
+                    "id": 9,
                     "itemName": "Wooden Box",
                     "definitionAssetPath": "Assets/Data/Items/Item_13_Wooden Box.asset",
                     "count": 1
                 },
                 {
-                    "id": 9,
+                    "id": 11,
                     "itemName": "Funance",
                     "definitionAssetPath": "Assets/Data/Items/Item_8_Funance.asset",
                     "count": 1
                 },
                 {
-                    "id": 15,
+                    "id": 17,
                     "itemName": "Nail",
                     "definitionAssetPath": "Assets/Data/Items/Item_14_Nail.asset",
                     "count": 2
                 },
                 {
-                    "id": 16,
+                    "id": 18,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
                     "count": 1
                 },
                 {
-                    "id": 17,
+                    "id": 19,
                     "itemName": "Drill",
                     "definitionAssetPath": "Assets/Data/Items/Item_19_Drill.asset",
                     "count": 1
                 },
                 {
-                    "id": 19,
+                    "id": 21,
                     "itemName": "Coil",
                     "definitionAssetPath": "Assets/Data/Items/Item_18_Coil.asset",
                     "count": 1
                 },
                 {
-                    "id": 22,
+                    "id": 24,
                     "itemName": "Conveyor belt 2F",
                     "definitionAssetPath": "Assets/Data/Items/Item_26_Conveyor belt 2F.asset",
                     "count": 1
                 },
                 {
-                    "id": 23,
+                    "id": 25,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
                     "count": 1
                 },
                 {
-                    "id": 30,
+                    "id": 32,
                     "itemName": "Wooden fence",
                     "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
                     "count": 2
                 },
                 {
-                    "id": 32,
+                    "id": 34,
                     "itemName": "Brick wall",
                     "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
                     "count": 1
                 }
             ],
             "output": {
-                "id": 6,
+                "id": 8,
                 "itemName": "Woodplank",
                 "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                 "count": 2
             }
         },
         {
-            "id": 30,
+            "id": 32,
             "itemName": "Wooden fence",
             "definitionAssetPath": "Assets/Data/Items/Item_22_Wooden Fence.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Wooden fence/Wooden fence.prefab",
@@ -7233,7 +7663,7 @@
             }
         },
         {
-            "id": 31,
+            "id": 33,
             "itemName": "Wooden fence door",
             "definitionAssetPath": "Assets/Data/Items/Item_23_Wooden Fence Door.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Wooden Fence door/Wooden fence door.prefab",
@@ -7289,7 +7719,7 @@
             }
         },
         {
-            "id": 32,
+            "id": 34,
             "itemName": "Brick wall",
             "definitionAssetPath": "Assets/Data/Items/Item_24_Brick Wall.asset",
             "mapObjectAssetPath": "Assets/MapObject/Wall/Brick Wall/Brick Wall.prefab",
@@ -7326,6 +7756,59 @@
             "mapFilterValue": 37,
             "mapObjectName": "Brick Wall",
             "mapObjectType": "Wall",
+            "inputOutputLayoutType": "",
+            "rectGridWidth": 0,
+            "rectGridHeight": 0,
+            "rectGridCells": [],
+            "rectGridBlocks": [],
+            "ioPairs": [],
+            "inputList": [],
+            "outputList": [],
+            "output": {
+                "id": -1,
+                "itemName": "",
+                "definitionAssetPath": "",
+                "count": 1
+            }
+        },
+        {
+            "id": 35,
+            "itemName": "Utility pole",
+            "definitionAssetPath": "Assets/Data/Items/Item_34_Utility pole.asset",
+            "mapObjectAssetPath": "Assets/MapObject/Electro/Utility pole/Utility pole.prefab",
+            "portableMeshAssetPath": "Assets/MapObject/Package_P.mesh",
+            "portableMaterialAssetPath": "Assets/MapObject/M_Package_P.mat",
+            "iconAssetPath": "Assets/Items/Electro/Utility pole/Utility pole_Icon.png",
+            "interactionButtonAssetPaths": [],
+            "size": 0,
+            "itemFilter": false,
+            "capacity": 10,
+            "storesFluid": false,
+            "fluidStorageLiters": 0.0,
+            "craftingDurationSeconds": 5.0,
+            "craftingTime": 5.0,
+            "energyType": "None",
+            "energyTypeValue": 0,
+            "energyAmount": 0,
+            "useEnergyType": "None",
+            "useEnergyTypeValue": 0,
+            "useEnergyAmount": 0.0,
+            "completeEnergy": 0.0,
+            "mapSizeX": 1,
+            "mapSizeY": 1,
+            "placementCenterX": 0,
+            "placementCenterY": 0,
+            "focusRadius": 1.0,
+            "workableFocusRadius": -1.0,
+            "workableRangeCells": -1,
+            "conveyorSpeed": -1.0,
+            "waterLitersPerSecond": -1.0,
+            "multiFocusMode": "NearOne",
+            "multiFocusModeValue": 1,
+            "mapFilter": "Ground, Ore, WaterOutline",
+            "mapFilterValue": 37,
+            "mapObjectName": "Utility pole",
+            "mapObjectType": "UtilityPole",
             "inputOutputLayoutType": "",
             "rectGridWidth": 0,
             "rectGridHeight": 0,

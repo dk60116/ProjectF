@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_13_Wooden Box
   m_EditorClassIdentifier: 
   itemName: Wooden Box
-  id: 8
+  id: 10
   mapObject: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}

@@ -2178,6 +2178,229 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
+    public bool TryGetRectGridObjectAnchorCell(MapObject footprintSource, out Vector2Int objectAnchorCell)
+    {
+        objectAnchorCell = Vector2Int.zero;
+        EnsureRectGridData();
+        EnsureRectGridPlacementData();
+        if (slotLayoutType != SlotLayoutType.RectGrid || rectGridPlacements == null || rectGridPlacements.Count <= 0)
+        {
+            return false;
+        }
+
+        bool foundObject = false;
+        int minX = int.MaxValue;
+        int maxX = int.MinValue;
+        int minY = int.MaxValue;
+        int maxY = int.MinValue;
+        for (int i = 0; i < rectGridPlacements.Count; i++)
+        {
+            RectGridBlockPlacement placement = rectGridPlacements[i];
+            if (placement.blockType != RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            foundObject = true;
+            minX = Mathf.Min(minX, placement.x);
+            maxX = Mathf.Max(maxX, placement.x);
+            minY = Mathf.Min(minY, placement.y);
+            maxY = Mathf.Max(maxY, placement.y);
+        }
+
+        if (!foundObject)
+        {
+            return false;
+        }
+
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        Vector2Int centerCell = anchorSource != null
+            ? anchorSource.PlacementCenterCell
+            : Vector2Int.zero;
+        Vector2Int desiredCell = new Vector2Int(
+            minX + Mathf.Clamp(centerCell.x, 0, Mathf.Max(0, maxX - minX)),
+            minY + Mathf.Clamp(centerCell.y, 0, Mathf.Max(0, maxY - minY)));
+        if (GetRectGridBlockAt(desiredCell.x, desiredCell.y) == RectGridBlockType.Object)
+        {
+            objectAnchorCell = desiredCell;
+            return true;
+        }
+
+        int bestIndex = -1;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < rectGridPlacements.Count; i++)
+        {
+            RectGridBlockPlacement placement = rectGridPlacements[i];
+            if (placement.blockType != RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            int distance = Mathf.Abs(placement.x - desiredCell.x) + Mathf.Abs(placement.y - desiredCell.y);
+            if (distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            bestIndex = i;
+        }
+
+        if (bestIndex < 0)
+        {
+            return false;
+        }
+
+        RectGridBlockPlacement nearestObjectPlacement = rectGridPlacements[bestIndex];
+        objectAnchorCell = new Vector2Int(nearestObjectPlacement.x, nearestObjectPlacement.y);
+        return true;
+    }
+
+    public bool TryGetRectGridPlacementCoordinate(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        RectGridBlockPlacement placement,
+        out Vector2Int coordinate)
+    {
+        coordinate = Vector2Int.zero;
+        EnsureRectGridData();
+        EnsureRectGridPlacementData();
+        if (slotLayoutType != SlotLayoutType.RectGrid
+            || placement.blockType == RectGridBlockType.None
+            || !IsValidRectGridCell(placement.x, placement.y)
+            || !TryGetRectGridObjectAnchorCell(footprintSource, out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        Vector2Int localOffset = new Vector2Int(
+            placement.x - objectAnchorCell.x,
+            placement.y - objectAnchorCell.y);
+        coordinate = anchorCoordinate + RotateRectGridOffset(localOffset, quarterTurns);
+        return true;
+    }
+
+    public bool TryGetRectGridBlockTypeAtCoordinate(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out RectGridBlockType blockType)
+    {
+        blockType = RectGridBlockType.None;
+        EnsureRectGridData();
+        EnsureRectGridPlacementData();
+        if (slotLayoutType != SlotLayoutType.RectGrid || rectGridPlacements == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < rectGridPlacements.Count; i++)
+        {
+            RectGridBlockPlacement placement = rectGridPlacements[i];
+            if (!TryGetRectGridPlacementCoordinate(
+                    footprintSource,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int placementCoordinate)
+                || placementCoordinate != coordinate)
+            {
+                continue;
+            }
+
+            blockType = placement.blockType;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetNearestRectGridObjectDirection(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        EnsureRectGridData();
+        EnsureRectGridPlacementData();
+        if (slotLayoutType != SlotLayoutType.RectGrid
+            || rectGridPlacements == null
+            || !TryGetRectGridObjectAnchorCell(footprintSource, out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        Vector2Int bestDelta = Vector2Int.zero;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < rectGridPlacements.Count; i++)
+        {
+            RectGridBlockPlacement placement = rectGridPlacements[i];
+            if (placement.blockType != RectGridBlockType.Object)
+            {
+                continue;
+            }
+
+            Vector2Int localOffset = new Vector2Int(
+                placement.x - objectAnchorCell.x,
+                placement.y - objectAnchorCell.y);
+            Vector2Int objectCoordinate = anchorCoordinate + RotateRectGridOffset(localOffset, quarterTurns);
+            Vector2Int delta = objectCoordinate - coordinate;
+            int distance = Mathf.Abs(delta.x) + Mathf.Abs(delta.y);
+            if (distance <= 0 || distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            bestDelta = delta;
+        }
+
+        return TryGetDominantCardinalDirection(bestDelta, out direction);
+    }
+
+    public static Vector2Int RotateRectGridOffset(Vector2Int offset, int quarterTurns)
+    {
+        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        switch (normalizedQuarterTurns)
+        {
+            case 1:
+                return new Vector2Int(offset.y, -offset.x);
+            case 2:
+                return new Vector2Int(-offset.x, -offset.y);
+            case 3:
+                return new Vector2Int(-offset.y, offset.x);
+            default:
+                return offset;
+        }
+    }
+
+    public static bool TryGetDominantCardinalDirection(Vector2Int offset, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        if (offset == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (Mathf.Abs(offset.x) >= Mathf.Abs(offset.y) && offset.x != 0)
+        {
+            direction = new Vector2Int(offset.x > 0 ? 1 : -1, 0);
+            return true;
+        }
+
+        if (offset.y != 0)
+        {
+            direction = new Vector2Int(0, offset.y > 0 ? 1 : -1);
+            return true;
+        }
+
+        return false;
+    }
+
     public bool TryGetInitialOutputDirection(out RectGridDirection direction)
     {
         EnsureRectGridPlacementData();

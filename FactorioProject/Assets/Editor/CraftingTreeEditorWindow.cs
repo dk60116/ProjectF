@@ -11,6 +11,8 @@ public class CraftingTreeEditorWindow : EditorWindow
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
     private const int OutputCountCraftingTreeFileVersion = 2;
     private const int LegacyCraftingTreeFileVersion = 1;
+    private static readonly Color DropFillColor = new Color(0.35f, 0.65f, 1f, 0.16f);
+    private static readonly Color DropOutlineColor = new Color(0.35f, 0.65f, 1f, 0.95f);
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedItemId = -1;
@@ -162,7 +164,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 continue;
             }
 
-            string displayName = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName;
+            string displayName = GetDefinitionDisplayName(definition);
             bool isSelected = definition.id == selectedItemId;
             Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
             GUIContent content = new GUIContent($"[{definition.id}] {displayName}", GetItemIcon(definition));
@@ -290,7 +292,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         GUILayout.EndVertical();
 
         GUILayout.BeginVertical();
-        string displayName = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName;
+        string displayName = GetDefinitionDisplayName(definition);
         EditorGUILayout.LabelField($"[{definition.id}] {displayName}", EditorStyles.largeLabel);
         EditorGUILayout.LabelField("필요 재료를 아래에서 추가/편집하세요.", EditorStyles.miniLabel);
         GUILayout.EndVertical();
@@ -363,7 +365,9 @@ public class CraftingTreeEditorWindow : EditorWindow
         if (GUILayout.Button("Add", GUILayout.Width(60f)))
         {
             List<MapObject> selectedMapObjects = GetOrCreateCraftingMapObjects(targetDefinition.id);
-            selectedMapObjects.Add(GetNextCraftingMapObjectCandidate(mapObjects, selectedMapObjects));
+            AddCraftingMapObjectIfMissing(
+                selectedMapObjects,
+                GetNextCraftingMapObjectCandidate(mapObjects, selectedMapObjects));
         }
         GUILayout.EndHorizontal();
 
@@ -376,7 +380,12 @@ public class CraftingTreeEditorWindow : EditorWindow
         List<MapObject> selectedObjects = GetOrCreateCraftingMapObjects(targetDefinition.id);
         if (selectedObjects.Count <= 0)
         {
-            EditorGUILayout.HelpBox("필요한 Crafting MapObject를 추가하세요.", MessageType.None);
+            Rect emptyDropRect = GUILayoutUtility.GetRect(1f, 36f, GUILayout.ExpandWidth(true));
+            EditorGUI.HelpBox(emptyDropRect, "필요한 Crafting MapObject를 추가하세요.", MessageType.None);
+            if (HandleMapObjectDropTarget(emptyDropRect, this, mapObjects, out MapObject droppedMapObject))
+            {
+                AddCraftingMapObjectIfMissing(selectedObjects, droppedMapObject);
+            }
             return;
         }
 
@@ -390,7 +399,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             Rect iconRect = GUILayoutUtility.GetRect(22f, 22f, GUILayout.ExpandWidth(false));
             DrawIconBackground(iconRect);
             DrawMapObjectIcon(iconRect, currentSelection);
-            int newIndex = DrawMapObjectPopup(currentIndex, mapObjects);
+            int newIndex = DrawMapObjectPopup(currentIndex, mapObjects, iconRect, out MapObject droppedMapObject);
             if (GUILayout.Button("X", GUILayout.Width(24f)))
             {
                 selectedObjects.RemoveAt(i);
@@ -401,7 +410,9 @@ public class CraftingTreeEditorWindow : EditorWindow
             EditorGUILayout.EndHorizontal();
             if (EditorGUI.EndChangeCheck())
             {
-                selectedObjects[i] = newIndex > 0 ? mapObjects[newIndex - 1] : null;
+                selectedObjects[i] = droppedMapObject != null
+                    ? droppedMapObject
+                    : (newIndex > 0 ? mapObjects[newIndex - 1] : null);
             }
         }
     }
@@ -691,7 +702,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return null;
         }
 
-        GameObject prefabRoot = mapObject.transform.root != null ? mapObject.transform.root.gameObject : mapObject.gameObject;
+        GameObject prefabRoot = GetMapObjectPrefabRoot(mapObject);
         return new CraftingMapObjectJsonEntry
         {
             itemId = mapObject.ResolveItemId(),
@@ -1155,21 +1166,6 @@ public class CraftingTreeEditorWindow : EditorWindow
         return results;
     }
 
-    private static string[] BuildMapObjectNames(List<MapObject> mapObjects)
-    {
-        string[] names = new string[mapObjects.Count + 1];
-        names[0] = "(None)";
-
-        for (int i = 0; i < mapObjects.Count; i++)
-        {
-            MapObject mapObject = mapObjects[i];
-            string displayName = mapObject != null ? mapObject.gameObject.name : "(Missing)";
-            names[i + 1] = displayName;
-        }
-
-        return names;
-    }
-
     private void EnsureVisibleSelection(List<ItemDefinition> definitions, List<ItemDefinition> visibleDefinitions)
     {
         if (visibleDefinitions != null && visibleDefinitions.Count > 0)
@@ -1239,8 +1235,8 @@ public class CraftingTreeEditorWindow : EditorWindow
                 return idCompare;
             }
 
-            string leftName = string.IsNullOrWhiteSpace(left.itemName) ? left.name : left.itemName;
-            string rightName = string.IsNullOrWhiteSpace(right.itemName) ? right.name : right.itemName;
+            string leftName = GetDefinitionDisplayName(left);
+            string rightName = GetDefinitionDisplayName(right);
             return string.Compare(leftName, rightName, StringComparison.OrdinalIgnoreCase);
         });
 
@@ -1259,7 +1255,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return true;
         }
 
-        string displayName = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName;
+        string displayName = GetDefinitionDisplayName(definition);
         if (!string.IsNullOrWhiteSpace(displayName) &&
             displayName.IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0)
         {
@@ -1311,9 +1307,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition definition = definitions[i];
-            string displayName = definition == null
-                ? "(Missing)"
-                : (string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName);
+            string displayName = GetDefinitionDisplayName(definition);
             int id = definition != null ? definition.id : -1;
             GUIContent content = new GUIContent($"[{id}] {displayName}", GetItemIcon(definition));
             options.Add(content);
@@ -1322,11 +1316,26 @@ public class CraftingTreeEditorWindow : EditorWindow
         return options;
     }
 
-    private int DrawMapObjectPopup(int currentIndex, List<MapObject> mapObjects)
+    private int DrawMapObjectPopup(
+        int currentIndex,
+        List<MapObject> mapObjects,
+        Rect iconRect,
+        out MapObject droppedMapObject)
     {
+        droppedMapObject = null;
         List<GUIContent> options = BuildMapObjectContents(mapObjects);
         int safeIndex = Mathf.Clamp(currentIndex, 0, options.Count - 1);
-        return EditorGUILayout.Popup(safeIndex, options.ToArray());
+        Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
+        int nextIndex = EditorGUI.Popup(popupRect, safeIndex, options.ToArray());
+
+        Rect dropRect = Rect.MinMaxRect(
+            iconRect.xMin,
+            Mathf.Min(iconRect.yMin, popupRect.yMin),
+            popupRect.xMax,
+            Mathf.Max(iconRect.yMax, popupRect.yMax));
+        HandleMapObjectDropTarget(dropRect, this, mapObjects, out droppedMapObject);
+
+        return nextIndex;
     }
 
     private static List<GUIContent> BuildMapObjectContents(List<MapObject> mapObjects)
@@ -1343,6 +1352,200 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         return options;
+    }
+
+    private static bool HandleMapObjectDropTarget(
+        Rect rect,
+        EditorWindow owner,
+        List<MapObject> candidates,
+        out MapObject droppedMapObject)
+    {
+        droppedMapObject = ResolveDraggedMapObject(candidates);
+        if (droppedMapObject == null)
+        {
+            return false;
+        }
+
+        Event current = Event.current;
+        if (current == null || !rect.Contains(current.mousePosition))
+        {
+            return false;
+        }
+
+        switch (current.type)
+        {
+            case EventType.DragUpdated:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+                owner?.Repaint();
+                current.Use();
+                break;
+
+            case EventType.DragPerform:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+                DragAndDrop.AcceptDrag();
+                GUI.changed = true;
+                owner?.Repaint();
+                current.Use();
+                return true;
+
+            case EventType.Repaint:
+                DrawDropHighlight(rect);
+                break;
+        }
+
+        return false;
+    }
+
+    private static MapObject ResolveDraggedMapObject(List<MapObject> candidates)
+    {
+        MapObject mapObject = ResolveDraggedMapObjectReference();
+        if (mapObject != null)
+        {
+            return FindMatchingMapObjectCandidate(candidates, mapObject) ?? mapObject;
+        }
+
+        if (ItemDefinitionDragAndDropUtility.TryGetDraggedDefinition(out ItemDefinition draggedDefinition))
+        {
+            return FindMapObjectCandidateByItemId(candidates, draggedDefinition != null ? draggedDefinition.id : -1);
+        }
+
+        return null;
+    }
+
+    private static MapObject ResolveDraggedMapObjectReference()
+    {
+        UnityEngine.Object[] objectReferences = DragAndDrop.objectReferences;
+        if (objectReferences == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < objectReferences.Length; i++)
+        {
+            UnityEngine.Object reference = objectReferences[i];
+            if (reference is MapObject mapObject)
+            {
+                return mapObject;
+            }
+
+            if (reference is GameObject gameObject)
+            {
+                MapObject candidate = gameObject.GetComponent<MapObject>();
+                if (candidate == null)
+                {
+                    candidate = gameObject.GetComponentInChildren<MapObject>(true);
+                }
+
+                if (candidate != null)
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static MapObject FindMatchingMapObjectCandidate(List<MapObject> candidates, MapObject mapObject)
+    {
+        if (candidates == null || mapObject == null)
+        {
+            return null;
+        }
+
+        string assetPath = GetMapObjectAssetPath(mapObject);
+        int itemId = mapObject.ResolveItemId();
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            MapObject candidate = candidates[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            if (candidate == mapObject)
+            {
+                return candidate;
+            }
+
+            if (!string.IsNullOrWhiteSpace(assetPath)
+                && string.Equals(GetMapObjectAssetPath(candidate), assetPath, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+
+            if (itemId >= 0 && candidate.ResolveItemId() == itemId)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static MapObject FindMapObjectCandidateByItemId(List<MapObject> candidates, int itemId)
+    {
+        if (candidates == null || itemId < 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            MapObject candidate = candidates[i];
+            if (candidate != null && candidate.ResolveItemId() == itemId)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetMapObjectAssetPath(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return string.Empty;
+        }
+
+        return AssetDatabase.GetAssetPath(GetMapObjectPrefabRoot(mapObject));
+    }
+
+    private static GameObject GetMapObjectPrefabRoot(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        return mapObject.transform.root != null
+            ? mapObject.transform.root.gameObject
+            : mapObject.gameObject;
+    }
+
+    private static void AddCraftingMapObjectIfMissing(List<MapObject> selectedObjects, MapObject mapObject)
+    {
+        if (selectedObjects == null || mapObject == null || selectedObjects.Contains(mapObject))
+        {
+            return;
+        }
+
+        selectedObjects.Add(mapObject);
+    }
+
+    private static void DrawDropHighlight(Rect rect)
+    {
+        EditorGUI.DrawRect(rect, DropFillColor);
+        DrawOutline(rect, DropOutlineColor);
+    }
+
+    private static void DrawOutline(Rect rect, Color color)
+    {
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, rect.width, 1f), color);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMax - 1f, rect.width, 1f), color);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, 1f, rect.height), color);
+        EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.yMin, 1f, rect.height), color);
     }
 
     private static Texture GetItemIcon(ItemDefinition definition)
@@ -1414,20 +1617,6 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         return 0;
-    }
-
-    private static string[] BuildDefinitionNames(List<ItemDefinition> definitions)
-    {
-        string[] names = new string[definitions.Count];
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            string displayName = definition == null ? "(Missing)" : (string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName);
-            int id = definition != null ? definition.id : -1;
-            names[i] = $"[{id}] {displayName}";
-        }
-
-        return names;
     }
 
     private static ItemDefinition FindDefinitionById(List<ItemDefinition> definitions, int id)
