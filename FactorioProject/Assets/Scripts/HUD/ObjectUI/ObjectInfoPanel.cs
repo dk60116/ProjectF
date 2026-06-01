@@ -5,6 +5,8 @@ using UnityEngine.UI;
 
 public class ObjectInfoPanel : MonoBehaviour
 {
+    private const float LayoutRefreshInterval = 0.5f;
+
     [SerializeField, HideInInspector]
     [FormerlySerializedAs("focusedObjectSlot")]
     private ItemSlot focusedObjectSlot;
@@ -16,6 +18,10 @@ public class ObjectInfoPanel : MonoBehaviour
     private ItemInfoDescription infoLine;
 
     private MapObject boundObject;
+    private MapObject focusedPanelMapObject;
+    private Resource focusedPanelUnderlyingResource;
+    private bool referencesResolved;
+    private float nextLayoutRefreshTime;
 
     private void Awake()
     {
@@ -25,6 +31,7 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void OnValidate()
     {
+        referencesResolved = false;
         ResolveReferences();
     }
 
@@ -49,6 +56,7 @@ public class ObjectInfoPanel : MonoBehaviour
         RefreshInfoLine(mapObject, underlyingResource);
 
         RefreshInfoLineRectTransformImmediate();
+        nextLayoutRefreshTime = Time.unscaledTime + LayoutRefreshInterval;
     }
 
     public void Refresh()
@@ -63,12 +71,13 @@ public class ObjectInfoPanel : MonoBehaviour
         Resource underlyingResource = ResolveUnderlyingResource(boundObject);
         RefreshFocusedInfoPanels(boundObject, underlyingResource);
         RefreshInfoLine(boundObject, underlyingResource);
-        RefreshInfoLineRectTransformImmediate();
+        RefreshInfoLineRectTransformThrottled();
     }
 
     public void Clear()
     {
         boundObject = null;
+        nextLayoutRefreshTime = 0f;
         ResolveReferences();
         ClearFocusedInfoPanels();
         CloseInfoLine();
@@ -85,6 +94,11 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void ResolveReferences()
     {
+        if (referencesResolved && infoLine != null && IsLocalComponent(infoLine))
+        {
+            return;
+        }
+
         if (infoLine == null || !IsLocalComponent(infoLine))
         {
             infoLine = GetComponentInChildren<ItemInfoDescription>(true);
@@ -92,12 +106,11 @@ public class ObjectInfoPanel : MonoBehaviour
 
         ResolveFocusedInfoPanelReferences();
         CloseExtraInfoLines();
+        referencesResolved = true;
     }
 
     private void RefreshInfoLine(MapObject mapObject, Resource underlyingResource)
     {
-        CloseInfoLine();
-
         if (mapObject is Resource resource)
         {
             ShowResourceInfo(resource);
@@ -128,6 +141,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is UtilityPole utilityPole)
+        {
+            ShowUtilityPoleInfo(utilityPole, underlyingResource);
+            return;
+        }
+
         if (mapObject is InputOutputModule inputOutputModule)
         {
             ShowInputOutputModuleInfo(inputOutputModule, underlyingResource);
@@ -139,17 +158,30 @@ public class ObjectInfoPanel : MonoBehaviour
             ShowInstallationObjectInfo(installationObject, underlyingResource);
             return;
         }
+
+        CloseInfoLine();
     }
 
     private void RefreshFocusedInfoPanels(MapObject mapObject, Resource underlyingResource)
     {
+        if (focusedPanelMapObject == mapObject
+            && focusedPanelUnderlyingResource == underlyingResource)
+        {
+            return;
+        }
+
         ClearFocusedInfoPanels();
         SetFocusedInfoPanelItem(1, underlyingResource, underlyingResource != null);
         SetFocusedInfoPanelItem(0, mapObject, true);
+        focusedPanelMapObject = mapObject;
+        focusedPanelUnderlyingResource = underlyingResource;
     }
 
     private void ClearFocusedInfoPanels()
     {
+        focusedPanelMapObject = null;
+        focusedPanelUnderlyingResource = null;
+
         int count = Mathf.Max(
             focusedInfoPanels != null ? focusedInfoPanels.Count : 0,
             focusedObjectSlots != null ? focusedObjectSlots.Count : 0);
@@ -333,6 +365,21 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowRobotArm(robotArm, underlyingResource);
     }
 
+    private void ShowUtilityPoleInfo(UtilityPole utilityPole, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowUtilityPole(utilityPole, underlyingResource);
+    }
+
     private void ShowInputOutputModuleInfo(InputOutputModule inputOutputModule, Resource underlyingResource)
     {
         if (infoLine == null)
@@ -424,6 +471,18 @@ public class ObjectInfoPanel : MonoBehaviour
         {
             infoLine.gameObject.SetActive(false);
         }
+    }
+
+    private void RefreshInfoLineRectTransformThrottled()
+    {
+        float now = Time.unscaledTime;
+        if (now < nextLayoutRefreshTime)
+        {
+            return;
+        }
+
+        nextLayoutRefreshTime = now + LayoutRefreshInterval;
+        RefreshInfoLineRectTransformImmediate();
     }
 
     private void RefreshInfoLineRectTransformImmediate()

@@ -575,7 +575,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Wooden Box
-  objId: 10
+  objId: 11
   itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -587,6 +587,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
+  particleEffect: {fileID: 0}
   mapFilter: 45
   installationFocusRadius: 1
   installedDirection: 0

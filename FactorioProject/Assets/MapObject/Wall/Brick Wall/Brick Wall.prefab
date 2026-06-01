@@ -193,7 +193,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Brick wall
-  objId: 35
+  objId: 37
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -205,6 +205,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
+  particleEffect: {fileID: 0}
   mapFilter: 37
   installationFocusRadius: 1
   installedDirection: 0

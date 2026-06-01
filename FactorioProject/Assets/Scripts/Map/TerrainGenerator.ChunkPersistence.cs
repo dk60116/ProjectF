@@ -1189,6 +1189,10 @@ public partial class TerrainGenerator : MonoBehaviour
         public int biomeGridMinY;
         public int biomeGridWidth;
         public int biomeGridHeight;
+        public int mapMinX;
+        public int mapMinY;
+        public int mapMaxExclusiveX;
+        public int mapMaxExclusiveY;
         public TerrainBiome[] biomeGrid;
         public bool[] blockedWaterGrid;
         public float generatedSurfaceYOffset;
@@ -1720,8 +1724,17 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (installationObject is MiningMachine)
         {
-            return anchorCoordinate == worldCoordinate
-                   && resourcePrefab.ResolvedHarvestMode == Resource.HarvestMode.Mining;
+            if (resourcePrefab.ResolvedHarvestMode != Resource.HarvestMode.Mining)
+            {
+                return false;
+            }
+
+            if (installationState.occupiedCoordinates != null && installationState.occupiedCoordinates.Count > 0)
+            {
+                return installationState.occupiedCoordinates.Contains(worldCoordinate);
+            }
+
+            return anchorCoordinate == worldCoordinate;
         }
 
         InstallationMapFilter allowedFilter = InstallationPlacementController.ResolvePlacementMapFilter(

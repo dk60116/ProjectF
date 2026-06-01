@@ -12,6 +12,11 @@ public partial class TerrainGenerator : MonoBehaviour
 {
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
+    private const int MinMapSize = 32;
+    private const float IslandLandRadius = 0.78f;
+    private const float IslandCoastNoiseScale = 0.024f;
+    private const float IslandCoastDetailNoiseScale = 0.067f;
+    private const float IslandCoastIrregularity = 0.09f;
     private const float BackgroundConveyorSimulationInterval = 0.05f;
     private const int BackgroundConveyorSimulationPassesPerTick = 1;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
@@ -59,6 +64,7 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     public int CurrentSeed => seed;
+    public int CurrentMapSize => GetNormalizedMapSize();
 
     public enum ResourcePlacementMode
     {
@@ -235,13 +241,11 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField]
     private List<ResourceEntry> reedResources = new List<ResourceEntry>();
 
-    private Resource stone;
-    private Resource coal;
-    private Resource iron;
-    private Resource cooper;
-
     [SerializeField, Min(4)]
     private int chunkSize = 16;
+
+    [SerializeField, Min(MinMapSize)]
+    private int mapSize = 256;
 
     [SerializeField, Min(0)]
     private int loadRadius = 2;
@@ -496,22 +500,6 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(0)]
     private int starterWaterExclusionRadius = 2;
 
-    [SerializeField, Range(0f, 1f)]
-    [HideInInspector]
-    private float stoneSpawnChance = 0.1f;
-
-    [SerializeField, Range(0f, 1f)]
-    [HideInInspector]
-    private float coalSpawnChance = 0.1f;
-
-    [SerializeField, Range(0f, 1f)]
-    [HideInInspector]
-    private float ironSpawnChance = 0.1f;
-
-    [SerializeField, Range(0f, 1f)]
-    [HideInInspector]
-    private float cooperSpawnChance = 0.1f;
-
     [SerializeField, Min(0.001f)]
     private float resourcePatchScale = 0.12f;
 
@@ -711,8 +699,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void OnValidate()
     {
-        MigrateLegacyResourcesIfNeeded();
-        UpgradeLegacyGeneratedSurfaceBlendSettings();
+        NormalizeTerrainBoundsSettings();
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
@@ -722,13 +709,8 @@ public partial class TerrainGenerator : MonoBehaviour
         waterSurfaceGlintOffset = Mathf.Max(0f, waterSurfaceGlintOffset);
         waterSurfaceGlintScale = Mathf.Max(0.01f, waterSurfaceGlintScale);
         waterSurfaceGlintFlowSpeed = Mathf.Max(0f, waterSurfaceGlintFlowSpeed);
-        NormalizeOreBodyScaleSettings();
-        oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
-        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
-        NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
-        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
-        SyncResourceEntryDefinitions();
-        InvalidateStarterTreeCache();
+        NormalizeResourceGenerationSettings();
+        InvalidateTerrainGenerationCaches();
 #if UNITY_EDITOR
         PopulateGeneratedSurfaceBlendEditorDefaults();
 #endif
@@ -754,15 +736,38 @@ public partial class TerrainGenerator : MonoBehaviour
             MaxOreBodyScaleRatioLimit);
     }
 
-    private void Start()
+    private void NormalizeResourceGenerationSettings()
     {
-        MigrateLegacyResourcesIfNeeded();
-        UpgradeLegacyGeneratedSurfaceBlendSettings();
         NormalizeOreBodyScaleSettings();
-        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
+        oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
+        NormalizeResourceEntries(
+            oreResources,
+            normalOreMinResourceCount,
+            normalOreMaxResourceCount,
+            starterOreMinResourceCount,
+            starterOreMaxResourceCount);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
+    }
+
+    private void NormalizeTerrainBoundsSettings()
+    {
+        chunkSize = Mathf.Max(4, chunkSize);
+        mapSize = Mathf.Max(MinMapSize, mapSize);
+    }
+
+    private void InvalidateTerrainGenerationCaches()
+    {
+        InvalidateStarterTreeCache();
+        InvalidateTerrainBiomeDataCaches();
+        InvalidateTerrainBiomeMaterialCaches();
+    }
+
+    private void Start()
+    {
+        NormalizeTerrainBoundsSettings();
+        NormalizeResourceGenerationSettings();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
@@ -942,7 +947,8 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         return new TerrainSaveData
         {
-            seed = seed
+            seed = seed,
+            mapSize = GetNormalizedMapSize()
         };
     }
 
@@ -963,12 +969,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void LoadFromSaveState(TerrainSaveData terrainSaveData, MapSaveData mapSaveData)
     {
-        MigrateLegacyResourcesIfNeeded();
-        NormalizeOreBodyScaleSettings();
-        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
-        NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
-        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
-        SyncResourceEntryDefinitions();
+        NormalizeTerrainBoundsSettings();
+        NormalizeResourceGenerationSettings();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
@@ -976,15 +978,18 @@ public partial class TerrainGenerator : MonoBehaviour
         if (terrainSaveData != null)
         {
             seed = terrainSaveData.seed;
-            chunkSize = Mathf.Max(4, chunkSize);
+            if (terrainSaveData.mapSize > 0)
+            {
+                mapSize = terrainSaveData.mapSize;
+            }
+
+            NormalizeTerrainBoundsSettings();
             loadRadius = Mathf.Max(0, loadRadius);
             unloadRadius = Mathf.Max(loadRadius + 1, unloadRadius);
             hasSeedInitialized = true;
         }
 
-        InvalidateStarterTreeCache();
-        InvalidateTerrainBiomeDataCaches();
-        InvalidateTerrainBiomeMaterialCaches();
+        InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
         resourceStateStore?.ApplySaveState(mapSaveData);
@@ -1256,17 +1261,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void Generate()
     {
-        MigrateLegacyResourcesIfNeeded();
-        NormalizeOreBodyScaleSettings();
-        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
-        NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
-        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
-        SyncResourceEntryDefinitions();
+        NormalizeTerrainBoundsSettings();
+        NormalizeResourceGenerationSettings();
         EnsureResourceStateStore();
         InitializeSeedForGeneration();
-        InvalidateStarterTreeCache();
-        InvalidateTerrainBiomeDataCaches();
-        InvalidateTerrainBiomeMaterialCaches();
+        InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
         resourceStateStore?.ClearStates();
@@ -1284,16 +1283,10 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        MigrateLegacyResourcesIfNeeded();
-        NormalizeOreBodyScaleSettings();
-        NormalizeResourceEntries(oreResources, normalOreMinResourceCount, normalOreMaxResourceCount, starterOreMinResourceCount, starterOreMaxResourceCount);
-        NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
-        NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
-        SyncResourceEntryDefinitions();
+        NormalizeTerrainBoundsSettings();
+        NormalizeResourceGenerationSettings();
         EnsureResourceStateStore();
-        InvalidateStarterTreeCache();
-        InvalidateTerrainBiomeDataCaches();
-        InvalidateTerrainBiomeMaterialCaches();
+        InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks();
 
@@ -1311,9 +1304,74 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         seed = value;
         hasSeedInitialized = true;
-        InvalidateStarterTreeCache();
-        InvalidateTerrainBiomeDataCaches();
-        InvalidateTerrainBiomeMaterialCaches();
+        InvalidateTerrainGenerationCaches();
+    }
+
+    public bool IsCoordinateWithinMapBounds(Vector2Int worldCoordinate)
+    {
+        return IsCoordinateInsideMapBounds(worldCoordinate);
+    }
+
+    private int GetNormalizedMapSize()
+    {
+        return Mathf.Max(MinMapSize, mapSize);
+    }
+
+    private int GetMapMinCoordinate()
+    {
+        return -(GetNormalizedMapSize() / 2);
+    }
+
+    private int GetMapMaxExclusiveCoordinate()
+    {
+        return GetMapMinCoordinate() + GetNormalizedMapSize();
+    }
+
+    private bool IsCoordinateInsideMapBounds(Vector2Int worldCoordinate)
+    {
+        int min = GetMapMinCoordinate();
+        int maxExclusive = GetMapMaxExclusiveCoordinate();
+        return worldCoordinate.x >= min
+               && worldCoordinate.y >= min
+               && worldCoordinate.x < maxExclusive
+               && worldCoordinate.y < maxExclusive;
+    }
+
+    private bool DoesChunkIntersectMapBounds(Vector2Int chunkCoordinate, int normalizedChunkSize)
+    {
+        int chunkSizeInBlocks = Mathf.Max(4, normalizedChunkSize);
+        int chunkMinX = chunkCoordinate.x * chunkSizeInBlocks;
+        int chunkMinY = chunkCoordinate.y * chunkSizeInBlocks;
+        int chunkMaxExclusiveX = chunkMinX + chunkSizeInBlocks;
+        int chunkMaxExclusiveY = chunkMinY + chunkSizeInBlocks;
+        int mapMin = GetMapMinCoordinate();
+        int mapMaxExclusive = GetMapMaxExclusiveCoordinate();
+
+        return chunkMaxExclusiveX > mapMin
+               && chunkMaxExclusiveY > mapMin
+               && chunkMinX < mapMaxExclusive
+               && chunkMinY < mapMaxExclusive;
+    }
+
+    private Vector2Int ClampChunkCoordinateToMapBounds(Vector2Int chunkCoordinate, int normalizedChunkSize)
+    {
+        GetMapChunkRange(normalizedChunkSize, out Vector2Int minChunk, out Vector2Int maxChunk);
+        return new Vector2Int(
+            Mathf.Clamp(chunkCoordinate.x, minChunk.x, maxChunk.x),
+            Mathf.Clamp(chunkCoordinate.y, minChunk.y, maxChunk.y));
+    }
+
+    private void GetMapChunkRange(int normalizedChunkSize, out Vector2Int minChunk, out Vector2Int maxChunk)
+    {
+        int chunkSizeInBlocks = Mathf.Max(4, normalizedChunkSize);
+        int mapMin = GetMapMinCoordinate();
+        int mapMaxInclusive = GetMapMaxExclusiveCoordinate() - 1;
+        minChunk = new Vector2Int(
+            Mathf.FloorToInt(mapMin / (float)chunkSizeInBlocks),
+            Mathf.FloorToInt(mapMin / (float)chunkSizeInBlocks));
+        maxChunk = new Vector2Int(
+            Mathf.FloorToInt(mapMaxInclusive / (float)chunkSizeInBlocks),
+            Mathf.FloorToInt(mapMaxInclusive / (float)chunkSizeInBlocks));
     }
 
     private void RefreshTrackedChunks()
@@ -1342,6 +1400,10 @@ public partial class TerrainGenerator : MonoBehaviour
                 for (int chunkX = centerChunk.x - normalizedLoadRadius; chunkX <= centerChunk.x + normalizedLoadRadius; chunkX++)
                 {
                     Vector2Int chunkCoordinate = new Vector2Int(chunkX, chunkY);
+                    if (!DoesChunkIntersectMapBounds(chunkCoordinate, normalizedChunkSize))
+                    {
+                        continue;
+                    }
 
                     if (forceReload || (!loadedChunks.ContainsKey(chunkCoordinate) && !IsChunkGenerationActive(chunkCoordinate)))
                     {
@@ -1378,7 +1440,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 int distanceX = Mathf.Abs(loadedChunk.Key.x - centerChunk.x);
                 int distanceY = Mathf.Abs(loadedChunk.Key.y - centerChunk.y);
 
-                if (distanceX > normalizedUnloadRadius || distanceY > normalizedUnloadRadius)
+                if (!DoesChunkIntersectMapBounds(loadedChunk.Key, normalizedChunkSize)
+                    || distanceX > normalizedUnloadRadius
+                    || distanceY > normalizedUnloadRadius)
                 {
                     QueueChunkUnload(loadedChunk.Key);
                 }
@@ -1398,6 +1462,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private IEnumerator GenerateChunkRoutine(Vector2Int chunkCoordinate, int normalizedChunkSize, bool allowYield)
     {
+        if (!DoesChunkIntersectMapBounds(chunkCoordinate, normalizedChunkSize))
+        {
+            yield break;
+        }
+
         if (!TryGetBlockSet(Block.BlockType.Ground, out BlockSet groundSet))
         {
             yield break;
@@ -1447,6 +1516,11 @@ public partial class TerrainGenerator : MonoBehaviour
             for (int localX = 0; localX < normalizedChunkSize; localX++)
             {
                 Vector2Int worldCoordinate = new Vector2Int(origin.x + localX, origin.y + localY);
+                if (!IsCoordinateInsideMapBounds(worldCoordinate))
+                {
+                    continue;
+                }
+
                 Vector3 localPosition = new Vector3(localX, 0f, localY);
                 BlockBiomeVisualData visualData = BuildBlockBiomeVisualData(worldCoordinate);
                 Block block = CreateBlock(chunkObject.transform, groundSet, Block.BlockType.Ground, worldCoordinate, localPosition, false, 0f);

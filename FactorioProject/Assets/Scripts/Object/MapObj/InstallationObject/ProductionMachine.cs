@@ -5,6 +5,7 @@ using UnityEngine;
 public class ProductionMachine : InputOutputModule
 {
     private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
+    private const int MaximumProductionIngredientTypes = 2;
 
     [SerializeField]
     private List<SpriteRenderer> targetIconDisplays;
@@ -14,6 +15,13 @@ public class ProductionMachine : InputOutputModule
     private bool workAnimatorHasWorkParameter;
     private bool workAnimatorStateInitialized;
     private bool lastWorkAnimatorState;
+    private readonly List<CraftingTreeRuntime.IngredientEntry> productionIngredientBuffer =
+        new List<CraftingTreeRuntime.IngredientEntry>();
+    private readonly List<CraftingTreeRuntime.IngredientEntry> resolvedProductionIngredients =
+        new List<CraftingTreeRuntime.IngredientEntry>();
+    private readonly List<Block> resolvedProductionInputBlocks = new List<Block>();
+    private readonly HashSet<Vector2Int> resolvedProductionInputCoordinates = new HashSet<Vector2Int>();
+    private readonly HashSet<int> productionIngredientItemIds = new HashSet<int>();
 
     protected override void OnEnable()
     {
@@ -63,6 +71,125 @@ public class ProductionMachine : InputOutputModule
         }
 
         return foundAny;
+    }
+
+    public bool TryCollectProductionIngredientItemIds(ICollection<int> itemIds)
+    {
+        if (itemIds == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        if (outputs == null || outputs.Count <= 0)
+        {
+            return false;
+        }
+
+        productionIngredientItemIds.Clear();
+        bool foundAny = false;
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            ItemDefinition outputDefinition = outputs[i].itemDefinition;
+            int outputItemId = outputDefinition != null ? outputDefinition.id : -1;
+            if (outputItemId < 0
+                || !TryGetProductionIngredients(outputItemId, productionIngredientBuffer))
+            {
+                continue;
+            }
+
+            for (int ingredientIndex = 0; ingredientIndex < productionIngredientBuffer.Count; ingredientIndex++)
+            {
+                int ingredientItemId = productionIngredientBuffer[ingredientIndex].itemId;
+                if (ingredientItemId < 0 || !productionIngredientItemIds.Add(ingredientItemId))
+                {
+                    continue;
+                }
+
+                itemIds.Add(ingredientItemId);
+                foundAny = true;
+            }
+        }
+
+        return foundAny;
+    }
+
+    public bool TryGetObjectInfoProductionIngredientCount(out int ingredientCount)
+    {
+        ingredientCount = 0;
+        if (!TryResolveObjectInfoProductionIngredients(resolvedProductionIngredients, out _, out _, out _))
+        {
+            return false;
+        }
+
+        ingredientCount = resolvedProductionIngredients.Count;
+        return ingredientCount > 0;
+    }
+
+    public bool TryGetObjectInfoProductionIngredient(
+        int ingredientIndex,
+        out int itemId,
+        out int requiredCount,
+        out int areaCount,
+        out int areaCapacity)
+    {
+        itemId = -1;
+        requiredCount = 0;
+        areaCount = 0;
+        areaCapacity = 0;
+
+        if (ingredientIndex < 0
+            || !TryResolveObjectInfoProductionIngredients(resolvedProductionIngredients, out _, out _, out _)
+            || ingredientIndex >= resolvedProductionIngredients.Count)
+        {
+            return false;
+        }
+
+        CraftingTreeRuntime.IngredientEntry ingredient = resolvedProductionIngredients[ingredientIndex];
+        itemId = ingredient.itemId;
+        requiredCount = Mathf.Max(1, ingredient.count);
+        if (!TryResolveObjectInfoInputAreaCounts(
+                itemId,
+                requiredCount,
+                out areaCount,
+                out areaCapacity))
+        {
+            areaCount = 0;
+            areaCapacity = requiredCount;
+        }
+
+        return itemId >= 0;
+    }
+
+    public bool TryGetObjectInfoProductionOutput(
+        out int outputItemId,
+        out int outputAreaCount,
+        out int outputAreaCapacity)
+    {
+        outputItemId = -1;
+        outputAreaCount = 0;
+        outputAreaCapacity = 0;
+
+        if (!TryResolveObjectInfoProductionIngredients(
+                resolvedProductionIngredients,
+                out _,
+                out outputItemId,
+                out int outputCount))
+        {
+            return false;
+        }
+
+        if (!TryResolveObjectInfoOutputAreaCounts(
+                outputItemId,
+                outputCount,
+                out outputAreaCount,
+                out outputAreaCapacity))
+        {
+            outputAreaCount = 0;
+            outputAreaCapacity = Mathf.Max(1, outputCount);
+        }
+
+        return outputItemId >= 0;
     }
 
     public int ResolveSelectedProductionTargetItemId()
@@ -142,6 +269,164 @@ public class ProductionMachine : InputOutputModule
     protected override bool ShouldShowObjectInfoEmptyInputOutputSlots()
     {
         return ResolveSelectedProductionTargetItemId() >= 0;
+    }
+
+    protected override bool TryCollectAdditionalRuntimeInputItemIds(ICollection<int> itemIds)
+    {
+        return TryCollectProductionIngredientItemIds(itemIds);
+    }
+
+    protected override bool AppendAcceptedRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    {
+        if (inputItemIds == null
+            || !TryResolveSelectedProductionRecipe(
+                resolvedProductionIngredients,
+                out _,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int i = 0; i < resolvedProductionIngredients.Count; i++)
+        {
+            int ingredientItemId = resolvedProductionIngredients[i].itemId;
+            if (ingredientItemId < 0 || !ContainsRuntimeInputItemArea(coordinate, ingredientItemId))
+            {
+                continue;
+            }
+
+            inputItemIds.Add(ingredientItemId);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    protected override void TryStartNextCraft()
+    {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null || !HasRuntimeOutputCoordinates)
+        {
+            return;
+        }
+
+        if (!TryResolveSelectedProductionRecipe(
+                resolvedProductionIngredients,
+                out int outputIndex,
+                out int outputItemId,
+                out int outputCount))
+        {
+            return;
+        }
+
+        if (!TryResolveProductionIngredientBlocks(resolvedProductionIngredients))
+        {
+            return;
+        }
+
+        if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+        {
+            return;
+        }
+
+        if (!TryEnsureCraftStartEnergy(installedDefinition))
+        {
+            return;
+        }
+
+        Vector3 consumeTargetWorldPosition = ResolveConsumeTargetWorldPosition();
+        for (int i = 0; i < resolvedProductionIngredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = resolvedProductionIngredients[i];
+            Block inputBlock = resolvedProductionInputBlocks[i];
+            if (inputBlock == null
+                || inputBlock.ConsumeInputAreaCenterObjectsAnimated(
+                    ingredient.itemId,
+                    ingredient.count,
+                    consumeTargetWorldPosition,
+                    InputConsumeMoveInterval) != ingredient.count)
+            {
+                return;
+            }
+        }
+
+        BeginActiveCraft(outputIndex, outputItemId, outputCount, installedDefinition);
+    }
+
+    protected override string ResolveObjectInfoStatus(out bool isProducing)
+    {
+        isProducing = false;
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null)
+        {
+            return "No machine";
+        }
+
+        if (IsWaitingForOutput)
+        {
+            return "Output full";
+        }
+
+        if (IsActiveCraftRunning)
+        {
+            if (!HasOperationalEnergyAvailable(installedDefinition))
+            {
+                return "No energy";
+            }
+
+            isProducing = true;
+            return "Working";
+        }
+
+        if (!HasRuntimeOutputCoordinates)
+        {
+            return "No output area";
+        }
+
+        if (ResolveSelectedProductionTargetItemId() < 0)
+        {
+            return "No target";
+        }
+
+        if (!TryResolveSelectedProductionRecipe(
+                resolvedProductionIngredients,
+                out _,
+                out int outputItemId,
+                out int outputCount))
+        {
+            return "No recipe";
+        }
+
+        bool missingInputArea = false;
+        for (int i = 0; i < resolvedProductionIngredients.Count; i++)
+        {
+            if (!HasRuntimeInputItemArea(resolvedProductionIngredients[i].itemId))
+            {
+                missingInputArea = true;
+                break;
+            }
+        }
+
+        if (!TryResolveProductionIngredientBlocks(resolvedProductionIngredients))
+        {
+            return missingInputArea ? "No input area" : "No input item";
+        }
+
+        if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+        {
+            return "Output full";
+        }
+
+        if (!HasOperationalEnergyAvailable(installedDefinition))
+        {
+            return "No energy";
+        }
+
+        isProducing = true;
+        return "Working";
     }
 
     protected override void OnItemFilterMaskChanged()
@@ -255,6 +540,226 @@ public class ProductionMachine : InputOutputModule
         }
 
         return workAnimatorHasWorkParameter;
+    }
+
+    private bool TryResolveSelectedProductionRecipe(
+        List<CraftingTreeRuntime.IngredientEntry> ingredients,
+        out int outputIndex,
+        out int outputItemId,
+        out int outputCount)
+    {
+        outputIndex = -1;
+        outputItemId = -1;
+        outputCount = 0;
+
+        if (ingredients == null)
+        {
+            return false;
+        }
+
+        outputItemId = ResolveSelectedProductionTargetItemId();
+        outputIndex = ResolveProductionTargetOutputIndex(outputItemId);
+        if (outputItemId < 0
+            || outputIndex < 0
+            || !TryGetProductionIngredients(outputItemId, ingredients)
+            || ingredients.Count <= 0
+            || ingredients.Count > MaximumProductionIngredientTypes)
+        {
+            return false;
+        }
+
+        outputCount = ResolveProductionOutputCount(outputIndex, outputItemId);
+        return outputCount > 0;
+    }
+
+    private bool TryResolveObjectInfoProductionIngredients(
+        List<CraftingTreeRuntime.IngredientEntry> ingredients,
+        out int outputIndex,
+        out int outputItemId,
+        out int outputCount)
+    {
+        outputIndex = -1;
+        outputItemId = -1;
+        outputCount = 0;
+
+        if (ingredients == null)
+        {
+            return false;
+        }
+
+        if ((IsActiveCraftRunning || IsWaitingForOutput)
+            && ActiveOutputItemId >= 0
+            && TryGetProductionIngredients(ActiveOutputItemId, ingredients)
+            && ingredients.Count > 0)
+        {
+            outputItemId = ActiveOutputItemId;
+            outputIndex = ResolveProductionTargetOutputIndex(outputItemId);
+            outputCount = ActiveOutputCount > 0
+                ? ActiveOutputCount
+                : ResolveProductionOutputCount(outputIndex, outputItemId);
+            return outputCount > 0;
+        }
+
+        return TryResolveSelectedProductionRecipe(
+            ingredients,
+            out outputIndex,
+            out outputItemId,
+            out outputCount);
+    }
+
+    private bool TryGetProductionIngredients(
+        int outputItemId,
+        List<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        if (ingredients == null)
+        {
+            return false;
+        }
+
+        ingredients.Clear();
+        if (outputItemId < 0)
+        {
+            return false;
+        }
+
+        if (CraftingTreeRuntime.TryGetIngredients(outputItemId, ingredients))
+        {
+            MergeDuplicateProductionIngredients(ingredients);
+            return ingredients.Count > 0;
+        }
+
+        return TryGetLegacyProductionIngredients(outputItemId, ingredients);
+    }
+
+    private bool TryGetLegacyProductionIngredients(
+        int outputItemId,
+        List<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        if (ingredients == null)
+        {
+            return false;
+        }
+
+        ingredients.Clear();
+        int outputIndex = ResolveProductionTargetOutputIndex(outputItemId);
+        IReadOnlyList<ItemIoEntry> inputs = InputList;
+        if (outputIndex < 0 || inputs == null || outputIndex >= inputs.Count)
+        {
+            return false;
+        }
+
+        ItemIoEntry inputEntry = inputs[outputIndex];
+        int inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
+        if (inputItemId < 0)
+        {
+            return false;
+        }
+
+        ingredients.Add(new CraftingTreeRuntime.IngredientEntry(inputItemId, Mathf.Max(1, inputEntry.count)));
+        return true;
+    }
+
+    private bool TryResolveProductionIngredientBlocks(List<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        resolvedProductionInputBlocks.Clear();
+        resolvedProductionInputCoordinates.Clear();
+        if (ingredients == null || ingredients.Count <= 0)
+        {
+            return false;
+        }
+
+        ISet<Vector2Int> excludedCoordinates = ingredients.Count > 1
+            ? resolvedProductionInputCoordinates
+            : null;
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            if (!TryResolveRuntimeInputItemBlock(
+                    ingredient.itemId,
+                    ingredient.count,
+                    excludedCoordinates,
+                    out Block inputBlock,
+                    out Vector2Int inputCoordinate))
+            {
+                return false;
+            }
+
+            resolvedProductionInputBlocks.Add(inputBlock);
+            resolvedProductionInputCoordinates.Add(inputCoordinate);
+        }
+
+        return resolvedProductionInputBlocks.Count == ingredients.Count;
+    }
+
+    private static void MergeDuplicateProductionIngredients(List<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        if (ingredients == null || ingredients.Count <= 1)
+        {
+            return;
+        }
+
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            if (ingredient.itemId < 0)
+            {
+                ingredients.RemoveAt(i);
+                i--;
+                continue;
+            }
+
+            int mergedCount = Mathf.Max(1, ingredient.count);
+            for (int j = i + 1; j < ingredients.Count; j++)
+            {
+                CraftingTreeRuntime.IngredientEntry candidate = ingredients[j];
+                if (candidate.itemId != ingredient.itemId)
+                {
+                    continue;
+                }
+
+                mergedCount += Mathf.Max(1, candidate.count);
+                ingredients.RemoveAt(j);
+                j--;
+            }
+
+            ingredients[i] = new CraftingTreeRuntime.IngredientEntry(ingredient.itemId, mergedCount);
+        }
+    }
+
+    private int ResolveProductionTargetOutputIndex(int outputItemId)
+    {
+        if (outputItemId < 0)
+        {
+            return -1;
+        }
+
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        if (outputs == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            ItemDefinition outputDefinition = outputs[i].itemDefinition;
+            if (outputDefinition != null && outputDefinition.id == outputItemId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private int ResolveProductionOutputCount(int outputIndex, int outputItemId)
+    {
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        if (outputs != null && outputIndex >= 0 && outputIndex < outputs.Count)
+        {
+            return Mathf.Max(1, outputs[outputIndex].count);
+        }
+
+        return CraftingTreeRuntime.GetOutputCount(outputItemId);
     }
 
     private bool TryResolveProductionTargetDefinition(int itemId, out ItemDefinition definition)

@@ -11,6 +11,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         Vector2Int.down,
         Vector2Int.left
     };
+
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeGridCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates
@@ -196,6 +197,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private Color energyGaugeFillColor = new Color(1f, 0.05f, 0f, 1f);
     [SerializeField]
     private Color craftProgressGaugeFillColor = new Color(0.026268482f, 1f, 0f, 1f);
+    [SerializeField]
+    private bool playParticleEffectWhileCrafting;
     [SerializeField, Min(1)]
     private int runtimeAreaMaxObjects = 10;
     [SerializeField]
@@ -241,6 +244,12 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
     private readonly List<Vector2Int> connectedFluidSeedCoordinates = new List<Vector2Int>(8);
     private bool energyGaugeRenderersResolved;
+    private bool energyGaugeWorldPositionResolved;
+    private Vector3 cachedEnergyGaugeWorldPosition;
+    private long cachedEnergyGaugePlacementSequence;
+    private Vector3 cachedEnergyGaugeTransformPosition;
+    private Quaternion cachedEnergyGaugeTransformRotation;
+    private Vector3 cachedEnergyGaugeTransformScale;
 
     public IReadOnlyList<ItemIoEntry> InputList
     {
@@ -347,6 +356,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
         }
 
+        ExpandRuntimeInputItemAreasForAdditionalItemIds();
         RegisterRuntimeAreaCoordinates();
         cachedTerrain = null;
     }
@@ -429,6 +439,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             }
         }
 
+        ExpandRuntimeInputItemAreasForAdditionalItemIds();
         RegisterRuntimeAreaCoordinates();
         ConfigureRuntimeGridCoordinates(state.gridCoordinates);
 
@@ -1115,18 +1126,42 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         if (preferredItemId >= 0)
         {
-            for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+            Block firstCompatibleBlock = null;
+            for (int pass = 0; pass < 2; pass++)
             {
-                RuntimeInputItemArea inputArea = runtimeInputItemAreas[i];
-                if (inputArea.itemId != preferredItemId)
+                bool requireExistingStack = pass == 0;
+                for (int i = 0; i < runtimeInputItemAreas.Count; i++)
                 {
-                    continue;
-                }
+                    RuntimeInputItemArea inputArea = runtimeInputItemAreas[i];
+                    if (inputArea.itemId != preferredItemId)
+                    {
+                        continue;
+                    }
 
-                if (terrainGenerator.TryGetLoadedBlock(inputArea.coordinate, out block) && block != null)
-                {
-                    return true;
+                    if (!terrainGenerator.TryGetLoadedBlock(inputArea.coordinate, out Block candidateBlock)
+                        || candidateBlock == null
+                        || !candidateBlock.CanAddInputAreaCenterObjects(1, preferredItemId))
+                    {
+                        continue;
+                    }
+
+                    if (firstCompatibleBlock == null)
+                    {
+                        firstCompatibleBlock = candidateBlock;
+                    }
+
+                    if (!requireExistingStack || candidateBlock.HasInputAreaCenterItem(preferredItemId))
+                    {
+                        block = candidateBlock;
+                        return true;
+                    }
                 }
+            }
+
+            if (firstCompatibleBlock != null)
+            {
+                block = firstCompatibleBlock;
+                return true;
             }
         }
 
@@ -1153,6 +1188,70 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         block = firstBlock;
         return block != null;
+    }
+
+    protected bool HasRuntimeInputItemArea(int itemId)
+    {
+        if (itemId < 0 || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            if (runtimeInputItemAreas[i].itemId == itemId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected bool TryResolveRuntimeInputItemBlock(
+        int itemId,
+        int requiredCount,
+        ISet<Vector2Int> excludedCoordinates,
+        out Block block,
+        out Vector2Int coordinate)
+    {
+        block = null;
+        coordinate = default;
+        if (itemId < 0
+            || requiredCount <= 0
+            || runtimeInputItemAreas == null
+            || runtimeInputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            RuntimeInputItemArea inputArea = runtimeInputItemAreas[i];
+            if (inputArea.itemId != itemId
+                || (excludedCoordinates != null && excludedCoordinates.Contains(inputArea.coordinate)))
+            {
+                continue;
+            }
+
+            if (!TryGetLoadedBlock(inputArea.coordinate, out Block candidateBlock)
+                || candidateBlock == null
+                || candidateBlock.GetInputAreaCenterItemCount(itemId) < requiredCount)
+            {
+                continue;
+            }
+
+            block = candidateBlock;
+            coordinate = inputArea.coordinate;
+            return true;
+        }
+
+        return false;
+    }
+
+    protected virtual bool TryCollectAdditionalRuntimeInputItemIds(ICollection<int> itemIds)
+    {
+        return false;
     }
 
     public bool AppendRuntimeInputItemIds(ISet<int> inputItemIds)
@@ -1201,7 +1300,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return foundAny;
     }
 
-    private bool AppendAcceptedRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
+    protected virtual bool AppendAcceptedRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
         if (inputItemIds == null || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
         {
@@ -1279,6 +1378,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         UpdateEnergyGaugeVisual();
+        UpdateCraftParticleEffectVisual();
     }
 
     private void PullFluidFromConnectedStorage(float deltaTime)
@@ -1975,12 +2075,19 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     protected override void OnDisable()
     {
+        StopCraftParticleEffectVisual(true);
         MapObjectTickManager.UnregisterUpdateTick(this);
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
         ReleaseEnergyGaugeVisual();
         base.OnDisable();
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        InvalidateEnergyGaugeWorldPosition();
+        base.OnPlacementRuntimeChanged();
     }
 
     private void OnDestroy()
@@ -2045,6 +2152,61 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate)
     {
         return ContainsCoordinate(runtimeOutputCoordinates, coordinate);
+    }
+
+    public bool IsRuntimeOutputCoordinate(Vector2Int coordinate)
+    {
+        return ContainsRuntimeOutputCoordinate(coordinate);
+    }
+
+    public bool TryGetRuntimeOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null || !ContainsRuntimeOutputCoordinate(coordinate))
+        {
+            return false;
+        }
+
+        return AppendOutputItemIds(outputItemIds);
+    }
+
+    public bool CanExposeStoredFluidAtRuntimePipeCoordinate(
+        Vector2Int coordinate,
+        int fluidItemId,
+        ISet<int> scratchItemIds)
+    {
+        if (fluidItemId < 0 || !ContainsRuntimePipeAreaBlockCoordinate(coordinate))
+        {
+            return false;
+        }
+
+        if (scratchItemIds != null)
+        {
+            scratchItemIds.Clear();
+        }
+
+        if (ContainsRuntimeOutputCoordinate(coordinate))
+        {
+            bool matchesOutput = scratchItemIds != null
+                && TryGetRuntimeOutputItemIdsAtCoordinate(coordinate, scratchItemIds)
+                && scratchItemIds.Contains(fluidItemId);
+            scratchItemIds?.Clear();
+            return matchesOutput;
+        }
+
+        if (scratchItemIds != null)
+        {
+            if (AppendAcceptedRuntimeInputItemIdsAtCoordinate(coordinate, scratchItemIds)
+                || AppendRuntimeInputItemIdsAtCoordinate(coordinate, scratchItemIds))
+            {
+                bool matchesInput = scratchItemIds.Contains(fluidItemId);
+                scratchItemIds.Clear();
+                return matchesInput;
+            }
+
+            scratchItemIds.Clear();
+        }
+
+        return !HasFluidInputRecipe() || CanAcceptFluidInputItem(fluidItemId);
     }
 
     private bool ContainsRuntimePipeInputCoordinate(Vector2Int coordinate)
@@ -2446,6 +2608,30 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return hasActiveCraft || waitingForOutput;
     }
 
+    public bool TryGetElectricPowerRequirement(out float wattsPerSecond)
+    {
+        wattsPerSecond = 0f;
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (!RequiresElectricOperationalEnergy(installedDefinition))
+        {
+            return false;
+        }
+
+        wattsPerSecond = ItemDefinition.ResolveElectricUseWatts(installedDefinition);
+        return wattsPerSecond > 0.0001f;
+    }
+
+    public bool TryGetElectricPowerDemand(out float wattsPerSecond)
+    {
+        wattsPerSecond = 0f;
+        if (!hasActiveCraft || waitingForOutput)
+        {
+            return false;
+        }
+
+        return TryGetElectricPowerRequirement(out wattsPerSecond);
+    }
+
     public int RuntimeAreaMaxObjects => Mathf.Max(1, runtimeAreaMaxObjects);
     public float CraftDurationSeconds => Mathf.Max(0.1f, craftDuration);
     public float ObjectInfoStoredEnergy => Mathf.Max(0f, storedEnergy);
@@ -2611,6 +2797,47 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         return true;
+    }
+
+    public bool TryGetObjectInfoBurnEnergyInput(
+        out int burnEnergyAmount,
+        out int energyAreaCapacity)
+    {
+        burnEnergyAmount = 0;
+        energyAreaCapacity = 0;
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (installedDefinition == null
+            || installedDefinition.useEnergyType != ItemDefinition.EnergyType.Burn
+            || runtimeInputEnergyCoordinates == null
+            || runtimeInputEnergyCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        energyAreaCapacity = Mathf.Max(ResolveRuntimeAreaCapacity(runtimeInputEnergyCoordinates), 1);
+        burnEnergyAmount = GetRuntimeAreaEnergyAmount(
+            runtimeInputEnergyCoordinates,
+            installedDefinition.useEnergyType);
+        return true;
+    }
+
+    public bool TryGetObjectInfoEnergyUseRate(
+        out ItemDefinition.EnergyType energyType,
+        out float amountPerSecond)
+    {
+        energyType = ItemDefinition.EnergyType.None;
+        amountPerSecond = 0f;
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return false;
+        }
+
+        energyType = installedDefinition.useEnergyType;
+        amountPerSecond = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
+        return energyType != ItemDefinition.EnergyType.None && amountPerSecond > 0.0001f;
     }
 
     public bool TryGetObjectInfoItemPair(
@@ -2868,6 +3095,33 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             outputAreaCapacity = 0;
         }
 
+        return true;
+    }
+
+    protected bool TryResolveObjectInfoInputAreaCounts(
+        int inputItemId,
+        int inputRecipeCount,
+        out int inputAreaCount,
+        out int inputAreaCapacity)
+    {
+        inputAreaCount = 0;
+        inputAreaCapacity = 0;
+        if (inputItemId < 0)
+        {
+            return false;
+        }
+
+        objectInfoInputAreaCoordinates.Clear();
+        AppendRuntimeInputItemAreaCoordinates(inputItemId, objectInfoInputAreaCoordinates);
+        if (objectInfoInputAreaCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        inputAreaCount = GetRuntimeAreaObjectCount(objectInfoInputAreaCoordinates, inputItemId);
+        inputAreaCapacity = Mathf.Max(
+            ResolveRuntimeAreaCapacity(objectInfoInputAreaCoordinates),
+            Mathf.Max(inputAreaCount, Mathf.Max(1, inputRecipeCount)));
         return true;
     }
 
@@ -3568,10 +3822,20 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return true;
         }
 
-        float remainingEnergyCost = Mathf.Max(0f, installedDefinition.useEnergyAmount) * Mathf.Max(0f, deltaTime);
+        float remainingEnergyCost = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) * Mathf.Max(0f, deltaTime);
         if (remainingEnergyCost <= 0.0001f)
         {
             return false;
+        }
+
+        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        {
+            energyGaugeCapacity = 0f;
+            return UtilityPole.TryConsumeElectricity(
+                this,
+                remainingEnergyCost,
+                deltaTime,
+                out consumedEnergy);
         }
 
         while (remainingEnergyCost > 0.0001f)
@@ -3606,6 +3870,13 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return true;
         }
 
+        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        {
+            storedEnergy = 0f;
+            energyGaugeCapacity = 0f;
+            return UtilityPole.HasElectricityAvailable(this);
+        }
+
         if (storedEnergy > 0f)
         {
             return true;
@@ -3619,6 +3890,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         if (!RequiresOperationalEnergy(installedDefinition))
         {
             return true;
+        }
+
+        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        {
+            return false;
         }
 
         float minimumOperationalEnergy = Mathf.Max(1, installedDefinition.useEnergyAmount);
@@ -3789,6 +4065,51 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return -1;
     }
 
+    private int GetRuntimeAreaEnergyAmount(
+        IReadOnlyList<Vector2Int> coordinates,
+        ItemDefinition.EnergyType energyType)
+    {
+        if (coordinates == null || coordinates.Count <= 0 || energyType == ItemDefinition.EnergyType.None)
+        {
+            return 0;
+        }
+
+        int totalEnergy = 0;
+        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            if (!visitedCoordinates.Add(coordinate))
+            {
+                continue;
+            }
+
+            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
+            {
+                continue;
+            }
+
+            int itemId = block.GetInputAreaCenterItemId();
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            ItemDefinition energyDefinition = ResolveItemDefinition(itemId);
+            if (energyDefinition == null
+                || energyDefinition.energyType != energyType
+                || energyDefinition.energyAmount <= 0)
+            {
+                continue;
+            }
+
+            int itemCount = block.GetInputAreaCenterItemCount(itemId);
+            totalEnergy += Mathf.Max(0, itemCount) * energyDefinition.energyAmount;
+        }
+
+        return Mathf.Max(0, totalEnergy);
+    }
+
     private bool TryFindOutputSourceBlock(int itemId, out Block sourceBlock, out Vector3 startWorldPosition)
     {
         sourceBlock = null;
@@ -3925,7 +4246,13 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     {
         return installedDefinition != null
                && installedDefinition.useEnergyType != ItemDefinition.EnergyType.None
-               && installedDefinition.useEnergyAmount > 0;
+               && ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) > 0f;
+    }
+
+    protected static bool RequiresElectricOperationalEnergy(ItemDefinition installedDefinition)
+    {
+        return RequiresOperationalEnergy(installedDefinition)
+               && installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity;
     }
 
     protected bool HasOperationalEnergyAvailable(ItemDefinition installedDefinition)
@@ -3933,6 +4260,11 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         if (!RequiresOperationalEnergy(installedDefinition))
         {
             return true;
+        }
+
+        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        {
+            return UtilityPole.HasElectricityAvailable(this);
         }
 
         return storedEnergy > 0f || HasUsableEnergyItem(installedDefinition.useEnergyType);
@@ -4249,13 +4581,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return 0f;
         }
 
-        float configuredCompleteEnergy = Mathf.Max(0f, installedDefinition.completeEnergy);
+        float configuredCompleteEnergy = ItemDefinition.ResolveCompleteEnergyAmount(installedDefinition);
         if (configuredCompleteEnergy > 0.0001f)
         {
             return configuredCompleteEnergy;
         }
 
-        return Mathf.Max(0.1f, fallbackCraftDuration) * Mathf.Max(0f, installedDefinition.useEnergyAmount);
+        return Mathf.Max(0.1f, fallbackCraftDuration)
+               * ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
     }
 
     protected float ResolveInitialCraftDuration(ItemDefinition installedDefinition)
@@ -4265,7 +4598,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return CraftDurationSeconds;
         }
 
-        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         return Mathf.Max(0.1f, ResolveCompleteEnergy(installedDefinition) / energyRate);
     }
 
@@ -4276,7 +4609,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return Mathf.Max(0f, remainingCraftTime);
         }
 
-        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         float remainingEnergy = Mathf.Max(0f, ResolveCompleteEnergy(installedDefinition) - Mathf.Max(0f, consumedEnergy));
         return remainingEnergy / energyRate;
     }
@@ -4288,7 +4621,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return 0f;
         }
 
-        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         float completeEnergy = ResolveCompleteEnergy(installedDefinition);
         float totalDuration = completeEnergy / energyRate;
         float elapsedDuration = Mathf.Clamp(totalDuration - Mathf.Max(0f, savedRemainingCraftTime), 0f, totalDuration);
@@ -4425,6 +4758,39 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         return Mathf.Clamp01(storedEnergy / gaugeCapacity);
     }
 
+    private void UpdateCraftParticleEffectVisual()
+    {
+        if (!playParticleEffectWhileCrafting || particleEffect == null)
+        {
+            return;
+        }
+
+        if (!hasActiveCraft || waitingForOutput)
+        {
+            StopCraftParticleEffectVisual(false);
+            return;
+        }
+
+        if (!particleEffect.isPlaying)
+        {
+            particleEffect.Play();
+        }
+    }
+
+    private void StopCraftParticleEffectVisual(bool clearParticles)
+    {
+        if (!playParticleEffectWhileCrafting || particleEffect == null || !particleEffect.isPlaying)
+        {
+            return;
+        }
+
+        particleEffect.Stop(
+            true,
+            clearParticles
+                ? ParticleSystemStopBehavior.StopEmittingAndClear
+                : ParticleSystemStopBehavior.StopEmitting);
+    }
+
     private float ResolveCraftProgressGaugeFillAmount()
     {
         if (!hasActiveCraft)
@@ -4487,13 +4853,36 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     private Vector3 ResolveEnergyGaugeWorldPosition()
     {
+        long placementSequence = RuntimePlacementSequence;
+        if (energyGaugeWorldPositionResolved
+            && cachedEnergyGaugePlacementSequence == placementSequence
+            && transform.position == cachedEnergyGaugeTransformPosition
+            && transform.rotation == cachedEnergyGaugeTransformRotation
+            && transform.lossyScale == cachedEnergyGaugeTransformScale)
+        {
+            return cachedEnergyGaugeWorldPosition;
+        }
+
+        cachedEnergyGaugeWorldPosition = CalculateEnergyGaugeWorldPosition();
+        cachedEnergyGaugePlacementSequence = placementSequence;
+        cachedEnergyGaugeTransformPosition = transform.position;
+        cachedEnergyGaugeTransformRotation = transform.rotation;
+        cachedEnergyGaugeTransformScale = transform.lossyScale;
+        energyGaugeWorldPositionResolved = true;
+        return cachedEnergyGaugeWorldPosition;
+    }
+
+    private Vector3 CalculateEnergyGaugeWorldPosition()
+    {
         Bounds bounds = default;
         bool hasBounds = false;
         IReadOnlyList<Renderer> renderers = ResolveEnergyGaugeRenderers();
         for (int i = 0; i < renderers.Count; i++)
         {
             Renderer renderer = renderers[i];
-            if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
+            if (!IsEnergyGaugeBoundsRenderer(renderer)
+                || !renderer.enabled
+                || !renderer.gameObject.activeInHierarchy)
             {
                 continue;
             }
@@ -4543,13 +4932,24 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         for (int i = 0; i < renderers.Length; i++)
         {
             Renderer renderer = renderers[i];
-            if (renderer != null)
+            if (IsEnergyGaugeBoundsRenderer(renderer))
             {
                 cachedEnergyGaugeRenderers.Add(renderer);
             }
         }
 
+        InvalidateEnergyGaugeWorldPosition();
         return cachedEnergyGaugeRenderers;
+    }
+
+    private static bool IsEnergyGaugeBoundsRenderer(Renderer renderer)
+    {
+        return renderer != null && !(renderer is ParticleSystemRenderer);
+    }
+
+    private void InvalidateEnergyGaugeWorldPosition()
+    {
+        energyGaugeWorldPositionResolved = false;
     }
 
     protected void BeginActiveCraft(int recipeIndex, int outputItemId, int outputCount, ItemDefinition installedDefinition)
@@ -4575,6 +4975,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     protected bool IsWaitingForOutput => waitingForOutput;
     protected bool HasRuntimeOutputCoordinates => runtimeOutputCoordinates != null && runtimeOutputCoordinates.Count > 0;
     protected IReadOnlyList<Vector2Int> RuntimeOutputCoordinates => runtimeOutputCoordinates;
+    protected float InputConsumeMoveInterval => Mathf.Max(0f, inputConsumeMoveInterval);
 
     protected virtual bool IsRecipeOutputAllowedByItemFilter(int outputItemId)
     {
@@ -4606,7 +5007,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
     }
 
-    private bool ContainsRuntimeInputItemArea(Vector2Int coordinate, int itemId)
+    protected bool ContainsRuntimeInputItemArea(Vector2Int coordinate, int itemId)
     {
         for (int i = 0; i < runtimeInputItemAreas.Count; i++)
         {
@@ -4618,6 +5019,45 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         return false;
+    }
+
+    private void ExpandRuntimeInputItemAreasForAdditionalItemIds()
+    {
+        if (runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        {
+            return;
+        }
+
+        List<int> itemIds = new List<int>();
+        if (!TryCollectAdditionalRuntimeInputItemIds(itemIds) || itemIds.Count <= 0)
+        {
+            return;
+        }
+
+        List<Vector2Int> coordinates = new List<Vector2Int>();
+        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
+        {
+            Vector2Int coordinate = runtimeInputItemAreas[i].coordinate;
+            if (!coordinates.Contains(coordinate))
+            {
+                coordinates.Add(coordinate);
+            }
+        }
+
+        for (int coordinateIndex = 0; coordinateIndex < coordinates.Count; coordinateIndex++)
+        {
+            Vector2Int coordinate = coordinates[coordinateIndex];
+            for (int itemIndex = 0; itemIndex < itemIds.Count; itemIndex++)
+            {
+                int itemId = itemIds[itemIndex];
+                if (itemId < 0 || ContainsRuntimeInputItemArea(coordinate, itemId))
+                {
+                    continue;
+                }
+
+                runtimeInputItemAreas.Add(new RuntimeInputItemArea(coordinate, itemId));
+            }
+        }
     }
 
     private bool ContainsRuntimeAreaCoordinate(Vector2Int coordinate)

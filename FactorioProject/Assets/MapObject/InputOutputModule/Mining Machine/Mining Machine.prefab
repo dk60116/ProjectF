@@ -95,6 +95,7 @@ GameObject:
   - component: {fileID: 2705861293071220046}
   - component: {fileID: 8277338630082605383}
   - component: {fileID: 4863933332349520842}
+  - component: {fileID: 2862884122402060625}
   m_Layer: 0
   m_Name: Mining machine
   m_TagString: Untagged
@@ -132,7 +133,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Mining machine
-  objId: 27
+  objId: 28
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -144,6 +145,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
+  particleEffect: {fileID: 0}
   mapFilter: 37
   installationFocusRadius: 1
   installedDirection: 0
@@ -186,6 +188,7 @@ MonoBehaviour:
   craftProgressGaugeCanvasVerticalOffset: 14
   energyGaugeFillColor: {r: 1, g: 0.05, b: 0, a: 1}
   craftProgressGaugeFillColor: {r: 0.026268482, g: 1, b: 0, a: 1}
+  playParticleEffectWhileCrafting: 0
   runtimeAreaMaxObjects: 10
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []
@@ -224,6 +227,27 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!65 &2862884122402060625
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5824118724912299156}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.75, y: 1, z: 0.25}
+  m_Center: {x: 0, y: 0.5, z: 0}
 --- !u!1 &6539843091019789507
 GameObject:
   m_ObjectHideFlags: 0

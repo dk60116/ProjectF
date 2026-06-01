@@ -29,6 +29,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private TerrainBiome ResolveTileBiome(Vector2Int worldCoordinate)
     {
+        if (!IsCoordinateInsideMapBounds(worldCoordinate))
+        {
+            return TerrainBiome.Water;
+        }
+
         if (IsRawWaterTileBiome(worldCoordinate))
         {
             return TerrainBiome.Water;
@@ -150,18 +155,49 @@ public partial class TerrainGenerator : MonoBehaviour
             return cachedWater;
         }
 
-        bool isWater = false;
+        bool isWater = IsIslandCoastWater(worldCoordinate);
         if (!IsBlockedForWater(worldCoordinate))
         {
             float waterThreshold = Mathf.Lerp(0.64f, 0.48f, Mathf.Clamp01(waterFillPercent * 1.35f));
             float waterField = EvaluateWaterField(worldCoordinate);
             float continuityThreshold = waterThreshold - Mathf.Lerp(0.1f, 0.18f, Mathf.InverseLerp(0.8f, 3f, riverWidth));
-            isWater = waterField > waterThreshold
+            isWater = isWater
+                      || waterField > waterThreshold
                       || (waterField >= continuityThreshold && HasRiverContinuitySupport(worldCoordinate));
         }
 
         rawWaterCache[worldCoordinate] = isWater;
         return isWater;
+    }
+
+    private bool IsIslandCoastWater(Vector2Int worldCoordinate)
+    {
+        if (!IsCoordinateInsideMapBounds(worldCoordinate))
+        {
+            return true;
+        }
+
+        float halfSize = GetNormalizedMapSize() * 0.5f;
+        Vector2 normalized = new Vector2(worldCoordinate.x + 0.5f, worldCoordinate.y + 0.5f) / Mathf.Max(1f, halfSize);
+        float distanceFromCenter = normalized.magnitude;
+        float primaryNoise = SampleNoise(worldCoordinate, IslandCoastNoiseScale, new Vector2(187.4f, 58.6f));
+        float detailNoise = SampleNoise(worldCoordinate, IslandCoastDetailNoiseScale, new Vector2(643.2f, 911.7f));
+        float coastNoise = ((primaryNoise * 0.7f) + (detailNoise * 0.3f) - 0.5f) * IslandCoastIrregularity;
+        float protectedRadius = GetIslandProtectedRadius(halfSize);
+        float coastRadius = Mathf.Max(protectedRadius, IslandLandRadius + coastNoise);
+        return distanceFromCenter > coastRadius;
+    }
+
+    private float GetIslandProtectedRadius(float halfSize)
+    {
+        float starterPatchReach = generateStarterResourcePatches
+            ? starterPatchDistanceFromCenter + starterPatchHalfSize + 3f
+            : 0f;
+        float starterTreeReach = generateStarterTrees
+            ? starterTreeDistanceFromCenter + 3f
+            : 0f;
+        float protectedDistance = Mathf.Max(startSafeZoneRadius + 3f, starterPatchReach, starterTreeReach);
+        return Mathf.Clamp01(protectedDistance / Mathf.Max(1f, halfSize));
     }
 
     private bool HasRawWaterWithin(Vector2Int worldCoordinate, int radius)
@@ -475,8 +511,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const string DirtBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/earth/T_earth_basecolor.tga";
     private const string GrassBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/grass_a/T_grass_a_basecolor.tga";
     private const string ForestBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/grass_b/T_grass_b_basecolor.tga";
-    private const string LegacySandBaseTexturePath = "Assets/AureDevGames/Water Stylized Shader Orto & Perspective Camera/Textures/Sand/Sand.png";
-    private const string LegacyGroundBaseTexturePath = "Assets/Materials/Ground_TD_00.png";
 
     private void PopulateGeneratedSurfaceBlendEditorDefaults()
     {
@@ -498,7 +532,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (generatedSurfaceWaterMaterial == null)
         {
             generatedSurfaceWaterMaterial = AssetDatabase.LoadAssetAtPath<Material>(
-                "Assets/Materials/M_StylizedOceanWater_Sector.mat");
+                "Assets/Materials/M_ToonWater_Terrain.mat");
         }
 
         if (generatedSurfaceBlendTextureDefaultsInitialized)
@@ -508,20 +542,17 @@ public partial class TerrainGenerator : MonoBehaviour
 
         generatedSurfaceBlendTextureDefaultsInitialized = true;
 
-        AssignEditorTextureIfMissingOrLegacy(
+        AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendSandTexture,
-            SandBaseColorTexturePath,
-            LegacySandBaseTexturePath);
+            SandBaseColorTexturePath);
 
-        AssignEditorTextureIfMissingOrLegacy(
+        AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendDirtTexture,
-            DirtBaseColorTexturePath,
-            LegacyGroundBaseTexturePath);
+            DirtBaseColorTexturePath);
 
-        AssignEditorTextureIfMissingOrLegacy(
+        AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendGrassTexture,
-            GrassBaseColorTexturePath,
-            LegacyGroundBaseTexturePath);
+            GrassBaseColorTexturePath);
         if (generatedSurfaceBlendGrassTexture == null)
         {
             generatedSurfaceBlendGrassTexture = ResolveGeneratedSurfaceBlendTexture(
@@ -531,11 +562,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 "_MainTex");
         }
 
-        AssignEditorTextureIfMissingOrLegacy(
+        AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendForestTexture,
-            ForestBaseColorTexturePath,
-            LegacyGroundBaseTexturePath,
-            GrassBaseColorTexturePath);
+            ForestBaseColorTexturePath);
         if (generatedSurfaceBlendForestTexture == null)
         {
             generatedSurfaceBlendForestTexture = ResolveGeneratedSurfaceBlendTexture(
@@ -551,9 +580,9 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private static void AssignEditorTextureIfMissingOrLegacy(ref Texture2D texture, string defaultAssetPath, params string[] legacyAssetPaths)
+    private static void AssignEditorTextureIfMissing(ref Texture2D texture, string defaultAssetPath)
     {
-        if (texture != null && !IsEditorTextureAtAnyPath(texture, legacyAssetPaths))
+        if (texture != null)
         {
             return;
         }
@@ -563,25 +592,6 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             texture = defaultTexture;
         }
-    }
-
-    private static bool IsEditorTextureAtAnyPath(Texture2D texture, params string[] assetPaths)
-    {
-        if (texture == null || assetPaths == null)
-        {
-            return false;
-        }
-
-        string texturePath = AssetDatabase.GetAssetPath(texture);
-        for (int i = 0; i < assetPaths.Length; i++)
-        {
-            if (string.Equals(texturePath, assetPaths[i], StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 #endif
 }

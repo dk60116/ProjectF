@@ -74,12 +74,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool ShouldGenerateChunk(Vector2Int chunkCoordinate)
     {
-        return IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveLoadRadius());
+        return DoesChunkIntersectMapBounds(chunkCoordinate, Mathf.Max(4, chunkSize))
+               && IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveLoadRadius());
     }
 
     private bool ShouldUnloadChunk(Vector2Int chunkCoordinate)
     {
-        return !IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveUnloadRadius());
+        return !DoesChunkIntersectMapBounds(chunkCoordinate, Mathf.Max(4, chunkSize))
+               || !IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveUnloadRadius());
     }
 
     private int GetEffectiveLoadRadius()

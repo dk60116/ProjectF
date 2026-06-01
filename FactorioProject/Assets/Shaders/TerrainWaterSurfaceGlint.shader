@@ -69,18 +69,30 @@ Shader "ProjectF/Terrain/WaterSurfaceGlint"
                 return saturate((waveA * 0.58h) + (waveB * 0.42h));
             }
 
-            half FlowLayer(float along, float across, half scale, half lineWidth, half phase, half speed)
+            half StationaryGlintPulse(float along, float across, half phase, half speed)
             {
                 float time = _Time.y * speed;
+                half phaseA = StableGlintNoise(float2((along * 0.071) + phase, (across * 0.113) - phase)) * 6.28318h;
+                half phaseB = StableGlintNoise(float2((along * 0.193) - phase, (across * 0.157) + phase)) * 6.28318h;
+                half pulseA = 0.5h + 0.5h * sin(time + phaseA);
+                half pulseB = 0.5h + 0.5h * sin((time * 1.37h) + phaseB);
+                return saturate((pulseA * 0.64h) + (pulseB * 0.36h));
+            }
+
+            half FlowLayer(float along, float across, half scale, half lineWidth, half phase, half speed)
+            {
+                half localPulse = StationaryGlintPulse(along, across, phase, speed);
+                half animatedLineWidth = lineWidth * lerp(0.55h, 1.55h, localPulse);
                 float warpedAcross = (across * scale)
-                    + sin((along * 0.58) + time + phase) * 0.18
-                    + sin((along * 1.43) - (time * 0.72) + (phase * 1.37)) * 0.07;
-                half lane = smoothstep(lineWidth, 0.0h, abs(frac(warpedAcross) - 0.5h));
+                    + sin((along * 0.58) + phase) * (0.10 + (0.10 * localPulse))
+                    + sin((along * 1.43) + (phase * 1.37)) * (0.035 + (0.045 * localPulse));
+                half lane = smoothstep(animatedLineWidth, 0.0h, abs(frac(warpedAcross) - 0.5h));
 
-                half dash = 0.5h + 0.5h * sin((along * scale * 1.15) - (time * 2.35) + phase);
+                half dash = 0.5h + 0.5h * sin((along * scale * 1.15) + phase);
                 dash = smoothstep(0.36h, 0.92h, dash);
+                dash *= lerp(0.25h, 1.35h, localPulse);
 
-                half noise = StableGlintNoise(float2((along * 0.19) - (time * 0.24) + phase, (across * 0.31) + phase));
+                half noise = StableGlintNoise(float2((along * 0.19) + phase, (across * 0.31) + phase));
                 half breakup = lerp(1.0h, smoothstep(_Breakup, 1.0h, noise), 0.62h);
                 return lane * dash * breakup;
             }
@@ -114,11 +126,14 @@ Shader "ProjectF/Terrain/WaterSurfaceGlint"
                 half layerA = FlowLayer(along, across, max(_GlintScale, 0.01h), _LineWidth, 0.0h, _FlowSpeed);
                 half layerB = FlowLayer(along + 3.7h, across - 1.9h, max(_GlintScale * 0.73h, 0.01h), _LineWidth * 0.74h, 2.11h, _FlowSpeed * 1.37h);
 
-                float time = _Time.y * _FlowSpeed;
-                half softRipple = 0.5h + 0.5h * sin((along * 1.1h) - (time * 1.45h) + sin(across * 1.7h) * 0.35h);
-                softRipple = smoothstep(0.82h, 1.0h, softRipple) * 0.18h;
+                half softRipple = 0.5h + 0.5h * sin((along * 1.1h) + sin(across * 1.7h) * 0.35h);
+                half softPulse = StationaryGlintPulse(along + 11.3h, across - 5.7h, 4.9h, _FlowSpeed * 1.45h);
+                softRipple = smoothstep(0.78h, 1.0h, softRipple) * lerp(0.0h, 0.28h, softPulse);
 
-                half alpha = saturate((layerA + (layerB * 0.58h) + softRipple) * _GlintColor.a);
+                half surfacePulse = StationaryGlintPulse(along - 2.1h, across + 4.3h, 7.4h, _FlowSpeed * 0.83h);
+                half alpha = saturate((layerA + (layerB * 0.58h) + softRipple)
+                    * _GlintColor.a
+                    * lerp(0.45h, 1.65h, surfacePulse));
 
                 half3 color = MixFog(_GlintColor.rgb, input.fogFactor);
                 return half4(color, alpha);

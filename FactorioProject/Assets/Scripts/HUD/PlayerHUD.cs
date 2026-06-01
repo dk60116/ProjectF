@@ -74,14 +74,18 @@ public class PlayerHUD : BagSlot
     private MapPaper mapPaper;
     [SerializeField]
     private ObjectInfoPanel objectInfoPanel;
+    [SerializeField, Min(0.02f)]
+    private float objectInfoPanelRefreshInterval = 0.2f;
 
     private TerrainGenerator cachedTerrainGenerator;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
     private MapObject currentObjectInfoTarget;
+    private UtilityPole currentObjectInfoSupplyRangePole;
     private MapObject lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
+    private float nextObjectInfoPanelRefreshTime;
     private int lastObservedHandItemId = -2;
     private int lastObservedHandItemCount = -1;
     private int lastObservedHandMaxCount = -1;
@@ -1764,6 +1768,7 @@ public class PlayerHUD : BagSlot
         if (objectInfoPanel == null)
         {
             currentObjectInfoTarget = null;
+            SetObjectInfoSupplyRangeVisual(null, false);
             return;
         }
 
@@ -1849,7 +1854,13 @@ public class PlayerHUD : BagSlot
             && objectInfoPanel.IsBoundTo(currentObjectInfoTarget)
             && objectInfoPanel.gameObject.activeSelf)
         {
-            objectInfoPanel.Refresh();
+            float now = Time.unscaledTime;
+            if (now >= nextObjectInfoPanelRefreshTime)
+            {
+                nextObjectInfoPanelRefreshTime = now + Mathf.Max(0.02f, objectInfoPanelRefreshInterval);
+                objectInfoPanel.Refresh();
+            }
+
             return;
         }
 
@@ -1867,16 +1878,67 @@ public class PlayerHUD : BagSlot
         currentObjectInfoTarget = target;
         currentObjectInfoOpenedByYellowFocus = openedByYellowFocus;
         objectInfoPanel.Bind(target);
+        nextObjectInfoPanelRefreshTime = Time.unscaledTime + Mathf.Max(0.02f, objectInfoPanelRefreshInterval);
+        SetObjectInfoSupplyRangeVisual(target, !openedByYellowFocus);
     }
 
     private void ClearObjectInfoPanelState()
     {
+        SetObjectInfoSupplyRangeVisual(null, false);
         currentObjectInfoTarget = null;
         currentObjectInfoOpenedByYellowFocus = false;
+        nextObjectInfoPanelRefreshTime = 0f;
         if (objectInfoPanel != null)
         {
             objectInfoPanel.Clear();
         }
+    }
+
+    private void SetObjectInfoSupplyRangeVisual(MapObject target, bool requested)
+    {
+        UtilityPole nextPole = requested ? ResolveUtilityPole(target) : null;
+        if (currentObjectInfoSupplyRangePole == nextPole)
+        {
+            if (nextPole != null)
+            {
+                nextPole.SetSelectedSupplyRangeVisualRequested(true);
+            }
+
+            return;
+        }
+
+        if (currentObjectInfoSupplyRangePole != null)
+        {
+            currentObjectInfoSupplyRangePole.SetSelectedSupplyRangeVisualRequested(false);
+        }
+
+        currentObjectInfoSupplyRangePole = nextPole;
+        if (currentObjectInfoSupplyRangePole != null)
+        {
+            currentObjectInfoSupplyRangePole.SetSelectedSupplyRangeVisualRequested(true);
+        }
+    }
+
+    private static UtilityPole ResolveUtilityPole(MapObject target)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        UtilityPole pole = target as UtilityPole;
+        if (pole != null)
+        {
+            return pole;
+        }
+
+        pole = target.GetComponent<UtilityPole>();
+        if (pole != null)
+        {
+            return pole;
+        }
+
+        return target.GetComponentInChildren<UtilityPole>(true);
     }
 
     private void UpdateItemFilterButtonState()

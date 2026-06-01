@@ -82,7 +82,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Boiler
-  objId: 29
+  objId: 31
   itemDefinition: {fileID: 11400000, guid: 763440cffdd93a948a7d8e73c541f673, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -94,6 +94,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
+  particleEffect: {fileID: 0}
   mapFilter: 37
   installationFocusRadius: 1
   installedDirection: 0
@@ -158,6 +159,7 @@ MonoBehaviour:
   craftProgressGaugeCanvasVerticalOffset: 14
   energyGaugeFillColor: {r: 1, g: 0.05, b: 0, a: 1}
   craftProgressGaugeFillColor: {r: 0.026268482, g: 1, b: 0, a: 1}
+  playParticleEffectWhileCrafting: 0
   runtimeAreaMaxObjects: 10
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []

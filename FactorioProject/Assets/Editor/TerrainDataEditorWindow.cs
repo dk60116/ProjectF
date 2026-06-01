@@ -13,6 +13,7 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private static readonly string[] CorePropertyPaths =
     {
+        "mapSize",
         "blocks",
         "chunkSize",
         "loadRadius",

@@ -123,6 +123,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private Quaternion handItemRestLocalRotation;
     private Vector3 handItemRestLocalScale;
     private bool hasHandItemRestTransform;
+    private ItemDefinition cachedInstalledDefinition;
+    private int cachedInstalledDefinitionId = int.MinValue;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -133,6 +135,40 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     public float BackgroundTurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
+
+    public bool TryGetElectricPowerRequirement(out float wattsPerSecond)
+    {
+        return TryGetElectricOperationalPowerRequirement(out wattsPerSecond);
+    }
+
+    public bool TryGetElectricPowerDemand(out float wattsPerSecond)
+    {
+        wattsPerSecond = 0f;
+        if (!TryGetElectricOperationalPowerRequirement(out float configuredWatts))
+        {
+            return false;
+        }
+
+        EnsureRuntimeStateInitialized();
+        if (!HasPlacementRuntime())
+        {
+            return false;
+        }
+
+        if (heldItemId >= 0 || IsActiveTransferState(state))
+        {
+            wattsPerSecond = configuredWatts;
+            return true;
+        }
+
+        if (state == RobotArmState.WaitingForPickup && CanPickupOneItem())
+        {
+            wattsPerSecond = configuredWatts;
+            return true;
+        }
+
+        return false;
+    }
 
     public void GetObjectInfoStatus(out string statusText, out bool isWorking)
     {
@@ -147,6 +183,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         if (!HasPlacementRuntime())
         {
             return "No placement";
+        }
+
+        if (TryGetElectricOperationalPowerRequirement(out _) && !UtilityPole.HasElectricityAvailable(this))
+        {
+            return "No energy";
         }
 
         if (heldItemId >= 0)
@@ -224,6 +265,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         EnsureBodyRotationCache();
         ClearHeldItem();
         cachedTerrainGenerator = null;
+        cachedInstalledDefinition = null;
+        cachedInstalledDefinitionId = int.MinValue;
         pickupTimer = 0f;
         dropRetryTimer = 0f;
         actionTurnTimer = 0f;
@@ -292,6 +335,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         EnsureBodyRotationCache();
         RefreshHeldItemVisualIfNeeded();
         if (RefreshRuntimeSleepState())
+        {
+            return;
+        }
+
+        deltaTime = ResolvePoweredDeltaTime(deltaTime);
+        if (deltaTime <= 0f)
         {
             return;
         }
@@ -1665,6 +1714,57 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         {
             SetBodyLocalRotation(inputBodyLocalRotation);
         }
+    }
+
+    private float ResolvePoweredDeltaTime(float deltaTime)
+    {
+        if (!TryGetElectricOperationalPowerRequirement(out float wattsPerSecond))
+        {
+            return deltaTime;
+        }
+
+        deltaTime = Mathf.Max(0f, deltaTime);
+        float requestedEnergy = wattsPerSecond * deltaTime;
+        if (requestedEnergy <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        if (!UtilityPole.TryConsumeElectricity(this, requestedEnergy, deltaTime, out float consumedEnergy))
+        {
+            return 0f;
+        }
+
+        return deltaTime * Mathf.Clamp01(consumedEnergy / requestedEnergy);
+    }
+
+    private bool TryGetElectricOperationalPowerRequirement(out float wattsPerSecond)
+    {
+        wattsPerSecond = 0f;
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        float electricUseWatts = ItemDefinition.ResolveElectricUseWatts(installedDefinition);
+        if (electricUseWatts <= 0.0001f)
+        {
+            return false;
+        }
+
+        wattsPerSecond = electricUseWatts;
+        return wattsPerSecond > 0.0001f;
+    }
+
+    private ItemDefinition ResolveInstalledDefinition()
+    {
+        int itemId = ResolveItemId();
+        if (cachedInstalledDefinition != null && cachedInstalledDefinitionId == itemId)
+        {
+            return cachedInstalledDefinition;
+        }
+
+        cachedInstalledDefinition = BoundItemDefinition != null
+            ? BoundItemDefinition
+            : InputOutputModule.ResolveItemDefinition(itemId);
+        cachedInstalledDefinitionId = itemId;
+        return cachedInstalledDefinition;
     }
 
     private static bool IsTurningState(RobotArmState robotArmState)

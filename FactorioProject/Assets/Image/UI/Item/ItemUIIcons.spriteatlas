@@ -40,6 +40,7 @@ SpriteAtlas:
     - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
     - {fileID: 21300000, guid: 7a2374bfb3a01524ebd53c2d4d63d095, type: 3}
     - {fileID: 21300000, guid: 5dc246db162925547952152ac9cc4f97, type: 3}
+    - {fileID: 21300000, guid: a60fbe4ccf4c1a742b5788944597807a, type: 3}
     - {fileID: 21300000, guid: 9db5a52bf14d6444398759c739b11413, type: 3}
     - {fileID: 21300000, guid: a023e52e50811cd4bb7c13d0687b4363, type: 3}
     - {fileID: 21300000, guid: 5d15a580082ae1149900ad7c1a2c8441, type: 3}
@@ -117,6 +118,7 @@ SpriteAtlas:
     - 29bf3b2c94e4edb4d8c79242fcbbdf7f: 21300000
     - 81e5db3c65898a6409a8fc7873104ac5: 21300000
     - f03f9c3cb97d43241ad3e1ac5fdac2c0: 21300000
+    - a60fbe4ccf4c1a742b5788944597807a: 21300000
     - 2df89a6ca7b038141bc380d89e523bfc: 21300000
     - c6a06b0d53be27848bf3976a181c4f1b: 21300000
     - a6db811d32e4d74498bb391f271afca2: 21300000
@@ -163,6 +165,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 29bf3b2c94e4edb4d8c79242fcbbdf7f, type: 3}
   - {fileID: 21300000, guid: 81e5db3c65898a6409a8fc7873104ac5, type: 3}
   - {fileID: 21300000, guid: f03f9c3cb97d43241ad3e1ac5fdac2c0, type: 3}
+  - {fileID: 21300000, guid: a60fbe4ccf4c1a742b5788944597807a, type: 3}
   - {fileID: 21300000, guid: 2df89a6ca7b038141bc380d89e523bfc, type: 3}
   - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
   - {fileID: 21300000, guid: a6db811d32e4d74498bb391f271afca2, type: 3}
@@ -208,6 +211,7 @@ SpriteAtlas:
   - Rope_Icon
   - CooperPlate_Icon
   - IronPlate_Icon
+  - Fire_Icon
   - Brick_Icon
   - Pickaxe
   - Coil_Icon

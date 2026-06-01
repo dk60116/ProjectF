@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_8_Funance
   m_EditorClassIdentifier: 
   itemName: Funance
-  id: 12
+  id: 13
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
   portableMesh: {fileID: 4300000, guid: f470bd3487c41be48bdae19b78255dfa, type: 2}
   portableMat: {fileID: 2100000, guid: 1630d20689111db41a593bc92cb6d880, type: 2}
@@ -24,9 +24,12 @@ MonoBehaviour:
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   energyType: 0
   energyAmount: 0
   useEnergyType: 1
   useEnergyAmount: 1
   completeEnergy: 10
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
   craftingDurationSeconds: 5

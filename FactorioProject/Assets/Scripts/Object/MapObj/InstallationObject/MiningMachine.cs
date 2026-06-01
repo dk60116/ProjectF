@@ -3,43 +3,105 @@ using UnityEngine;
 
 public class MiningMachine : InputOutputModule
 {
+    private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
+
     [SerializeField]
     private Transform drill;
 
+    private Animator cachedWorkAnimator;
+    private bool hasCheckedWorkAnimatorParameter;
+    private bool workAnimatorHasWorkParameter;
+    private bool workAnimatorStateInitialized;
+    private bool lastWorkAnimatorState;
+    private readonly List<Resource> miningResourceCandidates = new List<Resource>(4);
+    private Resource activeMiningResource;
+    private int activeMiningResourceIndex = -1;
+    private int nextMiningResourceIndex;
+
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        RefreshWorkAnimatorState(true);
+    }
+
+    protected override void OnDisable()
+    {
+        SetWorkAnimatorState(false, true);
+        ClearActiveMiningResourceSelection();
+        base.OnDisable();
+    }
+
+    public override void PrepareForPool()
+    {
+        ClearActiveMiningResourceSelection();
+        nextMiningResourceIndex = 0;
+        base.PrepareForPool();
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        base.OnPlacementRuntimeChanged();
+        ClearActiveMiningResourceSelection();
+        nextMiningResourceIndex = 0;
+    }
+
+    public override void ManagedUpdateTick(float deltaTime)
+    {
+        base.ManagedUpdateTick(deltaTime);
+        RefreshWorkAnimatorState();
+    }
+
     public bool TryAppendPlacementOutputItemIds(
         TerrainGenerator terrain,
-        Vector2Int anchorCoordinate,
+        IReadOnlyList<Vector2Int> miningCoordinates,
         ISet<int> outputItemIds)
     {
-        if (outputItemIds == null
-            || !TryResolveMiningResource(terrain, anchorCoordinate, out Resource resource)
-            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
-            || outputItemId < 0)
+        if (outputItemIds == null || terrain == null || miningCoordinates == null || miningCoordinates.Count <= 0)
         {
             return false;
         }
 
-        outputItemIds.Add(outputItemId);
-        return true;
+        bool foundAny = false;
+        for (int i = 0; i < miningCoordinates.Count; i++)
+        {
+            if (!TryResolveMiningResource(terrain, miningCoordinates[i], out Resource resource)
+                || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
+                || outputItemId < 0)
+            {
+                continue;
+            }
+
+            outputItemIds.Add(outputItemId);
+            foundAny = true;
+        }
+
+        return foundAny;
     }
 
     protected override void TryStartNextCraft()
     {
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
-            || !TryResolveMiningResource(out Resource resource)
-            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount))
+            || !TryResolveNextMiningResource(
+                out Resource resource,
+                out int resourceIndex,
+                out int outputItemId,
+                out int outputCount,
+                -1,
+                -1,
+                true))
         {
             return;
         }
 
-        if (!TryResolveOutputBlock(outputItemId, outputCount, out _)
-            || !TryEnsureCraftStartEnergy(installedDefinition))
+        if (!TryEnsureCraftStartEnergy(installedDefinition))
         {
             return;
         }
 
+        SetActiveMiningResourceSelection(resource, resourceIndex);
         BeginActiveCraft(-1, outputItemId, outputCount, installedDefinition);
+        SetWorkAnimatorState(true, true);
     }
 
     protected override string ResolveObjectInfoStatus(out bool isProducing)
@@ -68,15 +130,28 @@ public class MiningMachine : InputOutputModule
             return "Working";
         }
 
-        if (!TryResolveMiningResource(out Resource resource)
-            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
+        if (!TryResolveNextMiningResource(
+                out _,
+                out _,
+                out int outputItemId,
+                out int outputCount,
+                -1,
+                -1,
+                false)
             || outputItemId < 0
             || outputCount <= 0)
         {
             return "No resource";
         }
 
-        if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+        if (!TryResolveNextMiningResource(
+                out _,
+                out _,
+                out _,
+                out _,
+                -1,
+                -1,
+                true))
         {
             return "Output full";
         }
@@ -103,15 +178,21 @@ public class MiningMachine : InputOutputModule
             return false;
         }
 
-        if (!TryResolveMiningResource(out Resource resource)
+        if (!TryResolveActiveMiningResource(
+                ActiveOutputItemId,
+                ActiveOutputCount,
+                out Resource resource,
+                out int resourceIndex)
             || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount))
         {
+            ClearActiveMiningResourceSelection();
             ClearActiveCraft();
             return false;
         }
 
         if (outputItemId != ActiveOutputItemId || outputCount != ActiveOutputCount)
         {
+            ClearActiveMiningResourceSelection();
             ClearActiveCraft();
             return false;
         }
@@ -119,16 +200,20 @@ public class MiningMachine : InputOutputModule
         Vector3 startWorldPosition = resource.FocusPoint;
         if (!resource.TryHarvestForMachine(out int harvestedItemId, out int harvestedCount))
         {
+            ClearActiveMiningResourceSelection();
             ClearActiveCraft();
             return false;
         }
 
         if (!TryEmitOutputItemsToBlock(outputBlock, harvestedItemId, harvestedCount, startWorldPosition))
         {
+            ClearActiveMiningResourceSelection();
             ClearActiveCraft();
             return false;
         }
 
+        AdvanceMiningResourceCursor(resourceIndex, resource);
+        ClearActiveMiningResourceSelection();
         ClearActiveCraft();
         return true;
     }
@@ -136,16 +221,12 @@ public class MiningMachine : InputOutputModule
     protected override bool AppendOutputItemIds(ISet<int> outputItemIds)
     {
         bool foundAny = base.AppendOutputItemIds(outputItemIds);
-        if (outputItemIds == null
-            || !TryResolveMiningResource(out Resource resource)
-            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
-            || outputItemId < 0)
+        if (outputItemIds == null)
         {
             return foundAny;
         }
 
-        outputItemIds.Add(outputItemId);
-        return true;
+        return AppendMiningResourceOutputItemIds(outputItemIds) || foundAny;
     }
 
     public override bool TryGetObjectInfoOutput(
@@ -168,8 +249,14 @@ public class MiningMachine : InputOutputModule
         outputAreaCapacity = 0;
         displayZeroCountItem = false;
 
-        if (!TryResolveMiningResource(out Resource resource)
-            || !resource.TryPeekMachineHarvestOutput(out outputItemId, out int outputCount)
+        if (!TryResolveNextMiningResource(
+                out _,
+                out _,
+                out outputItemId,
+                out int outputCount,
+                -1,
+                -1,
+                false)
             || outputItemId < 0)
         {
             return false;
@@ -183,15 +270,174 @@ public class MiningMachine : InputOutputModule
             out outputAreaCapacity);
     }
 
-    private bool TryResolveMiningResource(out Resource resource)
+    public bool TryGetObjectInfoResourceReserves(out int reserves)
     {
-        resource = null;
-        if (!TryGetLoadedBlock(RuntimeAnchorCoordinate, out Block block) || block == null)
+        reserves = 0;
+        if (!TryCollectMiningResources(miningResourceCandidates))
         {
             return false;
         }
 
-        return TryResolveMiningResource(block, out resource);
+        for (int i = 0; i < miningResourceCandidates.Count; i++)
+        {
+            Resource resource = miningResourceCandidates[i];
+            if (resource != null)
+            {
+                reserves += resource.RemainingHarvestOutputCount;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryResolveNextMiningResource(
+        out Resource resource,
+        out int resourceIndex,
+        out int outputItemId,
+        out int outputCount,
+        int requiredOutputItemId,
+        int requiredOutputCount,
+        bool requireOutputBlock)
+    {
+        resource = null;
+        resourceIndex = -1;
+        outputItemId = -1;
+        outputCount = 0;
+
+        if (!TryCollectMiningResources(miningResourceCandidates))
+        {
+            return false;
+        }
+
+        int candidateCount = miningResourceCandidates.Count;
+        int startIndex = NormalizeMiningResourceIndex(nextMiningResourceIndex, candidateCount);
+        for (int offset = 0; offset < candidateCount; offset++)
+        {
+            int candidateIndex = (startIndex + offset) % candidateCount;
+            Resource candidate = miningResourceCandidates[candidateIndex];
+            if (candidate == null
+                || !candidate.TryPeekMachineHarvestOutput(out int candidateOutputItemId, out int candidateOutputCount)
+                || candidateOutputItemId < 0
+                || candidateOutputCount <= 0)
+            {
+                continue;
+            }
+
+            if (requiredOutputItemId >= 0 && candidateOutputItemId != requiredOutputItemId)
+            {
+                continue;
+            }
+
+            if (requiredOutputCount > 0 && candidateOutputCount != requiredOutputCount)
+            {
+                continue;
+            }
+
+            if (requireOutputBlock && !TryResolveOutputBlock(candidateOutputItemId, candidateOutputCount, out _))
+            {
+                continue;
+            }
+
+            resource = candidate;
+            resourceIndex = candidateIndex;
+            outputItemId = candidateOutputItemId;
+            outputCount = candidateOutputCount;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveActiveMiningResource(
+        int requiredOutputItemId,
+        int requiredOutputCount,
+        out Resource resource,
+        out int resourceIndex)
+    {
+        resource = null;
+        resourceIndex = -1;
+
+        if (IsSelectableMiningResource(activeMiningResource)
+            && activeMiningResource.TryPeekMachineHarvestOutput(out int activeOutputItemId, out int activeOutputCount)
+            && activeOutputItemId == requiredOutputItemId
+            && activeOutputCount == requiredOutputCount)
+        {
+            resource = activeMiningResource;
+            resourceIndex = activeMiningResourceIndex;
+            return true;
+        }
+
+        return TryResolveNextMiningResource(
+            out resource,
+            out resourceIndex,
+            out _,
+            out _,
+            requiredOutputItemId,
+            requiredOutputCount,
+            false);
+    }
+
+    private bool AppendMiningResourceOutputItemIds(ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null || !TryCollectMiningResources(miningResourceCandidates))
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        for (int i = 0; i < miningResourceCandidates.Count; i++)
+        {
+            Resource resource = miningResourceCandidates[i];
+            if (resource == null
+                || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
+                || outputItemId < 0)
+            {
+                continue;
+            }
+
+            outputItemIds.Add(outputItemId);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    private bool TryCollectMiningResources(List<Resource> resources)
+    {
+        if (resources == null)
+        {
+            return false;
+        }
+
+        resources.Clear();
+        IReadOnlyList<Vector2Int> coordinates = RuntimeOccupiedCoordinates;
+        if (coordinates != null && coordinates.Count > 0)
+        {
+            for (int i = 0; i < coordinates.Count; i++)
+            {
+                TryAddMiningResourceAtCoordinate(coordinates[i], resources);
+            }
+        }
+        else
+        {
+            TryAddMiningResourceAtCoordinate(RuntimeAnchorCoordinate, resources);
+        }
+
+        return resources.Count > 0;
+    }
+
+    private bool TryAddMiningResourceAtCoordinate(Vector2Int coordinate, List<Resource> resources)
+    {
+        if (resources == null
+            || !TryGetLoadedBlock(coordinate, out Block block)
+            || !TryResolveMiningResource(block, out Resource resource)
+            || resources.Contains(resource))
+        {
+            return false;
+        }
+
+        resources.Add(resource);
+        return true;
     }
 
     private static bool TryResolveMiningResource(
@@ -225,5 +471,148 @@ public class MiningMachine : InputOutputModule
         }
 
         return true;
+    }
+
+    private static bool IsSelectableMiningResource(Resource resource)
+    {
+        return resource != null && resource.CanHarvest && resource.gameObject.activeInHierarchy;
+    }
+
+    private void SetActiveMiningResourceSelection(Resource resource, int resourceIndex)
+    {
+        activeMiningResource = resource;
+        activeMiningResourceIndex = resourceIndex;
+    }
+
+    private void ClearActiveMiningResourceSelection()
+    {
+        activeMiningResource = null;
+        activeMiningResourceIndex = -1;
+    }
+
+    private void AdvanceMiningResourceCursor(int consumedResourceIndex, Resource consumedResource)
+    {
+        if (consumedResourceIndex < 0)
+        {
+            return;
+        }
+
+        nextMiningResourceIndex = consumedResource != null && consumedResource.CanHarvest
+            ? consumedResourceIndex + 1
+            : consumedResourceIndex;
+    }
+
+    private static int NormalizeMiningResourceIndex(int index, int count)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        int normalized = index % count;
+        return normalized < 0 ? normalized + count : normalized;
+    }
+
+    private void RefreshWorkAnimatorState(bool force = false)
+    {
+        SetWorkAnimatorState(ShouldPlayWorkAnimation(), force);
+    }
+
+    private bool ShouldPlayWorkAnimation()
+    {
+        if (IsWaitingForOutput)
+        {
+            return false;
+        }
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (IsActiveCraftRunning)
+        {
+            return HasOperationalEnergyAvailable(installedDefinition);
+        }
+
+        return lastWorkAnimatorState && CanContinueWorkAnimation(installedDefinition);
+    }
+
+    private bool CanContinueWorkAnimation(ItemDefinition installedDefinition)
+    {
+        return installedDefinition != null
+               && HasOperationalEnergyAvailable(installedDefinition)
+               && TryResolveNextMiningResource(
+                   out _,
+                   out _,
+                   out int outputItemId,
+                   out int outputCount,
+                   -1,
+                   -1,
+                   true)
+               && outputItemId >= 0
+               && outputCount > 0;
+    }
+
+    private void SetWorkAnimatorState(bool isWorking, bool force = false)
+    {
+        Animator targetAnimator = ResolveMiningWorkAnimator();
+        if (targetAnimator == null || !HasWorkAnimatorBoolParameter(targetAnimator))
+        {
+            workAnimatorStateInitialized = false;
+            lastWorkAnimatorState = false;
+            return;
+        }
+
+        if (!force && workAnimatorStateInitialized && lastWorkAnimatorState == isWorking)
+        {
+            return;
+        }
+
+        targetAnimator.SetBool(WorkAnimatorBoolHash, isWorking);
+        workAnimatorStateInitialized = true;
+        lastWorkAnimatorState = isWorking;
+    }
+
+    private Animator ResolveMiningWorkAnimator()
+    {
+        Animator targetAnimator = ResolveInstallationAnimator();
+        if (targetAnimator != cachedWorkAnimator)
+        {
+            cachedWorkAnimator = targetAnimator;
+            hasCheckedWorkAnimatorParameter = false;
+            workAnimatorHasWorkParameter = false;
+            workAnimatorStateInitialized = false;
+            lastWorkAnimatorState = false;
+        }
+
+        return cachedWorkAnimator;
+    }
+
+    private bool HasWorkAnimatorBoolParameter(Animator targetAnimator)
+    {
+        if (targetAnimator == null)
+        {
+            return false;
+        }
+
+        if (hasCheckedWorkAnimatorParameter && workAnimatorHasWorkParameter)
+        {
+            return true;
+        }
+
+        hasCheckedWorkAnimatorParameter = true;
+        workAnimatorHasWorkParameter = false;
+
+        AnimatorControllerParameter[] parameters = targetAnimator.parameters;
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            AnimatorControllerParameter parameter = parameters[i];
+            if (parameter != null
+                && parameter.type == AnimatorControllerParameterType.Bool
+                && parameter.nameHash == WorkAnimatorBoolHash)
+            {
+                workAnimatorHasWorkParameter = true;
+                break;
+            }
+        }
+
+        return workAnimatorHasWorkParameter;
     }
 }

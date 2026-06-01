@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: M_ToonWater_Terrain
-  m_Shader: {fileID: -6465566751694194690, guid: b4a6b41e114133b4d8eb40ab1d879de6, type: 3}
+  m_Shader: {fileID: 4800000, guid: 6b54d7424dc94f89a53ec1d9413a4f24, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -70,7 +70,7 @@ Material:
     m_Ints: []
     m_Floats:
     - Boolean_2918AA79: 0
-    - Vector1_20DB7652: 0.045
+    - Vector1_20DB7652: 0.55
     - Vector1_24CAEF48: 1
     - Vector1_301E02E2: 512
     - Vector1_31894ABB: 0
@@ -101,7 +101,11 @@ Material:
     - _ReceiveShadows: 0
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
-    - _SpecularHighlights: 1
+    - _NormalStrength: 0.32
+    - _RippleScaleA: 1.35
+    - _RippleScaleB: 2.15
+    - _RippleSpeedA: 1.1
+    - _RippleSpeedB: 1.65
     - _SrcBlend: 1
     - _Surface: 0
     - _WorkflowMode: 1
@@ -110,15 +114,15 @@ Material:
     - Color_1139F668: {r: 1, g: 1, b: 1, a: 0.21176471}
     - Color_198818EE: {r: 0, g: 1.2057794, b: 1.498, a: 0.16470589}
     - Color_626750DD: {r: 0, g: 0, b: 0, a: 0}
-    - Color_77A2EDE9: {r: 1, g: 1, b: 1, a: 1}
+    - Color_77A2EDE9: {r: 0.16, g: 0.16, b: 0.16, a: 1}
     - Vector2_1E1B6943: {r: 1, g: 5, b: 0, a: 0}
     - Vector2_D06E76BC: {r: 0.1, g: 0.05, b: 0, a: 0}
-    - Vector2_D26C9C89: {r: 1, g: 0, b: 0, a: 0}
+    - Vector2_D26C9C89: {r: 0, g: 0, b: 0, a: 0}
     - Vector2_F678228C: {r: 0.5, g: 0.5, b: 0, a: 0}
-    - _BaseColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-    - _Color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - _BaseColor: {r: 0.18, g: 0.56, b: 0.72, a: 0.82}
+    - _Color: {r: 0.18, g: 0.56, b: 0.72, a: 0.82}
+    - _DeepColor: {r: 0.06, g: 0.28, b: 0.44, a: 0.82}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &3896513066879331790
 MonoBehaviour:

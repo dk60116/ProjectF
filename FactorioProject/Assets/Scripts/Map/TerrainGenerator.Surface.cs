@@ -262,6 +262,10 @@ public partial class TerrainGenerator : MonoBehaviour
             biomeGridMinY = origin.y - margin,
             biomeGridWidth = gridSize,
             biomeGridHeight = gridSize,
+            mapMinX = GetMapMinCoordinate(),
+            mapMinY = GetMapMinCoordinate(),
+            mapMaxExclusiveX = GetMapMaxExclusiveCoordinate(),
+            mapMaxExclusiveY = GetMapMaxExclusiveCoordinate(),
             biomeGrid = new TerrainBiome[gridSize * gridSize],
             blockedWaterGrid = new bool[gridSize * gridSize],
             generatedSurfaceYOffset = generatedSurfaceYOffset,
@@ -299,7 +303,7 @@ public partial class TerrainGenerator : MonoBehaviour
         };
 
         AppendDominantBiomeBaseSurfaceFromSnapshot(chunkSurface, input);
-        for (int biomeIndex = 0; biomeIndex < 6; biomeIndex++)
+        for (int biomeIndex = 0; biomeIndex < GeneratedSurfaceBiomeMaterialCount; biomeIndex++)
         {
             AppendBiomeContourSurfaceFromSnapshot(chunkSurface, (TerrainBiome)biomeIndex, input);
         }
@@ -310,7 +314,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private static void AppendDominantBiomeBaseSurfaceFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
     {
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        List<Vector2> polygonScratch = new List<Vector2>(4);
         for (int cellY = 0; cellY < input.cellCount; cellY++)
         {
             for (int cellX = 0; cellX < input.cellCount; cellX++)
@@ -320,9 +325,15 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
                 Vector2 p01 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
                 Vector2 center = (p00 + p11) * 0.5f;
+                Vector2 centerWorld = new Vector2(input.origin.x + center.x, input.origin.y + center.y);
+                if (!IsSurfaceSampleInsideMapBounds(input, centerWorld))
+                {
+                    continue;
+                }
+
                 TerrainBiome dominantBiome = GetDominantBiomeAtSampleFromSnapshot(
                     input,
-                    new Vector2(input.origin.x + center.x, input.origin.y + center.y),
+                    centerWorld,
                     weightBuffer);
 
                 if (ShouldSkipDominantBaseSurfaceForWaterEdgeFromSnapshot(input, p00, p10, p11, p01, weightBuffer))
@@ -334,7 +345,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     chunkSurface,
                     input,
                     dominantBiome,
-                    new List<Vector2> { p00, p10, p11, p01 },
+                    SetContourQuad(polygonScratch, p00, p10, p11, p01),
                     GetBiomeBaseSurfaceY(dominantBiome, input.generatedSurfaceYOffset, input.waterSurfaceDepth));
             }
         }
@@ -368,8 +379,9 @@ public partial class TerrainGenerator : MonoBehaviour
         TerrainBiome biome,
         ChunkSurfaceWorkerInput input)
     {
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
         float[,] scores = new float[input.cellCount + 1, input.cellCount + 1];
+        List<Vector2> polygonScratch = new List<Vector2>(8);
 
         for (int sampleY = 0; sampleY <= input.cellCount; sampleY++)
         {
@@ -391,6 +403,11 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + (cellY / (float)input.resolution));
                 Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
                 Vector2 p01 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
+                Vector2 centerWorld = new Vector2(input.origin.x + (p00.x + p11.x) * 0.5f, input.origin.y + (p00.y + p11.y) * 0.5f);
+                if (!IsSurfaceSampleInsideMapBounds(input, centerWorld))
+                {
+                    continue;
+                }
 
                 float s00 = scores[cellX, cellY];
                 float s10 = scores[cellX + 1, cellY];
@@ -398,7 +415,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 float s01 = scores[cellX, cellY + 1];
                 float centerScore = GetBiomeScoreAtSampleFromSnapshot(
                     input,
-                    new Vector2(input.origin.x + (p00.x + p11.x) * 0.5f, input.origin.y + (p00.y + p11.y) * 0.5f),
+                    centerWorld,
                     biome,
                     weightBuffer);
 
@@ -414,7 +431,8 @@ public partial class TerrainGenerator : MonoBehaviour
                     s10,
                     s11,
                     s01,
-                    centerScore);
+                    centerScore,
+                    polygonScratch);
             }
         }
     }
@@ -431,7 +449,8 @@ public partial class TerrainGenerator : MonoBehaviour
         float s10,
         float s11,
         float s01,
-        float centerScore)
+        float centerScore,
+        List<Vector2> polygon)
     {
         bool inside00 = s00 > 0f;
         bool inside10 = s10 > 0f;
@@ -449,7 +468,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (mask == 15)
         {
-            AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p00, p10, p11, p01 });
+            AppendContourPolygonFromSnapshot(chunkSurface, input, biome, SetContourQuad(polygon, p00, p10, p11, p01));
             return;
         }
 
@@ -474,19 +493,19 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (mask == 5)
             {
-                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p00, bottom, left });
-                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p11, top, right });
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, SetContourTriangle(polygon, p00, bottom, left));
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, SetContourTriangle(polygon, p11, top, right));
             }
             else
             {
-                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p10, right, bottom });
-                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, new List<Vector2> { p01, left, top });
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, SetContourTriangle(polygon, p10, right, bottom));
+                AppendContourPolygonFromSnapshot(chunkSurface, input, biome, SetContourTriangle(polygon, p01, left, top));
             }
 
             return;
         }
 
-        List<Vector2> polygon = new List<Vector2>(8);
+        polygon.Clear();
         if (inside00) polygon.Add(p00);
         if (inside00 != inside10) polygon.Add(bottom);
         if (inside10) polygon.Add(p10);
@@ -497,6 +516,35 @@ public partial class TerrainGenerator : MonoBehaviour
         if (inside01 != inside00) polygon.Add(left);
 
         AppendContourPolygonFromSnapshot(chunkSurface, input, biome, polygon);
+    }
+
+    private static List<Vector2> SetContourTriangle(List<Vector2> polygon, Vector2 a, Vector2 b, Vector2 c)
+    {
+        if (polygon == null)
+        {
+            polygon = new List<Vector2>(3);
+        }
+
+        polygon.Clear();
+        polygon.Add(a);
+        polygon.Add(b);
+        polygon.Add(c);
+        return polygon;
+    }
+
+    private static List<Vector2> SetContourQuad(List<Vector2> polygon, Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+    {
+        if (polygon == null)
+        {
+            polygon = new List<Vector2>(4);
+        }
+
+        polygon.Clear();
+        polygon.Add(a);
+        polygon.Add(b);
+        polygon.Add(c);
+        polygon.Add(d);
+        return polygon;
     }
 
     private static void AppendContourPolygonFromSnapshot(
@@ -526,7 +574,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int vertexStart = chunkSurface.vertices.Count;
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         for (int i = 0; i < polygon.Count; i++)
         {
             Vector2 point = polygon[i];
@@ -592,7 +640,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            float[] weightBuffer = new float[6];
+            float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
             Color startColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, start, weightBuffer);
             Color endColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, end, weightBuffer);
             if (input.waterSurfaceDepth > 0f)
@@ -618,8 +666,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private static void AppendContourSafetyPatchesFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
     {
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
         float patchRadius = 0.22f / Mathf.Max(1, input.resolution);
+        List<Vector2> polygonScratch = new List<Vector2>(4);
 
         for (int cellY = 0; cellY < input.cellCount; cellY++)
         {
@@ -630,8 +679,13 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
                 Vector2 p01 = new Vector2(-0.5f + (cellX / (float)input.resolution), -0.5f + ((cellY + 1) / (float)input.resolution));
                 Vector2 center = (p00 + p11) * 0.5f;
+                Vector2 centerWorld = new Vector2(input.origin.x + center.x, input.origin.y + center.y);
+                if (!IsSurfaceSampleInsideMapBounds(input, centerWorld))
+                {
+                    continue;
+                }
 
-                TerrainBiome centerBiome = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + center.x, input.origin.y + center.y), weightBuffer);
+                TerrainBiome centerBiome = GetDominantBiomeAtSampleFromSnapshot(input, centerWorld, weightBuffer);
                 TerrainBiome biome00 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p00.x, input.origin.y + p00.y), weightBuffer);
                 TerrainBiome biome10 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p10.x, input.origin.y + p10.y), weightBuffer);
                 TerrainBiome biome11 = GetDominantBiomeAtSampleFromSnapshot(input, new Vector2(input.origin.x + p11.x, input.origin.y + p11.y), weightBuffer);
@@ -640,7 +694,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 int uniqueBiomeCount = CountUniqueBiomes(centerBiome, biome00, biome10, biome11, biome01);
                 if (uniqueBiomeCount >= 3)
                 {
-                    AppendCenterSafetyPatchFromSnapshot(chunkSurface, input, centerBiome, center, patchRadius);
+                    AppendCenterSafetyPatchFromSnapshot(chunkSurface, input, centerBiome, center, patchRadius, polygonScratch);
                 }
             }
         }
@@ -651,19 +705,19 @@ public partial class TerrainGenerator : MonoBehaviour
         ChunkSurfaceWorkerInput input,
         TerrainBiome biome,
         Vector2 center,
-        float patchRadius)
+        float patchRadius,
+        List<Vector2> polygon)
     {
         AppendContourPolygonFromSnapshot(
             chunkSurface,
             input,
             biome,
-            new List<Vector2>
-            {
+            SetContourQuad(
+                polygon,
                 new Vector2(center.x, center.y - patchRadius),
                 new Vector2(center.x + patchRadius, center.y),
                 new Vector2(center.x, center.y + patchRadius),
-                new Vector2(center.x - patchRadius, center.y)
-            });
+                new Vector2(center.x - patchRadius, center.y)));
     }
 
     private static TerrainBiome GetDominantBiomeAtSampleFromSnapshot(
@@ -794,10 +848,36 @@ public partial class TerrainGenerator : MonoBehaviour
         int localY = worldCoordinate.y - input.biomeGridMinY;
         if (localX < 0 || localY < 0 || localX >= input.biomeGridWidth || localY >= input.biomeGridHeight)
         {
-            return TerrainBiome.Grass;
+            return IsCoordinateInsideMapBounds(input, worldCoordinate) ? TerrainBiome.Grass : TerrainBiome.Water;
         }
 
         return input.biomeGrid[localX + (localY * input.biomeGridWidth)];
+    }
+
+    private static bool IsSurfaceSampleInsideMapBounds(ChunkSurfaceWorkerInput input, Vector2 sampleWorldPosition)
+    {
+        return input != null && IsCoordinateInsideMapBounds(input, GetSurfaceSampleCoordinate(sampleWorldPosition));
+    }
+
+    private static bool IsCoordinateInsideMapBounds(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
+    {
+        return input != null
+               && worldCoordinate.x >= input.mapMinX
+               && worldCoordinate.y >= input.mapMinY
+               && worldCoordinate.x < input.mapMaxExclusiveX
+               && worldCoordinate.y < input.mapMaxExclusiveY;
+    }
+
+    private static Vector2Int GetSurfaceSampleCoordinate(Vector2 sampleWorldPosition)
+    {
+        return new Vector2Int(
+            Mathf.FloorToInt(sampleWorldPosition.x + 0.5f),
+            Mathf.FloorToInt(sampleWorldPosition.y + 0.5f));
+    }
+
+    private bool IsSurfaceSampleInsideMapBounds(Vector2 sampleWorldPosition)
+    {
+        return IsCoordinateInsideMapBounds(GetSurfaceSampleCoordinate(sampleWorldPosition));
     }
 
     private static bool GetBlockedForWaterFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
@@ -859,7 +939,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        for (int biomeIndex = 0; biomeIndex < 6; biomeIndex++)
+        for (int biomeIndex = 0; biomeIndex < GeneratedSurfaceBiomeMaterialCount; biomeIndex++)
         {
             TerrainBiome biome = (TerrainBiome)biomeIndex;
             IEnumerator biomeRoutine = AppendBiomeContourSurfaceRoutine(chunkSurface, biome, origin, cellCount, resolution, allowYield);
@@ -894,7 +974,8 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        List<Vector2> polygonScratch = new List<Vector2>(4);
         int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
         int rowsSinceYield = 0;
 
@@ -907,8 +988,14 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
                 Vector2 p01 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
                 Vector2 center = (p00 + p11) * 0.5f;
+                Vector2 centerWorld = new Vector2(origin.x + center.x, origin.y + center.y);
+                if (!IsSurfaceSampleInsideMapBounds(centerWorld))
+                {
+                    continue;
+                }
+
                 TerrainBiome dominantBiome = GetDominantBiomeAtSample(
-                    new Vector2(origin.x + center.x, origin.y + center.y),
+                    centerWorld,
                     weightBuffer);
 
                 if (ShouldSkipDominantBaseSurfaceForWaterEdge(origin, p00, p10, p11, p01, weightBuffer))
@@ -919,7 +1006,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 AppendContourPolygonAtHeight(
                     chunkSurface,
                     dominantBiome,
-                    new List<Vector2> { p00, p10, p11, p01 },
+                    SetContourQuad(polygonScratch, p00, p10, p11, p01),
                     GetBiomeBaseSurfaceY(dominantBiome));
             }
 
@@ -962,8 +1049,9 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
         float[,] scores = new float[cellCount + 1, cellCount + 1];
+        List<Vector2> polygonScratch = new List<Vector2>(8);
         int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
         int rowsSinceYield = 0;
 
@@ -994,17 +1082,34 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + (cellY / (float)resolution));
                 Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
                 Vector2 p01 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
+                Vector2 centerWorld = new Vector2(origin.x + (p00.x + p11.x) * 0.5f, origin.y + (p00.y + p11.y) * 0.5f);
+                if (!IsSurfaceSampleInsideMapBounds(centerWorld))
+                {
+                    continue;
+                }
 
                 float s00 = scores[cellX, cellY];
                 float s10 = scores[cellX + 1, cellY];
                 float s11 = scores[cellX + 1, cellY + 1];
                 float s01 = scores[cellX, cellY + 1];
                 float centerScore = GetBiomeScoreAtSample(
-                    new Vector2(origin.x + (p00.x + p11.x) * 0.5f, origin.y + (p00.y + p11.y) * 0.5f),
+                    centerWorld,
                     biome,
                     weightBuffer);
 
-                AppendMarchingSquaresCell(chunkSurface, biome, p00, p10, p11, p01, s00, s10, s11, s01, centerScore);
+                AppendMarchingSquaresCell(
+                    chunkSurface,
+                    biome,
+                    p00,
+                    p10,
+                    p11,
+                    p01,
+                    s00,
+                    s10,
+                    s11,
+                    s01,
+                    centerScore,
+                    polygonScratch);
             }
 
             if (allowYield && ++rowsSinceYield >= surfaceRowBudget)
@@ -1026,7 +1131,8 @@ public partial class TerrainGenerator : MonoBehaviour
         float s10,
         float s11,
         float s01,
-        float centerScore)
+        float centerScore,
+        List<Vector2> polygon)
     {
         bool inside00 = s00 > 0f;
         bool inside10 = s10 > 0f;
@@ -1044,7 +1150,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (mask == 15)
         {
-            AppendContourPolygon(chunkSurface, biome, new List<Vector2> { p00, p10, p11, p01 });
+            AppendContourPolygon(chunkSurface, biome, SetContourQuad(polygon, p00, p10, p11, p01));
             return;
         }
 
@@ -1068,19 +1174,19 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (mask == 5)
             {
-                AppendContourPolygon(chunkSurface, biome, new List<Vector2> { p00, bottom, left });
-                AppendContourPolygon(chunkSurface, biome, new List<Vector2> { p11, top, right });
+                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p00, bottom, left));
+                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p11, top, right));
             }
             else
             {
-                AppendContourPolygon(chunkSurface, biome, new List<Vector2> { p10, right, bottom });
-                AppendContourPolygon(chunkSurface, biome, new List<Vector2> { p01, left, top });
+                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p10, right, bottom));
+                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p01, left, top));
             }
 
             return;
         }
 
-        List<Vector2> polygon = new List<Vector2>(8);
+        polygon.Clear();
         if (inside00)
         {
             polygon.Add(p00);
@@ -1245,10 +1351,11 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        float[] weightBuffer = new float[6];
+        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
         int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
         int rowsSinceYield = 0;
         float patchRadius = 0.22f / Mathf.Max(1, resolution);
+        List<Vector2> polygonScratch = new List<Vector2>(4);
 
         for (int cellY = 0; cellY < cellCount; cellY++)
         {
@@ -1259,9 +1366,14 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
                 Vector2 p01 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
                 Vector2 center = (p00 + p11) * 0.5f;
+                Vector2 centerWorld = new Vector2(origin.x + center.x, origin.y + center.y);
+                if (!IsSurfaceSampleInsideMapBounds(centerWorld))
+                {
+                    continue;
+                }
 
                 TerrainBiome centerBiome = GetDominantBiomeAtSample(
-                    new Vector2(origin.x + center.x, origin.y + center.y),
+                    centerWorld,
                     weightBuffer);
                 TerrainBiome biome00 = GetDominantBiomeAtSample(
                     new Vector2(origin.x + p00.x, origin.y + p00.y),
@@ -1279,7 +1391,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 int uniqueBiomeCount = CountUniqueBiomes(centerBiome, biome00, biome10, biome11, biome01);
                 if (uniqueBiomeCount >= 3)
                 {
-                    AppendCenterSafetyPatch(chunkSurface, centerBiome, center, patchRadius);
+                    AppendCenterSafetyPatch(chunkSurface, centerBiome, center, patchRadius, polygonScratch);
                 }
             }
 
@@ -1295,18 +1407,18 @@ public partial class TerrainGenerator : MonoBehaviour
         ChunkSurfaceBuildData chunkSurface,
         TerrainBiome biome,
         Vector2 center,
-        float patchRadius)
+        float patchRadius,
+        List<Vector2> polygon)
     {
         AppendContourPolygon(
             chunkSurface,
             biome,
-            new List<Vector2>
-            {
+            SetContourQuad(
+                polygon,
                 new Vector2(center.x, center.y - patchRadius),
                 new Vector2(center.x + patchRadius, center.y),
                 new Vector2(center.x, center.y + patchRadius),
-                new Vector2(center.x - patchRadius, center.y)
-            });
+                new Vector2(center.x - patchRadius, center.y)));
     }
 
     private TerrainBiome GetDominantBiomeAtSample(Vector2 sampleWorldPosition, float[] weights)
@@ -1925,14 +2037,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
     }
 
-    private void UpgradeLegacyGeneratedSurfaceBlendSettings()
-    {
-        if (Mathf.Approximately(generatedSurfaceBlendTextureTiling, 1.12f))
-        {
-            generatedSurfaceBlendTextureTiling = 0.28f;
-        }
-    }
-
     private void ApplyGeneratedSurfaceBlendSettingsToRuntimeMaterial()
     {
         if (generatedSurfaceBlendMaterial != null)
@@ -2166,6 +2270,21 @@ public partial class TerrainGenerator : MonoBehaviour
     public bool IsWaterBiomeAt(Vector2Int worldCoordinate)
     {
         return GetTileBiome(worldCoordinate) == TerrainBiome.Water;
+    }
+
+    public bool IsWaterSurfaceAtWorldPosition(Vector2 worldPosition, float[] weightBuffer = null)
+    {
+        return GetWaterSurfaceScoreAtWorldPosition(worldPosition, weightBuffer) > 0f;
+    }
+
+    public float GetWaterSurfaceScoreAtWorldPosition(Vector2 worldPosition, float[] weightBuffer = null)
+    {
+        if (weightBuffer == null || weightBuffer.Length < GeneratedSurfaceBiomeMaterialCount)
+        {
+            weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        }
+
+        return GetBiomeScoreAtSample(worldPosition, TerrainBiome.Water, weightBuffer);
     }
 
     private Color GetGeneratedSurfaceBlendWeights(Vector2Int origin, Vector2 localPoint, float[] weights)

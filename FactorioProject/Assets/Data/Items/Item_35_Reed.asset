@@ -25,9 +25,12 @@ MonoBehaviour:
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   energyType: 1
   energyAmount: 5
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
   craftingDurationSeconds: 5

@@ -418,6 +418,11 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
     public void Configure(IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
     {
+        Configure(requests, RangeFillColor);
+    }
+
+    public void Configure(IReadOnlyList<WorkableObjectRangeVisualRequest> requests, Color fillColor)
+    {
         EnsureComponents();
         if (meshFilter == null || meshRenderer == null)
         {
@@ -444,8 +449,8 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         propertyBlock ??= new MaterialPropertyBlock();
         propertyBlock.Clear();
-        propertyBlock.SetColor(BaseColorShaderId, RangeFillColor);
-        propertyBlock.SetColor(ColorShaderId, RangeFillColor);
+        propertyBlock.SetColor(BaseColorShaderId, fillColor);
+        propertyBlock.SetColor(ColorShaderId, fillColor);
         propertyBlock.SetTexture(BaseMapShaderId, rangeAlphaTexture);
         propertyBlock.SetTexture(MainTexShaderId, rangeAlphaTexture);
         meshRenderer.SetPropertyBlock(propertyBlock);

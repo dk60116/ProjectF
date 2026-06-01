@@ -1094,54 +1094,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return blocked;
     }
 
-    private void MigrateLegacyResourcesIfNeeded()
-    {
-        if (oreResources != null && oreResources.Count > 0)
-        {
-            return;
-        }
-
-        oreResources = new List<ResourceEntry>(4);
-        AddLegacyResource("Iron", iron, ironSpawnChance, new Vector2(901.3f, 117.2f), new Vector2(77.6f, 401.7f), 101, true, Vector2Int.right);
-        AddLegacyResource("Coal", coal, coalSpawnChance, new Vector2(451.2f, 772.8f), new Vector2(191.4f, 68.9f), 202, true, Vector2Int.up);
-        AddLegacyResource("Stone", stone, stoneSpawnChance, new Vector2(137.9f, 251.6f), new Vector2(612.5f, 812.3f), 303, true, Vector2Int.left);
-        AddLegacyResource("Cooper", cooper, cooperSpawnChance, new Vector2(623.4f, 528.6f), new Vector2(318.2f, 944.7f), 404, true, Vector2Int.down);
-    }
-
-    private void AddLegacyResource(
-        string resourceName,
-        Resource prefab,
-        float spawnChance,
-        Vector2 patchOffset,
-        Vector2 detailOffset,
-        int salt,
-        bool useStarterPatch,
-        Vector2Int starterDirection)
-    {
-        if (prefab == null)
-        {
-            return;
-        }
-
-        oreResources.Add(new ResourceEntry
-        {
-            name = resourceName,
-            prefab = prefab,
-            placementMode = ResourcePlacementMode.Clustered,
-            spawnChance = spawnChance,
-            spacingMultiplier = 1f,
-            minResourceCount = normalOreMinResourceCount,
-            maxResourceCount = normalOreMaxResourceCount,
-            starterMinResourceCount = starterOreMinResourceCount,
-            starterMaxResourceCount = starterOreMaxResourceCount,
-            patchOffset = patchOffset,
-            detailOffset = detailOffset,
-            salt = salt,
-            useStarterPatch = useStarterPatch,
-            starterDirection = starterDirection
-        });
-    }
-
     private static void NormalizeResourceEntries(List<ResourceEntry> entries, int defaultMin, int defaultMax, int defaultStarterMin, int defaultStarterMax)
     {
         if (entries == null)
@@ -1381,7 +1333,7 @@ public partial class TerrainGenerator : MonoBehaviour
         int normalizedChunkSize = Mathf.Max(4, chunkSize);
         int chunkX = Mathf.FloorToInt(sourcePosition.x / normalizedChunkSize);
         int chunkY = Mathf.FloorToInt(sourcePosition.z / normalizedChunkSize);
-        return new Vector2Int(chunkX, chunkY);
+        return ClampChunkCoordinateToMapBounds(new Vector2Int(chunkX, chunkY), normalizedChunkSize);
     }
 
     private void ResolveTrackingTarget()

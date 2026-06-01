@@ -6,6 +6,7 @@ using UnityEngine;
 public class ItemDefinition : ScriptableObject
 {
     private const float DefaultCraftingDurationSeconds = 5f;
+    private const float KilowattsToWatts = 1000f;
 
     public enum EnergyType { None, Burn, Electricity }
 
@@ -23,6 +24,7 @@ public class ItemDefinition : ScriptableObject
     public bool storesFluid;
     [Min(0f)]
     public float fluidStorageLiters = 0f;
+    public Color fluidDisplayColor = Color.white;
     public EnergyType energyType = EnergyType.None;
     [Min(0)]
     public int energyAmount = 0;
@@ -31,10 +33,63 @@ public class ItemDefinition : ScriptableObject
     public float useEnergyAmount = 0f;
     [Min(0f)]
     public float completeEnergy = 0f;
+    [Min(0)]
+    public int utilityPoleConnectionRadius = 6;
+    [Min(0)]
+    public int utilityPoleSupplyRadius = 3;
     [SerializeField, Min(0.01f)]
     private float craftingDurationSeconds = DefaultCraftingDurationSeconds;
 
     public float CraftingDurationSeconds => craftingDurationSeconds > 0f ? craftingDurationSeconds : DefaultCraftingDurationSeconds;
+    public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
+    public float ElectricUseWatts => ResolveElectricUseWatts(this);
+
+    public static float ResolveUseEnergyRatePerSecond(ItemDefinition definition)
+    {
+        if (definition == null || definition.useEnergyType == EnergyType.None)
+        {
+            return 0f;
+        }
+
+        float amount = Mathf.Max(0f, definition.useEnergyAmount);
+        return definition.useEnergyType == EnergyType.Electricity
+            ? amount * KilowattsToWatts
+            : amount;
+    }
+
+    public static float ResolveCompleteEnergyAmount(ItemDefinition definition)
+    {
+        if (definition == null || definition.useEnergyType == EnergyType.None)
+        {
+            return 0f;
+        }
+
+        float amount = Mathf.Max(0f, definition.completeEnergy);
+        return definition.useEnergyType == EnergyType.Electricity
+            ? amount * KilowattsToWatts
+            : amount;
+    }
+
+    public static float ResolveElectricUseWatts(ItemDefinition definition)
+    {
+        return definition != null && definition.useEnergyType == EnergyType.Electricity
+            ? ResolveUseEnergyRatePerSecond(definition)
+            : 0f;
+    }
+
+    public static bool IsElectricityItemDefinition(ItemDefinition definition)
+    {
+        return definition != null
+               && string.Equals(definition.itemName, "Electricity", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static float ResolveElectricOutputWatts(ItemDefinition outputDefinition, float outputKilowatts)
+    {
+        float amount = Mathf.Max(0f, outputKilowatts);
+        return IsElectricityItemDefinition(outputDefinition)
+            ? amount * KilowattsToWatts
+            : amount;
+    }
 
     public void SetCraftingDurationSeconds(float seconds)
     {
@@ -57,6 +112,9 @@ public class ItemDefinition : ScriptableObject
         {
             fluidStorageLiters = Mathf.Max(0f, fluidStorageLiters);
         }
+
+        utilityPoleConnectionRadius = Mathf.Max(0, utilityPoleConnectionRadius);
+        utilityPoleSupplyRadius = Mathf.Max(0, utilityPoleSupplyRadius);
     }
 #endif
 }

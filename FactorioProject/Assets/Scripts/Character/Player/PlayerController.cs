@@ -21,8 +21,23 @@ public class PlayerController : MonoBehaviour
     private const float ConveyorCarryDeceleration = 10f;
     private const float MinPhysicsMoveDistance = 0.00001f;
     private const float MinPhysicsMoveDistanceSqr = MinPhysicsMoveDistance * MinPhysicsMoveDistance;
+    private const float WaterBoundarySkin = 0.005f;
+    private const int WaterMoveClampIterations = 5;
+    private const float WaterBoundaryNormalProbeDistance = 0.05f;
+    private const float WaterBoundarySlideScoreTolerance = 0.01f;
     private const float DefaultMultiFocusFacingScoreWeight = 0.75f;
     private const float TemporaryDropFocusDuration = 0.18f;
+    private static readonly Vector2[] WaterBoundarySampleDirections =
+    {
+        new Vector2(1f, 0f),
+        new Vector2(0.7071068f, 0.7071068f),
+        new Vector2(0f, 1f),
+        new Vector2(-0.7071068f, 0.7071068f),
+        new Vector2(-1f, 0f),
+        new Vector2(-0.7071068f, -0.7071068f),
+        new Vector2(0f, -1f),
+        new Vector2(0.7071068f, -0.7071068f)
+    };
 
     [SerializeField]
     private Transform movementReference;
@@ -60,6 +75,8 @@ public class PlayerController : MonoBehaviour
     private readonly List<WorkableObject> selectedWorkableRangeRemovalBuffer = new List<WorkableObject>();
     private readonly List<Block> singleFocusedBlockBuffer = new List<Block>(1);
     private readonly List<Block> focusRemovalBuffer = new List<Block>();
+    private readonly float[] waterBoundaryWeightBuffer = new float[8];
+    private readonly float[] waterBoundaryNormalWeightBuffer = new float[8];
     private Rigidbody cachedRigidbody;
     private CapsuleCollider cachedCapsuleCollider;
     private Vector3 defaultCapsuleColliderCenter;
@@ -83,6 +100,9 @@ public class PlayerController : MonoBehaviour
     private float temporaryDropFocusUntilTime;
     private MapObject currentMouseFocusedMapObject;
     private PointerEventData pointerEventData;
+    private int nearbyWaterBiomeCacheFrame = -1;
+    private Vector2Int nearbyWaterBiomeCacheCoordinate;
+    private bool nearbyWaterBiomeCacheResult;
 
     private struct InteractionFocusCandidate
     {
@@ -323,8 +343,11 @@ public class PlayerController : MonoBehaviour
         {
             if (cachedRigidbody == null)
             {
+                Vector3 startPosition = ClampRootPositionToGroundY(transform.position);
+                Vector3 moveDelta = moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime;
+                moveDelta = ResolveWaterConstrainedMove(startPosition, moveDelta);
                 transform.position = ClampRootPositionToGroundY(
-                    transform.position + moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime);
+                    startPosition + moveDelta);
             }
         }
 
@@ -497,11 +520,281 @@ public class PlayerController : MonoBehaviour
             finalMove = delta;
         }
 
+        finalMove = ResolveWaterConstrainedMove(startPosition, finalMove);
+
         Vector3 finalPosition = ClampRootPositionToGroundY(startPosition + finalMove);
         if (finalMove.sqrMagnitude > MinPhysicsMoveDistanceSqr)
         {
             cachedRigidbody.MovePosition(finalPosition);
         }
+    }
+
+    private Vector3 ResolveWaterConstrainedMove(Vector3 startPosition, Vector3 moveDelta)
+    {
+        moveDelta.y = 0f;
+        if (moveDelta.sqrMagnitude <= MinPhysicsMoveDistanceSqr
+            || ResolveTerrainGenerator() == null)
+        {
+            return moveDelta;
+        }
+
+        startPosition = ClampRootPositionToGroundY(startPosition);
+        Vector3 targetPosition = ClampRootPositionToGroundY(startPosition + moveDelta);
+        if (!IsPlayerBlockedByWaterAtPosition(targetPosition))
+        {
+            return moveDelta;
+        }
+
+        Vector3 directMove = ClampMoveBeforeWater(startPosition, moveDelta);
+        Vector3 remainingMove = moveDelta - directMove;
+        if (remainingMove.sqrMagnitude <= MinPhysicsMoveDistanceSqr
+            || !TryEstimateWaterSurfaceNormal(startPosition + directMove, moveDelta, out Vector2 waterNormal))
+        {
+            return directMove;
+        }
+
+        Vector3 waterNormal3 = new Vector3(waterNormal.x, 0f, waterNormal.y);
+        Vector3 slideMove = Vector3.ProjectOnPlane(remainingMove, waterNormal3);
+        Vector3 slideOrigin = startPosition + directMove;
+        Vector3 bestSlideMove = ClampSlideMoveAlongWaterBoundary(slideOrigin, slideMove);
+        Vector3 xSlideMove = ClampSlideMoveAlongWaterBoundary(
+            slideOrigin,
+            new Vector3(remainingMove.x, 0f, 0f));
+        Vector3 zSlideMove = ClampSlideMoveAlongWaterBoundary(
+            slideOrigin,
+            new Vector3(0f, 0f, remainingMove.z));
+
+        if (xSlideMove.sqrMagnitude > bestSlideMove.sqrMagnitude)
+        {
+            bestSlideMove = xSlideMove;
+        }
+
+        if (zSlideMove.sqrMagnitude > bestSlideMove.sqrMagnitude)
+        {
+            bestSlideMove = zSlideMove;
+        }
+
+        return directMove + bestSlideMove;
+    }
+
+    private Vector3 ClampMoveBeforeWater(Vector3 startPosition, Vector3 moveDelta)
+    {
+        moveDelta.y = 0f;
+        if (moveDelta.sqrMagnitude <= MinPhysicsMoveDistanceSqr)
+        {
+            return Vector3.zero;
+        }
+
+        startPosition = ClampRootPositionToGroundY(startPosition);
+        if (IsPlayerBlockedByWaterAtPosition(startPosition))
+        {
+            return Vector3.zero;
+        }
+
+        if (!IsPlayerBlockedByWaterAtPosition(startPosition + moveDelta))
+        {
+            return moveDelta;
+        }
+
+        float allowed = 0f;
+        float blocked = 1f;
+        for (int i = 0; i < WaterMoveClampIterations; i++)
+        {
+            float candidate = (allowed + blocked) * 0.5f;
+            if (IsPlayerBlockedByWaterAtPosition(startPosition + (moveDelta * candidate)))
+            {
+                blocked = candidate;
+            }
+            else
+            {
+                allowed = candidate;
+            }
+        }
+
+        return moveDelta * allowed;
+    }
+
+    private Vector3 ClampSlideMoveAlongWaterBoundary(Vector3 startPosition, Vector3 moveDelta)
+    {
+        moveDelta.y = 0f;
+        if (moveDelta.sqrMagnitude <= MinPhysicsMoveDistanceSqr)
+        {
+            return Vector3.zero;
+        }
+
+        startPosition = ClampRootPositionToGroundY(startPosition);
+        float startWaterScore = GetPlayerWaterSurfaceMaxScore(startPosition);
+        float allowedWaterScore = Mathf.Max(0f, startWaterScore + WaterBoundarySlideScoreTolerance);
+        if (GetPlayerWaterSurfaceMaxScore(startPosition + moveDelta) <= allowedWaterScore)
+        {
+            return moveDelta;
+        }
+
+        float allowed = 0f;
+        float blocked = 1f;
+        for (int i = 0; i < WaterMoveClampIterations; i++)
+        {
+            float candidate = (allowed + blocked) * 0.5f;
+            if (GetPlayerWaterSurfaceMaxScore(startPosition + (moveDelta * candidate)) <= allowedWaterScore)
+            {
+                allowed = candidate;
+            }
+            else
+            {
+                blocked = candidate;
+            }
+        }
+
+        return moveDelta * allowed;
+    }
+
+    private bool IsPlayerBlockedByWaterAtPosition(Vector3 rootPosition)
+    {
+        return GetPlayerWaterSurfaceMaxScore(rootPosition) > 0f;
+    }
+
+    private float GetPlayerWaterSurfaceMaxScore(Vector3 rootPosition)
+    {
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return float.NegativeInfinity;
+        }
+
+        Vector2 center = GetPlayerCollisionCenterXZ(rootPosition);
+        if (!HasNearbyWaterBiome(center))
+        {
+            return float.NegativeInfinity;
+        }
+
+        float radius = GetPlayerWaterCollisionRadius();
+        float maxScore = terrain.GetWaterSurfaceScoreAtWorldPosition(center, waterBoundaryWeightBuffer);
+
+        for (int i = 0; i < WaterBoundarySampleDirections.Length; i++)
+        {
+            Vector2 direction = WaterBoundarySampleDirections[i];
+            float score = terrain.GetWaterSurfaceScoreAtWorldPosition(
+                center + (direction * radius),
+                waterBoundaryWeightBuffer);
+            maxScore = Mathf.Max(maxScore, score);
+        }
+
+        return maxScore;
+    }
+
+    private bool TryEstimateWaterSurfaceNormal(
+        Vector3 rootPosition,
+        Vector3 preferredDirection,
+        out Vector2 normal)
+    {
+        normal = Vector2.zero;
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector2 center = GetPlayerCollisionCenterXZ(rootPosition);
+        Vector2 direction = new Vector2(preferredDirection.x, preferredDirection.z);
+        if (direction.sqrMagnitude > 0.0001f)
+        {
+            center += direction.normalized * GetPlayerWaterCollisionRadius();
+        }
+
+        float probe = WaterBoundaryNormalProbeDistance;
+        float right = terrain.GetWaterSurfaceScoreAtWorldPosition(
+            center + new Vector2(probe, 0f),
+            waterBoundaryNormalWeightBuffer);
+        float left = terrain.GetWaterSurfaceScoreAtWorldPosition(
+            center + new Vector2(-probe, 0f),
+            waterBoundaryNormalWeightBuffer);
+        float up = terrain.GetWaterSurfaceScoreAtWorldPosition(
+            center + new Vector2(0f, probe),
+            waterBoundaryNormalWeightBuffer);
+        float down = terrain.GetWaterSurfaceScoreAtWorldPosition(
+            center + new Vector2(0f, -probe),
+            waterBoundaryNormalWeightBuffer);
+
+        normal = new Vector2(right - left, up - down);
+        if (normal.sqrMagnitude <= 0.000001f)
+        {
+            if (direction.sqrMagnitude <= 0.0001f)
+            {
+                return false;
+            }
+
+            normal = direction;
+        }
+
+        normal.Normalize();
+        return true;
+    }
+
+    private bool HasNearbyWaterBiome(Vector2 center)
+    {
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(center.x),
+            Mathf.RoundToInt(center.y));
+        if (nearbyWaterBiomeCacheFrame == Time.frameCount
+            && nearbyWaterBiomeCacheCoordinate == coordinate)
+        {
+            return nearbyWaterBiomeCacheResult;
+        }
+
+        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        {
+            for (int offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                if (terrain.IsWaterBiomeAt(coordinate + new Vector2Int(offsetX, offsetY)))
+                {
+                    nearbyWaterBiomeCacheFrame = Time.frameCount;
+                    nearbyWaterBiomeCacheCoordinate = coordinate;
+                    nearbyWaterBiomeCacheResult = true;
+                    return true;
+                }
+            }
+        }
+
+        nearbyWaterBiomeCacheFrame = Time.frameCount;
+        nearbyWaterBiomeCacheCoordinate = coordinate;
+        nearbyWaterBiomeCacheResult = false;
+        return false;
+    }
+
+    private Vector2 GetPlayerCollisionCenterXZ(Vector3 rootPosition)
+    {
+        CacheDefaultCapsuleColliderCenter();
+        if (cachedCapsuleCollider == null)
+        {
+            return new Vector2(rootPosition.x, rootPosition.z);
+        }
+
+        Vector3 currentRootPosition = cachedRigidbody != null
+            ? cachedRigidbody.position
+            : transform.position;
+        Vector3 currentWorldCenter = cachedCapsuleCollider.transform.TransformPoint(cachedCapsuleCollider.center);
+        Vector3 centerOffset = currentWorldCenter - currentRootPosition;
+        return new Vector2(rootPosition.x + centerOffset.x, rootPosition.z + centerOffset.z);
+    }
+
+    private float GetPlayerWaterCollisionRadius()
+    {
+        CacheDefaultCapsuleColliderCenter();
+        if (cachedCapsuleCollider == null)
+        {
+            return WaterBoundarySkin;
+        }
+
+        Transform colliderTransform = cachedCapsuleCollider.transform;
+        Vector3 scale = colliderTransform != null ? colliderTransform.lossyScale : Vector3.one;
+        float planarScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+        return Mathf.Max(0f, cachedCapsuleCollider.radius * planarScale) + WaterBoundarySkin;
     }
 
     private void SnapRootToGroundY()
@@ -1228,7 +1521,93 @@ public class PlayerController : MonoBehaviour
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInstallationFocusBlocks);
 
         AppendInteractionFocusCandidate(nearestFocusCandidate, combinedInteractionFocusBlocks);
+        KeepClosestInteractionFocusTarget(combinedInteractionFocusBlocks);
         SetFocusedBlocks(combinedInteractionFocusBlocks);
+    }
+
+    private void KeepClosestInteractionFocusTarget(List<Block> focusBlocks)
+    {
+        if (focusBlocks == null || focusBlocks.Count <= 1 || player == null)
+        {
+            return;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        MapObject closestTarget = null;
+        Block closestFallbackBlock = null;
+        float closestDistanceSqr = float.MaxValue;
+
+        for (int i = 0; i < focusBlocks.Count; i++)
+        {
+            Block block = focusBlocks[i];
+            if (block == null)
+            {
+                continue;
+            }
+
+            MapObject target = ResolveInteractionFocusTarget(block);
+            float distanceSqr = GetInteractionFocusTargetDistanceSqr(target, block, origin);
+            if (distanceSqr >= closestDistanceSqr)
+            {
+                continue;
+            }
+
+            closestDistanceSqr = distanceSqr;
+            closestTarget = target;
+            closestFallbackBlock = block;
+        }
+
+        if (closestFallbackBlock == null)
+        {
+            focusBlocks.Clear();
+            return;
+        }
+
+        focusBlocks.Clear();
+        if (closestTarget != null)
+        {
+            AppendMapObjectFocusBlocks(closestTarget, closestFallbackBlock, focusBlocks);
+        }
+
+        if (focusBlocks.Count <= 0)
+        {
+            focusBlocks.Add(closestFallbackBlock);
+        }
+    }
+
+    private static MapObject ResolveInteractionFocusTarget(Block block)
+    {
+        if (block == null)
+        {
+            return null;
+        }
+
+        if (block.MapObject != null)
+        {
+            return block.MapObject;
+        }
+
+        return block.Resource;
+    }
+
+    private float GetInteractionFocusTargetDistanceSqr(MapObject target, Block block, Vector3 origin)
+    {
+        if (target is Resource resource)
+        {
+            return GetResourceFocusSelectionDistanceSqr(resource, origin);
+        }
+
+        if (target is WorkableObject workableObject)
+        {
+            return GetWorkableFocusDistanceSqr(workableObject, block, origin);
+        }
+
+        if (target != null)
+        {
+            return GetMapObjectFocusSelectionDistanceSqr(target, block, origin);
+        }
+
+        return GetBlockFocusDistanceSqr(block, origin);
     }
 
     private void ExpireTemporaryDropFocusIfNeeded()

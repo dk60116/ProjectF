@@ -82,6 +82,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int capacity = -1;
         public bool storesFluid;
         public float fluidStorageLiters;
+        public bool hasFluidDisplayColor;
+        public Color fluidDisplayColor = Color.white;
         public float craftingDurationSeconds = -1f;
         public float craftingTime = -1f;
         public string energyType;
@@ -91,6 +93,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int useEnergyTypeValue = -1;
         public float useEnergyAmount;
         public float completeEnergy;
+        public int utilityPoleConnectionRadius = -1;
+        public int utilityPoleSupplyRadius = -1;
         public int mapSizeX = -1;
         public int mapSizeY = -1;
         public int placementCenterX = -1;
@@ -709,11 +713,14 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
         SerializedProperty storesFluidProperty = serializedObject.FindProperty("storesFluid");
         SerializedProperty fluidStorageLitersProperty = serializedObject.FindProperty("fluidStorageLiters");
+        SerializedProperty fluidDisplayColorProperty = serializedObject.FindProperty("fluidDisplayColor");
         SerializedProperty energyTypeProperty = serializedObject.FindProperty("energyType");
         SerializedProperty energyAmountProperty = serializedObject.FindProperty("energyAmount");
         SerializedProperty useEnergyTypeProperty = serializedObject.FindProperty("useEnergyType");
         SerializedProperty useEnergyAmountProperty = serializedObject.FindProperty("useEnergyAmount");
         SerializedProperty completeEnergyProperty = serializedObject.FindProperty("completeEnergy");
+        SerializedProperty utilityPoleConnectionRadiusProperty = serializedObject.FindProperty("utilityPoleConnectionRadius");
+        SerializedProperty utilityPoleSupplyRadiusProperty = serializedObject.FindProperty("utilityPoleSupplyRadius");
         SerializedProperty craftingDurationSecondsProperty = serializedObject.FindProperty("craftingDurationSeconds");
 
         EditorGUILayout.Space(4f);
@@ -756,22 +763,31 @@ public class ItemDataEditorWindow : EditorWindow
 
             EditorGUILayout.PropertyField(capacityProperty, new GUIContent("Capacity"));
         }
-        if (storesFluidProperty != null)
+        if (storesFluidProperty != null || fluidDisplayColorProperty != null)
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(storesFluidProperty, new GUIContent("Store Fluid"));
-            if (storesFluidProperty.boolValue)
+            bool isFluidItem = InputOutputModule.IsFluidItemDefinition(definition);
+            if (fluidDisplayColorProperty != null && isFluidItem)
             {
-                if (fluidStorageLitersProperty != null)
-                {
-                    fluidStorageLitersProperty.floatValue = Mathf.Max(0f, fluidStorageLitersProperty.floatValue);
-                    EditorGUILayout.PropertyField(fluidStorageLitersProperty, new GUIContent("Fluid Storage Liters"));
-                }
+                EditorGUILayout.PropertyField(fluidDisplayColorProperty, new GUIContent("Pipe DP Color"));
             }
-            else if (fluidStorageLitersProperty != null)
+
+            if (storesFluidProperty != null)
             {
-                fluidStorageLitersProperty.floatValue = 0f;
+                EditorGUILayout.PropertyField(storesFluidProperty, new GUIContent("Store Fluid"));
+                if (storesFluidProperty.boolValue)
+                {
+                    if (fluidStorageLitersProperty != null)
+                    {
+                        fluidStorageLitersProperty.floatValue = Mathf.Max(0f, fluidStorageLitersProperty.floatValue);
+                        EditorGUILayout.PropertyField(fluidStorageLitersProperty, new GUIContent("Fluid Storage Liters"));
+                    }
+                }
+                else if (fluidStorageLitersProperty != null)
+                {
+                    fluidStorageLitersProperty.floatValue = 0f;
+                }
             }
         }
         if (craftingDurationSecondsProperty != null)
@@ -828,13 +844,38 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 if (useEnergyAmountProperty != null)
                 {
-                    EditorGUILayout.PropertyField(useEnergyAmountProperty, new GUIContent("Use Energy Amount / Sec"));
+                    string useEnergyAmountLabel = useEnergyType == ItemDefinition.EnergyType.Electricity
+                        ? "Use Energy Amount (kW)"
+                        : "Use Energy Amount / Sec";
+                    EditorGUILayout.PropertyField(useEnergyAmountProperty, new GUIContent(useEnergyAmountLabel));
                 }
 
                 if (completeEnergyProperty != null)
                 {
                     EditorGUILayout.PropertyField(completeEnergyProperty, new GUIContent("Complete Energy"));
                 }
+            }
+        }
+
+        if (definition.mapObject is UtilityPole
+            && (utilityPoleConnectionRadiusProperty != null || utilityPoleSupplyRadiusProperty != null))
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Utility Pole", EditorStyles.boldLabel);
+            if (utilityPoleConnectionRadiusProperty != null)
+            {
+                utilityPoleConnectionRadiusProperty.intValue = Mathf.Max(0, utilityPoleConnectionRadiusProperty.intValue);
+                EditorGUILayout.PropertyField(
+                    utilityPoleConnectionRadiusProperty,
+                    new GUIContent("Connection Radius"));
+            }
+
+            if (utilityPoleSupplyRadiusProperty != null)
+            {
+                utilityPoleSupplyRadiusProperty.intValue = Mathf.Max(0, utilityPoleSupplyRadiusProperty.intValue);
+                EditorGUILayout.PropertyField(
+                    utilityPoleSupplyRadiusProperty,
+                    new GUIContent("Supply Radius"));
             }
         }
 
@@ -1386,6 +1427,7 @@ public class ItemDataEditorWindow : EditorWindow
                     inputEntryProperty,
                     outputEntryProperty,
                     definitions,
+                    targetObject is ProductionMachine,
                     GetInputOutputPairFoldoutKey(targetObject, i),
                     i,
                     () =>
@@ -1904,6 +1946,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty inputEntryProperty,
         SerializedProperty outputEntryProperty,
         List<ItemDefinition> definitions,
+        bool preferCraftingTreeIngredients,
         string foldoutKey,
         int pairIndex,
         Action removeAction)
@@ -1911,7 +1954,12 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         EditorGUILayout.BeginHorizontal();
         bool isExpanded = string.IsNullOrEmpty(foldoutKey) || !collapsedInputOutputPairKeys.Contains(foldoutKey);
-        string header = GetInputOutputPairHeader(inputEntryProperty, outputEntryProperty, pairIndex);
+        string header = GetInputOutputPairHeader(
+            inputEntryProperty,
+            outputEntryProperty,
+            definitions,
+            preferCraftingTreeIngredients,
+            pairIndex);
         bool nextExpanded = EditorGUILayout.Foldout(isExpanded, header, true, EditorStyles.foldout);
         if (nextExpanded != isExpanded && !string.IsNullOrEmpty(foldoutKey))
         {
@@ -1939,7 +1987,16 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
         if (isExpanded)
         {
-            DrawInputOutputEntryFields(inputEntryProperty, definitions, "Input");
+            if (preferCraftingTreeIngredients
+                && TryGetCraftingTreeIngredientSummary(outputEntryProperty, definitions, out string ingredientSummary))
+            {
+                DrawReadOnlyInputOutputSummary("Ingredients", ingredientSummary);
+            }
+            else
+            {
+                DrawInputOutputEntryFields(inputEntryProperty, definitions, "Input");
+            }
+
             GUILayout.Space(4f);
             DrawInputOutputEntryFields(outputEntryProperty, definitions, "Output");
         }
@@ -1950,9 +2007,18 @@ public class ItemDataEditorWindow : EditorWindow
     private static string GetInputOutputPairHeader(
         SerializedProperty inputEntryProperty,
         SerializedProperty outputEntryProperty,
+        List<ItemDefinition> definitions,
+        bool preferCraftingTreeIngredients,
         int pairIndex)
     {
-        return $"Pair {pairIndex + 1}: {GetInputOutputEntrySummary(inputEntryProperty)} -> {GetInputOutputEntrySummary(outputEntryProperty)}";
+        string inputSummary = GetInputOutputEntrySummary(inputEntryProperty);
+        if (preferCraftingTreeIngredients
+            && TryGetCraftingTreeIngredientSummary(outputEntryProperty, definitions, out string ingredientSummary))
+        {
+            inputSummary = ingredientSummary;
+        }
+
+        return $"Pair {pairIndex + 1}: {inputSummary} -> {GetInputOutputEntrySummary(outputEntryProperty)}";
     }
 
     private static string GetInputOutputEntrySummary(SerializedProperty entryProperty)
@@ -1970,6 +2036,58 @@ public class ItemDataEditorWindow : EditorWindow
         string itemName = definition != null ? GetDefinitionDisplayName(definition) : "None";
         int count = countProperty != null ? Mathf.Max(1, countProperty.intValue) : 1;
         return $"{itemName} x{count}";
+    }
+
+    private static void DrawReadOnlyInputOutputSummary(string label, string summary)
+    {
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel(label);
+        EditorGUILayout.SelectableLabel(
+            string.IsNullOrWhiteSpace(summary) ? "None" : summary,
+            EditorStyles.textField,
+            GUILayout.Height(EditorGUIUtility.singleLineHeight));
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private static bool TryGetCraftingTreeIngredientSummary(
+        SerializedProperty outputEntryProperty,
+        List<ItemDefinition> definitions,
+        out string summary)
+    {
+        summary = string.Empty;
+        if (outputEntryProperty == null)
+        {
+            return false;
+        }
+
+        SerializedProperty itemDefinitionProperty = outputEntryProperty.FindPropertyRelative("itemDefinition");
+        ItemDefinition outputDefinition = itemDefinitionProperty != null
+            ? itemDefinitionProperty.objectReferenceValue as ItemDefinition
+            : null;
+        if (outputDefinition == null || outputDefinition.id < 0)
+        {
+            return false;
+        }
+
+        List<CraftingTreeRuntime.IngredientEntry> ingredients = new List<CraftingTreeRuntime.IngredientEntry>();
+        if (!CraftingTreeRuntime.TryGetIngredients(outputDefinition.id, ingredients) || ingredients.Count <= 0)
+        {
+            return false;
+        }
+
+        List<string> parts = new List<string>();
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            ItemDefinition ingredientDefinition = FindDefinitionById(definitions, ingredient.itemId);
+            string itemName = ingredientDefinition != null
+                ? GetDefinitionDisplayName(ingredientDefinition)
+                : $"Item {ingredient.itemId}";
+            parts.Add($"{itemName} x{Mathf.Max(1, ingredient.count)}");
+        }
+
+        summary = string.Join(" + ", parts);
+        return !string.IsNullOrWhiteSpace(summary);
     }
 
     private void DrawInputOutputEntryFields(
@@ -2016,7 +2134,10 @@ public class ItemDataEditorWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         GUILayout.Space(EditorGUIUtility.labelWidth);
-        int nextCount = EditorGUILayout.IntField("Count", Mathf.Max(1, countProperty.intValue));
+        string countLabel = ItemDefinition.IsElectricityItemDefinition(currentDefinition)
+            ? "Count (kW)"
+            : "Count";
+        int nextCount = EditorGUILayout.IntField(countLabel, Mathf.Max(1, countProperty.intValue));
         countProperty.intValue = Mathf.Max(1, nextCount);
         EditorGUILayout.EndHorizontal();
 
@@ -2234,12 +2355,12 @@ public class ItemDataEditorWindow : EditorWindow
         Undo.RecordObject(itemManager, "Rebuild Item Data");
         itemManager.RebuildItemDefinitionsFromAssets();
         itemManager.ApplyItemIdsToPrefabs();
-        int productionMachineRecipeCount = ProductionMachineRecipeAutoFill.SyncMk1(itemManager);
+        int productionMachineRecipeCount = ProductionMachineRecipeAutoFill.SyncProductionMachines(itemManager);
         EditorUtility.SetDirty(itemManager);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         EnsureSelection(GetDefinitions(itemManager));
-        ShowNotification(new GUIContent($"Item Data rebuilt. Production Mk1 recipes: {productionMachineRecipeCount}"));
+        ShowNotification(new GUIContent($"Item Data rebuilt. Production recipes: {productionMachineRecipeCount}"));
         Repaint();
     }
 
@@ -2564,6 +2685,8 @@ public class ItemDataEditorWindow : EditorWindow
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             storesFluid = definition.storesFluid,
             fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
+            hasFluidDisplayColor = InputOutputModule.IsFluidItemDefinition(definition),
+            fluidDisplayColor = definition.fluidDisplayColor,
             craftingDurationSeconds = definition.CraftingDurationSeconds,
             craftingTime = definition.CraftingDurationSeconds,
             energyType = definition.energyType.ToString(),
@@ -2572,7 +2695,13 @@ public class ItemDataEditorWindow : EditorWindow
               useEnergyType = definition.useEnergyType.ToString(),
               useEnergyTypeValue = (int)definition.useEnergyType,
               useEnergyAmount = Mathf.Max(0f, definition.useEnergyAmount),
-              completeEnergy = Mathf.Max(0f, definition.completeEnergy)
+              completeEnergy = Mathf.Max(0f, definition.completeEnergy),
+              utilityPoleConnectionRadius = definition.mapObject is UtilityPole
+                  ? Mathf.Max(0, definition.utilityPoleConnectionRadius)
+                  : -1,
+              utilityPoleSupplyRadius = definition.mapObject is UtilityPole
+                  ? Mathf.Max(0, definition.utilityPoleSupplyRadius)
+                  : -1
           };
 
         if (definition.interactionButtonList != null && definition.interactionButtonList.Count > 0)
@@ -2832,6 +2961,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
         definition.storesFluid = entry.storesFluid;
         definition.fluidStorageLiters = entry.storesFluid ? Mathf.Max(0f, entry.fluidStorageLiters) : 0f;
+        if (entry.hasFluidDisplayColor)
+        {
+            definition.fluidDisplayColor = entry.fluidDisplayColor;
+        }
         float savedCraftingDuration = entry.craftingDurationSeconds > 0f ? entry.craftingDurationSeconds : entry.craftingTime;
         if (savedCraftingDuration > 0f)
         {
@@ -2842,6 +2975,15 @@ public class ItemDataEditorWindow : EditorWindow
         definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
         definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.useEnergyAmount);
         definition.completeEnergy = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.completeEnergy);
+        if (entry.utilityPoleConnectionRadius >= 0)
+        {
+            definition.utilityPoleConnectionRadius = Mathf.Max(0, entry.utilityPoleConnectionRadius);
+        }
+
+        if (entry.utilityPoleSupplyRadius >= 0)
+        {
+            definition.utilityPoleSupplyRadius = Mathf.Max(0, entry.utilityPoleSupplyRadius);
+        }
 
         Mesh portableMesh = LoadAssetAtPath<Mesh>(entry.portableMeshAssetPath);
         if (portableMesh != null)
@@ -3780,6 +3922,7 @@ public class ItemDataEditorWindow : EditorWindow
 internal static class ProductionMachineRecipeAutoFill
 {
     private const string ProductionMachineMk1Name = "Production machine (Mk1)";
+    private const string ProductionMachineMk2Name = "Production machine (MK2)";
     private const int CurrentCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
     private const int OutputCountCraftingTreeFileVersion = 2;
@@ -3842,6 +3985,34 @@ internal static class ProductionMachineRecipeAutoFill
         }
     }
 
+    public static int SyncProductionMachines(ItemManager itemManager)
+    {
+        List<ItemDefinition> definitions = CollectDefinitions(itemManager);
+        if (definitions.Count == 0)
+        {
+            return 0;
+        }
+
+        int syncedRecipeCount = 0;
+        ProductionMachine mk1 = FindProductionMachine(definitions, ProductionMachineMk1Name);
+        if (mk1 != null)
+        {
+            List<RecipeEntry> recipes = BuildInputRecipes(definitions, 1);
+            ApplyRecipes(mk1, recipes);
+            syncedRecipeCount += recipes.Count;
+        }
+
+        ProductionMachine mk2 = FindProductionMachine(definitions, ProductionMachineMk2Name);
+        if (mk2 != null)
+        {
+            List<RecipeEntry> recipes = BuildInputRecipes(definitions, 2);
+            ApplyRecipes(mk2, recipes);
+            syncedRecipeCount += recipes.Count;
+        }
+
+        return syncedRecipeCount;
+    }
+
     public static int SyncMk1(ItemManager itemManager)
     {
         List<ItemDefinition> definitions = CollectDefinitions(itemManager);
@@ -3850,13 +4021,13 @@ internal static class ProductionMachineRecipeAutoFill
             return 0;
         }
 
-        ProductionMachine productionMachine = FindProductionMachineMk1(definitions);
+        ProductionMachine productionMachine = FindProductionMachine(definitions, ProductionMachineMk1Name);
         if (productionMachine == null)
         {
             return 0;
         }
 
-        List<RecipeEntry> recipes = BuildSingleInputRecipes(definitions);
+        List<RecipeEntry> recipes = BuildInputRecipes(definitions, 1);
         ApplyRecipes(productionMachine, recipes);
         return recipes.Count;
     }
@@ -3881,7 +4052,7 @@ internal static class ProductionMachineRecipeAutoFill
         return results;
     }
 
-    private static ProductionMachine FindProductionMachineMk1(List<ItemDefinition> definitions)
+    private static ProductionMachine FindProductionMachine(List<ItemDefinition> definitions, string machineName)
     {
         for (int i = 0; i < definitions.Count; i++)
         {
@@ -3902,8 +4073,8 @@ internal static class ProductionMachineRecipeAutoFill
                 ? productionMachine.transform.root.gameObject
                 : productionMachine.gameObject;
             string prefabName = prefabRoot != null ? prefabRoot.name : productionMachine.name;
-            if (string.Equals(definitionName, ProductionMachineMk1Name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(prefabName, ProductionMachineMk1Name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(definitionName, machineName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(prefabName, machineName, StringComparison.OrdinalIgnoreCase))
             {
                 return productionMachine;
             }
@@ -3927,19 +4098,21 @@ internal static class ProductionMachineRecipeAutoFill
         return mapObject.GetComponentInChildren<ProductionMachine>(true);
     }
 
-    private static List<RecipeEntry> BuildSingleInputRecipes(List<ItemDefinition> definitions)
+    private static List<RecipeEntry> BuildInputRecipes(List<ItemDefinition> definitions, int maxIngredientTypes)
     {
         List<RecipeEntry> recipes = new List<RecipeEntry>();
         DefinitionLookup definitionLookup = new DefinitionLookup(definitions);
         List<CraftingTreeJsonEntry> entries = LoadCraftingTreeEntries();
-        HashSet<string> seenPairs = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<int> seenOutputItemIds = new HashSet<int>();
+        int allowedIngredientTypes = Mathf.Max(1, maxIngredientTypes);
 
         for (int i = 0; i < entries.Count; i++)
         {
             CraftingTreeJsonEntry entry = entries[i];
             if (entry == null
                 || entry.ingredients == null
-                || entry.ingredients.Count != 1)
+                || entry.ingredients.Count <= 0
+                || entry.ingredients.Count > allowedIngredientTypes)
             {
                 continue;
             }
@@ -3971,8 +4144,7 @@ internal static class ProductionMachineRecipeAutoFill
                 continue;
             }
 
-            string pairKey = $"{inputDefinition.id}>{outputDefinition.id}";
-            if (!seenPairs.Add(pairKey))
+            if (!seenOutputItemIds.Add(outputDefinition.id))
             {
                 continue;
             }

@@ -132,7 +132,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 28
+  objId: 30
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -144,6 +144,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
+  particleEffect: {fileID: 0}
   mapFilter: 32
   installationFocusRadius: 1
   installedDirection: 0
@@ -186,6 +187,7 @@ MonoBehaviour:
   craftProgressGaugeCanvasVerticalOffset: 14
   energyGaugeFillColor: {r: 1, g: 0.05, b: 0, a: 1}
   craftProgressGaugeFillColor: {r: 0.026268482, g: 1, b: 0, a: 1}
+  playParticleEffectWhileCrafting: 0
   runtimeAreaMaxObjects: 10
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []

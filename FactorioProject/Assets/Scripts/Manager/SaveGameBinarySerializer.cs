@@ -94,6 +94,7 @@ public static class SaveGameBinarySerializer
     {
         terrain ??= new TerrainSaveData();
         writer.Write(terrain.seed);
+        writer.Write(terrain.mapSize);
     }
 
     private static TerrainSaveData ReadTerrain(BinaryReader reader, int version)
@@ -102,6 +103,11 @@ public static class SaveGameBinarySerializer
         {
             seed = reader.ReadInt32()
         };
+
+        if (version >= 9)
+        {
+            terrain.mapSize = reader.ReadInt32();
+        }
 
         if (version <= 1)
         {

@@ -9,9 +9,16 @@ public class ItemInfoDescription : MonoBehaviour
     private const int DefaultConveyorInfoSlotCount = 2;
     private const int Belt2FInfoSlotCount = 6;
     private const string DefaultFluidItemName = "Water";
+    private const string SteamFluidItemName = "Steam";
+    private const string FireEnergyItemName = "Fire";
+    private const string ElectricityItemName = "Electricity";
+    private const float GaugeFillLerpSpeed = 12f;
+    private const float GaugeFillSnapThreshold = 0.0025f;
     private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
+    private static readonly Color ElectricGaugeFillColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
+    private static readonly Dictionary<Image, float> GaugeFillTargets = new Dictionary<Image, float>();
 
     [SerializeField]
     private List<GameObject> defaultParent = new List<GameObject>();
@@ -20,11 +27,11 @@ public class ItemInfoDescription : MonoBehaviour
     [SerializeField]
     private List<Image> defaultSign = new List<Image>();
     [SerializeField]
-    private GameObject energyGauge, workGauge;
+    private GameObject energyGauge, workGauge, defaultGauge;
     [SerializeField]
-    private Image energyFill, workFill;
+    private Image energyFill, workFill, defaultFill;
     [SerializeField]
-    private TextMeshProUGUI energyText, workText;
+    private TextMeshProUGUI energyText, workText, defaultGaugeText;
     [SerializeField]
     private List<GameObject> defaultItem;
     [SerializeField]
@@ -35,25 +42,44 @@ public class ItemInfoDescription : MonoBehaviour
     private ItemSlot energyItemSlot, inputItemSlot, outputItemSlot;
 
     private readonly List<int> conveyorItemIds = new List<int>(2);
+    private readonly List<int> defaultItemOriginalSiblingIndices = new List<int>();
     private int defaultStatusLineIndex;
+    private bool defaultItemSiblingIndicesCaptured;
+    private RobotArm liveGaugeRobotArm;
+    private UtilityPole liveGaugeUtilityPole;
+    private InputOutputModule liveGaugeModule;
 
     private void Awake()
     {
         ResolveDefaultItemSlotReferences();
+        ResolveGaugeReferences();
     }
 
     private void OnValidate()
     {
         ResolveDefaultItemSlotReferences();
+        ResolveGaugeReferences();
+    }
+
+    private void Update()
+    {
+        RefreshLiveGaugeTargets();
+        UpdateGaugeFill(energyFill);
+        UpdateGaugeFill(workFill);
+        UpdateGaugeFill(defaultFill);
     }
 
     public void Clear()
     {
         ResolveDefaultItemSlotReferences();
+        ResolveGaugeReferences();
+        RestoreDefaultItemSiblingIndices();
+        ClearLiveGaugeSource();
         defaultStatusLineIndex = 0;
         ClearDefaultLines();
         SetGauge(energyGauge, energyFill, energyText, false, 0f, Color.white, 0f, 0f);
         SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
 
         ClearItemSlots(defaultItem, defaultItemSlot);
         ClearItemSlot(energyItem, energyItemSlot);
@@ -118,14 +144,54 @@ public class ItemInfoDescription : MonoBehaviour
     public void ShowRobotArm(RobotArm robotArm, Resource underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
-        SetDefaultItemSlot(0, robotArm != null ? robotArm.HeldItemId : -1, true);
+        liveGaugeRobotArm = robotArm;
         if (robotArm == null)
         {
+            SetDefaultItemSlot(0, -1, true);
             return;
         }
 
         robotArm.GetObjectInfoStatus(out string statusText, out bool isWorking);
         SetDefaultStatus(statusText, isWorking);
+        TrySetElectricPowerGauge(energyGauge, energyFill, energyText, robotArm);
+        bool energyUseDisplayed = robotArm.TryGetElectricPowerRequirement(out float wattsPerSecond)
+            && SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity, wattsPerSecond, -1);
+        SetDefaultItemSlot(energyUseDisplayed ? 1 : 0, robotArm.HeldItemId, true);
+    }
+
+    public void ShowUtilityPole(UtilityPole utilityPole, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        liveGaugeUtilityPole = utilityPole;
+
+        float productionKilowatts = 0f;
+        float requiredKilowatts = 0f;
+        if (utilityPole != null
+            && utilityPole.TryGetObjectInfoNetworkPower(out float productionWatts, out float requiredWatts))
+        {
+            productionKilowatts = productionWatts / 1000f;
+            requiredKilowatts = requiredWatts / 1000f;
+        }
+
+        float fillAmount = requiredKilowatts > 0.0001f
+            ? Mathf.Clamp01(productionKilowatts / requiredKilowatts)
+            : (productionKilowatts > 0.0001f ? 1f : 0f);
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            fillAmount,
+            ElectricGaugeFillColor,
+            productionKilowatts,
+            requiredKilowatts);
+        if (energyText != null)
+        {
+            energyText.text =
+                $"{FormatKilowatts(productionKilowatts)} kW / {FormatKilowatts(requiredKilowatts)} kW";
+        }
+
+        SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
     }
 
     public void ShowInstallationObject(InstallationObject installationObject, Resource underlyingResource = null)
@@ -136,14 +202,25 @@ public class ItemInfoDescription : MonoBehaviour
 
     public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)
     {
-        BeginObjectDisplay(underlyingResource);
+        MiningMachine miningMachine = module as MiningMachine;
+        if (miningMachine != null && miningMachine.TryGetObjectInfoResourceReserves(out int miningResourceReserves))
+        {
+            BeginObjectDisplay(miningResourceReserves);
+        }
+        else
+        {
+            BeginObjectDisplay(underlyingResource);
+        }
 
+        liveGaugeModule = module;
         Pump pump = module as Pump;
+        bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
         if (pump != null)
         {
             pump.GetObjectInfoStatus(out string pumpStatusText, out bool isPumpProducing);
             SetDefaultStatus(pumpStatusText, isPumpProducing);
-            SetPumpOutputRateDefaultItemSlot(0, pump);
+            bool energyUseDisplayed = SetEnergyUseRateDefaultItemSlot(0, pump, -1);
+            SetPumpOutputRateDefaultItemSlot(energyUseDisplayed ? 1 : 0, pump);
             return;
         }
 
@@ -151,46 +228,53 @@ public class ItemInfoDescription : MonoBehaviour
         Boiler boiler = module as Boiler;
         if (steamGenerator != null && module.CanStoreFluid)
         {
-            SetFluidStorageGauge(module);
-            SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+            if (showElectricPowerGauge)
+            {
+                SetFluidStorageGauge(workGauge, workFill, workText, module);
+                SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            }
+            else
+            {
+                SetFluidStorageGauge(module);
+                SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+            }
         }
         else if (boiler != null && module.CanStoreFluid)
         {
-            SetFluidStorageGauge(module);
-            SetGauge(
-                workGauge,
-                workFill,
-                workText,
-                true,
-                boiler.ObjectInfoBoilerTemperatureFillAmount,
-                boiler.ObjectInfoBoilerTemperatureGaugeFillColor,
-                boiler.WaterTemperatureCelsius,
-                boiler.MaxWaterTemperatureCelsius,
-                true);
+            if (showElectricPowerGauge)
+            {
+                SetFluidStorageGauge(workGauge, workFill, workText, module);
+                SetBoilerTemperatureGauge(defaultGauge, defaultFill, defaultGaugeText, boiler);
+            }
+            else
+            {
+                SetFluidStorageGauge(module);
+                SetBoilerTemperatureGauge(workGauge, workFill, workText, boiler);
+            }
         }
         else
         {
-            SetGauge(
-                energyGauge,
-                energyFill,
-                energyText,
-                true,
-                module != null ? module.ObjectInfoEnergyGaugeFillAmount : 0f,
-                module != null ? module.ObjectInfoEnergyGaugeFillColor : Color.white,
-                module != null ? module.ObjectInfoStoredEnergy : 0f,
-                module != null ? module.ObjectInfoEnergyGaugeCapacity : 0f,
-                true);
+            if (showElectricPowerGauge)
+            {
+                SetWorkProgressGauge(workGauge, workFill, workText, module);
+                SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            }
+            else
+            {
+                bool showEnergyGauge = !(module is ProductionMachine);
+                SetGauge(
+                    energyGauge,
+                    energyFill,
+                    energyText,
+                    showEnergyGauge,
+                    module != null ? module.ObjectInfoEnergyGaugeFillAmount : 0f,
+                    module != null ? module.ObjectInfoEnergyGaugeFillColor : Color.white,
+                    module != null ? module.ObjectInfoStoredEnergy : 0f,
+                    module != null ? module.ObjectInfoEnergyGaugeCapacity : 0f,
+                    true);
 
-            SetGauge(
-                workGauge,
-                workFill,
-                workText,
-                true,
-                module != null ? module.ObjectInfoWorkGaugeFillAmount : 0f,
-                module != null ? module.ObjectInfoWorkGaugeFillColor : Color.white,
-                module != null ? module.ObjectInfoCurrentUseEnergy : 0f,
-                module != null ? module.ObjectInfoCompleteEnergy : 0f,
-                true);
+                SetWorkProgressGauge(workGauge, workFill, workText, module);
+            }
         }
 
         if (module == null)
@@ -201,22 +285,73 @@ public class ItemInfoDescription : MonoBehaviour
         module.GetObjectInfoStatus(out string statusText, out bool isProducing);
         SetDefaultStatus(statusText, isProducing);
 
-        SetFluidStorageDefaultItemSlot(0, module);
-
+        int energyInputItemId = -1;
         if (module.TryGetObjectInfoEnergyInput(
             out int energyItemId,
             out int energyAreaCount,
             out int energyAreaCapacity))
         {
-            SetItemSlot(
-                energyItem,
-                energyItemSlot,
-                energyItemId,
-                energyAreaCount,
-                energyAreaCapacity,
-                true,
-                false,
-                ResolveModuleFluidTemperature(module, energyItemId));
+            energyInputItemId = energyItemId;
+            if (module.TryGetObjectInfoBurnEnergyInput(
+                    out int burnEnergyAmount,
+                    out int burnEnergyAreaCapacity))
+            {
+                SetBurnEnergyInputItemSlot(
+                    energyItem,
+                    energyItemSlot,
+                    energyItemId,
+                    energyAreaCount,
+                    burnEnergyAmount,
+                    burnEnergyAreaCapacity);
+            }
+            else
+            {
+                SetItemSlot(
+                    energyItem,
+                    energyItemSlot,
+                    energyItemId,
+                    energyAreaCount,
+                    energyAreaCapacity,
+                    true,
+                    false,
+                    ResolveModuleFluidTemperature(module, energyItemId));
+            }
+        }
+
+        if (steamGenerator != null)
+        {
+            SetFluidStorageInputItemSlot(steamGenerator);
+            if (!TrySetSteamGeneratorOutputRateItemSlot(outputItem, outputItemSlot, steamGenerator)
+                && module.TryGetObjectInfoOutput(
+                    out int steamOutputItemId,
+                    out int steamOutputAreaCount,
+                    out int steamOutputAreaCapacity,
+                    out bool displayZeroSteamOutputItem))
+            {
+                SetItemSlot(
+                    outputItem,
+                    outputItemSlot,
+                    steamOutputItemId,
+                    steamOutputAreaCount,
+                    steamOutputAreaCapacity,
+                    true,
+                    displayZeroSteamOutputItem,
+                    ResolveModuleFluidTemperature(module, steamOutputItemId));
+            }
+
+            return;
+        }
+
+        bool energyUseRateDisplayed = SetEnergyUseRateDefaultItemSlot(0, module, energyInputItemId);
+        SetFluidStorageDefaultItemSlot(energyUseRateDisplayed ? 1 : 0, module);
+
+        ProductionMachine productionMachine = module as ProductionMachine;
+        if (productionMachine != null
+            && TrySetProductionMachineItemSlots(
+                productionMachine,
+                energyUseRateDisplayed ? 1 : 0))
+        {
+            return;
         }
 
         if (module.TryGetObjectInfoItemPair(
@@ -275,6 +410,75 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    private bool TrySetProductionMachineItemSlots(ProductionMachine productionMachine, int defaultItemStartIndex)
+    {
+        if (productionMachine == null
+            || !productionMachine.TryGetObjectInfoProductionIngredientCount(out int ingredientCount))
+        {
+            return false;
+        }
+
+        bool displayedAny = false;
+        int nextDefaultItemIndex = Mathf.Max(0, defaultItemStartIndex);
+        for (int i = 0; i < ingredientCount; i++)
+        {
+            if (!productionMachine.TryGetObjectInfoProductionIngredient(
+                    i,
+                    out int ingredientItemId,
+                    out int ingredientRequiredCount,
+                    out int ingredientAreaCount,
+                    out int ingredientAreaCapacity))
+            {
+                continue;
+            }
+
+            if (i == 0)
+            {
+                SetProductionIngredientItemSlot(
+                    inputItem,
+                    inputItemSlot,
+                    ingredientItemId,
+                    ingredientRequiredCount,
+                    ingredientAreaCount,
+                    ingredientAreaCapacity,
+                    ResolveModuleFluidTemperature(productionMachine, ingredientItemId));
+            }
+            else
+            {
+                MoveDefaultItemBelowInputItem(nextDefaultItemIndex, i);
+                SetProductionIngredientDefaultItemSlot(
+                    nextDefaultItemIndex,
+                    ingredientItemId,
+                    ingredientRequiredCount,
+                    ingredientAreaCount,
+                    ingredientAreaCapacity,
+                    ResolveModuleFluidTemperature(productionMachine, ingredientItemId));
+                nextDefaultItemIndex++;
+            }
+
+            displayedAny = true;
+        }
+
+        if (productionMachine.TryGetObjectInfoProductionOutput(
+                out int outputItemId,
+                out int outputAreaCount,
+                out int outputAreaCapacity))
+        {
+            SetItemSlot(
+                outputItem,
+                outputItemSlot,
+                outputItemId,
+                outputAreaCount,
+                outputAreaCapacity,
+                true,
+                true,
+                ResolveModuleFluidTemperature(productionMachine, outputItemId));
+            displayedAny = true;
+        }
+
+        return displayedAny;
+    }
+
     private void SetDefaultStatus(string text, bool isProducing)
     {
         SetDefaultText(defaultStatusLineIndex, text, !string.IsNullOrEmpty(text));
@@ -283,14 +487,156 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void BeginObjectDisplay(Resource underlyingResource)
     {
-        Clear();
         if (!IsDisplayableUnderlyingResource(underlyingResource))
+        {
+            BeginObjectDisplay(-1);
+            return;
+        }
+
+        BeginObjectDisplay(underlyingResource.RemainingHarvestOutputCount);
+    }
+
+    private void BeginObjectDisplay(int resourceReserves)
+    {
+        Clear();
+        if (resourceReserves < 0)
         {
             return;
         }
 
-        SetResourceReservesLine(0, underlyingResource.RemainingHarvestOutputCount);
+        SetResourceReservesLine(0, resourceReserves);
         defaultStatusLineIndex = 1;
+    }
+
+    private void ClearLiveGaugeSource()
+    {
+        liveGaugeRobotArm = null;
+        liveGaugeUtilityPole = null;
+        liveGaugeModule = null;
+    }
+
+    private void RefreshLiveGaugeTargets()
+    {
+        if (!Application.isPlaying || !gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
+        if (liveGaugeModule != null && liveGaugeModule.gameObject.activeInHierarchy)
+        {
+            RefreshInputOutputModuleGaugeTargets(liveGaugeModule);
+            return;
+        }
+
+        if (liveGaugeUtilityPole != null && liveGaugeUtilityPole.gameObject.activeInHierarchy)
+        {
+            RefreshUtilityPoleGaugeTarget(liveGaugeUtilityPole);
+            return;
+        }
+
+        if (liveGaugeRobotArm != null && liveGaugeRobotArm.gameObject.activeInHierarchy)
+        {
+            TrySetElectricPowerGauge(energyGauge, energyFill, energyText, liveGaugeRobotArm);
+        }
+    }
+
+    private void RefreshInputOutputModuleGaugeTargets(InputOutputModule module)
+    {
+        if (module == null)
+        {
+            return;
+        }
+
+        bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
+        if (module is Pump)
+        {
+            return;
+        }
+
+        SteamGenerator steamGenerator = module as SteamGenerator;
+        Boiler boiler = module as Boiler;
+        if (steamGenerator != null && module.CanStoreFluid)
+        {
+            if (showElectricPowerGauge)
+            {
+                SetFluidStorageGauge(workGauge, workFill, workText, module);
+                SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            }
+            else
+            {
+                SetFluidStorageGauge(module);
+                SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+            }
+
+            return;
+        }
+
+        if (boiler != null && module.CanStoreFluid)
+        {
+            if (showElectricPowerGauge)
+            {
+                SetFluidStorageGauge(workGauge, workFill, workText, module);
+                SetBoilerTemperatureGauge(defaultGauge, defaultFill, defaultGaugeText, boiler);
+            }
+            else
+            {
+                SetFluidStorageGauge(module);
+                SetBoilerTemperatureGauge(workGauge, workFill, workText, boiler);
+            }
+
+            return;
+        }
+
+        if (showElectricPowerGauge)
+        {
+            SetWorkProgressGauge(workGauge, workFill, workText, module);
+            SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            return;
+        }
+
+        bool showEnergyGauge = !(module is ProductionMachine);
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            showEnergyGauge,
+            module.ObjectInfoEnergyGaugeFillAmount,
+            module.ObjectInfoEnergyGaugeFillColor,
+            module.ObjectInfoStoredEnergy,
+            module.ObjectInfoEnergyGaugeCapacity,
+            true);
+
+        SetWorkProgressGauge(workGauge, workFill, workText, module);
+    }
+
+    private void RefreshUtilityPoleGaugeTarget(UtilityPole utilityPole)
+    {
+        float productionKilowatts = 0f;
+        float requiredKilowatts = 0f;
+        if (utilityPole != null
+            && utilityPole.TryGetObjectInfoNetworkPower(out float productionWatts, out float requiredWatts))
+        {
+            productionKilowatts = productionWatts / 1000f;
+            requiredKilowatts = requiredWatts / 1000f;
+        }
+
+        float fillAmount = requiredKilowatts > 0.0001f
+            ? Mathf.Clamp01(productionKilowatts / requiredKilowatts)
+            : (productionKilowatts > 0.0001f ? 1f : 0f);
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            fillAmount,
+            ElectricGaugeFillColor,
+            productionKilowatts,
+            requiredKilowatts);
+        if (energyText != null)
+        {
+            energyText.text =
+                $"{FormatKilowatts(productionKilowatts)} kW / {FormatKilowatts(requiredKilowatts)} kW";
+        }
     }
 
     private void SetResourceReservesLine(int index, int reserves)
@@ -326,7 +672,7 @@ public class ItemInfoDescription : MonoBehaviour
             outputItemId,
             fluidItemSet.icon,
             displayName,
-            $"{FormatGaugeNumber(litersPerSecond, false)} L/s");
+            FormatLitersPerSecond(litersPerSecond));
     }
 
     private bool TrySetBoilerOutputRateItemSlot(GameObject root, ItemSlot slot, Boiler boiler)
@@ -351,7 +697,7 @@ public class ItemInfoDescription : MonoBehaviour
             outputItemId,
             fluidItemSet.icon,
             displayName,
-            $"{FormatGaugeNumber(litersPerSecond, false)} L/s");
+            FormatLitersPerSecond(litersPerSecond));
         return true;
     }
 
@@ -373,11 +719,12 @@ public class ItemInfoDescription : MonoBehaviour
         string displayName = string.IsNullOrWhiteSpace(itemSet.name)
             ? ResolveItemDisplayName(outputItemId)
             : itemSet.name;
+        float kilowatts = wattsPerSecond / 1000f;
         slot.SetCustomDisplay(
             outputItemId,
             itemSet.icon,
             displayName,
-            $"{FormatGaugeNumber(wattsPerSecond, false)} W/s");
+            $"{FormatKilowatts(kilowatts)} kW");
         return true;
     }
 
@@ -390,6 +737,21 @@ public class ItemInfoDescription : MonoBehaviour
 
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
+        SetFluidStorageItemSlot(root, slot, installationObject);
+    }
+
+    private void SetFluidStorageInputItemSlot(InstallationObject installationObject)
+    {
+        SetFluidStorageItemSlot(inputItem, inputItemSlot, installationObject);
+    }
+
+    private void SetFluidStorageItemSlot(GameObject root, ItemSlot slot, InstallationObject installationObject)
+    {
+        if (installationObject == null || !installationObject.CanStoreFluid)
+        {
+            return;
+        }
+
         SetActiveIfNeeded(root, true);
         if (slot == null)
         {
@@ -413,20 +775,167 @@ public class ItemInfoDescription : MonoBehaviour
             $"{FormatGaugeNumber(storedLiters, true)} / {FormatGaugeNumber(capacityLiters, true)} L");
     }
 
+    private bool SetEnergyUseRateDefaultItemSlot(
+        int index,
+        InputOutputModule module,
+        int preferredEnergyItemId)
+    {
+        if (module == null
+            || !module.TryGetObjectInfoEnergyUseRate(
+                out ItemDefinition.EnergyType energyType,
+                out float amountPerSecond))
+        {
+            return false;
+        }
+
+        return SetEnergyUseRateDefaultItemSlot(index, energyType, amountPerSecond, preferredEnergyItemId);
+    }
+
+    private bool SetEnergyUseRateDefaultItemSlot(
+        int index,
+        ItemDefinition.EnergyType energyType,
+        float amountPerSecond,
+        int preferredEnergyItemId)
+    {
+        if (energyType == ItemDefinition.EnergyType.None || amountPerSecond <= 0.0001f)
+        {
+            return false;
+        }
+
+        GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
+        ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return root != null;
+        }
+
+        int displayItemId = ResolveEnergyUseDisplayItemId(energyType, preferredEnergyItemId);
+        ItemManager.ItemSet itemSet = ResolveItemSet(displayItemId);
+        string displayName = energyType == ItemDefinition.EnergyType.Electricity
+            && displayItemId >= 0
+            && !string.IsNullOrWhiteSpace(itemSet.name)
+                ? itemSet.name
+                : ResolveEnergyTypeDisplayName(energyType);
+        slot.SetCustomDisplay(
+            displayItemId,
+            itemSet.icon,
+            displayName,
+            FormatEnergyUseRate(energyType, amountPerSecond));
+        return true;
+    }
+
+    private bool TrySetElectricPowerGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        InstallationObject consumer)
+    {
+        if (consumer == null
+            || !UtilityPole.TryGetElectricPowerInfo(
+                consumer,
+                out float suppliedWatts,
+                out float requiredWatts))
+        {
+            return false;
+        }
+
+        float suppliedKilowatts = suppliedWatts / 1000f;
+        float requiredKilowatts = requiredWatts / 1000f;
+        float fillAmount = requiredKilowatts > 0.0001f
+            ? Mathf.Clamp01(suppliedKilowatts / requiredKilowatts)
+            : 0f;
+        SetGauge(
+            root,
+            fill,
+            text,
+            true,
+            fillAmount,
+            ElectricGaugeFillColor,
+            suppliedKilowatts,
+            requiredKilowatts);
+        if (text != null)
+        {
+            text.text = $"{FormatKilowatts(suppliedKilowatts)} kW / {FormatKilowatts(requiredKilowatts)} kW";
+        }
+
+        return true;
+    }
+
     private void SetFluidStorageGauge(InstallationObject installationObject)
+    {
+        SetFluidStorageGauge(energyGauge, energyFill, energyText, installationObject);
+    }
+
+    private void SetFluidStorageGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        InstallationObject installationObject)
     {
         float capacityLiters = installationObject != null ? installationObject.FluidStorageCapacityLiters : 0f;
         float storedLiters = installationObject != null ? installationObject.StoredFluidLiters : 0f;
         SetGauge(
-            energyGauge,
-            energyFill,
-            energyText,
+            root,
+            fill,
+            text,
             true,
             capacityLiters > 0.0001f ? storedLiters / capacityLiters : 0f,
-            FluidGaugeFillColor,
+            ResolveFluidGaugeFillColor(installationObject),
             storedLiters,
             capacityLiters,
             true);
+    }
+
+    private void SetBoilerTemperatureGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        Boiler boiler)
+    {
+        SetGauge(
+            root,
+            fill,
+            text,
+            true,
+            boiler != null ? boiler.ObjectInfoBoilerTemperatureFillAmount : 0f,
+            boiler != null ? boiler.ObjectInfoBoilerTemperatureGaugeFillColor : Color.white,
+            boiler != null ? boiler.WaterTemperatureCelsius : 0f,
+            boiler != null ? boiler.MaxWaterTemperatureCelsius : 0f,
+            true);
+    }
+
+    private void SetWorkProgressGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        InputOutputModule module)
+    {
+        float currentValue = module != null ? module.ObjectInfoCurrentUseEnergy : 0f;
+        float completeValue = module != null ? module.ObjectInfoCompleteEnergy : 0f;
+        bool showKilowatts = module != null
+            && module.TryGetObjectInfoEnergyUseRate(out ItemDefinition.EnergyType energyType, out _)
+            && energyType == ItemDefinition.EnergyType.Electricity;
+        if (showKilowatts)
+        {
+            currentValue /= 1000f;
+            completeValue /= 1000f;
+        }
+
+        SetGauge(
+            root,
+            fill,
+            text,
+            true,
+            module != null ? module.ObjectInfoWorkGaugeFillAmount : 0f,
+            module != null ? module.ObjectInfoWorkGaugeFillColor : Color.white,
+            currentValue,
+            completeValue,
+            true);
+        if (showKilowatts && text != null)
+        {
+            text.text = $"{FormatKilowatts(currentValue)} kW / {FormatKilowatts(completeValue)} kW";
+        }
     }
 
     private static bool IsDisplayableUnderlyingResource(Resource resource)
@@ -504,6 +1013,61 @@ public class ItemInfoDescription : MonoBehaviour
                 slot.Clear();
             }
         }
+    }
+
+    private void SetProductionIngredientDefaultItemSlot(
+        int index,
+        int itemId,
+        int requiredCount,
+        int count,
+        int maxCount,
+        float? fluidTemperatureCelsius)
+    {
+        GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
+        ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
+        SetProductionIngredientItemSlot(root, slot, itemId, requiredCount, count, maxCount, fluidTemperatureCelsius);
+    }
+
+    private void SetProductionIngredientItemSlot(
+        GameObject root,
+        ItemSlot slot,
+        int itemId,
+        int requiredCount,
+        int count,
+        int maxCount,
+        float? fluidTemperatureCelsius)
+    {
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return;
+        }
+
+        if (itemId < 0)
+        {
+            slot.SetEmptyCountDisplay(Mathf.Max(0, count), Mathf.Max(1, maxCount));
+            return;
+        }
+
+        int displayCount = Mathf.Max(0, count);
+        int displayMaxCount = Mathf.Max(1, maxCount, displayCount);
+        int displayRequiredCount = Mathf.Max(1, requiredCount);
+        ItemManager.ItemSet itemSet = ResolveItemSet(itemId);
+        string displayName = string.IsNullOrWhiteSpace(itemSet.name)
+            ? ResolveItemDisplayName(itemId)
+            : itemSet.name;
+        if (InputOutputModule.IsFluidItemId(itemId))
+        {
+            displayName = ResolveFluidDisplayName(
+                displayName,
+                fluidTemperatureCelsius ?? MapClimate.CurrentTemperatureCelsius);
+        }
+
+        slot.SetCustomDisplay(
+            itemId,
+            itemSet.icon,
+            $"{displayName} [{displayRequiredCount}]",
+            $"{displayCount} / {displayMaxCount}");
     }
 
     private void SetDefaultText(string text, bool visible)
@@ -630,6 +1194,31 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    private void SetBurnEnergyInputItemSlot(
+        GameObject root,
+        ItemSlot slot,
+        int energyItemId,
+        int energyItemCount,
+        int burnEnergyAmount,
+        int energyAreaCapacity)
+    {
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return;
+        }
+
+        ItemManager.ItemSet itemSet = ResolveItemSet(energyItemId);
+        string displayName = energyItemId >= 0
+            ? (string.IsNullOrWhiteSpace(itemSet.name) ? ResolveItemDisplayName(energyItemId) : itemSet.name)
+            : string.Empty;
+        slot.SetCustomDisplay(
+            energyItemId,
+            itemSet.icon,
+            displayName,
+            $"{Mathf.Max(0, energyItemCount)}[{Mathf.Max(0, burnEnergyAmount)}] / {Mathf.Max(1, energyAreaCapacity)}");
+    }
+
     private static void SetFluidItemSlotDisplay(
         ItemSlot slot,
         int itemId,
@@ -708,6 +1297,43 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         return ResolveFluidItemSet();
+    }
+
+    private static Color ResolveFluidGaugeFillColor(InstallationObject installationObject)
+    {
+        int fluidItemId = ResolveFluidGaugeItemId(installationObject);
+        ItemDefinition definition = InputOutputModule.ResolveItemDefinition(fluidItemId);
+        if (InputOutputModule.IsFluidItemDefinition(definition))
+        {
+            Color color = definition.fluidDisplayColor;
+            color.a = color.a > 0f ? color.a : 1f;
+            return color;
+        }
+
+        return FluidGaugeFillColor;
+    }
+
+    private static int ResolveFluidGaugeItemId(InstallationObject installationObject)
+    {
+        if (installationObject == null)
+        {
+            return -1;
+        }
+
+        int storedFluidItemId = installationObject.StoredFluidItemId;
+        if (storedFluidItemId >= 0)
+        {
+            return storedFluidItemId;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (installationObject is SteamGenerator
+            && TryResolveItemSetByName(itemManager, SteamFluidItemName, out ItemManager.ItemSet steamItemSet))
+        {
+            return steamItemSet.id;
+        }
+
+        return -1;
     }
 
     private static string ResolveFluidStorageDisplayName(
@@ -843,6 +1469,89 @@ public class ItemInfoDescription : MonoBehaviour
             : (float?)null;
     }
 
+    private static int ResolveEnergyUseDisplayItemId(
+        ItemDefinition.EnergyType energyType,
+        int preferredEnergyItemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (energyType == ItemDefinition.EnergyType.Burn
+            && itemManager != null
+            && TryResolveItemSetByName(itemManager, FireEnergyItemName, out ItemManager.ItemSet fireItemSet))
+        {
+            return fireItemSet.id;
+        }
+
+        if (IsEnergyDisplayItem(preferredEnergyItemId, energyType))
+        {
+            return preferredEnergyItemId;
+        }
+
+        if (itemManager == null)
+        {
+            return -1;
+        }
+
+        if (energyType == ItemDefinition.EnergyType.Electricity
+            && TryResolveItemSetByName(itemManager, ElectricityItemName, out ItemManager.ItemSet electricityItemSet))
+        {
+            return electricityItemSet.id;
+        }
+
+        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        if (definitions == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && definition.id >= 0
+                && definition.energyType == energyType
+                && definition.energyAmount > 0)
+            {
+                return definition.id;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsEnergyDisplayItem(int itemId, ItemDefinition.EnergyType energyType)
+    {
+        if (itemId < 0 || energyType == ItemDefinition.EnergyType.None)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = InputOutputModule.ResolveItemDefinition(itemId);
+        if (definition == null)
+        {
+            return false;
+        }
+
+        if (energyType == ItemDefinition.EnergyType.Electricity)
+        {
+            return ItemDefinition.IsElectricityItemDefinition(definition);
+        }
+
+        return definition.energyType == energyType && definition.energyAmount > 0;
+    }
+
+    private static string ResolveEnergyTypeDisplayName(ItemDefinition.EnergyType energyType)
+    {
+        switch (energyType)
+        {
+            case ItemDefinition.EnergyType.Electricity:
+                return "Electricity";
+            case ItemDefinition.EnergyType.Burn:
+                return "Burn Energy";
+            default:
+                return "Energy";
+        }
+    }
+
     private void ResolveDefaultItemSlotReferences()
     {
         if (defaultItemSlot == null)
@@ -875,6 +1584,125 @@ public class ItemInfoDescription : MonoBehaviour
 
             defaultItemSlot[i] = slot;
         }
+
+        CaptureDefaultItemSiblingIndices();
+    }
+
+    private void CaptureDefaultItemSiblingIndices()
+    {
+        if (defaultItemSiblingIndicesCaptured || defaultItem == null)
+        {
+            return;
+        }
+
+        defaultItemOriginalSiblingIndices.Clear();
+        for (int i = 0; i < defaultItem.Count; i++)
+        {
+            GameObject root = defaultItem[i];
+            defaultItemOriginalSiblingIndices.Add(root != null ? root.transform.GetSiblingIndex() : -1);
+        }
+
+        defaultItemSiblingIndicesCaptured = true;
+    }
+
+    private void RestoreDefaultItemSiblingIndices()
+    {
+        if (!defaultItemSiblingIndicesCaptured || defaultItem == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < defaultItem.Count; i++)
+        {
+            GameObject root = defaultItem[i];
+            if (root == null || i >= defaultItemOriginalSiblingIndices.Count)
+            {
+                continue;
+            }
+
+            Transform parent = root.transform.parent;
+            int siblingIndex = defaultItemOriginalSiblingIndices[i];
+            if (parent == null || siblingIndex < 0)
+            {
+                continue;
+            }
+
+            root.transform.SetSiblingIndex(Mathf.Min(siblingIndex, parent.childCount - 1));
+        }
+    }
+
+    private void MoveDefaultItemBelowInputItem(int defaultItemIndex, int orderBelowInput)
+    {
+        GameObject root = defaultItem != null
+            && defaultItemIndex >= 0
+            && defaultItemIndex < defaultItem.Count
+            ? defaultItem[defaultItemIndex]
+            : null;
+        if (root == null || inputItem == null)
+        {
+            return;
+        }
+
+        Transform targetTransform = root.transform;
+        Transform inputTransform = inputItem.transform;
+        if (targetTransform.parent == null || targetTransform.parent != inputTransform.parent)
+        {
+            return;
+        }
+
+        int targetSiblingIndex = inputTransform.GetSiblingIndex() + Mathf.Max(1, orderBelowInput);
+        if (targetTransform.GetSiblingIndex() < inputTransform.GetSiblingIndex())
+        {
+            targetSiblingIndex--;
+        }
+
+        targetTransform.SetSiblingIndex(Mathf.Min(targetSiblingIndex, targetTransform.parent.childCount - 1));
+    }
+
+    private void ResolveGaugeReferences()
+    {
+        ResolveGaugeReferences(defaultGauge, ref defaultFill, ref defaultGaugeText);
+    }
+
+    private static void ResolveGaugeReferences(
+        GameObject gaugeRoot,
+        ref Image fill,
+        ref TextMeshProUGUI text)
+    {
+        if (gaugeRoot == null)
+        {
+            return;
+        }
+
+        if (fill == null || !fill.transform.IsChildOf(gaugeRoot.transform))
+        {
+            fill = ResolveChildComponent<Image>(gaugeRoot);
+        }
+
+        if (text == null || !text.transform.IsChildOf(gaugeRoot.transform))
+        {
+            text = ResolveChildComponent<TextMeshProUGUI>(gaugeRoot);
+        }
+    }
+
+    private static T ResolveChildComponent<T>(GameObject root) where T : Component
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        T[] components = root.GetComponentsInChildren<T>(true);
+        for (int i = 0; i < components.Length; i++)
+        {
+            T component = components[i];
+            if (component != null && component.transform != root.transform)
+            {
+                return component;
+            }
+        }
+
+        return root.GetComponent<T>();
     }
 
     private static void SetActiveIfNeeded(GameObject target, bool active)
@@ -901,10 +1729,12 @@ public class ItemInfoDescription : MonoBehaviour
         float maxValue,
         bool alwaysShowOneDecimal = false)
     {
+        bool wasActive = root != null ? root.activeSelf : fill != null && fill.gameObject.activeInHierarchy;
         SetActiveIfNeeded(root, active);
         if (fill != null)
         {
-            fill.fillAmount = active ? Mathf.Clamp01(fillAmount) : 0f;
+            float targetFillAmount = active ? Mathf.Clamp01(fillAmount) : 0f;
+            ApplyGaugeFill(fill, targetFillAmount, !active || !wasActive, active);
             if (active)
             {
                 fill.color = fillColor;
@@ -915,6 +1745,60 @@ public class ItemInfoDescription : MonoBehaviour
         {
             text.text = active ? FormatGaugeValue(currentValue, maxValue, alwaysShowOneDecimal) : string.Empty;
         }
+    }
+
+    private static void ApplyGaugeFill(Image fill, float targetFillAmount, bool snap, bool active)
+    {
+        if (fill == null)
+        {
+            return;
+        }
+
+        targetFillAmount = Mathf.Clamp01(targetFillAmount);
+        if (!active || !Application.isPlaying || snap)
+        {
+            fill.fillAmount = targetFillAmount;
+            if (active && Application.isPlaying)
+            {
+                GaugeFillTargets[fill] = targetFillAmount;
+            }
+            else
+            {
+                GaugeFillTargets.Remove(fill);
+            }
+
+            return;
+        }
+
+        GaugeFillTargets[fill] = targetFillAmount;
+        UpdateGaugeFill(fill);
+    }
+
+    private static void UpdateGaugeFill(Image fill)
+    {
+        if (fill == null)
+        {
+            return;
+        }
+
+        if (!GaugeFillTargets.TryGetValue(fill, out float targetFillAmount))
+        {
+            return;
+        }
+
+        if (!fill.gameObject.activeInHierarchy)
+        {
+            GaugeFillTargets.Remove(fill);
+            fill.fillAmount = 0f;
+            return;
+        }
+
+        float deltaTime = Mathf.Clamp(Time.unscaledDeltaTime, 0f, 0.2f);
+        float lerpAmount = 1f - Mathf.Exp(-GaugeFillLerpSpeed * deltaTime);
+        float nextFillAmount = Mathf.Lerp(fill.fillAmount, targetFillAmount, lerpAmount);
+        fill.fillAmount = Mathf.Abs(nextFillAmount - targetFillAmount) <= GaugeFillSnapThreshold
+            ? targetFillAmount
+            : nextFillAmount;
     }
 
     private static string FormatGaugeValue(float currentValue, float maxValue, bool alwaysShowOneDecimal)
@@ -937,5 +1821,42 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         return value.ToString("0.#");
+    }
+
+    private static string FormatKilowatts(float kilowatts)
+    {
+        kilowatts = Mathf.Max(0f, kilowatts);
+        if (kilowatts <= 0.0001f)
+        {
+            return "0";
+        }
+
+        if (kilowatts < 0.01f)
+        {
+            return kilowatts.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        if (kilowatts < 1f)
+        {
+            return kilowatts.ToString("0.##", CultureInfo.InvariantCulture);
+        }
+
+        return FormatGaugeNumber(kilowatts, false);
+    }
+
+    private static string FormatEnergyUseRate(ItemDefinition.EnergyType energyType, float amountPerSecond)
+    {
+        amountPerSecond = Mathf.Max(0f, amountPerSecond);
+        if (energyType == ItemDefinition.EnergyType.Electricity)
+        {
+            return $"{FormatKilowatts(amountPerSecond / 1000f)}kW / s";
+        }
+
+        return $"{FormatGaugeNumber(amountPerSecond, false)} / s";
+    }
+
+    private static string FormatLitersPerSecond(float litersPerSecond)
+    {
+        return $"{FormatGaugeNumber(litersPerSecond, true)}L / s";
     }
 }

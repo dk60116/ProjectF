@@ -12,6 +12,12 @@ public enum PipeVariantKind
 public class Pipe : InstallationObject
 {
     private const int MaxObjectInfoFluidSearchNodes = 256;
+    private const float FluidDisplayRefreshIntervalSeconds = 0.2f;
+    private const int NoDisplayedFluidItemId = -2;
+    private static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
+    private static readonly int EmissionColorShaderId = Shader.PropertyToID("_EmissionColor");
+    private static readonly Color UnknownFluidDisplayColor = Color.white;
     private static readonly Vector2Int[] CardinalDirections =
     {
         Vector2Int.up,
@@ -47,6 +53,15 @@ public class Pipe : InstallationObject
     private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<int> objectInfoFluidItemIds = new HashSet<int>();
 
+    [SerializeField]
+    private MeshRenderer fluidDP;
+
+    private MaterialPropertyBlock fluidDisplayPropertyBlock;
+    private int displayedFluidItemId = NoDisplayedFluidItemId;
+    private bool displayedFluidVisible;
+    private bool fluidDisplayRendererResolved;
+    private float nextFluidDisplayRefreshTime;
+
     public Pipe StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
     public Pipe CornerVariantPrefab => cornerVariantPrefab;
     public Pipe TeeVariantPrefab => teeVariantPrefab;
@@ -56,6 +71,32 @@ public class Pipe : InstallationObject
     public bool IsCornerVariant => variantKind == PipeVariantKind.Corner;
     public bool IsTeeVariant => variantKind == PipeVariantKind.Tee;
     public bool IsCrossVariant => variantKind == PipeVariantKind.Cross;
+
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        displayedFluidItemId = NoDisplayedFluidItemId;
+        displayedFluidVisible = false;
+        nextFluidDisplayRefreshTime = Time.time + GetFluidDisplayRefreshOffset();
+        RefreshFluidDisplay(true);
+    }
+
+    protected override void OnDisable()
+    {
+        SetFluidDisplayVisible(false, true);
+        base.OnDisable();
+    }
+
+    private void Update()
+    {
+        if (Time.time < nextFluidDisplayRefreshTime)
+        {
+            return;
+        }
+
+        nextFluidDisplayRefreshTime = Time.time + FluidDisplayRefreshIntervalSeconds;
+        RefreshFluidDisplay(false);
+    }
 
     public bool TryGetObjectInfoFluidItemId(out int fluidItemId)
     {
@@ -201,58 +242,15 @@ public class Pipe : InstallationObject
         out int fluidItemId,
         out float temperatureCelsius)
     {
-        return TryGetFluidOutputInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius)
-               || TryGetStoredFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius);
+        return TryGetStoredFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius);
     }
 
-    private bool TryGetFluidOutputItemIdAtCoordinate(Vector2Int coordinate, out int fluidItemId)
-    {
-        return TryGetFluidOutputInfoAtCoordinate(coordinate, out fluidItemId, out _);
-    }
-
-    private bool TryGetFluidOutputInfoAtCoordinate(
-        Vector2Int coordinate,
-        out int fluidItemId,
-        out float temperatureCelsius)
-    {
-        fluidItemId = -1;
-        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
-        if (InputOutputModule.TryGetFluidOutputInfoAtRuntimeGridCoordinate(
-                coordinate,
-                out fluidItemId,
-                out temperatureCelsius))
-        {
-            return true;
-        }
-
-        objectInfoFluidItemIds.Clear();
-        if (InputOutputModule.TryGetOutputItemIdsAtRuntimeGridCoordinate(
-                coordinate,
-                objectInfoFluidItemIds))
-        {
-            foreach (int itemId in objectInfoFluidItemIds)
-            {
-                if (!InputOutputModule.IsFluidItemId(itemId))
-                {
-                    continue;
-                }
-
-                fluidItemId = itemId;
-                objectInfoFluidItemIds.Clear();
-                return true;
-            }
-        }
-
-        objectInfoFluidItemIds.Clear();
-        return false;
-    }
-
-    private static bool TryGetStoredFluidItemIdAtCoordinate(Vector2Int coordinate, out int fluidItemId)
+    private bool TryGetStoredFluidItemIdAtCoordinate(Vector2Int coordinate, out int fluidItemId)
     {
         return TryGetStoredFluidInfoAtCoordinate(coordinate, out fluidItemId, out _);
     }
 
-    private static bool TryGetStoredFluidInfoAtCoordinate(
+    private bool TryGetStoredFluidInfoAtCoordinate(
         Vector2Int coordinate,
         out int fluidItemId,
         out float temperatureCelsius)
@@ -263,6 +261,7 @@ public class Pipe : InstallationObject
                 coordinate,
                 null,
                 false,
+                storage => CanDisplayStoredFluidAtCoordinate(storage, coordinate),
                 out InstallationObject areaStorage)
             && areaStorage != null
             && areaStorage.StoredFluidItemId >= 0)
@@ -278,7 +277,8 @@ public class Pipe : InstallationObject
             || block == null
             || !(block.MapObject is InstallationObject bodyStorage)
             || bodyStorage is Pipe
-            || bodyStorage.StoredFluidItemId < 0)
+            || bodyStorage.StoredFluidItemId < 0
+            || !CanDisplayStoredFluidAtCoordinate(bodyStorage, coordinate))
         {
             return false;
         }
@@ -286,6 +286,25 @@ public class Pipe : InstallationObject
         fluidItemId = bodyStorage.StoredFluidItemId;
         temperatureCelsius = bodyStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
         return true;
+    }
+
+    private bool CanDisplayStoredFluidAtCoordinate(InstallationObject storage, Vector2Int coordinate)
+    {
+        if (storage == null || storage.StoredFluidItemId < 0)
+        {
+            return false;
+        }
+
+        InputOutputModule module = storage as InputOutputModule;
+        if (module == null)
+        {
+            return true;
+        }
+
+        return module.CanExposeStoredFluidAtRuntimePipeCoordinate(
+            coordinate,
+            storage.StoredFluidItemId,
+            objectInfoFluidItemIds);
     }
 
     private static bool TryGetPipeAtCoordinate(
@@ -379,6 +398,126 @@ public class Pipe : InstallationObject
         }
     }
 
+    private void RefreshFluidDisplay(bool force)
+    {
+        MeshRenderer renderer = ResolveFluidDisplayRenderer();
+        if (renderer == null)
+        {
+            return;
+        }
+
+        if (!TryGetObjectInfoFluidItemId(out int fluidItemId))
+        {
+            displayedFluidItemId = NoDisplayedFluidItemId;
+            SetFluidDisplayVisible(false, force);
+            return;
+        }
+
+        if (!force && displayedFluidVisible && displayedFluidItemId == fluidItemId)
+        {
+            return;
+        }
+
+        ApplyFluidDisplayColor(renderer, ResolveFluidDisplayColor(fluidItemId));
+        displayedFluidItemId = fluidItemId;
+        SetFluidDisplayVisible(true, force);
+    }
+
+    private MeshRenderer ResolveFluidDisplayRenderer()
+    {
+        if (fluidDisplayRendererResolved)
+        {
+            return fluidDP;
+        }
+
+        fluidDisplayRendererResolved = true;
+        if (fluidDP != null)
+        {
+            return fluidDP;
+        }
+
+        MeshRenderer[] childRenderers = GetComponentsInChildren<MeshRenderer>(true);
+        for (int i = 0; i < childRenderers.Length; i++)
+        {
+            MeshRenderer renderer = childRenderers[i];
+            if (renderer != null && renderer.name == "Fluid DP")
+            {
+                fluidDP = renderer;
+                return fluidDP;
+            }
+        }
+
+        for (int i = 0; i < childRenderers.Length; i++)
+        {
+            MeshRenderer renderer = childRenderers[i];
+            if (RendererUsesFluidDisplayMaterial(renderer))
+            {
+                fluidDP = renderer;
+                return fluidDP;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool RendererUsesFluidDisplayMaterial(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        Material sharedMaterial = renderer.sharedMaterial;
+        return sharedMaterial != null && sharedMaterial.name == "M_Fluid";
+    }
+
+    private void ApplyFluidDisplayColor(Renderer renderer, Color color)
+    {
+        if (fluidDisplayPropertyBlock == null)
+        {
+            fluidDisplayPropertyBlock = new MaterialPropertyBlock();
+        }
+
+        renderer.GetPropertyBlock(fluidDisplayPropertyBlock);
+        fluidDisplayPropertyBlock.SetColor(BaseColorShaderId, color);
+        fluidDisplayPropertyBlock.SetColor(ColorShaderId, color);
+        fluidDisplayPropertyBlock.SetColor(EmissionColorShaderId, color);
+        renderer.SetPropertyBlock(fluidDisplayPropertyBlock);
+    }
+
+    private void SetFluidDisplayVisible(bool visible, bool force)
+    {
+        MeshRenderer renderer = ResolveFluidDisplayRenderer();
+        if (renderer == null)
+        {
+            displayedFluidVisible = false;
+            return;
+        }
+
+        if (force || renderer.enabled != visible)
+        {
+            renderer.enabled = visible;
+        }
+
+        displayedFluidVisible = visible;
+    }
+
+    private static Color ResolveFluidDisplayColor(int fluidItemId)
+    {
+        ItemDefinition definition = InputOutputModule.ResolveItemDefinition(fluidItemId);
+        if (definition != null)
+        {
+            return definition.fluidDisplayColor;
+        }
+
+        return UnknownFluidDisplayColor;
+    }
+
+    private float GetFluidDisplayRefreshOffset()
+    {
+        return (GetInstanceID() & 0x3ff) / 1024f * FluidDisplayRefreshIntervalSeconds;
+    }
+
 #if UNITY_EDITOR
     protected override void OnValidate()
     {
@@ -387,6 +526,10 @@ public class Pipe : InstallationObject
         {
             straightVariantPrefab = this;
         }
+
+        fluidDisplayRendererResolved = false;
+        ResolveFluidDisplayRenderer();
+        SetFluidDisplayVisible(false, true);
     }
 #endif
 }

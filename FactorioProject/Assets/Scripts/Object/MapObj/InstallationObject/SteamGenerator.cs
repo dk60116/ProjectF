@@ -11,12 +11,24 @@ public class SteamGenerator : InputOutputModule
 
     private bool hasSteamGenerationReserve;
 
+    [SerializeField]
+    private Transform wheelTF;
+    [SerializeField, Min(0f)]
+    private float wheelRotationDegreesPerSecond = 180f;
+
     public InstallationFacingDirection LocalPipeAreaConnectionDirection => localPipeAreaConnectionDirection;
 
     public override void ManagedUpdateTick(float deltaTime)
     {
         base.ManagedUpdateTick(deltaTime);
-        ConsumeSteamForGeneration(deltaTime);
+        bool isGenerating = ConsumeSteamForGeneration(deltaTime);
+        UpdateGenerationVisuals(isGenerating, deltaTime);
+    }
+
+    protected override void OnDisable()
+    {
+        StopGenerationVisuals(true);
+        base.OnDisable();
     }
 
     public bool TryGetPipeAreaConnectionDirection(Quaternion rotation, out Vector2Int direction)
@@ -195,6 +207,32 @@ public class SteamGenerator : InputOutputModule
         return true;
     }
 
+    public bool TryGetAvailableElectricOutputRate(out float wattsPerSecond)
+    {
+        wattsPerSecond = 0f;
+        if (!TryGetObjectInfoOutputRate(out _, out float outputWattsPerSecond)
+            || outputWattsPerSecond <= FluidEpsilon
+            || !TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
+            || inputLitersPerSecond <= 0
+            || !CanStoreFluid)
+        {
+            return false;
+        }
+
+        if (StoredFluidItemId >= 0 && !CanProvideFluidItem(inputItemId))
+        {
+            return false;
+        }
+
+        if (!HasEnoughSteamReserve(inputLitersPerSecond, 0f))
+        {
+            return false;
+        }
+
+        wattsPerSecond = outputWattsPerSecond;
+        return true;
+    }
+
     public override bool TryGetObjectInfoOutput(
         out int outputItemId,
         out int outputAreaCount,
@@ -252,7 +290,7 @@ public class SteamGenerator : InputOutputModule
         }
 
         isProducing = true;
-        return $"Generating ({inputLitersPerSecond} L/s)";
+        return "Generating";
     }
 
     private bool ConsumeSteamForGeneration(float deltaTime)
@@ -279,15 +317,21 @@ public class SteamGenerator : InputOutputModule
             inputLitersPerSecond,
             requestedLiters);
         float missingLocalLiters = requiredStoredLiters - StoredFluidLiters;
+        float pulledLiters = 0f;
         if (missingLocalLiters > FluidEpsilon)
         {
-            TryPullFluidFromConnectedStorage(inputItemId, missingLocalLiters, out _);
+            TryPullFluidFromConnectedStorage(inputItemId, missingLocalLiters, out pulledLiters);
         }
 
         if (StoredFluidLiters + FluidEpsilon < requiredStoredLiters
             || !TryConsumeFluidLiters(inputItemId, requestedLiters, out float consumedLiters)
             || consumedLiters + FluidEpsilon < requestedLiters)
         {
+            if (missingLocalLiters > FluidEpsilon && pulledLiters <= FluidEpsilon)
+            {
+                DrainStoredSteamReserve(inputItemId, requestedLiters);
+            }
+
             hasSteamGenerationReserve = false;
             return false;
         }
@@ -300,6 +344,7 @@ public class SteamGenerator : InputOutputModule
     {
         base.PrepareForPool();
         hasSteamGenerationReserve = false;
+        StopGenerationVisuals(true);
     }
 
     private bool HasEnoughSteamReserve(int inputLitersPerSecond, float requestedLiters)
@@ -325,6 +370,20 @@ public class SteamGenerator : InputOutputModule
         return capacity > FluidEpsilon
             ? Mathf.Min(capacity, startReserveLiters)
             : startReserveLiters;
+    }
+
+    private void DrainStoredSteamReserve(int inputItemId, float maxDrainLiters)
+    {
+        if (inputItemId < 0
+            || maxDrainLiters <= FluidEpsilon
+            || StoredFluidLiters <= FluidEpsilon
+            || StoredFluidItemId < 0
+            || !CanProvideFluidItem(inputItemId))
+        {
+            return;
+        }
+
+        TryConsumeFluidLiters(inputItemId, maxDrainLiters, out _);
     }
 
     private bool TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
@@ -366,8 +425,11 @@ public class SteamGenerator : InputOutputModule
             if (outputs != null && i < outputs.Count)
             {
                 ItemIoEntry output = outputs[i];
-                outputItemId = output.itemDefinition != null ? output.itemDefinition.id : -1;
-                outputWattsPerSecond = outputItemId >= 0 ? Mathf.Max(0, output.count) : 0;
+                ItemDefinition outputDefinition = output.itemDefinition;
+                outputItemId = outputDefinition != null ? outputDefinition.id : -1;
+                outputWattsPerSecond = outputItemId >= 0
+                    ? Mathf.RoundToInt(ItemDefinition.ResolveElectricOutputWatts(outputDefinition, output.count))
+                    : 0;
                 if (outputItemId >= 0 && !IsRecipeOutputAllowedByItemFilter(outputItemId))
                 {
                     continue;
@@ -380,6 +442,39 @@ public class SteamGenerator : InputOutputModule
         }
 
         return false;
+    }
+
+    private void UpdateGenerationVisuals(bool isGenerating, float deltaTime)
+    {
+        if (!isGenerating)
+        {
+            StopGenerationVisuals(false);
+            return;
+        }
+
+        if (wheelTF != null && deltaTime > 0f && wheelRotationDegreesPerSecond > 0f)
+        {
+            wheelTF.Rotate(0f, 0f, -wheelRotationDegreesPerSecond * deltaTime, Space.Self);
+        }
+
+        if (particleEffect != null && !particleEffect.isPlaying)
+        {
+            particleEffect.Play();
+        }
+    }
+
+    private void StopGenerationVisuals(bool clearParticles)
+    {
+        if (particleEffect == null || !particleEffect.isPlaying)
+        {
+            return;
+        }
+
+        particleEffect.Stop(
+            true,
+            clearParticles
+                ? ParticleSystemStopBehavior.StopEmittingAndClear
+                : ParticleSystemStopBehavior.StopEmitting);
     }
 
     private static bool TryResolveDirection(

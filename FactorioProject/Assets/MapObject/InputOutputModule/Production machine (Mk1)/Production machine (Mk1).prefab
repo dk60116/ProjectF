@@ -493,7 +493,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (Mk1)
-  objId: 32
+  objId: 34
   itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -505,6 +505,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 3703143181103027719}
+  particleEffect: {fileID: 0}
   mapFilter: 37
   installationFocusRadius: 1
   installedDirection: 0
@@ -595,6 +596,7 @@ MonoBehaviour:
   craftProgressGaugeCanvasVerticalOffset: 14
   energyGaugeFillColor: {r: 1, g: 0.05, b: 0, a: 1}
   craftProgressGaugeFillColor: {r: 0.026268482, g: 1, b: 0, a: 1}
+  playParticleEffectWhileCrafting: 0
   runtimeAreaMaxObjects: 10
   runtimeInputEnergyCoordinates: []
   runtimeInputItemAreas: []

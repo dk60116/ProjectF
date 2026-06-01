@@ -267,7 +267,14 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return;
         }
 
-        if (!TryResolveTemplateRobotArm(installationState.itemId, out _, out RobotArm templateRobotArm))
+        if (!TryResolveTemplateRobotArm(installationState.itemId, out ItemDefinition installedDefinition, out RobotArm templateRobotArm))
+        {
+            installationState.lastBackgroundSimulationTicks = nowTicks;
+            stateStore.UpdateInstallationState(installationState);
+            return;
+        }
+
+        if (RequiresElectricOperationalEnergy(installedDefinition))
         {
             installationState.lastBackgroundSimulationTicks = nowTicks;
             stateStore.UpdateInstallationState(installationState);
@@ -1147,7 +1154,15 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
         else
         {
-            float energyRate = Mathf.Max(0f, installedDefinition.useEnergyAmount);
+            if (RequiresElectricOperationalEnergy(installedDefinition))
+            {
+                state.storedEnergy = 0f;
+                state.energyGaugeCapacity = 0f;
+                blocked = true;
+                return simulatedSeconds > 0d;
+            }
+
+            float energyRate = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
             float completeEnergy = InputOutputModule.ResolveCompleteEnergy(
                 installedDefinition,
                 templateModule.CraftDurationSeconds);
@@ -1230,6 +1245,16 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
+        if (templateModule is ProductionMachine productionMachine)
+        {
+            return TryStartNextProductionMachineCraft(
+                stateStore,
+                installationState,
+                state,
+                productionMachine,
+                installedDefinition);
+        }
+
         int recipeCount = Mathf.Min(templateModule.InputList.Count, templateModule.OutputList.Count);
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
@@ -1280,6 +1305,174 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
 
         return false;
+    }
+
+    private bool TryStartNextProductionMachineCraft(
+        BlockStateStore stateStore,
+        BlockStateStore.InstallationSaveState installationState,
+        InputOutputModule.PersistentState state,
+        ProductionMachine productionMachine,
+        ItemDefinition installedDefinition)
+    {
+        if (state == null
+            || productionMachine == null
+            || installedDefinition == null
+            || state.inputItemAreas == null
+            || state.inputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.ItemIoEntry> outputs = productionMachine.OutputList;
+        if (outputs == null || outputs.Count <= 0)
+        {
+            return false;
+        }
+
+        List<CraftingTreeRuntime.IngredientEntry> ingredients = new List<CraftingTreeRuntime.IngredientEntry>();
+        List<Vector2Int> inputCoordinates = new List<Vector2Int>();
+        HashSet<Vector2Int> usedInputCoordinates = new HashSet<Vector2Int>();
+        for (int outputIndex = 0; outputIndex < outputs.Count; outputIndex++)
+        {
+            ItemDefinition outputDefinition = outputs[outputIndex].itemDefinition;
+            int outputItemId = outputDefinition != null ? outputDefinition.id : -1;
+            if (outputItemId < 0
+                || !SavedProductionMachineAcceptsOutput(installationState, productionMachine, outputItemId)
+                || !TryGetProductionMachineRecipe(
+                    productionMachine,
+                    outputIndex,
+                    outputItemId,
+                    ingredients,
+                    out int outputCount))
+            {
+                continue;
+            }
+
+            inputCoordinates.Clear();
+            usedInputCoordinates.Clear();
+            bool hasRequiredInputs = true;
+            ISet<Vector2Int> excludedCoordinates = ingredients.Count > 1
+                ? usedInputCoordinates
+                : null;
+            for (int ingredientIndex = 0; ingredientIndex < ingredients.Count; ingredientIndex++)
+            {
+                CraftingTreeRuntime.IngredientEntry ingredient = ingredients[ingredientIndex];
+                if (!TryResolveRuntimeInputItemArea(
+                        state,
+                        ingredient.itemId,
+                        excludedCoordinates,
+                        out Vector2Int inputCoordinate)
+                    || GetCenterItemCount(stateStore, inputCoordinate, ingredient.itemId) < ingredient.count)
+                {
+                    hasRequiredInputs = false;
+                    break;
+                }
+
+                inputCoordinates.Add(inputCoordinate);
+                usedInputCoordinates.Add(inputCoordinate);
+            }
+
+            if (!hasRequiredInputs)
+            {
+                continue;
+            }
+
+            if (InputOutputModule.IsFluidItemId(outputItemId)
+                || !TryResolveOutputCoordinate(stateStore, state, productionMachine, outputItemId, outputCount, out _))
+            {
+                continue;
+            }
+
+            if (!TryEnsureCraftStartEnergy(stateStore, state, productionMachine, installedDefinition))
+            {
+                continue;
+            }
+
+            bool consumedInputs = true;
+            for (int ingredientIndex = 0; ingredientIndex < ingredients.Count; ingredientIndex++)
+            {
+                CraftingTreeRuntime.IngredientEntry ingredient = ingredients[ingredientIndex];
+                if (RemoveCenterItems(
+                        stateStore,
+                        inputCoordinates[ingredientIndex],
+                        ingredient.itemId,
+                        ingredient.count) == ingredient.count)
+                {
+                    continue;
+                }
+
+                consumedInputs = false;
+                break;
+            }
+
+            if (!consumedInputs)
+            {
+                continue;
+            }
+
+            state.hasActiveCraft = true;
+            state.waitingForOutput = false;
+            state.remainingCraftTime = ResolveInitialCraftDuration(installedDefinition, productionMachine.CraftDurationSeconds);
+            state.activeCraftConsumedEnergy = 0f;
+            state.activeRecipeIndex = outputIndex;
+            state.activeOutputItemId = outputItemId;
+            state.activeOutputCount = outputCount;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetProductionMachineRecipe(
+        ProductionMachine productionMachine,
+        int outputIndex,
+        int outputItemId,
+        List<CraftingTreeRuntime.IngredientEntry> ingredients,
+        out int outputCount)
+    {
+        outputCount = 0;
+        if (productionMachine == null || ingredients == null || outputItemId < 0)
+        {
+            return false;
+        }
+
+        ingredients.Clear();
+        if (CraftingTreeRuntime.TryGetIngredients(outputItemId, ingredients))
+        {
+            MergeDuplicateProductionIngredients(ingredients);
+        }
+        else
+        {
+            if (!TryGetRecipePair(
+                    productionMachine,
+                    outputIndex,
+                    out int inputItemId,
+                    out int inputCount,
+                    out int legacyOutputItemId,
+                    out int legacyOutputCount)
+                || legacyOutputItemId != outputItemId)
+            {
+                return false;
+            }
+
+            ingredients.Add(new CraftingTreeRuntime.IngredientEntry(inputItemId, inputCount));
+            outputCount = legacyOutputCount;
+        }
+
+        if (ingredients.Count <= 0 || ingredients.Count > 2)
+        {
+            return false;
+        }
+
+        if (outputCount <= 0)
+        {
+            IReadOnlyList<InputOutputModule.ItemIoEntry> outputs = productionMachine.OutputList;
+            outputCount = outputs != null && outputIndex >= 0 && outputIndex < outputs.Count
+                ? Mathf.Max(1, outputs[outputIndex].count)
+                : CraftingTreeRuntime.GetOutputCount(outputItemId);
+        }
+
+        return outputCount > 0;
     }
 
     private static bool SavedProductionMachineAcceptsOutput(
@@ -1368,6 +1561,13 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return true;
         }
 
+        if (RequiresElectricOperationalEnergy(installedDefinition))
+        {
+            state.storedEnergy = 0f;
+            state.energyGaugeCapacity = 0f;
+            return false;
+        }
+
         if (state.storedEnergy > 0.0001f)
         {
             return true;
@@ -1385,6 +1585,13 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         if (!RequiresOperationalEnergy(installedDefinition))
         {
             return true;
+        }
+
+        if (RequiresElectricOperationalEnergy(installedDefinition))
+        {
+            state.storedEnergy = 0f;
+            state.energyGaugeCapacity = 0f;
+            return false;
         }
 
         float minimumOperationalEnergy = Mathf.Max(1f, installedDefinition.useEnergyAmount);
@@ -1614,6 +1821,37 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return false;
     }
 
+    private static bool TryResolveRuntimeInputItemArea(
+        InputOutputModule.PersistentState state,
+        int inputItemId,
+        ISet<Vector2Int> excludedCoordinates,
+        out Vector2Int coordinate)
+    {
+        coordinate = default;
+        if (state == null
+            || inputItemId < 0
+            || state.inputItemAreas == null
+            || state.inputItemAreas.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < state.inputItemAreas.Count; i++)
+        {
+            InputOutputModule.PersistentInputItemAreaState area = state.inputItemAreas[i];
+            if (area.itemId != inputItemId
+                || (excludedCoordinates != null && excludedCoordinates.Contains(area.coordinate)))
+            {
+                continue;
+            }
+
+            coordinate = area.coordinate;
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool TryGetRecipePair(
         InputOutputModule templateModule,
         int recipeIndex,
@@ -1649,11 +1887,52 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return inputItemId >= 0 && outputItemId >= 0;
     }
 
+    private static void MergeDuplicateProductionIngredients(List<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        if (ingredients == null || ingredients.Count <= 1)
+        {
+            return;
+        }
+
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            if (ingredient.itemId < 0)
+            {
+                ingredients.RemoveAt(i);
+                i--;
+                continue;
+            }
+
+            int mergedCount = Mathf.Max(1, ingredient.count);
+            for (int j = i + 1; j < ingredients.Count; j++)
+            {
+                CraftingTreeRuntime.IngredientEntry candidate = ingredients[j];
+                if (candidate.itemId != ingredient.itemId)
+                {
+                    continue;
+                }
+
+                mergedCount += Mathf.Max(1, candidate.count);
+                ingredients.RemoveAt(j);
+                j--;
+            }
+
+            ingredients[i] = new CraftingTreeRuntime.IngredientEntry(ingredient.itemId, mergedCount);
+        }
+    }
+
     private static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
     {
         return installedDefinition != null
                && installedDefinition.useEnergyType != ItemDefinition.EnergyType.None
-               && installedDefinition.useEnergyAmount > 0f;
+               && ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) > 0f;
+    }
+
+    private static bool RequiresElectricOperationalEnergy(ItemDefinition installedDefinition)
+    {
+        return RequiresOperationalEnergy(installedDefinition)
+               && installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity;
     }
 
     private static float ResolveInitialCraftDuration(ItemDefinition installedDefinition, float fallbackCraftDuration)
@@ -1663,7 +1942,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return Mathf.Max(0.1f, fallbackCraftDuration);
         }
 
-        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         return Mathf.Max(0.1f, InputOutputModule.ResolveCompleteEnergy(installedDefinition, fallbackCraftDuration) / energyRate);
     }
 
@@ -1677,7 +1956,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return Mathf.Max(0.1f, fallbackCraftDuration);
         }
 
-        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         float remainingEnergy = Mathf.Max(
             0f,
             InputOutputModule.ResolveCompleteEnergy(installedDefinition, fallbackCraftDuration) - Mathf.Max(0f, consumedEnergy));
@@ -1694,7 +1973,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return 0f;
         }
 
-        float energyRate = Mathf.Max(0.0001f, installedDefinition.useEnergyAmount);
+        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         float completeEnergy = InputOutputModule.ResolveCompleteEnergy(installedDefinition, fallbackCraftDuration);
         float totalDuration = completeEnergy / energyRate;
         float elapsedDuration = Mathf.Clamp(totalDuration - Mathf.Max(0f, savedRemainingCraftTime), 0f, totalDuration);

@@ -31,8 +31,14 @@ public class InstallationObject : MapObject
     private const float FluidInRateSampleSeconds = 0.25f;
     private const float FluidInRateIdleResetSeconds = 0.75f;
 
+    public static event Action<InstallationObject> PlacementRuntimeChanged;
+    public static event Action<InstallationObject> PlacementRuntimeCleared;
+
     [SerializeField]
     private Animator animator;
+    [SerializeField]
+    protected ParticleSystem particleEffect;
+
 
     private static readonly HashSet<InstallationObject> ActiveInstances = new HashSet<InstallationObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
@@ -65,6 +71,9 @@ public class InstallationObject : MapObject
     private float fluidInSampleStartTime = -1f;
     private float fluidInLastReceiveTime = -1f;
     private float fluidInRateLitersPerSecond;
+
+    [SerializeField]
+    private Transform powerLinePoint;
 
     public InstallationMapFilter MapFilter
     {
@@ -128,6 +137,46 @@ public class InstallationObject : MapObject
         }
     }
 
+    public static bool CollectActiveInstallationsAtRuntimeGridCoordinate(
+        Vector2Int coordinate,
+        List<InstallationObject> results)
+    {
+        if (results == null || ActiveInstances.Count <= 0)
+        {
+            return false;
+        }
+
+        bool addedAny = false;
+        foreach (InstallationObject installationObject in ActiveInstances)
+        {
+            if (installationObject == null
+                || !installationObject.gameObject.activeInHierarchy
+                || installationObject.runtimeOccupiedCoordinates == null
+                || installationObject.runtimeOccupiedCoordinates.Count <= 0)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < installationObject.runtimeOccupiedCoordinates.Count; i++)
+            {
+                if (installationObject.runtimeOccupiedCoordinates[i] != coordinate)
+                {
+                    continue;
+                }
+
+                if (!results.Contains(installationObject))
+                {
+                    results.Add(installationObject);
+                    addedAny = true;
+                }
+
+                break;
+            }
+        }
+
+        return addedAny;
+    }
+
     public void ConfigurePlacementRuntime(
         Vector2Int anchorCoordinate,
         int quarterTurns,
@@ -148,19 +197,19 @@ public class InstallationObject : MapObject
             runtimeOccupiedCoordinates.Clear();
         }
 
-        if (occupiedCoordinates == null)
+        if (occupiedCoordinates != null)
         {
-            return;
-        }
-
-        for (int i = 0; i < occupiedCoordinates.Count; i++)
-        {
-            Vector2Int coordinate = occupiedCoordinates[i];
-            if (!runtimeOccupiedCoordinates.Contains(coordinate))
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
             {
-                runtimeOccupiedCoordinates.Add(coordinate);
+                Vector2Int coordinate = occupiedCoordinates[i];
+                if (!runtimeOccupiedCoordinates.Contains(coordinate))
+                {
+                    runtimeOccupiedCoordinates.Add(coordinate);
+                }
             }
         }
+
+        OnPlacementRuntimeChanged();
     }
 
     private static long ClaimPlacementSequence(long placementSequence)
@@ -200,6 +249,8 @@ public class InstallationObject : MapObject
             runtimeOccupiedCoordinates.Clear();
         }
 
+        OnPlacementRuntimeCleared();
+
         ApplyItemFilterMask(null, false);
         storedFluidLiters = 0f;
         storedFluidItemId = -1;
@@ -207,6 +258,16 @@ public class InstallationObject : MapObject
         ClearFluidInRate();
         transform.localPosition = Vector3.zero;
         RefreshInstalledDirectionFromCurrentTransform();
+    }
+
+    protected virtual void OnPlacementRuntimeChanged()
+    {
+        PlacementRuntimeChanged?.Invoke(this);
+    }
+
+    protected virtual void OnPlacementRuntimeCleared()
+    {
+        PlacementRuntimeCleared?.Invoke(this);
     }
 
     public bool TryAddFluidLiters(float requestedLiters, out float acceptedLiters)

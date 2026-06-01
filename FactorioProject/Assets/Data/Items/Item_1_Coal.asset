@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_1_Coal
   m_EditorClassIdentifier: 
   itemName: Robot arm
-  id: 31
+  id: 33
   mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
   portableMesh: {fileID: 4300000, guid: 5ce0adc8ea6624a4db404d8419f00a30, type: 2}
   portableMat: {fileID: 2100000, guid: f25200fb9cd7c5d4f936de1603c185fa, type: 2}
@@ -24,9 +24,12 @@ MonoBehaviour:
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   energyType: 1
   energyAmount: 10
-  useEnergyType: 0
-  useEnergyAmount: 0
+  useEnergyType: 2
+  useEnergyAmount: 10
   completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
   craftingDurationSeconds: 3

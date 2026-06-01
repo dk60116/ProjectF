@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_19_Drill
   m_EditorClassIdentifier: 
   itemName: Drill
-  id: 20
+  id: 21
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 6f3a16a67ad54f6eb8d0bfbf3e153bb0, type: 2}
   portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
@@ -24,9 +24,12 @@ MonoBehaviour:
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   energyType: 0
   energyAmount: 0
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
   craftingDurationSeconds: 3

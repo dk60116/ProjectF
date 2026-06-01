@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_31_Steam
   m_EditorClassIdentifier: 
   itemName: Steam
-  id: 6
+  id: 7
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
@@ -24,9 +24,12 @@ MonoBehaviour:
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0
+  fluidDisplayColor: {r: 0.5754717, g: 0.5754717, b: 0.5754717, a: 1}
   energyType: 0
   energyAmount: 0
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
   craftingDurationSeconds: 5
