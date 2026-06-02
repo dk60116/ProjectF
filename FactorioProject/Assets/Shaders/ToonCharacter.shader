@@ -29,6 +29,15 @@ Shader "Custom/ToonCharacter"
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         _QueueOffset("Queue offset", Float) = 0.0
+        [ToggleUI] _BlueprintPreview("Blueprint Preview", Float) = 0.0
+        _BlueprintTint("Blueprint Tint", Color) = (0.45, 0.95, 1, 1)
+        _BlueprintBrightness("Blueprint Brightness", Range(0.5, 2.0)) = 1.8
+        _BlueprintMinBrightness("Blueprint Min Brightness", Range(0.0, 1.0)) = 0.42
+        _BlueprintContrast("Blueprint Contrast", Range(0.5, 5.0)) = 2.65
+        _BlueprintAlpha("Blueprint Alpha", Range(0.0, 1.0)) = 0.95
+        _BlueprintRimColor("Blueprint Rim Color", Color) = (0.03, 0.12, 0.52, 1)
+        _BlueprintRimStrength("Blueprint Rim Strength", Range(0.0, 2.0)) = 0.8
+        _BlueprintRimPower("Blueprint Rim Power", Range(0.5, 8.0)) = 2.2
 
         [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
         [HideInInspector] _Color("Base Color", Color) = (1, 1, 1, 1)
@@ -70,12 +79,43 @@ Shader "Custom/ToonCharacter"
                 half _Cutoff;
                 half _UseBlackCutout;
                 half _BlackCutoutThreshold;
+                half _BlueprintPreview;
+                half4 _BlueprintTint;
+                half _BlueprintBrightness;
+                half _BlueprintMinBrightness;
+                half _BlueprintContrast;
+                half _BlueprintAlpha;
+                half4 _BlueprintRimColor;
+                half _BlueprintRimStrength;
+                half _BlueprintRimPower;
             CBUFFER_END
 
             half4 SampleToonBase(float2 uv, out half4 rawSample)
             {
                 rawSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
                 return rawSample * _BaseColor;
+            }
+
+            half4 ApplyBlueprintPreview(half4 baseSample)
+            {
+                half preview = saturate(_BlueprintPreview);
+                half luma = dot(baseSample.rgb, half3(0.2126h, 0.7152h, 0.0722h));
+                luma = saturate((luma - 0.5h) * _BlueprintContrast + 0.5h);
+                half grayRange = max(_BlueprintBrightness - _BlueprintMinBrightness, 0.0h);
+                half gray = saturate(_BlueprintMinBrightness + luma * grayRange);
+                half3 brightGrayscale = half3(gray, gray, gray);
+                half3 tinted = lerp(brightGrayscale, brightGrayscale * _BlueprintTint.rgb, 0.72h);
+                baseSample.rgb = lerp(baseSample.rgb, tinted, preview);
+                baseSample.a = lerp(baseSample.a, baseSample.a * saturate(_BlueprintAlpha), preview);
+                return baseSample;
+            }
+
+            half3 ApplyBlueprintRim(half3 color, half3 normalWS, half3 viewDirectionWS)
+            {
+                half preview = saturate(_BlueprintPreview);
+                half ndv = saturate(dot(normalWS, viewDirectionWS));
+                half rim = pow(saturate(1.0h - ndv), max(_BlueprintRimPower, 0.001h));
+                return color + _BlueprintRimColor.rgb * (rim * _BlueprintRimStrength * preview);
             }
 
             void ApplyToonCutout(half4 rawSample, half4 baseSample)
@@ -246,6 +286,7 @@ Shader "Custom/ToonCharacter"
                 half4 rawBaseSample;
                 half4 baseSample = SampleToonBase(input.uv, rawBaseSample);
                 ApplyToonCutout(rawBaseSample, baseSample);
+                baseSample = ApplyBlueprintPreview(baseSample);
 
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
@@ -282,90 +323,9 @@ Shader "Custom/ToonCharacter"
 #endif
 
                 half3 finalColor = ambient + direct + additional + specular;
+                finalColor = ApplyBlueprintRim(finalColor, inputData.normalWS, inputData.viewDirectionWS);
                 finalColor = MixFog(finalColor, inputData.fogCoord);
                 return half4(finalColor, baseSample.a);
-            }
-            ENDHLSL
-        }
-
-        Pass
-        {
-            Name "ShadowCaster"
-            Tags { "LightMode" = "ShadowCaster" }
-
-            ZWrite On
-            ZTest LEqual
-            ColorMask 0
-            Cull[_Cull]
-
-            HLSLPROGRAM
-            #pragma target 2.0
-            #pragma vertex ShadowPassVertex
-            #pragma fragment ShadowPassFragment
-            #pragma multi_compile_instancing
-            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
-
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
-
-            float3 _LightDirection;
-            float3 _LightPosition;
-
-            struct ShadowAttributes
-            {
-                float4 positionOS : POSITION;
-                float3 normalOS : NORMAL;
-                float2 uv : TEXCOORD0;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
-            };
-
-            struct ShadowVaryings
-            {
-                float2 uv : TEXCOORD0;
-                float4 positionCS : SV_POSITION;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
-            };
-
-            float4 GetToonShadowPositionHClip(ShadowAttributes input)
-            {
-                float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
-
-#if _CASTING_PUNCTUAL_LIGHT_SHADOW
-                float3 lightDirectionWS = normalize(_LightPosition - positionWS);
-#else
-                float3 lightDirectionWS = _LightDirection;
-#endif
-
-                float4 positionCS = TransformWorldToHClip(ApplyShadowBias(positionWS, normalWS, lightDirectionWS));
-
-#if UNITY_REVERSED_Z
-                positionCS.z = min(positionCS.z, UNITY_NEAR_CLIP_VALUE);
-#else
-                positionCS.z = max(positionCS.z, UNITY_NEAR_CLIP_VALUE);
-#endif
-
-                return positionCS;
-            }
-
-            ShadowVaryings ShadowPassVertex(ShadowAttributes input)
-            {
-                ShadowVaryings output = (ShadowVaryings)0;
-                UNITY_SETUP_INSTANCE_ID(input);
-                UNITY_TRANSFER_INSTANCE_ID(input, output);
-
-                output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.positionCS = GetToonShadowPositionHClip(input);
-                return output;
-            }
-
-            half4 ShadowPassFragment(ShadowVaryings input) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(input);
-
-                half4 rawBaseSample;
-                half4 baseSample = SampleToonBase(input.uv, rawBaseSample);
-                ApplyToonCutout(rawBaseSample, baseSample);
-                return 0;
             }
             ENDHLSL
         }
@@ -484,6 +444,7 @@ Shader "Custom/ToonCharacter"
             ENDHLSL
         }
 
+        UsePass "Universal Render Pipeline/Simple Lit/ShadowCaster"
         UsePass "Universal Render Pipeline/Simple Lit/Meta"
     }
 }

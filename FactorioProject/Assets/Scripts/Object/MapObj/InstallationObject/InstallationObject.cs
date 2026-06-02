@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using ProjectF.Attributes;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 [Flags]
 public enum InstallationMapFilter
@@ -30,6 +31,9 @@ public class InstallationObject : MapObject
         InstallationMapFilter.Ground | InstallationMapFilter.Ore | InstallationMapFilter.WaterOutline;
     private const float FluidInRateSampleSeconds = 0.25f;
     private const float FluidInRateIdleResetSeconds = 0.75f;
+    private const string PowerLinePointName = "PowerLinePoint";
+    private const string LowercasePowerLinePointName = "powerLinePoint";
+    private const string UtilityPoleLineNamePrefix = "UtilityPole_Line_";
 
     public static event Action<InstallationObject> PlacementRuntimeChanged;
     public static event Action<InstallationObject> PlacementRuntimeCleared;
@@ -71,6 +75,7 @@ public class InstallationObject : MapObject
     private float fluidInSampleStartTime = -1f;
     private float fluidInLastReceiveTime = -1f;
     private float fluidInRateLitersPerSecond;
+    private readonly List<Renderer> runtimeShadowRenderers = new List<Renderer>();
 
     [SerializeField]
     private Transform powerLinePoint;
@@ -87,6 +92,12 @@ public class InstallationObject : MapObject
     public int RuntimeQuarterTurns => runtimeQuarterTurns;
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
     public long RuntimePlacementSequence => runtimePlacementSequence;
+    public bool TryGetPowerLinePoint(out Transform linePoint)
+    {
+        linePoint = ResolvePowerLinePoint();
+        return linePoint != null;
+    }
+
     public float StoredFluidLiters => Mathf.Max(0f, storedFluidLiters);
     public int StoredFluidItemId => StoredFluidLiters > 0.0001f ? storedFluidItemId : -1;
     public float FluidStorageCapacityLiters
@@ -577,6 +588,7 @@ public class InstallationObject : MapObject
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
         RefreshInstalledDirectionFromCurrentTransform();
+        ApplyRuntimeShadowSettings();
     }
 
     protected virtual void OnDisable()
@@ -597,6 +609,104 @@ public class InstallationObject : MapObject
         }
 
         return animator;
+    }
+
+    protected virtual void ApplyRuntimeShadowSettings()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        ClearRuntimeStaticFlags(transform);
+
+        runtimeShadowRenderers.Clear();
+        GetComponentsInChildren(true, runtimeShadowRenderers);
+
+        for (int i = 0; i < runtimeShadowRenderers.Count; i++)
+        {
+            Renderer renderer = runtimeShadowRenderers[i];
+            if (!ShouldApplyRuntimeShadowSettings(renderer))
+            {
+                continue;
+            }
+
+            renderer.shadowCastingMode = ShadowCastingMode.On;
+            renderer.receiveShadows = true;
+        }
+    }
+
+    private static bool ShouldApplyRuntimeShadowSettings(Renderer renderer)
+    {
+        if (renderer == null
+            || renderer is LineRenderer
+            || renderer is ParticleSystemRenderer
+            || renderer is SpriteRenderer
+            || renderer.GetComponent<WorkableObjectRangeVisual>() != null
+            || renderer.GetComponent<TMPro.TextMeshPro>() != null)
+        {
+            return false;
+        }
+
+        return (renderer is MeshRenderer || renderer is SkinnedMeshRenderer)
+               && !renderer.gameObject.name.StartsWith(UtilityPoleLineNamePrefix, StringComparison.Ordinal);
+    }
+
+    private static void ClearRuntimeStaticFlags(Transform root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        root.gameObject.isStatic = false;
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            ClearRuntimeStaticFlags(root.GetChild(i));
+        }
+    }
+
+    private Transform ResolvePowerLinePoint()
+    {
+        if (powerLinePoint != null && powerLinePoint.IsChildOf(transform))
+        {
+            return powerLinePoint;
+        }
+
+        powerLinePoint = FindDescendantByName(transform, PowerLinePointName)
+                         ?? FindDescendantByName(transform, LowercasePowerLinePointName);
+        return powerLinePoint != null ? powerLinePoint : transform;
+    }
+
+    private static Transform FindDescendantByName(Transform root, string targetName)
+    {
+        if (root == null || string.IsNullOrEmpty(targetName))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (child == null)
+            {
+                continue;
+            }
+
+            if (child.name == targetName)
+            {
+                return child;
+            }
+
+            Transform nested = FindDescendantByName(child, targetName);
+            if (nested != null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
     }
 
     protected void MarkFocusActivationRadiusDirty()

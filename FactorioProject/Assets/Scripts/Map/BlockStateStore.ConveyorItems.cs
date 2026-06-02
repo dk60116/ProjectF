@@ -914,16 +914,37 @@ public partial class BlockStateStore
             || sourceColumnOrdinal != 0
             || !TryResolveVirtualConveyor(
                 destinationCoordinate,
-                out _,
+                out ConveyorBelt destinationConveyor,
                 out Vector2Int inputDirection,
                 out _)
-            || inputDirection != -incomingFlowDirection)
+            || !CanVirtualConveyorReceiveFlow(destinationConveyor, inputDirection, incomingFlowDirection))
         {
             return false;
         }
 
         destinationLaneIndex = ConveyorSingleLineBackLaneIndex;
         return true;
+    }
+
+    private static bool CanVirtualConveyorReceiveFlow(
+        ConveyorBelt receiverConveyor,
+        Vector2Int receiverInputDirection,
+        Vector2Int incomingFlowDirection)
+    {
+        if (receiverInputDirection == Vector2Int.zero || incomingFlowDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (receiverInputDirection == -incomingFlowDirection)
+        {
+            return true;
+        }
+
+        return receiverConveyor != null
+            && !receiverConveyor.IsCornerVariant
+            && ((receiverInputDirection.x * incomingFlowDirection.x)
+                + (receiverInputDirection.y * incomingFlowDirection.y)) == 0;
     }
 
     private bool TryResolveVirtualConveyor(

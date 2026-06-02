@@ -30,16 +30,27 @@ public class UtilityPole : InstallationObject
     private static readonly List<PoleConnection> poleConnections = new List<PoleConnection>();
     private static readonly List<PoleConnection> previewPoleConnections = new List<PoleConnection>();
     private static readonly List<UtilityPole> visualPoleScratch = new List<UtilityPole>();
+    private static readonly List<LineRenderer> previewConsumerLineRenderers = new List<LineRenderer>();
     private static readonly Dictionary<UtilityPole, PreviewPoleRuntime> previewPoleRuntimes =
         new Dictionary<UtilityPole, PreviewPoleRuntime>();
+    private static readonly Dictionary<InstallationObject, PreviewConsumerRuntime> previewConsumerRuntimes =
+        new Dictionary<InstallationObject, PreviewConsumerRuntime>();
     private static readonly Dictionary<InstallationObject, ElectricNetwork> suppliedConsumerNetworks =
         new Dictionary<InstallationObject, ElectricNetwork>();
+    private static readonly HashSet<InstallationObject> renderedConsumerLineScratch =
+        new HashSet<InstallationObject>();
 
     private static int networkRuntimeEvaluatedFrame = -1;
     private static bool networksDirty = true;
     private static bool poleConnectionsDirty = true;
     private static bool previewPoleConnectionsDirty = true;
     private static bool connectionLineVisualsDirty = true;
+    private static bool deferredConnectionLineVisualRefreshRequested;
+    private static int deferredConnectionLineVisualRefreshFrame = -1;
+    private static bool previewConsumerLineVisualsDirty;
+    private static bool deferredPreviewConsumerLineVisualRefreshRequested;
+    private static int deferredPreviewConsumerLineVisualRefreshFrame = -1;
+    private static int usedPreviewConsumerLineRendererCount;
     private static WorkableObjectRangeVisual sharedSupplyRangeVisual;
     private static WorkableObjectRangeVisual sharedConnectionRangeVisual;
     private static bool installOrEditUtilityPoleSelectionRangeVisualsRequested;
@@ -127,11 +138,6 @@ public class UtilityPole : InstallationObject
         if (selectedSupplyRangeVisualRequested == requested
             && selectedConnectionRangeVisualRequested == nextConnectionRangeRequested)
         {
-            if (requested)
-            {
-                RefreshSupplyRangeVisual();
-            }
-
             return;
         }
 
@@ -176,12 +182,21 @@ public class UtilityPole : InstallationObject
         pole.ResolveLinePointReferences();
         pole.EnsureLineRenderers();
         pole.RefreshLineRenderers();
-        previewPoleRuntimes[pole] = new PreviewPoleRuntime(
+        PreviewPoleRuntime nextRuntime = new PreviewPoleRuntime(
             anchorCoordinate,
             ((quarterTurns % 4) + 4) % 4,
             topologyReplacement);
+        if (previewPoleRuntimes.TryGetValue(pole, out PreviewPoleRuntime currentRuntime)
+            && currentRuntime.AnchorCoordinate == nextRuntime.AnchorCoordinate
+            && currentRuntime.QuarterTurns == nextRuntime.QuarterTurns
+            && currentRuntime.TopologyReplacement == nextRuntime.TopologyReplacement)
+        {
+            return;
+        }
+
+        previewPoleRuntimes[pole] = nextRuntime;
         MarkPreviewPoleConnectionsDirty();
-        RefreshConnectionLineRenderersIfDirty();
+        RequestDeferredConnectionLineVisualRefresh();
     }
 
     public static void UnregisterBlueprintPreview(UtilityPole pole)
@@ -193,12 +208,49 @@ public class UtilityPole : InstallationObject
 
         pole.HideConnectionLineRenderers();
         MarkPreviewPoleConnectionsDirty();
-        RefreshConnectionLineRenderersIfDirty();
+        RequestDeferredConnectionLineVisualRefresh();
+    }
+
+    public static void RegisterConsumerBlueprintPreview(
+        InstallationObject consumer,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (!CanRenderConsumerPowerLine(consumer))
+        {
+            UnregisterConsumerBlueprintPreview(consumer);
+            return;
+        }
+
+        PreviewConsumerRuntime nextRuntime = new PreviewConsumerRuntime(
+            anchorCoordinate,
+            ((quarterTurns % 4) + 4) % 4);
+        if (previewConsumerRuntimes.TryGetValue(consumer, out PreviewConsumerRuntime currentRuntime)
+            && currentRuntime.AnchorCoordinate == nextRuntime.AnchorCoordinate
+            && currentRuntime.QuarterTurns == nextRuntime.QuarterTurns)
+        {
+            return;
+        }
+
+        previewConsumerRuntimes[consumer] = nextRuntime;
+        previewConsumerLineVisualsDirty = true;
+        RequestDeferredPreviewConsumerLineVisualRefresh();
+    }
+
+    public static void UnregisterConsumerBlueprintPreview(InstallationObject consumer)
+    {
+        if (consumer == null || !previewConsumerRuntimes.Remove(consumer))
+        {
+            return;
+        }
+
+        previewConsumerLineVisualsDirty = true;
+        RequestDeferredPreviewConsumerLineVisualRefresh();
     }
 
     public static void ClearBlueprintPreviews()
     {
-        if (previewPoleRuntimes.Count <= 0)
+        if (previewPoleRuntimes.Count <= 0 && previewConsumerRuntimes.Count <= 0)
         {
             return;
         }
@@ -219,7 +271,11 @@ public class UtilityPole : InstallationObject
 
         visualPoleScratch.Clear();
         previewPoleRuntimes.Clear();
+        previewConsumerRuntimes.Clear();
+        HidePreviewConsumerLineRenderers();
         MarkPreviewPoleConnectionsDirty();
+        previewConsumerLineVisualsDirty = false;
+        deferredPreviewConsumerLineVisualRefreshRequested = false;
         RefreshConnectionLineRenderersIfDirty();
     }
 
@@ -440,6 +496,12 @@ public class UtilityPole : InstallationObject
         base.OnDisable();
     }
 
+    private void LateUpdate()
+    {
+        FlushDeferredConnectionLineVisualRefresh();
+        FlushDeferredPreviewConsumerLineVisualRefresh();
+    }
+
     private void OnDestroy()
     {
         HideConnectionLineRenderers();
@@ -482,6 +544,7 @@ public class UtilityPole : InstallationObject
     {
         networksDirty = true;
         networkRuntimeEvaluatedFrame = -1;
+        connectionLineVisualsDirty = true;
     }
 
     private static void HandleInstallationPlacementRuntimeChanged(InstallationObject installationObject)
@@ -498,6 +561,7 @@ public class UtilityPole : InstallationObject
         }
 
         MarkElectricNetworkDirty();
+        RefreshConnectionLineRenderersIfDirty();
     }
 
     private static void HandleInstallationPlacementRuntimeCleared(InstallationObject installationObject)
@@ -512,6 +576,7 @@ public class UtilityPole : InstallationObject
         }
 
         MarkElectricNetworkDirty();
+        RefreshConnectionLineRenderersIfDirty();
     }
 
     private ItemDefinition ResolvePoleDefinition()
@@ -717,9 +782,68 @@ public class UtilityPole : InstallationObject
         RefreshConnectionLineRenderers();
     }
 
+    private static void RequestDeferredConnectionLineVisualRefresh()
+    {
+        if (!Application.isPlaying)
+        {
+            RefreshConnectionLineRenderersIfDirty();
+            return;
+        }
+
+        deferredConnectionLineVisualRefreshRequested = true;
+    }
+
+    private static void FlushDeferredConnectionLineVisualRefresh()
+    {
+        if (!deferredConnectionLineVisualRefreshRequested
+            || deferredConnectionLineVisualRefreshFrame == Time.frameCount)
+        {
+            return;
+        }
+
+        deferredConnectionLineVisualRefreshRequested = false;
+        deferredConnectionLineVisualRefreshFrame = Time.frameCount;
+        RefreshConnectionLineRenderersIfDirty();
+    }
+
+    private static void RequestDeferredPreviewConsumerLineVisualRefresh()
+    {
+        if (!Application.isPlaying)
+        {
+            RefreshPreviewConsumerLineRenderersIfDirty();
+            return;
+        }
+
+        deferredPreviewConsumerLineVisualRefreshRequested = true;
+    }
+
+    private static void FlushDeferredPreviewConsumerLineVisualRefresh()
+    {
+        if (!deferredPreviewConsumerLineVisualRefreshRequested
+            || deferredPreviewConsumerLineVisualRefreshFrame == Time.frameCount)
+        {
+            return;
+        }
+
+        deferredPreviewConsumerLineVisualRefreshRequested = false;
+        deferredPreviewConsumerLineVisualRefreshFrame = Time.frameCount;
+        RefreshPreviewConsumerLineRenderersIfDirty();
+    }
+
+    private static void RefreshPreviewConsumerLineRenderersIfDirty()
+    {
+        if (!previewConsumerLineVisualsDirty)
+        {
+            return;
+        }
+
+        RefreshPreviewConsumerLineRenderers();
+    }
+
     private static void RefreshConnectionLineRenderers()
     {
         CleanupPreviewPoleRuntimes();
+        CleanupPreviewConsumerRuntimes();
         if (activePoles.Count <= 0 && previewPoleRuntimes.Count <= 0)
         {
             connectionLineVisualsDirty = false;
@@ -734,6 +858,7 @@ public class UtilityPole : InstallationObject
 
         EnsurePreviewPoleConnectionsEvaluated();
         previewReplacesPlacedConnections = HasTopologyReplacementPreview();
+        EnsureNetworksEvaluated(false);
         BuildVisualPoleScratch();
         foreach (UtilityPole pole in visualPoleScratch)
         {
@@ -774,6 +899,11 @@ public class UtilityPole : InstallationObject
             owner.RenderConnectionLine(connection.FirstPoint, connection.SecondPoint);
         }
 
+        if (!previewReplacesPlacedConnections)
+        {
+            RenderConsumerPowerLines();
+        }
+
         foreach (UtilityPole pole in visualPoleScratch)
         {
             if (pole != null)
@@ -784,6 +914,314 @@ public class UtilityPole : InstallationObject
 
         connectionLineVisualsDirty = false;
         visualPoleScratch.Clear();
+        previewConsumerLineVisualsDirty = true;
+        RequestDeferredPreviewConsumerLineVisualRefresh();
+    }
+
+    private static void RenderConsumerPowerLines()
+    {
+        renderedConsumerLineScratch.Clear();
+        foreach (KeyValuePair<InstallationObject, ElectricNetwork> entry in suppliedConsumerNetworks)
+        {
+            InstallationObject consumer = entry.Key;
+            if (!CanRenderConsumerPowerLine(consumer)
+                || !entry.Value.HasPowerSource
+                || !TryResolveConsumerPowerLinePole(entry.Value, consumer, out UtilityPole supplyingPole))
+            {
+                continue;
+            }
+
+            supplyingPole.RenderConsumerPowerLine(consumer);
+            renderedConsumerLineScratch.Add(consumer);
+        }
+
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            ElectricNetwork network = networks[networkIndex];
+            if (network == null || network.SuppliedInstallations == null)
+            {
+                continue;
+            }
+
+            foreach (InstallationObject consumer in network.SuppliedInstallations)
+            {
+                if (renderedConsumerLineScratch.Contains(consumer)
+                    || !CanRenderConsumerPowerLine(consumer)
+                    || !TryResolveConsumerPowerLinePole(null, consumer, out UtilityPole supplyingPole))
+                {
+                    continue;
+                }
+
+                supplyingPole.RenderConsumerPowerLine(consumer);
+                renderedConsumerLineScratch.Add(consumer);
+            }
+        }
+
+        renderedConsumerLineScratch.Clear();
+    }
+
+    private static void RefreshPreviewConsumerLineRenderers()
+    {
+        CleanupPreviewConsumerRuntimes();
+        usedPreviewConsumerLineRendererCount = 0;
+        if (previewConsumerRuntimes.Count <= 0)
+        {
+            HideUnusedPreviewConsumerLineRenderers();
+            previewConsumerLineVisualsDirty = false;
+            return;
+        }
+
+        BuildVisualPoleScratch();
+        foreach (KeyValuePair<InstallationObject, PreviewConsumerRuntime> entry in previewConsumerRuntimes)
+        {
+            InstallationObject consumer = entry.Key;
+            if (!CanRenderConsumerPowerLine(consumer)
+                || !TryResolvePreviewConsumerPowerLinePole(entry.Value, consumer, out UtilityPole supplyingPole))
+            {
+                continue;
+            }
+
+            supplyingPole.RenderPreviewConsumerPowerLine(consumer);
+        }
+
+        HideUnusedPreviewConsumerLineRenderers();
+        visualPoleScratch.Clear();
+        previewConsumerLineVisualsDirty = false;
+    }
+
+    private static bool CanRenderConsumerPowerLine(InstallationObject consumer)
+    {
+        return consumer != null
+               && !(consumer is UtilityPole)
+               && consumer.gameObject.activeInHierarchy
+               && TryGetElectricPowerRequirement(consumer, out _)
+               && consumer.TryGetPowerLinePoint(out _);
+    }
+
+    private static bool TryResolveConsumerPowerLinePole(
+        ElectricNetwork preferredNetwork,
+        InstallationObject consumer,
+        out UtilityPole supplyingPole)
+    {
+        supplyingPole = null;
+        if (consumer == null || !consumer.TryGetPowerLinePoint(out Transform consumerPoint))
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        if (preferredNetwork != null)
+        {
+            TryResolveConsumerPowerLinePoleInNetwork(
+                preferredNetwork,
+                consumer,
+                consumerPoint,
+                ref supplyingPole,
+                ref bestDistanceSqr);
+            return supplyingPole != null;
+        }
+
+        for (int i = 0; i < networks.Count; i++)
+        {
+            TryResolveConsumerPowerLinePoleInNetwork(
+                networks[i],
+                consumer,
+                consumerPoint,
+                ref supplyingPole,
+                ref bestDistanceSqr);
+        }
+
+        return supplyingPole != null;
+    }
+
+    private static bool TryResolvePreviewConsumerPowerLinePole(
+        PreviewConsumerRuntime previewRuntime,
+        InstallationObject consumer,
+        out UtilityPole supplyingPole)
+    {
+        supplyingPole = null;
+        if (consumer == null || !consumer.TryGetPowerLinePoint(out Transform consumerPoint))
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        for (int i = 0; i < visualPoleScratch.Count; i++)
+        {
+            UtilityPole pole = visualPoleScratch[i];
+            if (pole == null
+                || (!IsValidPlacedPole(pole) && !IsValidPreviewPole(pole))
+                || !PoleSuppliesPreviewConsumer(pole, consumer, previewRuntime))
+            {
+                continue;
+            }
+
+            pole.ResolveLinePointReferences();
+            if (pole.linePointCenter == null)
+            {
+                continue;
+            }
+
+            float distanceSqr = (
+                ResolveLinePointWorldPosition(pole.linePointCenter)
+                - ResolveLinePointWorldPosition(consumerPoint)).sqrMagnitude;
+            if (!IsBetterConsumerPowerLinePole(pole, supplyingPole, distanceSqr, bestDistanceSqr))
+            {
+                continue;
+            }
+
+            supplyingPole = pole;
+            bestDistanceSqr = distanceSqr;
+        }
+
+        return supplyingPole != null;
+    }
+
+    private static void TryResolveConsumerPowerLinePoleInNetwork(
+        ElectricNetwork network,
+        InstallationObject consumer,
+        Transform consumerPoint,
+        ref UtilityPole supplyingPole,
+        ref float bestDistanceSqr)
+    {
+        if (network == null || network.Poles == null || consumer == null || consumerPoint == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < network.Poles.Count; i++)
+        {
+            UtilityPole pole = network.Poles[i];
+            if (!IsValidPlacedPole(pole) || !PoleSuppliesInstallation(pole, consumer))
+            {
+                continue;
+            }
+
+            pole.ResolveLinePointReferences();
+            if (pole.linePointCenter == null)
+            {
+                continue;
+            }
+
+            float distanceSqr = (
+                ResolveLinePointWorldPosition(pole.linePointCenter)
+                - ResolveLinePointWorldPosition(consumerPoint)).sqrMagnitude;
+            if (!IsBetterConsumerPowerLinePole(pole, supplyingPole, distanceSqr, bestDistanceSqr))
+            {
+                continue;
+            }
+
+            supplyingPole = pole;
+            bestDistanceSqr = distanceSqr;
+        }
+    }
+
+    private static bool IsBetterConsumerPowerLinePole(
+        UtilityPole candidate,
+        UtilityPole current,
+        float candidateDistanceSqr,
+        float currentDistanceSqr)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        if (current == null)
+        {
+            return true;
+        }
+
+        float difference = candidateDistanceSqr - currentDistanceSqr;
+        if (Mathf.Abs(difference) > DistanceTieEpsilon)
+        {
+            return difference < 0f;
+        }
+
+        return candidate.GetInstanceID() < current.GetInstanceID();
+    }
+
+    private static bool PoleSuppliesInstallation(UtilityPole pole, InstallationObject consumer)
+    {
+        if (pole == null
+            || consumer == null
+            || !pole.TryGetPlacementRuntime(out Vector2Int poleAnchor, out _)
+            || consumer.RuntimeOccupiedCoordinates == null
+            || consumer.RuntimeOccupiedCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        int radius = pole.SupplyRadiusCells;
+        for (int i = 0; i < consumer.RuntimeOccupiedCoordinates.Count; i++)
+        {
+            if (ChebyshevDistance(poleAnchor, consumer.RuntimeOccupiedCoordinates[i]) <= radius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool PoleSuppliesPreviewConsumer(
+        UtilityPole pole,
+        InstallationObject consumer,
+        PreviewConsumerRuntime consumerRuntime)
+    {
+        if (pole == null
+            || consumer == null
+            || !TryGetPoleAnchorCoordinate(pole, out Vector2Int poleAnchor))
+        {
+            return false;
+        }
+
+        int radius = pole.SupplyRadiusCells;
+        int sizeX = Mathf.Max(1, consumer.Status.mapSizeX);
+        int sizeY = Mathf.Max(1, consumer.Status.mapSizeY);
+        Vector2Int centerCell = consumer.PlacementCenterCell;
+        for (int y = 0; y < sizeY; y++)
+        {
+            for (int x = 0; x < sizeX; x++)
+            {
+                Vector2Int localOffset = new Vector2Int(x - centerCell.x, y - centerCell.y);
+                Vector2Int rotatedOffset = InputOutputModule.RotateRectGridOffset(
+                    localOffset,
+                    consumerRuntime.QuarterTurns);
+                if (ChebyshevDistance(poleAnchor, consumerRuntime.AnchorCoordinate + rotatedOffset) <= radius)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void RenderConsumerPowerLine(InstallationObject consumer)
+    {
+        if (consumer == null
+            || linePointCenter == null
+            || !consumer.TryGetPowerLinePoint(out Transform consumerPoint))
+        {
+            return;
+        }
+
+        RenderConnectionLine(linePointCenter, consumerPoint);
+    }
+
+    private void RenderPreviewConsumerPowerLine(InstallationObject consumer)
+    {
+        if (consumer == null
+            || linePointCenter == null
+            || !consumer.TryGetPowerLinePoint(out Transform consumerPoint))
+        {
+            return;
+        }
+
+        LineRenderer lineRenderer = EnsurePreviewConsumerLineRenderer(usedPreviewConsumerLineRendererCount, this);
+        usedPreviewConsumerLineRendererCount++;
+        RefreshLineRenderer(lineRenderer, linePointCenter, consumerPoint, ResolveConnectionLineSagDepth(linePointCenter, consumerPoint));
     }
 
     private void BeginConnectionLineVisualRefresh()
@@ -894,6 +1332,63 @@ public class UtilityPole : InstallationObject
         return lineRenderer;
     }
 
+    private static LineRenderer EnsurePreviewConsumerLineRenderer(int index, UtilityPole styleSource)
+    {
+        while (previewConsumerLineRenderers.Count <= index)
+        {
+            previewConsumerLineRenderers.Add(null);
+        }
+
+        UtilityPole owner = styleSource != null ? styleSource : ResolveAnyActivePole();
+        if (owner == null)
+        {
+            return null;
+        }
+
+        LineRenderer lineRenderer = owner.EnsureLineRenderer(
+            previewConsumerLineRenderers[index],
+            $"UtilityPole_Line_PreviewConsumer_{index}",
+            GetConnectionLineRoot(),
+            true);
+        previewConsumerLineRenderers[index] = lineRenderer;
+        return lineRenderer;
+    }
+
+    private static UtilityPole ResolveAnyActivePole()
+    {
+        foreach (UtilityPole pole in activePoles)
+        {
+            if (pole != null)
+            {
+                return pole;
+            }
+        }
+
+        foreach (KeyValuePair<UtilityPole, PreviewPoleRuntime> entry in previewPoleRuntimes)
+        {
+            if (entry.Key != null)
+            {
+                return entry.Key;
+            }
+        }
+
+        return null;
+    }
+
+    private static void HidePreviewConsumerLineRenderers()
+    {
+        usedPreviewConsumerLineRendererCount = 0;
+        HideUnusedPreviewConsumerLineRenderers();
+    }
+
+    private static void HideUnusedPreviewConsumerLineRenderers()
+    {
+        for (int i = usedPreviewConsumerLineRendererCount; i < previewConsumerLineRenderers.Count; i++)
+        {
+            SetLineRendererVisible(previewConsumerLineRenderers[i], false);
+        }
+    }
+
     private static Transform GetConnectionLineRoot()
     {
         if (connectionLineRoot != null)
@@ -976,6 +1471,32 @@ public class UtilityPole : InstallationObject
         }
 
         visualPoleScratch.Clear();
+    }
+
+    private static void CleanupPreviewConsumerRuntimes()
+    {
+        if (previewConsumerRuntimes.Count <= 0)
+        {
+            return;
+        }
+
+        installationScratch.Clear();
+        foreach (KeyValuePair<InstallationObject, PreviewConsumerRuntime> entry in previewConsumerRuntimes)
+        {
+            InstallationObject consumer = entry.Key;
+            if (consumer == null || !consumer.gameObject.activeInHierarchy)
+            {
+                installationScratch.Add(consumer);
+            }
+        }
+
+        for (int i = 0; i < installationScratch.Count; i++)
+        {
+            previewConsumerRuntimes.Remove(installationScratch[i]);
+            connectionLineVisualsDirty = true;
+        }
+
+        installationScratch.Clear();
     }
 
     private void ResetLinePointConnections()
@@ -1818,13 +2339,16 @@ public class UtilityPole : InstallationObject
         return connection.SecondPole == pole ? connection.FirstPole : null;
     }
 
-    private static void EnsureNetworksEvaluated()
+    private static void EnsureNetworksEvaluated(bool refreshLineVisuals = true)
     {
         if (networksDirty)
         {
             RebuildNetworks();
             networksDirty = false;
-            RefreshConnectionLineRenderersIfDirty();
+            if (refreshLineVisuals)
+            {
+                RefreshConnectionLineRenderersIfDirty();
+            }
         }
 
         RefreshNetworkRuntimeValues();
@@ -2197,6 +2721,18 @@ public class UtilityPole : InstallationObject
         public Vector2Int AnchorCoordinate { get; }
         public int QuarterTurns { get; }
         public bool TopologyReplacement { get; }
+    }
+
+    private readonly struct PreviewConsumerRuntime
+    {
+        public PreviewConsumerRuntime(Vector2Int anchorCoordinate, int quarterTurns)
+        {
+            AnchorCoordinate = anchorCoordinate;
+            QuarterTurns = quarterTurns;
+        }
+
+        public Vector2Int AnchorCoordinate { get; }
+        public int QuarterTurns { get; }
     }
 
     private readonly struct PoleConnectionCandidate

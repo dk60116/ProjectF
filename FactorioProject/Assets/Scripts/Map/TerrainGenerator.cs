@@ -22,6 +22,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
     private const float GeneratedWaterWallVerticalOverlap = 0.018f;
+    private const int GeneratedWaterDepthSearchRadius = 4;
+    private const float GeneratedWaterDepthDeepDistance = 2.65f;
     private const int GeneratedWaterFoamRenderQueue = 3010;
     private const int GeneratedWaterGlintRenderQueue = 3012;
 
@@ -452,7 +454,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     [Header("Water Foam")]
     [SerializeField]
-    private bool generateWaterFoamOverlay = true;
+    private bool generateWaterFoamOverlay = false;
 
     [SerializeField, Min(0f)]
     private float waterFoamWidth = 0.22f;
@@ -461,7 +463,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private float waterFoamSurfaceOffset = 0.004f;
 
     [SerializeField]
-    private Color waterFoamOverlayColor = new Color(0.72f, 0.9f, 1f, 0.28f);
+    private Color waterFoamOverlayColor = new Color(0.72f, 0.9f, 1f, 0f);
 
     [Header("Water Highlights")]
     [SerializeField]

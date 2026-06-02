@@ -36,6 +36,15 @@ Shader "Custom/ConveyorBeltScroll"
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         _QueueOffset("Queue offset", Float) = 0.0
+        [ToggleUI] _BlueprintPreview("Blueprint Preview", Float) = 0.0
+        _BlueprintTint("Blueprint Tint", Color) = (0.45, 0.95, 1, 1)
+        _BlueprintBrightness("Blueprint Brightness", Range(0.5, 2.0)) = 1.8
+        _BlueprintMinBrightness("Blueprint Min Brightness", Range(0.0, 1.0)) = 0.42
+        _BlueprintContrast("Blueprint Contrast", Range(0.5, 5.0)) = 2.65
+        _BlueprintAlpha("Blueprint Alpha", Range(0.0, 1.0)) = 0.95
+        _BlueprintRimColor("Blueprint Rim Color", Color) = (0.03, 0.12, 0.52, 1)
+        _BlueprintRimStrength("Blueprint Rim Strength", Range(0.0, 2.0)) = 0.8
+        _BlueprintRimPower("Blueprint Rim Power", Range(0.5, 8.0)) = 2.2
 
         [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
         [HideInInspector] _Color("Base Color", Color) = (1, 1, 1, 1)
@@ -146,7 +155,39 @@ Shader "Custom/ConveyorBeltScroll"
                 float _UvLengthScale;
                 float _UvLengthOffset;
                 half _Surface;
+                half _BlueprintPreview;
+                half4 _BlueprintTint;
+                half _BlueprintBrightness;
+                half _BlueprintMinBrightness;
+                half _BlueprintContrast;
+                half _BlueprintAlpha;
+                half4 _BlueprintRimColor;
+                half _BlueprintRimStrength;
+                half _BlueprintRimPower;
             CBUFFER_END
+
+            half4 ApplyBlueprintPreview(half4 baseSample)
+            {
+                half preview = saturate(_BlueprintPreview);
+                half luma = dot(baseSample.rgb, half3(0.2126h, 0.7152h, 0.0722h));
+                luma = saturate((luma - 0.5h) * _BlueprintContrast + 0.5h);
+                half gray = saturate(0.08h + luma * max(_BlueprintBrightness, 1.0h) * 0.72h);
+                half3 grayscalePattern = half3(gray, gray, gray);
+                half3 bluePattern = grayscalePattern * _BlueprintTint.rgb;
+                half3 preservedPattern = saturate(baseSample.rgb * 1.08h);
+                half3 tinted = lerp(preservedPattern, bluePattern, 0.55h);
+                baseSample.rgb = lerp(baseSample.rgb, tinted, preview);
+                baseSample.a = lerp(baseSample.a, baseSample.a * saturate(_BlueprintAlpha), preview);
+                return baseSample;
+            }
+
+            half3 ApplyBlueprintRim(half3 color, half3 normalWS, half3 viewDirectionWS)
+            {
+                half preview = saturate(_BlueprintPreview);
+                half ndv = saturate(dot(normalWS, viewDirectionWS));
+                half rim = pow(saturate(1.0h - ndv), max(_BlueprintRimPower, 0.001h));
+                return color + _BlueprintRimColor.rgb * (rim * _BlueprintRimStrength * preview);
+            }
 
             float2 RotateUvQuarter(float2 uv, int steps)
             {
@@ -298,6 +339,8 @@ Shader "Custom/ConveyorBeltScroll"
                     baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, scaledUv + scrollOffset) * _BaseColor;
                 }
 
+                baseSample = ApplyBlueprintPreview(baseSample);
+
                 Light mainLight = GetMainLight(inputData.shadowCoord);
 
                 half NdotL = saturate(dot(inputData.normalWS, mainLight.direction));
@@ -318,6 +361,8 @@ Shader "Custom/ConveyorBeltScroll"
 #endif
 
                 half3 finalColor = ambient + direct + additional;
+                finalColor = lerp(finalColor, baseSample.rgb, saturate(_BlueprintPreview) * 0.65h);
+                finalColor = ApplyBlueprintRim(finalColor, inputData.normalWS, inputData.viewDirectionWS);
                 finalColor = MixFog(finalColor, inputData.fogCoord);
                 return half4(finalColor, baseSample.a);
             }

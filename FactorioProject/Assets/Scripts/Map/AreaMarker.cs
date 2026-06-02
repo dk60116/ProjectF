@@ -45,6 +45,13 @@ public class AreaMarker : MonoBehaviour
     private SpriteRenderer[] capturedSpriteRenderers;
     private int[] originalSortingOrders;
     private Material[] originalSharedMaterials;
+    private Sprite currentIconSprite;
+    private float currentIconRotationZ;
+    private bool currentIconInitialized;
+    private int currentSortingOrderOffset;
+    private bool currentSortingOrderInitialized;
+    private bool currentRenderOnTop;
+    private bool currentRenderOnTopInitialized;
     private static Material lateRenderMaterial;
 
     private void Awake()
@@ -63,16 +70,31 @@ public class AreaMarker : MonoBehaviour
 
         CaptureOriginalIconColor();
         CaptureOriginalIconLocalRotation();
+        if (currentIconInitialized
+            && currentIconSprite == sprite
+            && Mathf.Approximately(currentIconRotationZ, iconRotationZ))
+        {
+            return;
+        }
+
         icon.sprite = sprite;
         icon.transform.localRotation = originalIconLocalRotation * Quaternion.Euler(0f, 0f, iconRotationZ);
         PreserveOriginalIconAlpha();
         icon.enabled = sprite != null;
+        currentIconSprite = sprite;
+        currentIconRotationZ = iconRotationZ;
+        currentIconInitialized = true;
     }
 
     public void SetSortingOrderOffset(int sortingOrderOffset)
     {
         CaptureOriginalRendererState();
         if (capturedSpriteRenderers == null || originalSortingOrders == null)
+        {
+            return;
+        }
+
+        if (currentSortingOrderInitialized && currentSortingOrderOffset == sortingOrderOffset)
         {
             return;
         }
@@ -85,12 +107,20 @@ public class AreaMarker : MonoBehaviour
                 spriteRenderer.sortingOrder = originalSortingOrders[i] + sortingOrderOffset;
             }
         }
+
+        currentSortingOrderOffset = sortingOrderOffset;
+        currentSortingOrderInitialized = true;
     }
 
     public void SetRenderOnTop(bool renderOnTop)
     {
         CaptureOriginalRendererState();
         if (capturedSpriteRenderers == null || originalSharedMaterials == null)
+        {
+            return;
+        }
+
+        if (currentRenderOnTopInitialized && currentRenderOnTop == renderOnTop)
         {
             return;
         }
@@ -108,6 +138,9 @@ public class AreaMarker : MonoBehaviour
                 ? renderOnTopMaterial
                 : originalSharedMaterials[i];
         }
+
+        currentRenderOnTop = renderOnTop;
+        currentRenderOnTopInitialized = true;
     }
 
     public void ResetVisuals()
@@ -123,6 +156,11 @@ public class AreaMarker : MonoBehaviour
         icon.transform.localRotation = originalIconLocalRotation;
         PreserveOriginalIconAlpha();
         icon.enabled = false;
+        currentIconSprite = null;
+        currentIconRotationZ = 0f;
+        currentIconInitialized = true;
+        currentSortingOrderInitialized = false;
+        currentRenderOnTopInitialized = false;
         ResetRendererSorting();
         SetRenderOnTop(false);
     }
@@ -352,7 +390,11 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         bool renderOnTop = false,
         Transform markerParent = null)
     {
-        ReleaseMarkers();
+        if (areaMarkerPool != null && areaMarkerPool != pool)
+        {
+            ReleaseMarkers();
+        }
+
         areaMarkerPool = pool;
         forceMarkerVisibility = forceVisible;
         markerSortingOrderOffset = sortingOrderOffset;
@@ -360,31 +402,21 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 
         if (areaMarkerPool == null || markerRequests == null || markerRequests.Count <= 0)
         {
+            ReleaseMarkers();
             return;
         }
 
-        for (int i = 0; i < markerRequests.Count; i++)
+        SyncMarkerCount(markerRequests.Count);
+        for (int i = 0; i < markerRequests.Count && i < activeMarkers.Count; i++)
         {
-            AreaMarker marker = areaMarkerPool.Get();
+            AreaMarker marker = activeMarkers[i];
             if (marker == null)
             {
                 continue;
             }
 
             AreaMarkerSpawnRequest request = markerRequests[i];
-            marker.transform.SetParent(null, true);
-            marker.transform.position = request.WorldPosition + Vector3.up * verticalOffset;
-            marker.transform.rotation = Quaternion.identity;
-            marker.transform.localScale = Vector3.one;
-            marker.SetIcon(request.Icon, request.IconRotationZ);
-            marker.SetSortingOrderOffset(markerSortingOrderOffset);
-            marker.SetRenderOnTop(renderMarkersOnTop);
-            if (markerParent != null)
-            {
-                marker.transform.SetParent(markerParent, true);
-            }
-
-            activeMarkers.Add(marker);
+            ConfigureMarker(marker, request, markerParent);
         }
 
         RefreshMarkerVisibility(true);
@@ -442,6 +474,88 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         }
 
         activeMarkers.Clear();
+    }
+
+    private void SyncMarkerCount(int markerCount)
+    {
+        int desiredCount = Mathf.Max(0, markerCount);
+        for (int i = activeMarkers.Count - 1; i >= desiredCount; i--)
+        {
+            AreaMarker marker = activeMarkers[i];
+            activeMarkers.RemoveAt(i);
+            if (marker == null)
+            {
+                continue;
+            }
+
+            if (areaMarkerPool != null)
+            {
+                areaMarkerPool.Release(marker);
+            }
+            else if (Application.isPlaying)
+            {
+                Destroy(marker.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(marker.gameObject);
+            }
+        }
+
+        while (activeMarkers.Count < desiredCount)
+        {
+            AreaMarker marker = areaMarkerPool != null ? areaMarkerPool.Get() : null;
+            if (marker == null)
+            {
+                break;
+            }
+
+            activeMarkers.Add(marker);
+        }
+    }
+
+    private void ConfigureMarker(
+        AreaMarker marker,
+        AreaMarkerSpawnRequest request,
+        Transform markerParent)
+    {
+        if (marker == null)
+        {
+            return;
+        }
+
+        Transform markerTransform = marker.transform;
+        Vector3 targetPosition = request.WorldPosition + Vector3.up * verticalOffset;
+        if ((markerTransform.position - targetPosition).sqrMagnitude > 0.000001f)
+        {
+            markerTransform.position = targetPosition;
+        }
+
+        if (Mathf.Abs(Quaternion.Dot(markerTransform.rotation, Quaternion.identity)) < 0.9999f)
+        {
+            markerTransform.rotation = Quaternion.identity;
+        }
+
+        if (markerTransform.localScale != Vector3.one)
+        {
+            markerTransform.localScale = Vector3.one;
+        }
+
+        if (markerParent != null)
+        {
+            if (markerTransform.parent != markerParent)
+            {
+                markerTransform.SetParent(markerParent, true);
+            }
+        }
+        else if (markerTransform.parent != null)
+        {
+            markerTransform.SetParent(null, true);
+        }
+
+        marker.SetIcon(request.Icon, request.IconRotationZ);
+        marker.SetSortingOrderOffset(markerSortingOrderOffset);
+        marker.SetRenderOnTop(renderMarkersOnTop);
     }
 
     private void RefreshMarkerVisibility(bool forceRefresh)

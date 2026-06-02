@@ -336,6 +336,11 @@ public partial class TerrainGenerator : MonoBehaviour
                     centerWorld,
                     weightBuffer);
 
+                if (dominantBiome == TerrainBiome.Water)
+                {
+                    continue;
+                }
+
                 if (ShouldSkipDominantBaseSurfaceForWaterEdgeFromSnapshot(input, p00, p10, p11, p01, weightBuffer))
                 {
                     continue;
@@ -580,7 +585,10 @@ public partial class TerrainGenerator : MonoBehaviour
             Vector2 point = polygon[i];
             chunkSurface.vertices.Add(new Vector3(point.x, y, point.y));
             chunkSurface.uvs.Add(point);
-            chunkSurface.colors.Add(GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, point, weightBuffer));
+            chunkSurface.colors.Add(
+                biome == TerrainBiome.Water
+                    ? GetGeneratedWaterDepthColorFromSnapshot(input, chunkSurface.origin, point)
+                    : GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, point, weightBuffer));
         }
 
         List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(biome)];
@@ -842,6 +850,12 @@ public partial class TerrainGenerator : MonoBehaviour
             forestWeightValue * inverseTotal);
     }
 
+    private static Color GetGeneratedWaterDepthColorFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int origin, Vector2 localPoint)
+    {
+        Vector2 worldPoint = new Vector2(origin.x + localPoint.x, origin.y + localPoint.y);
+        return EncodeGeneratedWaterDepthColor(GetNearestGeneratedLandDistanceFromSnapshot(input, worldPoint));
+    }
+
     private static TerrainBiome GetTileBiomeFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
     {
         int localX = worldCoordinate.x - input.biomeGridMinX;
@@ -997,6 +1011,11 @@ public partial class TerrainGenerator : MonoBehaviour
                 TerrainBiome dominantBiome = GetDominantBiomeAtSample(
                     centerWorld,
                     weightBuffer);
+
+                if (dominantBiome == TerrainBiome.Water)
+                {
+                    continue;
+                }
 
                 if (ShouldSkipDominantBaseSurfaceForWaterEdge(origin, p00, p10, p11, p01, weightBuffer))
                 {
@@ -1256,7 +1275,10 @@ public partial class TerrainGenerator : MonoBehaviour
             Vector2 point = polygon[i];
             chunkSurface.vertices.Add(new Vector3(point.x, y, point.y));
             chunkSurface.uvs.Add(point);
-            chunkSurface.colors.Add(GetGeneratedSurfaceBlendWeights(chunkSurface.origin, point, chunkSurface.blendWeightBuffer));
+            chunkSurface.colors.Add(
+                biome == TerrainBiome.Water
+                    ? GetGeneratedWaterDepthColor(chunkSurface.origin, point)
+                    : GetGeneratedSurfaceBlendWeights(chunkSurface.origin, point, chunkSurface.blendWeightBuffer));
         }
 
         List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(biome)];
@@ -2117,7 +2139,9 @@ public partial class TerrainGenerator : MonoBehaviour
         material.renderQueue = GeneratedWaterFoamRenderQueue;
         if (material.HasProperty("_FoamColor"))
         {
-            material.SetColor("_FoamColor", waterFoamOverlayColor);
+            Color foamColor = waterFoamOverlayColor;
+            foamColor.a = 0f;
+            material.SetColor("_FoamColor", foamColor);
         }
     }
 
@@ -2324,6 +2348,75 @@ public partial class TerrainGenerator : MonoBehaviour
             dirtWeightValue * inverseTotal,
             grassWeightValue * inverseTotal,
             forestWeightValue * inverseTotal);
+    }
+
+    private Color GetGeneratedWaterDepthColor(Vector2Int origin, Vector2 localPoint)
+    {
+        Vector2 worldPoint = new Vector2(origin.x + localPoint.x, origin.y + localPoint.y);
+        return EncodeGeneratedWaterDepthColor(GetNearestGeneratedLandDistance(worldPoint));
+    }
+
+    private static Color EncodeGeneratedWaterDepthColor(float landDistance)
+    {
+        float depth = Mathf.InverseLerp(0f, GeneratedWaterDepthDeepDistance, landDistance);
+        depth = Mathf.SmoothStep(0f, 1f, depth);
+        return new Color(depth, depth, depth, 1f);
+    }
+
+    private static float GetNearestGeneratedLandDistanceFromSnapshot(ChunkSurfaceWorkerInput input, Vector2 worldPoint)
+    {
+        if (input == null)
+        {
+            return GeneratedWaterDepthDeepDistance;
+        }
+
+        Vector2Int center = GetSurfaceSampleCoordinate(worldPoint);
+        float nearestDistance = GeneratedWaterDepthDeepDistance;
+        for (int offsetY = -GeneratedWaterDepthSearchRadius; offsetY <= GeneratedWaterDepthSearchRadius; offsetY++)
+        {
+            for (int offsetX = -GeneratedWaterDepthSearchRadius; offsetX <= GeneratedWaterDepthSearchRadius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (GetTileBiomeFromSnapshot(input, coordinate) == TerrainBiome.Water
+                    && !GetBlockedForWaterFromSnapshot(input, coordinate))
+                {
+                    continue;
+                }
+
+                nearestDistance = Mathf.Min(nearestDistance, GetDistanceToTileRect(worldPoint, coordinate));
+            }
+        }
+
+        return nearestDistance;
+    }
+
+    private float GetNearestGeneratedLandDistance(Vector2 worldPoint)
+    {
+        Vector2Int center = GetSurfaceSampleCoordinate(worldPoint);
+        float nearestDistance = GeneratedWaterDepthDeepDistance;
+        for (int offsetY = -GeneratedWaterDepthSearchRadius; offsetY <= GeneratedWaterDepthSearchRadius; offsetY++)
+        {
+            for (int offsetX = -GeneratedWaterDepthSearchRadius; offsetX <= GeneratedWaterDepthSearchRadius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (GetTileBiome(coordinate) == TerrainBiome.Water
+                    && !IsBlockedForWater(coordinate))
+                {
+                    continue;
+                }
+
+                nearestDistance = Mathf.Min(nearestDistance, GetDistanceToTileRect(worldPoint, coordinate));
+            }
+        }
+
+        return nearestDistance;
+    }
+
+    private static float GetDistanceToTileRect(Vector2 point, Vector2Int coordinate)
+    {
+        float dx = Mathf.Max(Mathf.Abs(point.x - coordinate.x) - 0.5f, 0f);
+        float dy = Mathf.Max(Mathf.Abs(point.y - coordinate.y) - 0.5f, 0f);
+        return Mathf.Sqrt((dx * dx) + (dy * dy));
     }
 
     private static int GetBiomeMaterialIndex(TerrainBiome biome)

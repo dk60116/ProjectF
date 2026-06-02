@@ -46,6 +46,7 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                half4 color : COLOR;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -55,6 +56,7 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 float3 positionWS : TEXCOORD0;
                 half3 normalWS : TEXCOORD1;
                 half fogFactor : TEXCOORD2;
+                half waterDepth : TEXCOORD4;
 #if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
                 float4 shadowCoord : TEXCOORD3;
 #endif
@@ -116,6 +118,7 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 output.positionWS = vertexInput.positionWS;
                 output.normalWS = NormalizeNormalPerVertex(normalInput.normalWS);
                 output.fogFactor = ComputeFogFactor(vertexInput.positionCS.z);
+                output.waterDepth = saturate(input.color.r);
 #if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
                 output.shadowCoord = GetShadowCoord(vertexInput);
 #endif
@@ -137,8 +140,9 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half3 lightDirectionWS = mainLight.direction;
 
                 float waterNoise = StationaryWaveHeight(input.positionWS.xz * 0.58, _Time.y * 0.35);
-                half waterBlend = saturate(0.5h + (waterNoise * 0.28h));
-                half3 baseColor = lerp(_DeepColor.rgb, _BaseColor.rgb, waterBlend);
+                half depthBlend = saturate(input.waterDepth);
+                half waveBrightness = lerp(0.95h, 1.07h, saturate(0.5h + (waterNoise * 0.28h)));
+                half3 baseColor = lerp(_BaseColor.rgb, _DeepColor.rgb, depthBlend) * waveBrightness;
 
                 half lightFacing = saturate(dot(normalWS, lightDirectionWS) * 0.35h + 0.65h);
                 half shadowAttenuation = mainLight.shadowAttenuation * mainLight.distanceAttenuation;

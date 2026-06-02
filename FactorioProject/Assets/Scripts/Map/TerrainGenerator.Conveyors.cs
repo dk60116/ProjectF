@@ -1526,7 +1526,7 @@ public partial class TerrainGenerator : MonoBehaviour
             && block.TryGetRuntimeNextConveyorBlock(out Block nextBlock)
             && nextBlock != null
             && nextBlock.IsRuntimeConveyor
-            && !IsRuntimeConveyorLineBlock(nextBlock);
+            && !IsStraightConveyorLineSuccessor(block, nextBlock);
     }
 
     private void MarkConveyorLineBlockTouched(Block block)
@@ -1748,7 +1748,7 @@ public partial class TerrainGenerator : MonoBehaviour
             line.blocks.Add(currentBlock);
 
             if (!currentBlock.TryGetRuntimeNextConveyorBlock(out Block nextBlock)
-                || !IsRuntimeConveyorLineBlock(nextBlock))
+                || !IsStraightConveyorLineSuccessor(currentBlock, nextBlock))
             {
                 break;
             }
@@ -1793,6 +1793,7 @@ public partial class TerrainGenerator : MonoBehaviour
             Block block = line.blocks[i];
             Block nextBlock = i < lineLength - 1 ? line.blocks[i + 1] : null;
             if (block == null
+                || (nextBlock != null && !IsStraightConveyorLineSuccessor(block, nextBlock))
                 || !block.TryGetStraightConveyorLineMotionData(
                     nextBlock,
                     out line.frontLaneIndices[i],
@@ -1815,7 +1816,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return !block.TryGetRuntimePreviousConveyorBlock(out Block previousBlock)
-            || !IsRuntimeConveyorLineBlock(previousBlock);
+            || !IsStraightConveyorLineSuccessor(previousBlock, block);
     }
 
     private static bool IsRuntimeConveyorLineBlock(Block block)
@@ -1823,6 +1824,15 @@ public partial class TerrainGenerator : MonoBehaviour
         return block != null
             && block.IsRuntimeConveyor
             && !block.IsCornerConveyorBlock();
+    }
+
+    private static bool IsStraightConveyorLineSuccessor(Block block, Block nextBlock)
+    {
+        return IsRuntimeConveyorLineBlock(block)
+            && IsRuntimeConveyorLineBlock(nextBlock)
+            && block.TryGetRuntimeConveyorFlowDirection(out Vector2Int flowDirection)
+            && nextBlock.TryGetRuntimeConveyorFlowDirection(out Vector2Int nextFlowDirection)
+            && flowDirection == nextFlowDirection;
     }
 
     private void TickActiveConveyorDotVisuals(float deltaTime)

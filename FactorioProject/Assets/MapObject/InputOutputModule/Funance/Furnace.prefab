@@ -62,7 +62,7 @@ MonoBehaviour:
   animator: {fileID: 0}
   particleEffect: {fileID: 4537308524571558528}
   mapFilter: 37
-  installationFocusRadius: 1
+  installationFocusRadius: 0.5
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
@@ -71,6 +71,7 @@ MonoBehaviour:
   storedFluidLiters: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
+  powerLinePoint: {fileID: 0}
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
@@ -178,7 +179,7 @@ GameObject:
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
+  m_StaticEditorFlags: 2147483647
   m_IsActive: 1
 --- !u!4 &354565451974692786
 Transform:
@@ -215,7 +216,7 @@ MeshRenderer:
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
-  m_StaticShadowCaster: 0
+  m_StaticShadowCaster: 1
   m_MotionVectors: 1
   m_LightProbeUsage: 1
   m_ReflectionProbeUsage: 1
@@ -321,6 +322,14 @@ PrefabInstance:
     - target: {fileID: 1850189683619851348, guid: c885ff713c6f94c46a3edf9e93f5f899, type: 3}
       propertyPath: m_Name
       value: Smoke_Black
+      objectReference: {fileID: 0}
+    - target: {fileID: 1850189683619851348, guid: c885ff713c6f94c46a3edf9e93f5f899, type: 3}
+      propertyPath: m_StaticEditorFlags
+      value: 2147483647
+      objectReference: {fileID: 0}
+    - target: {fileID: 6366149787864497811, guid: c885ff713c6f94c46a3edf9e93f5f899, type: 3}
+      propertyPath: m_StaticEditorFlags
+      value: 2147483647
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

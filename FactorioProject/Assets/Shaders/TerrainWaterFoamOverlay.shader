@@ -2,7 +2,7 @@ Shader "ProjectF/Terrain/WaterFoamOverlay"
 {
     Properties
     {
-        _FoamColor("Foam Color", Color) = (0.72, 0.9, 1, 0.28)
+        _FoamColor("Foam Color", Color) = (0.72, 0.9, 1, 0)
         _NoiseScale("Noise Scale", Float) = 5.5
         _NoiseStrength("Noise Strength", Range(0, 1)) = 0.42
         _FlowSpeed("Flow Speed", Float) = 0.12

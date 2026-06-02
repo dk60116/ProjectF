@@ -3380,6 +3380,14 @@ public class Block : BaseObject
         return TryGetPreviousConveyorBlock(out previousBlock);
     }
 
+    public bool TryGetRuntimeConveyorFlowDirection(out Vector2Int flowDirection)
+    {
+        flowDirection = Vector2Int.zero;
+        return IsConveyorStackingEnabled()
+            && TryGetConveyorFlowDirection(out flowDirection)
+            && flowDirection != Vector2Int.zero;
+    }
+
     public bool CanUseStraightConveyorLineSimulation()
     {
         return CanUseStraightConveyorLineSimulationStructureOnly()
@@ -9667,7 +9675,7 @@ public class Block : BaseObject
             return;
         }
 
-        if (nextInputDirection != -flowDirection)
+        if (!CanReceiveConveyorHandoff(nextBlock, nextInputDirection, flowDirection))
         {
             return;
         }
@@ -9717,6 +9725,33 @@ public class Block : BaseObject
         }
 
         return previousFlowDirection == -inputDirection;
+    }
+
+    private static bool CanReceiveConveyorHandoff(
+        Block receiverBlock,
+        Vector2Int receiverInputDirection,
+        Vector2Int incomingFlowDirection)
+    {
+        if (receiverInputDirection == Vector2Int.zero || incomingFlowDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        if (receiverInputDirection == -incomingFlowDirection)
+        {
+            return true;
+        }
+
+        return receiverBlock != null
+            && !receiverBlock.IsCornerConveyorBlock()
+            && IsPerpendicularCardinal(receiverInputDirection, incomingFlowDirection);
+    }
+
+    private static bool IsPerpendicularCardinal(Vector2Int left, Vector2Int right)
+    {
+        return left != Vector2Int.zero
+            && right != Vector2Int.zero
+            && ((left.x * right.x) + (left.y * right.y)) == 0;
     }
 
     private bool TryResolveBelt2FSkippedAdjacentBlock(

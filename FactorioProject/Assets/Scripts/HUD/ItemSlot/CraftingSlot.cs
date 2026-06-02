@@ -335,12 +335,6 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        if (!TryPrepareHandForCrafting(craftItemId))
-        {
-            RefreshIngredients();
-            return;
-        }
-
         BagSlot parentBagSlot = GetComponentInParent<BagSlot>();
         if (parentBagSlot != null && !parentBagSlot.CanCraftItem(craftItemId))
         {
@@ -359,6 +353,12 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        if (!CanPrepareHandForCrafting(craftItemId))
+        {
+            RefreshIngredients();
+            return;
+        }
+
         PlayerHUD hud = FindObjectOfType<PlayerHUD>();
         if (hud == null || !hud.CanEnqueueCrafting(craftItemId))
         {
@@ -367,6 +367,13 @@ public class CraftingSlot : ItemSlot
 
         if (!TryConsumeIngredients(out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients))
         {
+            RefreshIngredients();
+            return;
+        }
+
+        if (!TryPrepareHandForCrafting(craftItemId))
+        {
+            RefundIngredients(consumedIngredients);
             RefreshIngredients();
             return;
         }
@@ -599,7 +606,9 @@ public class CraftingSlot : ItemSlot
         }
 
         Player player = GameManager.Instance.Player;
-        return player.CanAcceptHandObject(craftItemId) || player.CanClearHandIntoBag();
+        return player.CanAcceptHandObject(craftItemId)
+               || player.CanClearHandIntoBag()
+               || CanClearHandIntoBagAfterCrafting(player);
     }
 
     private bool TryPrepareHandForCrafting(int craftItemId)
@@ -611,6 +620,175 @@ public class CraftingSlot : ItemSlot
 
         Player player = GameManager.Instance.Player;
         return player.CanAcceptHandObject(craftItemId) || player.TryStoreHandItemsInBag();
+    }
+
+    private bool CanClearHandIntoBagAfterCrafting(Player player)
+    {
+        if (player == null || ingredientBuffer == null || ingredientBuffer.Count <= 0)
+        {
+            return false;
+        }
+
+        PlayerBag handBag = player.GetHandBag();
+        if (handBag == null)
+        {
+            return true;
+        }
+
+        handBag.RefreshExternalStackCounts(false);
+        int projectedHandCount = handBag.GetSlotCount(0);
+        if (projectedHandCount <= 0)
+        {
+            return true;
+        }
+
+        int handItemId = handBag.GetSlotItemId(0);
+        if (handItemId < 0)
+        {
+            return false;
+        }
+
+        PlayerBag bag = player.GetBag();
+        if (bag == null)
+        {
+            return false;
+        }
+
+        int slotCount = bag.SlotCount;
+        if (slotCount <= 0)
+        {
+            return false;
+        }
+
+        int[] slotItemIds = new int[slotCount];
+        int[] slotCounts = new int[slotCount];
+        int[] slotCapacities = new int[slotCount];
+        for (int i = 0; i < slotCount; i++)
+        {
+            slotItemIds[i] = bag.GetSlotItemId(i);
+            slotCounts[i] = bag.GetSlotCount(i);
+            slotCapacities[i] = bag.GetSlotMaxCount(i);
+        }
+
+        for (int ingredientIndex = 0; ingredientIndex < ingredientBuffer.Count; ingredientIndex++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredientBuffer[ingredientIndex];
+            int remaining = Mathf.Max(0, ingredient.count);
+            if (remaining <= 0 || ingredient.itemId < 0)
+            {
+                continue;
+            }
+
+            bool removedFromBag = false;
+            for (int slotIndex = 0; slotIndex < slotCount && remaining > 0; slotIndex++)
+            {
+                if (slotItemIds[slotIndex] != ingredient.itemId || slotCounts[slotIndex] <= 0)
+                {
+                    continue;
+                }
+
+                int removed = Mathf.Min(slotCounts[slotIndex], remaining);
+                slotCounts[slotIndex] -= removed;
+                remaining -= removed;
+                removedFromBag = removedFromBag || removed > 0;
+                if (slotCounts[slotIndex] <= 0)
+                {
+                    slotCounts[slotIndex] = 0;
+                    slotItemIds[slotIndex] = -1;
+                }
+            }
+
+            if (removedFromBag)
+            {
+                SimulateBagDuplicateStackMerge(slotItemIds, slotCounts, slotCapacities);
+            }
+
+            if (remaining > 0 && ingredient.itemId == handItemId)
+            {
+                int removedFromHand = Mathf.Min(projectedHandCount, remaining);
+                projectedHandCount -= removedFromHand;
+                if (projectedHandCount <= 0)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return GetProjectedBagCapacityForItem(slotItemIds, slotCounts, slotCapacities, handItemId) >= projectedHandCount;
+    }
+
+    private static void SimulateBagDuplicateStackMerge(
+        int[] slotItemIds,
+        int[] slotCounts,
+        int[] slotCapacities)
+    {
+        if (slotItemIds == null || slotCounts == null || slotCapacities == null)
+        {
+            return;
+        }
+
+        int slotCount = Mathf.Min(slotItemIds.Length, Mathf.Min(slotCounts.Length, slotCapacities.Length));
+        for (int targetIndex = 0; targetIndex < slotCount; targetIndex++)
+        {
+            int itemId = slotItemIds[targetIndex];
+            if (itemId < 0)
+            {
+                continue;
+            }
+
+            int targetCapacity = Mathf.Max(0, slotCapacities[targetIndex]);
+            int targetCount = Mathf.Clamp(slotCounts[targetIndex], 0, targetCapacity);
+            for (int sourceIndex = targetIndex + 1; sourceIndex < slotCount && targetCount < targetCapacity; sourceIndex++)
+            {
+                if (slotItemIds[sourceIndex] != itemId || slotCounts[sourceIndex] <= 0)
+                {
+                    continue;
+                }
+
+                int moved = Mathf.Min(targetCapacity - targetCount, slotCounts[sourceIndex]);
+                targetCount += moved;
+                slotCounts[sourceIndex] -= moved;
+                if (slotCounts[sourceIndex] <= 0)
+                {
+                    slotCounts[sourceIndex] = 0;
+                    slotItemIds[sourceIndex] = -1;
+                }
+            }
+
+            slotCounts[targetIndex] = targetCount;
+        }
+    }
+
+    private static int GetProjectedBagCapacityForItem(
+        int[] slotItemIds,
+        int[] slotCounts,
+        int[] slotCapacities,
+        int itemId)
+    {
+        if (slotItemIds == null || slotCounts == null || slotCapacities == null || itemId < 0)
+        {
+            return 0;
+        }
+
+        int totalCapacity = 0;
+        int slotCount = Mathf.Min(slotItemIds.Length, Mathf.Min(slotCounts.Length, slotCapacities.Length));
+        for (int i = 0; i < slotCount; i++)
+        {
+            int capacity = Mathf.Max(0, slotCapacities[i]);
+            int count = Mathf.Clamp(slotCounts[i], 0, capacity);
+            if (count <= 0)
+            {
+                totalCapacity += capacity;
+                continue;
+            }
+
+            if (slotItemIds[i] == itemId)
+            {
+                totalCapacity += Mathf.Max(0, capacity - count);
+            }
+        }
+
+        return totalCapacity;
     }
 
     private bool TryConsumeIngredients(out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients)

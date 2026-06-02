@@ -4653,14 +4653,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        bool requiresOperationalEnergy = RequiresOperationalEnergy(installedDefinition);
+        bool showWorldEnergyGauge = ShouldShowWorldEnergyGauge(installedDefinition);
         UIManager uiManager = UIManager.Instance;
         if (uiManager == null)
         {
             return;
         }
 
-        if (requiresOperationalEnergy)
+        if (showWorldEnergyGauge)
         {
             if (activeEnergyGauge == null)
             {
@@ -4687,7 +4687,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
         activeCraftProgressGauge.SetFillColor(craftProgressGaugeFillColor);
         Vector3 gaugeWorldPosition = ResolveEnergyGaugeWorldPosition();
-        if (requiresOperationalEnergy)
+        if (showWorldEnergyGauge)
         {
             activeEnergyGauge.SetFillColor(energyGaugeFillColor);
             uiManager.UpdateEnergyGauge(
@@ -4700,9 +4700,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
             activeCraftProgressGauge,
             gaugeWorldPosition,
             ResolveCraftProgressGaugeFillAmount(),
-            requiresOperationalEnergy
+            showWorldEnergyGauge
                 ? new Vector2(0f, -Mathf.Max(0f, craftProgressGaugeCanvasVerticalOffset))
                 : Vector2.zero);
+    }
+
+    protected virtual bool ShouldShowWorldEnergyGauge(ItemDefinition installedDefinition)
+    {
+        return RequiresOperationalEnergy(installedDefinition);
     }
 
     private bool ShouldShowGaugeByAreaMarkerVisibility()

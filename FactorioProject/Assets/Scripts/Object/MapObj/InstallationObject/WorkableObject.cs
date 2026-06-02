@@ -97,11 +97,6 @@ public class WorkableObject : InstallationObject
     {
         if (selectedRangeVisualRequested == requested)
         {
-            if (requested)
-            {
-                RefreshWorkableRangeVisual();
-            }
-
             return;
         }
 
@@ -415,6 +410,14 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
     private MeshRenderer meshRenderer;
     private MaterialPropertyBlock propertyBlock;
     private Texture2D rangeAlphaTexture;
+    private bool[] rangeInsideScratch;
+    private float[] rangeBoundaryDistanceScratch;
+    private Color[] rangePixelScratch;
+    private bool hasCachedRangeLayout;
+    private int cachedRangeRequestHash;
+    private int cachedRangeRequestCount;
+    private Bounds cachedRangeBounds;
+    private float cachedRangeYPosition;
 
     public void Configure(IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
     {
@@ -434,9 +437,30 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
         meshRenderer.receiveShadows = false;
 
-        if (!TryBuildRangeAlphaTexture(requests, out Bounds bounds, out float yPosition))
+        int requestCount = requests != null ? requests.Count : 0;
+        int requestHash = ComputeRangeRequestHash(requests);
+        Bounds bounds;
+        float yPosition;
+        if (hasCachedRangeLayout
+            && rangeAlphaTexture != null
+            && cachedRangeRequestCount == requestCount
+            && cachedRangeRequestHash == requestHash)
         {
+            bounds = cachedRangeBounds;
+            yPosition = cachedRangeYPosition;
+        }
+        else if (!TryBuildRangeAlphaTexture(requests, out bounds, out yPosition))
+        {
+            hasCachedRangeLayout = false;
             return;
+        }
+        else
+        {
+            hasCachedRangeLayout = true;
+            cachedRangeRequestHash = requestHash;
+            cachedRangeRequestCount = requestCount;
+            cachedRangeBounds = bounds;
+            cachedRangeYPosition = yPosition;
         }
 
         transform.SetParent(null, true);
@@ -558,8 +582,9 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         int textureWidth = rangeAlphaTexture.width;
         int textureHeight = rangeAlphaTexture.height;
-        bool[] inside = new bool[textureWidth * textureHeight];
-        float[] boundaryDistances = new float[inside.Length];
+        EnsureRangeAlphaScratch(textureWidth * textureHeight);
+        bool[] inside = rangeInsideScratch;
+        float[] boundaryDistances = rangeBoundaryDistanceScratch;
 
         for (int y = 0; y < textureHeight; y++)
         {
@@ -571,7 +596,7 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
             }
         }
 
-        Color[] pixels = new Color[inside.Length];
+        Color[] pixels = rangePixelScratch;
         float pixelWorldWidth = width / textureWidth;
         float pixelWorldHeight = height / textureHeight;
         float boundaryPixelOffset = Mathf.Min(pixelWorldWidth, pixelWorldHeight) * 0.5f;
@@ -605,6 +630,54 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         rangeAlphaTexture.SetPixels(pixels);
         rangeAlphaTexture.Apply(false, false);
         return true;
+    }
+
+    private static int ComputeRangeRequestHash(IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
+    {
+        if (requests == null)
+        {
+            return 0;
+        }
+
+        unchecked
+        {
+            int hash = 17;
+            hash = (hash * 31) + requests.Count;
+            for (int i = 0; i < requests.Count; i++)
+            {
+                WorkableObjectRangeVisualRequest request = requests[i];
+                hash = (hash * 31) + QuantizeRangeHashValue(request.Center.x);
+                hash = (hash * 31) + QuantizeRangeHashValue(request.Center.y);
+                hash = (hash * 31) + QuantizeRangeHashValue(request.Center.z);
+                hash = (hash * 31) + QuantizeRangeHashValue(request.Radius);
+                hash = (hash * 31) + QuantizeRangeHashValue(request.YOffset);
+            }
+
+            return hash;
+        }
+    }
+
+    private static int QuantizeRangeHashValue(float value)
+    {
+        return Mathf.RoundToInt(value * 1000f);
+    }
+
+    private void EnsureRangeAlphaScratch(int length)
+    {
+        if (rangeInsideScratch == null || rangeInsideScratch.Length != length)
+        {
+            rangeInsideScratch = new bool[length];
+        }
+
+        if (rangeBoundaryDistanceScratch == null || rangeBoundaryDistanceScratch.Length != length)
+        {
+            rangeBoundaryDistanceScratch = new float[length];
+        }
+
+        if (rangePixelScratch == null || rangePixelScratch.Length != length)
+        {
+            rangePixelScratch = new Color[length];
+        }
     }
 
     private void EnsureRangeAlphaTexture()
