@@ -472,6 +472,7 @@ public class Block : BaseObject
 
     public void SetMapObject(MapObject value)
     {
+        ConveyorBelt previousConveyorBelt = mapObject as ConveyorBelt;
         bool wasConveyor = IsConveyorStackingEnabled();
         bool wasFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
 
@@ -502,6 +503,12 @@ public class Block : BaseObject
                 RefreshConveyorActivityRegistration();
                 RefreshConveyorSlotDotVisuals();
                 RefreshBeltDirectionDebugVisuals();
+            }
+
+            previousConveyorBelt?.RefreshEndpointVisualsAndNeighbors();
+            if (mapObject is ConveyorBelt currentConveyorBelt && currentConveyorBelt != previousConveyorBelt)
+            {
+                currentConveyorBelt.RefreshEndpointVisualsAndNeighbors();
             }
         }
         else if (wasFluidDirectionObject || isFluidDirectionObject)

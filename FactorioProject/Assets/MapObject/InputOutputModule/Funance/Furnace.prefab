@@ -94,30 +94,34 @@ MonoBehaviour:
     itemDefinition: {fileID: 0}
     count: 1
   slotLayoutType: 1
-  rectGridWidth: 2
+  rectGridWidth: 3
   rectGridHeight: 2
   rectGridCells:
   - x: 0
     y: 1
   - x: 1
     y: 1
+  - x: 2
+    y: 1
   - x: 0
     y: 0
   - x: 1
+    y: 0
+  - x: 2
     y: 0
   rectGridPlacements:
-  - x: 0
-    y: 1
-    blockType: 1
   - x: 1
-    y: 1
-    blockType: 2
-  - x: 1
-    y: 0
-    blockType: 3
-  - x: 0
     y: 0
     blockType: 4
+  - x: 1
+    y: 1
+    blockType: 1
+  - x: 0
+    y: 1
+    blockType: 2
+  - x: 2
+    y: 1
+    blockType: 3
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

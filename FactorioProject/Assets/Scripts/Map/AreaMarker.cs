@@ -599,7 +599,13 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
             return true;
         }
 
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        GameManager gameManager = GameManager.Instance;
+        if (gameManager != null && (gameManager.InstallationPlacementActive || gameManager.MapEditActive))
+        {
+            return true;
+        }
+
+        Player player = gameManager != null ? gameManager.Player : null;
         if (player == null)
         {
             return false;

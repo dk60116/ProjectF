@@ -13,6 +13,7 @@ public class UtilityPole : InstallationObject
     private const string ConnectionLineRootName = "__UtilityPoleConnectionLines";
     private const int LinePointAIndex = 0;
     private const int LinePointBIndex = 1;
+    private const int MaxConnectionsPerLinePoint = 2;
     private const int MaxLineCurvePointCount = 64;
     private const float DistanceTieEpsilon = 0.0001f;
     private static readonly Color SupplyRangeFillColor = new Color(1f, 0.86f, 0.05f, 0.14f);
@@ -98,17 +99,16 @@ public class UtilityPole : InstallationObject
 
     private LineRenderer lineCenterToA;
     private LineRenderer lineCenterToB;
-    private readonly List<LineRenderer> connectionLineRenderers = new List<LineRenderer>(2);
+    private readonly List<LineRenderer> connectionLineRenderers = new List<LineRenderer>(4);
     private int usedConnectionLineRendererCount;
-    private bool linePointAConnectionOccupied;
-    private bool linePointBConnectionOccupied;
+    private int linePointAConnectionCount;
+    private int linePointBConnectionCount;
 
     private int ExternalConnectionCount
     {
         get
         {
-            int count = linePointAConnectionOccupied ? 1 : 0;
-            return linePointBConnectionOccupied ? count + 1 : count;
+            return linePointAConnectionCount + linePointBConnectionCount;
         }
     }
 
@@ -1240,8 +1240,7 @@ public class UtilityPole : InstallationObject
     private void HideConnectionLineRenderers()
     {
         usedConnectionLineRendererCount = 0;
-        linePointAConnectionOccupied = false;
-        linePointBConnectionOccupied = false;
+        ResetLinePointConnections();
         for (int i = 0; i < connectionLineRenderers.Count; i++)
         {
             SetLineRendererVisible(connectionLineRenderers[i], false);
@@ -1501,27 +1500,36 @@ public class UtilityPole : InstallationObject
 
     private void ResetLinePointConnections()
     {
-        linePointAConnectionOccupied = false;
-        linePointBConnectionOccupied = false;
+        linePointAConnectionCount = 0;
+        linePointBConnectionCount = 0;
     }
 
     private bool IsLinePointConnectionOccupied(int linePointIndex)
     {
-        return linePointIndex == LinePointAIndex
-            ? linePointAConnectionOccupied
-            : linePointBConnectionOccupied;
+        return GetLinePointConnectionCount(linePointIndex) >= MaxConnectionsPerLinePoint;
     }
 
     private void SetLinePointConnectionOccupied(int linePointIndex)
     {
         if (linePointIndex == LinePointAIndex)
         {
-            linePointAConnectionOccupied = true;
+            linePointAConnectionCount = Mathf.Min(
+                linePointAConnectionCount + 1,
+                MaxConnectionsPerLinePoint);
         }
         else
         {
-            linePointBConnectionOccupied = true;
+            linePointBConnectionCount = Mathf.Min(
+                linePointBConnectionCount + 1,
+                MaxConnectionsPerLinePoint);
         }
+    }
+
+    private int GetLinePointConnectionCount(int linePointIndex)
+    {
+        return linePointIndex == LinePointAIndex
+            ? linePointAConnectionCount
+            : linePointBConnectionCount;
     }
 
     private bool TryGetConnectionLinePoint(int linePointIndex, out Transform linePoint)
@@ -1994,8 +2002,7 @@ public class UtilityPole : InstallationObject
             for (int i = 0; i < connectionCandidateScratch.Count; i++)
             {
                 PoleConnectionCandidate candidate = connectionCandidateScratch[i];
-                if (ArePolesAlreadyConnected(candidate.FirstPole, candidate.SecondPole, poleConnections)
-                    || ArePolesAlreadyConnected(candidate.FirstPole, candidate.SecondPole, previewPoleConnections)
+                if (ArePolesAlreadyConnected(candidate.FirstPole, candidate.SecondPole, poleConnections, previewPoleConnections)
                     || CountUnconnectedCandidateEndpoints(candidate) != unconnectedEndpointPriority)
                 {
                     continue;
@@ -2111,6 +2118,13 @@ public class UtilityPole : InstallationObject
 
     private static bool TryAddPoleConnection(PoleConnectionCandidate candidate, List<PoleConnection> targetConnections)
     {
+        if (candidate.FirstPole == null
+            || candidate.SecondPole == null
+            || candidate.FirstPole == candidate.SecondPole)
+        {
+            return false;
+        }
+
         if (!TryResolveClosestAvailableLinePointPair(
                 candidate.FirstPole,
                 candidate.SecondPole,
@@ -2158,18 +2172,69 @@ public class UtilityPole : InstallationObject
         UtilityPole second,
         List<PoleConnection> connections)
     {
+        return ArePolesAlreadyConnected(first, second, connections, null);
+    }
+
+    private static bool ArePolesAlreadyConnected(
+        UtilityPole first,
+        UtilityPole second,
+        List<PoleConnection> primaryConnections,
+        List<PoleConnection> secondaryConnections)
+    {
         if (first == null || second == null)
         {
             return false;
         }
 
+        if (first == second)
+        {
+            return true;
+        }
+
+        visitedPoles.Clear();
+        poleQueue.Clear();
+        visitedPoles.Add(first);
+        poleQueue.Enqueue(first);
+
+        while (poleQueue.Count > 0)
+        {
+            UtilityPole pole = poleQueue.Dequeue();
+            if (TryVisitConnectedPoles(pole, primaryConnections, second)
+                || TryVisitConnectedPoles(pole, secondaryConnections, second))
+            {
+                visitedPoles.Clear();
+                poleQueue.Clear();
+                return true;
+            }
+        }
+
+        visitedPoles.Clear();
+        poleQueue.Clear();
+        return false;
+    }
+
+    private static bool TryVisitConnectedPoles(
+        UtilityPole pole,
+        List<PoleConnection> connections,
+        UtilityPole targetPole)
+    {
         for (int i = 0; connections != null && i < connections.Count; i++)
         {
             PoleConnection connection = connections[i];
-            if ((connection.FirstPole == first && connection.SecondPole == second)
-                || (connection.FirstPole == second && connection.SecondPole == first))
+            UtilityPole connectedPole = GetConnectedPole(connection, pole);
+            if (connectedPole == null)
+            {
+                continue;
+            }
+
+            if (connectedPole == targetPole)
             {
                 return true;
+            }
+
+            if (visitedPoles.Add(connectedPole))
+            {
+                poleQueue.Enqueue(connectedPole);
             }
         }
 
