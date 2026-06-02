@@ -3,30 +3,16 @@ using UnityEngine;
 
 public class MiningMachine : InputOutputModule
 {
-    private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
-
     [SerializeField]
     private Transform drill;
 
-    private Animator cachedWorkAnimator;
-    private bool hasCheckedWorkAnimatorParameter;
-    private bool workAnimatorHasWorkParameter;
-    private bool workAnimatorStateInitialized;
-    private bool lastWorkAnimatorState;
     private readonly List<Resource> miningResourceCandidates = new List<Resource>(4);
     private Resource activeMiningResource;
     private int activeMiningResourceIndex = -1;
     private int nextMiningResourceIndex;
 
-    protected override void OnEnable()
-    {
-        base.OnEnable();
-        RefreshWorkAnimatorState(true);
-    }
-
     protected override void OnDisable()
     {
-        SetWorkAnimatorState(false, true);
         ClearActiveMiningResourceSelection();
         base.OnDisable();
     }
@@ -43,12 +29,6 @@ public class MiningMachine : InputOutputModule
         base.OnPlacementRuntimeChanged();
         ClearActiveMiningResourceSelection();
         nextMiningResourceIndex = 0;
-    }
-
-    public override void ManagedUpdateTick(float deltaTime)
-    {
-        base.ManagedUpdateTick(deltaTime);
-        RefreshWorkAnimatorState();
     }
 
     public bool TryAppendPlacementOutputItemIds(
@@ -101,7 +81,6 @@ public class MiningMachine : InputOutputModule
 
         SetActiveMiningResourceSelection(resource, resourceIndex);
         BeginActiveCraft(-1, outputItemId, outputCount, installedDefinition);
-        SetWorkAnimatorState(true, true);
     }
 
     protected override bool ShouldShowWorldEnergyGauge(ItemDefinition installedDefinition)
@@ -524,12 +503,7 @@ public class MiningMachine : InputOutputModule
         return normalized < 0 ? normalized + count : normalized;
     }
 
-    private void RefreshWorkAnimatorState(bool force = false)
-    {
-        SetWorkAnimatorState(ShouldPlayWorkAnimation(), force);
-    }
-
-    private bool ShouldPlayWorkAnimation()
+    protected override bool ShouldPlayWorkAnimation()
     {
         if (IsWaitingForOutput)
         {
@@ -542,7 +516,7 @@ public class MiningMachine : InputOutputModule
             return HasOperationalEnergyAvailable(installedDefinition);
         }
 
-        return lastWorkAnimatorState && CanContinueWorkAnimation(installedDefinition);
+        return IsWorkAnimatorStateActive && CanContinueWorkAnimation(installedDefinition);
     }
 
     private bool CanContinueWorkAnimation(ItemDefinition installedDefinition)
@@ -561,69 +535,4 @@ public class MiningMachine : InputOutputModule
                && outputCount > 0;
     }
 
-    private void SetWorkAnimatorState(bool isWorking, bool force = false)
-    {
-        Animator targetAnimator = ResolveMiningWorkAnimator();
-        if (targetAnimator == null || !HasWorkAnimatorBoolParameter(targetAnimator))
-        {
-            workAnimatorStateInitialized = false;
-            lastWorkAnimatorState = false;
-            return;
-        }
-
-        if (!force && workAnimatorStateInitialized && lastWorkAnimatorState == isWorking)
-        {
-            return;
-        }
-
-        targetAnimator.SetBool(WorkAnimatorBoolHash, isWorking);
-        workAnimatorStateInitialized = true;
-        lastWorkAnimatorState = isWorking;
-    }
-
-    private Animator ResolveMiningWorkAnimator()
-    {
-        Animator targetAnimator = ResolveInstallationAnimator();
-        if (targetAnimator != cachedWorkAnimator)
-        {
-            cachedWorkAnimator = targetAnimator;
-            hasCheckedWorkAnimatorParameter = false;
-            workAnimatorHasWorkParameter = false;
-            workAnimatorStateInitialized = false;
-            lastWorkAnimatorState = false;
-        }
-
-        return cachedWorkAnimator;
-    }
-
-    private bool HasWorkAnimatorBoolParameter(Animator targetAnimator)
-    {
-        if (targetAnimator == null)
-        {
-            return false;
-        }
-
-        if (hasCheckedWorkAnimatorParameter && workAnimatorHasWorkParameter)
-        {
-            return true;
-        }
-
-        hasCheckedWorkAnimatorParameter = true;
-        workAnimatorHasWorkParameter = false;
-
-        AnimatorControllerParameter[] parameters = targetAnimator.parameters;
-        for (int i = 0; i < parameters.Length; i++)
-        {
-            AnimatorControllerParameter parameter = parameters[i];
-            if (parameter != null
-                && parameter.type == AnimatorControllerParameterType.Bool
-                && parameter.nameHash == WorkAnimatorBoolHash)
-            {
-                workAnimatorHasWorkParameter = true;
-                break;
-            }
-        }
-
-        return workAnimatorHasWorkParameter;
-    }
 }

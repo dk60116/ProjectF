@@ -4,17 +4,11 @@ using UnityEngine;
 
 public class ProductionMachine : InputOutputModule
 {
-    private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
     private const int MaximumProductionIngredientTypes = 2;
 
     [SerializeField]
     private List<SpriteRenderer> targetIconDisplays;
 
-    private Animator cachedWorkAnimator;
-    private bool hasCheckedWorkAnimatorParameter;
-    private bool workAnimatorHasWorkParameter;
-    private bool workAnimatorStateInitialized;
-    private bool lastWorkAnimatorState;
     private readonly List<CraftingTreeRuntime.IngredientEntry> productionIngredientBuffer =
         new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<CraftingTreeRuntime.IngredientEntry> resolvedProductionIngredients =
@@ -27,19 +21,6 @@ public class ProductionMachine : InputOutputModule
     {
         base.OnEnable();
         RefreshProductionTargetIconDisplays();
-        RefreshWorkAnimatorState(true);
-    }
-
-    protected override void OnDisable()
-    {
-        SetWorkAnimatorState(false, true);
-        base.OnDisable();
-    }
-
-    public override void ManagedUpdateTick(float deltaTime)
-    {
-        base.ManagedUpdateTick(deltaTime);
-        RefreshWorkAnimatorState();
     }
 
     public bool TryCollectProductionTargetItemIds(ICollection<int> itemIds)
@@ -241,6 +222,7 @@ public class ProductionMachine : InputOutputModule
         ClearAllProductionTargetFilterBits(filterBitCount);
         SetItemFilterEnabled(itemId, filterBitCount, true);
         RefreshProductionTargetIconDisplays();
+        WakeRuntimeUpdate();
     }
 
     public void ClearProductionTargetSelection()
@@ -254,6 +236,7 @@ public class ProductionMachine : InputOutputModule
         int filterBitCount = ResolveProductionTargetFilterBitCount(targetItemIds);
         ClearAllProductionTargetFilterBits(filterBitCount);
         RefreshProductionTargetIconDisplays();
+        WakeRuntimeUpdate();
     }
 
     protected override bool IsRecipeOutputAllowedByItemFilter(int outputItemId)
@@ -462,84 +445,6 @@ public class ProductionMachine : InputOutputModule
             display.sprite = targetIcon;
             display.enabled = targetIcon != null;
         }
-    }
-
-    private void RefreshWorkAnimatorState(bool force = false)
-    {
-        SetWorkAnimatorState(ShouldPlayWorkAnimation(), force);
-    }
-
-    private bool ShouldPlayWorkAnimation()
-    {
-        return IsActiveCraftRunning
-               && !IsWaitingForOutput
-               && HasOperationalEnergyAvailable(ResolveInstalledDefinition());
-    }
-
-    private void SetWorkAnimatorState(bool isWorking, bool force = false)
-    {
-        Animator targetAnimator = ResolveProductionWorkAnimator();
-        if (targetAnimator == null || !HasWorkAnimatorBoolParameter(targetAnimator))
-        {
-            workAnimatorStateInitialized = false;
-            lastWorkAnimatorState = false;
-            return;
-        }
-
-        if (!force && workAnimatorStateInitialized && lastWorkAnimatorState == isWorking)
-        {
-            return;
-        }
-
-        targetAnimator.SetBool(WorkAnimatorBoolHash, isWorking);
-        workAnimatorStateInitialized = true;
-        lastWorkAnimatorState = isWorking;
-    }
-
-    private Animator ResolveProductionWorkAnimator()
-    {
-        Animator targetAnimator = ResolveInstallationAnimator();
-        if (targetAnimator != cachedWorkAnimator)
-        {
-            cachedWorkAnimator = targetAnimator;
-            hasCheckedWorkAnimatorParameter = false;
-            workAnimatorHasWorkParameter = false;
-            workAnimatorStateInitialized = false;
-            lastWorkAnimatorState = false;
-        }
-
-        return cachedWorkAnimator;
-    }
-
-    private bool HasWorkAnimatorBoolParameter(Animator targetAnimator)
-    {
-        if (targetAnimator == null)
-        {
-            return false;
-        }
-
-        if (hasCheckedWorkAnimatorParameter)
-        {
-            return workAnimatorHasWorkParameter;
-        }
-
-        hasCheckedWorkAnimatorParameter = true;
-        workAnimatorHasWorkParameter = false;
-
-        AnimatorControllerParameter[] parameters = targetAnimator.parameters;
-        for (int i = 0; i < parameters.Length; i++)
-        {
-            AnimatorControllerParameter parameter = parameters[i];
-            if (parameter != null
-                && parameter.type == AnimatorControllerParameterType.Bool
-                && parameter.nameHash == WorkAnimatorBoolHash)
-            {
-                workAnimatorHasWorkParameter = true;
-                break;
-            }
-        }
-
-        return workAnimatorHasWorkParameter;
     }
 
     private bool TryResolveSelectedProductionRecipe(

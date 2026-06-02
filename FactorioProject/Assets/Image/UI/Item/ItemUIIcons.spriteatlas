@@ -66,11 +66,13 @@ SpriteAtlas:
     - {fileID: 21300000, guid: 5074c2111e0cf234f8d8f911cf70fe24, type: 3}
     - {fileID: 21300000, guid: 556c3ce33690c0c449757ce36fbd1b9c, type: 3}
     - {fileID: 21300000, guid: bedd2a65b52676a4fa821c9211aeafdd, type: 3}
+    - {fileID: 21300000, guid: b6c8bfd785901674d9f07965da9cc348, type: 3}
     - {fileID: 21300000, guid: 512cd3b54b628fb4195bbd3675ff322d, type: 3}
     - {fileID: 21300000, guid: a628ddd2a38b95940813b0bb46eec89f, type: 3}
     - {fileID: 21300000, guid: c8e209659c2ed834280db61e53da32f2, type: 3}
     - {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
     - {fileID: 21300000, guid: 1c5af457d79a02240a489621d09a6284, type: 3}
+    - {fileID: 21300000, guid: 74480ccda121853489572ab7f4fc8dc9, type: 3}
     - {fileID: 21300000, guid: dac4f30093e209d408e04e1efeec296b, type: 3}
     - {fileID: 21300000, guid: f5fe2b95085abff4da2c9efcad11d11b, type: 3}
     - {fileID: 21300000, guid: f09c56f9f04acdb4e9ceac56adb01f7e, type: 3}
@@ -107,6 +109,7 @@ SpriteAtlas:
     - 1c5af457d79a02240a489621d09a6284: 21300000
     - d830ad6735f87f54499c4772be68650d: 21300000
     - de1de8772e6bd95418f5e646676e941b: 21300000
+    - b6c8bfd785901674d9f07965da9cc348: 21300000
     - 9892bdf878eea1a43b216b9bee80a13e: 21300000
     - f09c56f9f04acdb4e9ceac56adb01f7e: 21300000
     - 72a1ce6a9d343d3429777b5ee6e1c0e8: 21300000
@@ -122,6 +125,7 @@ SpriteAtlas:
     - 2df89a6ca7b038141bc380d89e523bfc: 21300000
     - c6a06b0d53be27848bf3976a181c4f1b: 21300000
     - a6db811d32e4d74498bb391f271afca2: 21300000
+    - 74480ccda121853489572ab7f4fc8dc9: 21300000
     - 06d339dd761e3e64bb04a0f22eb6eed5: 21300000
     - a023e52e50811cd4bb7c13d0687b4363: 21300000
     - 0ce0c28f00f06f54684b99cb53343f02: 21300000
@@ -154,6 +158,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 1c5af457d79a02240a489621d09a6284, type: 3}
   - {fileID: 21300000, guid: d830ad6735f87f54499c4772be68650d, type: 3}
   - {fileID: 21300000, guid: de1de8772e6bd95418f5e646676e941b, type: 3}
+  - {fileID: 21300000, guid: b6c8bfd785901674d9f07965da9cc348, type: 3}
   - {fileID: 21300000, guid: 9892bdf878eea1a43b216b9bee80a13e, type: 3}
   - {fileID: 21300000, guid: f09c56f9f04acdb4e9ceac56adb01f7e, type: 3}
   - {fileID: 21300000, guid: 72a1ce6a9d343d3429777b5ee6e1c0e8, type: 3}
@@ -169,6 +174,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 2df89a6ca7b038141bc380d89e523bfc, type: 3}
   - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
   - {fileID: 21300000, guid: a6db811d32e4d74498bb391f271afca2, type: 3}
+  - {fileID: 21300000, guid: 74480ccda121853489572ab7f4fc8dc9, type: 3}
   - {fileID: 21300000, guid: 06d339dd761e3e64bb04a0f22eb6eed5, type: 3}
   - {fileID: 21300000, guid: a023e52e50811cd4bb7c13d0687b4363, type: 3}
   - {fileID: 21300000, guid: 0ce0c28f00f06f54684b99cb53343f02, type: 3}
@@ -200,6 +206,7 @@ SpriteAtlas:
   - Production machine (Mk1)_Icon
   - Iron ore_Icon
   - Reed_Icon
+  - Electric mining machine_Icon 1
   - Drill_Icon
   - Door_Interaction_0
   - Box_Interaction_1
@@ -215,6 +222,7 @@ SpriteAtlas:
   - Brick_Icon
   - Pickaxe
   - Coil_Icon
+  - Production machine (Mk2)_Icon
   - Knife
   - Steam_Icon
   - Door_Interaction_1

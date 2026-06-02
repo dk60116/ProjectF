@@ -67,6 +67,11 @@ public class Pump : InputOutputModule
         ProduceWater(deltaTime);
     }
 
+    protected override bool ShouldKeepRuntimeUpdateTickActive()
+    {
+        return true;
+    }
+
     protected override bool AppendOutputItemIds(ISet<int> outputItemIds)
     {
         bool foundAny = base.AppendOutputItemIds(outputItemIds);

@@ -38,6 +38,15 @@ public class Block : BaseObject
     private const float ConveyorBlockedRetryJitterStep = 0.01f;
     private const int ConveyorBlockedRetryJitterSteps = 5;
     private const int ConveyorContinuousMotionMaxCarrySteps = 4;
+
+    public event Action<Block> RuntimeItemStackChanged;
+
+    private void NotifyRuntimeItemStackChanged()
+    {
+        RobotArm.WakeAroundCoordinate(coordinate);
+        InputOutputModule.WakeRuntimeModulesAtCoordinate(coordinate);
+        RuntimeItemStackChanged?.Invoke(this);
+    }
     private const float ConveyorContinuousMotionEpsilon = 0.0001f;
     private const string ConveyorSlotDotRootName = "ConveyorSlotDots";
     private static readonly Vector2Int[] ConveyorNeighborDirections =
@@ -523,7 +532,7 @@ public class Block : BaseObject
             TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
         }
 
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
     }
 
     private void InvalidateConveyorRuntimeCaches()
@@ -732,7 +741,7 @@ public class Block : BaseObject
         portableObject.SetBatchedRendering(true);
         stack.Add(portableObject);
         targetPortableObject = portableObject;
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         return true;
     }
 
@@ -772,7 +781,7 @@ public class Block : BaseObject
             portableObject.SetBatchedRendering(true);
             stack.Add(portableObject);
             targetPortableObject = portableObject;
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             return true;
         }
 
@@ -972,7 +981,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             return false;
         }
 
@@ -984,7 +993,7 @@ public class Block : BaseObject
         consumedItemId = itemId;
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleaseFloorObject(topObject);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         return true;
     }
 
@@ -1018,7 +1027,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             return false;
         }
 
@@ -1029,7 +1038,7 @@ public class Block : BaseObject
 
         consumedItemId = itemId;
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
 
         DroppedItemPickupGate gate = topObject.GetComponent<DroppedItemPickupGate>();
         gate?.ClearGate();
@@ -1130,7 +1139,7 @@ public class Block : BaseObject
         Vector3 finalLocalPosition = new Vector3(0f, objectIndex * InputAreaCenterVerticalSpacing, 0f);
         Vector3 finalWorldPosition = inputAreaCenterAnchor.TransformPoint(finalLocalPosition);
         inputAreaCenterStack.Add(portableObject);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
 
         portableObject.MoveTo(() => inputAreaCenterAnchor != null ? inputAreaCenterAnchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
@@ -1355,7 +1364,7 @@ public class Block : BaseObject
             Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
             Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
             stack.Add(portableObject);
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
 
             portableObject.MoveTo(() => anchor != null ? anchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
@@ -1956,7 +1965,7 @@ public class Block : BaseObject
         if (useVirtualDataSlot)
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             HoldConveyorLaneMovement(laneIndex, movementReleaseDelay);
             WakeConveyorMoveAttempts();
             RefreshConveyorActivityRegistration();
@@ -1978,7 +1987,7 @@ public class Block : BaseObject
         portableObject.transform.localScale = Vector3.one;
         portableObject.gameObject.SetActive(true);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         HoldConveyorLaneMovement(laneIndex, movementReleaseDelay);
         WakeConveyorMoveAttempts();
         RefreshConveyorActivityRegistration();
@@ -2326,7 +2335,7 @@ public class Block : BaseObject
 
         portableObject = MaterializeConveyorObjectForTransfer(portableObject, itemId, laneIndex);
         ClearConveyorItemAtLane(laneIndex);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         WakeConveyorMoveAttemptsAround();
         ReleaseFloorObject(portableObject);
         takenItemId = itemId;
@@ -4096,7 +4105,7 @@ public class Block : BaseObject
             ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
             if (useInputAreaCenter)
             {
-                RobotArm.WakeAroundCoordinate(coordinate);
+                NotifyRuntimeItemStackChanged();
             }
 
             return true;
@@ -4223,7 +4232,7 @@ public class Block : BaseObject
             ReleaseFloorObjectToHand(topObject, handTarget);
             if (useInputAreaCenter)
             {
-                RobotArm.WakeAroundCoordinate(coordinate);
+                NotifyRuntimeItemStackChanged();
             }
 
             return true;
@@ -4543,7 +4552,7 @@ public class Block : BaseObject
         int itemId = portableObject.ItemId;
         stack.RemoveAt(stack.Count - 1);
         ReleaseFloorObject(portableObject);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         if (itemId < 0)
         {
             return false;
@@ -4673,7 +4682,7 @@ public class Block : BaseObject
             if (floorObject == null)
             {
                 inputAreaCenterStack.RemoveAt(objectIndex);
-                RobotArm.WakeAroundCoordinate(coordinate);
+                NotifyRuntimeItemStackChanged();
                 continue;
             }
 
@@ -4682,7 +4691,7 @@ public class Block : BaseObject
             {
                 inputAreaCenterStack.RemoveAt(objectIndex);
                 ReleaseFloorObjectToHand(floorObject, null);
-                RobotArm.WakeAroundCoordinate(coordinate);
+                NotifyRuntimeItemStackChanged();
                 continue;
             }
 
@@ -4693,7 +4702,7 @@ public class Block : BaseObject
 
             inputAreaCenterStack.RemoveAt(objectIndex);
             ReleaseFloorObjectToHand(floorObject, handTarget);
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             transferred++;
         }
 
@@ -11507,7 +11516,7 @@ public class Block : BaseObject
         portableObject.SetItem(objectId);
         int objectIndex = inputAreaCenterStack.Count;
         inputAreaCenterStack.Add(portableObject);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
         portableObject.GetOrAddPickupGate()?.MarkSettled();
         targetPortableObject = portableObject;
@@ -11556,7 +11565,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             return false;
         }
 
@@ -11572,7 +11581,7 @@ public class Block : BaseObject
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         return true;
     }
 
@@ -11690,7 +11699,7 @@ public class Block : BaseObject
         {
             inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
             ReleaseFloorObject(topObject);
-            RobotArm.WakeAroundCoordinate(coordinate);
+            NotifyRuntimeItemStackChanged();
             return false;
         }
 
@@ -11701,7 +11710,7 @@ public class Block : BaseObject
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleaseFloorObjectToHand(topObject, handTarget);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged();
         return true;
     }
 

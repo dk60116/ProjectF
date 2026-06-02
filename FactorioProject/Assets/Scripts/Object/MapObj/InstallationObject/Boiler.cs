@@ -107,6 +107,11 @@ public class Boiler : InputOutputModule
         // are emitted as steam. Do not restart the generic one-shot craft loop here.
     }
 
+    protected override bool ShouldAutoPullFluidFromConnectedStorage()
+    {
+        return false;
+    }
+
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;
@@ -431,6 +436,8 @@ public class Boiler : InputOutputModule
             return;
         }
 
+        TryPullBoilerInputWater(deltaTime, inputItemId);
+
         if (!NormalizeWaterTemperatureForStoredFluid(inputItemId))
         {
             preserveSteamReadyTemperatureForMakeupWater = false;
@@ -520,9 +527,7 @@ public class Boiler : InputOutputModule
         if (StoredFluidLiters <= FluidEpsilon
             || !CanProvideFluidItem(inputItemId)
             || inputLitersPerSecond <= 0
-            || outputLitersPerSecond <= 0
-            || !TryResolveFluidOutputStorage(outputItemId, FluidEpsilon, out _)
-            || !TryConsumeBoilerOperatingEnergy(deltaTime, installedDefinition, out _))
+            || outputLitersPerSecond <= 0)
         {
             return false;
         }
@@ -547,6 +552,11 @@ public class Boiler : InputOutputModule
                 out float litersToEmit)
             || targetStorage == null
             || litersToEmit <= FluidEpsilon)
+        {
+            return false;
+        }
+
+        if (!TryConsumeBoilerOperatingEnergy(deltaTime, installedDefinition, out _))
         {
             return false;
         }
@@ -638,14 +648,30 @@ public class Boiler : InputOutputModule
             return false;
         }
 
-        if (!TryResolveFluidOutputStorage(outputItemId, maxLiters, out targetStorage)
-            && !TryResolveFluidOutputStorage(outputItemId, FluidEpsilon, out targetStorage))
+        if (!TryResolveFluidOutputStorage(outputItemId, FluidEpsilon, out targetStorage))
         {
             return false;
         }
 
         resolvedLiters = Mathf.Min(maxLiters, targetStorage.AvailableFluidStorageLiters);
         return resolvedLiters > FluidEpsilon;
+    }
+
+    private void TryPullBoilerInputWater(float deltaTime, int inputItemId)
+    {
+        if (deltaTime <= 0f
+            || inputItemId < 0
+            || !CanStoreFluid
+            || !HasFluidStorageSpace
+            || IsWaterStorageFull(inputItemId))
+        {
+            return;
+        }
+
+        TryPullFluidFromConnectedStorage(
+            inputItemId,
+            ConnectedFluidStorageTransferLitersPerSecond * deltaTime,
+            out _);
     }
 
     private bool NormalizeWaterTemperatureForStoredFluid(int inputItemId)

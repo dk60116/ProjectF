@@ -49,13 +49,6 @@ public sealed class EditorToolBuildSync : IPostprocessBuildWithReport
     public void OnPostprocessBuild(BuildReport report)
     {
         string repositoryRoot = Path.GetFullPath(Path.Combine(Application.dataPath, "..", ".."));
-        string toolProjectPath = Path.Combine(repositoryRoot, "Tools", "ItemGiveTool", "ItemGiveTool.csproj");
-        if (!File.Exists(toolProjectPath))
-        {
-            Debug.LogWarning($"EditorToolBuildSync: tool project not found at '{toolProjectPath}'.");
-            return;
-        }
-
         string buildOutputPath = report.summary.outputPath;
         string buildDirectory = Directory.Exists(buildOutputPath)
             ? buildOutputPath
@@ -66,13 +59,42 @@ public sealed class EditorToolBuildSync : IPostprocessBuildWithReport
             return;
         }
 
-        string publishDirectory = Path.Combine(buildDirectory, "Tools", "EditorTool");
+        string editorToolProjectPath = Path.Combine(repositoryRoot, "Tools", "ItemGiveTool", "ItemGiveTool.csproj");
+        string profilerToolProjectPath = Path.Combine(repositoryRoot, "Tools", "MapObjectProfilerTool", "MapObjectProfilerTool.csproj");
+
+        PublishTool(
+            "EditorTool",
+            editorToolProjectPath,
+            Path.Combine(buildDirectory, "Tools", "EditorTool"),
+            repositoryRoot,
+            true);
+        PublishTool(
+            "MapObjectProfiler",
+            profilerToolProjectPath,
+            Path.Combine(buildDirectory, "Tools", "MapObjectProfiler"),
+            repositoryRoot,
+            true);
+    }
+
+    private static bool PublishTool(
+        string toolName,
+        string projectPath,
+        string publishDirectory,
+        string repositoryRoot,
+        bool exportItemCatalog)
+    {
+        if (!File.Exists(projectPath))
+        {
+            Debug.LogWarning($"EditorToolBuildSync: {toolName} project not found at '{projectPath}'.");
+            return false;
+        }
+
         Directory.CreateDirectory(publishDirectory);
 
         System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"publish \"{toolProjectPath}\" -c Release -o \"{publishDirectory}\" --nologo",
+            Arguments = $"publish \"{projectPath}\" -c Release -o \"{publishDirectory}\" --nologo",
             CreateNoWindow = true,
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -89,16 +111,22 @@ public sealed class EditorToolBuildSync : IPostprocessBuildWithReport
 
             if (process.ExitCode != 0)
             {
-                Debug.LogWarning($"EditorToolBuildSync: dotnet publish failed.\n{output}\n{error}");
-                return;
+                Debug.LogWarning($"EditorToolBuildSync: {toolName} dotnet publish failed.\n{output}\n{error}");
+                return false;
             }
 
-            ExportItemCatalog(publishDirectory);
-            Debug.Log($"EditorToolBuildSync: published EditorTool to '{publishDirectory}'.");
+            if (exportItemCatalog)
+            {
+                ExportItemCatalog(publishDirectory);
+            }
+
+            Debug.Log($"EditorToolBuildSync: published {toolName} to '{publishDirectory}'.");
+            return true;
         }
         catch (System.Exception exception)
         {
-            Debug.LogWarning($"EditorToolBuildSync: failed to publish EditorTool. {exception.Message}");
+            Debug.LogWarning($"EditorToolBuildSync: failed to publish {toolName}. {exception.Message}");
+            return false;
         }
     }
 

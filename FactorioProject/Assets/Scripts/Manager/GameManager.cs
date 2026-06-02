@@ -35,6 +35,10 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private bool showDirections;
     [SerializeField]
+    private bool mapObjectTickProfilingEnabled;
+    [SerializeField, Min(1)]
+    private int mapObjectTickProfilingMaxRows = 64;
+    [SerializeField]
     private bool runtimeItemGiveServerEnabled = true;
     [SerializeField, Min(1)]
     private int runtimeItemGiveServerPort = RuntimeItemGiveReceiver.DefaultPort;
@@ -46,6 +50,8 @@ public class GameManager : MonoBehaviour
     private bool lastRuntimeShowBeltItemLine;
     private bool beltDirectionRuntimeStateInitialized;
     private bool lastRuntimeShowBeltDirections;
+    private bool mapObjectTickProfilingRuntimeStateInitialized;
+    private bool lastRuntimeMapObjectTickProfilingEnabled;
 
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
@@ -91,6 +97,7 @@ public class GameManager : MonoBehaviour
         SyncSleepAwakeRuntimeVisibility();
         SyncBeltItemLineRuntimeVisibility();
         SyncBeltDirectionRuntimeVisibility();
+        SyncMapObjectTickProfilingRuntimeState();
     }
 
     private void OnValidate()
@@ -101,6 +108,7 @@ public class GameManager : MonoBehaviour
             SyncSleepAwakeRuntimeVisibility(true);
             SyncBeltItemLineRuntimeVisibility(true);
             SyncBeltDirectionRuntimeVisibility(true);
+            SyncMapObjectTickProfilingRuntimeState(true);
         }
     }
 
@@ -157,6 +165,8 @@ public class GameManager : MonoBehaviour
     public bool ShowBeltItemLine => showBeltItemLine;
     public bool ShowDirections => showDirections;
     public bool ShowBeltDirections => ShowDirections;
+    public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
+    public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
     public int RuntimeItemGiveServerPort => runtimeItemGiveServerPort;
 
@@ -219,6 +229,12 @@ public class GameManager : MonoBehaviour
     {
         showDirections = show;
         SyncBeltDirectionRuntimeVisibility(true);
+    }
+
+    public void SetMapObjectTickProfilingEnabled(bool enabled)
+    {
+        mapObjectTickProfilingEnabled = enabled;
+        SyncMapObjectTickProfilingRuntimeState(true);
     }
 
     private void SyncConveyorSlotDotRuntimeVisibility(bool force = false)
@@ -305,6 +321,28 @@ public class GameManager : MonoBehaviour
         beltDirectionRuntimeStateInitialized = true;
         lastRuntimeShowBeltDirections = showDirections;
         TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
+    }
+
+    private void SyncMapObjectTickProfilingRuntimeState(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && mapObjectTickProfilingRuntimeStateInitialized
+            && lastRuntimeMapObjectTickProfilingEnabled == mapObjectTickProfilingEnabled)
+        {
+            return;
+        }
+
+        mapObjectTickProfilingRuntimeStateInitialized = true;
+        lastRuntimeMapObjectTickProfilingEnabled = mapObjectTickProfilingEnabled;
+        if (!mapObjectTickProfilingEnabled)
+        {
+            MapObjectTickProfiler.Reset();
+        }
     }
 
     private void ConfigureRuntimeItemGiveReceiver()
@@ -463,6 +501,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 break;
             case ToolCommand.ListSaveSlots:
                 request.Result = GetSaveSlotsResult();
+                break;
+            case ToolCommand.PerfSnapshot:
+                request.Result = GetPerfSnapshotResult(request.Count);
                 break;
             default:
                 request.Result = GiveItems(request.ItemId, request.Count);
@@ -655,6 +696,29 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts.Length >= 1
+            && (string.Equals(parts[0], "perf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "profile", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "tickprofile", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.PerfSnapshot;
+            itemId = 0;
+            count = GameManager.Instance != null ? GameManager.Instance.MapObjectTickProfilingMaxRows : 64;
+            if (parts.Length >= 2 && (!int.TryParse(parts[1], out count) || count <= 0))
+            {
+                error = "usage: perf [maxRows]";
+                return false;
+            }
+
+            if (parts.Length > 2)
+            {
+                error = "usage: perf [maxRows]";
+                return false;
+            }
+
+            return true;
+        }
+
         if (parts.Length == 1
             && (string.Equals(parts[0], "saveslots", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(parts[0], "slots", StringComparison.OrdinalIgnoreCase)))
@@ -834,7 +898,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showDirections> <true|false> | camera size <minSize> <maxSize> | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -966,6 +1030,22 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             "save slots",
             BuildSaveSlotsExtraTokens(saveManager, true));
+    }
+
+    private ToolResult GetPerfSnapshotResult(int maxRows)
+    {
+        int resolvedMaxRows = Mathf.Max(1, maxRows);
+        string json = MapObjectTickProfiler.BuildAndResetSnapshotJson(resolvedMaxRows);
+        string encodedJson = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "perf",
+            $"perfData={encodedJson}");
     }
 
     private ToolResult SaveSlot(int slotIndex)
@@ -1108,7 +1188,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return BuildExtraTokens(
             BuildSaveSlotsExtraTokens(saveManager, false, allowStaleCache),
             BuildCameraSizeExtraTokens(playerCamera),
-            BuildSeedExtraTokens(terrain));
+            BuildSeedExtraTokens(terrain),
+            BuildMapObjectTickProfilingExtraTokens(GameManager.Instance));
     }
 
     private static string BuildCameraSizeExtraTokens(PlayerCamera playerCamera)
@@ -1130,6 +1211,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return terrain != null
             ? $"seed={terrain.CurrentSeed.ToString(CultureInfo.InvariantCulture)}"
             : string.Empty;
+    }
+
+    private static string BuildMapObjectTickProfilingExtraTokens(GameManager gameManager)
+    {
+        return gameManager != null
+            ? $"mapObjectTickProfiling={(gameManager.MapObjectTickProfilingEnabled ? 1 : 0)}"
+            : "mapObjectTickProfiling=0";
     }
 
     private static string BuildExtraTokens(params string[] tokens)
@@ -2337,6 +2425,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showDirections={(value ? 1 : 0)}");
         }
 
+        if (string.Equals(toggleName, "mapObjectTickProfiling", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "tickProfiling", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "profiling", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetMapObjectTickProfilingEnabled(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"mapObjectTickProfiling={(value ? 1 : 0)}");
+        }
+
         return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");
     }
 
@@ -2386,7 +2482,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         SaveSlot,
         LoadSlot,
         ResetMap,
-        ListSaveSlots
+        ListSaveSlots,
+        PerfSnapshot
     }
 
     private sealed class ToolRequest

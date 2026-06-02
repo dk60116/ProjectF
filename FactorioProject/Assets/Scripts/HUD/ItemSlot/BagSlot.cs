@@ -14,6 +14,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private static readonly List<RaycastResult> itemSlotRaycastResults = new List<RaycastResult>();
     private static readonly List<ItemSlot> itemSlotParentBuffer = new List<ItemSlot>();
     private static readonly List<BagSlot> bagSlotParentBuffer = new List<BagSlot>();
+    private static readonly List<CanvasGroup> canvasGroupParentBuffer = new List<CanvasGroup>();
     private static readonly Vector3[] itemSlotWorldCorners = new Vector3[4];
     private static BagSlot automaticPickupPreviewSlot;
     private static InstallationPlacementController cachedDropFocusPlacementController;
@@ -90,6 +91,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private float craftingExpandAnimationUntilTime;
     private bool pickupPreviewActive;
     private int pickupPreviewItemId = -1;
+    private int pickupPreviewDisplayCount;
+    private int pickupPreviewDisplayMaxCount;
 
     private readonly List<int> craftableItems = new List<int>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
@@ -642,10 +645,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void CacheReferences()
     {
-        if (rectTransform == null)
-        {
-            rectTransform = transform as RectTransform;
-        }
+        CachePointerReferences();
 
         if (craftingRoot == null)
         {
@@ -677,6 +677,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             {
                 canvasGroup = gameObject.AddComponent<CanvasGroup>();
             }
+        }
+    }
+
+    private void CachePointerReferences()
+    {
+        if (rectTransform == null)
+        {
+            rectTransform = transform as RectTransform;
+        }
+
+        if (canvasGroup == null)
+        {
+            canvasGroup = GetComponent<CanvasGroup>();
         }
     }
 
@@ -928,10 +941,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        CanvasGroup[] canvasGroups = itemSlot.GetComponentsInParent<CanvasGroup>(false);
-        for (int i = 0; i < canvasGroups.Length; i++)
+        canvasGroupParentBuffer.Clear();
+        itemSlot.GetComponentsInParent(false, canvasGroupParentBuffer);
+        bool visible = true;
+        for (int i = 0; i < canvasGroupParentBuffer.Count; i++)
         {
-            CanvasGroup canvasGroup = canvasGroups[i];
+            CanvasGroup canvasGroup = canvasGroupParentBuffer[i];
             if (canvasGroup == null || !canvasGroup.isActiveAndEnabled)
             {
                 continue;
@@ -939,7 +954,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
             if (canvasGroup.alpha <= 0.001f || !canvasGroup.blocksRaycasts)
             {
-                return false;
+                visible = false;
+                break;
             }
 
             if (canvasGroup.ignoreParentGroups)
@@ -948,7 +964,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             }
         }
 
-        return true;
+        canvasGroupParentBuffer.Clear();
+        return visible;
     }
 
     private static bool IsPointerBlockingItemSlot(ItemSlot itemSlot)
@@ -2891,7 +2908,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void ApplyPickupPreview(int itemId, int pickupCount)
     {
-        if (itemId < 0 || !TryGetItemIcon(itemId, out _))
+        if (itemId < 0)
         {
             ClearPickupPreview();
             return;
@@ -2903,8 +2920,24 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        if (pickupPreviewActive
+            && pickupPreviewItemId == itemId
+            && pickupPreviewDisplayCount == previewCount
+            && pickupPreviewDisplayMaxCount == previewMaxCount)
+        {
+            return;
+        }
+
+        if (!TryGetItemIcon(itemId, out _))
+        {
+            ClearPickupPreview();
+            return;
+        }
+
         pickupPreviewActive = true;
         pickupPreviewItemId = itemId;
+        pickupPreviewDisplayCount = previewCount;
+        pickupPreviewDisplayMaxCount = previewMaxCount;
         SetItemDisplay(itemId, previewCount, previewMaxCount, false);
         SetIconAlpha(pickupPreviewAlpha);
         SetCountAlpha(pickupPreviewAlpha);
@@ -2959,7 +2992,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool IsPointerOverSlot()
     {
-        CacheReferences();
+        CachePointerReferences();
         if (!isActiveAndEnabled || rectTransform == null)
         {
             return false;
@@ -2988,6 +3021,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         pickupPreviewActive = false;
         pickupPreviewItemId = -1;
+        pickupPreviewDisplayCount = 0;
+        pickupPreviewDisplayMaxCount = 0;
         RestoreBoundSlotDisplayOrClear();
     }
 
@@ -2996,6 +3031,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         ReleaseAutomaticPickupPreviewSlot();
         pickupPreviewActive = false;
         pickupPreviewItemId = -1;
+        pickupPreviewDisplayCount = 0;
+        pickupPreviewDisplayMaxCount = 0;
         SetIconAlpha(1f);
         SetCountAlpha(1f);
     }

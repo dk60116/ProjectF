@@ -405,6 +405,32 @@ public class UtilityPole : InstallationObject
             return false;
         }
 
+        float requestedWatts = deltaTime > EnergyEpsilon ? requestedEnergy / deltaTime : 0f;
+        if (requestedWatts <= EnergyEpsilon && TryGetElectricPowerRequirement(consumer, out float configuredWatts))
+        {
+            requestedWatts = configuredWatts;
+        }
+
+        if (!TryGetElectricSupplyRatio(consumer, requestedWatts, out float supplyRatio))
+        {
+            return false;
+        }
+
+        consumedEnergy = requestedEnergy * supplyRatio;
+        return consumedEnergy > EnergyEpsilon;
+    }
+
+    public static bool TryGetElectricSupplyRatio(
+        InstallationObject consumer,
+        float requestedWatts,
+        out float supplyRatio)
+    {
+        supplyRatio = 0f;
+        if (consumer == null)
+        {
+            return false;
+        }
+
         EnsureNetworksEvaluated();
         ElectricNetwork network = ResolveBestNetworkForConsumer(consumer);
         if (network == null || !network.HasPowerSource || network.ProductionWatts <= EnergyEpsilon)
@@ -412,30 +438,28 @@ public class UtilityPole : InstallationObject
             return false;
         }
 
-        float requestedWatts = deltaTime > EnergyEpsilon ? requestedEnergy / deltaTime : 0f;
-        if (requestedWatts <= EnergyEpsilon && TryGetElectricPowerRequirement(consumer, out float configuredWatts))
-        {
-            requestedWatts = configuredWatts;
-        }
-
-        float effectiveDemandWatts = network.DemandWatts;
+        float effectiveDemandWatts = Mathf.Max(network.RequiredWatts, network.DemandWatts);
+        float clampedRequestedWatts = Mathf.Max(0f, requestedWatts);
         if (TryGetElectricPowerDemand(consumer, out float trackedDemandWatts))
         {
             effectiveDemandWatts = Mathf.Max(
                 effectiveDemandWatts,
                 trackedDemandWatts,
-                requestedWatts);
+                clampedRequestedWatts);
+        }
+        else if (TryGetElectricPowerRequirement(consumer, out _))
+        {
+            effectiveDemandWatts = Mathf.Max(effectiveDemandWatts, clampedRequestedWatts);
         }
         else
         {
-            effectiveDemandWatts += Mathf.Max(0f, requestedWatts);
+            effectiveDemandWatts += clampedRequestedWatts;
         }
 
-        float supplyRatio = effectiveDemandWatts > EnergyEpsilon
+        supplyRatio = effectiveDemandWatts > EnergyEpsilon
             ? Mathf.Clamp01(network.ProductionWatts / effectiveDemandWatts)
             : 1f;
-        consumedEnergy = requestedEnergy * supplyRatio;
-        return consumedEnergy > EnergyEpsilon;
+        return true;
     }
 
     public bool TryGetObjectInfoNetworkPower(out float productionWatts, out float requiredWatts)
@@ -2473,6 +2497,7 @@ public class UtilityPole : InstallationObject
 
         RefreshNetworkRuntimeValues(true);
         RegisterSuppliedConsumerNetworks();
+        InputOutputModule.WakeElectricRuntimeModules();
     }
 
     private static bool IsValidPlacedPole(UtilityPole pole)
@@ -2620,8 +2645,9 @@ public class UtilityPole : InstallationObject
             }
         }
 
-        network.SupplyRatio = network.DemandWatts > EnergyEpsilon
-            ? Mathf.Clamp01(network.ProductionWatts / network.DemandWatts)
+        float networkDemandWatts = Mathf.Max(network.RequiredWatts, network.DemandWatts);
+        network.SupplyRatio = networkDemandWatts > EnergyEpsilon
+            ? Mathf.Clamp01(network.ProductionWatts / networkDemandWatts)
             : (network.ProductionWatts > EnergyEpsilon ? 1f : 0f);
     }
 

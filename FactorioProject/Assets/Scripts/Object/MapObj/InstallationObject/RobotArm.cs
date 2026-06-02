@@ -125,6 +125,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private bool hasHandItemRestTransform;
     private ItemDefinition cachedInstalledDefinition;
     private int cachedInstalledDefinitionId = int.MinValue;
+    private float lastElectricPowerSupplyRatio = 1f;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -256,6 +257,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         UnregisterActiveRobotArm(this);
         runtimeSleeping = false;
         handItem?.SetSleepAwakeSleeping(false);
+        ResetAnimatorSpeed();
         RefreshSleepAwakeVisual(true);
         base.OnDisable();
     }
@@ -272,11 +274,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         actionTurnTimer = 0f;
         waitingForDropRetry = false;
         state = RobotArmState.WaitingForPickup;
+        lastElectricPowerSupplyRatio = 1f;
         hasRuntimeStateInitialized = false;
         runtimeSleeping = false;
         UnregisterInstancedRendering();
         SetUpdateTickRegistered(false);
         SetBodyLocalRotation(inputBodyLocalRotation);
+        ResetAnimatorSpeed();
         RefreshSleepAwakeVisual(true);
         base.PrepareForPool();
     }
@@ -340,6 +344,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         deltaTime = ResolvePoweredDeltaTime(deltaTime);
+        ApplyPoweredAnimatorSpeed();
         if (deltaTime <= 0f)
         {
             return;
@@ -1720,6 +1725,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     {
         if (!TryGetElectricOperationalPowerRequirement(out float wattsPerSecond))
         {
+            lastElectricPowerSupplyRatio = 1f;
             return deltaTime;
         }
 
@@ -1727,15 +1733,36 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         float requestedEnergy = wattsPerSecond * deltaTime;
         if (requestedEnergy <= 0.0001f)
         {
+            lastElectricPowerSupplyRatio = 0f;
             return 0f;
         }
 
         if (!UtilityPole.TryConsumeElectricity(this, requestedEnergy, deltaTime, out float consumedEnergy))
         {
+            lastElectricPowerSupplyRatio = 0f;
             return 0f;
         }
 
-        return deltaTime * Mathf.Clamp01(consumedEnergy / requestedEnergy);
+        lastElectricPowerSupplyRatio = Mathf.Clamp01(consumedEnergy / requestedEnergy);
+        return deltaTime * lastElectricPowerSupplyRatio;
+    }
+
+    private void ApplyPoweredAnimatorSpeed()
+    {
+        Animator targetAnimator = ResolveAnimator();
+        if (targetAnimator != null)
+        {
+            targetAnimator.speed = Mathf.Clamp01(lastElectricPowerSupplyRatio);
+        }
+    }
+
+    private void ResetAnimatorSpeed()
+    {
+        lastElectricPowerSupplyRatio = 1f;
+        if (cachedAnimator != null)
+        {
+            cachedAnimator.speed = 1f;
+        }
     }
 
     private bool TryGetElectricOperationalPowerRequirement(out float wattsPerSecond)

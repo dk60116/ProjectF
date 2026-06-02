@@ -4,7 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class BoxObject : InstallationObject, IMapObjectLateTick
+public class BoxObject : InstallationObject
 {
     private static readonly HashSet<BoxObject> ActiveInstances = new HashSet<BoxObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
@@ -39,6 +39,7 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
     private int cachedCountTextCapacity = int.MinValue;
     private bool cachedCountTextHasValue;
     private Block lastContainedStackVisibilityBlock;
+    private Block observedContentBlock;
 
     public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
     public bool IsOpen => isOpen;
@@ -107,15 +108,12 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         ActiveInstances.Add(this);
         globalMaxFocusActivationRadiusDirty = true;
         ApplyHingeRotation(false);
-        SyncContainedStackVisibility(true);
-        SyncItemIcon(true);
-        SyncCountText(true);
-        MapObjectTickManager.RegisterLateTick(this);
+        RefreshBoxVisuals(true);
     }
 
     protected override void OnDisable()
     {
-        MapObjectTickManager.UnregisterLateTick(this);
+        SetObservedContentBlock(null);
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
         hinge?.DOKill();
@@ -124,13 +122,6 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         SetLockIconVisible(false, true);
         ApplyEmptyCountText(true);
         base.OnDisable();
-    }
-
-    public void ManagedLateUpdateTick(float deltaTime)
-    {
-        SyncContainedStackVisibility();
-        SyncItemIcon();
-        SyncCountText();
     }
 
     public bool IsWithinFocusRange(Vector3 worldPosition)
@@ -393,17 +384,13 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         if (isOpen == shouldOpen)
         {
             ApplyHingeRotation(false);
-            SyncContainedStackVisibility(true);
-            SyncItemIcon(true);
-            SyncCountText(true);
+            RefreshBoxVisuals(true);
             return;
         }
 
         isOpen = shouldOpen;
         ApplyHingeRotation(Application.isPlaying);
-        SyncContainedStackVisibility(true);
-        SyncItemIcon(true);
-        SyncCountText(true);
+        RefreshBoxVisuals(true);
 
         if (persistState)
         {
@@ -423,7 +410,21 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         cachedDisplayedSprite = null;
         cachedLockIconVisible = false;
         cachedCountTextValue = string.Empty;
+        SetObservedContentBlock(null);
         base.PrepareForPool();
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        base.OnPlacementRuntimeChanged();
+        cachedTerrainGenerator = null;
+        RefreshBoxVisuals(true);
+    }
+
+    protected override void OnItemFilterMaskChanged()
+    {
+        base.OnItemFilterMaskChanged();
+        RefreshBoxVisuals(true);
     }
 
 #if UNITY_EDITOR
@@ -495,6 +496,40 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
         }
 
         hinge.localRotation = Quaternion.Euler(angle, 0f, 0f);
+    }
+
+    private void RefreshBoxVisuals(bool force = false)
+    {
+        Block contentBlock = null;
+        TryGetContentBlock(out contentBlock);
+        SetObservedContentBlock(contentBlock);
+        SyncContainedStackVisibility(contentBlock, force);
+        SyncItemIcon(contentBlock, force);
+        SyncCountText(contentBlock, force);
+    }
+
+    private void SetObservedContentBlock(Block contentBlock)
+    {
+        if (observedContentBlock == contentBlock)
+        {
+            return;
+        }
+
+        if (observedContentBlock != null)
+        {
+            observedContentBlock.RuntimeItemStackChanged -= HandleObservedContentBlockItemStackChanged;
+        }
+
+        observedContentBlock = contentBlock;
+        if (observedContentBlock != null)
+        {
+            observedContentBlock.RuntimeItemStackChanged += HandleObservedContentBlockItemStackChanged;
+        }
+    }
+
+    private void HandleObservedContentBlockItemStackChanged(Block contentBlock)
+    {
+        RefreshBoxVisuals();
     }
 
     private void PersistRuntimeState()
@@ -602,6 +637,17 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
             return;
         }
 
+        SyncContainedStackVisibility(contentBlock, force);
+    }
+
+    private void SyncContainedStackVisibility(Block contentBlock, bool force = false)
+    {
+        if (contentBlock == null)
+        {
+            RestoreLastContainedStackVisibilityBlock();
+            return;
+        }
+
         if (lastContainedStackVisibilityBlock != null && lastContainedStackVisibilityBlock != contentBlock)
         {
             lastContainedStackVisibilityBlock.ClearInputAreaCenterObjectsVisibilitySource(this);
@@ -639,7 +685,29 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
 
         SetLockIconVisible(false, force);
 
-        if (!TryGetContentBlock(out Block contentBlock))
+        TryGetContentBlock(out Block contentBlock);
+
+        SyncItemIcon(contentBlock, force);
+    }
+
+    private void SyncItemIcon(Block contentBlock, bool force = false)
+    {
+        if (itemIcon == null)
+        {
+            SetLockIconVisible(false, force);
+            return;
+        }
+
+        if (TryGetSingleResolvedItemId(out int filteredItemId))
+        {
+            ApplyItemIconSprite(ResolveItemIconSprite(filteredItemId), filteredItemId, force);
+            SetLockIconVisible(true, force);
+            return;
+        }
+
+        SetLockIconVisible(false, force);
+
+        if (contentBlock == null)
         {
             ApplyItemIconSprite(null, -1, force);
             return;
@@ -663,7 +731,19 @@ public class BoxObject : InstallationObject, IMapObjectLateTick
             return;
         }
 
-        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        TryGetContentBlock(out Block contentBlock);
+
+        SyncCountText(contentBlock, force);
+    }
+
+    private void SyncCountText(Block contentBlock, bool force = false)
+    {
+        if (countText == null)
+        {
+            return;
+        }
+
+        if (contentBlock == null)
         {
             ApplyEmptyCountText(force);
             return;

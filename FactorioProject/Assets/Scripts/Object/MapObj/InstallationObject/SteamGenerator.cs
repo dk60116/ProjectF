@@ -31,6 +31,11 @@ public class SteamGenerator : InputOutputModule
         base.OnDisable();
     }
 
+    protected override bool ShouldAutoPullFluidFromConnectedStorage()
+    {
+        return false;
+    }
+
     public bool TryGetPipeAreaConnectionDirection(Quaternion rotation, out Vector2Int direction)
     {
         return TryResolveDirection(rotation, localPipeAreaConnectionDirection, out direction);
@@ -224,7 +229,7 @@ public class SteamGenerator : InputOutputModule
             return false;
         }
 
-        if (!HasEnoughSteamReserve(inputLitersPerSecond, 0f))
+        if (!HasAvailableSteamGenerationReserve(inputLitersPerSecond))
         {
             return false;
         }
@@ -284,7 +289,7 @@ public class SteamGenerator : InputOutputModule
             return "Wrong fluid";
         }
 
-        if (!HasEnoughSteamReserve(inputLitersPerSecond, 0f))
+        if (!HasAvailableSteamGenerationReserve(inputLitersPerSecond))
         {
             return "No steam";
         }
@@ -336,7 +341,13 @@ public class SteamGenerator : InputOutputModule
             return false;
         }
 
+        bool wasGenerating = hasSteamGenerationReserve;
         hasSteamGenerationReserve = true;
+        if (!wasGenerating)
+        {
+            InputOutputModule.WakeElectricRuntimeModules();
+        }
+
         return true;
     }
 
@@ -353,6 +364,11 @@ public class SteamGenerator : InputOutputModule
             inputLitersPerSecond,
             requestedLiters);
         return StoredFluidLiters + FluidEpsilon >= requiredStoredLiters;
+    }
+
+    private bool HasAvailableSteamGenerationReserve(int inputLitersPerSecond)
+    {
+        return hasSteamGenerationReserve || HasEnoughSteamReserve(inputLitersPerSecond, 0f);
     }
 
     private float ResolveRequiredSteamReserveLiters(int inputLitersPerSecond, float requestedLiters)
