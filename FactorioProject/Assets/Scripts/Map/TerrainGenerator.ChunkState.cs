@@ -115,31 +115,30 @@ public partial class TerrainGenerator
             return;
         }
 
-        if (floorObjectVirtualizationScanCoordinates.Count != loadedBlocks.Count
-            || floorObjectVirtualizationScanIndex >= floorObjectVirtualizationScanCoordinates.Count)
-        {
-            RebuildFloorObjectVirtualizationScanCoordinates();
-        }
-
-        if (floorObjectVirtualizationScanCoordinates.Count <= 0)
+        int conversionBudget = Mathf.Max(1, floorObjectVirtualizationConversionsPerTick);
+        Vector2Int centerCoordinate = GetFloorObjectLiveCenterCoordinate();
+        int radius = Mathf.Max(0, floorObjectLiveRadius);
+        UpdateFloorObjectVirtualizationWorkQueue(centerCoordinate, radius);
+        if (floorObjectVirtualizationWorkQueue.Count <= 0)
         {
             return;
         }
 
-        int conversionBudget = Mathf.Max(1, floorObjectVirtualizationConversionsPerTick);
-        int scanBudget = Mathf.Max(1, floorObjectVirtualizationConversionsPerTick);
-        Vector2Int centerCoordinate = GetFloorObjectLiveCenterCoordinate();
-        int radius = Mathf.Max(0, floorObjectLiveRadius);
         int conversionCount = 0;
-        int scannedCount = 0;
+        int processedCount = 0;
 
         using (FloorObjectVirtualizationScanMarker.Auto())
         {
-            while (scannedCount < scanBudget
-                && floorObjectVirtualizationScanIndex < floorObjectVirtualizationScanCoordinates.Count)
+            while (processedCount < conversionBudget
+                && floorObjectVirtualizationWorkQueue.Count > 0)
             {
-                Vector2Int coordinate = floorObjectVirtualizationScanCoordinates[floorObjectVirtualizationScanIndex++];
-                scannedCount++;
+                Vector2Int coordinate = floorObjectVirtualizationWorkQueue.Dequeue();
+                if (!floorObjectVirtualizationQueuedCoordinates.Remove(coordinate))
+                {
+                    continue;
+                }
+
+                processedCount++;
 
                 if (!loadedBlocks.TryGetValue(coordinate, out Block block)
                     || block == null
@@ -169,24 +168,142 @@ public partial class TerrainGenerator
         }
     }
 
-    private void RebuildFloorObjectVirtualizationScanCoordinates()
+    private void UpdateFloorObjectVirtualizationWorkQueue(Vector2Int centerCoordinate, int radius)
     {
-        using (FloorObjectVirtualizationRebuildMarker.Auto())
+        radius = Mathf.Max(0, radius);
+        if (!floorObjectVirtualizationLiveAreaInitialized)
         {
-            floorObjectVirtualizationScanCoordinates.Clear();
-            foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
-            {
-                floorObjectVirtualizationScanCoordinates.Add(pair.Key);
-            }
-
-            floorObjectVirtualizationScanIndex = 0;
+            floorObjectVirtualizationLiveAreaInitialized = true;
+            floorObjectVirtualizationLiveCenterCoordinate = centerCoordinate;
+            floorObjectVirtualizationLiveRadius = radius;
+            EnqueueLoadedFloorObjectVirtualizationWork();
+            return;
         }
+
+        if (floorObjectVirtualizationLiveCenterCoordinate == centerCoordinate
+            && floorObjectVirtualizationLiveRadius == radius)
+        {
+            return;
+        }
+
+        Vector2Int previousCenterCoordinate = floorObjectVirtualizationLiveCenterCoordinate;
+        int previousRadius = Mathf.Max(0, floorObjectVirtualizationLiveRadius);
+        floorObjectVirtualizationLiveCenterCoordinate = centerCoordinate;
+        floorObjectVirtualizationLiveRadius = radius;
+
+        EnqueueFloorObjectLiveAreaDelta(
+            previousCenterCoordinate,
+            previousRadius,
+            centerCoordinate,
+            radius);
+    }
+
+    private void EnqueueLoadedFloorObjectVirtualizationWork()
+    {
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            EnqueueFloorObjectVirtualizationCoordinate(pair.Key);
+        }
+    }
+
+    private void EnqueueFloorObjectLiveAreaDelta(
+        Vector2Int previousCenterCoordinate,
+        int previousRadius,
+        Vector2Int currentCenterCoordinate,
+        int currentRadius)
+    {
+        previousRadius = Mathf.Max(0, previousRadius);
+        currentRadius = Mathf.Max(0, currentRadius);
+
+        int previousMinX = previousCenterCoordinate.x - previousRadius;
+        int previousMaxX = previousCenterCoordinate.x + previousRadius;
+        int previousMinY = previousCenterCoordinate.y - previousRadius;
+        int previousMaxY = previousCenterCoordinate.y + previousRadius;
+        int currentMinX = currentCenterCoordinate.x - currentRadius;
+        int currentMaxX = currentCenterCoordinate.x + currentRadius;
+        int currentMinY = currentCenterCoordinate.y - currentRadius;
+        int currentMaxY = currentCenterCoordinate.y + currentRadius;
+
+        EnqueueFloorObjectRectangleDifference(
+            currentMinX,
+            currentMaxX,
+            currentMinY,
+            currentMaxY,
+            previousMinX,
+            previousMaxX,
+            previousMinY,
+            previousMaxY);
+        EnqueueFloorObjectRectangleDifference(
+            previousMinX,
+            previousMaxX,
+            previousMinY,
+            previousMaxY,
+            currentMinX,
+            currentMaxX,
+            currentMinY,
+            currentMaxY);
+    }
+
+    private void EnqueueFloorObjectRectangleDifference(
+        int includeMinX,
+        int includeMaxX,
+        int includeMinY,
+        int includeMaxY,
+        int excludeMinX,
+        int excludeMaxX,
+        int excludeMinY,
+        int excludeMaxY)
+    {
+        int overlapMinX = Mathf.Max(includeMinX, excludeMinX);
+        int overlapMaxX = Mathf.Min(includeMaxX, excludeMaxX);
+        int overlapMinY = Mathf.Max(includeMinY, excludeMinY);
+        int overlapMaxY = Mathf.Min(includeMaxY, excludeMaxY);
+        if (overlapMinX > overlapMaxX || overlapMinY > overlapMaxY)
+        {
+            EnqueueFloorObjectRectangle(includeMinX, includeMaxX, includeMinY, includeMaxY);
+            return;
+        }
+
+        EnqueueFloorObjectRectangle(includeMinX, includeMaxX, includeMinY, overlapMinY - 1);
+        EnqueueFloorObjectRectangle(includeMinX, includeMaxX, overlapMaxY + 1, includeMaxY);
+        EnqueueFloorObjectRectangle(includeMinX, overlapMinX - 1, overlapMinY, overlapMaxY);
+        EnqueueFloorObjectRectangle(overlapMaxX + 1, includeMaxX, overlapMinY, overlapMaxY);
+    }
+
+    private void EnqueueFloorObjectRectangle(int minX, int maxX, int minY, int maxY)
+    {
+        if (minX > maxX || minY > maxY)
+        {
+            return;
+        }
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                EnqueueFloorObjectVirtualizationCoordinate(new Vector2Int(x, y));
+            }
+        }
+    }
+
+    private void EnqueueFloorObjectVirtualizationCoordinate(Vector2Int coordinate)
+    {
+        if (!virtualizeDistantFloorObjects
+            || !loadedBlocks.ContainsKey(coordinate)
+            || !floorObjectVirtualizationQueuedCoordinates.Add(coordinate))
+        {
+            return;
+        }
+
+        floorObjectVirtualizationWorkQueue.Enqueue(coordinate);
     }
 
     private void ClearFloorObjectVirtualizationScan()
     {
-        floorObjectVirtualizationScanCoordinates.Clear();
-        floorObjectVirtualizationScanIndex = 0;
+        floorObjectVirtualizationWorkQueue.Clear();
+        floorObjectVirtualizationQueuedCoordinates.Clear();
+        floorObjectVirtualizationLiveAreaInitialized = false;
+        floorObjectVirtualizationLiveRadius = -1;
     }
 
     private bool ShouldKeepFloorObjectsVirtual(Vector2Int coordinate, IReadOnlyList<int> itemIds)

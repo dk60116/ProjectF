@@ -36,6 +36,23 @@ public class SteamGenerator : InputOutputModule
         return false;
     }
 
+    protected override bool ShouldKeepRuntimeUpdateTickActive()
+    {
+        if (!TryGetSteamInputRecipe(out int inputItemId, out _))
+        {
+            return false;
+        }
+
+        if (StoredFluidLiters > FluidEpsilon)
+        {
+            return StoredFluidItemId < 0 || CanProvideFluidItem(inputItemId);
+        }
+
+        return CanStoreFluid
+               && HasFluidStorageSpace
+               && HasConnectedFluidSource(inputItemId);
+    }
+
     public bool TryGetPipeAreaConnectionDirection(Quaternion rotation, out Vector2Int direction)
     {
         return TryResolveDirection(rotation, localPipeAreaConnectionDirection, out direction);

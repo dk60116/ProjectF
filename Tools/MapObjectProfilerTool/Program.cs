@@ -429,7 +429,7 @@ internal sealed class ProfilerForm : Form
         else
         {
             summaryLabel.Text =
-                $"Window {snapshot.WindowMs:0.#} ms / Active Update {snapshot.ActiveUpdateTicks:N0} / Late {snapshot.ActiveLateTicks:N0} / Rows {profileRows.Count:N0}";
+                $"Window {snapshot.WindowMs:0.#} ms / Active Update {snapshot.ActiveUpdateTicks:N0} / Belts {snapshot.ActiveBeltTicks:N0} / Belt Motion {snapshot.ActiveBeltDataMotions:N0} / Belt Visual {snapshot.ActiveBeltVisualTicks:N0} / Rows {profileRows.Count:N0}";
         }
 
         RefreshGrid();
@@ -493,6 +493,7 @@ internal sealed class ProfilerForm : Form
         using SolidBrush barBackBrush = new SolidBrush(Color.FromArgb(52, 58, 62));
         using SolidBrush updateBrush = new SolidBrush(Color.FromArgb(89, 183, 216));
         using SolidBrush lateBrush = new SolidBrush(Color.FromArgb(177, 132, 224));
+        using SolidBrush beltBrush = new SolidBrush(Color.FromArgb(235, 189, 92));
         using Pen dividerPen = new Pen(Color.FromArgb(55, 62, 66));
         Font graphFont = (Font ?? SystemFonts.MessageBoxFont)!;
 
@@ -532,12 +533,24 @@ internal sealed class ProfilerForm : Form
             e.Graphics.DrawString($"{row.Kind} / {row.Type}", graphFont, dimBrush, detailRect, textFormat);
             e.Graphics.FillRectangle(barBackBrush, barRect);
             int filledWidth = Math.Max(1, (int)Math.Round(barRect.Width * Math.Clamp(row.TotalUs / maxTotalUs, 0.0, 1.0)));
-            e.Graphics.FillRectangle(row.Kind == "Late" ? lateBrush : updateBrush, new Rectangle(barRect.Left, barRect.Top, filledWidth, barRect.Height));
+            e.Graphics.FillRectangle(
+                ResolveRowBrush(row, updateBrush, lateBrush, beltBrush),
+                new Rectangle(barRect.Left, barRect.Top, filledWidth, barRect.Height));
 
             string metrics = $"{row.TotalUs / 1000.0:0.###} ms   avg {row.AvgUs:0.#} us   max {row.MaxUs:0.#} us   x{row.Samples:N0}";
             e.Graphics.DrawString(metrics, graphFont, dimBrush, metricRect, textFormat);
             e.Graphics.DrawLine(dividerPen, rowRect.Left, rowRect.Bottom, rowRect.Right, rowRect.Bottom);
         }
+    }
+
+    private static SolidBrush ResolveRowBrush(ProfileRow row, SolidBrush updateBrush, SolidBrush lateBrush, SolidBrush beltBrush)
+    {
+        if (string.Equals(row.Kind, "Belt", StringComparison.OrdinalIgnoreCase))
+        {
+            return beltBrush;
+        }
+
+        return string.Equals(row.Kind, "Late", StringComparison.OrdinalIgnoreCase) ? lateBrush : updateBrush;
     }
 
     private static void DrawCenteredText(Graphics graphics, Rectangle bounds, string text)
@@ -773,6 +786,15 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("activeLateTicks")]
     public int ActiveLateTicks { get; set; }
+
+    [JsonPropertyName("activeBeltTicks")]
+    public int ActiveBeltTicks { get; set; }
+
+    [JsonPropertyName("activeBeltDataMotions")]
+    public int ActiveBeltDataMotions { get; set; }
+
+    [JsonPropertyName("activeBeltVisualTicks")]
+    public int ActiveBeltVisualTicks { get; set; }
 
     [JsonPropertyName("rowCount")]
     public int RowCount { get; set; }

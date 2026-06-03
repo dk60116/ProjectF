@@ -438,16 +438,9 @@ public class UtilityPole : InstallationObject
             return false;
         }
 
-        float effectiveDemandWatts = Mathf.Max(network.RequiredWatts, network.DemandWatts);
+        float effectiveDemandWatts = network.RequiredWatts;
         float clampedRequestedWatts = Mathf.Max(0f, requestedWatts);
-        if (TryGetElectricPowerDemand(consumer, out float trackedDemandWatts))
-        {
-            effectiveDemandWatts = Mathf.Max(
-                effectiveDemandWatts,
-                trackedDemandWatts,
-                clampedRequestedWatts);
-        }
-        else if (TryGetElectricPowerRequirement(consumer, out _))
+        if (TryGetElectricPowerRequirement(consumer, out _))
         {
             effectiveDemandWatts = Mathf.Max(effectiveDemandWatts, clampedRequestedWatts);
         }
@@ -2573,6 +2566,39 @@ public class UtilityPole : InstallationObject
         {
             ScanPoleSupplyArea(network.Poles[i], network.SuppliedInstallations);
         }
+
+        RefreshNetworkTopologyRuntimeValues(network);
+    }
+
+    private static void RefreshNetworkTopologyRuntimeValues(ElectricNetwork network)
+    {
+        if (network == null)
+        {
+            return;
+        }
+
+        network.PowerSources.Clear();
+        network.StaticRequiredWatts = 0f;
+
+        foreach (InstallationObject installationObject in network.SuppliedInstallations)
+        {
+            if (installationObject == null || !installationObject.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (installationObject is SteamGenerator steamGenerator
+                && steamGenerator.TryGetObjectInfoOutputRate(out _, out float configuredGeneratorWatts)
+                && configuredGeneratorWatts > EnergyEpsilon)
+            {
+                network.PowerSources.Add(steamGenerator);
+            }
+
+            if (TryGetElectricPowerRequirement(installationObject, out float requiredWatts))
+            {
+                network.StaticRequiredWatts += requiredWatts;
+            }
+        }
     }
 
     private static void RefreshNetworkRuntimeValues(bool force = false)
@@ -2599,25 +2625,25 @@ public class UtilityPole : InstallationObject
 
         network.ClearPowerRuntime();
 
-        foreach (InstallationObject installationObject in network.SuppliedInstallations)
+        network.RequiredWatts = network.StaticRequiredWatts;
+
+        for (int i = 0; i < network.PowerSources.Count; i++)
         {
-            if (installationObject == null || !installationObject.gameObject.activeInHierarchy)
+            SteamGenerator steamGenerator = network.PowerSources[i];
+            if (steamGenerator == null || !steamGenerator.gameObject.activeInHierarchy)
             {
                 continue;
             }
 
-            if (installationObject is SteamGenerator steamGenerator)
+            if (steamGenerator.TryGetObjectInfoOutputRate(out _, out float configuredGeneratorWatts)
+                && configuredGeneratorWatts > EnergyEpsilon)
             {
-                if (steamGenerator.TryGetObjectInfoOutputRate(out _, out float configuredGeneratorWatts)
-                    && configuredGeneratorWatts > EnergyEpsilon)
-                {
-                    network.HasPowerSource = true;
-                }
+                network.HasPowerSource = true;
+            }
 
-                if (steamGenerator.TryGetAvailableElectricOutputRate(out float generatorWatts))
-                {
-                    network.ProductionWatts += generatorWatts;
-                }
+            if (steamGenerator.TryGetAvailableElectricOutputRate(out float generatorWatts))
+            {
+                network.ProductionWatts += generatorWatts;
             }
         }
 
@@ -2626,28 +2652,8 @@ public class UtilityPole : InstallationObject
             network.SupplyRatio = 0f;
             return;
         }
-
-        foreach (InstallationObject installationObject in network.SuppliedInstallations)
-        {
-            if (installationObject == null || !installationObject.gameObject.activeInHierarchy)
-            {
-                continue;
-            }
-
-            if (TryGetElectricPowerRequirement(installationObject, out float requiredWatts))
-            {
-                network.RequiredWatts += requiredWatts;
-            }
-
-            if (TryGetElectricPowerDemand(installationObject, out float demandWatts))
-            {
-                network.DemandWatts += demandWatts;
-            }
-        }
-
-        float networkDemandWatts = Mathf.Max(network.RequiredWatts, network.DemandWatts);
-        network.SupplyRatio = networkDemandWatts > EnergyEpsilon
-            ? Mathf.Clamp01(network.ProductionWatts / networkDemandWatts)
+        network.SupplyRatio = network.RequiredWatts > EnergyEpsilon
+            ? Mathf.Clamp01(network.ProductionWatts / network.RequiredWatts)
             : (network.ProductionWatts > EnergyEpsilon ? 1f : 0f);
     }
 
@@ -2881,15 +2887,18 @@ public class UtilityPole : InstallationObject
     {
         public readonly List<UtilityPole> Poles = new List<UtilityPole>();
         public readonly HashSet<InstallationObject> SuppliedInstallations = new HashSet<InstallationObject>();
+        public readonly List<SteamGenerator> PowerSources = new List<SteamGenerator>();
+        public float StaticRequiredWatts;
         public float ProductionWatts;
         public float RequiredWatts;
-        public float DemandWatts;
         public float SupplyRatio;
         public bool HasPowerSource;
 
         public void ClearTopologyRuntime()
         {
             SuppliedInstallations.Clear();
+            PowerSources.Clear();
+            StaticRequiredWatts = 0f;
             ClearPowerRuntime();
         }
 
@@ -2897,7 +2906,6 @@ public class UtilityPole : InstallationObject
         {
             ProductionWatts = 0f;
             RequiredWatts = 0f;
-            DemandWatts = 0f;
             SupplyRatio = 0f;
             HasPowerSource = false;
         }

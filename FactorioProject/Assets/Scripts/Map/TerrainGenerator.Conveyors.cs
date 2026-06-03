@@ -56,11 +56,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (isActive)
         {
-            activeConveyorDataMotionBlocks.Add(block);
+            AddActiveConveyorDataMotionBlock(block);
         }
         else
         {
-            activeConveyorDataMotionBlocks.Remove(block);
+            RemoveActiveConveyorDataMotionBlock(block);
         }
     }
 
@@ -86,10 +86,11 @@ public partial class TerrainGenerator : MonoBehaviour
         activeConveyors.Clear();
         conveyorTickBuffer.Clear();
         activeConveyorDataMotionBlocks.Clear();
-        conveyorDataMotionTickBuffer.Clear();
+        activeConveyorDataMotionIndices.Clear();
         sortedActiveConveyors.Clear();
         activeConveyorOrderDirty = true;
         conveyorNetworkIds.Clear();
+        conveyorNetworkBlocksById.Clear();
         conveyorNetworkRetryTimes.Clear();
         conveyorNetworkSleepingIds.Clear();
         conveyorNetworkActiveIds.Clear();
@@ -97,8 +98,9 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorNetworkSleepCheckBuffer.Clear();
         conveyorNetworkBuildQueue.Clear();
         conveyorWakeQueue.Clear();
+        conveyorLineWakeQueue.Clear();
         conveyorWakeQueued.Clear();
-        conveyorWakeQueuedLineIds.Clear();
+        conveyorLineWakeQueuedIds.Clear();
         deferredConveyorRuntimeRefreshBlocks.Clear();
         deferredConveyorNetworkWakeBlocks.Clear();
         deferredConveyorRuntimeRefreshDepth = 0;
@@ -266,19 +268,10 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        int queuedLineId = -1;
-        bool hasQueuedLineId = TryGetCachedNonCycleConveyorLineSlot(block, out queuedLineId, out _, out _);
-        bool allowBlockWakeInsideQueuedLine = hasQueuedLineId && block.ShouldTickActiveConveyor();
-        if (hasQueuedLineId
-            && !allowBlockWakeInsideQueuedLine
-            && !conveyorWakeQueuedLineIds.Add(queuedLineId))
+        if (TryGetCachedNonCycleConveyorLineSlot(block, out int queuedLineId, out _, out _))
         {
+            QueueConveyorLineWake(queuedLineId);
             return;
-        }
-
-        if (hasQueuedLineId && allowBlockWakeInsideQueuedLine)
-        {
-            conveyorWakeQueuedLineIds.Add(queuedLineId);
         }
 
         if (conveyorWakeQueued.Contains(block))
@@ -288,6 +281,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
         conveyorWakeQueued.Add(block);
         conveyorWakeQueue.Enqueue(block);
+    }
+
+    private void QueueConveyorLineWake(int lineId)
+    {
+        if (lineId <= 0 || !conveyorLineWakeQueuedIds.Add(lineId))
+        {
+            return;
+        }
+
+        conveyorLineWakeQueue.Enqueue(lineId);
     }
 
     public void SetConveyorDotVisualActive(Block block, bool isActive)
@@ -860,11 +863,12 @@ public partial class TerrainGenerator : MonoBehaviour
         if (isTracked)
         {
             CacheConveyorBlockItemCount(block, CaptureConveyorBlockItemCount(block));
-        }
-
-        if (isTracked && block.HasDynamicVirtualConveyorItemVisuals())
-        {
-            return;
+            bool hasDynamicVisuals = block.HasDynamicVirtualConveyorItemVisuals();
+            SetDynamicConveyorItemVisualBlockTracked(block, hasDynamicVisuals);
+            if (hasDynamicVisuals)
+            {
+                return;
+            }
         }
 
         conveyorItemVisualDirtyBlocks.Add(block);
@@ -873,7 +877,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private void TrackConveyorItemVisualBlock(Block block)
     {
         CacheConveyorBlockItemCount(block, CaptureConveyorBlockItemCount(block));
-        if (!conveyorItemVisualBlocks.Add(block))
+        bool added = conveyorItemVisualBlocks.Add(block);
+        SetDynamicConveyorItemVisualBlockTracked(block, block.HasDynamicVirtualConveyorItemVisuals());
+        if (!added)
         {
             return;
         }
@@ -885,6 +891,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void UntrackConveyorItemVisualBlock(Block block)
     {
+        SetDynamicConveyorItemVisualBlockTracked(block, false);
         RemoveCachedConveyorBlockItemCount(block);
         if (!conveyorItemVisualBlocks.Remove(block))
         {
@@ -900,9 +907,46 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         conveyorItemVisualBlocks.Clear();
         conveyorItemVisualDirtyBlocks.Clear();
+        dynamicConveyorItemVisualBlocks.Clear();
+        dynamicConveyorItemVisualBlockIndices.Clear();
         conveyorItemCountsByBlock.Clear();
         cachedLoadedConveyorItemCount = 0;
         conveyorItemVisualBlockSetVersion++;
+        dynamicConveyorItemVisualBlockSetVersion++;
+    }
+
+    private void SetDynamicConveyorItemVisualBlockTracked(Block block, bool isTracked)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        if (isTracked)
+        {
+            if (dynamicConveyorItemVisualBlockIndices.ContainsKey(block))
+            {
+                return;
+            }
+
+            dynamicConveyorItemVisualBlockIndices.Add(block, dynamicConveyorItemVisualBlocks.Count);
+            dynamicConveyorItemVisualBlocks.Add(block);
+            dynamicConveyorItemVisualBlockSetVersion++;
+            return;
+        }
+
+        if (!dynamicConveyorItemVisualBlockIndices.TryGetValue(block, out int index))
+        {
+            return;
+        }
+
+        int lastIndex = dynamicConveyorItemVisualBlocks.Count - 1;
+        Block lastBlock = dynamicConveyorItemVisualBlocks[lastIndex];
+        dynamicConveyorItemVisualBlocks[index] = lastBlock;
+        dynamicConveyorItemVisualBlockIndices[lastBlock] = index;
+        dynamicConveyorItemVisualBlocks.RemoveAt(lastIndex);
+        dynamicConveyorItemVisualBlockIndices.Remove(block);
+        dynamicConveyorItemVisualBlockSetVersion++;
     }
 
     private int CaptureConveyorBlockItemCount(Block block)
@@ -958,6 +1002,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         conveyorNetworkCacheDirty = true;
         conveyorLineCacheDirty = true;
+        conveyorNetworkBlocksById.Clear();
         conveyorNetworkRetryTimes.Clear();
         conveyorNetworkSleepingIds.Clear();
         conveyorNetworkActiveIds.Clear();
@@ -969,7 +1014,7 @@ public partial class TerrainGenerator : MonoBehaviour
     public void MarkConveyorLineCacheDirty()
     {
         conveyorLineCacheDirty = true;
-        conveyorWakeQueuedLineIds.Clear();
+        ClearConveyorLineWakeQueue();
     }
 
     public int ConveyorLineCount
@@ -1202,15 +1247,17 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        bool hasWork = false;
-        foreach (KeyValuePair<Block, int> pair in conveyorNetworkIds)
+        if (!conveyorNetworkBlocksById.TryGetValue(networkId, out List<Block> networkBlocks)
+            || networkBlocks == null
+            || networkBlocks.Count == 0)
         {
-            if (pair.Value != networkId)
-            {
-                continue;
-            }
+            return;
+        }
 
-            Block block = pair.Key;
+        bool hasWork = false;
+        for (int i = 0; i < networkBlocks.Count; i++)
+        {
+            Block block = networkBlocks[i];
             if (block != null && block.HasConveyorWorkIgnoringNetworkThrottle())
             {
                 hasWork = true;
@@ -1225,12 +1272,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
         conveyorNetworkRetryTimes.Remove(networkId);
         conveyorNetworkSleepingIds.Add(networkId);
-        foreach (KeyValuePair<Block, int> pair in conveyorNetworkIds)
+        for (int i = 0; i < networkBlocks.Count; i++)
         {
-            if (pair.Value == networkId)
-            {
-                pair.Key?.RefreshConveyorActivityRegistration(false);
-            }
+            networkBlocks[i]?.RefreshConveyorActivityRegistration(false);
         }
     }
 
@@ -1241,12 +1285,15 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        foreach (KeyValuePair<Block, int> pair in conveyorNetworkIds)
+        if (!conveyorNetworkBlocksById.TryGetValue(networkId, out List<Block> networkBlocks)
+            || networkBlocks == null)
         {
-            if (pair.Value == networkId)
-            {
-                pair.Key?.RefreshSleepAwakeDebugVisuals(true);
-            }
+            return;
+        }
+
+        for (int i = 0; i < networkBlocks.Count; i++)
+        {
+            networkBlocks[i]?.RefreshSleepAwakeDebugVisuals(true);
         }
     }
 
@@ -1257,43 +1304,44 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        conveyorDataMotionTickBuffer.Clear();
-        foreach (Block block in activeConveyorDataMotionBlocks)
+        int index = 0;
+        int remainingCount = activeConveyorDataMotionBlocks.Count;
+        while (index < activeConveyorDataMotionBlocks.Count && remainingCount > 0)
         {
-            if (IsLoadedRuntimeBlock(block))
-            {
-                conveyorDataMotionTickBuffer.Add(block);
-            }
-        }
-
-        if (conveyorDataMotionTickBuffer.Count != activeConveyorDataMotionBlocks.Count)
-        {
-            activeConveyorDataMotionBlocks.RemoveWhere(block => !IsLoadedRuntimeBlock(block));
-        }
-
-        for (int i = 0; i < conveyorDataMotionTickBuffer.Count; i++)
-        {
-            Block block = conveyorDataMotionTickBuffer[i];
+            remainingCount--;
+            Block block = activeConveyorDataMotionBlocks[index];
             if (block == null || !IsLoadedRuntimeBlock(block))
             {
+                RemoveActiveConveyorDataMotionAt(index);
                 activeConveyors.Remove(block);
                 continue;
             }
 
             if (!block.HasActiveVirtualConveyorDataMotion())
             {
-                activeConveyorDataMotionBlocks.Remove(block);
+                RemoveActiveConveyorDataMotionAt(index);
                 block.RefreshConveyorActivityRegistration();
                 continue;
             }
 
             block.TickVirtualConveyorDataMotion(deltaTime);
-            if (block.HasActiveVirtualConveyorDataMotion())
+            if (!activeConveyorDataMotionIndices.TryGetValue(block, out int currentIndex))
             {
                 continue;
             }
 
-            activeConveyorDataMotionBlocks.Remove(block);
+            if (currentIndex != index)
+            {
+                continue;
+            }
+
+            if (block.HasActiveVirtualConveyorDataMotion())
+            {
+                index++;
+                continue;
+            }
+
+            RemoveActiveConveyorDataMotionAt(index);
             block.RefreshConveyorActivityRegistration();
             if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
@@ -1302,11 +1350,56 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private void AddActiveConveyorDataMotionBlock(Block block)
+    {
+        if (block == null || activeConveyorDataMotionIndices.ContainsKey(block))
+        {
+            return;
+        }
+
+        activeConveyorDataMotionIndices[block] = activeConveyorDataMotionBlocks.Count;
+        activeConveyorDataMotionBlocks.Add(block);
+    }
+
+    private bool RemoveActiveConveyorDataMotionBlock(Block block)
+    {
+        return block != null
+            && activeConveyorDataMotionIndices.TryGetValue(block, out int index)
+            && RemoveActiveConveyorDataMotionAt(index) != null;
+    }
+
+    private Block RemoveActiveConveyorDataMotionAt(int index)
+    {
+        int lastIndex = activeConveyorDataMotionBlocks.Count - 1;
+        if (index < 0 || index > lastIndex)
+        {
+            return null;
+        }
+
+        Block removedBlock = activeConveyorDataMotionBlocks[index];
+        Block lastBlock = activeConveyorDataMotionBlocks[lastIndex];
+        activeConveyorDataMotionBlocks[index] = lastBlock;
+        activeConveyorDataMotionBlocks.RemoveAt(lastIndex);
+
+        if (removedBlock != null)
+        {
+            activeConveyorDataMotionIndices.Remove(removedBlock);
+        }
+
+        if (index < lastIndex && lastBlock != null)
+        {
+            activeConveyorDataMotionIndices[lastBlock] = index;
+        }
+
+        return removedBlock;
+    }
+
     private void TickActiveConveyors(float deltaTime)
     {
         if (deltaTime <= 0f
             || (activeConveyors.Count == 0
                 && conveyorWakeQueue.Count == 0
+                && conveyorLineWakeQueue.Count == 0
                 && conveyorNetworkSleepCheckQueuedIds.Count == 0))
         {
             return;
@@ -1320,26 +1413,37 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureConveyorLineCache();
         conveyorLinesTickedThisFrame.Clear();
         MaybeEnqueueActiveConveyorSafetyScan();
-        if (conveyorWakeQueue.Count == 0)
+        if (conveyorWakeQueue.Count == 0 && conveyorLineWakeQueue.Count == 0)
         {
             ProcessQueuedConveyorNetworkSleepChecks();
             return;
         }
 
-        int queuedAtFrameStart = conveyorWakeQueue.Count;
+        int queuedAtFrameStart = conveyorWakeQueue.Count + conveyorLineWakeQueue.Count;
         int processLimit = GetEffectiveConveyorWakeQueueProcessLimit();
         int processedCount = 0;
-        while (conveyorWakeQueue.Count > 0 && processedCount < queuedAtFrameStart && processedCount < processLimit)
+        while ((conveyorLineWakeQueue.Count > 0 || conveyorWakeQueue.Count > 0)
+            && processedCount < queuedAtFrameStart
+            && processedCount < processLimit)
         {
-            Block block = conveyorWakeQueue.Dequeue();
-            conveyorWakeQueued.Remove(block);
-            if (TryGetCachedNonCycleConveyorLineSlot(block, out int queuedLineId, out _, out _))
+            if (conveyorLineWakeQueue.Count > 0)
             {
-                conveyorWakeQueuedLineIds.Remove(queuedLineId);
+                int lineId = conveyorLineWakeQueue.Dequeue();
+                conveyorLineWakeQueuedIds.Remove(lineId);
+                processedCount++;
+                TryTickStraightConveyorLine(lineId);
+                continue;
             }
 
+            Block block = conveyorWakeQueue.Dequeue();
+            conveyorWakeQueued.Remove(block);
             processedCount++;
             if (block == null)
+            {
+                continue;
+            }
+
+            if (TryTickStraightConveyorLine(block))
             {
                 continue;
             }
@@ -1352,11 +1456,6 @@ public partial class TerrainGenerator : MonoBehaviour
             if (!activeConveyors.Contains(block))
             {
                 SetConveyorActive(block, true, false);
-            }
-
-            if (TryTickStraightConveyorLine(block))
-            {
-                continue;
             }
 
             block.TickConveyor(deltaTime);
@@ -1397,6 +1496,16 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        return TryTickStraightConveyorLine(lineId);
+    }
+
+    private bool TryTickStraightConveyorLine(int lineId)
+    {
+        if (lineId <= 0)
+        {
+            return false;
+        }
+
         if (conveyorLinesTickedThisFrame.Contains(lineId))
         {
             return true;
@@ -1414,10 +1523,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
         bool movedAny = false;
         movedAny |= TryTickStraightConveyorLine(line);
-        NotifyStraightConveyorLineTickCompleted(line);
 
         if (!movedAny)
         {
+            NotifyStraightConveyorLineTickCompleted(line);
             return true;
         }
 
@@ -1567,6 +1676,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         conveyorNetworkCacheDirty = false;
         conveyorNetworkIds.Clear();
+        conveyorNetworkBlocksById.Clear();
         conveyorNetworkActiveIds.Clear();
         conveyorNetworkBuildQueue.Clear();
 
@@ -1581,7 +1691,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
             int networkId = nextNetworkId++;
             conveyorNetworkActiveIds.Add(networkId);
-            conveyorNetworkIds[startBlock] = networkId;
+            AddConveyorBlockToNetwork(startBlock, networkId);
             conveyorNetworkBuildQueue.Enqueue(startBlock);
 
             while (conveyorNetworkBuildQueue.Count > 0)
@@ -1653,8 +1763,25 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        conveyorNetworkIds[neighborBlock] = networkId;
+        AddConveyorBlockToNetwork(neighborBlock, networkId);
         conveyorNetworkBuildQueue.Enqueue(neighborBlock);
+    }
+
+    private void AddConveyorBlockToNetwork(Block block, int networkId)
+    {
+        if (block == null || networkId <= 0)
+        {
+            return;
+        }
+
+        conveyorNetworkIds[block] = networkId;
+        if (!conveyorNetworkBlocksById.TryGetValue(networkId, out List<Block> networkBlocks))
+        {
+            networkBlocks = new List<Block>();
+            conveyorNetworkBlocksById[networkId] = networkBlocks;
+        }
+
+        networkBlocks.Add(block);
     }
 
     private void ClearConveyorLineCache()
@@ -1667,8 +1794,14 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorLinesTickedThisFrame.Clear();
         conveyorLineTouchedBlocks.Clear();
         conveyorLineTouchedSet.Clear();
-        conveyorWakeQueuedLineIds.Clear();
+        ClearConveyorLineWakeQueue();
         conveyorLineCacheDirty = true;
+    }
+
+    private void ClearConveyorLineWakeQueue()
+    {
+        conveyorLineWakeQueue.Clear();
+        conveyorLineWakeQueuedIds.Clear();
     }
 
     private void EnsureConveyorLineCache()

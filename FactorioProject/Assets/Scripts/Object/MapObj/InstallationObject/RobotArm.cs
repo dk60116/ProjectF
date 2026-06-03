@@ -8,6 +8,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private static readonly int PickTriggerHash = Animator.StringToHash("tPick");
     private static readonly int DropTriggerHash = Animator.StringToHash("tDrop");
     private static readonly List<RobotArm> ActiveRobotArms = new List<RobotArm>();
+    private static readonly Dictionary<Vector2Int, List<RobotArm>> WakeRobotArmsByCoordinate =
+        new Dictionary<Vector2Int, List<RobotArm>>();
     private static readonly Vector2Int[] Belt2FPickupSearchOffsets =
     {
         Vector2Int.zero,
@@ -21,6 +23,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private const float MaxManagedUpdateDeltaSeconds = 0.12f;
     private const float ConveyorPickupFrameAllowanceMax = 0.25f;
     private const float ItemMoveDuration = PortableObject.MoveToDuration * 0.5f;
+    private const float RuntimeSleepRecheckIntervalSeconds = 0.1f;
+    private const float AnimatorSpeedChangeEpsilon = 0.001f;
+    private const int WakeRangeCellRadius = 1;
+
+    private static ItemManager cachedFilterBitCountItemManager;
+    private static int cachedFilterBitCountDefinitionCount = -1;
+    private static int cachedFilterBitCount = 1;
 
     public enum RobotArmState
     {
@@ -118,6 +127,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private RobotArmRenderBatcher renderBatcher;
     private RobotArmInstancedRenderPart[] instancedRenderParts;
     private bool instancedRenderingActive;
+    private float runtimeSleepCheckTimer;
     private Transform handItemRestParent;
     private Vector3 handItemRestLocalPosition;
     private Quaternion handItemRestLocalRotation;
@@ -126,6 +136,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private ItemDefinition cachedInstalledDefinition;
     private int cachedInstalledDefinitionId = int.MinValue;
     private float lastElectricPowerSupplyRatio = 1f;
+    private float lastAppliedAnimatorSpeed = -1f;
+    private readonly List<Vector2Int> registeredWakeCoordinates = new List<Vector2Int>(9);
+    private bool interactionCoordinateCacheValid;
+    private long cachedInteractionPlacementSequence;
+    private Vector2Int cachedPickupCoordinate;
+    private Vector2Int cachedDropCoordinate;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -272,6 +288,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         pickupTimer = 0f;
         dropRetryTimer = 0f;
         actionTurnTimer = 0f;
+        runtimeSleepCheckTimer = 0f;
         waitingForDropRetry = false;
         state = RobotArmState.WaitingForPickup;
         lastElectricPowerSupplyRatio = 1f;
@@ -283,6 +300,14 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         ResetAnimatorSpeed();
         RefreshSleepAwakeVisual(true);
         base.PrepareForPool();
+    }
+
+    private void OnDestroy()
+    {
+        UnregisterInstancedRendering();
+        SetUpdateTickRegistered(false);
+        UnregisterActiveRobotArm(this);
+        handItem?.SetSleepAwakeSleeping(false);
     }
 
     public PersistentState CapturePersistentState()
@@ -338,7 +363,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         deltaTime = ResolveManagedUpdateDeltaTime(deltaTime);
         EnsureBodyRotationCache();
         RefreshHeldItemVisualIfNeeded();
-        if (RefreshRuntimeSleepState())
+        if (ShouldRunRuntimeSleepCheck(deltaTime) && RefreshRuntimeSleepState())
         {
             return;
         }
@@ -381,21 +406,34 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     public static void WakeAroundCoordinate(Vector2Int coordinate)
     {
-        for (int i = ActiveRobotArms.Count - 1; i >= 0; i--)
+        if (!WakeRobotArmsByCoordinate.TryGetValue(coordinate, out List<RobotArm> robotArms)
+            || robotArms == null
+            || robotArms.Count <= 0)
         {
-            RobotArm robotArm = ActiveRobotArms[i];
+            return;
+        }
+
+        for (int i = robotArms.Count - 1; i >= 0; i--)
+        {
+            RobotArm robotArm = robotArms[i];
             if (robotArm == null)
             {
-                ActiveRobotArms.RemoveAt(i);
+                robotArms.RemoveAt(i);
                 continue;
             }
 
             if (!robotArm.isActiveAndEnabled || !robotArm.IsCoordinateInsideRuntimeSleepWakeRange(coordinate))
             {
+                robotArms.RemoveAt(i);
                 continue;
             }
 
             robotArm.WakeRuntimeSleep();
+        }
+
+        if (robotArms.Count <= 0)
+        {
+            WakeRobotArmsByCoordinate.Remove(coordinate);
         }
     }
 
@@ -422,6 +460,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         ActiveRobotArms.Add(robotArm);
+        robotArm.RefreshRegisteredWakeCoordinates();
     }
 
     private static void UnregisterActiveRobotArm(RobotArm robotArm)
@@ -431,7 +470,85 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
+        robotArm.UnregisterWakeCoordinates();
         ActiveRobotArms.Remove(robotArm);
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        InvalidateInteractionCoordinateCache();
+        base.OnPlacementRuntimeChanged();
+        RefreshRegisteredWakeCoordinates();
+    }
+
+    protected override void OnPlacementRuntimeCleared()
+    {
+        InvalidateInteractionCoordinateCache();
+        UnregisterWakeCoordinates();
+        base.OnPlacementRuntimeCleared();
+    }
+
+    private void RefreshRegisteredWakeCoordinates()
+    {
+        UnregisterWakeCoordinates();
+        if (!isActiveAndEnabled || RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int occupiedIndex = 0; occupiedIndex < RuntimeOccupiedCoordinates.Count; occupiedIndex++)
+        {
+            Vector2Int occupiedCoordinate = RuntimeOccupiedCoordinates[occupiedIndex];
+            for (int x = -WakeRangeCellRadius; x <= WakeRangeCellRadius; x++)
+            {
+                for (int y = -WakeRangeCellRadius; y <= WakeRangeCellRadius; y++)
+                {
+                    RegisterWakeCoordinate(occupiedCoordinate + new Vector2Int(x, y));
+                }
+            }
+        }
+    }
+
+    private void RegisterWakeCoordinate(Vector2Int coordinate)
+    {
+        if (registeredWakeCoordinates.Contains(coordinate))
+        {
+            return;
+        }
+
+        registeredWakeCoordinates.Add(coordinate);
+        if (!WakeRobotArmsByCoordinate.TryGetValue(coordinate, out List<RobotArm> robotArms)
+            || robotArms == null)
+        {
+            robotArms = new List<RobotArm>(4);
+            WakeRobotArmsByCoordinate[coordinate] = robotArms;
+        }
+
+        if (!robotArms.Contains(this))
+        {
+            robotArms.Add(this);
+        }
+    }
+
+    private void UnregisterWakeCoordinates()
+    {
+        for (int i = 0; i < registeredWakeCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = registeredWakeCoordinates[i];
+            if (!WakeRobotArmsByCoordinate.TryGetValue(coordinate, out List<RobotArm> robotArms)
+                || robotArms == null)
+            {
+                continue;
+            }
+
+            robotArms.Remove(this);
+            if (robotArms.Count <= 0)
+            {
+                WakeRobotArmsByCoordinate.Remove(coordinate);
+            }
+        }
+
+        registeredWakeCoordinates.Clear();
     }
 
     private bool RefreshRuntimeSleepState(bool force = false)
@@ -439,6 +556,36 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         bool shouldSleep = ShouldRuntimeSleep();
         SetRuntimeSleeping(shouldSleep, force);
         return shouldSleep;
+    }
+
+    private bool ShouldRunRuntimeSleepCheck(float deltaTime)
+    {
+        if (!Application.isPlaying)
+        {
+            return true;
+        }
+
+        if (!CanRuntimeSleepInCurrentState())
+        {
+            runtimeSleepCheckTimer = 0f;
+            return true;
+        }
+
+        runtimeSleepCheckTimer -= Mathf.Max(0f, deltaTime);
+        if (runtimeSleepCheckTimer > 0f)
+        {
+            return false;
+        }
+
+        runtimeSleepCheckTimer = Mathf.Max(0.02f, Mathf.Min(RuntimeSleepRecheckIntervalSeconds, PickupIntervalSeconds));
+        return true;
+    }
+
+    private bool CanRuntimeSleepInCurrentState()
+    {
+        return heldItemId >= 0
+            ? state == RobotArmState.WaitingForDrop
+            : state == RobotArmState.WaitingForPickup;
     }
 
     private bool ShouldRuntimeSleep()
@@ -597,6 +744,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     {
         pickupTimer = 0f;
         dropRetryTimer = 0f;
+        runtimeSleepCheckTimer = 0f;
         waitingForDropRetry = false;
         SetRuntimeSleeping(false, true);
     }
@@ -615,6 +763,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         runtimeSleeping = sleeping;
+        runtimeSleepCheckTimer = 0f;
         SetUpdateTickRegistered(!runtimeSleeping && isActiveAndEnabled);
         handItem?.SetSleepAwakeSleeping(runtimeSleeping);
         RefreshSleepAwakeVisual(true);
@@ -957,12 +1106,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return;
         }
 
-        RotateBodyToward(inputBodyLocalRotation, deltaTime);
         if (TickTimerStillRunning(ref pickupTimer, deltaTime))
         {
             return;
         }
 
+        RotateBodyToward(inputBodyLocalRotation, deltaTime);
         if (CanPickupOneItem())
         {
             PlayPickAnimation();
@@ -1353,22 +1502,30 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return Mathf.Max(1, fallbackItemId + 1);
         }
 
-        int maxItemId = fallbackItemId;
-        for (int i = 0; i < definitions.Count; i++)
+        if (cachedFilterBitCountItemManager != itemManager
+            || cachedFilterBitCountDefinitionCount != definitions.Count)
         {
-            ItemDefinition definition = definitions[i];
-            if (definition == null)
+            int maxItemId = 0;
+            for (int i = 0; i < definitions.Count; i++)
             {
-                continue;
+                ItemDefinition definition = definitions[i];
+                if (definition == null)
+                {
+                    continue;
+                }
+
+                if (definition.id > maxItemId)
+                {
+                    maxItemId = definition.id;
+                }
             }
 
-            if (definition.id > maxItemId)
-            {
-                maxItemId = definition.id;
-            }
+            cachedFilterBitCountItemManager = itemManager;
+            cachedFilterBitCountDefinitionCount = definitions.Count;
+            cachedFilterBitCount = Mathf.Max(1, maxItemId + 1);
         }
 
-        return Mathf.Max(1, maxItemId + 1);
+        return Mathf.Max(cachedFilterBitCount, fallbackItemId + 1);
     }
 
     private bool TryPlaceHeldItem()
@@ -1466,44 +1623,79 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool TryResolvePickupCoordinate(out Vector2Int pickupCoordinate)
     {
-        return TryResolveInteractionCoordinate(true, out pickupCoordinate);
+        if (!EnsureInteractionCoordinateCache())
+        {
+            pickupCoordinate = default;
+            return false;
+        }
+
+        pickupCoordinate = cachedPickupCoordinate;
+        return true;
     }
 
     private bool TryResolveDropCoordinate(out Vector2Int dropCoordinate)
     {
-        return TryResolveInteractionCoordinate(false, out dropCoordinate);
+        if (!EnsureInteractionCoordinateCache())
+        {
+            dropCoordinate = default;
+            return false;
+        }
+
+        dropCoordinate = cachedDropCoordinate;
+        return true;
     }
 
-    private bool TryResolveInteractionCoordinate(bool inputSide, out Vector2Int interactionCoordinate)
+    private bool EnsureInteractionCoordinateCache()
     {
-        interactionCoordinate = default;
+        if (interactionCoordinateCacheValid
+            && cachedInteractionPlacementSequence == RuntimePlacementSequence)
+        {
+            return true;
+        }
 
-        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _) || RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count == 0)
+        interactionCoordinateCacheValid = false;
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
+            || RuntimeOccupiedCoordinates == null
+            || RuntimeOccupiedCoordinates.Count == 0
+            || !TryResolveFlowDirection(out Vector2Int flowDirection))
         {
             return false;
         }
 
-        if (!TryResolveFlowDirection(out Vector2Int flowDirection))
-        {
-            return false;
-        }
-
-        Vector2Int edgeCoordinate = anchorCoordinate;
-        int bestProjection = inputSide ? int.MaxValue : int.MinValue;
+        Vector2Int inputEdgeCoordinate = anchorCoordinate;
+        Vector2Int outputEdgeCoordinate = anchorCoordinate;
+        int bestInputProjection = int.MaxValue;
+        int bestOutputProjection = int.MinValue;
         for (int i = 0; i < RuntimeOccupiedCoordinates.Count; i++)
         {
             Vector2Int coordinate = RuntimeOccupiedCoordinates[i];
             int projection = coordinate.x * flowDirection.x + coordinate.y * flowDirection.y;
-            bool betterProjection = inputSide ? projection < bestProjection : projection > bestProjection;
-            if (betterProjection)
+            if (projection < bestInputProjection)
             {
-                bestProjection = projection;
-                edgeCoordinate = coordinate;
+                bestInputProjection = projection;
+                inputEdgeCoordinate = coordinate;
+            }
+
+            if (projection > bestOutputProjection)
+            {
+                bestOutputProjection = projection;
+                outputEdgeCoordinate = coordinate;
             }
         }
 
-        interactionCoordinate = inputSide ? edgeCoordinate - flowDirection : edgeCoordinate + flowDirection;
+        cachedPickupCoordinate = inputEdgeCoordinate - flowDirection;
+        cachedDropCoordinate = outputEdgeCoordinate + flowDirection;
+        cachedInteractionPlacementSequence = RuntimePlacementSequence;
+        interactionCoordinateCacheValid = true;
         return true;
+    }
+
+    private void InvalidateInteractionCoordinateCache()
+    {
+        interactionCoordinateCacheValid = false;
+        cachedInteractionPlacementSequence = 0;
+        cachedPickupCoordinate = default;
+        cachedDropCoordinate = default;
     }
 
     private bool TryResolveFlowDirection(out Vector2Int flowDirection)
@@ -1750,10 +1942,20 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private void ApplyPoweredAnimatorSpeed()
     {
         Animator targetAnimator = ResolveAnimator();
-        if (targetAnimator != null)
+        if (targetAnimator == null)
         {
-            targetAnimator.speed = Mathf.Clamp01(lastElectricPowerSupplyRatio);
+            lastAppliedAnimatorSpeed = -1f;
+            return;
         }
+
+        float speed = Mathf.Clamp01(lastElectricPowerSupplyRatio);
+        if (lastAppliedAnimatorSpeed >= 0f && Mathf.Abs(lastAppliedAnimatorSpeed - speed) <= AnimatorSpeedChangeEpsilon)
+        {
+            return;
+        }
+
+        targetAnimator.speed = speed;
+        lastAppliedAnimatorSpeed = speed;
     }
 
     private void ResetAnimatorSpeed()
@@ -1762,6 +1964,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         if (cachedAnimator != null)
         {
             cachedAnimator.speed = 1f;
+            lastAppliedAnimatorSpeed = 1f;
+        }
+        else
+        {
+            lastAppliedAnimatorSpeed = -1f;
         }
     }
 
@@ -2020,6 +2227,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         Quaternion currentRotation = body.localRotation;
+        float currentAngle = Quaternion.Angle(currentRotation, targetLocalRotation);
+        if (currentAngle <= 0.1f)
+        {
+            return true;
+        }
+
         Quaternion nextRotation = Quaternion.RotateTowards(
             currentRotation,
             targetLocalRotation,
@@ -2030,12 +2243,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             MarkHandItemRenderDataDirty();
         }
 
-        return Quaternion.Angle(body.localRotation, targetLocalRotation) <= 0.1f;
+        return Quaternion.Angle(nextRotation, targetLocalRotation) <= 0.1f;
     }
 
     private void SetBodyLocalRotation(Quaternion targetLocalRotation)
     {
-        if (body != null)
+        if (body != null && Quaternion.Angle(body.localRotation, targetLocalRotation) > 0.001f)
         {
             body.localRotation = targetLocalRotation;
             MarkHandItemRenderDataDirty();

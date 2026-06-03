@@ -344,6 +344,7 @@ public class InstallationObject : MapObject
         }
 
         float previousStoredLiters = storedFluidLiters;
+        int previousStoredFluidItemId = storedFluidItemId;
         acceptedLiters = Mathf.Min(requestedLiters, availableLiters);
         storedFluidLiters += acceptedLiters;
         if (acceptedLiters > 0.0001f && fluidItemId >= 0)
@@ -357,6 +358,7 @@ public class InstallationObject : MapObject
             previousStoredLiters,
             acceptedLiters,
             NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius));
+        NotifyStoredFluidChanged(previousStoredFluidItemId, previousStoredLiters);
         return acceptedLiters > 0f;
     }
 
@@ -401,6 +403,8 @@ public class InstallationObject : MapObject
             storedFluidItemId = fluidItemId;
         }
 
+        int previousStoredFluidItemId = storedFluidItemId;
+        float previousStoredLiters = storedFluidLiters;
         consumedLiters = Mathf.Min(requestedLiters, storedFluidLiters);
         storedFluidLiters = Mathf.Max(0f, storedFluidLiters - consumedLiters);
         if (storedFluidLiters <= 0.0001f)
@@ -410,6 +414,7 @@ public class InstallationObject : MapObject
             storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         }
 
+        NotifyStoredFluidChanged(previousStoredFluidItemId, previousStoredLiters);
         return consumedLiters > 0f;
     }
 
@@ -425,6 +430,8 @@ public class InstallationObject : MapObject
 
     public void SetStoredFluid(int fluidItemId, float liters, float temperatureCelsius)
     {
+        int previousStoredFluidItemId = storedFluidItemId;
+        float previousStoredLiters = storedFluidLiters;
         float capacity = FluidStorageCapacityLiters;
         storedFluidLiters = capacity > 0f
             ? Mathf.Clamp(liters, 0f, capacity)
@@ -435,6 +442,7 @@ public class InstallationObject : MapObject
         storedFluidTemperatureCelsius = storedFluidItemId >= 0
             ? NormalizeFluidTemperatureCelsius(temperatureCelsius)
             : MapClimate.CurrentTemperatureCelsius;
+        NotifyStoredFluidChanged(previousStoredFluidItemId, previousStoredLiters);
     }
 
     public virtual bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
@@ -501,6 +509,32 @@ public class InstallationObject : MapObject
         storedFluidTemperatureCelsius = NormalizeFluidTemperatureCelsius(
             ((previousTemperature * previousLiters)
              + (NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius) * acceptedLiters)) / totalLiters);
+    }
+
+    protected virtual void OnStoredFluidChanged(
+        int previousFluidItemId,
+        float previousStoredLiters,
+        int currentFluidItemId,
+        float currentStoredLiters)
+    {
+    }
+
+    private void NotifyStoredFluidChanged(int previousFluidItemId, float previousStoredLiters)
+    {
+        float previousLiters = Mathf.Max(0f, previousStoredLiters);
+        float currentLiters = StoredFluidLiters;
+        int currentFluidItemId = StoredFluidItemId;
+        if (previousFluidItemId == currentFluidItemId
+            && Mathf.Abs(previousLiters - currentLiters) <= 0.0001f)
+        {
+            return;
+        }
+
+        OnStoredFluidChanged(
+            previousFluidItemId,
+            previousLiters,
+            currentFluidItemId,
+            currentLiters);
     }
 
     protected void SetStoredFluidTemperatureCelsius(float temperatureCelsius)

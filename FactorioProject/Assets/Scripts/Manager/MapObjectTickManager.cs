@@ -10,14 +10,16 @@ public interface IMapObjectUpdateTick
     void ManagedUpdateTick(float deltaTime);
 }
 
-public interface IMapObjectLateTick
+public interface IMapObjectUpdateTickInterval
 {
-    void ManagedLateUpdateTick(float deltaTime);
+    float ManagedUpdateTickIntervalSeconds { get; }
 }
 
 public sealed class MapObjectTickManager : MonoBehaviour
 {
     private const float DefaultUpdateTickIntervalSeconds = 1f / 60f;
+    private const int UpdateTickIntervalKeyScale = 10000;
+    private const int AliveValidationFrameInterval = 120;
 
     private static MapObjectTickManager instance;
     private static bool applicationQuitting;
@@ -25,16 +27,16 @@ public sealed class MapObjectTickManager : MonoBehaviour
     [SerializeField, Min(0.001f)]
     private float updateTickIntervalSeconds = DefaultUpdateTickIntervalSeconds;
 
-    private readonly List<IMapObjectUpdateTick> updateTicks = new List<IMapObjectUpdateTick>();
+    private readonly List<UpdateTickBucket> updateTickBuckets = new List<UpdateTickBucket>(4);
+    private readonly Dictionary<int, UpdateTickBucket> updateTickBucketsByIntervalKey =
+        new Dictionary<int, UpdateTickBucket>(4);
     private readonly HashSet<IMapObjectUpdateTick> updateTickSet = new HashSet<IMapObjectUpdateTick>();
-    private readonly Dictionary<IMapObjectUpdateTick, float> updateTickLastTimes =
-        new Dictionary<IMapObjectUpdateTick, float>();
-    private readonly List<IMapObjectLateTick> lateTicks = new List<IMapObjectLateTick>();
-    private readonly HashSet<IMapObjectLateTick> lateTickSet = new HashSet<IMapObjectLateTick>();
-    private float updateTickQuota;
-    private int updateTickCursor;
+    private readonly HashSet<IMapObjectUpdateTick> updateTickEntrySet = new HashSet<IMapObjectUpdateTick>();
+    private readonly Dictionary<IMapObjectUpdateTick, UpdateTickEntry> updateTickEntriesByTick =
+        new Dictionary<IMapObjectUpdateTick, UpdateTickEntry>();
+    private int nextAliveValidationFrame;
+    private bool tickingUpdateObjects;
     private bool updateTicksDirty;
-    private bool lateTicksDirty;
 
     public static void RegisterUpdateTick(IMapObjectUpdateTick tick)
     {
@@ -54,26 +56,6 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         instance.RemoveUpdateTick(tick);
-    }
-
-    public static void RegisterLateTick(IMapObjectLateTick tick)
-    {
-        if (tick == null || !Application.isPlaying || applicationQuitting)
-        {
-            return;
-        }
-
-        EnsureInstance().AddLateTick(tick);
-    }
-
-    public static void UnregisterLateTick(IMapObjectLateTick tick)
-    {
-        if (tick == null || instance == null)
-        {
-            return;
-        }
-
-        instance.RemoveLateTick(tick);
     }
 
     private static MapObjectTickManager EnsureInstance()
@@ -103,12 +85,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void Update()
     {
+        RequestPeriodicAliveValidation();
         TickUpdateObjects(Time.deltaTime);
-    }
-
-    private void LateUpdate()
-    {
-        TickLateObjects(Time.deltaTime);
     }
 
     private void OnApplicationQuit()
@@ -126,18 +104,34 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void AddUpdateTick(IMapObjectUpdateTick tick)
     {
-        if (updateTicksDirty)
+        if (updateTicksDirty && !tickingUpdateObjects)
         {
             CompactUpdateTicks();
         }
 
-        if (tick == null || !updateTickSet.Add(tick))
+        if (tick == null || updateTickSet.Contains(tick))
         {
             return;
         }
 
-        updateTicks.Add(tick);
-        updateTickLastTimes[tick] = Time.time;
+        if (updateTickEntrySet.Contains(tick))
+        {
+            updateTickSet.Add(tick);
+            if (updateTickEntriesByTick.TryGetValue(tick, out UpdateTickEntry entry))
+            {
+                entry.LastTime = Time.time;
+            }
+
+            enabled = true;
+            return;
+        }
+
+        updateTickSet.Add(tick);
+        updateTickEntrySet.Add(tick);
+        UpdateTickBucket bucket = GetOrCreateUpdateTickBucket(ResolveUpdateTickIntervalSeconds(tick));
+        UpdateTickEntry newEntry = new UpdateTickEntry(tick, Time.time);
+        updateTickEntriesByTick[tick] = newEntry;
+        bucket.Entries.Add(newEntry);
         enabled = true;
     }
 
@@ -149,33 +143,6 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         updateTicksDirty = true;
-        updateTickLastTimes.Remove(tick);
-    }
-
-    private void AddLateTick(IMapObjectLateTick tick)
-    {
-        if (lateTicksDirty)
-        {
-            CompactLateTicks();
-        }
-
-        if (tick == null || !lateTickSet.Add(tick))
-        {
-            return;
-        }
-
-        lateTicks.Add(tick);
-        enabled = true;
-    }
-
-    private void RemoveLateTick(IMapObjectLateTick tick)
-    {
-        if (tick == null || !lateTickSet.Remove(tick))
-        {
-            return;
-        }
-
-        lateTicksDirty = true;
     }
 
     private void TickUpdateObjects(float deltaTime)
@@ -185,54 +152,94 @@ public sealed class MapObjectTickManager : MonoBehaviour
             CompactUpdateTicks();
         }
 
-        int count = updateTicks.Count;
+        int count = updateTickSet.Count;
         bool profileTicks = MapObjectTickProfiler.IsEnabled;
         if (profileTicks)
         {
-            MapObjectTickProfiler.SetActiveTickCounts(count, lateTicks.Count);
+            MapObjectTickProfiler.SetActiveTickCount(count);
         }
         if (count <= 0)
         {
-            updateTickQuota = 0f;
-            updateTickCursor = 0;
+            ResetUpdateTickBucketState();
             RefreshEnabledState();
             return;
         }
 
-        float safeInterval = Mathf.Max(0.001f, updateTickIntervalSeconds);
         float frameDeltaTime = Mathf.Max(0f, deltaTime);
-        updateTickQuota += count * frameDeltaTime / safeInterval;
+        tickingUpdateObjects = true;
+        try
+        {
+            for (int bucketIndex = 0; bucketIndex < updateTickBuckets.Count; bucketIndex++)
+            {
+                TickUpdateBucket(updateTickBuckets[bucketIndex], frameDeltaTime, profileTicks);
+            }
+        }
+        finally
+        {
+            tickingUpdateObjects = false;
+        }
 
-        int ticksToRun = Mathf.Min(count, Mathf.FloorToInt(updateTickQuota));
+        if (updateTicksDirty)
+        {
+            CompactUpdateTicks();
+        }
+
+        RefreshEnabledState();
+    }
+
+    private void TickUpdateBucket(UpdateTickBucket bucket, float frameDeltaTime, bool profileTicks)
+    {
+        if (bucket == null)
+        {
+            return;
+        }
+
+        int count = bucket.Entries.Count;
+        if (count <= 0)
+        {
+            bucket.Quota = 0f;
+            bucket.Cursor = 0;
+            return;
+        }
+
+        float safeInterval = Mathf.Max(0.001f, bucket.IntervalSeconds);
+        bucket.Quota += count * frameDeltaTime / safeInterval;
+
+        int ticksToRun = Mathf.Min(count, Mathf.FloorToInt(bucket.Quota));
         if (ticksToRun <= 0)
         {
-            RefreshEnabledState();
             return;
         }
 
-        updateTickQuota -= ticksToRun;
+        bucket.Quota -= ticksToRun;
         bool tickedEveryObject = ticksToRun >= count;
         float managedDeltaTime = tickedEveryObject
             ? frameDeltaTime
             : safeInterval;
-        if (tickedEveryObject && updateTickQuota >= 1f)
+        if (tickedEveryObject && bucket.Quota >= 1f)
         {
-            updateTickQuota -= Mathf.Floor(updateTickQuota);
+            bucket.Quota -= Mathf.Floor(bucket.Quota);
         }
 
+        List<UpdateTickEntry> entries = bucket.Entries;
         for (int processed = 0; processed < ticksToRun; processed++)
         {
-            if (updateTickCursor >= updateTicks.Count)
+            if (bucket.Cursor >= entries.Count)
             {
-                updateTickCursor = 0;
+                bucket.Cursor = 0;
             }
 
-            IMapObjectUpdateTick tick = updateTicks[updateTickCursor];
-            updateTickCursor++;
-            if (!IsTickAlive(tick))
+            UpdateTickEntry entry = entries[bucket.Cursor];
+            bucket.Cursor++;
+            if (entry == null)
             {
-                updateTickSet.Remove(tick);
-                updateTickLastTimes.Remove(tick);
+                updateTicksDirty = true;
+                continue;
+            }
+
+            IMapObjectUpdateTick tick = entry.Tick;
+            if (tick == null)
+            {
                 updateTicksDirty = true;
                 continue;
             }
@@ -242,7 +249,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 continue;
             }
 
-            float resolvedDeltaTime = ResolveUpdateTickDeltaTime(tick, managedDeltaTime);
+            float resolvedDeltaTime = ResolveUpdateTickDeltaTime(entry, managedDeltaTime);
             if (profileTicks)
             {
                 long startTimestamp = MapObjectTickProfiler.BeginSample();
@@ -254,128 +261,146 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 tick.ManagedUpdateTick(resolvedDeltaTime);
             }
         }
-
-        if (updateTicksDirty)
-        {
-            CompactUpdateTicks();
-        }
-
-        RefreshEnabledState();
     }
 
-    private void TickLateObjects(float deltaTime)
+    private void RequestPeriodicAliveValidation()
     {
-        if (lateTicksDirty)
+        int frameCount = Time.frameCount;
+        if (frameCount < nextAliveValidationFrame)
         {
-            CompactLateTicks();
+            return;
         }
 
-        int count = lateTicks.Count;
-        bool profileTicks = MapObjectTickProfiler.IsEnabled;
-        if (profileTicks)
+        nextAliveValidationFrame = frameCount + AliveValidationFrameInterval;
+        if (updateTickSet.Count > 0)
         {
-            MapObjectTickProfiler.SetActiveTickCounts(updateTicks.Count, count);
+            updateTicksDirty = true;
         }
-        for (int i = 0; i < count; i++)
-        {
-            IMapObjectLateTick tick = lateTicks[i];
-            if (!IsTickAlive(tick))
-            {
-                lateTickSet.Remove(tick);
-                lateTicksDirty = true;
-                continue;
-            }
-
-            if (lateTicksDirty && !lateTickSet.Contains(tick))
-            {
-                continue;
-            }
-
-            if (profileTicks)
-            {
-                long startTimestamp = MapObjectTickProfiler.BeginSample();
-                tick.ManagedLateUpdateTick(deltaTime);
-                MapObjectTickProfiler.EndLateSample(tick, startTimestamp);
-            }
-            else
-            {
-                tick.ManagedLateUpdateTick(deltaTime);
-            }
-        }
-
-        if (lateTicksDirty)
-        {
-            CompactLateTicks();
-        }
-
-        RefreshEnabledState();
     }
 
     private void CompactUpdateTicks()
     {
-        for (int i = updateTicks.Count - 1; i >= 0; i--)
+        updateTickEntrySet.Clear();
+        updateTickEntriesByTick.Clear();
+        for (int bucketIndex = updateTickBuckets.Count - 1; bucketIndex >= 0; bucketIndex--)
         {
-            IMapObjectUpdateTick tick = updateTicks[i];
-            if (IsTickAlive(tick) && updateTickSet.Contains(tick))
+            UpdateTickBucket bucket = updateTickBuckets[bucketIndex];
+            if (bucket == null)
             {
+                updateTickBuckets.RemoveAt(bucketIndex);
                 continue;
             }
 
-            updateTicks.RemoveAt(i);
-            updateTickLastTimes.Remove(tick);
+            List<UpdateTickEntry> entries = bucket.Entries;
+            int writeIndex = 0;
+            for (int readIndex = 0; readIndex < entries.Count; readIndex++)
+            {
+                UpdateTickEntry entry = entries[readIndex];
+                IMapObjectUpdateTick tick = entry != null ? entry.Tick : null;
+                if (!IsTickAlive(tick) || !updateTickSet.Contains(tick))
+                {
+                    if (tick != null)
+                    {
+                        updateTickSet.Remove(tick);
+                    }
+
+                    continue;
+                }
+
+                if (!updateTickEntrySet.Add(tick))
+                {
+                    continue;
+                }
+
+                updateTickEntriesByTick[tick] = entry;
+                entries[writeIndex] = entry;
+                writeIndex++;
+            }
+
+            if (writeIndex < entries.Count)
+            {
+                entries.RemoveRange(writeIndex, entries.Count - writeIndex);
+            }
+
+            if (entries.Count <= 0)
+            {
+                updateTickBucketsByIntervalKey.Remove(bucket.IntervalKey);
+                updateTickBuckets.RemoveAt(bucketIndex);
+                continue;
+            }
+
+            if (bucket.Cursor >= entries.Count)
+            {
+                bucket.Cursor %= entries.Count;
+            }
         }
 
         updateTicksDirty = false;
-        if (updateTicks.Count <= 0)
-        {
-            updateTickCursor = 0;
-            updateTickQuota = 0f;
-        }
-        else if (updateTickCursor >= updateTicks.Count)
-        {
-            updateTickCursor %= updateTicks.Count;
-        }
     }
 
-    private float ResolveUpdateTickDeltaTime(IMapObjectUpdateTick tick, float fallbackDeltaTime)
+    private float ResolveUpdateTickDeltaTime(UpdateTickEntry entry, float fallbackDeltaTime)
     {
         float now = Time.time;
         float safeFallback = Mathf.Max(0f, fallbackDeltaTime);
-        if (tick == null)
+        if (entry == null)
         {
             return safeFallback;
         }
 
-        if (!updateTickLastTimes.TryGetValue(tick, out float lastTime))
-        {
-            updateTickLastTimes[tick] = now;
-            return safeFallback;
-        }
-
-        updateTickLastTimes[tick] = now;
+        float lastTime = entry.LastTime;
+        entry.LastTime = now;
         float elapsedTime = now - lastTime;
         return elapsedTime > 0f ? elapsedTime : safeFallback;
     }
 
-    private void CompactLateTicks()
+    private void RefreshEnabledState()
     {
-        for (int i = lateTicks.Count - 1; i >= 0; i--)
+        enabled = updateTickSet.Count > 0;
+    }
+
+    private UpdateTickBucket GetOrCreateUpdateTickBucket(float intervalSeconds)
+    {
+        intervalSeconds = Mathf.Max(0.001f, intervalSeconds);
+        int intervalKey = GetUpdateTickIntervalKey(intervalSeconds);
+        if (updateTickBucketsByIntervalKey.TryGetValue(intervalKey, out UpdateTickBucket bucket))
         {
-            IMapObjectLateTick tick = lateTicks[i];
-            if (IsTickAlive(tick) && lateTickSet.Contains(tick))
+            return bucket;
+        }
+
+        bucket = new UpdateTickBucket(intervalKey, intervalSeconds);
+        updateTickBucketsByIntervalKey.Add(intervalKey, bucket);
+        updateTickBuckets.Add(bucket);
+        return bucket;
+    }
+
+    private float ResolveUpdateTickIntervalSeconds(IMapObjectUpdateTick tick)
+    {
+        if (tick is IMapObjectUpdateTickInterval intervalProvider)
+        {
+            return Mathf.Max(0.001f, intervalProvider.ManagedUpdateTickIntervalSeconds);
+        }
+
+        return Mathf.Max(0.001f, updateTickIntervalSeconds);
+    }
+
+    private static int GetUpdateTickIntervalKey(float intervalSeconds)
+    {
+        return Mathf.Max(1, Mathf.RoundToInt(intervalSeconds * UpdateTickIntervalKeyScale));
+    }
+
+    private void ResetUpdateTickBucketState()
+    {
+        for (int i = 0; i < updateTickBuckets.Count; i++)
+        {
+            UpdateTickBucket bucket = updateTickBuckets[i];
+            if (bucket == null)
             {
                 continue;
             }
 
-            lateTicks.RemoveAt(i);
+            bucket.Quota = 0f;
+            bucket.Cursor = 0;
         }
-
-        lateTicksDirty = false;
-    }
-
-    private void RefreshEnabledState()
-    {
-        enabled = updateTicks.Count > 0 || lateTicks.Count > 0;
     }
 
     private static bool IsTickAlive(object tick)
@@ -387,6 +412,33 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         UnityEngine.Object unityObject = tick as UnityEngine.Object;
         return ReferenceEquals(unityObject, null) || unityObject != null;
+    }
+
+    private sealed class UpdateTickEntry
+    {
+        public readonly IMapObjectUpdateTick Tick;
+        public float LastTime;
+
+        public UpdateTickEntry(IMapObjectUpdateTick tick, float lastTime)
+        {
+            Tick = tick;
+            LastTime = lastTime;
+        }
+    }
+
+    private sealed class UpdateTickBucket
+    {
+        public readonly int IntervalKey;
+        public readonly float IntervalSeconds;
+        public readonly List<UpdateTickEntry> Entries = new List<UpdateTickEntry>();
+        public float Quota;
+        public int Cursor;
+
+        public UpdateTickBucket(int intervalKey, float intervalSeconds)
+        {
+            IntervalKey = intervalKey;
+            IntervalSeconds = intervalSeconds;
+        }
     }
 }
 
@@ -403,7 +455,9 @@ public static class MapObjectTickProfiler
     private static readonly double stopwatchTickToMicroseconds = MicrosecondsPerSecond / Stopwatch.Frequency;
 
     private static int activeUpdateTickCount;
-    private static int activeLateTickCount;
+    private static int activeBeltTickCount;
+    private static int activeBeltDataMotionCount;
+    private static int activeBeltVisualTickCount;
     private static float windowStartTime = -1f;
 
     public static bool IsEnabled
@@ -425,15 +479,27 @@ public static class MapObjectTickProfiler
         RecordSample("Update", target, startTimestamp);
     }
 
-    public static void EndLateSample(object target, long startTimestamp)
+    public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp)
     {
-        RecordSample("Late", target, startTimestamp);
+        TargetDescriptor descriptor = new TargetDescriptor
+        {
+            TypeName = string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName,
+            ItemId = -1,
+            ItemName = string.IsNullOrWhiteSpace(itemName) ? typeName : itemName
+        };
+        RecordSample(string.IsNullOrWhiteSpace(kind) ? "Update" : kind, descriptor, startTimestamp);
     }
 
-    public static void SetActiveTickCounts(int updateCount, int lateCount)
+    public static void SetActiveTickCount(int updateCount)
     {
         activeUpdateTickCount = Mathf.Max(0, updateCount);
-        activeLateTickCount = Mathf.Max(0, lateCount);
+    }
+
+    public static void SetBeltTickCounts(int activeBelts, int dataMotionBelts, int visualBelts)
+    {
+        activeBeltTickCount = Mathf.Max(0, activeBelts);
+        activeBeltDataMotionCount = Mathf.Max(0, dataMotionBelts);
+        activeBeltVisualTickCount = Mathf.Max(0, visualBelts);
     }
 
     public static void Reset()
@@ -443,7 +509,9 @@ public static class MapObjectTickProfiler
         snapshotRows.Clear();
         jsonBuilder.Length = 0;
         activeUpdateTickCount = 0;
-        activeLateTickCount = 0;
+        activeBeltTickCount = 0;
+        activeBeltDataMotionCount = 0;
+        activeBeltVisualTickCount = 0;
         windowStartTime = Time.unscaledTime;
     }
 
@@ -472,7 +540,10 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("frame", Time.frameCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("windowMs", (windowSeconds * 1000f).ToString("0.###", CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeUpdateTicks", activeUpdateTickCount.ToString(CultureInfo.InvariantCulture), true);
-        AppendJsonProperty("activeLateTicks", activeLateTickCount.ToString(CultureInfo.InvariantCulture), true);
+        AppendJsonProperty("activeLateTicks", "0", true);
+        AppendJsonProperty("activeBeltTicks", activeBeltTickCount.ToString(CultureInfo.InvariantCulture), true);
+        AppendJsonProperty("activeBeltDataMotions", activeBeltDataMotionCount.ToString(CultureInfo.InvariantCulture), true);
+        AppendJsonProperty("activeBeltVisualTicks", activeBeltVisualTickCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("rowCount", rowCount.ToString(CultureInfo.InvariantCulture), true);
         jsonBuilder.Append(",\"rows\":[");
 
@@ -523,6 +594,16 @@ public static class MapObjectTickProfiler
             return;
         }
 
+        RecordSample(kind, ResolveTargetDescriptor(target), startTimestamp);
+    }
+
+    private static void RecordSample(string kind, TargetDescriptor descriptor, long startTimestamp)
+    {
+        if (descriptor == null)
+        {
+            return;
+        }
+
         long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
         if (elapsedTicks <= 0L)
         {
@@ -534,7 +615,6 @@ public static class MapObjectTickProfiler
             windowStartTime = Time.unscaledTime;
         }
 
-        TargetDescriptor descriptor = ResolveTargetDescriptor(target);
         string key = string.Concat(kind, "|", descriptor.TypeName, "|", descriptor.ItemId.ToString(CultureInfo.InvariantCulture));
         if (!groupStatsByKey.TryGetValue(key, out GroupStats stats))
         {

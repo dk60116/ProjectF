@@ -37,7 +37,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private static readonly ProfilerMarker RefreshChunkGenerationQueueMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkGenerationQueue");
     private static readonly ProfilerMarker RefreshChunkUnloadScanMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkUnloadScan");
     private static readonly ProfilerMarker FloorObjectVirtualizationMarker = new ProfilerMarker("TerrainGenerator.FloorObjectVirtualization");
-    private static readonly ProfilerMarker FloorObjectVirtualizationRebuildMarker = new ProfilerMarker("TerrainGenerator.FloorObjectVirtualization.RebuildScan");
     private static readonly ProfilerMarker FloorObjectVirtualizationScanMarker = new ProfilerMarker("TerrainGenerator.FloorObjectVirtualization.Scan");
     private static readonly ProfilerMarker GenerateChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkCoroutineStep");
     private static readonly ProfilerMarker UnloadChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.UnloadChunkCoroutineStep");
@@ -595,8 +594,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, InstallationObject> sleepingInstallationViews = new Dictionary<Vector2Int, InstallationObject>();
     private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
     private readonly List<Block> conveyorTickBuffer = new List<Block>();
-    private readonly HashSet<Block> activeConveyorDataMotionBlocks = new HashSet<Block>();
-    private readonly List<Block> conveyorDataMotionTickBuffer = new List<Block>();
+    private readonly List<Block> activeConveyorDataMotionBlocks = new List<Block>();
+    private readonly Dictionary<Block, int> activeConveyorDataMotionIndices = new Dictionary<Block, int>();
     private readonly List<Block> sortedActiveConveyors = new List<Block>();
     private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
     private readonly List<Block> activeConveyorDotVisualList = new List<Block>();
@@ -632,11 +631,15 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Block> pendingBeltItemLineDebugRefreshSet = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
     private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
+    private readonly List<Block> dynamicConveyorItemVisualBlocks = new List<Block>(256);
+    private readonly Dictionary<Block, int> dynamicConveyorItemVisualBlockIndices = new Dictionary<Block, int>();
     private readonly Dictionary<Block, int> conveyorItemCountsByBlock = new Dictionary<Block, int>();
     private int pendingBeltItemLineDebugRefreshIndex;
     private int conveyorItemVisualBlockSetVersion;
+    private int dynamicConveyorItemVisualBlockSetVersion;
     private int cachedLoadedConveyorItemCount;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
+    private readonly Dictionary<int, List<Block>> conveyorNetworkBlocksById = new Dictionary<int, List<Block>>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
     private readonly HashSet<int> conveyorNetworkSleepingIds = new HashSet<int>();
     private readonly HashSet<int> conveyorNetworkActiveIds = new HashSet<int>();
@@ -644,7 +647,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<int> conveyorNetworkSleepCheckBuffer = new List<int>();
     private readonly Queue<Block> conveyorNetworkBuildQueue = new Queue<Block>();
     private readonly Queue<Block> conveyorWakeQueue = new Queue<Block>();
+    private readonly Queue<int> conveyorLineWakeQueue = new Queue<int>();
     private readonly HashSet<Block> conveyorWakeQueued = new HashSet<Block>();
+    private readonly HashSet<int> conveyorLineWakeQueuedIds = new HashSet<int>();
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
     private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
     private readonly Dictionary<Block, ConveyorLineSlot> conveyorLineSlots = new Dictionary<Block, ConveyorLineSlot>();
@@ -653,10 +658,11 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<int> conveyorLinesTickedThisFrame = new HashSet<int>();
     private readonly List<Block> conveyorLineTouchedBlocks = new List<Block>();
     private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
-    private readonly HashSet<int> conveyorWakeQueuedLineIds = new HashSet<int>();
     private readonly HashSet<Block> deferredConveyorRuntimeRefreshBlocks = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorNetworkWakeBlocks = new HashSet<Block>();
     private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
+    private readonly Queue<Vector2Int> floorObjectVirtualizationWorkQueue = new Queue<Vector2Int>();
+    private readonly HashSet<Vector2Int> floorObjectVirtualizationQueuedCoordinates = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> backgroundConveyorDirtyCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> backgroundConveyorWakeCoordinates = new HashSet<Vector2Int>();
     private readonly Dictionary<Vector2Int, TerrainBiome> tileBiomeCache = new Dictionary<Vector2Int, TerrainBiome>();
@@ -664,7 +670,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, bool> directWaterBlockCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<Vector2Int, bool> bufferedWaterBlockCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<TerrainBiome, Material> biomeMaterialCache = new Dictionary<TerrainBiome, Material>();
-    private readonly List<Vector2Int> floorObjectVirtualizationScanCoordinates = new List<Vector2Int>();
 
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
@@ -677,7 +682,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private float nextBackgroundConveyorSimulationTime;
     private Vector2Int currentCenterChunk;
     private float nextFloorObjectVirtualizationTime;
-    private int floorObjectVirtualizationScanIndex;
+    private Vector2Int floorObjectVirtualizationLiveCenterCoordinate;
+    private int floorObjectVirtualizationLiveRadius = -1;
+    private bool floorObjectVirtualizationLiveAreaInitialized;
     private BlockStateStore resourceStateStore;
     private InstallationPlacementController installationRestoreController;
     private InstallationBackgroundSimulator installationBackgroundSimulator;
@@ -787,23 +794,60 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        bool profileBeltTicks = MapObjectTickProfiler.IsEnabled;
+        if (profileBeltTicks)
+        {
+            MapObjectTickProfiler.SetBeltTickCounts(
+                activeConveyors.Count,
+                activeConveyorDataMotionBlocks.Count,
+                activeConveyorDotVisualList.Count);
+        }
+
         using (TickConveyorDataMotionsMarker.Auto())
         {
+            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
             TickActiveConveyorDataMotions(Time.deltaTime);
+            if (profileBeltTicks)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "ConveyorDataMotion",
+                    "Belt Data Motion",
+                    startTimestamp);
+            }
         }
 
         using (TickConveyorsMarker.Auto())
         {
+            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
             TickActiveConveyors(Time.deltaTime);
+            if (profileBeltTicks)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "ActiveConveyor",
+                    "Active Belt Tick",
+                    startTimestamp);
+            }
         }
 
         using (TickBackgroundConveyorsMarker.Auto())
         {
+            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
             TickBackgroundConveyors();
+            if (profileBeltTicks)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "BackgroundConveyor",
+                    "Background Belt Tick",
+                    startTimestamp);
+            }
         }
 
         using (TickConveyorDotsMarker.Auto())
         {
+            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
             SyncConveyorSlotDotRuntimeVisibility();
             TickPendingConveyorSlotDotRefreshes();
             SyncBeltItemLineRuntimeVisibility();
@@ -811,6 +855,14 @@ public partial class TerrainGenerator : MonoBehaviour
             SyncBeltDirectionRuntimeVisibility();
             TickActiveConveyorDotVisuals(Time.deltaTime);
             DrawActiveBeltDirectionArrows();
+            if (profileBeltTicks)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "ConveyorVisual",
+                    "Belt Visual Tick",
+                    startTimestamp);
+            }
         }
 
         using (RefreshChunksMarker.Auto())
@@ -895,6 +947,7 @@ public partial class TerrainGenerator : MonoBehaviour
     public bool VirtualizeConveyorItems => virtualizeConveyorItems;
     public bool VirtualizeConveyorBelts => virtualizeConveyorBelts;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
+    public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;
 
     public void CopyLoadedBlocks(List<Block> results)
     {
@@ -1235,6 +1288,24 @@ public partial class TerrainGenerator : MonoBehaviour
         results.Clear();
         foreach (Block block in conveyorItemVisualBlocks)
         {
+            if (block != null)
+            {
+                results.Add(block);
+            }
+        }
+    }
+
+    public void CopyDynamicConveyorItemVisualBlocks(List<Block> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        for (int i = 0; i < dynamicConveyorItemVisualBlocks.Count; i++)
+        {
+            Block block = dynamicConveyorItemVisualBlocks[i];
             if (block != null)
             {
                 results.Add(block);
@@ -1842,6 +1913,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         block.Initialize(coordinate, blockType);
         loadedBlocks[coordinate] = block;
+        EnqueueFloorObjectVirtualizationCoordinate(coordinate);
         return block;
     }
 

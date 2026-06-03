@@ -112,6 +112,55 @@ public class Boiler : InputOutputModule
         return false;
     }
 
+    protected override bool ShouldKeepRuntimeUpdateTickActive()
+    {
+        if (!CanStoreFluid
+            || !TryGetBoilerFluidRecipe(
+                out int inputItemId,
+                out _,
+                out int outputItemId,
+                out _,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        if (HasFluidStorageSpace
+            && !IsWaterStorageFull(inputItemId)
+            && HasConnectedFluidSource(inputItemId))
+        {
+            return true;
+        }
+
+        if (StoredFluidLiters <= FluidEpsilon || !CanProvideFluidItem(inputItemId))
+        {
+            return false;
+        }
+
+        if (WaterTemperatureCelsius > ResolveIdleWaterTemperatureCelsius() + FluidEpsilon)
+        {
+            return true;
+        }
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (!HasOperationalEnergyAvailable(installedDefinition))
+        {
+            return false;
+        }
+
+        if (WaterTemperatureCelsius + FluidEpsilon < MaxWaterTemperatureCelsiusValue)
+        {
+            return true;
+        }
+
+        return TryResolveSteamOutputStorage(
+            outputItemId,
+            FluidEpsilon * 2f,
+            out _,
+            out _);
+    }
+
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;

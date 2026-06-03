@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
+public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapObjectUpdateTickInterval
 {
+    private const float DefaultManagedUpdateTickIntervalSeconds = 0.1f;
     protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
     private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
     private static readonly Vector2Int[] FluidCardinalDirections =
@@ -39,6 +40,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         None = 0,
         RectGrid = 1
     }
+
+    public virtual float ManagedUpdateTickIntervalSeconds => DefaultManagedUpdateTickIntervalSeconds;
 
     public enum RectGridBlockType
     {
@@ -715,11 +718,13 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
     private static void HandleInstallationPlacementRuntimeChanged(InstallationObject installationObject)
     {
         InvalidateFluidTopologyCache();
+        WakeRuntimeModulesAroundInstallation(installationObject);
     }
 
     private static void HandleInstallationPlacementRuntimeCleared(InstallationObject installationObject)
     {
         InvalidateFluidTopologyCache();
+        WakeRuntimeModulesAroundInstallation(installationObject);
     }
 
     private static void InvalidateFluidTopologyCache()
@@ -732,6 +737,22 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         if (fluidTopologyVersion <= 0)
         {
             fluidTopologyVersion = 1;
+        }
+    }
+
+    private static void WakeRuntimeModulesAroundInstallation(InstallationObject installationObject)
+    {
+        if (installationObject == null)
+        {
+            return;
+        }
+
+        WakeRuntimeModulesAtCoordinates(installationObject.RuntimeOccupiedCoordinates);
+        if (installationObject is InputOutputModule module)
+        {
+            WakeRuntimeModulesAtCoordinates(module.runtimePipeInputCoordinates);
+            WakeRuntimeModulesAtCoordinates(module.runtimeOutputCoordinates);
+            WakeRuntimeModulesAtCoordinates(module.runtimeGridCoordinates);
         }
     }
 
@@ -1506,12 +1527,24 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 
     protected virtual bool ShouldKeepRuntimeUpdateTickActive()
     {
-        return CanStoreFluid;
+        return ShouldKeepFluidRuntimeUpdateTickActive();
     }
 
     protected virtual bool ShouldAutoPullFluidFromConnectedStorage()
     {
         return true;
+    }
+
+    protected virtual bool ShouldKeepFluidRuntimeUpdateTickActive()
+    {
+        if (!CanStoreFluid
+            || !HasFluidStorageSpace
+            || !ShouldAutoPullFluidFromConnectedStorage())
+        {
+            return false;
+        }
+
+        return HasConnectedFluidSource(ResolvePreferredFluidInputItemId());
     }
 
     private void RefreshRuntimeUpdateSleepState()
@@ -1538,6 +1571,47 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick
         }
 
         SetRuntimeSleeping(false, true);
+    }
+
+    protected override void OnStoredFluidChanged(
+        int previousFluidItemId,
+        float previousStoredLiters,
+        int currentFluidItemId,
+        float currentStoredLiters)
+    {
+        base.OnStoredFluidChanged(
+            previousFluidItemId,
+            previousStoredLiters,
+            currentFluidItemId,
+            currentStoredLiters);
+
+        WakeRuntimeUpdate();
+        WakeRuntimeModulesAtFluidRuntimeCoordinates();
+    }
+
+    private void WakeRuntimeModulesAtFluidRuntimeCoordinates()
+    {
+        WakeRuntimeModulesAtCoordinates(runtimePipeInputCoordinates);
+        WakeRuntimeModulesAtCoordinates(runtimeOutputCoordinates);
+        WakeRuntimeModulesAtCoordinates(runtimeGridCoordinates);
+    }
+
+    private static void WakeRuntimeModulesAtCoordinates(IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int coordinate = coordinates[i];
+            WakeRuntimeModulesAtCoordinate(coordinate);
+            for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+            {
+                WakeRuntimeModulesAtCoordinate(coordinate + FluidCardinalDirections[directionIndex]);
+            }
+        }
     }
 
     private void SetRuntimeSleeping(bool sleeping, bool force = false)

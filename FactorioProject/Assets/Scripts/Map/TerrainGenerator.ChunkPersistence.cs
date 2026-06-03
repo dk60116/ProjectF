@@ -1323,6 +1323,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 if (block != null)
                 {
                     loadedBlocks[block.Coordinate] = block;
+                    EnqueueFloorObjectVirtualizationCoordinate(block.Coordinate);
                 }
             }
 
