@@ -30,10 +30,6 @@ public class InstallationPlacementController : MonoBehaviour
     private const float InstallPreviewVisualSyncPositionEpsilonSqr = 0.0001f;
     private const float RailAlignedPlacementMaxDistance = 0.48f;
     private const float TrainPlacementRailSearchRadius = 2.25f;
-    private const float TrainPlacementRailConnectionMaxDistance = 0.08f;
-    private const float TrainPlacementRailConnectionLookAhead = 0.5f;
-    private const float TrainPlacementInternalConnectionMaxDistance = 0.015f;
-    private const int TrainPlacementRailConnectionMaxHops = 8;
     private const int MaxPipeFluidCompatibilitySearchNodes = 1024;
 
     [SerializeField]
@@ -174,11 +170,7 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<MapObject, InstallPreviewItemReservation> installPreviewItemReservationsByPreview = new Dictionary<MapObject, InstallPreviewItemReservation>();
     private readonly Dictionary<MapObject, int> installPreviewConveyorRotationSequenceIndexesByPreview = new Dictionary<MapObject, int>();
     private readonly Dictionary<Wall, MapObject> installedFenceVariantPreviews = new Dictionary<Wall, MapObject>();
-    private readonly List<InstallationObject> trainCouplingInstallationScratch = new List<InstallationObject>(8);
-    private readonly HashSet<Train> trainCouplingSeenScratch = new HashSet<Train>();
     private readonly List<InstallationObject> trainPlacementRailSearchScratch = new List<InstallationObject>(16);
-    private readonly List<Railload> trainPlacementRailCandidateScratch = new List<Railload>(8);
-    private readonly Collider[] trainCouplingOverlapColliders = new Collider[64];
     private readonly Dictionary<Wall, MapObject> installedFenceVariantPreviewSourcePrefabs = new Dictionary<Wall, MapObject>();
     private readonly Dictionary<Wall, List<RendererVisibilityState>> installedFencePreviewRendererStates = new Dictionary<Wall, List<RendererVisibilityState>>();
     private readonly Dictionary<Pipe, MapObject> installedPipeVariantPreviews = new Dictionary<Pipe, MapObject>();
@@ -4344,22 +4336,7 @@ public class InstallationPlacementController : MonoBehaviour
                     installedObject,
                     installedAnchorCoordinate,
                     placementPlan));
-            if (TrySnapTrainToAdjacentTrainOnRail(
-                    installedObject,
-                    installedAnchorCoordinate,
-                    out Vector2Int snappedTrainAnchorCoordinate))
-            {
-                installedAnchorCoordinate = snappedTrainAnchorCoordinate;
-                ConfigureInstalledObjectRuntime(
-                    installedObject,
-                    installedAnchorCoordinate,
-                    placementPlan.quarterTurns,
-                    occupiedCoordinatesOverride: ResolvePlacementPlanRuntimeOccupiedCoordinates(
-                        installedObject,
-                        installedAnchorCoordinate,
-                        placementPlan));
-            }
-
+            InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate);
             RegisterInstalledObjectPersistence(installedObject);
             RememberLastInstalledRotation(activeInstallDefinition, placementPlan.quarterTurns);
 
@@ -9890,33 +9867,6 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
-    private bool TryResolveTrainCoupledPlacementRotation(
-        Quaternion baseRotation,
-        MapObject sourcePrefab,
-        Vector2Int anchorCoordinate,
-        Vector3 referencePosition,
-        out Quaternion rotation)
-    {
-        rotation = Quaternion.identity;
-        Train train = ResolveTrainSource(sourcePrefab);
-        if (train == null
-            || !train.SnapToAdjacentTrainOnRailWhenPlaced
-            || !TryFindNearestTrainCouplingRailTarget(
-                train,
-                anchorCoordinate,
-                referencePosition,
-                null,
-                out _,
-                out Vector3 targetForward)
-            || targetForward.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        rotation = AlignBaseRotationForwardToDirection(baseRotation, targetForward);
-        return true;
-    }
-
     private bool TryFindNearestRailPathAtCoordinate(
         Vector2Int coordinate,
         Vector2 referencePoint,
@@ -9966,631 +9916,6 @@ public class InstallationPlacementController : MonoBehaviour
 
         railAlignmentInstallationScratch.Clear();
         return found;
-    }
-
-    private bool TrySnapTrainToAdjacentTrainOnRail(
-        MapObject installedObject,
-        Vector2Int anchorCoordinate,
-        out Vector2Int snappedAnchorCoordinate)
-    {
-        snappedAnchorCoordinate = anchorCoordinate;
-        if (!(installedObject is Train train)
-            || !train.SnapToAdjacentTrainOnRailWhenPlaced
-            || !TryFindNearestTrainCouplingRailTarget(
-                train,
-                anchorCoordinate,
-                out TrainPlacementRailSample targetSample,
-                out Vector3 targetForward)
-            || targetForward.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        Vector3 snappedPosition = train.transform.position;
-        snappedPosition.x = targetSample.Point.x;
-        snappedPosition.z = targetSample.Point.y;
-        Quaternion snappedRotation = Quaternion.LookRotation(targetForward, Vector3.up);
-        ApplyTrainPlacementPose(train, snappedPosition, snappedRotation);
-        snappedAnchorCoordinate = RoundWorldPositionToCoordinate(snappedPosition);
-        return true;
-    }
-
-    private bool TryFindNearestTrainCouplingRailTarget(
-        Train train,
-        Vector2Int anchorCoordinate,
-        out TrainPlacementRailSample targetSample,
-        out Vector3 targetForward)
-    {
-        Vector3 trainPosition = train != null ? train.transform.position : Vector3.zero;
-        return TryFindNearestTrainCouplingRailTarget(
-            train,
-            anchorCoordinate,
-            trainPosition,
-            train,
-            out targetSample,
-            out targetForward);
-    }
-
-    private bool TryFindNearestTrainCouplingRailTarget(
-        Train train,
-        Vector2Int anchorCoordinate,
-        Vector3 trainPosition,
-        Train ignoredTrain,
-        out TrainPlacementRailSample targetSample,
-        out Vector3 targetForward)
-    {
-        targetSample = default;
-        targetForward = Vector3.zero;
-        if (train == null)
-        {
-            return false;
-        }
-
-        Vector2 trainPoint = new Vector2(trainPosition.x, trainPosition.z);
-        float maxSnapDistance = train.TrainCouplingSnapMaxDistance;
-        float bestScore = float.MaxValue;
-        int searchCells = Mathf.CeilToInt(
-            Mathf.Max(1f, train.TrainCouplingCenterDistance + maxSnapDistance + TrainPlacementRailSearchRadius));
-        bool found = false;
-
-        trainCouplingSeenScratch.Clear();
-        for (int offsetY = -searchCells; offsetY <= searchCells; offsetY++)
-        {
-            for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
-            {
-                Vector2Int coordinate = anchorCoordinate + new Vector2Int(offsetX, offsetY);
-                trainCouplingInstallationScratch.Clear();
-                InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-                    coordinate,
-                    trainCouplingInstallationScratch);
-
-                for (int i = 0; i < trainCouplingInstallationScratch.Count; i++)
-                {
-                    TryEvaluateTrainCouplingCandidate(
-                        train,
-                        trainPoint,
-                        maxSnapDistance,
-                        ignoredTrain,
-                        trainCouplingInstallationScratch[i] as Train,
-                        ref targetSample,
-                        ref targetForward,
-                        ref bestScore,
-                        ref found);
-                }
-            }
-        }
-
-        TryEvaluateOverlappingTrainCouplingCandidates(
-            train,
-            trainPosition,
-            trainPoint,
-            maxSnapDistance,
-            ignoredTrain,
-            ref targetSample,
-            ref targetForward,
-            ref bestScore,
-            ref found);
-
-        trainCouplingInstallationScratch.Clear();
-        trainCouplingSeenScratch.Clear();
-        trainPlacementRailSearchScratch.Clear();
-        trainPlacementRailCandidateScratch.Clear();
-        return found;
-    }
-
-    private void TryEvaluateOverlappingTrainCouplingCandidates(
-        Train train,
-        Vector3 trainPosition,
-        Vector2 trainPoint,
-        float maxSnapDistance,
-        Train ignoredTrain,
-        ref TrainPlacementRailSample targetSample,
-        ref Vector3 targetForward,
-        ref float bestScore,
-        ref bool found)
-    {
-        float overlapRadius = Mathf.Max(
-            1f,
-            train.TrainCouplingCenterDistance + maxSnapDistance + TrainPlacementRailSearchRadius);
-        int overlapCount = Physics.OverlapSphereNonAlloc(
-            trainPosition,
-            overlapRadius,
-            trainCouplingOverlapColliders,
-            Physics.DefaultRaycastLayers,
-            QueryTriggerInteraction.Ignore);
-        for (int i = 0; i < overlapCount; i++)
-        {
-            Collider candidateCollider = trainCouplingOverlapColliders[i];
-            Train candidate = candidateCollider != null
-                ? candidateCollider.GetComponentInParent<Train>()
-                : null;
-            TryEvaluateTrainCouplingCandidate(
-                train,
-                trainPoint,
-                maxSnapDistance,
-                ignoredTrain,
-                candidate,
-                ref targetSample,
-                ref targetForward,
-                ref bestScore,
-                ref found);
-        }
-    }
-
-    private void TryEvaluateTrainCouplingCandidate(
-        Train train,
-        Vector2 trainPoint,
-        float maxSnapDistance,
-        Train ignoredTrain,
-        Train candidate,
-        ref TrainPlacementRailSample targetSample,
-        ref Vector3 targetForward,
-        ref float bestScore,
-        ref bool found)
-    {
-        if (train == null
-            || candidate == null
-            || candidate == ignoredTrain
-            || trainCouplingSeenScratch.Contains(candidate)
-            || installPreviewInstances.Contains(candidate)
-            || !candidate.gameObject.activeInHierarchy)
-        {
-            return;
-        }
-
-        trainCouplingSeenScratch.Add(candidate);
-        Vector3 candidateForward = FlattenHorizontalDirection(candidate.transform.forward);
-        if (candidateForward.sqrMagnitude <= 0.0001f)
-        {
-            return;
-        }
-
-        Vector2 candidatePoint = new Vector2(
-            candidate.transform.position.x,
-            candidate.transform.position.z);
-        Vector2Int candidateCoordinate = RoundWorldPositionToCoordinate(candidate.transform.position);
-        int railSearchCells = Mathf.CeilToInt(
-            Mathf.Max(1f, candidate.TrainCouplingSnapMaxDistance + 1f));
-        if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
-                candidateCoordinate,
-                candidatePoint,
-                railSearchCells,
-                out TrainPlacementRailSample candidateSample))
-        {
-            return;
-        }
-
-        float maxCandidateRailDistance = Mathf.Max(
-            RailAlignedPlacementMaxDistance,
-            candidate.TrainCouplingSnapMaxDistance);
-        if (candidateSample.SqrDistance > maxCandidateRailDistance * maxCandidateRailDistance)
-        {
-            return;
-        }
-
-        Vector2 candidateFacing = new Vector2(candidateForward.x, candidateForward.z);
-        if (candidateFacing.sqrMagnitude <= 0.0001f)
-        {
-            return;
-        }
-
-        candidateFacing.Normalize();
-        candidateFacing = ResolveTrainPlacementFacingTangent(candidateSample.Tangent, candidateFacing);
-        float couplingDistance = ResolveTrainCouplingCenterDistance(train, candidate);
-        TryUpdateNearestTrainCouplingRailTarget(
-            trainPoint,
-            maxSnapDistance,
-            candidateSample,
-            candidateFacing,
-            couplingDistance,
-            1,
-            ref targetSample,
-            ref targetForward,
-            ref bestScore,
-            ref found);
-        TryUpdateNearestTrainCouplingRailTarget(
-            trainPoint,
-            maxSnapDistance,
-            candidateSample,
-            candidateFacing,
-            couplingDistance,
-            -1,
-            ref targetSample,
-            ref targetForward,
-            ref bestScore,
-            ref found);
-    }
-
-    private void TryUpdateNearestTrainCouplingRailTarget(
-        Vector2 trainPoint,
-        float maxSnapDistance,
-        TrainPlacementRailSample candidateSample,
-        Vector2 candidateFacing,
-        float couplingDistance,
-        int chainDirection,
-        ref TrainPlacementRailSample nearestSample,
-        ref Vector3 nearestForward,
-        ref float nearestScore,
-        ref bool found)
-    {
-        if (!TrySampleTrainPlacementCoupledRailPosition(
-                candidateSample,
-                candidateFacing,
-                chainDirection,
-                couplingDistance,
-                out TrainPlacementRailSample coupledSample,
-                out Vector2 coupledFacing))
-        {
-            return;
-        }
-
-        float maxSnapSqrDistance = maxSnapDistance * maxSnapDistance;
-        float centerSqrDistance = (trainPoint - coupledSample.Point).sqrMagnitude;
-        bool centerWithinSnap = centerSqrDistance <= maxSnapSqrDistance;
-
-        Vector2 candidateToCoupled = coupledSample.Point - candidateSample.Point;
-        float connectorScore = float.MaxValue;
-        bool connectorWithinSnap = false;
-        if (candidateToCoupled.sqrMagnitude > 0.0001f)
-        {
-            float centerDistance = Mathf.Sqrt(candidateToCoupled.sqrMagnitude);
-            Vector2 couplingDirection = candidateToCoupled / centerDistance;
-            float pointerProgress = Vector2.Dot(trainPoint - candidateSample.Point, couplingDirection);
-            Vector2 connectorPoint = Vector2.Lerp(candidateSample.Point, coupledSample.Point, 0.5f);
-            float connectorSnapDistance = Mathf.Clamp(
-                maxSnapDistance * 0.65f,
-                0.25f,
-                maxSnapDistance);
-            float minConnectorProgress = Mathf.Min(
-                centerDistance * 0.2f,
-                connectorSnapDistance * 0.75f);
-            connectorScore = (trainPoint - connectorPoint).sqrMagnitude;
-            connectorWithinSnap = pointerProgress >= minConnectorProgress
-                                  && connectorScore <= connectorSnapDistance * connectorSnapDistance;
-        }
-
-        if (!centerWithinSnap && !connectorWithinSnap)
-        {
-            return;
-        }
-
-        float score = centerWithinSnap
-            ? centerSqrDistance
-            : maxSnapSqrDistance + connectorScore;
-        if (score >= nearestScore)
-        {
-            return;
-        }
-
-        nearestSample = coupledSample;
-        nearestForward = FlattenHorizontalDirection(new Vector3(coupledFacing.x, 0f, coupledFacing.y));
-        nearestScore = score;
-        found = nearestForward.sqrMagnitude > 0.0001f;
-    }
-
-    private bool TrySampleTrainPlacementCoupledRailPosition(
-        TrainPlacementRailSample leadSample,
-        Vector2 leadFacing,
-        int chainDirection,
-        float couplingDistance,
-        out TrainPlacementRailSample coupledSample,
-        out Vector2 coupledFacing)
-    {
-        coupledSample = default;
-        coupledFacing = Vector2.zero;
-        if (leadSample.Rail == null || leadFacing.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        leadFacing.Normalize();
-        float tangentDot = Vector2.Dot(leadFacing, leadSample.Tangent);
-        if (Mathf.Abs(tangentDot) <= 0.0001f)
-        {
-            tangentDot = 1f;
-        }
-
-        float signedStep = (chainDirection >= 0 ? 1f : -1f)
-                           * Mathf.Sign(tangentDot)
-                           * Mathf.Max(0.1f, couplingDistance);
-        if (!TryAdvanceTrainPlacementRailNetwork(
-                leadSample,
-                signedStep,
-                out coupledSample,
-                out float traveledDistance)
-            || traveledDistance + 0.0001f < Mathf.Abs(signedStep))
-        {
-            return false;
-        }
-
-        coupledFacing = ResolveTrainPlacementFacingTangent(coupledSample.Tangent, leadFacing);
-        return coupledFacing.sqrMagnitude > 0.0001f;
-    }
-
-    private bool TryAdvanceTrainPlacementRailNetwork(
-        TrainPlacementRailSample startSample,
-        float signedStep,
-        out TrainPlacementRailSample targetSample,
-        out float traveledDistance)
-    {
-        targetSample = startSample;
-        traveledDistance = 0f;
-        float remainingDistance = Mathf.Abs(signedStep);
-        if (remainingDistance <= 0.0001f)
-        {
-            return true;
-        }
-
-        TrainPlacementRailSample currentSample = startSample;
-        Vector2 travelDirection = signedStep >= 0f ? currentSample.Tangent : -currentSample.Tangent;
-        if (travelDirection.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        travelDirection.Normalize();
-        for (int hop = 0; hop < TrainPlacementRailConnectionMaxHops; hop++)
-        {
-            if (currentSample.Rail == null
-                || !currentSample.Rail.TryGetRenderedPathLength(out float pathLength))
-            {
-                return false;
-            }
-
-            float travelDot = Vector2.Dot(travelDirection, currentSample.Tangent);
-            if (Mathf.Abs(travelDot) <= 0.0001f)
-            {
-                travelDot = signedStep >= 0f ? 1f : -1f;
-            }
-
-            float directionSign = Mathf.Sign(travelDot);
-            float availableDistance = directionSign > 0f
-                ? pathLength - currentSample.DistanceAlongPath
-                : currentSample.DistanceAlongPath;
-            if (remainingDistance <= availableDistance + 0.0001f)
-            {
-                float targetDistance = Mathf.Clamp(
-                    currentSample.DistanceAlongPath + directionSign * remainingDistance,
-                    0f,
-                    pathLength);
-                traveledDistance += remainingDistance;
-                return TryCreateTrainPlacementRailSampleAtDistance(
-                    currentSample.Rail,
-                    targetDistance,
-                    out targetSample);
-            }
-
-            float endpointDistance = directionSign > 0f ? pathLength : 0f;
-            if (!TryCreateTrainPlacementRailSampleAtDistance(
-                    currentSample.Rail,
-                    endpointDistance,
-                    out TrainPlacementRailSample endpointSample))
-            {
-                return false;
-            }
-
-            targetSample = endpointSample;
-            float consumedDistance = Mathf.Max(0f, availableDistance);
-            traveledDistance += consumedDistance;
-            remainingDistance -= consumedDistance;
-            if (remainingDistance <= 0.0001f)
-            {
-                return true;
-            }
-
-            Vector2 exitDirection = directionSign > 0f ? endpointSample.Tangent : -endpointSample.Tangent;
-            if (exitDirection.sqrMagnitude <= 0.0001f)
-            {
-                return true;
-            }
-
-            exitDirection.Normalize();
-            if (!TryFindConnectedTrainPlacementRailSample(
-                    endpointSample,
-                    exitDirection,
-                    currentSample.Rail,
-                    out TrainPlacementRailSample connectedSample))
-            {
-                return true;
-            }
-
-            currentSample = connectedSample;
-            travelDirection = exitDirection;
-        }
-
-        targetSample = currentSample;
-        return true;
-    }
-
-    private static bool TryCreateTrainPlacementRailSampleAtDistance(
-        Railload rail,
-        float distanceAlongPath,
-        out TrainPlacementRailSample sample)
-    {
-        sample = default;
-        if (rail == null
-            || !rail.TrySampleRenderedPath(distanceAlongPath, out Vector2 pathPoint, out Vector2 tangent))
-        {
-            return false;
-        }
-
-        sample.Rail = rail;
-        sample.DistanceAlongPath = distanceAlongPath;
-        sample.Point = pathPoint;
-        sample.Tangent = tangent;
-        sample.SqrDistance = 0f;
-        return true;
-    }
-
-    private bool TryFindConnectedTrainPlacementRailSample(
-        TrainPlacementRailSample endpointSample,
-        Vector2 exitDirection,
-        Railload excludedRail,
-        out TrainPlacementRailSample connectedSample)
-    {
-        connectedSample = default;
-        if (endpointSample.Rail == null || exitDirection.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        exitDirection.Normalize();
-        trainPlacementRailCandidateScratch.Clear();
-        AddTrainPlacementRailCandidates(endpointSample.Point);
-        AddTrainPlacementRailCandidates(endpointSample.Point + exitDirection * TrainPlacementRailConnectionLookAhead);
-
-        bool found = false;
-        float maxConnectionSqrDistance = TrainPlacementRailConnectionMaxDistance
-                                         * TrainPlacementRailConnectionMaxDistance;
-        float bestScore = float.MinValue;
-        for (int i = 0; i < trainPlacementRailCandidateScratch.Count; i++)
-        {
-            Railload rail = trainPlacementRailCandidateScratch[i];
-            if (rail == null
-                || rail == excludedRail
-                || !TryFindTrainPlacementRailConnectionSample(
-                    rail,
-                    endpointSample.Point,
-                    true,
-                    out float distanceAlongPath,
-                    out Vector2 pathPoint,
-                    out Vector2 tangent,
-                    out float sqrDistance)
-                || sqrDistance > maxConnectionSqrDistance)
-            {
-                continue;
-            }
-
-            float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, tangent));
-            float progress = ResolveTrainPlacementRailLookAheadProgress(
-                rail,
-                distanceAlongPath,
-                tangent,
-                endpointSample.Point,
-                exitDirection,
-                TrainPlacementRailConnectionLookAhead);
-            if (progress <= 0.01f)
-            {
-                continue;
-            }
-
-            float score = progress * 1.2f + directionScore * 0.6f - sqrDistance * 3f;
-            if (score <= bestScore)
-            {
-                continue;
-            }
-
-            bestScore = score;
-            connectedSample.Rail = rail;
-            connectedSample.DistanceAlongPath = distanceAlongPath;
-            connectedSample.Point = pathPoint;
-            connectedSample.Tangent = tangent;
-            connectedSample.SqrDistance = sqrDistance;
-            found = true;
-        }
-
-        trainPlacementRailCandidateScratch.Clear();
-        trainPlacementRailSearchScratch.Clear();
-        return found;
-    }
-
-    private bool TryFindTrainPlacementRailConnectionSample(
-        Railload rail,
-        Vector2 point,
-        bool allowInternalFallback,
-        out float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
-    {
-        distanceAlongPath = 0f;
-        pathPoint = point;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        if (rail == null)
-        {
-            return false;
-        }
-
-        bool found = false;
-        if (TryUpdateTrainPlacementEndpointConnectionSample(
-                rail,
-                point,
-                true,
-                ref distanceAlongPath,
-                ref pathPoint,
-                ref tangent,
-                ref sqrDistance))
-        {
-            found = true;
-        }
-
-        if (TryUpdateTrainPlacementEndpointConnectionSample(
-                rail,
-                point,
-                false,
-                ref distanceAlongPath,
-                ref pathPoint,
-                ref tangent,
-                ref sqrDistance))
-        {
-            found = true;
-        }
-
-        if (found || !allowInternalFallback)
-        {
-            return found;
-        }
-
-        if (!rail.TryFindNearestRenderedPathSample(
-                point,
-                out float internalDistance,
-                out Vector2 internalPoint,
-                out Vector2 internalTangent,
-                out float internalSqrDistance)
-            || internalSqrDistance > TrainPlacementInternalConnectionMaxDistance
-                                   * TrainPlacementInternalConnectionMaxDistance)
-        {
-            return false;
-        }
-
-        distanceAlongPath = internalDistance;
-        pathPoint = internalPoint;
-        tangent = internalTangent;
-        sqrDistance = internalSqrDistance;
-        return true;
-    }
-
-    private static bool TryUpdateTrainPlacementEndpointConnectionSample(
-        Railload rail,
-        Vector2 point,
-        bool startEndpoint,
-        ref float bestDistanceAlongPath,
-        ref Vector2 bestPathPoint,
-        ref Vector2 bestTangent,
-        ref float bestSqrDistance)
-    {
-        if (rail == null
-            || !rail.TryGetRenderedEndpointSample(
-                startEndpoint,
-                out float distanceAlongPath,
-                out Vector2 pathPoint,
-                out Vector2 tangent))
-        {
-            return false;
-        }
-
-        float sqrDistance = (point - pathPoint).sqrMagnitude;
-        if (sqrDistance >= bestSqrDistance)
-        {
-            return false;
-        }
-
-        bestDistanceAlongPath = distanceAlongPath;
-        bestPathPoint = pathPoint;
-        bestTangent = tangent;
-        bestSqrDistance = sqrDistance;
-        return true;
     }
 
     private bool TryFindNearestTrainPlacementRailSampleAroundCoordinate(
@@ -10685,53 +10010,6 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
-    private void AddTrainPlacementRailCandidates(Vector2 point)
-    {
-        int searchCells = Mathf.CeilToInt(Mathf.Max(0.05f, TrainPlacementRailSearchRadius));
-        Vector2Int centerCoordinate = new Vector2Int(
-            Mathf.RoundToInt(point.x),
-            Mathf.RoundToInt(point.y));
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-
-        for (int offsetY = -searchCells; offsetY <= searchCells; offsetY++)
-        {
-            for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
-            {
-                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (terrain != null
-                    && terrain.TryGetLoadedBlock(coordinate, out Block block)
-                    && block != null
-                    && block.MapObject is Railload blockRailload)
-                {
-                    TryAddTrainPlacementRailCandidate(blockRailload);
-                }
-
-                trainPlacementRailSearchScratch.Clear();
-                InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-                    coordinate,
-                    trainPlacementRailSearchScratch);
-
-                for (int i = 0; i < trainPlacementRailSearchScratch.Count; i++)
-                {
-                    if (trainPlacementRailSearchScratch[i] is Railload runtimeRailload)
-                    {
-                        TryAddTrainPlacementRailCandidate(runtimeRailload);
-                    }
-                }
-            }
-        }
-
-        trainPlacementRailSearchScratch.Clear();
-    }
-
-    private void TryAddTrainPlacementRailCandidate(Railload rail)
-    {
-        if (rail != null && !trainPlacementRailCandidateScratch.Contains(rail))
-        {
-            trainPlacementRailCandidateScratch.Add(rail);
-        }
-    }
-
     private static Vector2 ResolveTrainPlacementFacingTangent(Vector2 railTangent, Vector2 referenceFacing)
     {
         if (railTangent.sqrMagnitude <= 0.0001f)
@@ -10749,40 +10027,6 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return railTangent;
-    }
-
-    private static float ResolveTrainPlacementRailLookAheadProgress(
-        Railload rail,
-        float distanceAlongPath,
-        Vector2 tangent,
-        Vector2 originPoint,
-        Vector2 direction,
-        float lookAheadDistance)
-    {
-        if (rail == null || direction.sqrMagnitude <= 0.0001f)
-        {
-            return 0f;
-        }
-
-        direction.Normalize();
-        float tangentDot = Vector2.Dot(direction, tangent);
-        if (Mathf.Abs(tangentDot) <= 0.0001f
-            || !rail.TryGetRenderedPathLength(out float pathLength))
-        {
-            return 0f;
-        }
-
-        float targetDistance = Mathf.Clamp(
-            distanceAlongPath + Mathf.Sign(tangentDot) * Mathf.Max(0.05f, lookAheadDistance),
-            0f,
-            pathLength);
-        if (Mathf.Abs(targetDistance - distanceAlongPath) <= 0.0001f
-            || !rail.TrySampleRenderedPath(targetDistance, out Vector2 futurePoint, out _))
-        {
-            return 0f;
-        }
-
-        return Mathf.Max(0f, Vector2.Dot(futurePoint - originPoint, direction));
     }
 
     private bool TryFindNearestRailPathAroundCoordinate(
@@ -10829,14 +10073,47 @@ public class InstallationPlacementController : MonoBehaviour
         return found;
     }
 
-    private static float ResolveTrainCouplingCenterDistance(Train a, Train b)
+    private void InitializePlacedTrainRailSample(MapObject installedObject, Vector2Int anchorCoordinate)
     {
-        if (a == null || b == null)
+        if (!(installedObject is Train train))
         {
-            return 1f;
+            return;
         }
 
-        return a.ResolveCouplingCenterDistance(b);
+        Vector2 trainPoint = new Vector2(
+            train.transform.position.x,
+            train.transform.position.z);
+        int searchCells = Mathf.CeilToInt(
+            Mathf.Max(1f, TrainPlacementRailSearchRadius));
+        if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
+                anchorCoordinate,
+                trainPoint,
+                searchCells,
+                out TrainPlacementRailSample railSample))
+        {
+            return;
+        }
+
+        float maxRailDistance = RailAlignedPlacementMaxDistance;
+        if (railSample.SqrDistance > maxRailDistance * maxRailDistance)
+        {
+            return;
+        }
+
+        Vector2 facing = new Vector2(
+            train.transform.forward.x,
+            train.transform.forward.z);
+        facing = ResolveTrainPlacementFacingTangent(railSample.Tangent, facing);
+        if (facing.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        train.ApplyPlacedRailSample(
+            railSample.Rail,
+            railSample.DistanceAlongPath,
+            railSample.Point,
+            facing);
     }
 
     private static void ApplyTrainPlacementPose(Train train, Vector3 position, Quaternion rotation)
@@ -29061,24 +28338,8 @@ public class InstallationPlacementController : MonoBehaviour
         Quaternion baseRotation = sourcePrefab != null
             ? sourcePrefab.transform.rotation
             : Quaternion.identity;
-        if (train.SnapToAdjacentTrainOnRailWhenPlaced
-            && TryFindNearestTrainCouplingRailTarget(
-                train,
-                anchorCoordinate,
-                referencePosition,
-                null,
-                out TrainPlacementRailSample targetSample,
-                out Vector3 targetForward)
-            && targetForward.sqrMagnitude > 0.0001f)
-        {
-            position.x = targetSample.Point.x;
-            position.z = targetSample.Point.y;
-            rotation = AlignBaseRotationForwardToDirection(baseRotation, targetForward);
-            return true;
-        }
-
         Vector2 referencePoint = new Vector2(referencePosition.x, referencePosition.z);
-        int searchCells = Mathf.CeilToInt(Mathf.Max(1f, train.TrainCouplingSnapMaxDistance + 0.5f));
+        int searchCells = Mathf.CeilToInt(Mathf.Max(1f, TrainPlacementRailSearchRadius));
         if (!TryFindNearestRailPathAroundCoordinate(
                 anchorCoordinate,
                 referencePoint,
@@ -29091,7 +28352,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        float maxRailDistance = Mathf.Max(RailAlignedPlacementMaxDistance, train.TrainCouplingSnapMaxDistance);
+        float maxRailDistance = RailAlignedPlacementMaxDistance;
         if (railSqrDistance > maxRailDistance * maxRailDistance)
         {
             return false;

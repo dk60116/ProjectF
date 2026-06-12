@@ -953,9 +953,9 @@
                     "count": 2
                 },
                 {
-                    "itemId": 0,
-                    "itemName": "Log",
-                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 }
             ],
@@ -1001,6 +1001,86 @@
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
+        },
+        {
+            "itemId": 41,
+            "itemName": "Iron wheel",
+            "definitionAssetPath": "Assets/Data/Items/Item_43_Iron wheel.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 16,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 42,
+            "itemName": "Railload",
+            "definitionAssetPath": "Assets/Data/Items/Item_42_Railload.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 3
+                },
+                {
+                    "itemId": 16,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 43,
+            "itemName": "Flatcar",
+            "definitionAssetPath": "Assets/Data/Items/Item_44_Flatcar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 44,
+            "itemName": "Rail handcar",
+            "definitionAssetPath": "Assets/Data/Items/Item_40_Rail handcar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
         }
     ],
     "items": [
@@ -1955,9 +2035,9 @@
                     "count": 2
                 },
                 {
-                    "itemId": 0,
-                    "itemName": "Log",
-                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 }
             ],
@@ -2003,6 +2083,86 @@
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
+        },
+        {
+            "itemId": 41,
+            "itemName": "Iron wheel",
+            "definitionAssetPath": "Assets/Data/Items/Item_43_Iron wheel.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 16,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 42,
+            "itemName": "Railload",
+            "definitionAssetPath": "Assets/Data/Items/Item_42_Railload.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 3
+                },
+                {
+                    "itemId": 16,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 43,
+            "itemName": "Flatcar",
+            "definitionAssetPath": "Assets/Data/Items/Item_44_Flatcar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 44,
+            "itemName": "Rail handcar",
+            "definitionAssetPath": "Assets/Data/Items/Item_40_Rail handcar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
         }
     ],
     "entries": [
@@ -2957,9 +3117,9 @@
                     "count": 2
                 },
                 {
-                    "itemId": 0,
-                    "itemName": "Log",
-                    "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 }
             ],
@@ -3005,6 +3165,86 @@
                     "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
                 }
             ]
+        },
+        {
+            "itemId": 41,
+            "itemName": "Iron wheel",
+            "definitionAssetPath": "Assets/Data/Items/Item_43_Iron wheel.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 16,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 42,
+            "itemName": "Railload",
+            "definitionAssetPath": "Assets/Data/Items/Item_42_Railload.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
+                    "count": 3
+                },
+                {
+                    "itemId": 16,
+                    "itemName": "Iron plate",
+                    "definitionAssetPath": "Assets/Data/Items/Item_25_Iron plate.asset",
+                    "count": 2
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 43,
+            "itemName": "Flatcar",
+            "definitionAssetPath": "Assets/Data/Items/Item_44_Flatcar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
+        },
+        {
+            "itemId": 44,
+            "itemName": "Rail handcar",
+            "definitionAssetPath": "Assets/Data/Items/Item_40_Rail handcar.asset",
+            "outputCount": 1,
+            "ingredients": [],
+            "craftingMapObjects": [],
+            "requiredMapObjects": []
         }
     ]
 }

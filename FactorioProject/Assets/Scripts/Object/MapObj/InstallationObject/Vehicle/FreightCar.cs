@@ -6,6 +6,4 @@ public class FreightCar : Train
 {
     [SerializeField]
     private List<Transform> itemPointList;
-
-    public override bool SnapToAdjacentTrainOnRailWhenPlaced => true;
 }
