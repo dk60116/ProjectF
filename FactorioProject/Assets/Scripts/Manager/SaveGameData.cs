@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 13;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -90,6 +90,10 @@ public sealed class PlayerSaveData
     public bool hasPlayer;
     public Vector3 position;
     public Quaternion rotation = Quaternion.identity;
+    public bool mountedOnVehicle;
+    public long mountedVehiclePlacementSequence;
+    public Vector2Int mountedVehicleAnchorCoordinate;
+    public int mountedVehiclePlayerPointIndex = -1;
     public int bagLevel = 1;
     public PlayerStatSaveData stats = new PlayerStatSaveData();
     public List<PlayerInventorySlotSaveState> bagSlots = new List<PlayerInventorySlotSaveState>();

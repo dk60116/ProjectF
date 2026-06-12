@@ -13,10 +13,20 @@ public class MeshTransformEditorWindow : EditorWindow
     private const float PreviewHeight = 260f;
     private const float PivotCenterPickRadius = 10f;
     private const float PivotAxisPickRadius = 7f;
+    private const float PreviewSceneGizmoSize = 76f;
+    private const float PreviewSceneGizmoPadding = 10f;
+    private const float PreviewSceneGizmoAxisLength = 25f;
+    private const float PreviewSceneGizmoCenterRadius = 7f;
+    private const float PreviewSceneGizmoAxisPickRadius = 10f;
     private const string UniversalPipelineShaderTag = "UniversalPipeline";
     private const string LegacyLightweightPipelineShaderTag = "LightweightPipeline";
     private const string HdPipelineShaderTag = "HDRenderPipeline";
     private static readonly Color MissingMaterialPreviewColor = Color.white;
+    private static readonly Color PreviewSceneGizmoCenterColor = new Color(0.72f, 0.72f, 0.72f, 1f);
+    private static readonly Color PreviewSceneGizmoBackAxisColor = new Color(0.48f, 0.48f, 0.48f, 0.75f);
+    private static readonly Color PreviewSceneGizmoXColor = new Color(0.95f, 0.28f, 0.24f, 1f);
+    private static readonly Color PreviewSceneGizmoYColor = new Color(0.36f, 0.88f, 0.3f, 1f);
+    private static readonly Color PreviewSceneGizmoZColor = new Color(0.3f, 0.52f, 1f, 1f);
     private static readonly string[] MissingMaterialPreviewShaderNames =
     {
         "Custom/ToonCharacter",
@@ -35,6 +45,15 @@ public class MeshTransformEditorWindow : EditorWindow
         AxisX,
         AxisY,
         AxisZ
+    }
+
+    private enum PreviewSceneGizmoHit
+    {
+        None,
+        Center,
+        X,
+        Y,
+        Z
     }
 
     [SerializeField]
@@ -65,6 +84,8 @@ public class MeshTransformEditorWindow : EditorWindow
     private Vector2 previewOrbit = new Vector2(135f, -20f);
     [SerializeField]
     private float previewZoom = 1.35f;
+    [SerializeField]
+    private bool previewOrthographic;
     [SerializeField]
     private bool showPivotInPreview = true;
 
@@ -276,8 +297,15 @@ public class MeshTransformEditorWindow : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            EditorGUILayout.LabelField("드래그: 회전 / 휠: 줌", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("드래그: 회전 / 휠: 줌 / 축 클릭: 시점 정렬", EditorStyles.miniLabel);
             GUILayout.FlexibleSpace();
+            if (GUILayout.Button(previewOrthographic ? "Ortho" : "Persp", GUILayout.Width(58f)))
+            {
+                previewOrthographic = !previewOrthographic;
+                previewDirty = true;
+                EditorUtility.SetDirty(this);
+            }
+
             if (GUILayout.Button("Reset View", GUILayout.Width(90f)))
             {
                 previewOrbit = new Vector2(135f, -20f);
@@ -1472,10 +1500,7 @@ public class MeshTransformEditorWindow : EditorWindow
         Quaternion orbitRotation = Quaternion.Euler(previewOrbit.y, previewOrbit.x, 0f);
         Vector3 cameraOffset = orbitRotation * (Vector3.back * distance);
 
-        previewRenderer.camera.transform.position = center + cameraOffset;
-        previewRenderer.camera.transform.LookAt(center);
-        previewRenderer.camera.nearClipPlane = 0.01f;
-        previewRenderer.camera.farClipPlane = Mathf.Max(100f, distance + radius * 6f);
+        ConfigurePreviewCamera(previewRenderer.camera, center, radius, distance, cameraOffset);
 
         if (previewMesh.subMeshCount <= 0)
         {
@@ -1486,10 +1511,7 @@ public class MeshTransformEditorWindow : EditorWindow
         if (Event.current.type == EventType.Repaint)
         {
             previewRenderer.BeginPreview(previewRect, GUIStyle.none);
-            previewRenderer.camera.transform.position = center + cameraOffset;
-            previewRenderer.camera.transform.LookAt(center);
-            previewRenderer.camera.nearClipPlane = 0.01f;
-            previewRenderer.camera.farClipPlane = Mathf.Max(100f, distance + radius * 6f);
+            ConfigurePreviewCamera(previewRenderer.camera, center, radius, distance, cameraOffset);
 
             int renderPassCount = Mathf.Max(previewMesh.subMeshCount, previewMaterials != null ? previewMaterials.Length : 0);
             for (int passIndex = 0; passIndex < renderPassCount; passIndex++)
@@ -1505,6 +1527,25 @@ public class MeshTransformEditorWindow : EditorWindow
         }
 
         DrawPivotGizmo(previewRect, previewRenderer.camera);
+        DrawPreviewSceneGizmo(previewRect);
+    }
+
+    private void ConfigurePreviewCamera(Camera previewCamera, Vector3 center, float radius, float distance, Vector3 cameraOffset)
+    {
+        previewCamera.orthographic = previewOrthographic;
+        if (previewOrthographic)
+        {
+            previewCamera.orthographicSize = Mathf.Max(radius * previewZoom, 0.05f);
+        }
+        else
+        {
+            previewCamera.fieldOfView = 30f;
+        }
+
+        previewCamera.transform.position = center + cameraOffset;
+        previewCamera.transform.LookAt(center);
+        previewCamera.nearClipPlane = 0.01f;
+        previewCamera.farClipPlane = Mathf.Max(100f, distance + radius * 6f);
     }
 
     private void UpdatePreviewMeshIfNeeded()
@@ -1789,6 +1830,187 @@ public class MeshTransformEditorWindow : EditorWindow
         return pivotPosition + positionOffset;
     }
 
+    private void DrawPreviewSceneGizmo(Rect previewRect)
+    {
+        Rect gizmoRect = GetPreviewSceneGizmoRect(previewRect);
+        HandlePreviewSceneGizmoInput(gizmoRect);
+
+        if (Event.current.type != EventType.Repaint)
+        {
+            return;
+        }
+
+        Vector2 center = gizmoRect.center;
+        Quaternion orbitRotation = Quaternion.Euler(previewOrbit.y, previewOrbit.x, 0f);
+        PreviewSceneGizmoHit hoveredHit = PickPreviewSceneGizmoHit(gizmoRect, orbitRotation, Event.current.mousePosition);
+
+        Handles.BeginGUI();
+        DrawPreviewSceneGizmoBackAxis(center, orbitRotation, Vector3.right);
+        DrawPreviewSceneGizmoBackAxis(center, orbitRotation, Vector3.up);
+        DrawPreviewSceneGizmoBackAxis(center, orbitRotation, Vector3.forward);
+        DrawPreviewSceneGizmoAxis(center, orbitRotation, Vector3.right, "X", PreviewSceneGizmoXColor, hoveredHit == PreviewSceneGizmoHit.X);
+        DrawPreviewSceneGizmoAxis(center, orbitRotation, Vector3.up, "Y", PreviewSceneGizmoYColor, hoveredHit == PreviewSceneGizmoHit.Y);
+        DrawPreviewSceneGizmoAxis(center, orbitRotation, Vector3.forward, "Z", PreviewSceneGizmoZColor, hoveredHit == PreviewSceneGizmoHit.Z);
+
+        Color previousColor = Handles.color;
+        Handles.color = hoveredHit == PreviewSceneGizmoHit.Center ? Color.white : PreviewSceneGizmoCenterColor;
+        Handles.DrawSolidRectangleWithOutline(
+            new Rect(center.x - 5f, center.y - 5f, 10f, 10f),
+            Handles.color,
+            new Color(0.12f, 0.12f, 0.12f, 1f));
+        Handles.color = previousColor;
+        Handles.EndGUI();
+    }
+
+    private static Rect GetPreviewSceneGizmoRect(Rect previewRect)
+    {
+        return new Rect(
+            previewRect.xMax - PreviewSceneGizmoSize - PreviewSceneGizmoPadding,
+            previewRect.y + PreviewSceneGizmoPadding,
+            PreviewSceneGizmoSize,
+            PreviewSceneGizmoSize);
+    }
+
+    private void HandlePreviewSceneGizmoInput(Rect gizmoRect)
+    {
+        Event currentEvent = Event.current;
+        if (currentEvent == null || currentEvent.type != EventType.MouseDown || currentEvent.button != 0)
+        {
+            return;
+        }
+
+        Quaternion orbitRotation = Quaternion.Euler(previewOrbit.y, previewOrbit.x, 0f);
+        PreviewSceneGizmoHit hit = PickPreviewSceneGizmoHit(gizmoRect, orbitRotation, currentEvent.mousePosition);
+        if (hit == PreviewSceneGizmoHit.None)
+        {
+            return;
+        }
+
+        Undo.RecordObject(this, "Change Mesh Preview View");
+        switch (hit)
+        {
+            case PreviewSceneGizmoHit.Center:
+                previewOrthographic = !previewOrthographic;
+                break;
+            case PreviewSceneGizmoHit.X:
+                SetPreviewViewDirection(Vector3.right);
+                break;
+            case PreviewSceneGizmoHit.Y:
+                SetPreviewViewDirection(Vector3.up);
+                break;
+            case PreviewSceneGizmoHit.Z:
+                SetPreviewViewDirection(Vector3.forward);
+                break;
+        }
+
+        previewDirty = true;
+        EditorUtility.SetDirty(this);
+        Repaint();
+        currentEvent.Use();
+    }
+
+    private void SetPreviewViewDirection(Vector3 cameraDirectionFromCenter)
+    {
+        Vector3 direction = cameraDirectionFromCenter.sqrMagnitude > 0f
+            ? cameraDirectionFromCenter.normalized
+            : Vector3.back;
+        float pitch = Mathf.Asin(Mathf.Clamp(direction.y, -0.9998f, 0.9998f)) * Mathf.Rad2Deg;
+        float yaw = Mathf.Atan2(-direction.x, -direction.z) * Mathf.Rad2Deg;
+        previewOrbit = new Vector2(NormalizeAngle(yaw), Mathf.Clamp(pitch, -89f, 89f));
+    }
+
+    private static float NormalizeAngle(float angle)
+    {
+        while (angle > 180f)
+        {
+            angle -= 360f;
+        }
+
+        while (angle < -180f)
+        {
+            angle += 360f;
+        }
+
+        return angle;
+    }
+
+    private static void DrawPreviewSceneGizmoBackAxis(Vector2 center, Quaternion orbitRotation, Vector3 axis)
+    {
+        Vector3 viewAxis = Quaternion.Inverse(orbitRotation) * -axis;
+        Vector2 axisPoint = center + new Vector2(viewAxis.x, -viewAxis.y) * (PreviewSceneGizmoAxisLength * 0.75f);
+
+        Color previousColor = Handles.color;
+        Handles.color = PreviewSceneGizmoBackAxisColor;
+        Handles.DrawAAPolyLine(2f, center, axisPoint);
+        Handles.DrawSolidDisc(axisPoint, Vector3.forward, 3f);
+        Handles.color = previousColor;
+    }
+
+    private static void DrawPreviewSceneGizmoAxis(
+        Vector2 center,
+        Quaternion orbitRotation,
+        Vector3 axis,
+        string label,
+        Color color,
+        bool isHovered)
+    {
+        Vector3 viewAxis = Quaternion.Inverse(orbitRotation) * axis;
+        Vector2 axisPoint = center + new Vector2(viewAxis.x, -viewAxis.y) * PreviewSceneGizmoAxisLength;
+
+        Color previousColor = Handles.color;
+        Handles.color = isHovered ? Color.white : color;
+        Handles.DrawAAPolyLine(3f, center, axisPoint);
+        Handles.DrawSolidDisc(axisPoint, Vector3.forward, isHovered ? 7f : 6f);
+        Handles.color = previousColor;
+
+        Rect labelRect = new Rect(axisPoint.x - 9f, axisPoint.y - 8f, 18f, 16f);
+        GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            normal = { textColor = Color.white }
+        };
+        GUI.Label(labelRect, label, labelStyle);
+    }
+
+    private static PreviewSceneGizmoHit PickPreviewSceneGizmoHit(Rect gizmoRect, Quaternion orbitRotation, Vector2 mousePosition)
+    {
+        if (!gizmoRect.Contains(mousePosition))
+        {
+            return PreviewSceneGizmoHit.None;
+        }
+
+        Vector2 center = gizmoRect.center;
+        if (Vector2.Distance(mousePosition, center) <= PreviewSceneGizmoCenterRadius)
+        {
+            return PreviewSceneGizmoHit.Center;
+        }
+
+        if (IsNearPreviewSceneGizmoAxis(center, orbitRotation, Vector3.right, mousePosition))
+        {
+            return PreviewSceneGizmoHit.X;
+        }
+
+        if (IsNearPreviewSceneGizmoAxis(center, orbitRotation, Vector3.up, mousePosition))
+        {
+            return PreviewSceneGizmoHit.Y;
+        }
+
+        if (IsNearPreviewSceneGizmoAxis(center, orbitRotation, Vector3.forward, mousePosition))
+        {
+            return PreviewSceneGizmoHit.Z;
+        }
+
+        return PreviewSceneGizmoHit.None;
+    }
+
+    private static bool IsNearPreviewSceneGizmoAxis(Vector2 center, Quaternion orbitRotation, Vector3 axis, Vector2 mousePosition)
+    {
+        Vector3 viewAxis = Quaternion.Inverse(orbitRotation) * axis;
+        Vector2 axisPoint = center + new Vector2(viewAxis.x, -viewAxis.y) * PreviewSceneGizmoAxisLength;
+        return Vector2.Distance(mousePosition, axisPoint) <= PreviewSceneGizmoAxisPickRadius
+            || DistanceToSegment(mousePosition, center, axisPoint) <= PreviewSceneGizmoAxisPickRadius * 0.45f;
+    }
+
     private void DrawPivotGizmo(Rect previewRect, Camera previewCamera)
     {
         if (!showPivotInPreview || previewCamera == null)
@@ -1812,7 +2034,9 @@ public class MeshTransformEditorWindow : EditorWindow
         }
 
         float distance = Mathf.Max(Vector3.Distance(previewCamera.transform.position, pivotPreviewPosition), 0.1f);
-        float height = 2f * distance * Mathf.Tan(previewCamera.fieldOfView * Mathf.Deg2Rad * 0.5f);
+        float height = previewCamera.orthographic
+            ? previewCamera.orthographicSize * 2f
+            : 2f * distance * Mathf.Tan(previewCamera.fieldOfView * Mathf.Deg2Rad * 0.5f);
         return Mathf.Max(height * 0.08f, 0.05f);
     }
 

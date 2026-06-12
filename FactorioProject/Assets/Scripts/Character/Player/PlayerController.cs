@@ -68,6 +68,8 @@ public class PlayerController : MonoBehaviour
     private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
+    private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
+    private readonly Dictionary<Block, MapObject> interactionFocusTargetOverrides = new Dictionary<Block, MapObject>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
     private readonly List<WorkableObject> nearbyWorkableRangeObjects = new List<WorkableObject>();
     private readonly List<BoxObject> nearbyBoxObjects = new List<BoxObject>();
@@ -97,6 +99,8 @@ public class PlayerController : MonoBehaviour
     private Vector3 currentConveyorCarryVelocity;
     private bool hasPendingFacingDirection;
     private Vector3 pendingFacingDirection;
+    private Transform interactionPointSnapTarget;
+    private Vehicle interactionPointSnapVehicle;
     private Block temporaryDropFocusBlock;
     private float temporaryDropFocusUntilTime;
     private MapObject currentMouseFocusedMapObject;
@@ -197,6 +201,8 @@ public class PlayerController : MonoBehaviour
 
     private void OnDisable()
     {
+        interactionPointSnapTarget = null;
+        interactionPointSnapVehicle = null;
         RestoreStandingVisualOffset();
         currentConveyorCarryVelocity = Vector3.zero;
         hasPendingFacingDirection = false;
@@ -275,6 +281,259 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    public Vehicle MountedVehicle => interactionPointSnapTarget != null ? interactionPointSnapVehicle : null;
+
+    public bool IsMountedOnVehicle(Vehicle vehicle)
+    {
+        return vehicle != null
+               && interactionPointSnapTarget != null
+               && interactionPointSnapVehicle == vehicle;
+    }
+
+    public bool TryGetMountedVehicleState(out Vehicle vehicle, out int playerPointIndex)
+    {
+        vehicle = MountedVehicle;
+        playerPointIndex = -1;
+        return vehicle != null
+               && vehicle.TryGetPlayerPointIndex(interactionPointSnapTarget, out playerPointIndex);
+    }
+
+    public bool TryRestoreMountedVehicle(Vehicle vehicle, int playerPointIndex)
+    {
+        if (vehicle == null)
+        {
+            ClearInteractionPointSnapForLoad();
+            return false;
+        }
+
+        if (player == null)
+        {
+            player = GetComponent<Player>();
+        }
+
+        if (player == null)
+        {
+            ClearInteractionPointSnapForLoad();
+            return false;
+        }
+
+        return vehicle.TryDockPlayerAtPoint(player, playerPointIndex);
+    }
+
+    public void ClearInteractionPointSnapForLoad()
+    {
+        ClearInteractionPointSnap(true);
+        pendingMoveDirection = Vector3.zero;
+        pendingFacingDirection = Vector3.zero;
+        hasPendingFacingDirection = false;
+        currentConveyorCarryVelocity = Vector3.zero;
+    }
+
+    public bool TrySnapBodyToInteractionPoint(Transform targetPoint, Vehicle vehicle = null)
+    {
+        if (targetPoint == null)
+        {
+            return false;
+        }
+
+        if (player == null)
+        {
+            player = GetComponent<Player>();
+        }
+
+        if (player == null)
+        {
+            return false;
+        }
+
+        if (cachedRigidbody == null)
+        {
+            cachedRigidbody = GetComponent<Rigidbody>();
+        }
+
+        pendingMoveDirection = Vector3.zero;
+        pendingFacingDirection = Vector3.zero;
+        hasPendingFacingDirection = false;
+        currentConveyorCarryVelocity = Vector3.zero;
+
+        if (joystick != null)
+        {
+            joystick.ResetInput();
+        }
+
+        CancelActiveResourceHarvest();
+        ClearTemporaryDropFocus();
+        SetFocusedBlocks(null);
+        SetMouseFocusedBlocks(null);
+        currentMouseFocusedMapObject = null;
+
+        interactionPointSnapTarget = targetPoint;
+        interactionPointSnapVehicle = vehicle;
+        ApplyInteractionPointSnap();
+        player.StopImmediateActions();
+        player.UpdateCarryState();
+        return true;
+    }
+
+    public bool TryDismountFromVehicle()
+    {
+        if (interactionPointSnapTarget == null)
+        {
+            return false;
+        }
+
+        if (player == null)
+        {
+            player = GetComponent<Player>();
+        }
+
+        Quaternion exitRotation = transform.rotation;
+        Vector3 exitPosition = ResolveInteractionPointExitPosition();
+        ClearInteractionPointSnap(true);
+
+        pendingMoveDirection = Vector3.zero;
+        pendingFacingDirection = Vector3.zero;
+        hasPendingFacingDirection = false;
+        currentConveyorCarryVelocity = Vector3.zero;
+
+        if (joystick != null)
+        {
+            joystick.ResetInput();
+        }
+
+        if (cachedRigidbody == null)
+        {
+            cachedRigidbody = GetComponent<Rigidbody>();
+        }
+
+        if (cachedRigidbody != null)
+        {
+            cachedRigidbody.position = exitPosition;
+            cachedRigidbody.rotation = exitRotation;
+            cachedRigidbody.velocity = Vector3.zero;
+            cachedRigidbody.angularVelocity = Vector3.zero;
+        }
+
+        transform.SetPositionAndRotation(exitPosition, exitRotation);
+
+        Transform bodyTransform = player != null && player.BodyTransform != null ? player.BodyTransform : transform;
+        if (bodyTransform != null && bodyTransform != transform)
+        {
+            bodyTransform.rotation = exitRotation;
+        }
+
+        Physics.SyncTransforms();
+        player?.StopImmediateActions();
+        player?.UpdateCarryState();
+        return true;
+    }
+
+    private void ClearInteractionPointSnap(bool restoreVisualOffset)
+    {
+        if (interactionPointSnapTarget == null)
+        {
+            return;
+        }
+
+        interactionPointSnapTarget = null;
+        interactionPointSnapVehicle = null;
+        if (restoreVisualOffset)
+        {
+            RestoreStandingVisualOffset();
+        }
+    }
+
+    private Vector3 ResolveInteractionPointExitPosition()
+    {
+        Transform snapTarget = interactionPointSnapTarget;
+        Vehicle vehicle = interactionPointSnapVehicle;
+        if (snapTarget == null)
+        {
+            return ClampRootPositionToGroundY(transform.position);
+        }
+
+        Vector3 center = vehicle != null ? vehicle.transform.position : transform.position;
+        Vector3 direction = snapTarget.position - center;
+        direction.y = 0f;
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            direction = snapTarget.right;
+            direction.y = 0f;
+        }
+
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            direction = transform.right;
+            direction.y = 0f;
+        }
+
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            direction = Vector3.right;
+        }
+
+        float exitDistance = 0.85f;
+        if (vehicle != null)
+        {
+            MapObject.MapObjectStatus status = vehicle.Status;
+            exitDistance = Mathf.Max(1, Mathf.Max(status.mapSizeX, status.mapSizeY)) * 0.5f + 0.55f;
+        }
+
+        return ClampRootPositionToGroundY(center + direction.normalized * exitDistance);
+    }
+
+    private void ApplyInteractionPointSnap()
+    {
+        if (interactionPointSnapTarget == null)
+        {
+            return;
+        }
+
+        if (player == null)
+        {
+            player = GetComponent<Player>();
+        }
+
+        if (player == null)
+        {
+            interactionPointSnapTarget = null;
+            interactionPointSnapVehicle = null;
+            return;
+        }
+
+        if (cachedRigidbody == null)
+        {
+            cachedRigidbody = GetComponent<Rigidbody>();
+        }
+
+        CacheDefaultBodyLocalPosition();
+        ApplyStandingColliderOffset(0f);
+        standingVisualOffsetVelocity = 0f;
+        hasStandingConveyorCoordinate = false;
+        standingConveyorCoordinate = default;
+
+        Vector3 targetPosition = interactionPointSnapTarget.position;
+        Quaternion targetRotation = interactionPointSnapTarget.rotation;
+
+        if (cachedRigidbody != null)
+        {
+            cachedRigidbody.position = targetPosition;
+            cachedRigidbody.rotation = targetRotation;
+            cachedRigidbody.velocity = Vector3.zero;
+            cachedRigidbody.angularVelocity = Vector3.zero;
+        }
+
+        transform.SetPositionAndRotation(targetPosition, targetRotation);
+
+        Transform bodyTransform = player.BodyTransform != null ? player.BodyTransform : transform;
+        if (bodyTransform != null && bodyTransform != transform)
+        {
+            bodyTransform.SetPositionAndRotation(targetPosition, targetRotation);
+        }
+
+        Physics.SyncTransforms();
+    }
+
     private bool IsTemporaryDropFocusBlockedByMode()
     {
         if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
@@ -288,7 +547,14 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
-        SnapRootToGroundY();
+        if (interactionPointSnapTarget != null)
+        {
+            ApplyInteractionPointSnap();
+        }
+        else
+        {
+            SnapRootToGroundY();
+        }
 
         player?.UpdateDropExitGate(transform.position);
 
@@ -318,6 +584,20 @@ public class PlayerController : MonoBehaviour
 
         Vector3 moveDirection = GetMoveDirection(input);
         bool hasMovement = moveDirection.sqrMagnitude > 0.0001f;
+
+        if (interactionPointSnapTarget != null)
+        {
+            if (interactionPointSnapVehicle != null)
+            {
+                float mountedMoveSpeed = player != null ? player.Stat.currentMoveSpeed : 0f;
+                interactionPointSnapVehicle.HandleMountedInput(moveDirection, mountedMoveSpeed, Time.deltaTime);
+                ApplyInteractionPointSnap();
+            }
+
+            moveDirection = Vector3.zero;
+            hasMovement = false;
+            currentConveyorCarryVelocity = Vector3.zero;
+        }
 
         if (hasMovement)
         {
@@ -369,6 +649,12 @@ public class PlayerController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (interactionPointSnapTarget != null)
+        {
+            ApplyInteractionPointSnap();
+            return;
+        }
+
         SnapRootToGroundY();
 
         if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
@@ -467,6 +753,12 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (interactionPointSnapTarget != null)
+        {
+            ApplyInteractionPointSnap();
+            return;
+        }
+
         SnapRootToGroundY();
         ApplyStandingOffset();
     }
@@ -1288,6 +1580,15 @@ public class PlayerController : MonoBehaviour
 
     private void HandleInstallationPlacementLock()
     {
+        if (interactionPointSnapTarget != null && interactionPointSnapVehicle != null)
+        {
+            ApplyInteractionPointSnap();
+        }
+        else
+        {
+            ClearInteractionPointSnap(true);
+        }
+
         pendingMoveDirection = Vector3.zero;
         pendingFacingDirection = Vector3.zero;
         hasPendingFacingDirection = false;
@@ -1490,6 +1791,7 @@ public class PlayerController : MonoBehaviour
     {
         ExpireTemporaryDropFocusIfNeeded();
 
+        interactionFocusTargetOverrides.Clear();
         TryGetStandingConveyorFocusBlock(out Block standingConveyorFocusBlock);
 
         combinedInteractionFocusBlocks.Clear();
@@ -1545,6 +1847,7 @@ public class PlayerController : MonoBehaviour
         MapObject closestTarget = null;
         Block closestFallbackBlock = null;
         float closestDistanceSqr = float.MaxValue;
+        bool foundVehicleTarget = false;
 
         for (int i = 0; i < focusBlocks.Count; i++)
         {
@@ -1555,12 +1858,26 @@ public class PlayerController : MonoBehaviour
             }
 
             MapObject target = ResolveInteractionFocusTarget(block);
-            float distanceSqr = GetInteractionFocusTargetDistanceSqr(target, block, origin);
-            if (distanceSqr >= closestDistanceSqr)
+            bool isVehicleTarget = target is Vehicle;
+            if (foundVehicleTarget && !isVehicleTarget)
             {
                 continue;
             }
 
+            float distanceSqr = GetInteractionFocusTargetDistanceSqr(target, block, origin);
+            if (!isVehicleTarget && distanceSqr >= closestDistanceSqr)
+            {
+                continue;
+            }
+
+            if (isVehicleTarget
+                && foundVehicleTarget
+                && distanceSqr >= closestDistanceSqr)
+            {
+                continue;
+            }
+
+            foundVehicleTarget = isVehicleTarget || foundVehicleTarget;
             closestDistanceSqr = distanceSqr;
             closestTarget = target;
             closestFallbackBlock = block;
@@ -1584,11 +1901,19 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private static MapObject ResolveInteractionFocusTarget(Block block)
+    private MapObject ResolveInteractionFocusTarget(Block block)
     {
         if (block == null)
         {
             return null;
+        }
+
+        if (interactionFocusTargetOverrides.TryGetValue(block, out MapObject overrideTarget)
+            && overrideTarget != null
+            && overrideTarget.gameObject.activeInHierarchy
+            && overrideTarget.AllowsFocus)
+        {
+            return overrideTarget;
         }
 
         if (IsInputOutputRuntimeFocusAreaCoordinate(block.Coordinate)
@@ -2436,49 +2761,91 @@ public class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                if (!(block.MapObject is InstallationObject installationObject)
-                    || installationObject == null
-                    || !installationObject.gameObject.activeInHierarchy
-                    || !installationObject.AllowsFocus
-                    || installationObject is WorkableObject
-                    || installationObject is BoxObject)
+                TryAppendNearbyInstallationFocus(
+                    block.MapObject as InstallationObject,
+                    block,
+                    origin,
+                    focusForward,
+                    results,
+                    ref nearestFocusCandidate,
+                    standingConveyorFocusBlock);
+
+                nearbyRuntimeInstallationScratch.Clear();
+                InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+                    coordinate,
+                    nearbyRuntimeInstallationScratch);
+                for (int i = 0; i < nearbyRuntimeInstallationScratch.Count; i++)
                 {
-                    continue;
+                    TryAppendNearbyInstallationFocus(
+                        nearbyRuntimeInstallationScratch[i],
+                        block,
+                        origin,
+                        focusForward,
+                        results,
+                        ref nearestFocusCandidate,
+                        standingConveyorFocusBlock);
                 }
-
-                if (nearbyInstallationObjects.Contains(installationObject))
-                {
-                    continue;
-                }
-
-                if (standingConveyorFocusBlock != null && installationObject is ConveyorBelt)
-                {
-                    continue;
-                }
-
-                nearbyInstallationObjects.Add(installationObject);
-
-                float focusRadius = Mathf.Max(0f, installationObject.FocusActivationRadius);
-                if (focusRadius <= 0f)
-                {
-                    continue;
-                }
-
-                float score = GetMapObjectFocusSelectionScore(installationObject, block, origin, focusForward, out float distanceSqr);
-                if (distanceSqr > focusRadius * focusRadius)
-                {
-                    continue;
-                }
-
-                if (installationObject.FocusMode == MapObject.MultiFocusMode.NearOne)
-                {
-                    TrySetInteractionFocusCandidate(ref nearestFocusCandidate, score, installationObject, block);
-                    continue;
-                }
-
-                AppendMapObjectFocusBlocks(installationObject, block, results);
             }
         }
+
+        nearbyRuntimeInstallationScratch.Clear();
+    }
+
+    private void TryAppendNearbyInstallationFocus(
+        InstallationObject installationObject,
+        Block block,
+        Vector3 origin,
+        Vector3 focusForward,
+        List<Block> results,
+        ref InteractionFocusCandidate nearestFocusCandidate,
+        Block standingConveyorFocusBlock)
+    {
+        if (installationObject == null
+            || block == null
+            || !installationObject.gameObject.activeInHierarchy
+            || !installationObject.AllowsFocus
+            || installationObject is WorkableObject
+            || installationObject is BoxObject)
+        {
+            return;
+        }
+
+        if (nearbyInstallationObjects.Contains(installationObject))
+        {
+            return;
+        }
+
+        if (standingConveyorFocusBlock != null && installationObject is ConveyorBelt)
+        {
+            return;
+        }
+
+        nearbyInstallationObjects.Add(installationObject);
+
+        float focusRadius = Mathf.Max(0f, installationObject.FocusActivationRadius);
+        if (focusRadius <= 0f)
+        {
+            return;
+        }
+
+        float score = GetMapObjectFocusSelectionScore(
+            installationObject,
+            block,
+            origin,
+            focusForward,
+            out float distanceSqr);
+        if (distanceSqr > focusRadius * focusRadius)
+        {
+            return;
+        }
+
+        if (installationObject.FocusMode == MapObject.MultiFocusMode.NearOne)
+        {
+            TrySetInteractionFocusCandidate(ref nearestFocusCandidate, score, installationObject, block);
+            return;
+        }
+
+        AppendMapObjectFocusBlocks(installationObject, block, results);
     }
 
     private float GetWorkableFocusDistanceSqr(WorkableObject workableObject, Block block, Vector3 origin)
@@ -2778,7 +3145,7 @@ public class PlayerController : MonoBehaviour
             {
                 for (int i = 0; i < focusCoordinates.Count; i++)
                 {
-                    if (!TryAppendFocusBlock(results, focusCoordinates[i]))
+                    if (!TryAppendFocusBlock(results, focusCoordinates[i], inputOutputModule))
                     {
                         continue;
                     }
@@ -2794,7 +3161,7 @@ public class PlayerController : MonoBehaviour
             {
                 for (int i = 0; i < occupiedCoordinates.Count; i++)
                 {
-                    if (!TryAppendFocusBlock(results, occupiedCoordinates[i]))
+                    if (!TryAppendFocusBlock(results, occupiedCoordinates[i], installationObject))
                     {
                         continue;
                     }
@@ -2807,7 +3174,7 @@ public class PlayerController : MonoBehaviour
             {
                 for (int i = 0; i < visualCoordinates.Count; i++)
                 {
-                    if (!TryAppendFocusBlock(results, visualCoordinates[i]))
+                    if (!TryAppendFocusBlock(results, visualCoordinates[i], installationObject))
                     {
                         continue;
                     }
@@ -2826,7 +3193,7 @@ public class PlayerController : MonoBehaviour
         return appended;
     }
 
-    private bool TryAppendFocusBlock(List<Block> results, Vector2Int coordinate)
+    private bool TryAppendFocusBlock(List<Block> results, Vector2Int coordinate, MapObject targetOverride = null)
     {
         if (results == null)
         {
@@ -2835,14 +3202,44 @@ public class PlayerController : MonoBehaviour
 
         if (ResolveTerrainGenerator() == null
             || !cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || results.Contains(block))
+            || block == null)
+        {
+            return false;
+        }
+
+        SetInteractionFocusTargetOverride(block, targetOverride);
+        if (results.Contains(block))
         {
             return false;
         }
 
         results.Add(block);
         return true;
+    }
+
+    private void SetInteractionFocusTargetOverride(Block block, MapObject targetOverride)
+    {
+        if (block == null || targetOverride == null)
+        {
+            return;
+        }
+
+        if (interactionFocusTargetOverrides.TryGetValue(block, out MapObject existing)
+            && existing != null
+            && existing != targetOverride
+            && existing is Vehicle
+            && targetOverride is Railload)
+        {
+            return;
+        }
+
+        if (targetOverride is Vehicle
+            || !interactionFocusTargetOverrides.TryGetValue(block, out existing)
+            || existing == null
+            || existing is Railload)
+        {
+            interactionFocusTargetOverrides[block] = targetOverride;
+        }
     }
 
     private void RefreshMouseMapObjectFocus()

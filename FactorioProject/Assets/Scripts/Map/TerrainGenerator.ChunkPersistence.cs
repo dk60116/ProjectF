@@ -1073,7 +1073,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 savedState.anchorCoordinate,
                 restoreQuarterTurns,
                 savedState.inputOutputState,
-                savedState.placementSequence);
+                savedState.placementSequence,
+                occupiedCoordinates);
         }
         else
         {
@@ -1106,6 +1107,14 @@ public partial class TerrainGenerator : MonoBehaviour
             savedState.occupiedCoordinates = occupiedCoordinates;
         }
 
+        if (restoredInstallation is Railload restoredRailload)
+        {
+            restoredRailload.ConfigureVisualPath(
+                savedState.railVisualPathPoints,
+                savedState.railVisualPathExtendsStart,
+                savedState.railVisualPathExtendsEnd);
+        }
+
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
         restoredInstallation.SetStoredFluid(
             savedState.storedFluidItemId,
@@ -1129,6 +1138,11 @@ public partial class TerrainGenerator : MonoBehaviour
         using (BindLoadedInstallationBlocksMarker.Auto())
         {
         if (installedObject == null || occupiedCoordinates == null)
+        {
+            return;
+        }
+
+        if (installedObject is Train)
         {
             return;
         }

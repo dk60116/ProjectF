@@ -14,7 +14,8 @@ public enum InstallationMapFilter
     ItemArea = 1 << 3,
     Tree = 1 << 4,
     WaterOutline = 1 << 5,
-    Pipe = 1 << 6
+    Pipe = 1 << 6,
+    Railload = 1 << 7
 }
 
 public enum InstallationFacingDirection

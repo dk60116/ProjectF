@@ -684,7 +684,7 @@
                     "itemId": 27,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
-                    "count": 4
+                    "count": 3
                 },
                 {
                     "itemId": 13,
@@ -718,12 +718,18 @@
                     "itemId": 20,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 4
+                    "count": 2
                 },
                 {
                     "itemId": 31,
                     "itemName": "Boiler",
                     "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 40,
+                    "itemName": "Wooden wheel",
+                    "definitionAssetPath": "Assets/Data/Items/Item_41_Wooden wheel.asset",
                     "count": 1
                 }
             ],
@@ -950,6 +956,34 @@
                     "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 40,
+            "itemName": "Wooden wheel",
+            "definitionAssetPath": "Assets/Data/Items/Item_41_Wooden wheel.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 }
             ],
@@ -1652,7 +1686,7 @@
                     "itemId": 27,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
-                    "count": 4
+                    "count": 3
                 },
                 {
                     "itemId": 13,
@@ -1686,12 +1720,18 @@
                     "itemId": 20,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 4
+                    "count": 2
                 },
                 {
                     "itemId": 31,
                     "itemName": "Boiler",
                     "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 40,
+                    "itemName": "Wooden wheel",
+                    "definitionAssetPath": "Assets/Data/Items/Item_41_Wooden wheel.asset",
                     "count": 1
                 }
             ],
@@ -1918,6 +1958,34 @@
                     "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 40,
+            "itemName": "Wooden wheel",
+            "definitionAssetPath": "Assets/Data/Items/Item_41_Wooden wheel.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 }
             ],
@@ -2620,7 +2688,7 @@
                     "itemId": 27,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_28_Pipe.asset",
-                    "count": 4
+                    "count": 3
                 },
                 {
                     "itemId": 13,
@@ -2654,12 +2722,18 @@
                     "itemId": 20,
                     "itemName": "Gear",
                     "definitionAssetPath": "Assets/Data/Items/Item_15_Gear.asset",
-                    "count": 4
+                    "count": 2
                 },
                 {
                     "itemId": 31,
                     "itemName": "Boiler",
                     "definitionAssetPath": "Assets/Data/Items/Item_29_Boiler.asset",
+                    "count": 1
+                },
+                {
+                    "itemId": 40,
+                    "itemName": "Wooden wheel",
+                    "definitionAssetPath": "Assets/Data/Items/Item_41_Wooden wheel.asset",
                     "count": 1
                 }
             ],
@@ -2886,6 +2960,34 @@
                     "itemId": 0,
                     "itemName": "Log",
                     "definitionAssetPath": "Assets/Data/Items/Item_5_Log.asset",
+                    "count": 4
+                }
+            ],
+            "craftingMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ],
+            "requiredMapObjects": [
+                {
+                    "itemId": 12,
+                    "mapObjectName": "Workbench",
+                    "assetPath": "Assets/MapObject/Workable/Workbench/Workbench.prefab"
+                }
+            ]
+        },
+        {
+            "itemId": 40,
+            "itemName": "Wooden wheel",
+            "definitionAssetPath": "Assets/Data/Items/Item_41_Wooden wheel.asset",
+            "outputCount": 1,
+            "ingredients": [
+                {
+                    "itemId": 9,
+                    "itemName": "Woodplank",
+                    "definitionAssetPath": "Assets/Data/Items/Item_6_Woodplank.asset",
                     "count": 4
                 }
             ],

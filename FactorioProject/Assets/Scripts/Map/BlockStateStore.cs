@@ -10,8 +10,13 @@ public partial class BlockStateStore : MonoBehaviour
         public int itemId;
         public int quarterTurns;
         public long placementSequence;
+        public bool hasStorageKey;
+        public Vector2Int storageKey;
         public int conveyorVariantKind = -1;
         public List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
+        public List<Vector2> railVisualPathPoints = new List<Vector2>();
+        public bool railVisualPathExtendsStart = true;
+        public bool railVisualPathExtendsEnd = true;
         public InputOutputModule.PersistentState inputOutputState;
         public RobotArm.PersistentState robotArmState;
         public long lastBackgroundSimulationTicks;
@@ -30,8 +35,13 @@ public partial class BlockStateStore : MonoBehaviour
                 itemId = itemId,
                 quarterTurns = quarterTurns,
                 placementSequence = placementSequence,
+                hasStorageKey = hasStorageKey,
+                storageKey = storageKey,
                 conveyorVariantKind = conveyorVariantKind,
                 occupiedCoordinates = new List<Vector2Int>(occupiedCoordinates ?? new List<Vector2Int>()),
+                railVisualPathPoints = new List<Vector2>(railVisualPathPoints ?? new List<Vector2>()),
+                railVisualPathExtendsStart = railVisualPathExtendsStart,
+                railVisualPathExtendsEnd = railVisualPathExtendsEnd,
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
                 robotArmState = robotArmState != null ? robotArmState.Clone() : null,
                 lastBackgroundSimulationTicks = lastBackgroundSimulationTicks,
@@ -311,6 +321,8 @@ public partial class BlockStateStore : MonoBehaviour
         {
             return;
         }
+
+        RemoveLiveInstallationRecordsForSamePlacement(installationObject, storedState, storageKey);
 
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord existingRecord))
         {
@@ -694,6 +706,13 @@ public partial class BlockStateStore : MonoBehaviour
             state.conveyorVariantKind = pipe.VariantKindId;
         }
 
+        if (installationObject is Railload railload)
+        {
+            state.railVisualPathPoints = railload.CopyVisualPathPoints();
+            state.railVisualPathExtendsStart = railload.RuntimeVisualPathExtendsStart;
+            state.railVisualPathExtendsEnd = railload.RuntimeVisualPathExtendsEnd;
+        }
+
         if (installationObject is InputOutputModule inputOutputModule)
         {
             state.inputOutputState = inputOutputModule.CapturePersistentState();
@@ -845,6 +864,8 @@ public partial class BlockStateStore : MonoBehaviour
 
         storedState = state.Clone();
         storageKey = ResolveInstallationStorageKey(storedState, savedInstallationStates);
+        AssignInstallationStorageKey(storedState, storageKey);
+        RemoveSavedInstallationStatesForSamePlacement(storedState, storageKey);
         if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState existingState))
         {
             if (storedState.lastBackgroundSimulationTicks <= 0)
@@ -863,7 +884,120 @@ public partial class BlockStateStore : MonoBehaviour
         return true;
     }
 
+    private void RemoveSavedInstallationStatesForSamePlacement(InstallationSaveState state, Vector2Int newStorageKey)
+    {
+        if (state == null || state.placementSequence <= 0 || savedInstallationStates.Count <= 0)
+        {
+            return;
+        }
+
+        List<Vector2Int> duplicateKeys = null;
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        {
+            if (pair.Key == newStorageKey || !InstallationStatesRepresentSamePlacement(pair.Value, state))
+            {
+                continue;
+            }
+
+            duplicateKeys ??= new List<Vector2Int>();
+            duplicateKeys.Add(pair.Key);
+        }
+
+        if (duplicateKeys == null)
+        {
+            return;
+        }
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        for (int i = 0; i < duplicateKeys.Count; i++)
+        {
+            Vector2Int duplicateKey = duplicateKeys[i];
+            if (!savedInstallationStates.TryGetValue(duplicateKey, out InstallationSaveState duplicateState))
+            {
+                continue;
+            }
+
+            AdjustSavedInstallationCount(duplicateState, -1);
+            UnregisterSavedCoordinateMappings(duplicateState, duplicateKey);
+            savedInstallationStates.Remove(duplicateKey);
+            world?.RemoveInstallation(duplicateKey);
+        }
+    }
+
+    private void RemoveLiveInstallationRecordsForSamePlacement(
+        InstallationObject installationObject,
+        InstallationSaveState state,
+        Vector2Int newStorageKey)
+    {
+        if ((installationObject == null && (state == null || state.placementSequence <= 0))
+            || liveInstallationStates.Count <= 0)
+        {
+            return;
+        }
+
+        List<Vector2Int> duplicateKeys = null;
+        foreach (KeyValuePair<Vector2Int, LiveInstallationRecord> pair in liveInstallationStates)
+        {
+            if (pair.Key == newStorageKey || pair.Value == null)
+            {
+                continue;
+            }
+
+            bool sameObject = installationObject != null
+                              && ReferenceEquals(pair.Value.installationObject, installationObject);
+            bool samePlacement = InstallationStatesRepresentSamePlacement(pair.Value.state, state);
+            if (!sameObject && !samePlacement)
+            {
+                continue;
+            }
+
+            duplicateKeys ??= new List<Vector2Int>();
+            duplicateKeys.Add(pair.Key);
+        }
+
+        if (duplicateKeys == null)
+        {
+            return;
+        }
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        for (int i = 0; i < duplicateKeys.Count; i++)
+        {
+            Vector2Int duplicateKey = duplicateKeys[i];
+            if (!liveInstallationStates.TryGetValue(duplicateKey, out LiveInstallationRecord duplicateRecord))
+            {
+                continue;
+            }
+
+            UnregisterLiveCoordinateMappings(duplicateRecord.state, duplicateKey);
+            liveInstallationStates.Remove(duplicateKey);
+            if (savedInstallationStates.TryGetValue(duplicateKey, out InstallationSaveState savedState))
+            {
+                world?.UpsertInstallation(savedState);
+            }
+            else
+            {
+                world?.RemoveInstallation(duplicateKey);
+            }
+        }
+    }
+
     public static Vector2Int GetInstallationStorageKey(InstallationSaveState state)
+    {
+        if (state == null)
+        {
+            return default;
+        }
+
+        if (state.hasStorageKey)
+        {
+            return state.storageKey;
+        }
+
+        return GetNaturalInstallationStorageKey(state);
+    }
+
+    private static Vector2Int GetNaturalInstallationStorageKey(InstallationSaveState state)
     {
         if (state == null)
         {
@@ -908,7 +1042,17 @@ public partial class BlockStateStore : MonoBehaviour
         InstallationSaveState state,
         Dictionary<Vector2Int, InstallationSaveState> statesByStorageKey)
     {
-        Vector2Int preferredKey = GetInstallationStorageKey(state);
+        if (state != null
+            && state.hasStorageKey
+            && (statesByStorageKey == null
+                || !statesByStorageKey.TryGetValue(state.storageKey, out InstallationSaveState existingStorageState)
+                || InstallationStatesCanShareStorageKey(existingStorageState, state)
+                || InstallationStatesRepresentSamePlacement(existingStorageState, state)))
+        {
+            return state.storageKey;
+        }
+
+        Vector2Int preferredKey = GetNaturalInstallationStorageKey(state);
         if (statesByStorageKey == null
             || !statesByStorageKey.TryGetValue(preferredKey, out InstallationSaveState existingState)
             || InstallationStatesCanShareStorageKey(existingState, state))
@@ -929,7 +1073,34 @@ public partial class BlockStateStore : MonoBehaviour
             }
         }
 
+        if (state != null && state.placementSequence > 0)
+        {
+            return CreateSyntheticInstallationStorageKey(state);
+        }
+
         return preferredKey;
+    }
+
+    private static Vector2Int CreateSyntheticInstallationStorageKey(InstallationSaveState state)
+    {
+        long sequence = state != null ? Math.Max(1L, state.placementSequence) : 1L;
+        unchecked
+        {
+            int x = int.MinValue + 4096 + (int)(sequence & 0x0FFFFFFF);
+            int y = int.MinValue + 4096 + (int)((sequence >> 28) & 0x0FFFFFFF);
+            return new Vector2Int(x, y);
+        }
+    }
+
+    private static void AssignInstallationStorageKey(InstallationSaveState state, Vector2Int storageKey)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        state.hasStorageKey = true;
+        state.storageKey = storageKey;
     }
 
     private static bool InstallationStatesCanShareStorageKey(
@@ -941,6 +1112,17 @@ public partial class BlockStateStore : MonoBehaviour
                || (existingState.anchorCoordinate == state.anchorCoordinate
                    && existingState.itemId == state.itemId
                    && existingState.placementSequence == state.placementSequence);
+    }
+
+    private static bool InstallationStatesRepresentSamePlacement(
+        InstallationSaveState existingState,
+        InstallationSaveState state)
+    {
+        return existingState != null
+               && state != null
+               && existingState.placementSequence > 0
+               && existingState.placementSequence == state.placementSequence
+               && existingState.itemId == state.itemId;
     }
 
     private void AdjustSavedInstallationCount(InstallationSaveState state, int delta)
@@ -989,7 +1171,11 @@ public partial class BlockStateStore : MonoBehaviour
 
         for (int i = 0; i < state.occupiedCoordinates.Count; i++)
         {
-            savedInstallationAnchorsByCoordinate[state.occupiedCoordinates[i]] = storageKey;
+            Vector2Int coordinate = state.occupiedCoordinates[i];
+            if (ShouldReplaceSavedCoordinateMapping(coordinate, storageKey, state))
+            {
+                savedInstallationAnchorsByCoordinate[coordinate] = storageKey;
+            }
         }
     }
 
@@ -1020,8 +1206,87 @@ public partial class BlockStateStore : MonoBehaviour
 
         for (int i = 0; i < state.occupiedCoordinates.Count; i++)
         {
-            liveInstallationAnchorsByCoordinate[state.occupiedCoordinates[i]] = storageKey;
+            Vector2Int coordinate = state.occupiedCoordinates[i];
+            if (ShouldReplaceLiveCoordinateMapping(coordinate, storageKey, state))
+            {
+                liveInstallationAnchorsByCoordinate[coordinate] = storageKey;
+            }
         }
+    }
+
+    private bool ShouldReplaceSavedCoordinateMapping(
+        Vector2Int coordinate,
+        Vector2Int storageKey,
+        InstallationSaveState state)
+    {
+        if (!savedInstallationAnchorsByCoordinate.TryGetValue(coordinate, out Vector2Int existingStorageKey)
+            || existingStorageKey == storageKey
+            || !savedInstallationStates.TryGetValue(existingStorageKey, out InstallationSaveState existingState)
+            || existingState == null)
+        {
+            return true;
+        }
+
+        return ShouldReplaceCoordinateMapping(existingState, state);
+    }
+
+    private bool ShouldReplaceLiveCoordinateMapping(
+        Vector2Int coordinate,
+        Vector2Int storageKey,
+        InstallationSaveState state)
+    {
+        if (!liveInstallationAnchorsByCoordinate.TryGetValue(coordinate, out Vector2Int existingStorageKey)
+            || existingStorageKey == storageKey
+            || !liveInstallationStates.TryGetValue(existingStorageKey, out LiveInstallationRecord existingRecord)
+            || existingRecord?.state == null)
+        {
+            return true;
+        }
+
+        return ShouldReplaceCoordinateMapping(existingRecord.state, state);
+    }
+
+    private static bool ShouldReplaceCoordinateMapping(
+        InstallationSaveState existingState,
+        InstallationSaveState incomingState)
+    {
+        bool existingIsTrain = IsTrainInstallationState(existingState);
+        bool incomingIsTrain = IsTrainInstallationState(incomingState);
+        if (existingIsTrain != incomingIsTrain)
+        {
+            return existingIsTrain;
+        }
+
+        return true;
+    }
+
+    private static bool IsTrainInstallationState(InstallationSaveState state)
+    {
+        if (state == null || state.itemId < 0)
+        {
+            return false;
+        }
+
+        IReadOnlyList<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        if (definitions == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null || definition.id != state.itemId || definition.mapObject == null)
+            {
+                continue;
+            }
+
+            return definition.mapObject is Train
+                   || definition.mapObject.GetComponent<Train>() != null
+                   || definition.mapObject.GetComponentInChildren<Train>(true) != null;
+        }
+
+        return false;
     }
 
     private void UnregisterLiveCoordinateMappings(InstallationSaveState state, Vector2Int storageKey)

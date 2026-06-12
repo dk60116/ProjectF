@@ -260,13 +260,14 @@ internal sealed class ProfilerForm : Form
             ImageLayout = DataGridViewImageCellLayout.Zoom
         });
         rowsGrid.Columns.Add(CreateTextColumn("Rank", "#", 7));
-        rowsGrid.Columns.Add(CreateTextColumn("Item", "Item", 26));
-        rowsGrid.Columns.Add(CreateTextColumn("Type", "Type", 18));
-        rowsGrid.Columns.Add(CreateTextColumn("Kind", "Tick", 9));
-        rowsGrid.Columns.Add(CreateTextColumn("Samples", "Samples", 12));
-        rowsGrid.Columns.Add(CreateTextColumn("TotalMs", "Total ms", 12));
-        rowsGrid.Columns.Add(CreateTextColumn("AvgUs", "Avg us", 12));
-        rowsGrid.Columns.Add(CreateTextColumn("MaxUs", "Max us", 12));
+        rowsGrid.Columns.Add(CreateTextColumn("Item", "Item", 24));
+        rowsGrid.Columns.Add(CreateTextColumn("Type", "Type", 17));
+        rowsGrid.Columns.Add(CreateTextColumn("Kind", "Tick", 8));
+        rowsGrid.Columns.Add(CreateTextColumn("Active", "Active", 10));
+        rowsGrid.Columns.Add(CreateTextColumn("Samples", "Samples", 11));
+        rowsGrid.Columns.Add(CreateTextColumn("TotalMs", "Total ms", 11));
+        rowsGrid.Columns.Add(CreateTextColumn("AvgUs", "Avg us", 11));
+        rowsGrid.Columns.Add(CreateTextColumn("MaxUs", "Max us", 11));
     }
 
     private static DataGridViewTextBoxColumn CreateTextColumn(string name, string headerText, float fillWeight)
@@ -415,7 +416,7 @@ internal sealed class ProfilerForm : Form
         profileRows.Clear();
         if (snapshot?.Rows != null)
         {
-            profileRows.AddRange(snapshot.Rows.Where(row => row.Samples > 0));
+            profileRows.AddRange(snapshot.Rows.Where(row => row.Samples > 0 || row.ActiveCount > 0));
         }
 
         if (snapshot == null)
@@ -463,6 +464,7 @@ internal sealed class ProfilerForm : Form
                 ResolveRowDisplayName(row),
                 row.Type,
                 row.Kind,
+                row.ActiveCount.ToString("N0", CultureInfo.InvariantCulture),
                 row.Samples.ToString("N0", CultureInfo.InvariantCulture),
                 (row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture),
                 row.AvgUs.ToString("0.#", CultureInfo.InvariantCulture),
@@ -537,7 +539,7 @@ internal sealed class ProfilerForm : Form
                 ResolveRowBrush(row, updateBrush, lateBrush, beltBrush),
                 new Rectangle(barRect.Left, barRect.Top, filledWidth, barRect.Height));
 
-            string metrics = $"{row.TotalUs / 1000.0:0.###} ms   avg {row.AvgUs:0.#} us   max {row.MaxUs:0.#} us   x{row.Samples:N0}";
+            string metrics = $"{row.TotalUs / 1000.0:0.###} ms   avg {row.AvgUs:0.#} us   max {row.MaxUs:0.#} us   x{row.Samples:N0}   active {row.ActiveCount:N0}";
             e.Graphics.DrawString(metrics, graphFont, dimBrush, metricRect, textFormat);
             e.Graphics.DrawLine(dividerPen, rowRect.Left, rowRect.Bottom, rowRect.Right, rowRect.Bottom);
         }
@@ -819,6 +821,9 @@ internal sealed class ProfileRow
 
     [JsonPropertyName("itemName")]
     public string ItemName { get; set; } = string.Empty;
+
+    [JsonPropertyName("activeCount")]
+    public int ActiveCount { get; set; }
 
     [JsonPropertyName("samples")]
     public long Samples { get; set; }

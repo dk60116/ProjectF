@@ -542,6 +542,10 @@ MonoBehaviour:
     count: 4
   - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
     count: 6
+  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+    count: 4
+  - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+    count: 4
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 2
@@ -566,6 +570,10 @@ MonoBehaviour:
   - itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
     count: 2
   - itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 29620dee78689b74d8666d2dcf035334, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 288b9f932dd1bc740bf07478a3843894, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}

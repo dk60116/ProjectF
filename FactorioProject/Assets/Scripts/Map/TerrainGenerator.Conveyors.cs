@@ -87,6 +87,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorTickBuffer.Clear();
         activeConveyorDataMotionBlocks.Clear();
         activeConveyorDataMotionIndices.Clear();
+        activeConveyorDataMotionDueTimes.Clear();
         sortedActiveConveyors.Clear();
         activeConveyorOrderDirty = true;
         conveyorNetworkIds.Clear();
@@ -1304,45 +1305,40 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        int index = 0;
-        int remainingCount = activeConveyorDataMotionBlocks.Count;
-        while (index < activeConveyorDataMotionBlocks.Count && remainingCount > 0)
+        float now = Time.time;
+        int processedCount = 0;
+        int processLimit = Mathf.Max(GetEffectiveConveyorWakeQueueProcessLimit(), activeConveyorDataMotionBlocks.Count);
+        while (activeConveyorDataMotionBlocks.Count > 0 && processedCount < processLimit)
         {
-            remainingCount--;
-            Block block = activeConveyorDataMotionBlocks[index];
+            Block block = activeConveyorDataMotionBlocks[0];
+            if (block == null || !activeConveyorDataMotionDueTimes.ContainsKey(block))
+            {
+                RemoveActiveConveyorDataMotionAt(0);
+                continue;
+            }
+
+            float dueTime = GetActiveConveyorDataMotionDueTime(block);
+            if (dueTime > now + 0.0001f)
+            {
+                break;
+            }
+
+            processedCount++;
+            RemoveActiveConveyorDataMotionAt(0);
             if (block == null || !IsLoadedRuntimeBlock(block))
             {
-                RemoveActiveConveyorDataMotionAt(index);
                 activeConveyors.Remove(block);
                 continue;
             }
 
             if (!block.HasActiveVirtualConveyorDataMotion())
             {
-                RemoveActiveConveyorDataMotionAt(index);
                 block.RefreshConveyorActivityRegistration();
                 continue;
             }
 
-            block.TickVirtualConveyorDataMotion(deltaTime);
-            if (!activeConveyorDataMotionIndices.TryGetValue(block, out int currentIndex))
-            {
-                continue;
-            }
-
-            if (currentIndex != index)
-            {
-                continue;
-            }
-
-            if (block.HasActiveVirtualConveyorDataMotion())
-            {
-                index++;
-                continue;
-            }
-
-            RemoveActiveConveyorDataMotionAt(index);
-            block.RefreshConveyorActivityRegistration();
+            block.CompleteDueVirtualConveyorDataMotions(now);
+            block.RefreshConveyorActivityRegistration(false);
             if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);
@@ -1352,13 +1348,30 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void AddActiveConveyorDataMotionBlock(Block block)
     {
-        if (block == null || activeConveyorDataMotionIndices.ContainsKey(block))
+        if (block == null)
         {
             return;
         }
 
-        activeConveyorDataMotionIndices[block] = activeConveyorDataMotionBlocks.Count;
+        float dueTime = block.GetNextVirtualConveyorDataMotionCompletionTime();
+        if (float.IsNaN(dueTime) || float.IsInfinity(dueTime))
+        {
+            RemoveActiveConveyorDataMotionBlock(block);
+            return;
+        }
+
+        if (activeConveyorDataMotionIndices.TryGetValue(block, out int existingIndex))
+        {
+            activeConveyorDataMotionDueTimes[block] = dueTime;
+            RestoreActiveConveyorDataMotionHeapAt(existingIndex);
+            return;
+        }
+
+        int index = activeConveyorDataMotionBlocks.Count;
         activeConveyorDataMotionBlocks.Add(block);
+        activeConveyorDataMotionIndices[block] = index;
+        activeConveyorDataMotionDueTimes[block] = dueTime;
+        HeapifyActiveConveyorDataMotionUp(index);
     }
 
     private bool RemoveActiveConveyorDataMotionBlock(Block block)
@@ -1378,20 +1391,118 @@ public partial class TerrainGenerator : MonoBehaviour
 
         Block removedBlock = activeConveyorDataMotionBlocks[index];
         Block lastBlock = activeConveyorDataMotionBlocks[lastIndex];
-        activeConveyorDataMotionBlocks[index] = lastBlock;
         activeConveyorDataMotionBlocks.RemoveAt(lastIndex);
 
         if (removedBlock != null)
         {
             activeConveyorDataMotionIndices.Remove(removedBlock);
+            activeConveyorDataMotionDueTimes.Remove(removedBlock);
         }
 
         if (index < lastIndex && lastBlock != null)
         {
+            activeConveyorDataMotionBlocks[index] = lastBlock;
             activeConveyorDataMotionIndices[lastBlock] = index;
+            RestoreActiveConveyorDataMotionHeapAt(index);
         }
 
         return removedBlock;
+    }
+
+    private float GetActiveConveyorDataMotionDueTime(Block block)
+    {
+        return block != null && activeConveyorDataMotionDueTimes.TryGetValue(block, out float dueTime)
+            ? dueTime
+            : float.PositiveInfinity;
+    }
+
+    private void RestoreActiveConveyorDataMotionHeapAt(int index)
+    {
+        if (index < 0 || index >= activeConveyorDataMotionBlocks.Count)
+        {
+            return;
+        }
+
+        Block block = activeConveyorDataMotionBlocks[index];
+        if (block == null || !activeConveyorDataMotionDueTimes.ContainsKey(block))
+        {
+            RemoveActiveConveyorDataMotionAt(index);
+            return;
+        }
+
+        int restoredIndex = HeapifyActiveConveyorDataMotionUp(index);
+        HeapifyActiveConveyorDataMotionDown(restoredIndex);
+    }
+
+    private int HeapifyActiveConveyorDataMotionUp(int index)
+    {
+        while (index > 0)
+        {
+            int parentIndex = (index - 1) >> 1;
+            if (CompareActiveConveyorDataMotionDueTime(index, parentIndex) >= 0)
+            {
+                break;
+            }
+
+            SwapActiveConveyorDataMotionHeapNodes(index, parentIndex);
+            index = parentIndex;
+        }
+
+        return index;
+    }
+
+    private void HeapifyActiveConveyorDataMotionDown(int index)
+    {
+        int count = activeConveyorDataMotionBlocks.Count;
+        while (true)
+        {
+            int leftIndex = (index << 1) + 1;
+            if (leftIndex >= count)
+            {
+                return;
+            }
+
+            int rightIndex = leftIndex + 1;
+            int smallestIndex = rightIndex < count && CompareActiveConveyorDataMotionDueTime(rightIndex, leftIndex) < 0
+                ? rightIndex
+                : leftIndex;
+            if (CompareActiveConveyorDataMotionDueTime(smallestIndex, index) >= 0)
+            {
+                return;
+            }
+
+            SwapActiveConveyorDataMotionHeapNodes(index, smallestIndex);
+            index = smallestIndex;
+        }
+    }
+
+    private int CompareActiveConveyorDataMotionDueTime(int leftIndex, int rightIndex)
+    {
+        float leftDueTime = GetActiveConveyorDataMotionDueTime(activeConveyorDataMotionBlocks[leftIndex]);
+        float rightDueTime = GetActiveConveyorDataMotionDueTime(activeConveyorDataMotionBlocks[rightIndex]);
+        return leftDueTime.CompareTo(rightDueTime);
+    }
+
+    private void SwapActiveConveyorDataMotionHeapNodes(int leftIndex, int rightIndex)
+    {
+        if (leftIndex == rightIndex)
+        {
+            return;
+        }
+
+        Block leftBlock = activeConveyorDataMotionBlocks[leftIndex];
+        Block rightBlock = activeConveyorDataMotionBlocks[rightIndex];
+        activeConveyorDataMotionBlocks[leftIndex] = rightBlock;
+        activeConveyorDataMotionBlocks[rightIndex] = leftBlock;
+        if (rightBlock != null)
+        {
+            activeConveyorDataMotionIndices[rightBlock] = leftIndex;
+        }
+
+        if (leftBlock != null)
+        {
+            activeConveyorDataMotionIndices[leftBlock] = rightIndex;
+        }
     }
 
     private void TickActiveConveyors(float deltaTime)

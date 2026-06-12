@@ -156,7 +156,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         bool profileTicks = MapObjectTickProfiler.IsEnabled;
         if (profileTicks)
         {
-            MapObjectTickProfiler.SetActiveTickCount(count);
+            MapObjectTickProfiler.SetActiveUpdateTargets(updateTickSet);
         }
         if (count <= 0)
         {
@@ -448,6 +448,8 @@ public static class MapObjectTickProfiler
     private const int DefaultSnapshotMaxRows = 64;
 
     private static readonly Dictionary<string, GroupStats> groupStatsByKey = new Dictionary<string, GroupStats>(128);
+    private static readonly Dictionary<string, GroupStats> activeUpdateStatsByKey =
+        new Dictionary<string, GroupStats>(128);
     private static readonly Dictionary<object, TargetDescriptor> targetDescriptorByObject =
         new Dictionary<object, TargetDescriptor>(512);
     private static readonly List<GroupStats> snapshotRows = new List<GroupStats>(128);
@@ -493,6 +495,22 @@ public static class MapObjectTickProfiler
     public static void SetActiveTickCount(int updateCount)
     {
         activeUpdateTickCount = Mathf.Max(0, updateCount);
+        activeUpdateStatsByKey.Clear();
+    }
+
+    public static void SetActiveUpdateTargets(ICollection<IMapObjectUpdateTick> updateTicks)
+    {
+        activeUpdateStatsByKey.Clear();
+        activeUpdateTickCount = updateTicks != null ? Mathf.Max(0, updateTicks.Count) : 0;
+        if (updateTicks == null || updateTicks.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (IMapObjectUpdateTick tick in updateTicks)
+        {
+            RecordActiveTarget("Update", tick);
+        }
     }
 
     public static void SetBeltTickCounts(int activeBelts, int dataMotionBelts, int visualBelts)
@@ -505,6 +523,7 @@ public static class MapObjectTickProfiler
     public static void Reset()
     {
         groupStatsByKey.Clear();
+        activeUpdateStatsByKey.Clear();
         targetDescriptorByObject.Clear();
         snapshotRows.Clear();
         jsonBuilder.Length = 0;
@@ -525,7 +544,19 @@ public static class MapObjectTickProfiler
         snapshotRows.Clear();
         foreach (KeyValuePair<string, GroupStats> pair in groupStatsByKey)
         {
+            pair.Value.ActiveCount = activeUpdateStatsByKey.TryGetValue(pair.Key, out GroupStats activeStats)
+                ? activeStats.ActiveCount
+                : 0;
+
             if (pair.Value.SampleCount > 0)
+            {
+                snapshotRows.Add(pair.Value);
+            }
+        }
+
+        foreach (KeyValuePair<string, GroupStats> pair in activeUpdateStatsByKey)
+        {
+            if (!groupStatsByKey.ContainsKey(pair.Key) && pair.Value.ActiveCount > 0)
             {
                 snapshotRows.Add(pair.Value);
             }
@@ -565,6 +596,7 @@ public static class MapObjectTickProfiler
             AppendJsonStringProperty("type", stats.TypeName, true);
             AppendJsonProperty("itemId", stats.ItemId.ToString(CultureInfo.InvariantCulture), true);
             AppendJsonStringProperty("itemName", stats.ItemName, true);
+            AppendJsonProperty("activeCount", stats.ActiveCount.ToString(CultureInfo.InvariantCulture), true);
             AppendJsonProperty("samples", stats.SampleCount.ToString(CultureInfo.InvariantCulture), true);
             AppendJsonProperty("totalUs", totalUs.ToString("0.###", CultureInfo.InvariantCulture), true);
             AppendJsonProperty("avgUs", avgUs.ToString("0.###", CultureInfo.InvariantCulture), true);
@@ -581,6 +613,7 @@ public static class MapObjectTickProfiler
 
         if (!enabled)
         {
+            activeUpdateStatsByKey.Clear();
             targetDescriptorByObject.Clear();
         }
 
@@ -595,6 +628,36 @@ public static class MapObjectTickProfiler
         }
 
         RecordSample(kind, ResolveTargetDescriptor(target), startTimestamp);
+    }
+
+    private static void RecordActiveTarget(string kind, object target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        TargetDescriptor descriptor = ResolveTargetDescriptor(target);
+        if (descriptor == null)
+        {
+            return;
+        }
+
+        string resolvedKind = string.IsNullOrWhiteSpace(kind) ? "Update" : kind;
+        string key = BuildGroupKey(resolvedKind, descriptor);
+        if (!activeUpdateStatsByKey.TryGetValue(key, out GroupStats stats))
+        {
+            stats = new GroupStats
+            {
+                Kind = resolvedKind,
+                TypeName = descriptor.TypeName,
+                ItemId = descriptor.ItemId,
+                ItemName = descriptor.ItemName
+            };
+            activeUpdateStatsByKey[key] = stats;
+        }
+
+        stats.ActiveCount++;
     }
 
     private static void RecordSample(string kind, TargetDescriptor descriptor, long startTimestamp)
@@ -615,7 +678,7 @@ public static class MapObjectTickProfiler
             windowStartTime = Time.unscaledTime;
         }
 
-        string key = string.Concat(kind, "|", descriptor.TypeName, "|", descriptor.ItemId.ToString(CultureInfo.InvariantCulture));
+        string key = BuildGroupKey(kind, descriptor);
         if (!groupStatsByKey.TryGetValue(key, out GroupStats stats))
         {
             stats = new GroupStats
@@ -634,6 +697,11 @@ public static class MapObjectTickProfiler
         {
             stats.MaxStopwatchTicks = elapsedTicks;
         }
+    }
+
+    private static string BuildGroupKey(string kind, TargetDescriptor descriptor)
+    {
+        return string.Concat(kind, "|", descriptor.TypeName, "|", descriptor.ItemId.ToString(CultureInfo.InvariantCulture));
     }
 
     private static TargetDescriptor ResolveTargetDescriptor(object target)
@@ -695,6 +763,12 @@ public static class MapObjectTickProfiler
         }
 
         result = right.MaxStopwatchTicks.CompareTo(left.MaxStopwatchTicks);
+        if (result != 0)
+        {
+            return result;
+        }
+
+        result = right.ActiveCount.CompareTo(left.ActiveCount);
         if (result != 0)
         {
             return result;
@@ -783,6 +857,7 @@ public static class MapObjectTickProfiler
         public string TypeName;
         public int ItemId;
         public string ItemName;
+        public int ActiveCount;
         public long SampleCount;
         public long TotalStopwatchTicks;
         public long MaxStopwatchTicks;

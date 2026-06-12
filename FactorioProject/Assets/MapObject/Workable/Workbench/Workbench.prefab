@@ -130,7 +130,7 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
-  workableRangeCells: 5
+  workableRangeCells: 7
   showWorkableRange: 1
   rangeVisualYOffset: 0.04
 --- !u!65 &3506328195643533228

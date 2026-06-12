@@ -596,6 +596,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Block> conveyorTickBuffer = new List<Block>();
     private readonly List<Block> activeConveyorDataMotionBlocks = new List<Block>();
     private readonly Dictionary<Block, int> activeConveyorDataMotionIndices = new Dictionary<Block, int>();
+    private readonly Dictionary<Block, float> activeConveyorDataMotionDueTimes = new Dictionary<Block, float>();
     private readonly List<Block> sortedActiveConveyors = new List<Block>();
     private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
     private readonly List<Block> activeConveyorDotVisualList = new List<Block>();

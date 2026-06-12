@@ -81,6 +81,7 @@ public class PlayerHUD : BagSlot
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
+    private MapObject currentInteractionMapObject;
     private MapObject currentObjectInfoTarget;
     private UtilityPole currentObjectInfoSupplyRangePole;
     private MapObject lastYellowObjectInfoFocusTarget;
@@ -886,6 +887,13 @@ public class PlayerHUD : BagSlot
         return installationPlacementController != null && installationPlacementController.MapEditModeActive;
     }
 
+    private bool IsPlacementOrMapEditModeActive()
+    {
+        EnsureInstallationPlacementController();
+        return installationPlacementController != null
+               && installationPlacementController.PlacementOrMapEditModeActive;
+    }
+
     private void AnimateMapEditActionButtons(bool shouldBeVisible)
     {
         List<Button> orderedButtons = GetButtonsInSiblingOrder(
@@ -1684,11 +1692,23 @@ public class PlayerHUD : BagSlot
             return;
         }
 
+        Vehicle mountedVehicle = playerController != null ? playerController.MountedVehicle : null;
+        if (mountedVehicle != null)
+        {
+            currentInteractionBoxObject = null;
+            currentInteractionDoorObject = null;
+            currentInteractionResource = null;
+            currentInteractionMapObject = mountedVehicle;
+            SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(mountedVehicle, 1));
+            return;
+        }
+
         if (TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
         {
             currentInteractionBoxObject = focusedBoxObject;
             currentInteractionDoorObject = null;
             currentInteractionResource = null;
+            currentInteractionMapObject = null;
             SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(focusedBoxObject));
             return;
         }
@@ -1698,8 +1718,24 @@ public class PlayerHUD : BagSlot
             currentInteractionBoxObject = null;
             currentInteractionDoorObject = focusedFenceDoor;
             currentInteractionResource = null;
+            currentInteractionMapObject = null;
             SetActiveInteractionButton(ResolveDoorInteractionButtonForUse(), ResolveInteractionIcon(focusedFenceDoor));
             return;
+        }
+
+        MapObject focusedMapObject = null;
+        if (TryGetFocusedMapObject(out focusedMapObject) && focusedMapObject is Vehicle)
+        {
+            Sprite vehicleIcon = ResolveInteractionIcon(focusedMapObject, 0);
+            if (vehicleIcon != null)
+            {
+                currentInteractionBoxObject = null;
+                currentInteractionDoorObject = null;
+                currentInteractionResource = null;
+                currentInteractionMapObject = focusedMapObject;
+                SetActiveInteractionButton(InteractionButton, vehicleIcon);
+                return;
+            }
         }
 
         if (TryGetFocusedResource(out Resource focusedResource))
@@ -1710,7 +1746,22 @@ public class PlayerHUD : BagSlot
                 currentInteractionBoxObject = null;
                 currentInteractionDoorObject = null;
                 currentInteractionResource = focusedResource;
+                currentInteractionMapObject = null;
                 SetActiveInteractionButton(InteractionButton, resourceIcon);
+                return;
+            }
+        }
+
+        if (focusedMapObject != null || TryGetFocusedMapObject(out focusedMapObject))
+        {
+            Sprite mapObjectIcon = ResolveInteractionIcon(focusedMapObject, 0);
+            if (mapObjectIcon != null)
+            {
+                currentInteractionBoxObject = null;
+                currentInteractionDoorObject = null;
+                currentInteractionResource = null;
+                currentInteractionMapObject = focusedMapObject;
+                SetActiveInteractionButton(InteractionButton, mapObjectIcon);
                 return;
             }
         }
@@ -1723,6 +1774,7 @@ public class PlayerHUD : BagSlot
         currentInteractionBoxObject = null;
         currentInteractionDoorObject = null;
         currentInteractionResource = null;
+        currentInteractionMapObject = null;
         HideInteractionButton(InteractionButton);
         if (DoorInteractionButton != null && DoorInteractionButton != InteractionButton)
         {
@@ -2029,6 +2081,23 @@ public class PlayerHUD : BagSlot
         return ResolveInteractionIcon(resource.ResolveItemId(), 0, true);
     }
 
+    private static Sprite ResolveInteractionIcon(MapObject mapObject, int preferredIconIndex = 0)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        ItemDefinition boundDefinition = mapObject.BoundItemDefinition;
+        Sprite boundIcon = ResolveInteractionIcon(boundDefinition, preferredIconIndex, false);
+        if (boundIcon != null)
+        {
+            return boundIcon;
+        }
+
+        return ResolveInteractionIcon(mapObject.ResolveItemId(), preferredIconIndex, false);
+    }
+
     private static Sprite ResolveHarvestModeInteractionIcon(Resource resource)
     {
         if (resource == null)
@@ -2199,6 +2268,11 @@ public class PlayerHUD : BagSlot
 
     private void HandleInteractionButtonClicked()
     {
+        if (IsPlacementOrMapEditModeActive())
+        {
+            return;
+        }
+
         if (currentInteractionBoxObject != null)
         {
             currentInteractionBoxObject.ToggleOpenState();
@@ -2220,6 +2294,28 @@ public class PlayerHUD : BagSlot
                 : null;
             playerController?.RequestFocusedResourceHarvest(currentInteractionResource);
             UpdateInteractionButtonState();
+            return;
+        }
+
+        if (currentInteractionMapObject != null)
+        {
+            if (currentInteractionMapObject is Vehicle vehicle)
+            {
+                Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+                PlayerController playerController = currentPlayer != null
+                    ? currentPlayer.GetComponent<PlayerController>()
+                    : null;
+                if (playerController != null && playerController.IsMountedOnVehicle(vehicle))
+                {
+                    playerController.TryDismountFromVehicle();
+                }
+                else
+                {
+                    vehicle.TryDockPlayer(currentPlayer);
+                }
+            }
+
+            UpdateInteractionButtonState();
         }
     }
 
@@ -2227,7 +2323,8 @@ public class PlayerHUD : BagSlot
     {
         if (!Input.GetKeyDown(KeyCode.Space)
             || GameManager.Instance == null
-            || GameManager.Instance.PlayerInteractionLocked)
+            || GameManager.Instance.PlayerInteractionLocked
+            || IsPlacementOrMapEditModeActive())
         {
             return;
         }
@@ -2237,7 +2334,8 @@ public class PlayerHUD : BagSlot
             : InteractionButton;
         bool hasInteractionTarget = currentInteractionBoxObject != null
                                     || currentInteractionDoorObject != null
-                                    || currentInteractionResource != null;
+                                    || currentInteractionResource != null
+                                    || currentInteractionMapObject != null;
         if (!hasInteractionTarget
             || activeButton == null
             || !activeButton.gameObject.activeInHierarchy)

@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_41_Wooden wheel
+  m_EditorClassIdentifier: 
+  itemName: Wooden wheel
+  id: 40
+  mapObject: {fileID: 0}
+  portableMesh: {fileID: 0}
+  portableMat: {fileID: 0}
+  icon: {fileID: 21300000, guid: a9a726bb2dab04b4884802cb6f8d2cc5, type: 3}
+  interactionButtonList: []
+  size: 0
+  itemFilter: 0
+  capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 0
+  useEnergyAmount: 0
+  completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
+  craftingDurationSeconds: 5

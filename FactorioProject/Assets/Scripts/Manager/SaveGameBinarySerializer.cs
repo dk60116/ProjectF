@@ -214,6 +214,9 @@ public static class SaveGameBinarySerializer
         writer.Write(state.placementSequence);
         writer.Write(state.conveyorVariantKind);
         WriteVector2IntList(writer, state.occupiedCoordinates);
+        WriteVector2List(writer, state.railVisualPathPoints);
+        writer.Write(state.railVisualPathExtendsStart);
+        writer.Write(state.railVisualPathExtendsEnd);
         WriteInputOutputState(writer, state.inputOutputState);
         WriteRobotArmState(writer, state.robotArmState);
         writer.Write(state.lastBackgroundSimulationTicks);
@@ -228,6 +231,8 @@ public static class SaveGameBinarySerializer
         writer.Write(state.storedFluidLiters);
         writer.Write(state.storedFluidItemId);
         writer.Write(state.storedFluidTemperatureCelsius);
+        writer.Write(state.hasStorageKey);
+        WriteVector2Int(writer, state.storageKey);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -245,6 +250,9 @@ public static class SaveGameBinarySerializer
             placementSequence = reader.ReadInt64(),
             conveyorVariantKind = reader.ReadInt32(),
             occupiedCoordinates = ReadVector2IntList(reader),
+            railVisualPathPoints = version >= 10 ? ReadVector2List(reader) : new List<Vector2>(),
+            railVisualPathExtendsStart = version >= 11 ? reader.ReadBoolean() : true,
+            railVisualPathExtendsEnd = version >= 11 ? reader.ReadBoolean() : true,
             inputOutputState = ReadInputOutputState(reader, version),
             robotArmState = version >= 3 ? ReadRobotArmState(reader) : null,
             lastBackgroundSimulationTicks = reader.ReadInt64()
@@ -273,6 +281,13 @@ public static class SaveGameBinarySerializer
         {
             state.storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         }
+
+        if (version >= 13)
+        {
+            state.hasStorageKey = reader.ReadBoolean();
+            state.storageKey = ReadVector2Int(reader);
+        }
+
         return state;
     }
 
@@ -448,6 +463,10 @@ public static class SaveGameBinarySerializer
         writer.Write(player.hasPlayer);
         WriteVector3(writer, player.position);
         WriteQuaternion(writer, player.rotation);
+        writer.Write(player.mountedOnVehicle);
+        writer.Write(player.mountedVehiclePlacementSequence);
+        WriteVector2Int(writer, player.mountedVehicleAnchorCoordinate);
+        writer.Write(player.mountedVehiclePlayerPointIndex);
         writer.Write(player.bagLevel);
         WritePlayerStats(writer, player.stats);
         WriteList(writer, player.bagSlots, WritePlayerSlot);
@@ -462,11 +481,20 @@ public static class SaveGameBinarySerializer
             hasPlayer = reader.ReadBoolean(),
             position = ReadVector3(reader),
             rotation = ReadQuaternion(reader),
-            bagLevel = reader.ReadInt32(),
-            stats = ReadPlayerStats(reader),
-            bagSlots = ReadList(reader, () => ReadPlayerSlot(reader)),
-            handSlots = ReadList(reader, () => ReadPlayerSlot(reader))
         };
+
+        if (version >= 12)
+        {
+            player.mountedOnVehicle = reader.ReadBoolean();
+            player.mountedVehiclePlacementSequence = reader.ReadInt64();
+            player.mountedVehicleAnchorCoordinate = ReadVector2Int(reader);
+            player.mountedVehiclePlayerPointIndex = reader.ReadInt32();
+        }
+
+        player.bagLevel = reader.ReadInt32();
+        player.stats = ReadPlayerStats(reader);
+        player.bagSlots = ReadList(reader, () => ReadPlayerSlot(reader));
+        player.handSlots = ReadList(reader, () => ReadPlayerSlot(reader));
 
         if (version >= 4)
         {
@@ -569,6 +597,17 @@ public static class SaveGameBinarySerializer
         return new Vector2Int(reader.ReadInt32(), reader.ReadInt32());
     }
 
+    private static void WriteVector2(BinaryWriter writer, Vector2 value)
+    {
+        writer.Write(value.x);
+        writer.Write(value.y);
+    }
+
+    private static Vector2 ReadVector2(BinaryReader reader)
+    {
+        return new Vector2(reader.ReadSingle(), reader.ReadSingle());
+    }
+
     private static void WriteVector3(BinaryWriter writer, Vector3 value)
     {
         writer.Write(value.x);
@@ -602,6 +641,16 @@ public static class SaveGameBinarySerializer
     private static List<Vector2Int> ReadVector2IntList(BinaryReader reader)
     {
         return ReadList(reader, () => ReadVector2Int(reader));
+    }
+
+    private static void WriteVector2List(BinaryWriter writer, List<Vector2> values)
+    {
+        WriteList(writer, values, WriteVector2);
+    }
+
+    private static List<Vector2> ReadVector2List(BinaryReader reader)
+    {
+        return ReadList(reader, () => ReadVector2(reader));
     }
 
     private static void WriteInputItemAreaList(BinaryWriter writer, List<InputOutputModule.PersistentInputItemAreaState> values)

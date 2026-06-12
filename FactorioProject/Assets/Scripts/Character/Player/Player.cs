@@ -348,6 +348,17 @@ public class Player : Character
             handBag.CaptureSaveSlots(saveData.handSlots);
         }
 
+        PlayerController playerController = GetComponent<PlayerController>();
+        if (playerController != null
+            && playerController.TryGetMountedVehicleState(out Vehicle mountedVehicle, out int playerPointIndex)
+            && mountedVehicle != null)
+        {
+            saveData.mountedOnVehicle = true;
+            saveData.mountedVehiclePlacementSequence = mountedVehicle.RuntimePlacementSequence;
+            saveData.mountedVehicleAnchorCoordinate = mountedVehicle.RuntimeAnchorCoordinate;
+            saveData.mountedVehiclePlayerPointIndex = playerPointIndex;
+        }
+
         ResolvePlayerHUD()?.CaptureCraftingQueueSaveState(saveData.craftingQueue);
         return saveData;
     }
@@ -364,6 +375,8 @@ public class Player : Character
         {
             return;
         }
+
+        GetComponent<PlayerController>()?.ClearInteractionPointSnapForLoad();
 
         Vector3 rootPosition = ClampRootPositionToGroundY(saveData.position);
         Rigidbody rigidbody = GetComponent<Rigidbody>();

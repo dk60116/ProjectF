@@ -273,12 +273,75 @@ public class SaveManager : MonoBehaviour
         if (player != null && data.player != null && data.player.hasPlayer)
         {
             player.ApplyTransformState(data.player);
+            RestorePlayerMountedVehicleState(player, data.player);
         }
 
         if (player != null && data.player != null && data.player.hasPlayer)
         {
             player.ApplyInventoryAndStatState(data.player);
         }
+    }
+
+    private void RestorePlayerMountedVehicleState(Player player, PlayerSaveData playerSaveData)
+    {
+        if (player == null || playerSaveData == null)
+        {
+            return;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null)
+        {
+            return;
+        }
+
+        if (!playerSaveData.mountedOnVehicle)
+        {
+            playerController.ClearInteractionPointSnapForLoad();
+            return;
+        }
+
+        Vehicle mountedVehicle = FindVehicleForSavedMount(playerSaveData);
+        if (mountedVehicle == null
+            || !playerController.TryRestoreMountedVehicle(
+                mountedVehicle,
+                playerSaveData.mountedVehiclePlayerPointIndex))
+        {
+            playerController.ClearInteractionPointSnapForLoad();
+        }
+    }
+
+    private Vehicle FindVehicleForSavedMount(PlayerSaveData playerSaveData)
+    {
+        if (playerSaveData == null || !playerSaveData.mountedOnVehicle)
+        {
+            return null;
+        }
+
+        Vehicle[] vehicles = FindObjectsOfType<Vehicle>(true);
+        Vehicle coordinateFallback = null;
+        for (int i = 0; i < vehicles.Length; i++)
+        {
+            Vehicle vehicle = vehicles[i];
+            if (vehicle == null || !vehicle.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (playerSaveData.mountedVehiclePlacementSequence > 0
+                && vehicle.RuntimePlacementSequence == playerSaveData.mountedVehiclePlacementSequence)
+            {
+                return vehicle;
+            }
+
+            if (coordinateFallback == null
+                && vehicle.RuntimeAnchorCoordinate == playerSaveData.mountedVehicleAnchorCoordinate)
+            {
+                coordinateFallback = vehicle;
+            }
+        }
+
+        return coordinateFallback;
     }
 
     private void LoadRecentSlotOrStartNewMap()
