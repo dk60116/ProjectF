@@ -252,8 +252,8 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
-  vehicleAccelerationPerSecond: 2
-  vehicleMaxSpeed: 2
+  vehicleAccelerationPerSecond: 1
+  vehicleMaxSpeed: 2.5
   vehicleStopInertiaSeconds: 0.35
   playerPoint:
   - {fileID: 473533616803250247}
@@ -266,9 +266,6 @@ MonoBehaviour:
   wheelRadius: 0.18
   wheelLocalRotationAxis: {x: 1, y: 0, z: 0}
   invertWheelRotation: 0
-  trainCouplingCenterDistance: 1
-  trainCouplingGapDistance: 0.4
-  trainCouplingSnapMaxDistance: 1.15
   railMoveSpeedMultiplier: 1
   railSnapMaxDistance: 0.75
   railRotationInterpolationSpeed: 10
@@ -280,8 +277,6 @@ MonoBehaviour:
   railConnectionMaxDistance: 0.08
   railConnectionLookAhead: 0.5
   internalConnectionMaxDistance: 0.015
-  maxCoupledTrainCars: 12
-  coupledTrainMinFacingDot: 0.15
 --- !u!65 &8817530847774380614
 BoxCollider:
   m_ObjectHideFlags: 0

@@ -1039,6 +1039,11 @@ public partial class TerrainGenerator : MonoBehaviour
         Vector3 position = placementController != null
             ? placementController.GetInstalledObjectWorldPosition(savedState.anchorCoordinate, sourcePrefab, restoreQuarterTurns)
             : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
+        if (savedState.hasWorldPose)
+        {
+            position = savedState.worldPosition;
+            rotation = savedState.worldRotation;
+        }
 
         bool reusedSleepingView = TryTakeSleepingInstallationView(savedState, out InstallationObject restoredInstallation);
         if (reusedSleepingView)
@@ -1093,6 +1098,11 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 inputOutputModule.ApplyPersistentState(savedState.inputOutputState);
             }
+        }
+
+        if (!savedState.hasWorldPose && placementController != null && restoredInstallation is Train)
+        {
+            placementController.InitializePlacedTrainRailSample(restoredInstallation, savedState.anchorCoordinate);
         }
 
         if (savedState.robotArmState != null && restoredInstallation is RobotArm robotArm)

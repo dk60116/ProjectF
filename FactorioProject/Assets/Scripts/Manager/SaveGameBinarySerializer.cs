@@ -233,6 +233,12 @@ public static class SaveGameBinarySerializer
         writer.Write(state.storedFluidTemperatureCelsius);
         writer.Write(state.hasStorageKey);
         WriteVector2Int(writer, state.storageKey);
+        writer.Write(state.hasWorldPose);
+        if (state.hasWorldPose)
+        {
+            WriteVector3(writer, state.worldPosition);
+            WriteQuaternion(writer, state.worldRotation);
+        }
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -286,6 +292,16 @@ public static class SaveGameBinarySerializer
         {
             state.hasStorageKey = reader.ReadBoolean();
             state.storageKey = ReadVector2Int(reader);
+        }
+
+        if (version >= 14)
+        {
+            state.hasWorldPose = reader.ReadBoolean();
+            if (state.hasWorldPose)
+            {
+                state.worldPosition = ReadVector3(reader);
+                state.worldRotation = ReadQuaternion(reader);
+            }
         }
 
         return state;

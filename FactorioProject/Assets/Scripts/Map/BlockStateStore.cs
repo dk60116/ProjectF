@@ -26,6 +26,9 @@ public partial class BlockStateStore : MonoBehaviour
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
+        public bool hasWorldPose;
+        public Vector3 worldPosition;
+        public Quaternion worldRotation = Quaternion.identity;
 
         public InstallationSaveState Clone()
         {
@@ -50,7 +53,10 @@ public partial class BlockStateStore : MonoBehaviour
                 itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>()),
                 storedFluidLiters = storedFluidLiters,
                 storedFluidItemId = storedFluidItemId,
-                storedFluidTemperatureCelsius = storedFluidTemperatureCelsius
+                storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
+                hasWorldPose = hasWorldPose,
+                worldPosition = worldPosition,
+                worldRotation = worldRotation
             };
         }
     }
@@ -711,6 +717,13 @@ public partial class BlockStateStore : MonoBehaviour
             state.railVisualPathPoints = railload.CopyVisualPathPoints();
             state.railVisualPathExtendsStart = railload.RuntimeVisualPathExtendsStart;
             state.railVisualPathExtendsEnd = railload.RuntimeVisualPathExtendsEnd;
+        }
+
+        if (installationObject is Train)
+        {
+            state.hasWorldPose = true;
+            state.worldPosition = installationObject.transform.position;
+            state.worldRotation = installationObject.transform.rotation;
         }
 
         if (installationObject is InputOutputModule inputOutputModule)

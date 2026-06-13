@@ -9,6 +9,11 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private const float DefaultLineWidth = 0.035f;
     private const float DefaultLineYOffset = 0.18f;
     private const float DefaultRefreshInterval = 0.35f;
+    private const float DefaultCartArrowYOffset = 1.15f;
+    private const float DefaultCartArrowLength = 0.9f;
+    private const float DefaultCartArrowHeadLength = 0.28f;
+    private const float DefaultCartArrowHeadWidth = 0.18f;
+    private const float DefaultCartArrowLineWidth = 0.055f;
 
     private static readonly Color[] GroupPalette =
     {
@@ -21,6 +26,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         new Color(0.90f, 0.20f, 0.30f, 1f),
         new Color(0.55f, 1.00f, 0.85f, 1f)
     };
+    private static readonly Color CartDirectionColor = new Color(1.00f, 0.95f, 0.12f, 1f);
 
     [SerializeField, Min(0.01f)]
     private float connectionDistance = DefaultConnectionDistance;
@@ -32,9 +38,20 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private float lineYOffset = DefaultLineYOffset;
     [SerializeField, Min(0.05f)]
     private float refreshInterval = DefaultRefreshInterval;
+    [SerializeField, Min(0.05f)]
+    private float cartArrowYOffset = DefaultCartArrowYOffset;
+    [SerializeField, Min(0.05f)]
+    private float cartArrowLength = DefaultCartArrowLength;
+    [SerializeField, Min(0.01f)]
+    private float cartArrowHeadLength = DefaultCartArrowHeadLength;
+    [SerializeField, Min(0.01f)]
+    private float cartArrowHeadWidth = DefaultCartArrowHeadWidth;
+    [SerializeField, Min(0.005f)]
+    private float cartArrowLineWidth = DefaultCartArrowLineWidth;
 
     private readonly List<RailInfo> rails = new List<RailInfo>();
     private readonly List<LineRenderer> lineRenderers = new List<LineRenderer>();
+    private readonly List<LineRenderer> cartArrowRenderers = new List<LineRenderer>();
     private readonly Queue<int> componentQueue = new Queue<int>();
 
     private Transform debugRoot;
@@ -103,6 +120,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         if (!isDirty && Time.unscaledTime < nextRefreshTime)
         {
+            RefreshCartDirectionArrows();
             return;
         }
 
@@ -156,6 +174,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             lineRenderers[i].enabled = false;
         }
 
+        RefreshCartDirectionArrows();
         isDirty = false;
         nextRefreshTime = Time.unscaledTime + refreshInterval;
     }
@@ -289,6 +308,94 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return lineRenderers[index];
     }
 
+    private void RefreshCartDirectionArrows()
+    {
+        EnsureDebugRoot();
+        EnsureLineMaterial();
+
+        int rendererIndex = 0;
+        RailHandcar[] activeHandcars = FindObjectsOfType<RailHandcar>(false);
+        for (int i = 0; i < activeHandcars.Length; i++)
+        {
+            RailHandcar handcar = activeHandcars[i];
+            if (handcar == null
+                || !handcar.isActiveAndEnabled
+                || !handcar.TryGetRailDebugDirection(out Vector3 cartPosition, out Vector3 direction))
+            {
+                continue;
+            }
+
+            direction.y = 0f;
+            if (direction.sqrMagnitude <= 0.0001f)
+            {
+                continue;
+            }
+
+            direction.Normalize();
+            Vector3 side = new Vector3(-direction.z, 0f, direction.x);
+            Vector3 center = cartPosition + Vector3.up * cartArrowYOffset;
+            float halfLength = Mathf.Max(0.05f, cartArrowLength) * 0.5f;
+            Vector3 tail = center - direction * halfLength;
+            Vector3 tip = center + direction * halfLength;
+            Vector3 headBase = tip - direction * Mathf.Max(0.01f, cartArrowHeadLength);
+            Vector3 headSide = side * Mathf.Max(0.01f, cartArrowHeadWidth);
+
+            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tail, tip);
+            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase + headSide);
+            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase - headSide);
+        }
+
+        for (int i = rendererIndex; i < cartArrowRenderers.Count; i++)
+        {
+            if (cartArrowRenderers[i] != null)
+            {
+                cartArrowRenderers[i].enabled = false;
+            }
+        }
+    }
+
+    private void ApplyCartArrowSegment(LineRenderer lineRenderer, Vector3 start, Vector3 end)
+    {
+        if (lineRenderer == null)
+        {
+            return;
+        }
+
+        lineRenderer.enabled = true;
+        lineRenderer.positionCount = 2;
+        lineRenderer.startWidth = cartArrowLineWidth;
+        lineRenderer.endWidth = cartArrowLineWidth;
+        lineRenderer.startColor = CartDirectionColor;
+        lineRenderer.endColor = CartDirectionColor;
+        lineRenderer.material = lineMaterial;
+        lineRenderer.SetPosition(0, start);
+        lineRenderer.SetPosition(1, end);
+    }
+
+    private LineRenderer EnsureCartArrowRenderer(int index)
+    {
+        EnsureDebugRoot();
+        while (cartArrowRenderers.Count <= index)
+        {
+            GameObject lineObject = new GameObject("Rail_Cart_Direction_Debug");
+            lineObject.transform.SetParent(debugRoot, false);
+
+            LineRenderer lineRenderer = lineObject.AddComponent<LineRenderer>();
+            lineRenderer.useWorldSpace = true;
+            lineRenderer.loop = false;
+            lineRenderer.numCapVertices = 2;
+            lineRenderer.numCornerVertices = 2;
+            lineRenderer.alignment = LineAlignment.View;
+            lineRenderer.textureMode = LineTextureMode.Stretch;
+            lineRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            lineRenderer.receiveShadows = false;
+            lineRenderer.sortingOrder = 6501;
+            cartArrowRenderers.Add(lineRenderer);
+        }
+
+        return cartArrowRenderers[index];
+    }
+
     private void DisableAllRenderers()
     {
         for (int i = 0; i < lineRenderers.Count; i++)
@@ -296,6 +403,14 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             if (lineRenderers[i] != null)
             {
                 lineRenderers[i].enabled = false;
+            }
+        }
+
+        for (int i = 0; i < cartArrowRenderers.Count; i++)
+        {
+            if (cartArrowRenderers[i] != null)
+            {
+                cartArrowRenderers[i].enabled = false;
             }
         }
     }

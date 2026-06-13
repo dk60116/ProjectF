@@ -1107,14 +1107,14 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (mapObject is Vehicle)
-        {
-            DrawVehicleFields(mapObjectSerializedObject);
-        }
-
         if (mapObject is Pump)
         {
             DrawPumpFields(mapObjectSerializedObject);
+        }
+
+        if (mapObject is Vehicle)
+        {
+            DrawVehicleFields(mapObjectSerializedObject);
         }
 
         if (mapObject is InstallationObject)
@@ -1202,16 +1202,16 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        SerializedProperty accelerationProperty = mapObjectSerializedObject.FindProperty("vehicleAccelerationPerSecond");
-        SerializedProperty maxSpeedProperty = mapObjectSerializedObject.FindProperty("vehicleMaxSpeed");
-        SerializedProperty stopInertiaProperty = mapObjectSerializedObject.FindProperty("vehicleStopInertiaSeconds");
+        SerializedProperty accelerationProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleAccelerationPerSecond");
+        SerializedProperty maxSpeedProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleMaxSpeed");
+        SerializedProperty stopInertiaProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleStopInertiaSeconds");
         if (accelerationProperty == null && maxSpeedProperty == null && stopInertiaProperty == null)
         {
             return;
         }
 
-        EditorGUILayout.Space(6f);
-        EditorGUILayout.LabelField("Vehicle", EditorStyles.boldLabel);
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Vehicle", EditorStyles.miniBoldLabel);
         if (accelerationProperty != null)
         {
             accelerationProperty.floatValue = Mathf.Max(0.01f, accelerationProperty.floatValue);
@@ -1227,7 +1227,7 @@ public class ItemDataEditorWindow : EditorWindow
         if (stopInertiaProperty != null)
         {
             stopInertiaProperty.floatValue = Mathf.Max(0f, stopInertiaProperty.floatValue);
-            EditorGUILayout.PropertyField(stopInertiaProperty, new GUIContent("Stop Inertia (s)"));
+            EditorGUILayout.PropertyField(stopInertiaProperty, new GUIContent("Stop Inertia (sec)"));
         }
     }
 
@@ -1716,6 +1716,32 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         return null;
+    }
+
+    private static void ApplyVehicleJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry)
+    {
+        if (serializedMapObject == null || entry == null)
+        {
+            return;
+        }
+
+        SerializedProperty accelerationProperty = FindSerializedProperty(serializedMapObject, "vehicleAccelerationPerSecond");
+        if (accelerationProperty != null && entry.vehicleAccelerationPerSecond > 0f)
+        {
+            accelerationProperty.floatValue = Mathf.Max(0.01f, entry.vehicleAccelerationPerSecond);
+        }
+
+        SerializedProperty maxSpeedProperty = FindSerializedProperty(serializedMapObject, "vehicleMaxSpeed");
+        if (maxSpeedProperty != null && entry.vehicleMaxSpeed > 0f)
+        {
+            maxSpeedProperty.floatValue = Mathf.Max(0.01f, entry.vehicleMaxSpeed);
+        }
+
+        SerializedProperty stopInertiaProperty = FindSerializedProperty(serializedMapObject, "vehicleStopInertiaSeconds");
+        if (stopInertiaProperty != null && entry.vehicleStopInertiaSeconds >= 0f)
+        {
+            stopInertiaProperty.floatValue = Mathf.Max(0f, entry.vehicleStopInertiaSeconds);
+        }
     }
 
     private static void DrawWorkableRangeCellsField(SerializedObject serializedMapObject)
@@ -3257,41 +3283,6 @@ public class ItemDataEditorWindow : EditorWindow
                 {
                     EditorUtility.SetDirty(conveyorBelt.gameObject);
                 }
-            }
-        }
-    }
-
-    private static void ApplyVehicleJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry)
-    {
-        if (serializedMapObject == null || entry == null)
-        {
-            return;
-        }
-
-        if (entry.vehicleAccelerationPerSecond >= 0f)
-        {
-            SerializedProperty accelerationProperty = serializedMapObject.FindProperty("vehicleAccelerationPerSecond");
-            if (accelerationProperty != null)
-            {
-                accelerationProperty.floatValue = Mathf.Max(0.01f, entry.vehicleAccelerationPerSecond);
-            }
-        }
-
-        if (entry.vehicleMaxSpeed >= 0f)
-        {
-            SerializedProperty maxSpeedProperty = serializedMapObject.FindProperty("vehicleMaxSpeed");
-            if (maxSpeedProperty != null)
-            {
-                maxSpeedProperty.floatValue = Mathf.Max(0.01f, entry.vehicleMaxSpeed);
-            }
-        }
-
-        if (entry.vehicleStopInertiaSeconds >= 0f)
-        {
-            SerializedProperty stopInertiaProperty = serializedMapObject.FindProperty("vehicleStopInertiaSeconds");
-            if (stopInertiaProperty != null)
-            {
-                stopInertiaProperty.floatValue = Mathf.Max(0f, entry.vehicleStopInertiaSeconds);
             }
         }
     }

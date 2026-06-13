@@ -10073,7 +10073,7 @@ public class InstallationPlacementController : MonoBehaviour
         return found;
     }
 
-    private void InitializePlacedTrainRailSample(MapObject installedObject, Vector2Int anchorCoordinate)
+    public void InitializePlacedTrainRailSample(MapObject installedObject, Vector2Int anchorCoordinate)
     {
         if (!(installedObject is Train train))
         {

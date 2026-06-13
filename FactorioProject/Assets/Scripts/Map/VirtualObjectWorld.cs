@@ -459,9 +459,13 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.anchorCoordinate = state.anchorCoordinate;
         record.worldPosition = liveInstallation != null
             ? liveInstallation.transform.position
+            : state.hasWorldPose
+                ? state.worldPosition
             : new Vector3(state.anchorCoordinate.x, 0f, state.anchorCoordinate.y);
         record.worldRotation = liveInstallation != null
             ? liveInstallation.transform.rotation
+            : state.hasWorldPose
+                ? state.worldRotation
             : Quaternion.Euler(0f, state.quarterTurns * 90f, 0f);
         record.quarterTurns = ((state.quarterTurns % 4) + 4) % 4;
         record.itemId = state.itemId;
