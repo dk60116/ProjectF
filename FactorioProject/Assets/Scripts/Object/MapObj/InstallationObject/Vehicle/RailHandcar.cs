@@ -30,6 +30,8 @@ public class RailHandcar : Train
     private const float MinRailConnectionMaxDistance = 0.22f;
     private const float MinInternalConnectionMaxDistance = 0.22f;
     private const float RailDirectionReferenceDeadZone = 0.05f;
+    private const float RailDebugBlockedProbeDistance = 0.12f;
+    private const float RailDebugBlockedDistanceEpsilon = 0.01f;
 
     private readonly List<InstallationObject> railSearchScratch = new List<InstallationObject>(16);
     private readonly List<Railload> railCandidateScratch = new List<Railload>(8);
@@ -161,6 +163,37 @@ public class RailHandcar : Train
 
         worldDirection.Normalize();
         return true;
+    }
+
+    public bool IsRailDebugDirectionBlocked(Vector3 worldDirection)
+    {
+        Vector2 direction = new Vector2(worldDirection.x, worldDirection.z);
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        direction.Normalize();
+        Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        float maxSqrDistance = railSnapMaxDistance * railSnapMaxDistance;
+        if (!TryGetStoredRailSample(currentPoint, maxSqrDistance, out RailSample currentSample)
+            && !TryFindBestRailSample(currentPoint, direction, maxSqrDistance, out currentSample))
+        {
+            return true;
+        }
+
+        float probeDistance = Mathf.Max(0.01f, RailDebugBlockedProbeDistance);
+        if (!TryAdvanceAlongRailNetwork(
+                currentSample,
+                direction,
+                probeDistance,
+                out _,
+                out float traveledDistance))
+        {
+            return true;
+        }
+
+        return traveledDistance + RailDebugBlockedDistanceEpsilon < probeDistance;
     }
 
     private bool TryGetStoredRailSample(Vector2 currentPoint, float maxSqrDistance, out RailSample sample)

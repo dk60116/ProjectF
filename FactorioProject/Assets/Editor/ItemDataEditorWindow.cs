@@ -10,6 +10,9 @@ public class ItemDataEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 260f;
     private const float GiveButtonWidth = 46f;
+    private const float ItemListRowHeight = 28f;
+    private const int ItemListOverscanRows = 3;
+    private const int LargeInputOutputPairAutoCollapseThreshold = 8;
     private const float RectGridCellSize = 34f;
     private const float RectGridCellSpacing = 5f;
     private const float RectGridPaletteBlockWidth = 78f;
@@ -37,9 +40,18 @@ public class ItemDataEditorWindow : EditorWindow
     private Vector2 detailScroll;
     private int selectedItemId = -1;
     private string itemSearchText = string.Empty;
+    private bool showPlayModeDetailFields;
     private ItemDefinition pendingReorderSelection;
     private readonly HashSet<string> collapsedInputOutputPairSectionKeys = new HashSet<string>();
     private readonly HashSet<string> collapsedInputOutputPairKeys = new HashSet<string>();
+    private readonly HashSet<string> collapsedInputOutputSlotLayoutSectionKeys = new HashSet<string>();
+    private readonly HashSet<string> initializedInputOutputPairSectionKeys = new HashSet<string>();
+    private readonly HashSet<string> initializedInputOutputPairKeys = new HashSet<string>();
+    private readonly HashSet<string> initializedInputOutputSlotLayoutSectionKeys = new HashSet<string>();
+    private readonly Dictionary<int, string> cachedCraftingTreeIngredientSummaries = new Dictionary<int, string>();
+    private readonly List<CraftingTreeRuntime.IngredientEntry> craftingTreeIngredientBuffer =
+        new List<CraftingTreeRuntime.IngredientEntry>();
+    private readonly List<string> craftingTreeIngredientSummaryParts = new List<string>();
     private ItemManager cachedItemManager;
     private bool itemManagerCacheDirty = true;
     private ItemManager cachedDefinitionsItemManager;
@@ -52,10 +64,13 @@ public class ItemDataEditorWindow : EditorWindow
     private int cachedVisibleDefinitionsVersion = -1;
     private ItemDefinition[] cachedInputOutputDefinitionOptions = Array.Empty<ItemDefinition>();
     private GUIContent[] cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
+    private readonly Dictionary<int, int> cachedInputOutputDefinitionOptionIndexes = new Dictionary<int, int>();
     private int cachedInputOutputDefinitionOptionsVersion = -1;
+    private int cachedCraftingTreeIngredientSummaryVersion = -1;
     private readonly Dictionary<int, string> inputOutputTargetKeyCache = new Dictionary<int, string>();
-    private static readonly Dictionary<Sprite, Texture> ItemIconTextureCache = new Dictionary<Sprite, Texture>();
-    private static readonly Dictionary<Sprite, Texture2D> SpriteRegionTextureCache = new Dictionary<Sprite, Texture2D>();
+    private static GUIStyle placementCenterLabelStyle;
+    private static GUIStyle rectGridPaletteLabelStyle;
+    private static GUIStyle rectGridBlockLabelStyle;
 
     private readonly struct RectGridPaletteEntry
     {
@@ -173,8 +188,6 @@ public class ItemDataEditorWindow : EditorWindow
     private void OnDisable()
     {
         Undo.undoRedoPerformed -= HandleUndoRedoPerformed;
-        ItemIconTextureCache.Clear();
-        ClearSpriteRegionTextureCache();
     }
 
     private void OnFocus()
@@ -184,22 +197,25 @@ public class ItemDataEditorWindow : EditorWindow
 
     private void OnHierarchyChange()
     {
+        if (IsCachedItemManagerValid(cachedItemManager))
+        {
+            return;
+        }
+
         itemManagerCacheDirty = true;
-        InvalidateDefinitionCache(false);
-        inputOutputTargetKeyCache.Clear();
         Repaint();
     }
 
     private void OnProjectChange()
     {
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
         inputOutputTargetKeyCache.Clear();
         Repaint();
     }
 
     private void HandleUndoRedoPerformed()
     {
-        InvalidateDefinitionPresentationCache(true);
+        InvalidateDefinitionPresentationCache();
         inputOutputTargetKeyCache.Clear();
         Repaint();
     }
@@ -214,33 +230,31 @@ public class ItemDataEditorWindow : EditorWindow
     private void InvalidateAllCaches()
     {
         itemManagerCacheDirty = true;
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
         inputOutputTargetKeyCache.Clear();
     }
 
-    private void InvalidateDefinitionCache(bool clearIconCache)
+    private void InvalidateDefinitionCache()
     {
         definitionsCacheDirty = true;
         cachedDefinitionsItemManager = null;
         cachedDefinitionsItemManagerCount = -1;
         cachedDefinitions.Clear();
         definitionsCacheVersion++;
-        InvalidateDefinitionPresentationCache(clearIconCache);
+        InvalidateDefinitionPresentationCache();
     }
 
-    private void InvalidateDefinitionPresentationCache(bool clearIconCache)
+    private void InvalidateDefinitionPresentationCache()
     {
         cachedVisibleDefinitions.Clear();
         cachedVisibleDefinitionsSearchText = string.Empty;
         cachedVisibleDefinitionsVersion = -1;
         cachedInputOutputDefinitionOptions = Array.Empty<ItemDefinition>();
         cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
+        cachedInputOutputDefinitionOptionIndexes.Clear();
         cachedInputOutputDefinitionOptionsVersion = -1;
-        if (clearIconCache)
-        {
-            ItemIconTextureCache.Clear();
-            ClearSpriteRegionTextureCache();
-        }
+        cachedCraftingTreeIngredientSummaries.Clear();
+        cachedCraftingTreeIngredientSummaryVersion = -1;
     }
 
     private void DrawBackground()
@@ -287,7 +301,14 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         listScroll = EditorGUILayout.BeginScrollView(listScroll);
-        for (int i = 0; i < visibleDefinitions.Count; i++)
+        int firstVisibleIndex = GetFirstVisibleItemListIndex(visibleDefinitions.Count);
+        int lastVisibleIndex = GetLastVisibleItemListIndex(firstVisibleIndex, visibleDefinitions.Count);
+        if (firstVisibleIndex > 0)
+        {
+            GUILayout.Space(firstVisibleIndex * ItemListRowHeight);
+        }
+
+        for (int i = firstVisibleIndex; i <= lastVisibleIndex; i++)
         {
             ItemDefinition definition = visibleDefinitions[i];
             if (definition == null)
@@ -297,21 +318,26 @@ public class ItemDataEditorWindow : EditorWindow
 
             string displayName = GetDefinitionDisplayName(definition);
             bool isSelected = definition.id == selectedItemId;
-            Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
+            Rect rowRect = GUILayoutUtility.GetRect(1f, ItemListRowHeight, GUILayout.ExpandWidth(true));
             Rect selectRect = new Rect(rowRect.x, rowRect.y, Mathf.Max(1f, rowRect.width - GiveButtonWidth - 4f), rowRect.height);
             Rect giveRect = new Rect(selectRect.xMax + 4f, rowRect.y, GiveButtonWidth, rowRect.height);
-            GUIContent content = new GUIContent($"[{definition.id}] {displayName}", GetItemIcon(definition));
+            GUIContent content = new GUIContent($"[{definition.id}] {displayName}");
             ItemDefinitionDragAndDropUtility.HandleListItemDrag(selectRect, definition, content.text, this);
             if (allowReorder)
             {
                 HandleDefinitionReorderDropTarget(rowRect, itemManager, definitions, visibleDefinitions, i);
             }
 
-            bool pressed = GUI.Toggle(selectRect, isSelected, content, "Button");
+            bool pressed = GUI.Toggle(selectRect, isSelected, GUIContent.none, "Button");
             if (pressed)
             {
                 selectedItemId = definition.id;
             }
+
+            Rect iconRect = new Rect(selectRect.x + 4f, selectRect.y + 4f, 20f, 20f);
+            Rect labelRect = new Rect(iconRect.xMax + 4f, selectRect.y, Mathf.Max(1f, selectRect.xMax - iconRect.xMax - 8f), selectRect.height);
+            DrawItemIcon(iconRect, definition);
+            GUI.Label(labelRect, content, EditorStyles.miniLabel);
 
             EditorGUI.BeginDisabledGroup(!EditorApplication.isPlaying);
             if (GUI.Button(giveRect, "Give"))
@@ -319,6 +345,12 @@ public class ItemDataEditorWindow : EditorWindow
                 TryGiveItemToPlayer(definition);
             }
             EditorGUI.EndDisabledGroup();
+        }
+
+        int hiddenTrailingRowCount = visibleDefinitions.Count - lastVisibleIndex - 1;
+        if (hiddenTrailingRowCount > 0)
+        {
+            GUILayout.Space(hiddenTrailingRowCount * ItemListRowHeight);
         }
 
         if (allowReorder)
@@ -329,6 +361,29 @@ public class ItemDataEditorWindow : EditorWindow
 
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
+    }
+
+    private int GetFirstVisibleItemListIndex(int itemCount)
+    {
+        if (itemCount <= 0)
+        {
+            return 0;
+        }
+
+        int firstIndex = Mathf.FloorToInt(Mathf.Max(0f, listScroll.y) / ItemListRowHeight) - ItemListOverscanRows;
+        return Mathf.Clamp(firstIndex, 0, itemCount - 1);
+    }
+
+    private int GetLastVisibleItemListIndex(int firstVisibleIndex, int itemCount)
+    {
+        if (itemCount <= 0)
+        {
+            return -1;
+        }
+
+        int visibleRowCount = Mathf.CeilToInt(Mathf.Max(ItemListRowHeight, position.height) / ItemListRowHeight)
+            + ItemListOverscanRows * 2;
+        return Mathf.Clamp(firstVisibleIndex + visibleRowCount, firstVisibleIndex, itemCount - 1);
     }
 
     private void HandleDefinitionReorderDropTarget(
@@ -473,7 +528,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorUtility.SetDirty(itemManager);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
 
         if (pendingReorderSelection != null)
         {
@@ -725,6 +780,17 @@ public class ItemDataEditorWindow : EditorWindow
         DrawSelectedItemHeader(selectedDefinition);
         GUILayout.Space(8f);
 
+        if (EditorApplication.isPlaying)
+        {
+            showPlayModeDetailFields = EditorGUILayout.ToggleLeft("Show Detail Fields", showPlayModeDetailFields);
+            if (!showPlayModeDetailFields)
+            {
+                EditorGUILayout.HelpBox("Play Mode에서는 프레임 드랍을 줄이기 위해 상세 편집 필드를 그리지 않습니다.", MessageType.Info);
+                GUILayout.EndArea();
+                return;
+            }
+        }
+
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
         DrawSelectedItemFields(selectedDefinition, definitions);
         EditorGUILayout.EndScrollView();
@@ -742,7 +808,9 @@ public class ItemDataEditorWindow : EditorWindow
 
         GUILayout.BeginVertical();
         EditorGUILayout.LabelField($"[{definition.id}] {GetDefinitionDisplayName(definition)}", EditorStyles.largeLabel);
-        string assetPath = AssetDatabase.GetAssetPath(definition);
+        string assetPath = EditorApplication.isPlaying
+            ? "(Asset Path skipped in Play Mode)"
+            : AssetDatabase.GetAssetPath(definition);
         EditorGUILayout.LabelField(string.IsNullOrWhiteSpace(assetPath) ? "(No Asset Path)" : assetPath, EditorStyles.miniLabel);
         GUILayout.Space(6f);
 
@@ -949,7 +1017,7 @@ public class ItemDataEditorWindow : EditorWindow
         if (serializedObject.ApplyModifiedProperties())
         {
             EditorUtility.SetDirty(definition);
-            InvalidateDefinitionPresentationCache(true);
+            InvalidateDefinitionPresentationCache();
             Repaint();
         }
     }
@@ -1303,12 +1371,8 @@ public class ItemDataEditorWindow : EditorWindow
                 DrawPlacementCenterGridCell(cellRect, isCenter);
                 if (isCenter)
                 {
-                    GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
-                    {
-                        alignment = TextAnchor.MiddleCenter,
-                        fontSize = cellSize >= 30f ? 9 : 8,
-                        normal = { textColor = Color.white }
-                    };
+                    GUIStyle labelStyle = GetPlacementCenterLabelStyle();
+                    labelStyle.fontSize = cellSize >= 30f ? 9 : 8;
                     GUI.Label(cellRect, cellSize >= 30f ? "Center" : "C", labelStyle);
                 }
 
@@ -1495,13 +1559,15 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.Space(6f);
         EditorGUILayout.LabelField("Input Output Module", EditorStyles.boldLabel);
         UnityEngine.Object targetObject = mapObjectSerializedObject.targetObject;
+        int pairCount = inputListProperty.arraySize;
         string sectionFoldoutKey = GetInputOutputPairSectionFoldoutKey(targetObject);
+        InitializeInputOutputPairFoldoutStates(sectionFoldoutKey, targetObject, pairCount);
         bool isSectionExpanded = string.IsNullOrEmpty(sectionFoldoutKey)
             || !collapsedInputOutputPairSectionKeys.Contains(sectionFoldoutKey);
         EditorGUILayout.BeginHorizontal();
         bool nextSectionExpanded = EditorGUILayout.Foldout(
             isSectionExpanded,
-            $"Input / Output Pairs ({inputListProperty.arraySize})",
+            $"Input / Output Pairs ({pairCount})",
             true,
             EditorStyles.foldout);
         if (nextSectionExpanded != isSectionExpanded)
@@ -1513,13 +1579,13 @@ public class ItemDataEditorWindow : EditorWindow
         if (GUILayout.Button("Expand All", GUILayout.Width(76f)))
         {
             SetInputOutputPairSectionCollapsedState(sectionFoldoutKey, false);
-            SetInputOutputPairCollapsedState(targetObject, inputListProperty.arraySize, false);
+            SetInputOutputPairCollapsedState(targetObject, pairCount, false);
             isSectionExpanded = true;
         }
 
         if (GUILayout.Button("Collapse All", GUILayout.Width(82f)))
         {
-            SetInputOutputPairCollapsedState(targetObject, inputListProperty.arraySize, true);
+            SetInputOutputPairCollapsedState(targetObject, pairCount, true);
             SetInputOutputPairSectionCollapsedState(sectionFoldoutKey, true);
             isSectionExpanded = false;
         }
@@ -1528,7 +1594,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (isSectionExpanded)
         {
-            for (int i = 0; i < inputListProperty.arraySize; i++)
+            for (int i = 0; i < pairCount; i++)
             {
                 SerializedProperty inputEntryProperty = inputListProperty.GetArrayElementAtIndex(i);
                 SerializedProperty outputEntryProperty = outputListProperty.GetArrayElementAtIndex(i);
@@ -1558,7 +1624,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         GUILayout.Space(8f);
-        DrawInputOutputRectGridFields(mapObjectSerializedObject);
+        DrawInputOutputRectGridFields(mapObjectSerializedObject, pairCount);
     }
 
     private string GetInputOutputPairSectionFoldoutKey(UnityEngine.Object targetObject)
@@ -1569,6 +1635,31 @@ public class ItemDataEditorWindow : EditorWindow
     private string GetInputOutputPairFoldoutKey(UnityEngine.Object targetObject, int pairIndex)
     {
         return $"{GetInputOutputTargetKey(targetObject)}/Pair/{Mathf.Max(0, pairIndex)}";
+    }
+
+    private void InitializeInputOutputPairFoldoutStates(string sectionFoldoutKey, UnityEngine.Object targetObject, int pairCount)
+    {
+        bool shouldAutoCollapse = pairCount >= LargeInputOutputPairAutoCollapseThreshold;
+        if (!string.IsNullOrEmpty(sectionFoldoutKey)
+            && initializedInputOutputPairSectionKeys.Add(sectionFoldoutKey)
+            && shouldAutoCollapse)
+        {
+            collapsedInputOutputPairSectionKeys.Add(sectionFoldoutKey);
+        }
+
+        if (!shouldAutoCollapse || targetObject == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < pairCount; i++)
+        {
+            string pairKey = GetInputOutputPairFoldoutKey(targetObject, i);
+            if (!string.IsNullOrEmpty(pairKey) && initializedInputOutputPairKeys.Add(pairKey))
+            {
+                collapsedInputOutputPairKeys.Add(pairKey);
+            }
+        }
     }
 
     private string GetInputOutputTargetKey(UnityEngine.Object targetObject)
@@ -1623,7 +1714,40 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private void DrawInputOutputRectGridFields(SerializedObject mapObjectSerializedObject)
+    private string GetInputOutputSlotLayoutSectionFoldoutKey(UnityEngine.Object targetObject)
+    {
+        return $"{GetInputOutputTargetKey(targetObject)}/SlotLayout";
+    }
+
+    private void InitializeInputOutputSlotLayoutFoldoutState(string sectionFoldoutKey, int pairCount)
+    {
+        bool shouldAutoCollapse = pairCount >= LargeInputOutputPairAutoCollapseThreshold;
+        if (!string.IsNullOrEmpty(sectionFoldoutKey)
+            && initializedInputOutputSlotLayoutSectionKeys.Add(sectionFoldoutKey)
+            && shouldAutoCollapse)
+        {
+            collapsedInputOutputSlotLayoutSectionKeys.Add(sectionFoldoutKey);
+        }
+    }
+
+    private void SetInputOutputSlotLayoutSectionCollapsedState(string sectionFoldoutKey, bool collapsed)
+    {
+        if (string.IsNullOrEmpty(sectionFoldoutKey))
+        {
+            return;
+        }
+
+        if (collapsed)
+        {
+            collapsedInputOutputSlotLayoutSectionKeys.Add(sectionFoldoutKey);
+        }
+        else
+        {
+            collapsedInputOutputSlotLayoutSectionKeys.Remove(sectionFoldoutKey);
+        }
+    }
+
+    private void DrawInputOutputRectGridFields(SerializedObject mapObjectSerializedObject, int pairCount)
     {
         if (mapObjectSerializedObject == null)
         {
@@ -1632,6 +1756,26 @@ public class ItemDataEditorWindow : EditorWindow
 
         InputOutputModule inputOutputModule = mapObjectSerializedObject.targetObject as InputOutputModule;
         if (inputOutputModule == null)
+        {
+            return;
+        }
+
+        string sectionFoldoutKey = GetInputOutputSlotLayoutSectionFoldoutKey(mapObjectSerializedObject.targetObject);
+        InitializeInputOutputSlotLayoutFoldoutState(sectionFoldoutKey, pairCount);
+        bool isSectionExpanded = string.IsNullOrEmpty(sectionFoldoutKey)
+            || !collapsedInputOutputSlotLayoutSectionKeys.Contains(sectionFoldoutKey);
+        bool nextSectionExpanded = EditorGUILayout.Foldout(
+            isSectionExpanded,
+            "Slot Layout",
+            true,
+            EditorStyles.foldout);
+        if (nextSectionExpanded != isSectionExpanded)
+        {
+            SetInputOutputSlotLayoutSectionCollapsedState(sectionFoldoutKey, !nextSectionExpanded);
+            isSectionExpanded = nextSectionExpanded;
+        }
+
+        if (!isSectionExpanded)
         {
             return;
         }
@@ -1645,7 +1789,6 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        EditorGUILayout.LabelField("Slot Layout", EditorStyles.miniBoldLabel);
         EditorGUILayout.PropertyField(slotLayoutTypeProperty, new GUIContent("Layout"));
 
         InputOutputModule.SlotLayoutType layoutType = (InputOutputModule.SlotLayoutType)slotLayoutTypeProperty.enumValueIndex;
@@ -1848,15 +1991,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.y, 1f, blockRect.height), new Color(1f, 1f, 1f, 0.15f));
         EditorGUI.DrawRect(new Rect(blockRect.xMax - 1f, blockRect.y, 1f, blockRect.height), new Color(0f, 0f, 0f, 0.35f));
 
-        GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
-        {
-            alignment = TextAnchor.MiddleCenter,
-            wordWrap = true,
-            fontSize = 9,
-            padding = new RectOffset(2, 2, 1, 1),
-            normal = { textColor = Color.white }
-        };
-        GUI.Label(blockRect, entry.displayLabel, labelStyle);
+        GUI.Label(blockRect, entry.displayLabel, GetRectGridPaletteLabelStyle());
         InputOutputRectGridBlockDragAndDropUtility.HandlePaletteBlockDrag(blockRect, entry.blockType, entry.label, this);
     }
 
@@ -1874,15 +2009,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(new Rect(insetRect.x, insetRect.y, 1f, insetRect.height), new Color(1f, 1f, 1f, 0.15f));
         EditorGUI.DrawRect(new Rect(insetRect.xMax - 1f, insetRect.y, 1f, insetRect.height), new Color(0f, 0f, 0f, 0.35f));
 
-        GUIStyle labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
-        {
-            alignment = TextAnchor.MiddleCenter,
-            wordWrap = true,
-            fontSize = 8,
-            padding = new RectOffset(1, 1, 1, 1),
-            normal = { textColor = Color.white }
-        };
-        GUI.Label(insetRect, GetRectGridBlockDisplayLabel(inputOutputModule, blockType, cell), labelStyle);
+        GUI.Label(insetRect, GetRectGridBlockDisplayLabel(inputOutputModule, blockType, cell), GetRectGridBlockLabelStyle());
     }
 
     private void HandleRectGridCellDrop(
@@ -2069,6 +2196,54 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.yMin, 1f, rect.height), new Color(0.35f, 0.65f, 1f, 0.95f));
     }
 
+    private static GUIStyle GetPlacementCenterLabelStyle()
+    {
+        if (placementCenterLabelStyle == null)
+        {
+            placementCenterLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
+            };
+        }
+
+        return placementCenterLabelStyle;
+    }
+
+    private static GUIStyle GetRectGridPaletteLabelStyle()
+    {
+        if (rectGridPaletteLabelStyle == null)
+        {
+            rectGridPaletteLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                fontSize = 9,
+                padding = new RectOffset(2, 2, 1, 1),
+                normal = { textColor = Color.white }
+            };
+        }
+
+        return rectGridPaletteLabelStyle;
+    }
+
+    private static GUIStyle GetRectGridBlockLabelStyle()
+    {
+        if (rectGridBlockLabelStyle == null)
+        {
+            rectGridBlockLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                fontSize = 8,
+                padding = new RectOffset(1, 1, 1, 1),
+                normal = { textColor = Color.white }
+            };
+        }
+
+        return rectGridBlockLabelStyle;
+    }
+
     private void DrawInputOutputPairRow(
         SerializedProperty inputEntryProperty,
         SerializedProperty outputEntryProperty,
@@ -2131,7 +2306,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.EndVertical();
     }
 
-    private static string GetInputOutputPairHeader(
+    private string GetInputOutputPairHeader(
         SerializedProperty inputEntryProperty,
         SerializedProperty outputEntryProperty,
         List<ItemDefinition> definitions,
@@ -2176,7 +2351,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
     }
 
-    private static bool TryGetCraftingTreeIngredientSummary(
+    private bool TryGetCraftingTreeIngredientSummary(
         SerializedProperty outputEntryProperty,
         List<ItemDefinition> definitions,
         out string summary)
@@ -2196,25 +2371,44 @@ public class ItemDataEditorWindow : EditorWindow
             return false;
         }
 
-        List<CraftingTreeRuntime.IngredientEntry> ingredients = new List<CraftingTreeRuntime.IngredientEntry>();
-        if (!CraftingTreeRuntime.TryGetIngredients(outputDefinition.id, ingredients) || ingredients.Count <= 0)
+        EnsureCraftingTreeIngredientSummaryCacheVersion();
+        if (cachedCraftingTreeIngredientSummaries.TryGetValue(outputDefinition.id, out summary))
         {
+            return !string.IsNullOrWhiteSpace(summary);
+        }
+
+        if (!CraftingTreeRuntime.TryGetIngredients(outputDefinition.id, craftingTreeIngredientBuffer)
+            || craftingTreeIngredientBuffer.Count <= 0)
+        {
+            cachedCraftingTreeIngredientSummaries[outputDefinition.id] = string.Empty;
             return false;
         }
 
-        List<string> parts = new List<string>();
-        for (int i = 0; i < ingredients.Count; i++)
+        craftingTreeIngredientSummaryParts.Clear();
+        for (int i = 0; i < craftingTreeIngredientBuffer.Count; i++)
         {
-            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            CraftingTreeRuntime.IngredientEntry ingredient = craftingTreeIngredientBuffer[i];
             ItemDefinition ingredientDefinition = FindDefinitionById(definitions, ingredient.itemId);
             string itemName = ingredientDefinition != null
                 ? GetDefinitionDisplayName(ingredientDefinition)
                 : $"Item {ingredient.itemId}";
-            parts.Add($"{itemName} x{Mathf.Max(1, ingredient.count)}");
+            craftingTreeIngredientSummaryParts.Add($"{itemName} x{Mathf.Max(1, ingredient.count)}");
         }
 
-        summary = string.Join(" + ", parts);
+        summary = string.Join(" + ", craftingTreeIngredientSummaryParts);
+        cachedCraftingTreeIngredientSummaries[outputDefinition.id] = summary;
         return !string.IsNullOrWhiteSpace(summary);
+    }
+
+    private void EnsureCraftingTreeIngredientSummaryCacheVersion()
+    {
+        if (cachedCraftingTreeIngredientSummaryVersion == definitionsCacheVersion)
+        {
+            return;
+        }
+
+        cachedCraftingTreeIngredientSummaries.Clear();
+        cachedCraftingTreeIngredientSummaryVersion = definitionsCacheVersion;
     }
 
     private void DrawInputOutputEntryFields(
@@ -2240,7 +2434,7 @@ public class ItemDataEditorWindow : EditorWindow
         ItemDefinition currentDefinition = itemDefinitionProperty.objectReferenceValue as ItemDefinition;
         ItemDefinition[] dropdownDefinitions = GetInputOutputDefinitionOptions(definitions);
         GUIContent[] dropdownOptions = GetInputOutputDefinitionOptionContents(definitions);
-        int currentIndex = GetInputOutputDefinitionOptionIndex(currentDefinition, dropdownDefinitions);
+        int currentIndex = GetInputOutputDefinitionOptionIndex(currentDefinition);
         Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
         int nextIndex = EditorGUI.Popup(popupRect, currentIndex, dropdownOptions);
         ItemDefinition nextDefinition = nextIndex > 0 && nextIndex < dropdownDefinitions.Length
@@ -2284,13 +2478,9 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         GUILayout.Space(EditorGUIUtility.labelWidth);
 
-        Texture icon = GetItemIcon(definition);
         Rect iconRect = GUILayoutUtility.GetRect(24f, 24f, GUILayout.Width(24f), GUILayout.Height(24f));
         DrawIconBackground(iconRect);
-        if (icon != null)
-        {
-            GUI.DrawTexture(iconRect, icon, ScaleMode.ScaleToFit);
-        }
+        DrawItemIcon(iconRect, definition);
 
         EditorGUILayout.LabelField($"[{definition.id}] {GetDefinitionDisplayName(definition)}", EditorStyles.miniLabel);
         EditorGUILayout.EndHorizontal();
@@ -2399,6 +2589,9 @@ public class ItemDataEditorWindow : EditorWindow
         cachedInputOutputDefinitionOptions = BuildInputOutputDefinitionOptions(definitions);
         cachedInputOutputDefinitionOptionContents =
             BuildInputOutputDefinitionOptionContents(cachedInputOutputDefinitionOptions);
+        BuildInputOutputDefinitionOptionIndexes(
+            cachedInputOutputDefinitionOptions,
+            cachedInputOutputDefinitionOptionIndexes);
         cachedInputOutputDefinitionOptionsVersion = definitionsCacheVersion;
     }
 
@@ -2437,35 +2630,49 @@ public class ItemDataEditorWindow : EditorWindow
             string label = definition != null
                 ? $"[{definition.id}] {GetDefinitionDisplayName(definition)}"
                 : "(None)";
-            contents[i] = new GUIContent(label, GetItemIcon(definition));
+            contents[i] = new GUIContent(label);
         }
 
         return contents;
     }
 
-    private static int GetInputOutputDefinitionOptionIndex(ItemDefinition currentDefinition, ItemDefinition[] options)
+    private static void BuildInputOutputDefinitionOptionIndexes(
+        ItemDefinition[] options,
+        Dictionary<int, int> optionIndexes)
     {
-        if (currentDefinition == null || options == null)
+        optionIndexes.Clear();
+        if (options == null)
         {
-            return 0;
+            return;
         }
 
         for (int i = 1; i < options.Length; i++)
         {
-            if (options[i] == currentDefinition)
+            ItemDefinition definition = options[i];
+            if (definition != null)
             {
-                return i;
+                optionIndexes[definition.GetInstanceID()] = i;
             }
         }
+    }
 
-        return 0;
+    private int GetInputOutputDefinitionOptionIndex(ItemDefinition currentDefinition)
+    {
+        if (currentDefinition == null)
+        {
+            return 0;
+        }
+
+        return cachedInputOutputDefinitionOptionIndexes.TryGetValue(currentDefinition.GetInstanceID(), out int optionIndex)
+            ? optionIndex
+            : 0;
     }
 
     private void SaveItemData()
     {
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
         EnsureSelection();
         Repaint();
     }
@@ -2490,7 +2697,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         AssetDatabase.Refresh();
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
         EnsureSelection(GetDefinitions(itemManager));
         Repaint();
     }
@@ -2513,7 +2720,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorUtility.SetDirty(itemManager);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
         EnsureSelection(GetDefinitions(itemManager));
         ShowNotification(new GUIContent($"Item Data rebuilt. Production recipes: {productionMachineRecipeCount}"));
         Repaint();
@@ -2801,7 +3008,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        InvalidateDefinitionCache(true);
+        InvalidateDefinitionCache();
         EnsureSelection(GetDefinitions(itemManager));
         Repaint();
 
@@ -3790,12 +3997,15 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        AppendMissingItemDefinitionAssets(cachedDefinitions);
+        if (!EditorApplication.isPlaying)
+        {
+            AppendMissingItemDefinitionAssets(cachedDefinitions);
+        }
         cachedDefinitionsItemManager = itemManager;
         cachedDefinitionsItemManagerCount = itemManagerDefinitionCount;
         definitionsCacheDirty = false;
         definitionsCacheVersion++;
-        InvalidateDefinitionPresentationCache(false);
+        InvalidateDefinitionPresentationCache();
         return cachedDefinitions;
     }
 
@@ -3804,6 +4014,28 @@ public class ItemDataEditorWindow : EditorWindow
         if (definitions == null || !AssetDatabase.IsValidFolder(ItemDefinitionAssetFolder))
         {
             return;
+        }
+
+        HashSet<string> knownAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<int> knownIds = new HashSet<int>();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition existingDefinition = definitions[i];
+            if (existingDefinition == null)
+            {
+                continue;
+            }
+
+            string existingAssetPath = AssetDatabase.GetAssetPath(existingDefinition);
+            if (!string.IsNullOrWhiteSpace(existingAssetPath))
+            {
+                knownAssetPaths.Add(existingAssetPath);
+            }
+
+            if (existingDefinition.id >= 0)
+            {
+                knownIds.Add(existingDefinition.id);
+            }
         }
 
         string[] definitionGuids = AssetDatabase.FindAssets("t:ItemDefinition", new[] { ItemDefinitionAssetFolder });
@@ -3816,54 +4048,31 @@ public class ItemDataEditorWindow : EditorWindow
         for (int i = 0; i < definitionGuids.Length; i++)
         {
             string assetPath = AssetDatabase.GUIDToAssetPath(definitionGuids[i]);
+            if (!string.IsNullOrWhiteSpace(assetPath) && knownAssetPaths.Contains(assetPath))
+            {
+                continue;
+            }
+
             ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
-            if (definition == null || ContainsDefinition(definitions, definition) || ContainsDefinition(missingDefinitions, definition))
+            if (definition == null || (definition.id >= 0 && knownIds.Contains(definition.id)))
             {
                 continue;
             }
 
             missingDefinitions.Add(definition);
+            if (!string.IsNullOrWhiteSpace(assetPath))
+            {
+                knownAssetPaths.Add(assetPath);
+            }
+
+            if (definition.id >= 0)
+            {
+                knownIds.Add(definition.id);
+            }
         }
 
         SortDefinitionsById(missingDefinitions);
         definitions.AddRange(missingDefinitions);
-    }
-
-    private static bool ContainsDefinition(List<ItemDefinition> definitions, ItemDefinition definition)
-    {
-        if (definitions == null || definition == null)
-        {
-            return false;
-        }
-
-        string definitionAssetPath = AssetDatabase.GetAssetPath(definition);
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition candidate = definitions[i];
-            if (candidate == null)
-            {
-                continue;
-            }
-
-            if (candidate == definition)
-            {
-                return true;
-            }
-
-            string candidateAssetPath = AssetDatabase.GetAssetPath(candidate);
-            if (!string.IsNullOrWhiteSpace(definitionAssetPath)
-                && string.Equals(candidateAssetPath, definitionAssetPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (definition.id >= 0 && candidate.id == definition.id)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static ItemDefinition FindDefinitionById(List<ItemDefinition> definitions, int id)
@@ -3918,172 +4127,6 @@ public class ItemDataEditorWindow : EditorWindow
                definition.name.IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private static Texture GetItemIcon(ItemDefinition definition)
-    {
-        if (definition == null || definition.icon == null)
-        {
-            return null;
-        }
-
-        Sprite icon = definition.icon;
-        if (ItemIconTextureCache.TryGetValue(icon, out Texture cachedIcon) && cachedIcon != null)
-        {
-            return cachedIcon;
-        }
-
-        Texture preview = AssetPreview.GetAssetPreview(icon);
-        if (preview != null)
-        {
-            ItemIconTextureCache[icon] = preview;
-            return preview;
-        }
-
-        Texture spriteRegion = GetSpriteRegionTexture(icon);
-        if (spriteRegion != null)
-        {
-            ItemIconTextureCache[icon] = spriteRegion;
-            return spriteRegion;
-        }
-
-        Texture mini = AssetPreview.GetMiniThumbnail(icon);
-        if (mini != null)
-        {
-            ItemIconTextureCache[icon] = mini;
-            return mini;
-        }
-
-        Texture texture = icon.texture;
-        if (texture != null)
-        {
-            ItemIconTextureCache[icon] = texture;
-        }
-
-        return texture;
-    }
-
-    private static Texture GetSpriteRegionTexture(Sprite sprite)
-    {
-        if (sprite == null || sprite.texture == null)
-        {
-            return null;
-        }
-
-        if (SpriteRegionTextureCache.TryGetValue(sprite, out Texture2D cachedTexture) && cachedTexture != null)
-        {
-            return cachedTexture;
-        }
-
-        Rect textureRect;
-        try
-        {
-            textureRect = sprite.textureRect;
-        }
-        catch (Exception)
-        {
-            textureRect = sprite.rect;
-        }
-
-        Texture2D sourceTexture = sprite.texture;
-        int sourceWidth = sourceTexture.width;
-        int sourceHeight = sourceTexture.height;
-        int x = Mathf.Clamp(Mathf.RoundToInt(textureRect.x), 0, Mathf.Max(0, sourceWidth - 1));
-        int y = Mathf.Clamp(Mathf.RoundToInt(textureRect.y), 0, Mathf.Max(0, sourceHeight - 1));
-        int width = Mathf.Clamp(Mathf.RoundToInt(textureRect.width), 1, Mathf.Max(1, sourceWidth - x));
-        int height = Mathf.Clamp(Mathf.RoundToInt(textureRect.height), 1, Mathf.Max(1, sourceHeight - y));
-        if (x == 0 && y == 0 && width == sourceWidth && height == sourceHeight)
-        {
-            return sourceTexture;
-        }
-
-        Texture2D regionTexture = new Texture2D(width, height, TextureFormat.RGBA32, false)
-        {
-            name = $"{sprite.name}_ItemDataPreview",
-            hideFlags = HideFlags.HideAndDontSave
-        };
-
-        RenderTexture renderTexture = null;
-        RenderTexture previousActive = RenderTexture.active;
-        bool pushedMatrix = false;
-        try
-        {
-            renderTexture = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
-            RenderTexture.active = renderTexture;
-            GL.PushMatrix();
-            pushedMatrix = true;
-            GL.LoadPixelMatrix(0f, width, 0f, height);
-            GL.Clear(true, true, Color.clear);
-            Rect targetRect = new Rect(0f, 0f, width, height);
-            Rect sourceRect = new Rect(
-                x / (float)sourceWidth,
-                y / (float)sourceHeight,
-                width / (float)sourceWidth,
-                height / (float)sourceHeight);
-            Graphics.DrawTexture(targetRect, sourceTexture, sourceRect, 0, 0, 0, 0);
-            GL.PopMatrix();
-            pushedMatrix = false;
-
-            regionTexture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
-            FlipTexturePixelsVertically(regionTexture, width, height);
-            regionTexture.Apply(false, true);
-        }
-        catch (Exception)
-        {
-            DestroyImmediate(regionTexture);
-            return null;
-        }
-        finally
-        {
-            if (pushedMatrix)
-            {
-                GL.PopMatrix();
-            }
-
-            RenderTexture.active = previousActive;
-            if (renderTexture != null)
-            {
-                RenderTexture.ReleaseTemporary(renderTexture);
-            }
-        }
-
-        SpriteRegionTextureCache[sprite] = regionTexture;
-        return regionTexture;
-    }
-
-    private static void FlipTexturePixelsVertically(Texture2D texture, int width, int height)
-    {
-        if (texture == null || width <= 0 || height <= 1)
-        {
-            return;
-        }
-
-        Color[] pixels = texture.GetPixels();
-        Color[] flippedPixels = new Color[pixels.Length];
-        for (int y = 0; y < height; y++)
-        {
-            Array.Copy(
-                pixels,
-                y * width,
-                flippedPixels,
-                (height - 1 - y) * width,
-                width);
-        }
-
-        texture.SetPixels(flippedPixels);
-    }
-
-    private static void ClearSpriteRegionTextureCache()
-    {
-        foreach (KeyValuePair<Sprite, Texture2D> pair in SpriteRegionTextureCache)
-        {
-            if (pair.Value != null)
-            {
-                DestroyImmediate(pair.Value);
-            }
-        }
-
-        SpriteRegionTextureCache.Clear();
-    }
-
     private void TryGiveItemToPlayer(ItemDefinition definition)
     {
         if (definition == null || definition.id < 0)
@@ -4134,16 +4177,57 @@ public class ItemDataEditorWindow : EditorWindow
 
     private static void DrawItemIcon(Rect rect, ItemDefinition definition)
     {
-        Texture icon = GetItemIcon(definition);
-        if (icon == null)
+        if (!IsRepaintEvent())
+        {
+            return;
+        }
+
+        Sprite sprite = definition != null ? definition.icon : null;
+        if (!TryGetSpriteTextureCoords(sprite, out Texture texture, out Rect textureCoords))
         {
             return;
         }
 
         Color previousColor = GUI.color;
         GUI.color = Color.white;
-        GUI.DrawTexture(rect, icon, ScaleMode.ScaleToFit);
+        GUI.DrawTextureWithTexCoords(rect, texture, textureCoords);
         GUI.color = previousColor;
+    }
+
+    private static bool TryGetSpriteTextureCoords(Sprite sprite, out Texture texture, out Rect textureCoords)
+    {
+        texture = null;
+        textureCoords = default;
+        if (sprite == null || sprite.texture == null)
+        {
+            return false;
+        }
+
+        Rect textureRect;
+        try
+        {
+            textureRect = sprite.textureRect;
+        }
+        catch (Exception)
+        {
+            textureRect = sprite.rect;
+        }
+
+        texture = sprite.texture;
+        float textureWidth = Mathf.Max(1f, texture.width);
+        float textureHeight = Mathf.Max(1f, texture.height);
+        textureCoords = new Rect(
+            textureRect.x / textureWidth,
+            textureRect.y / textureHeight,
+            textureRect.width / textureWidth,
+            textureRect.height / textureHeight);
+        return textureCoords.width > 0f && textureCoords.height > 0f;
+    }
+
+    private static bool IsRepaintEvent()
+    {
+        Event current = Event.current;
+        return current != null && current.type == EventType.Repaint;
     }
 
     private ItemManager FindItemManager()

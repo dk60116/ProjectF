@@ -27,6 +27,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         new Color(0.55f, 1.00f, 0.85f, 1f)
     };
     private static readonly Color CartDirectionColor = new Color(1.00f, 0.95f, 0.12f, 1f);
+    private static readonly Color BlockedCartDirectionColor = Color.black;
 
     [SerializeField, Min(0.01f)]
     private float connectionDistance = DefaultConnectionDistance;
@@ -339,10 +340,13 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             Vector3 tip = center + direction * halfLength;
             Vector3 headBase = tip - direction * Mathf.Max(0.01f, cartArrowHeadLength);
             Vector3 headSide = side * Mathf.Max(0.01f, cartArrowHeadWidth);
+            Color arrowColor = handcar.IsRailDebugDirectionBlocked(direction)
+                ? BlockedCartDirectionColor
+                : CartDirectionColor;
 
-            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tail, tip);
-            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase + headSide);
-            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase - headSide);
+            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tail, tip, arrowColor);
+            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase + headSide, arrowColor);
+            ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase - headSide, arrowColor);
         }
 
         for (int i = rendererIndex; i < cartArrowRenderers.Count; i++)
@@ -354,7 +358,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         }
     }
 
-    private void ApplyCartArrowSegment(LineRenderer lineRenderer, Vector3 start, Vector3 end)
+    private void ApplyCartArrowSegment(LineRenderer lineRenderer, Vector3 start, Vector3 end, Color color)
     {
         if (lineRenderer == null)
         {
@@ -365,8 +369,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         lineRenderer.positionCount = 2;
         lineRenderer.startWidth = cartArrowLineWidth;
         lineRenderer.endWidth = cartArrowLineWidth;
-        lineRenderer.startColor = CartDirectionColor;
-        lineRenderer.endColor = CartDirectionColor;
+        lineRenderer.startColor = color;
+        lineRenderer.endColor = color;
         lineRenderer.material = lineMaterial;
         lineRenderer.SetPosition(0, start);
         lineRenderer.SetPosition(1, end);

@@ -179,6 +179,12 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly List<InstallationObject> railAlignmentInstallationScratch = new List<InstallationObject>(4);
+    private readonly List<MapObject> trainPreviewConnectionScratch = new List<MapObject>(8);
+    private readonly Queue<MapObject> trainPreviewConnectionQueue = new Queue<MapObject>(8);
+    private readonly List<Train> trainPreviewExistingConnectionScratch = new List<Train>(8);
+    private readonly List<Train> trainPreviewConnectionGroupScratch = new List<Train>(8);
+    private readonly Queue<Train> trainPreviewConnectionTrainQueue = new Queue<Train>(8);
+    private readonly HashSet<Train> trainInstallPreviewHighlightedTrains = new HashSet<Train>();
     private InstallationObject selectedEditableInstallation;
     private Vector2Int selectedEditableAnchorCoordinate;
     private InstallationEditSession activeInstallationEditSession;
@@ -2073,6 +2079,11 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ApplyInstallPreviewTint(MapObject preview, bool selected)
     {
+        ApplyInstallPreviewTint(preview, selected, ResolveInstallPreviewTint(preview));
+    }
+
+    private void ApplyInstallPreviewTint(MapObject preview, bool selected, Color tint)
+    {
         if (preview == null)
         {
             return;
@@ -2083,7 +2094,6 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewPropertyBlock = new MaterialPropertyBlock();
         }
 
-        Color tint = installPreviewTint;
         Renderer[] renderers = preview.GetComponentsInChildren<Renderer>(true);
         for (int i = 0; i < renderers.Length; i++)
         {
@@ -2130,6 +2140,282 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         RefreshInstallPreviewConveyorShaderProperties(preview);
+    }
+
+    private Color ResolveInstallPreviewTint(MapObject preview)
+    {
+        return TryResolveTrainInstallPreviewTint(preview, out Color trainTint)
+            ? trainTint
+            : installPreviewTint;
+    }
+
+    private bool TryResolveTrainInstallPreviewTint(MapObject preview, out Color tint)
+    {
+        tint = default;
+        if (!TryGetTrainPreviewPose(
+                preview,
+                out Vector3 _,
+                out Vector3 _,
+                out float _))
+        {
+            return false;
+        }
+
+        CollectConnectedTrainPreviewComponent(preview);
+        bool hasPreviewConnection = trainPreviewConnectionScratch.Count > 1;
+        bool hasExistingConnection = false;
+        Color existingConnectionColor = default;
+        int existingConnectionSeed = int.MaxValue;
+        int previewSeed = int.MaxValue;
+
+        for (int i = 0; i < trainPreviewConnectionScratch.Count; i++)
+        {
+            MapObject connectedPreview = trainPreviewConnectionScratch[i];
+            if (!TryGetTrainPreviewPose(
+                    connectedPreview,
+                    out Vector3 previewPosition,
+                    out Vector3 previewForward,
+                    out float autoConnectDistance))
+            {
+                continue;
+            }
+
+            previewSeed = Mathf.Min(previewSeed, ResolveTrainPreviewConnectionSeed(connectedPreview));
+            if (Train.TryGetAutoConnectInfoNearPose(
+                    previewPosition,
+                    previewForward,
+                    autoConnectDistance,
+                    out Color candidateExistingColor,
+                    out int candidateExistingSeed,
+                    out _)
+                && candidateExistingSeed < existingConnectionSeed)
+            {
+                existingConnectionColor = candidateExistingColor;
+                existingConnectionSeed = candidateExistingSeed;
+                hasExistingConnection = true;
+            }
+        }
+
+        if (!hasPreviewConnection && !hasExistingConnection)
+        {
+            return false;
+        }
+
+        tint = hasExistingConnection
+            ? existingConnectionColor
+            : Train.GetConnectionColorForSeed(previewSeed == int.MaxValue ? preview.GetInstanceID() : previewSeed);
+        tint.a = Mathf.Max(tint.a, installPreviewTint.a);
+        return true;
+    }
+
+    private void CollectConnectedTrainPreviewComponent(MapObject rootPreview)
+    {
+        trainPreviewConnectionScratch.Clear();
+        trainPreviewConnectionQueue.Clear();
+        if (rootPreview == null)
+        {
+            return;
+        }
+
+        trainPreviewConnectionScratch.Add(rootPreview);
+        trainPreviewConnectionQueue.Enqueue(rootPreview);
+        while (trainPreviewConnectionQueue.Count > 0)
+        {
+            MapObject currentPreview = trainPreviewConnectionQueue.Dequeue();
+            if (!TryGetTrainPreviewPose(
+                    currentPreview,
+                    out Vector3 currentPosition,
+                    out Vector3 currentForward,
+                    out float currentAutoConnectDistance))
+            {
+                continue;
+            }
+
+            for (int i = 0; i < installPreviewInstances.Count; i++)
+            {
+                MapObject candidatePreview = installPreviewInstances[i];
+                if (candidatePreview == null
+                    || candidatePreview == currentPreview
+                    || trainPreviewConnectionScratch.Contains(candidatePreview)
+                    || !TryGetTrainPreviewPose(
+                        candidatePreview,
+                        out Vector3 candidatePosition,
+                        out Vector3 candidateForward,
+                        out float candidateAutoConnectDistance)
+                    || !Train.CanAutoConnectTrainPoses(
+                        currentPosition,
+                        currentForward,
+                        currentAutoConnectDistance,
+                        candidatePosition,
+                        candidateForward,
+                        candidateAutoConnectDistance))
+                {
+                    continue;
+                }
+
+                trainPreviewConnectionScratch.Add(candidatePreview);
+                trainPreviewConnectionQueue.Enqueue(candidatePreview);
+            }
+        }
+    }
+
+    private bool TryGetTrainPreviewPose(
+        MapObject preview,
+        out Vector3 position,
+        out Vector3 forward,
+        out float autoConnectDistance)
+    {
+        position = Vector3.zero;
+        forward = Vector3.forward;
+        autoConnectDistance = Train.GetDefaultAutoConnectDistance();
+        if (preview == null)
+        {
+            return false;
+        }
+
+        MapObject source = ResolveInstallPreviewPlacementSource(preview);
+        Train sourceTrain = ResolveTrainSource(source) ?? ResolveTrainSource(preview);
+        if (sourceTrain == null)
+        {
+            return false;
+        }
+
+        position = preview.transform.position;
+        forward = preview.transform.forward;
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            forward = sourceTrain.transform.forward;
+        }
+
+        autoConnectDistance = sourceTrain.AutoConnectDistance;
+        return true;
+    }
+
+    private int ResolveTrainPreviewConnectionSeed(MapObject preview)
+    {
+        if (preview != null
+            && installPreviewPlacementSequencesByPreview.TryGetValue(preview, out long placementSequence)
+            && placementSequence > 0)
+        {
+            return (int)(placementSequence & 0x7fffffff);
+        }
+
+        return preview != null ? preview.GetInstanceID() : 0;
+    }
+
+    private void RefreshTrainInstallPreviewTints()
+    {
+        ClearTrainInstallPreviewConnectionHighlights();
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            MapObject preview = installPreviewInstances[i];
+            if (preview == null || !TryGetTrainPreviewPose(preview, out _, out _, out _))
+            {
+                continue;
+            }
+
+            bool hasTrainTint = TryResolveTrainInstallPreviewTint(preview, out Color trainTint);
+            if (hasTrainTint)
+            {
+                HighlightExistingTrainConnectionsForCurrentPreviewComponent(trainTint);
+            }
+
+            ApplyInstallPreviewTint(
+                preview,
+                preview == activeInstallPreview,
+                hasTrainTint ? trainTint : installPreviewTint);
+        }
+    }
+
+    private void HighlightExistingTrainConnectionsForCurrentPreviewComponent(Color tint)
+    {
+        trainPreviewExistingConnectionScratch.Clear();
+        for (int i = 0; i < trainPreviewConnectionScratch.Count; i++)
+        {
+            MapObject connectedPreview = trainPreviewConnectionScratch[i];
+            if (!TryGetTrainPreviewPose(
+                    connectedPreview,
+                    out Vector3 previewPosition,
+                    out Vector3 previewForward,
+                    out float autoConnectDistance))
+            {
+                continue;
+            }
+
+            Train.CollectAutoConnectTrainsNearPose(
+                previewPosition,
+                previewForward,
+                autoConnectDistance,
+                trainPreviewExistingConnectionScratch);
+        }
+
+        for (int i = 0; i < trainPreviewExistingConnectionScratch.Count; i++)
+        {
+            HighlightExistingTrainConnectionGroup(trainPreviewExistingConnectionScratch[i], tint);
+        }
+    }
+
+    private void HighlightExistingTrainConnectionGroup(Train root, Color tint)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        trainPreviewConnectionGroupScratch.Clear();
+        trainPreviewConnectionTrainQueue.Clear();
+        trainPreviewConnectionGroupScratch.Add(root);
+        trainPreviewConnectionTrainQueue.Enqueue(root);
+
+        while (trainPreviewConnectionTrainQueue.Count > 0)
+        {
+            Train current = trainPreviewConnectionTrainQueue.Dequeue();
+            if (current == null)
+            {
+                continue;
+            }
+
+            current.SetConnectionPreviewVisualOverride(tint);
+            trainInstallPreviewHighlightedTrains.Add(current);
+
+            IReadOnlyList<Train> connectedTrains = current.ConnectedTrains;
+            if (connectedTrains == null)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < connectedTrains.Count; i++)
+            {
+                Train connectedTrain = connectedTrains[i];
+                if (connectedTrain == null || trainPreviewConnectionGroupScratch.Contains(connectedTrain))
+                {
+                    continue;
+                }
+
+                trainPreviewConnectionGroupScratch.Add(connectedTrain);
+                trainPreviewConnectionTrainQueue.Enqueue(connectedTrain);
+            }
+        }
+    }
+
+    private void ClearTrainInstallPreviewConnectionHighlights()
+    {
+        if (trainInstallPreviewHighlightedTrains.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (Train train in trainInstallPreviewHighlightedTrains)
+        {
+            if (train == null)
+            {
+                continue;
+            }
+
+            train.ClearConnectionPreviewVisualOverride();
+        }
+
+        trainInstallPreviewHighlightedTrains.Clear();
     }
 
     private static void RefreshInstallPreviewConveyorShaderProperties(MapObject preview)
@@ -14444,7 +14730,8 @@ public class InstallationPlacementController : MonoBehaviour
 
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
-            ApplyBlueprintPreviewMaterial(renderer, installPreviewTint);
+            Color previewTint = ResolveInstallPreviewTint(preview);
+            ApplyBlueprintPreviewMaterial(renderer, previewTint);
 
             Material sharedMaterial = renderer.sharedMaterial;
             if (sharedMaterial == null)
@@ -14456,24 +14743,24 @@ public class InstallationPlacementController : MonoBehaviour
             renderer.GetPropertyBlock(installPreviewPropertyBlock);
             bool hasColorProperty = false;
 
-            if (TryApplyBlueprintPreviewProperties(sharedMaterial, installPreviewPropertyBlock, installPreviewTint))
+            if (TryApplyBlueprintPreviewProperties(sharedMaterial, installPreviewPropertyBlock, previewTint))
             {
                 hasColorProperty = true;
             }
             else if (sharedMaterial.HasProperty(BaseColorPropertyId))
             {
-                installPreviewPropertyBlock.SetColor(BaseColorPropertyId, installPreviewTint);
+                installPreviewPropertyBlock.SetColor(BaseColorPropertyId, previewTint);
                 hasColorProperty = true;
             }
             else if (sharedMaterial.HasProperty(ColorPropertyId))
             {
-                installPreviewPropertyBlock.SetColor(ColorPropertyId, installPreviewTint);
+                installPreviewPropertyBlock.SetColor(ColorPropertyId, previewTint);
                 hasColorProperty = true;
             }
 
             if (sharedMaterial.HasProperty(EmissionColorPropertyId))
             {
-                installPreviewPropertyBlock.SetColor(EmissionColorPropertyId, installPreviewTint * 0.35f);
+                installPreviewPropertyBlock.SetColor(EmissionColorPropertyId, previewTint * 0.35f);
                 hasColorProperty = true;
             }
 
@@ -14858,6 +15145,7 @@ public class InstallationPlacementController : MonoBehaviour
             true);
         RefreshPipePreviewVariantsAroundActivePreview(
             hadPreviousAnchorCoordinate ? previousAnchorCoordinate : (Vector2Int?)null);
+        RefreshTrainInstallPreviewTints();
         RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
         InvalidateInstallGridPreview();
         CacheInstallPreviewMoveResult(block, true, preserveRotation);
@@ -16012,7 +16300,7 @@ public class InstallationPlacementController : MonoBehaviour
 
             Color previewFillColor = isBlockedPreview
                 ? installGridBlockedFillColor
-                : GetInstallPreviewFootprintFillColor();
+                : GetInstallPreviewFootprintFillColor(preview);
             List<Vector2Int> occupiedCoordinates = GetInstallPreviewAreaDisplayCoordinates(
                 preview,
                 anchorCoordinate,
@@ -16031,9 +16319,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private Color GetInstallPreviewFootprintFillColor()
+    private Color GetInstallPreviewFootprintFillColor(MapObject preview)
     {
-        Color color = installPreviewTint;
+        Color color = ResolveInstallPreviewTint(preview);
         color.a = Mathf.Min(color.a, InstallPreviewFootprintFillAlpha);
         return color;
     }
@@ -18819,6 +19107,7 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RefreshFencePreviewVariantsAroundActivePreview(null, true);
         RefreshPipePreviewVariantsAroundActivePreview(null);
+        RefreshTrainInstallPreviewTints();
         RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
         InvalidateInstallGridPreview();
         return true;
@@ -18892,6 +19181,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InvalidateInstallGrid();
+        RefreshTrainInstallPreviewTints();
     }
 
     private void RemovePlacedInstallPreviews(IReadOnlyList<MapObject> placedPreviews)
@@ -18939,6 +19229,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InvalidateInstallGrid();
+        RefreshTrainInstallPreviewTints();
     }
 
     private void EnsureValidActiveInstallPreview()
@@ -28812,6 +29103,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ClearInstallPreview()
     {
+        ClearTrainInstallPreviewConnectionHighlights();
         InvalidateInstallPreviewMoveCache();
         railloadInstallationController?.Cancel();
         RefundAllInstallPreviewReservations();
