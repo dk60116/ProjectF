@@ -864,6 +864,15 @@ public class RailHandcar : Train
         SetCurrentRailSample(sample.Rail, sample.DistanceAlongPath, facingTangent);
         RefreshRuntimeCoordinate(position);
         Physics.SyncTransforms();
+        RefreshConnectedTrainSpacing();
+    }
+
+    protected override void OnCoupledRailPoseApplied(Vector2 facingTangent)
+    {
+        if (facingTangent.sqrMagnitude > 0.0001f)
+        {
+            currentFacingTangent = facingTangent.normalized;
+        }
     }
 
     private void RefreshRuntimeCoordinate(Vector3 worldPosition)

@@ -30,6 +30,9 @@ public class InstallationPlacementController : MonoBehaviour
     private const float InstallPreviewVisualSyncPositionEpsilonSqr = 0.0001f;
     private const float RailAlignedPlacementMaxDistance = 0.48f;
     private const float TrainPlacementRailSearchRadius = 2.25f;
+    private const float TrainPlacementOverlapEpsilon = 0.005f;
+    private const float FallbackTrainCollisionHalfWidth = 0.25f;
+    private const float FallbackTrainCollisionHalfLength = 0.4f;
     private const int MaxPipeFluidCompatibilitySearchNodes = 1024;
 
     [SerializeField]
@@ -185,6 +188,8 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly List<Train> trainPreviewConnectionGroupScratch = new List<Train>(8);
     private readonly Queue<Train> trainPreviewConnectionTrainQueue = new Queue<Train>(8);
     private readonly HashSet<Train> trainInstallPreviewHighlightedTrains = new HashSet<Train>();
+    private readonly List<TrainCollisionBox2D> trainPlacementCollisionBoxes = new List<TrainCollisionBox2D>(4);
+    private readonly List<TrainCollisionBox2D> trainPlacementOtherCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private InstallationObject selectedEditableInstallation;
     private Vector2Int selectedEditableAnchorCoordinate;
     private InstallationEditSession activeInstallationEditSession;
@@ -203,6 +208,14 @@ public class InstallationPlacementController : MonoBehaviour
         public Vector2 Point;
         public Vector2 Tangent;
         public float SqrDistance;
+    }
+
+    private struct TrainCollisionBox2D
+    {
+        public Vector2 Center;
+        public Vector2 AxisRight;
+        public Vector2 AxisForward;
+        public Vector2 HalfExtents;
     }
     private bool installButtonHierarchySearchComplete;
     private MapObject cachedInstallPreviewMovePreview;
@@ -4927,6 +4940,11 @@ public class InstallationPlacementController : MonoBehaviour
                 referencePosition,
                 out Vector3 trainPosition,
                 out Quaternion trainRotation))
+        {
+            return false;
+        }
+
+        if (!CanPlaceTrainAtPose(sourcePrefab, trainPosition, trainRotation, preview))
         {
             return false;
         }
@@ -10422,6 +10440,335 @@ public class InstallationPlacementController : MonoBehaviour
         Physics.SyncTransforms();
     }
 
+    private bool CanPlaceTrainAtPose(
+        MapObject sourcePrefab,
+        Vector3 position,
+        Quaternion rotation,
+        MapObject previewToIgnore)
+    {
+        if (!IsTrainSource(sourcePrefab))
+        {
+            return true;
+        }
+
+        BuildTrainCollisionBoxes(sourcePrefab, position, rotation, trainPlacementCollisionBoxes);
+        if (trainPlacementCollisionBoxes.Count <= 0)
+        {
+            return true;
+        }
+
+        Train[] activeTrains = FindObjectsOfType<Train>(false);
+        for (int i = 0; i < activeTrains.Length; i++)
+        {
+            Train train = activeTrains[i];
+            if (train == null
+                || train == previewToIgnore
+                || !train.gameObject.activeInHierarchy
+                || !train.TryGetPlacementRuntime(out _, out _)
+                || !TrainCollisionBoxesOverlapWith(
+                    trainPlacementCollisionBoxes,
+                    sourcePrefab,
+                    position,
+                    rotation,
+                    train,
+                    train.transform.position,
+                    train.transform.rotation))
+            {
+                continue;
+            }
+
+            trainPlacementOtherCollisionBoxes.Clear();
+            return false;
+        }
+
+        CleanupInstallPreviewReferences();
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            MapObject otherPreview = installPreviewInstances[i];
+            MapObject otherPreviewSource = otherPreview != null
+                ? ResolveInstallPreviewPlacementSource(otherPreview)
+                : null;
+            Train otherPreviewTrain = ResolveTrainSource(otherPreviewSource) ?? ResolveTrainSource(otherPreview);
+            if (otherPreview == null
+                || otherPreview == previewToIgnore
+                || !otherPreview.gameObject.activeInHierarchy
+                || otherPreviewTrain == null
+                || !TrainCollisionBoxesOverlapWith(
+                    trainPlacementCollisionBoxes,
+                    sourcePrefab,
+                    position,
+                    rotation,
+                    otherPreviewSource ?? otherPreview,
+                    otherPreview.transform.position,
+                    otherPreview.transform.rotation))
+            {
+                continue;
+            }
+
+            trainPlacementOtherCollisionBoxes.Clear();
+            return false;
+        }
+
+        trainPlacementOtherCollisionBoxes.Clear();
+        return true;
+    }
+
+    private bool TrainCollisionBoxesOverlapWith(
+        IReadOnlyList<TrainCollisionBox2D> candidateBoxes,
+        MapObject candidateSource,
+        Vector3 candidatePosition,
+        Quaternion candidateRotation,
+        MapObject otherSource,
+        Vector3 otherPosition,
+        Quaternion otherRotation)
+    {
+        Train candidateTrain = ResolveTrainSource(candidateSource);
+        Train otherTrain = ResolveTrainSource(otherSource);
+        BuildTrainCollisionBoxes(otherSource, otherPosition, otherRotation, trainPlacementOtherCollisionBoxes);
+        for (int candidateIndex = 0; candidateIndex < candidateBoxes.Count; candidateIndex++)
+        {
+            TrainCollisionBox2D candidateBox = candidateBoxes[candidateIndex];
+            for (int otherIndex = 0; otherIndex < trainPlacementOtherCollisionBoxes.Count; otherIndex++)
+            {
+                TrainCollisionBox2D otherBox = trainPlacementOtherCollisionBoxes[otherIndex];
+                if (TrainCollisionBoxesOverlap(candidateBox, otherBox, out float overlapDepth)
+                    && !CanAllowTrainPlacementCouplingOverlap(
+                        candidateTrain,
+                        candidatePosition,
+                        candidateRotation,
+                        otherTrain,
+                        otherPosition,
+                        otherRotation,
+                        candidateBox,
+                        otherBox,
+                        overlapDepth))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool CanAllowTrainPlacementCouplingOverlap(
+        Train candidateTrain,
+        Vector3 candidatePosition,
+        Quaternion candidateRotation,
+        Train otherTrain,
+        Vector3 otherPosition,
+        Quaternion otherRotation,
+        TrainCollisionBox2D candidateBox,
+        TrainCollisionBox2D otherBox,
+        float overlapDepth)
+    {
+        if (candidateTrain == null
+            || otherTrain == null
+            || overlapDepth <= 0f
+            || overlapDepth > Mathf.Min(candidateTrain.CouplingOverlapAllowance, otherTrain.CouplingOverlapAllowance))
+        {
+            return false;
+        }
+
+        if (!Train.CanAutoConnectTrainPoses(
+                candidatePosition,
+                candidateRotation * Vector3.forward,
+                candidateTrain.AutoConnectDistance,
+                otherPosition,
+                otherRotation * Vector3.forward,
+                otherTrain.AutoConnectDistance))
+        {
+            return false;
+        }
+
+        Vector2 separation = otherBox.Center - candidateBox.Center;
+        if (separation.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector2 forwardAxis = candidateBox.AxisForward.sqrMagnitude > 0.0001f
+            ? candidateBox.AxisForward.normalized
+            : otherBox.AxisForward.normalized;
+        if (forwardAxis.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float forwardDistance = Mathf.Abs(Vector2.Dot(separation, forwardAxis));
+        Vector2 rightAxis = new Vector2(forwardAxis.y, -forwardAxis.x);
+        float lateralDistance = Mathf.Abs(Vector2.Dot(separation, rightAxis));
+        float lateralLimit = Mathf.Max(candidateBox.HalfExtents.x, otherBox.HalfExtents.x) + 0.05f;
+        if (lateralDistance > lateralLimit)
+        {
+            return false;
+        }
+
+        float minEndToEndDistance = Mathf.Max(0.05f, Mathf.Min(candidateBox.HalfExtents.y, otherBox.HalfExtents.y) * 0.5f);
+        return forwardDistance >= minEndToEndDistance;
+    }
+
+    private static void BuildTrainCollisionBoxes(
+        MapObject source,
+        Vector3 position,
+        Quaternion rotation,
+        List<TrainCollisionBox2D> boxes)
+    {
+        if (boxes == null)
+        {
+            return;
+        }
+
+        boxes.Clear();
+        if (source == null)
+        {
+            return;
+        }
+
+        Transform root = source.transform;
+        BoxCollider[] colliders = source.GetComponentsInChildren<BoxCollider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            BoxCollider boxCollider = colliders[i];
+            if (boxCollider == null || !boxCollider.enabled)
+            {
+                continue;
+            }
+
+            Transform colliderTransform = boxCollider.transform;
+            Vector3 localCenter = root.InverseTransformPoint(colliderTransform.TransformPoint(boxCollider.center));
+            Quaternion localRotation = Quaternion.Inverse(root.rotation) * colliderTransform.rotation;
+            Vector3 relativeScale = ResolveRelativeLossyScale(colliderTransform, root);
+            Vector3 halfSize = new Vector3(
+                Mathf.Abs(boxCollider.size.x * relativeScale.x) * 0.5f,
+                Mathf.Abs(boxCollider.size.y * relativeScale.y) * 0.5f,
+                Mathf.Abs(boxCollider.size.z * relativeScale.z) * 0.5f);
+            AddTrainCollisionBox(boxes, position, rotation, localCenter, localRotation, halfSize);
+        }
+
+        if (boxes.Count <= 0)
+        {
+            AddTrainCollisionBox(
+                boxes,
+                position,
+                rotation,
+                Vector3.zero,
+                Quaternion.identity,
+                new Vector3(FallbackTrainCollisionHalfWidth, 0.5f, FallbackTrainCollisionHalfLength));
+        }
+    }
+
+    private static void AddTrainCollisionBox(
+        List<TrainCollisionBox2D> boxes,
+        Vector3 rootPosition,
+        Quaternion rootRotation,
+        Vector3 localCenter,
+        Quaternion localRotation,
+        Vector3 halfSize)
+    {
+        if (boxes == null)
+        {
+            return;
+        }
+
+        Vector3 worldCenter = rootPosition + rootRotation * localCenter;
+        Vector2 axisRight = FlattenTrainCollisionAxis(rootRotation * (localRotation * Vector3.right));
+        Vector2 axisForward = FlattenTrainCollisionAxis(rootRotation * (localRotation * Vector3.forward));
+        if (axisRight.sqrMagnitude <= 0.0001f || axisForward.sqrMagnitude <= 0.0001f)
+        {
+            axisRight = FlattenTrainCollisionAxis(rootRotation * Vector3.right);
+            axisForward = FlattenTrainCollisionAxis(rootRotation * Vector3.forward);
+        }
+
+        if (axisRight.sqrMagnitude <= 0.0001f || axisForward.sqrMagnitude <= 0.0001f)
+        {
+            axisRight = Vector2.right;
+            axisForward = Vector2.up;
+        }
+
+        boxes.Add(new TrainCollisionBox2D
+        {
+            Center = new Vector2(worldCenter.x, worldCenter.z),
+            AxisRight = axisRight.normalized,
+            AxisForward = axisForward.normalized,
+            HalfExtents = new Vector2(
+                Mathf.Max(0.001f, halfSize.x),
+                Mathf.Max(0.001f, halfSize.z))
+        });
+    }
+
+    private static bool TrainCollisionBoxesOverlap(
+        TrainCollisionBox2D first,
+        TrainCollisionBox2D second,
+        out float overlapDepth)
+    {
+        overlapDepth = float.MaxValue;
+        return TrainCollisionBoxesOverlapOnAxis(first, second, first.AxisRight, ref overlapDepth)
+               && TrainCollisionBoxesOverlapOnAxis(first, second, first.AxisForward, ref overlapDepth)
+               && TrainCollisionBoxesOverlapOnAxis(first, second, second.AxisRight, ref overlapDepth)
+               && TrainCollisionBoxesOverlapOnAxis(first, second, second.AxisForward, ref overlapDepth);
+    }
+
+    private static bool TrainCollisionBoxesOverlapOnAxis(
+        TrainCollisionBox2D first,
+        TrainCollisionBox2D second,
+        Vector2 axis,
+        ref float overlapDepth)
+    {
+        if (axis.sqrMagnitude <= 0.0001f)
+        {
+            return true;
+        }
+
+        axis.Normalize();
+        float distance = Mathf.Abs(Vector2.Dot(second.Center - first.Center, axis));
+        float firstRadius =
+            Mathf.Abs(Vector2.Dot(first.AxisRight, axis)) * first.HalfExtents.x
+            + Mathf.Abs(Vector2.Dot(first.AxisForward, axis)) * first.HalfExtents.y;
+        float secondRadius =
+            Mathf.Abs(Vector2.Dot(second.AxisRight, axis)) * second.HalfExtents.x
+            + Mathf.Abs(Vector2.Dot(second.AxisForward, axis)) * second.HalfExtents.y;
+        float axisOverlapDepth = firstRadius + secondRadius - distance;
+        if (axisOverlapDepth <= TrainPlacementOverlapEpsilon)
+        {
+            return false;
+        }
+
+        overlapDepth = Mathf.Min(overlapDepth, axisOverlapDepth);
+        return true;
+    }
+
+    private static Vector2 FlattenTrainCollisionAxis(Vector3 axis)
+    {
+        Vector2 flatAxis = new Vector2(axis.x, axis.z);
+        return flatAxis.sqrMagnitude > 0.0001f ? flatAxis.normalized : Vector2.zero;
+    }
+
+    private static Vector3 ResolveRelativeLossyScale(Transform transform, Transform root)
+    {
+        if (transform == null)
+        {
+            return Vector3.one;
+        }
+
+        Vector3 scale = transform.lossyScale;
+        if (root == null)
+        {
+            return scale;
+        }
+
+        Vector3 rootScale = root.lossyScale;
+        return new Vector3(
+            SafeDivideScale(scale.x, rootScale.x),
+            SafeDivideScale(scale.y, rootScale.y),
+            SafeDivideScale(scale.z, rootScale.z));
+    }
+
+    private static float SafeDivideScale(float value, float divisor)
+    {
+        return Mathf.Abs(divisor) > 0.0001f ? value / divisor : value;
+    }
+
     private static Vector2Int RoundWorldPositionToCoordinate(Vector3 worldPosition)
     {
         return new Vector2Int(
@@ -15027,7 +15374,11 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (TryUseCachedInstallPreviewMove(block, preserveRotation, out bool cachedMoveResult))
+        bool hasMoveFootprintSource =
+            TryResolveInstallPreviewFootprintSourceForPlacement(activeInstallPreview, out MapObject moveFootprintSource);
+        bool isTrainMovePreview = hasMoveFootprintSource && IsTrainSource(moveFootprintSource);
+        if (!isTrainMovePreview
+            && TryUseCachedInstallPreviewMove(block, preserveRotation, out bool cachedMoveResult))
         {
             return cachedMoveResult;
         }
@@ -15036,7 +15387,7 @@ public class InstallationPlacementController : MonoBehaviour
         bool allowWaterPumpAutoRotation = IsWaterPumpPreview(activeInstallPreview);
         bool preserveRotationForTarget = preserveRotation && !allowWaterPumpAutoRotation;
         bool useSimpleRectGridTarget =
-            TryResolveInstallPreviewFootprintSourceForPlacement(activeInstallPreview, out MapObject moveFootprintSource)
+            hasMoveFootprintSource
             && CanUseSimpleRectGridInstallGridCheck(moveFootprintSource);
         Block anchorBlock;
         int resolvedQuarterTurns;
@@ -15121,6 +15472,8 @@ public class InstallationPlacementController : MonoBehaviour
             placementSource,
             installPreviewQuarterTurns,
             railReferenceWorldPosition);
+        Quaternion targetRotation = GetInstallPreviewRotation();
+
         if (IsTrainSource(placementSource) && railReferenceWorldPosition.HasValue)
         {
             installPreviewRailReferenceWorldPositions[activeInstallPreview] = railReferenceWorldPosition.Value;
@@ -15131,7 +15484,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         activeInstallPreview.transform.position = targetPosition;
-        activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        activeInstallPreview.transform.rotation = targetRotation;
         if (activeInstallPreview is InstallationObject movedInstallationPreview)
         {
             movedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
@@ -15188,8 +15541,9 @@ public class InstallationPlacementController : MonoBehaviour
             block.Coordinate,
             resolvedQuarterTurns,
             referencePosition,
-            out _,
-            out _);
+            out Vector3 trainPosition,
+            out Quaternion trainRotation)
+            && CanPlaceTrainAtPose(footprintSource, trainPosition, trainRotation, activeInstallPreview);
     }
 
     private bool TryGetPointerBlock(out Block block)
@@ -19092,11 +19446,14 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshActivePipePreviewVariant();
 
         MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
-        activeInstallPreview.transform.position = ResolvePlacementWorldPosition(
+        Vector3 targetPosition = ResolvePlacementWorldPosition(
             anchorBlock,
             placementSource,
             installPreviewQuarterTurns);
-        activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        Quaternion targetRotation = GetInstallPreviewRotation();
+
+        activeInstallPreview.transform.position = targetPosition;
+        activeInstallPreview.transform.rotation = targetRotation;
         if (activeInstallPreview is InstallationObject movedInstallationPreview)
         {
             movedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
@@ -19438,8 +19795,9 @@ public class InstallationPlacementController : MonoBehaviour
                 block.Coordinate,
                 quarterTurns,
                 referencePosition,
-                out _,
-                out _);
+                out Vector3 trainPosition,
+                out Quaternion trainRotation)
+                && CanPlaceTrainAtPose(footprintSource, trainPosition, trainRotation, previewToIgnore);
         }
 
         if (!TryGetFootprintBlocks(
