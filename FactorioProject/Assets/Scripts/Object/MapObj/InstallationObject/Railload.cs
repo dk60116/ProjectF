@@ -133,25 +133,13 @@ public class Railload : InstallationObject
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
 
-        if (runtimeVisualPathPoints != null
-            && runtimeVisualPathPoints.Count >= 2
+        return TryBuildRenderedPathSamples(renderedPathSamples)
             && TryFindNearestPointAndTangentOnPath(
-                runtimeVisualPathPoints,
+                renderedPathSamples,
                 point,
                 out pathPoint,
                 out tangent,
-                out sqrDistance))
-        {
-            return true;
-        }
-
-        IReadOnlyList<Vector2Int> coordinates = RuntimeOccupiedCoordinates;
-        return TryFindNearestPointAndTangentOnCoordinatePath(
-            coordinates,
-            point,
-            out pathPoint,
-            out tangent,
-            out sqrDistance);
+                out sqrDistance);
     }
 
     public bool TryFindNearestRenderedPathSample(
@@ -550,12 +538,18 @@ public class Railload : InstallationObject
             return false;
         }
 
-        for (int i = 0; i < coordinates.Count; i++)
+        railCenterPath.Clear();
+        BuildCenterPath(coordinates, RuntimeAnchorCoordinate, 0f, railCenterPath);
+        for (int i = 0; i < railCenterPath.Count; i++)
         {
-            AddVisualPathPoint(pathPoints, new Vector2(coordinates[i].x, coordinates[i].y));
+            Vector3 localPoint = railCenterPath[i];
+            AddVisualPathPoint(
+                pathPoints,
+                new Vector2(
+                    localPoint.x + RuntimeAnchorCoordinate.x,
+                    localPoint.z + RuntimeAnchorCoordinate.y));
         }
 
-        ExtendPathEndpointsToCellEdges2D(pathPoints, true, true);
         return pathPoints.Count >= 2;
     }
 

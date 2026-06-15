@@ -373,6 +373,8 @@ public class InstallationPlacementController : MonoBehaviour
         public List<Block> footprintBlocks = new List<Block>();
         public Vector2Int runtimeAnchorCoordinate;
         public bool hasRuntimeAnchorCoordinate;
+        public TrainPlacementRailSample trainRailSample;
+        public bool hasTrainRailSample;
         public bool bindToFootprintBlocks = true;
         public Vector3 position;
         public Quaternion rotation = Quaternion.identity;
@@ -4635,7 +4637,7 @@ public class InstallationPlacementController : MonoBehaviour
                     installedObject,
                     installedAnchorCoordinate,
                     placementPlan));
-            InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate);
+            InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate, placementPlan);
             RegisterInstalledObjectPersistence(installedObject);
             RememberLastInstalledRotation(activeInstallDefinition, placementPlan.quarterTurns);
 
@@ -4939,7 +4941,8 @@ public class InstallationPlacementController : MonoBehaviour
                 resolvedQuarterTurns,
                 referencePosition,
                 out Vector3 trainPosition,
-                out Quaternion trainRotation))
+                out Quaternion trainRotation,
+                out TrainPlacementRailSample trainRailSample))
         {
             return false;
         }
@@ -4958,6 +4961,8 @@ public class InstallationPlacementController : MonoBehaviour
             bindToFootprintBlocks = false,
             hasRuntimeAnchorCoordinate = true,
             runtimeAnchorCoordinate = RoundWorldPositionToCoordinate(trainPosition),
+            hasTrainRailSample = true,
+            trainRailSample = trainRailSample,
             position = trainPosition,
             rotation = trainRotation
         };
@@ -10333,69 +10338,41 @@ public class InstallationPlacementController : MonoBehaviour
         return railTangent;
     }
 
-    private bool TryFindNearestRailPathAroundCoordinate(
-        Vector2Int centerCoordinate,
-        Vector2 referencePoint,
-        int searchCells,
-        out Railload railload,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
+    public void InitializePlacedTrainRailSample(MapObject installedObject, Vector2Int anchorCoordinate)
     {
-        railload = null;
-        pathPoint = referencePoint;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        bool found = false;
-        int clampedSearchCells = Mathf.Max(0, searchCells);
-
-        for (int offsetY = -clampedSearchCells; offsetY <= clampedSearchCells; offsetY++)
-        {
-            for (int offsetX = -clampedSearchCells; offsetX <= clampedSearchCells; offsetX++)
-            {
-                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!TryFindNearestRailPathAtCoordinate(
-                        coordinate,
-                        referencePoint,
-                        out Railload candidateRail,
-                        out Vector2 candidatePathPoint,
-                        out Vector2 candidateTangent,
-                        out float candidateSqrDistance)
-                    || candidateSqrDistance >= sqrDistance)
-                {
-                    continue;
-                }
-
-                railload = candidateRail;
-                pathPoint = candidatePathPoint;
-                tangent = candidateTangent;
-                sqrDistance = candidateSqrDistance;
-                found = true;
-            }
-        }
-
-        return found;
+        InitializePlacedTrainRailSample(installedObject, anchorCoordinate, null);
     }
 
-    public void InitializePlacedTrainRailSample(MapObject installedObject, Vector2Int anchorCoordinate)
+    private void InitializePlacedTrainRailSample(
+        MapObject installedObject,
+        Vector2Int anchorCoordinate,
+        InstallPreviewPlacementPlan placementPlan)
     {
         if (!(installedObject is Train train))
         {
             return;
         }
 
-        Vector2 trainPoint = new Vector2(
-            train.transform.position.x,
-            train.transform.position.z);
-        int searchCells = Mathf.CeilToInt(
-            Mathf.Max(1f, TrainPlacementRailSearchRadius));
-        if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
-                anchorCoordinate,
-                trainPoint,
-                searchCells,
-                out TrainPlacementRailSample railSample))
+        TrainPlacementRailSample railSample;
+        if (placementPlan != null && placementPlan.hasTrainRailSample)
         {
-            return;
+            railSample = placementPlan.trainRailSample;
+        }
+        else
+        {
+            Vector2 trainPoint = new Vector2(
+                train.transform.position.x,
+                train.transform.position.z);
+            int searchCells = Mathf.CeilToInt(
+                Mathf.Max(1f, TrainPlacementRailSearchRadius));
+            if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
+                    anchorCoordinate,
+                    trainPoint,
+                    searchCells,
+                    out railSample))
+            {
+                return;
+            }
         }
 
         float maxRailDistance = RailAlignedPlacementMaxDistance;
@@ -15472,16 +15449,14 @@ public class InstallationPlacementController : MonoBehaviour
             placementSource,
             installPreviewQuarterTurns,
             railReferenceWorldPosition);
-        Quaternion targetRotation = GetInstallPreviewRotation();
+        Vector3? rotationRailReferenceWorldPosition = railReferenceWorldPosition;
+        if (!rotationRailReferenceWorldPosition.HasValue && IsTrainSource(placementSource))
+        {
+            rotationRailReferenceWorldPosition = targetPosition;
+        }
 
-        if (IsTrainSource(placementSource) && railReferenceWorldPosition.HasValue)
-        {
-            installPreviewRailReferenceWorldPositions[activeInstallPreview] = railReferenceWorldPosition.Value;
-        }
-        else
-        {
-            installPreviewRailReferenceWorldPositions.Remove(activeInstallPreview);
-        }
+        SetInstallPreviewRailReferenceForPlacement(placementSource, rotationRailReferenceWorldPosition);
+        Quaternion targetRotation = GetInstallPreviewRotation();
 
         activeInstallPreview.transform.position = targetPosition;
         activeInstallPreview.transform.rotation = targetRotation;
@@ -18629,6 +18604,24 @@ public class InstallationPlacementController : MonoBehaviour
         return Quaternion.identity;
     }
 
+    private void SetInstallPreviewRailReferenceForPlacement(
+        MapObject placementSource,
+        Vector3? railReferenceWorldPosition)
+    {
+        if (activeInstallPreview == null)
+        {
+            return;
+        }
+
+        if (IsTrainSource(placementSource) && railReferenceWorldPosition.HasValue)
+        {
+            installPreviewRailReferenceWorldPositions[activeInstallPreview] = railReferenceWorldPosition.Value;
+            return;
+        }
+
+        installPreviewRailReferenceWorldPositions.Remove(activeInstallPreview);
+    }
+
     private void HandleInstallPreviewClick(Vector2 pointerPosition)
     {
         if (!TryGetPointerBlock(pointerPosition, out Block clickedBlock) || clickedBlock == null)
@@ -19450,6 +19443,9 @@ public class InstallationPlacementController : MonoBehaviour
             anchorBlock,
             placementSource,
             installPreviewQuarterTurns);
+        SetInstallPreviewRailReferenceForPlacement(
+            placementSource,
+            IsTrainSource(placementSource) ? targetPosition : (Vector3?)null);
         Quaternion targetRotation = GetInstallPreviewRotation();
 
         activeInstallPreview.transform.position = targetPosition;
@@ -28976,8 +28972,29 @@ public class InstallationPlacementController : MonoBehaviour
         out Vector3 position,
         out Quaternion rotation)
     {
+        return TryResolveTrainRailPlacementPose(
+            sourcePrefab,
+            anchorCoordinate,
+            quarterTurns,
+            referencePosition,
+            out position,
+            out rotation,
+            out _);
+    }
+
+    private bool TryResolveTrainRailPlacementPose(
+        MapObject sourcePrefab,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector3 referencePosition,
+        out Vector3 position,
+        out Quaternion rotation,
+        out TrainPlacementRailSample railSample)
+    {
         position = referencePosition;
         rotation = sourcePrefab != null ? sourcePrefab.transform.rotation : Quaternion.identity;
+        railSample = default;
+        railSample.SqrDistance = float.MaxValue;
         Train train = ResolveTrainSource(sourcePrefab);
         if (train == null)
         {
@@ -28989,25 +29006,22 @@ public class InstallationPlacementController : MonoBehaviour
             : Quaternion.identity;
         Vector2 referencePoint = new Vector2(referencePosition.x, referencePosition.z);
         int searchCells = Mathf.CeilToInt(Mathf.Max(1f, TrainPlacementRailSearchRadius));
-        if (!TryFindNearestRailPathAroundCoordinate(
+        if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
                 anchorCoordinate,
                 referencePoint,
                 searchCells,
-                out _,
-                out Vector2 railPoint,
-                out Vector2 railTangent,
-                out float railSqrDistance))
+                out railSample))
         {
             return false;
         }
 
         float maxRailDistance = RailAlignedPlacementMaxDistance;
-        if (railSqrDistance > maxRailDistance * maxRailDistance)
+        if (railSample.SqrDistance > maxRailDistance * maxRailDistance)
         {
             return false;
         }
 
-        Vector3 railForward = FlattenHorizontalDirection(new Vector3(railTangent.x, 0f, railTangent.y));
+        Vector3 railForward = FlattenHorizontalDirection(new Vector3(railSample.Tangent.x, 0f, railSample.Tangent.y));
         if (railForward.sqrMagnitude <= 0.0001f)
         {
             return false;
@@ -29022,8 +29036,8 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Vector2 positionOffset = GetPlacementWorldPositionOffset(sourcePrefab, quarterTurns);
-        position.x = railPoint.x + positionOffset.x;
-        position.z = railPoint.y + positionOffset.y;
+        position.x = railSample.Point.x + positionOffset.x;
+        position.z = railSample.Point.y + positionOffset.y;
         rotation = AlignBaseRotationForwardToDirection(baseRotation, railForward);
         return true;
     }

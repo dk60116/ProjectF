@@ -32,9 +32,17 @@ public class RailHandcar : Train
     private const float RailDirectionReferenceDeadZone = 0.05f;
     private const float RailDebugBlockedProbeDistance = 0.12f;
     private const float RailDebugBlockedDistanceEpsilon = 0.01f;
+    private const float TrainBlockDistanceEpsilon = 0.001f;
+    private const float TrainBlockSafetyPadding = 0.02f;
+    private const float TrainBlockPlanarFallbackMinLateralDistance = 0.35f;
+    private const float TrainBlockPlanarFallbackMaxLateralDistance = 0.7f;
 
     private readonly List<InstallationObject> railSearchScratch = new List<InstallationObject>(16);
     private readonly List<Railload> railCandidateScratch = new List<Railload>(8);
+    private readonly List<Train> trainCollisionScratch = new List<Train>(16);
+    private readonly HashSet<Train> trainCollisionIgnoreScratch = new HashSet<Train>();
+    private readonly List<Train> trainCollisionMovingTrains = new List<Train>(8);
+    private readonly List<float> trainCollisionMovingOffsets = new List<float>(8);
 
     private Rigidbody cachedRigidbody;
     private Vector2 currentFacingTangent;
@@ -134,10 +142,33 @@ public class RailHandcar : Train
             traveledDistance = 0f;
         }
 
+        bool blockedByTrain = false;
+        if (TryClampMovementBeforeBlockingTrain(
+                currentSample,
+                travelDirection,
+                traveledDistance,
+                out RailSample clampedSample,
+                out float clampedDistance))
+        {
+            targetSample = clampedSample;
+            traveledDistance = clampedDistance;
+            blockedByTrain = true;
+        }
+
         Vector2 targetFacing = ResolveFacingTangent(targetSample.Tangent, currentFacing);
         float signedWheelDistance = Mathf.Sign(signedStep) * traveledDistance;
-        ApplyRailPose(targetSample, targetFacing, deltaTime, true);
+        ApplyRailPose(
+            targetSample,
+            targetFacing,
+            deltaTime,
+            true,
+            travelDirection,
+            traveledDistance > TrainBlockDistanceEpsilon);
         RotateWheelsByDistance(signedWheelDistance);
+        if (blockedByTrain)
+        {
+            ResetVehicleMotion();
+        }
     }
 
     public bool TryGetRailDebugDirection(out Vector3 worldPosition, out Vector3 worldDirection)
@@ -311,6 +342,297 @@ public class RailHandcar : Train
 
         targetSample = currentSample;
         return true;
+    }
+
+    private bool TryClampMovementBeforeBlockingTrain(
+        RailSample startSample,
+        Vector2 travelDirection,
+        float travelDistance,
+        out RailSample clampedSample,
+        out float clampedDistance)
+    {
+        clampedSample = startSample;
+        clampedDistance = travelDistance;
+        if (travelDistance <= TrainBlockDistanceEpsilon || travelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        trainCollisionIgnoreScratch.Clear();
+        CollectConnectedTrainGroup(trainCollisionIgnoreScratch);
+        trainCollisionMovingTrains.Clear();
+        trainCollisionMovingOffsets.Clear();
+        foreach (Train movingTrain in trainCollisionIgnoreScratch)
+        {
+            if (movingTrain == null
+                || !TryMeasureMovingTrainOffset(
+                    startSample,
+                    travelDirection,
+                    movingTrain,
+                    out float movingTrainOffset)
+                || movingTrainOffset < -TrainBlockDistanceEpsilon)
+            {
+                continue;
+            }
+
+            trainCollisionMovingTrains.Add(movingTrain);
+            trainCollisionMovingOffsets.Add(movingTrainOffset);
+        }
+
+        if (trainCollisionMovingTrains.Count <= 0)
+        {
+            trainCollisionMovingTrains.Add(this);
+            trainCollisionMovingOffsets.Add(0f);
+        }
+
+        trainCollisionScratch.Clear();
+        CollectActiveRuntimeTrains(trainCollisionScratch);
+
+        bool blocked = false;
+        float bestAllowedDistance = travelDistance;
+        for (int i = 0; i < trainCollisionScratch.Count; i++)
+        {
+            Train otherTrain = trainCollisionScratch[i];
+            float selfStopDistance = Mathf.Max(CouplingCenterDistance, otherTrain != null ? otherTrain.CouplingCenterDistance : 0f)
+                                     + TrainBlockSafetyPadding;
+            if (otherTrain == null
+                || trainCollisionMovingTrains.Contains(otherTrain))
+            {
+                continue;
+            }
+
+            bool hasOtherRailPose = otherTrain.TryGetCurrentRailPose(
+                out Railload otherRail,
+                out float otherDistanceAlongPath,
+                out _,
+                out _);
+            if ((!hasOtherRailPose
+                 || !TryMeasureDistanceAlongRailNetwork(
+                    startSample,
+                    travelDirection,
+                    otherRail,
+                    otherDistanceAlongPath,
+                    out float distanceToTrain,
+                    selfStopDistance))
+                && !TryEstimatePlanarBlockingDistance(
+                    startSample,
+                    travelDirection,
+                    otherTrain,
+                    travelDistance,
+                    selfStopDistance,
+                    out distanceToTrain))
+            {
+                continue;
+            }
+
+            for (int movingIndex = 0; movingIndex < trainCollisionMovingTrains.Count; movingIndex++)
+            {
+                Train movingTrain = trainCollisionMovingTrains[movingIndex];
+                float movingTrainOffset = trainCollisionMovingOffsets[movingIndex];
+                if (movingTrain == null || movingTrainOffset > distanceToTrain + TrainBlockDistanceEpsilon)
+                {
+                    continue;
+                }
+
+                float stopDistance = Mathf.Max(movingTrain.CouplingCenterDistance, otherTrain.CouplingCenterDistance)
+                                     + TrainBlockSafetyPadding;
+                float allowedDistance = distanceToTrain - movingTrainOffset - stopDistance;
+                if (allowedDistance > travelDistance + TrainBlockDistanceEpsilon)
+                {
+                    continue;
+                }
+
+                allowedDistance = Mathf.Clamp(allowedDistance, 0f, travelDistance);
+                if (allowedDistance >= bestAllowedDistance)
+                {
+                    continue;
+                }
+
+                bestAllowedDistance = allowedDistance;
+                blocked = true;
+            }
+        }
+
+        trainCollisionScratch.Clear();
+        trainCollisionIgnoreScratch.Clear();
+        trainCollisionMovingTrains.Clear();
+        trainCollisionMovingOffsets.Clear();
+        if (!blocked)
+        {
+            return false;
+        }
+
+        if (bestAllowedDistance <= TrainBlockDistanceEpsilon)
+        {
+            clampedSample = startSample;
+            clampedDistance = 0f;
+            return true;
+        }
+
+        if (!TryAdvanceAlongRailNetwork(
+                startSample,
+                travelDirection,
+                bestAllowedDistance,
+                out clampedSample,
+                out clampedDistance))
+        {
+            clampedSample = startSample;
+            clampedDistance = 0f;
+        }
+
+        return true;
+    }
+
+    private bool TryMeasureMovingTrainOffset(
+        RailSample startSample,
+        Vector2 travelDirection,
+        Train movingTrain,
+        out float offset)
+    {
+        offset = 0f;
+        if (movingTrain == this)
+        {
+            return true;
+        }
+
+        return movingTrain != null
+               && movingTrain.TryGetCurrentRailPose(
+                   out Railload movingRail,
+                   out float movingDistanceAlongPath,
+                   out _,
+                   out _)
+               && TryMeasureDistanceAlongRailNetwork(
+                   startSample,
+                   travelDirection,
+                   movingRail,
+                   movingDistanceAlongPath,
+                   out offset);
+    }
+
+    private bool TryEstimatePlanarBlockingDistance(
+        RailSample startSample,
+        Vector2 travelDirection,
+        Train targetTrain,
+        float travelDistance,
+        float stopDistance,
+        out float distance)
+    {
+        distance = 0f;
+        if (targetTrain == null || travelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        travelDirection.Normalize();
+        Vector2 targetPoint = new Vector2(
+            targetTrain.transform.position.x,
+            targetTrain.transform.position.z);
+        Vector2 delta = targetPoint - startSample.Point;
+        float projectedDistance = Vector2.Dot(delta, travelDirection);
+        if (projectedDistance < -stopDistance
+            || projectedDistance > travelDistance + stopDistance)
+        {
+            return false;
+        }
+
+        float lateralSqrDistance = Mathf.Max(
+            0f,
+            delta.sqrMagnitude - projectedDistance * projectedDistance);
+        float lateralDistance = Mathf.Sqrt(lateralSqrDistance);
+        float lateralLimit = Mathf.Clamp(
+            stopDistance * 0.5f,
+            TrainBlockPlanarFallbackMinLateralDistance,
+            TrainBlockPlanarFallbackMaxLateralDistance);
+        if (lateralDistance > lateralLimit)
+        {
+            return false;
+        }
+
+        distance = Mathf.Max(0f, projectedDistance);
+        return true;
+    }
+
+    private bool TryMeasureDistanceAlongRailNetwork(
+        RailSample startSample,
+        Vector2 travelDirection,
+        Railload targetRail,
+        float targetDistanceAlongPath,
+        out float distance,
+        float behindTolerance = 0f)
+    {
+        distance = 0f;
+        if (startSample.Rail == null
+            || targetRail == null
+            || travelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        RailSample currentSample = startSample;
+        travelDirection.Normalize();
+        for (int hop = 0; hop < RailNetworkAdvanceMaxHops; hop++)
+        {
+            if (currentSample.Rail == null
+                || !currentSample.Rail.TryGetRenderedPathLength(out float pathLength))
+            {
+                return false;
+            }
+
+            float travelDot = Vector2.Dot(travelDirection, currentSample.Tangent);
+            if (Mathf.Abs(travelDot) <= 0.0001f)
+            {
+                travelDot = 1f;
+            }
+
+            float directionSign = Mathf.Sign(travelDot);
+            if (currentSample.Rail == targetRail)
+            {
+                float targetDelta = (targetDistanceAlongPath - currentSample.DistanceAlongPath) * directionSign;
+                if (targetDelta < -TrainBlockDistanceEpsilon)
+                {
+                    if (targetDelta >= -Mathf.Max(0f, behindTolerance))
+                    {
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                distance += Mathf.Max(0f, targetDelta);
+                return true;
+            }
+
+            float availableDistance = directionSign > 0f
+                ? pathLength - currentSample.DistanceAlongPath
+                : currentSample.DistanceAlongPath;
+            float endpointDistance = directionSign > 0f ? pathLength : 0f;
+            if (!TryCreateRailSampleAtDistance(currentSample.Rail, endpointDistance, out RailSample endpointSample))
+            {
+                return false;
+            }
+
+            distance += Mathf.Max(0f, availableDistance);
+            Vector2 exitDirection = directionSign > 0f ? endpointSample.Tangent : -endpointSample.Tangent;
+            if (exitDirection.sqrMagnitude <= 0.0001f)
+            {
+                return false;
+            }
+
+            exitDirection.Normalize();
+            if (!TryFindConnectedRailSample(
+                    endpointSample,
+                    exitDirection,
+                    currentSample.Rail,
+                    out RailSample connectedSample))
+            {
+                return false;
+            }
+
+            currentSample = connectedSample;
+            travelDirection = ResolveFacingTangent(currentSample.Tangent, exitDirection);
+        }
+
+        return false;
     }
 
     private static bool TryCreateRailSampleAtDistance(
@@ -817,7 +1139,9 @@ public class RailHandcar : Train
         RailSample sample,
         Vector2 facingTangent,
         float deltaTime = 0f,
-        bool smoothRotation = false)
+        bool smoothRotation = false,
+        Vector2 pushDirection = default,
+        bool refreshPushedConnections = false)
     {
         if (sample.Rail == null)
         {
@@ -864,7 +1188,10 @@ public class RailHandcar : Train
         SetCurrentRailSample(sample.Rail, sample.DistanceAlongPath, facingTangent);
         RefreshRuntimeCoordinate(position);
         Physics.SyncTransforms();
-        RefreshConnectedTrainSpacing();
+        if (refreshPushedConnections)
+        {
+            RefreshPushedConnectedTrainSpacing(pushDirection);
+        }
     }
 
     protected override void OnCoupledRailPoseApplied(Vector2 facingTangent)

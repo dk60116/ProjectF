@@ -6,6 +6,7 @@ public class Train : Vehicle
     private const float DefaultAutoConnectDistance = 1.8f;
     private const float AutoConnectForwardMinDot = 0.55f;
     private const float CoupledSpacingDistanceEpsilon = 0.01f;
+    private const float CoupledPushDirectionMinDot = 0.05f;
     private const float CoupledSpacingRailConnectionMaxDistance = 0.35f;
     private const float ConnectionVisualBrightness = 1.8f;
     private const float ConnectionVisualMinBrightness = 0.42f;
@@ -30,6 +31,7 @@ public class Train : Vehicle
     private static readonly Queue<Train> ConnectionQueue = new Queue<Train>(16);
     private static readonly HashSet<Train> CoupledSpacingVisited = new HashSet<Train>();
     private static readonly Queue<Train> CoupledSpacingQueue = new Queue<Train>(16);
+    private static readonly Queue<Vector2> CoupledSpacingPushDirectionQueue = new Queue<Vector2>(16);
     private static readonly int BlueprintPreviewPropertyId = Shader.PropertyToID("_BlueprintPreview");
     private static readonly int BlueprintTintPropertyId = Shader.PropertyToID("_BlueprintTint");
     private static readonly int BlueprintBrightnessPropertyId = Shader.PropertyToID("_BlueprintBrightness");
@@ -132,10 +134,6 @@ public class Train : Vehicle
         }
 
         RefreshAllConnections();
-        if (TryAlignToNearestConnectedTrain())
-        {
-            RefreshAllConnections();
-        }
     }
 
     private bool ApplyRailPose(
@@ -196,6 +194,30 @@ public class Train : Vehicle
         pathPoint = currentPoint;
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
+        if (!TryGetCurrentRailPose(out rail, out distanceAlongPath, out pathPoint, out tangent))
+        {
+            return false;
+        }
+
+        sqrDistance = (currentPoint - pathPoint).sqrMagnitude;
+        if (sqrDistance > maxSqrDistance)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool TryGetCurrentRailPose(
+        out Railload rail,
+        out float distanceAlongPath,
+        out Vector2 pathPoint,
+        out Vector2 tangent)
+    {
+        rail = null;
+        distanceAlongPath = 0f;
+        pathPoint = Vector2.zero;
+        tangent = Vector2.zero;
         if (currentRail == null
             || !currentRail.TrySampleRenderedPath(currentRailDistance, out pathPoint, out tangent))
         {
@@ -207,12 +229,6 @@ public class Train : Vehicle
             && Vector2.Dot(tangent, currentRailTangent.normalized) < 0f)
         {
             tangent = -tangent;
-        }
-
-        sqrDistance = (currentPoint - pathPoint).sqrMagnitude;
-        if (sqrDistance > maxSqrDistance)
-        {
-            return false;
         }
 
         rail = currentRail;
@@ -428,23 +444,81 @@ public class Train : Vehicle
         return occupiedCoordinates != null && occupiedCoordinates.Count > 0;
     }
 
-    protected void RefreshConnectedTrainSpacing()
+    protected static void CollectActiveRuntimeTrains(ICollection<Train> results)
     {
-        if (coupledSpacingRefreshInProgress || connectedTrains.Count <= 0)
+        if (results == null)
         {
             return;
         }
 
+        foreach (Train train in ActiveTrains)
+        {
+            if (train == null
+                || !train.gameObject.activeInHierarchy
+                || !train.HasRuntimePlacement()
+                || results.Contains(train))
+            {
+                continue;
+            }
+
+            results.Add(train);
+        }
+    }
+
+    protected void CollectConnectedTrainGroup(HashSet<Train> results)
+    {
+        if (results == null || !results.Add(this))
+        {
+            return;
+        }
+
+        ConnectionQueue.Clear();
+        ConnectionQueue.Enqueue(this);
+        while (ConnectionQueue.Count > 0)
+        {
+            Train current = ConnectionQueue.Dequeue();
+            if (current == null || current.connectedTrains.Count <= 0)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < current.connectedTrains.Count; i++)
+            {
+                Train connectedTrain = current.connectedTrains[i];
+                if (connectedTrain == null || !results.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                ConnectionQueue.Enqueue(connectedTrain);
+            }
+        }
+
+        ConnectionQueue.Clear();
+    }
+
+    protected void RefreshPushedConnectedTrainSpacing(Vector2 pushDirection)
+    {
+        if (coupledSpacingRefreshInProgress
+            || connectedTrains.Count <= 0
+            || pushDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        pushDirection.Normalize();
         coupledSpacingRefreshInProgress = true;
         try
         {
             CoupledSpacingVisited.Clear();
             CoupledSpacingVisited.Add(this);
-            RefreshConnectedTrainSpacingFrom(this);
+            RefreshPushedConnectedTrainSpacingFrom(this, pushDirection);
         }
         finally
         {
             CoupledSpacingVisited.Clear();
+            CoupledSpacingQueue.Clear();
+            CoupledSpacingPushDirectionQueue.Clear();
             coupledSpacingRefreshInProgress = false;
         }
 
@@ -452,62 +526,24 @@ public class Train : Vehicle
         RefreshAllConnections();
     }
 
-    private bool TryAlignToNearestConnectedTrain()
+    private static void RefreshPushedConnectedTrainSpacingFrom(Train anchor, Vector2 pushDirection)
     {
-        if (connectedTrains.Count <= 0)
-        {
-            return false;
-        }
-
-        Train nearestTrain = null;
-        float nearestSqrDistance = float.MaxValue;
-        for (int i = 0; i < connectedTrains.Count; i++)
-        {
-            Train connectedTrain = connectedTrains[i];
-            if (connectedTrain == null || !connectedTrain.gameObject.activeInHierarchy)
-            {
-                continue;
-            }
-
-            float sqrDistance = PlanarSqrDistance(transform.position, connectedTrain.transform.position);
-            if (sqrDistance >= nearestSqrDistance)
-            {
-                continue;
-            }
-
-            nearestTrain = connectedTrain;
-            nearestSqrDistance = sqrDistance;
-        }
-
-        if (nearestTrain == null
-            || !TryResolveCoupledTrainTargetPose(
-                nearestTrain,
-                this,
-                out Railload rail,
-                out float distanceAlongPath,
-                out Vector2 railPoint,
-                out Vector2 facingTangent))
-        {
-            return false;
-        }
-
-        ApplyCoupledRailPose(rail, distanceAlongPath, railPoint, facingTangent);
-        Physics.SyncTransforms();
-        return true;
-    }
-
-    private static void RefreshConnectedTrainSpacingFrom(Train anchor)
-    {
-        if (anchor == null)
+        if (anchor == null || pushDirection.sqrMagnitude <= 0.0001f)
         {
             return;
         }
 
+        pushDirection.Normalize();
         CoupledSpacingQueue.Clear();
+        CoupledSpacingPushDirectionQueue.Clear();
         CoupledSpacingQueue.Enqueue(anchor);
+        CoupledSpacingPushDirectionQueue.Enqueue(pushDirection);
         while (CoupledSpacingQueue.Count > 0)
         {
             Train currentAnchor = CoupledSpacingQueue.Dequeue();
+            Vector2 currentPushDirection = CoupledSpacingPushDirectionQueue.Count > 0
+                ? CoupledSpacingPushDirectionQueue.Dequeue()
+                : pushDirection;
             if (currentAnchor == null || currentAnchor.connectedTrains.Count <= 0)
             {
                 continue;
@@ -516,11 +552,14 @@ public class Train : Vehicle
             for (int i = 0; i < currentAnchor.connectedTrains.Count; i++)
             {
                 Train connectedTrain = currentAnchor.connectedTrains[i];
-                if (connectedTrain == null || !CoupledSpacingVisited.Add(connectedTrain))
+                if (connectedTrain == null
+                    || CoupledSpacingVisited.Contains(connectedTrain)
+                    || !IsConnectedTrainInPushDirection(currentAnchor, connectedTrain, currentPushDirection))
                 {
                     continue;
                 }
 
+                CoupledSpacingVisited.Add(connectedTrain);
                 if (TryResolveCoupledTrainTargetPose(
                         currentAnchor,
                         connectedTrain,
@@ -530,13 +569,66 @@ public class Train : Vehicle
                         out Vector2 facingTangent))
                 {
                     connectedTrain.ApplyCoupledRailPose(rail, distanceAlongPath, railPoint, facingTangent);
+                    Vector2 nextPushDirection = ResolveNextCoupledPushDirection(currentPushDirection, facingTangent);
+                    CoupledSpacingQueue.Enqueue(connectedTrain);
+                    CoupledSpacingPushDirectionQueue.Enqueue(nextPushDirection);
                 }
-
-                CoupledSpacingQueue.Enqueue(connectedTrain);
             }
         }
 
         CoupledSpacingQueue.Clear();
+        CoupledSpacingPushDirectionQueue.Clear();
+    }
+
+    private static bool IsConnectedTrainInPushDirection(Train anchor, Train connectedTrain, Vector2 pushDirection)
+    {
+        if (anchor == null
+            || connectedTrain == null
+            || pushDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        pushDirection.Normalize();
+        if (anchor.currentRail != null
+            && anchor.currentRail == connectedTrain.currentRail
+            && anchor.currentRailTangent.sqrMagnitude > 0.0001f)
+        {
+            float distanceDelta = connectedTrain.currentRailDistance - anchor.currentRailDistance;
+            float pushRailDot = Vector2.Dot(pushDirection, anchor.currentRailTangent.normalized);
+            if (Mathf.Abs(distanceDelta) > CoupledSpacingDistanceEpsilon
+                && Mathf.Abs(pushRailDot) > CoupledSpacingDistanceEpsilon)
+            {
+                return Mathf.Sign(distanceDelta) == Mathf.Sign(pushRailDot);
+            }
+        }
+
+        Vector2 separation = new Vector2(
+            connectedTrain.transform.position.x - anchor.transform.position.x,
+            connectedTrain.transform.position.z - anchor.transform.position.z);
+        if (separation.sqrMagnitude <= 0.0001f)
+        {
+            return true;
+        }
+
+        return Vector2.Dot(separation.normalized, pushDirection) >= CoupledPushDirectionMinDot;
+    }
+
+    private static Vector2 ResolveNextCoupledPushDirection(Vector2 pushDirection, Vector2 facingTangent)
+    {
+        if (facingTangent.sqrMagnitude <= 0.0001f)
+        {
+            return pushDirection;
+        }
+
+        facingTangent.Normalize();
+        if (pushDirection.sqrMagnitude > 0.0001f
+            && Vector2.Dot(facingTangent, pushDirection.normalized) < 0f)
+        {
+            facingTangent = -facingTangent;
+        }
+
+        return facingTangent;
     }
 
     private static bool TryResolveCoupledTrainTargetPose(
