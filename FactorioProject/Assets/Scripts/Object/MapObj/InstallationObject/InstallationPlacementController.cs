@@ -179,6 +179,16 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<Pipe, MapObject> installedPipeVariantPreviews = new Dictionary<Pipe, MapObject>();
     private readonly Dictionary<Pipe, MapObject> installedPipeVariantPreviewSourcePrefabs = new Dictionary<Pipe, MapObject>();
     private readonly Dictionary<Pipe, List<RendererVisibilityState>> installedPipePreviewRendererStates = new Dictionary<Pipe, List<RendererVisibilityState>>();
+    private readonly Dictionary<MapObject, Color> trainConnectionPreviewTints = new Dictionary<MapObject, Color>();
+    private readonly Dictionary<Train, List<RendererPropertyBlockState>> installedTrainConnectionTintStates = new Dictionary<Train, List<RendererPropertyBlockState>>();
+    private readonly Dictionary<Train, MapObject> trainConnectionPreviewObjectsByTrain = new Dictionary<Train, MapObject>();
+    private readonly List<Train> trainConnectionPreviewScratch = new List<Train>(16);
+    private readonly List<Train> trainConnectionInstalledScratch = new List<Train>(32);
+    private readonly List<Train> trainConnectionNodeScratch = new List<Train>(48);
+    private readonly List<Train> trainConnectionComponentScratch = new List<Train>(16);
+    private readonly Queue<Train> trainConnectionQueue = new Queue<Train>(32);
+    private readonly HashSet<Train> trainConnectionVisited = new HashSet<Train>();
+    private readonly HashSet<Train> trainConnectionNodeSet = new HashSet<Train>();
     private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly List<InstallationObject> railAlignmentInstallationScratch = new List<InstallationObject>(4);
@@ -296,6 +306,15 @@ public class InstallationPlacementController : MonoBehaviour
     };
     private static readonly List<Renderer> ResourceRendererScratch = new List<Renderer>(8);
     private static readonly Dictionary<int, float> ResourceMarkerSurfaceYCache = new Dictionary<int, float>();
+    private static readonly Color[] TrainConnectionGroupTints =
+    {
+        new Color(0.16f, 0.78f, 1f, 0.9f),
+        new Color(1f, 0.72f, 0.22f, 0.9f),
+        new Color(0.54f, 0.95f, 0.34f, 0.9f),
+        new Color(1f, 0.34f, 0.56f, 0.9f),
+        new Color(0.62f, 0.55f, 1f, 0.9f),
+        new Color(0.2f, 0.9f, 0.74f, 0.9f)
+    };
 
     private sealed class InstallationEditSession
     {
@@ -394,6 +413,12 @@ public class InstallationPlacementController : MonoBehaviour
     {
         public Renderer renderer;
         public bool enabled;
+    }
+
+    private sealed class RendererPropertyBlockState
+    {
+        public Renderer renderer;
+        public MaterialPropertyBlock propertyBlock;
     }
 
     private sealed class InstalledFenceVariantPreviewPlan
@@ -2153,11 +2178,26 @@ public class InstallationPlacementController : MonoBehaviour
 
     private Color ResolveInstallPreviewTint(MapObject preview)
     {
+        if (preview != null && trainConnectionPreviewTints.TryGetValue(preview, out Color connectionTint))
+        {
+            return connectionTint;
+        }
+
         return installPreviewTint;
     }
 
     private void RefreshTrainInstallPreviewTints()
     {
+        ClearInstalledTrainConnectionTints();
+        trainConnectionPreviewTints.Clear();
+        trainConnectionPreviewObjectsByTrain.Clear();
+        trainConnectionPreviewScratch.Clear();
+        trainConnectionInstalledScratch.Clear();
+        trainConnectionNodeScratch.Clear();
+        trainConnectionNodeSet.Clear();
+        trainConnectionVisited.Clear();
+        trainConnectionQueue.Clear();
+
         for (int i = 0; i < installPreviewInstances.Count; i++)
         {
             MapObject preview = installPreviewInstances[i];
@@ -2172,11 +2212,274 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            Train previewTrain = ResolveTrainSource(preview);
+            if (previewTrain == null)
+            {
+                continue;
+            }
+
+            trainConnectionPreviewScratch.Add(previewTrain);
+            trainConnectionPreviewObjectsByTrain[previewTrain] = preview;
+            AddTrainConnectionNode(previewTrain);
+        }
+
+        if (trainConnectionPreviewScratch.Count > 0)
+        {
+            Train.CollectActiveRuntimeTrains(trainConnectionInstalledScratch);
+            for (int i = 0; i < trainConnectionInstalledScratch.Count; i++)
+            {
+                Train installedTrain = trainConnectionInstalledScratch[i];
+                if (installedTrain == null || trainConnectionPreviewObjectsByTrain.ContainsKey(installedTrain))
+                {
+                    continue;
+                }
+
+                AddTrainConnectionNode(installedTrain);
+            }
+        }
+
+        int groupTintIndex = 0;
+        for (int i = 0; i < trainConnectionNodeScratch.Count; i++)
+        {
+            Train startTrain = trainConnectionNodeScratch[i];
+            if (startTrain == null || trainConnectionVisited.Contains(startTrain))
+            {
+                continue;
+            }
+
+            CollectTrainConnectionComponent(startTrain);
+            if (trainConnectionComponentScratch.Count <= 1)
+            {
+                continue;
+            }
+
+            Color groupTint = ResolveTrainConnectionGroupTint(groupTintIndex++);
+            for (int componentIndex = 0; componentIndex < trainConnectionComponentScratch.Count; componentIndex++)
+            {
+                Train train = trainConnectionComponentScratch[componentIndex];
+                if (train == null)
+                {
+                    continue;
+                }
+
+                if (trainConnectionPreviewObjectsByTrain.TryGetValue(train, out MapObject preview))
+                {
+                    trainConnectionPreviewTints[preview] = groupTint;
+                    continue;
+                }
+
+                ApplyInstalledTrainConnectionTint(train, groupTint);
+            }
+        }
+
+        for (int i = 0; i < trainConnectionPreviewScratch.Count; i++)
+        {
+            Train previewTrain = trainConnectionPreviewScratch[i];
+            if (previewTrain == null
+                || !trainConnectionPreviewObjectsByTrain.TryGetValue(previewTrain, out MapObject preview)
+                || preview == null)
+            {
+                continue;
+            }
+
             ApplyInstallPreviewTint(
                 preview,
                 preview == activeInstallPreview,
-                installPreviewTint);
+                ResolveInstallPreviewTint(preview));
         }
+
+        trainConnectionPreviewScratch.Clear();
+        trainConnectionInstalledScratch.Clear();
+        trainConnectionNodeScratch.Clear();
+        trainConnectionNodeSet.Clear();
+        trainConnectionComponentScratch.Clear();
+        trainConnectionVisited.Clear();
+        trainConnectionQueue.Clear();
+        trainConnectionPreviewObjectsByTrain.Clear();
+    }
+
+    private void AddTrainConnectionNode(Train train)
+    {
+        if (train == null || !trainConnectionNodeSet.Add(train))
+        {
+            return;
+        }
+
+        trainConnectionNodeScratch.Add(train);
+    }
+
+    private void CollectTrainConnectionComponent(Train startTrain)
+    {
+        trainConnectionComponentScratch.Clear();
+        if (startTrain == null)
+        {
+            return;
+        }
+
+        trainConnectionQueue.Enqueue(startTrain);
+        trainConnectionVisited.Add(startTrain);
+        while (trainConnectionQueue.Count > 0)
+        {
+            Train currentTrain = trainConnectionQueue.Dequeue();
+            if (currentTrain == null)
+            {
+                continue;
+            }
+
+            trainConnectionComponentScratch.Add(currentTrain);
+            foreach (Train connectedTrain in currentTrain.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !trainConnectionNodeSet.Contains(connectedTrain)
+                    || !trainConnectionVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                trainConnectionQueue.Enqueue(connectedTrain);
+            }
+
+            for (int i = 0; i < trainConnectionNodeScratch.Count; i++)
+            {
+                Train candidate = trainConnectionNodeScratch[i];
+                if (candidate == null
+                    || candidate == currentTrain
+                    || trainConnectionVisited.Contains(candidate)
+                    || !Train.CanConnectByPose(currentTrain, candidate))
+                {
+                    continue;
+                }
+
+                trainConnectionVisited.Add(candidate);
+                trainConnectionQueue.Enqueue(candidate);
+            }
+        }
+    }
+
+    private static Color ResolveTrainConnectionGroupTint(int groupIndex)
+    {
+        if (TrainConnectionGroupTints.Length <= 0)
+        {
+            return Color.white;
+        }
+
+        int index = ((groupIndex % TrainConnectionGroupTints.Length) + TrainConnectionGroupTints.Length)
+                    % TrainConnectionGroupTints.Length;
+        return TrainConnectionGroupTints[index];
+    }
+
+    private void ApplyInstalledTrainConnectionTint(Train train, Color tint)
+    {
+        if (train == null)
+        {
+            return;
+        }
+
+        if (!installedTrainConnectionTintStates.TryGetValue(train, out List<RendererPropertyBlockState> rendererStates))
+        {
+            rendererStates = new List<RendererPropertyBlockState>();
+            Renderer[] renderers = train.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null
+                    || renderer.GetComponentInParent<WorkableObjectRangeVisual>() != null
+                    || renderer.sharedMaterial == null)
+                {
+                    continue;
+                }
+
+                MaterialPropertyBlock originalPropertyBlock = new MaterialPropertyBlock();
+                renderer.GetPropertyBlock(originalPropertyBlock);
+                rendererStates.Add(new RendererPropertyBlockState
+                {
+                    renderer = renderer,
+                    propertyBlock = originalPropertyBlock
+                });
+            }
+
+            installedTrainConnectionTintStates[train] = rendererStates;
+        }
+
+        for (int i = 0; i < rendererStates.Count; i++)
+        {
+            RendererPropertyBlockState rendererState = rendererStates[i];
+            Renderer renderer = rendererState?.renderer;
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Material sharedMaterial = renderer.sharedMaterial;
+            if (sharedMaterial == null)
+            {
+                continue;
+            }
+
+            if (installPreviewPropertyBlock == null)
+            {
+                installPreviewPropertyBlock = new MaterialPropertyBlock();
+            }
+
+            installPreviewPropertyBlock.Clear();
+            renderer.GetPropertyBlock(installPreviewPropertyBlock);
+            bool hasColorProperty = false;
+            if (TryApplyBlueprintPreviewProperties(sharedMaterial, installPreviewPropertyBlock, tint))
+            {
+                hasColorProperty = true;
+            }
+            else if (sharedMaterial.HasProperty(BaseColorPropertyId))
+            {
+                installPreviewPropertyBlock.SetColor(BaseColorPropertyId, tint);
+                hasColorProperty = true;
+            }
+            else if (sharedMaterial.HasProperty(ColorPropertyId))
+            {
+                installPreviewPropertyBlock.SetColor(ColorPropertyId, tint);
+                hasColorProperty = true;
+            }
+
+            if (sharedMaterial.HasProperty(EmissionColorPropertyId))
+            {
+                installPreviewPropertyBlock.SetColor(EmissionColorPropertyId, tint * 0.35f);
+                hasColorProperty = true;
+            }
+
+            if (hasColorProperty)
+            {
+                renderer.SetPropertyBlock(installPreviewPropertyBlock);
+            }
+        }
+    }
+
+    private void ClearInstalledTrainConnectionTints()
+    {
+        if (installedTrainConnectionTintStates.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Train, List<RendererPropertyBlockState>> entry in installedTrainConnectionTintStates)
+        {
+            List<RendererPropertyBlockState> rendererStates = entry.Value;
+            if (rendererStates == null)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < rendererStates.Count; i++)
+            {
+                RendererPropertyBlockState rendererState = rendererStates[i];
+                if (rendererState == null || rendererState.renderer == null)
+                {
+                    continue;
+                }
+
+                rendererState.renderer.SetPropertyBlock(rendererState.propertyBlock);
+            }
+        }
+
+        installedTrainConnectionTintStates.Clear();
     }
 
     private static void RefreshInstallPreviewConveyorShaderProperties(MapObject preview)
@@ -10121,6 +10424,7 @@ public class InstallationPlacementController : MonoBehaviour
             railSample.DistanceAlongPath,
             railSample.Point,
             facing);
+        ConnectTrainToNearbyTrains(train);
         return true;
     }
 
@@ -10269,6 +10573,30 @@ public class InstallationPlacementController : MonoBehaviour
             railSample.DistanceAlongPath,
             railSample.Point,
             facing);
+        ConnectTrainToNearbyTrains(train);
+    }
+
+    private void ConnectTrainToNearbyTrains(Train train)
+    {
+        if (train == null || !train.TryGetPlacementRuntime(out _, out _))
+        {
+            return;
+        }
+
+        trainConnectionInstalledScratch.Clear();
+        Train.CollectActiveRuntimeTrains(trainConnectionInstalledScratch);
+        for (int i = 0; i < trainConnectionInstalledScratch.Count; i++)
+        {
+            Train otherTrain = trainConnectionInstalledScratch[i];
+            if (otherTrain == null || otherTrain == train)
+            {
+                continue;
+            }
+
+            train.ConnectTo(otherTrain);
+        }
+
+        trainConnectionInstalledScratch.Clear();
     }
 
     private static void ApplyTrainPlacementPose(Train train, Vector3 position, Quaternion rotation)
@@ -19030,6 +19358,7 @@ public class InstallationPlacementController : MonoBehaviour
         RemoveMissingPreviewKeys(installPreviewRailReferenceWorldPositions);
         RemoveMissingPreviewKeys(installPreviewPlacementSequencesByPreview);
         RemoveMissingPreviewKeys(installPreviewConveyorRotationSequenceIndexesByPreview);
+        RemoveMissingPreviewKeys(trainConnectionPreviewTints);
         RemoveMissingPreviewItemReservations();
         RemoveMissingStraightFirstConveyorPreviews();
 
@@ -29283,6 +29612,8 @@ public class InstallationPlacementController : MonoBehaviour
         InvalidateInstallPreviewMoveCache();
         railloadInstallationController?.Cancel();
         RefundAllInstallPreviewReservations();
+        ClearInstalledTrainConnectionTints();
+        trainConnectionPreviewTints.Clear();
         RemoveInstalledFenceVariantPreviews(null);
         RemoveInstalledPipeVariantPreviews(null);
         UtilityPole.ClearBlueprintPreviews();

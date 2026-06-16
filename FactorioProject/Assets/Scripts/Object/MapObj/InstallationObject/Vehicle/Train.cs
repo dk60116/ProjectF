@@ -1,14 +1,75 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class Train : Vehicle
 {
+    private const float MinConnectionDistance = 0.05f;
+    private const float DefaultConnectionFallbackDistance = 1.4f;
+
+    private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
+
+    [SerializeField, Min(0.05f)]
+    private float trainConnectionCenterDistance = 0.9f;
+    [SerializeField, Min(0f)]
+    private float trainConnectionGapDistance = 0.35f;
+    [SerializeField, Min(0.01f)]
+    private float trainConnectionSnapMaxDistance = 0.35f;
+    [SerializeField, Min(0.01f)]
+    private float trainConnectionMaxLateralDistance = 0.45f;
+    [SerializeField, Range(0f, 1f)]
+    private float trainConnectionMinForwardDot = 0.5f;
+
     private Rigidbody cachedTrainRigidbody;
     private Railload currentRail;
     private float currentRailDistance;
     private Vector2 currentRailTangent;
+    private readonly HashSet<Train> connectedTrains = new HashSet<Train>();
+
+    public float ConnectionCenterDistance => Mathf.Max(
+        MinConnectionDistance,
+        trainConnectionCenterDistance + trainConnectionGapDistance);
+    public float ConnectionSnapMaxDistance => Mathf.Max(MinConnectionDistance, trainConnectionSnapMaxDistance);
+    public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
+    public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
+    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
+
+    public static void CollectActiveRuntimeTrains(ICollection<Train> results)
+    {
+        if (results == null || ActiveRuntimeTrains.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (Train train in ActiveRuntimeTrains)
+        {
+            if (train == null
+                || !train.gameObject.activeInHierarchy
+                || !train.TryGetPlacementRuntime(out _, out _))
+            {
+                continue;
+            }
+
+            results.Add(train);
+        }
+    }
+
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        ActiveRuntimeTrains.Add(this);
+    }
+
+    protected override void OnDisable()
+    {
+        ClearTrainConnections();
+        ActiveRuntimeTrains.Remove(this);
+        base.OnDisable();
+    }
 
     public override void PrepareForPool()
     {
+        ClearTrainConnections();
+        ActiveRuntimeTrains.Remove(this);
         currentRail = null;
         currentRailDistance = 0f;
         currentRailTangent = Vector2.zero;
@@ -17,10 +78,141 @@ public class Train : Vehicle
 
     protected override void OnPlacementRuntimeCleared()
     {
+        ClearTrainConnections();
         currentRail = null;
         currentRailDistance = 0f;
         currentRailTangent = Vector2.zero;
         base.OnPlacementRuntimeCleared();
+    }
+
+    public bool ConnectTo(Train other)
+    {
+        if (!CanConnectTo(other))
+        {
+            return false;
+        }
+
+        bool changed = connectedTrains.Add(other);
+        changed |= other.connectedTrains.Add(this);
+        return changed;
+    }
+
+    public void DisconnectFrom(Train other)
+    {
+        if (other == null)
+        {
+            return;
+        }
+
+        connectedTrains.Remove(other);
+        other.connectedTrains.Remove(this);
+    }
+
+    public void ClearTrainConnections()
+    {
+        if (connectedTrains.Count <= 0)
+        {
+            return;
+        }
+
+        Train[] connectedSnapshot = new Train[connectedTrains.Count];
+        connectedTrains.CopyTo(connectedSnapshot);
+        for (int i = 0; i < connectedSnapshot.Length; i++)
+        {
+            DisconnectFrom(connectedSnapshot[i]);
+        }
+
+        connectedTrains.Clear();
+    }
+
+    public bool CanConnectTo(Train other)
+    {
+        return other != null
+               && other != this
+               && gameObject.activeInHierarchy
+               && other.gameObject.activeInHierarchy
+               && TryGetPlacementRuntime(out _, out _)
+               && other.TryGetPlacementRuntime(out _, out _)
+               && CanConnectByPose(this, other);
+    }
+
+    public static bool CanConnectByPose(Train first, Train second)
+    {
+        if (first == null
+            || second == null
+            || first == second
+            || !TryGetConnectionPose(first, out Vector2 firstPoint, out Vector2 firstTangent)
+            || !TryGetConnectionPose(second, out Vector2 secondPoint, out Vector2 secondTangent))
+        {
+            return false;
+        }
+
+        float tangentDot = Mathf.Abs(Vector2.Dot(firstTangent, secondTangent));
+        float minForwardDot = Mathf.Min(first.ConnectionMinForwardDot, second.ConnectionMinForwardDot);
+        if (tangentDot < minForwardDot)
+        {
+            return false;
+        }
+
+        Vector2 delta = secondPoint - firstPoint;
+        float alongDistance = Mathf.Abs(Vector2.Dot(delta, firstTangent));
+        float maxCenterDistance = ResolveConnectionMaxCenterDistance(first, second);
+        if (alongDistance > maxCenterDistance)
+        {
+            return false;
+        }
+
+        float lateralDistance = Mathf.Abs(Cross(firstTangent, delta));
+        float maxLateralDistance = Mathf.Max(
+            first.ConnectionMaxLateralDistance,
+            second.ConnectionMaxLateralDistance);
+        return lateralDistance <= maxLateralDistance;
+    }
+
+    private static bool TryGetConnectionPose(Train train, out Vector2 point, out Vector2 tangent)
+    {
+        point = Vector2.zero;
+        tangent = Vector2.up;
+        if (train == null)
+        {
+            return false;
+        }
+
+        if (train.TryGetCurrentRailPose(out _, out _, out point, out tangent)
+            && tangent.sqrMagnitude > 0.0001f)
+        {
+            tangent.Normalize();
+            return true;
+        }
+
+        Vector3 position = train.transform.position;
+        Vector3 forward = train.transform.forward;
+        point = new Vector2(position.x, position.z);
+        tangent = new Vector2(forward.x, forward.z);
+        if (tangent.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        tangent.Normalize();
+        return true;
+    }
+
+    private static float ResolveConnectionMaxCenterDistance(Train first, Train second)
+    {
+        if (first == null || second == null)
+        {
+            return DefaultConnectionFallbackDistance;
+        }
+
+        float centerDistance = (first.ConnectionCenterDistance + second.ConnectionCenterDistance) * 0.5f;
+        float snapDistance = Mathf.Max(first.ConnectionSnapMaxDistance, second.ConnectionSnapMaxDistance);
+        return Mathf.Max(MinConnectionDistance, centerDistance + snapDistance);
+    }
+
+    private static float Cross(Vector2 a, Vector2 b)
+    {
+        return a.x * b.y - a.y * b.x;
     }
 
     public virtual void ApplyPlacedRailSample(
