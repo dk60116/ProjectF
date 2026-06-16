@@ -33,6 +33,11 @@ public class Train : Vehicle
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
 
+    public void RotateTrainWheelsByDistance(float signedDistance)
+    {
+        RotateWheelsByDistance(signedDistance);
+    }
+
     public static void CollectActiveRuntimeTrains(ICollection<Train> results)
     {
         if (results == null || ActiveRuntimeTrains.Count <= 0)
