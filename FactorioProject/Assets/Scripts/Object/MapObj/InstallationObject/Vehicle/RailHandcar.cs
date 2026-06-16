@@ -529,9 +529,9 @@ public class RailHandcar : Train
             RotateConnectedTrainWheels(
                 railMove.Train,
                 EstimateSignedRailSampleMoveDistance(
+                    railMove.Train,
                     railMove.StartSample,
-                    railMove.TargetSample,
-                    facingTangent));
+                    railMove.TargetSample));
         }
 
         TrimConsistPathTape(leaderEndPathDistance - maxFollowOffset - ResolveConsistPathTrimPadding());
@@ -1144,7 +1144,7 @@ public class RailHandcar : Train
             return Mathf.Abs(toSample.DistanceAlongPath - fromSample.DistanceAlongPath);
         }
 
-        return 0f;
+        return Vector2.Distance(fromSample.Point, toSample.Point);
     }
 
     private bool TryGetDistanceToTargetOnCurrentRail(
@@ -1635,7 +1635,6 @@ public class RailHandcar : Train
             sample.SqrDistance = sqrDistance;
 
             if (TryPromoteRailSampleAcrossConnection(
-                    currentPoint,
                     sample,
                     preferredDirection,
                     maxSqrDistance,
@@ -1672,7 +1671,6 @@ public class RailHandcar : Train
     }
 
     private bool TryPromoteRailSampleAcrossConnection(
-        Vector2 currentPoint,
         RailSample currentSample,
         Vector2 preferredDirection,
         float maxSqrDistance,
@@ -1686,7 +1684,7 @@ public class RailHandcar : Train
 
         float connectionWindow = Mathf.Max(
             ResolveRailConnectionMaxDistance(),
-            railSnapMaxDistance * 0.5f);
+            internalConnectionMaxDistance * 2f);
         if (!IsNearCurrentRailEndpoint(currentSample, connectionWindow))
         {
             return false;
@@ -1706,23 +1704,8 @@ public class RailHandcar : Train
             return false;
         }
 
-        float currentProgress = ResolveRailLookAheadProgress(
-            currentSample.Rail,
-            currentSample.DistanceAlongPath,
-            currentSample.Tangent,
-            currentPoint,
-            preferredDirection,
-            railConnectionLookAhead);
-        float connectedProgress = ResolveRailLookAheadProgress(
-            connectedSample.Rail,
-            connectedSample.DistanceAlongPath,
-            connectedSample.Tangent,
-            currentPoint,
-            preferredDirection,
-            railConnectionLookAhead);
-        bool hasMeaningfulForwardGain = connectedProgress > currentProgress + 0.01f;
         bool isClearlyCloser = connectedSample.SqrDistance + 0.0001f < currentSample.SqrDistance;
-        if (!hasMeaningfulForwardGain && !isClearlyCloser)
+        if (!isClearlyCloser)
         {
             return false;
         }
@@ -1778,15 +1761,17 @@ public class RailHandcar : Train
     }
 
     private static float EstimateSignedRailSampleMoveDistance(
+        Train train,
         RailSample startSample,
-        RailSample targetSample,
-        Vector2 facingTangent)
+        RailSample targetSample)
     {
+        float signedPathDistance = 0f;
         float distance;
         if (startSample.Rail != null
             && startSample.Rail == targetSample.Rail)
         {
-            distance = Mathf.Abs(targetSample.DistanceAlongPath - startSample.DistanceAlongPath);
+            signedPathDistance = targetSample.DistanceAlongPath - startSample.DistanceAlongPath;
+            distance = Mathf.Abs(signedPathDistance);
         }
         else
         {
@@ -1799,13 +1784,87 @@ public class RailHandcar : Train
         }
 
         Vector2 moveDirection = targetSample.Point - startSample.Point;
-        if (moveDirection.sqrMagnitude > 0.0001f
-            && facingTangent.sqrMagnitude > 0.0001f)
+        if (TryResolveSignedDistanceByReference(train, moveDirection, distance, out float signedDistance))
         {
-            return distance * Mathf.Sign(Vector2.Dot(moveDirection.normalized, facingTangent.normalized));
+            return signedDistance;
+        }
+
+        if (Mathf.Abs(signedPathDistance) > 0.0001f)
+        {
+            return distance * Mathf.Sign(signedPathDistance);
         }
 
         return distance;
+    }
+
+    private static bool TryResolveSignedDistanceByReference(
+        Train train,
+        Vector2 moveDirection,
+        float distance,
+        out float signedDistance)
+    {
+        signedDistance = 0f;
+        if (distance <= 0.0001f || moveDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        moveDirection.Normalize();
+        if (TryGetTrainVisualForward(train, out Vector2 visualForward)
+            && TryResolveSignedDistanceByDirection(moveDirection, visualForward, distance, out signedDistance))
+        {
+            return true;
+        }
+
+        if (train != null
+            && train.TryGetCurrentRailPose(out _, out _, out _, out Vector2 railTangent)
+            && TryResolveSignedDistanceByDirection(moveDirection, railTangent, distance, out signedDistance))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetTrainVisualForward(Train train, out Vector2 visualForward)
+    {
+        visualForward = Vector2.zero;
+        if (train == null)
+        {
+            return false;
+        }
+
+        visualForward = new Vector2(train.transform.forward.x, train.transform.forward.z);
+        if (visualForward.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        visualForward.Normalize();
+        return true;
+    }
+
+    private static bool TryResolveSignedDistanceByDirection(
+        Vector2 moveDirection,
+        Vector2 referenceDirection,
+        float distance,
+        out float signedDistance)
+    {
+        signedDistance = 0f;
+        if (moveDirection.sqrMagnitude <= 0.0001f
+            || referenceDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float dot = Vector2.Dot(moveDirection.normalized, referenceDirection.normalized);
+        if (Mathf.Abs(dot) <= 0.0001f)
+        {
+            return false;
+        }
+
+        signedDistance = distance * Mathf.Sign(dot);
+        return true;
     }
 
     private void ClearConnectedTrainMovementScratch()

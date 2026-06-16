@@ -43,8 +43,9 @@ public class FreightCar : Train
         }
 
         facingTangent.Normalize();
+        Vector2 visualFacingTangent = ResolveVisualFacingTangent(facingTangent);
         Quaternion targetRotation = Quaternion.LookRotation(
-            new Vector3(facingTangent.x, 0f, facingTangent.y),
+            new Vector3(visualFacingTangent.x, 0f, visualFacingTangent.y),
             Vector3.up);
         Quaternion rotation = targetRotation;
         if (smoothRotation && deltaTime > 0f)
@@ -60,5 +61,25 @@ public class FreightCar : Train
             railPoint,
             facingTangent,
             rotation);
+    }
+
+    private Vector2 ResolveVisualFacingTangent(Vector2 targetFacingTangent)
+    {
+        if (targetFacingTangent.sqrMagnitude <= 0.0001f)
+        {
+            return Vector2.up;
+        }
+
+        targetFacingTangent.Normalize();
+        Vector2 currentForward = new Vector2(transform.forward.x, transform.forward.z);
+        if (currentForward.sqrMagnitude <= 0.0001f)
+        {
+            return targetFacingTangent;
+        }
+
+        currentForward.Normalize();
+        return Vector2.Dot(currentForward, targetFacingTangent) < 0f
+            ? -targetFacingTangent
+            : targetFacingTangent;
     }
 }
