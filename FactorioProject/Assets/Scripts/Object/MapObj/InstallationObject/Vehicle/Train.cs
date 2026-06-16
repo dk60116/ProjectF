@@ -221,10 +221,10 @@ public class Train : Vehicle
         Vector2 railPoint,
         Vector2 facingTangent)
     {
-        ApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent);
+        TryApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent);
     }
 
-    private bool ApplyRailPose(
+    public bool TryApplyRailPose(
         Railload rail,
         float distanceAlongPath,
         Vector2 railPoint,

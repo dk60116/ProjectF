@@ -33,9 +33,17 @@ public class RailHandcar : Train
     private const float RailDebugBlockedProbeDistance = 0.12f;
     private const float RailDebugBlockedDistanceEpsilon = 0.01f;
     private const float EndpointBranchSwitchEpsilon = 0.01f;
+    private const int MaxRememberedTrainRouteTransitions = 48;
+    private const float RouteTransitionDirectionMinDot = 0.2f;
 
     private readonly List<InstallationObject> railSearchScratch = new List<InstallationObject>(16);
     private readonly List<Railload> railCandidateScratch = new List<Railload>(8);
+    private readonly List<Train> connectedTrainGroupScratch = new List<Train>(8);
+    private readonly Queue<Train> connectedTrainGroupQueue = new Queue<Train>(8);
+    private readonly HashSet<Train> connectedTrainGroupVisited = new HashSet<Train>();
+    private readonly List<ConnectedTrainRailMove> connectedTrainRailMoveScratch = new List<ConnectedTrainRailMove>(8);
+    private readonly List<RailRouteTransition> rememberedTrainRouteTransitions = new List<RailRouteTransition>(16);
+    private readonly List<RailRouteTransition> routeTransitionFrameScratch = new List<RailRouteTransition>(4);
 
     private Vector2 currentFacingTangent;
 
@@ -46,6 +54,23 @@ public class RailHandcar : Train
         public Vector2 Point;
         public Vector2 Tangent;
         public float SqrDistance;
+    }
+
+    private struct ConnectedTrainRailMove
+    {
+        public Train Train;
+        public RailSample StartSample;
+        public RailSample TargetSample;
+        public Vector2 StartFacingTangent;
+        public float TraveledDistance;
+    }
+
+    private struct RailRouteTransition
+    {
+        public Railload FromRail;
+        public Vector2 FromPoint;
+        public Vector2 ExitDirection;
+        public RailSample ConnectedSample;
     }
 
     public override void ApplyPlacedRailSample(
@@ -89,6 +114,7 @@ public class RailHandcar : Train
         bool switchedToBranch = false;
         if (hasInput && TryFindBranchRailSample(currentSample, inputDirection, out RailSample branchSample))
         {
+            RememberRouteTransition(currentSample, inputDirection, branchSample);
             currentSample = branchSample;
             switchedToBranch = true;
         }
@@ -122,26 +148,7 @@ public class RailHandcar : Train
             return;
         }
 
-        Vector2 travelDirection = signedSpeed >= 0f ? currentFacing : -currentFacing;
-        if (!TryAdvanceAlongRailNetwork(
-                currentSample,
-                travelDirection,
-                Mathf.Abs(signedStep),
-                out RailSample targetSample,
-                out float traveledDistance))
-        {
-            targetSample = currentSample;
-            traveledDistance = 0f;
-        }
-
-        Vector2 targetFacing = ResolveFacingTangent(targetSample.Tangent, currentFacing);
-        float signedWheelDistance = Mathf.Sign(signedStep) * traveledDistance;
-        ApplyRailPose(
-            targetSample,
-            targetFacing,
-            deltaTime,
-            true);
-        RotateWheelsByDistance(signedWheelDistance);
+        MoveConnectedTrainGroup(currentSample, currentFacing, signedStep, deltaTime);
     }
 
     public bool TryGetRailDebugDirection(out Vector3 worldPosition, out Vector3 worldDirection)
@@ -233,7 +240,12 @@ public class RailHandcar : Train
         Vector2 travelDirection,
         float moveDistance,
         out RailSample targetSample,
-        out float traveledDistance)
+        out float traveledDistance,
+        List<RailRouteTransition> recordedTransitions = null,
+        bool useRememberedTransitions = false,
+        Railload preferredConnectedRail = null,
+        bool requireFollowRoute = false,
+        bool allowNearbyRememberedTransitions = false)
     {
         targetSample = startSample;
         traveledDistance = 0f;
@@ -300,13 +312,43 @@ public class RailHandcar : Train
             }
 
             exitDirection.Normalize();
-            if (!TryFindConnectedRailSample(
+            RailSample connectedSample = default;
+            bool foundConnectedSample = preferredConnectedRail != null
+                                        && preferredConnectedRail != currentSample.Rail
+                                        && TryFindPreferredConnectedRailSample(
+                                            endpointSample,
+                                            exitDirection,
+                                            currentSample.Rail,
+                                            preferredConnectedRail,
+                                            out connectedSample);
+            if (!foundConnectedSample && useRememberedTransitions)
+            {
+                foundConnectedSample = TryFindRememberedRouteTransition(
+                                            endpointSample,
+                                            exitDirection,
+                                            currentSample.Rail,
+                                            allowNearbyRememberedTransitions,
+                                            out connectedSample);
+            }
+
+            if (!foundConnectedSample && requireFollowRoute)
+            {
+                return true;
+            }
+
+            if (!foundConnectedSample
+                && !TryFindConnectedRailSample(
                     endpointSample,
                     exitDirection,
                     currentSample.Rail,
-                    out RailSample connectedSample))
+                    out connectedSample))
             {
                 return true;
+            }
+
+            if (recordedTransitions != null)
+            {
+                AddRouteTransition(recordedTransitions, endpointSample, exitDirection, connectedSample);
             }
 
             float connectionDistance = Vector2.Distance(endpointSample.Point, connectedSample.Point);
@@ -323,6 +365,481 @@ public class RailHandcar : Train
 
         targetSample = currentSample;
         return true;
+    }
+
+    private void MoveConnectedTrainGroup(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        float signedStep,
+        float deltaTime)
+    {
+        float requestedDistance = Mathf.Abs(signedStep);
+        if (requestedDistance <= 0.0001f)
+        {
+            return;
+        }
+
+        Vector2 travelDirection = signedStep >= 0f ? currentFacing : -currentFacing;
+        if (travelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        travelDirection.Normalize();
+        CollectConnectedTrainGroupForMovement();
+        connectedTrainRailMoveScratch.Clear();
+        routeTransitionFrameScratch.Clear();
+        float maxSqrDistance = railSnapMaxDistance * railSnapMaxDistance;
+        bool hasUnresolvedConnectedTrain = false;
+        for (int i = 0; i < connectedTrainGroupScratch.Count; i++)
+        {
+            Train train = connectedTrainGroupScratch[i];
+            if (train == null)
+            {
+                continue;
+            }
+
+            RailSample startSample = train == this
+                ? currentSample
+                : default;
+            Vector2 startFacingTangent = train == this
+                ? currentFacing
+                : Vector2.zero;
+            if (train != this
+                && !TryResolveRailSampleForTrain(
+                    train,
+                    travelDirection,
+                    maxSqrDistance,
+                    out startSample,
+                    out startFacingTangent))
+            {
+                hasUnresolvedConnectedTrain = true;
+                break;
+            }
+
+            connectedTrainRailMoveScratch.Add(new ConnectedTrainRailMove
+            {
+                Train = train,
+                StartSample = startSample,
+                TargetSample = startSample,
+                StartFacingTangent = startFacingTangent,
+                TraveledDistance = 0f
+            });
+        }
+
+        if (hasUnresolvedConnectedTrain || connectedTrainRailMoveScratch.Count <= 0)
+        {
+            ClearConnectedTrainMovementScratch();
+            return;
+        }
+
+        MoveDrivenTrainToFront();
+
+        float groupTraveledDistance = requestedDistance;
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            ConnectedTrainRailMove railMove = connectedTrainRailMoveScratch[i];
+            routeTransitionFrameScratch.Clear();
+            Railload followRail = i > 0 && connectedTrainRailMoveScratch.Count > 0
+                ? connectedTrainRailMoveScratch[0].TargetSample.Rail
+                : null;
+            bool isFollowingTrain = followRail != null;
+            if (!TryAdvanceAlongRailNetwork(
+                    railMove.StartSample,
+                    travelDirection,
+                    requestedDistance,
+                    out RailSample targetSample,
+                    out float traveledDistance,
+                    routeTransitionFrameScratch,
+                    i > 0,
+                    followRail,
+                    isFollowingTrain,
+                    i > 0))
+            {
+                targetSample = railMove.StartSample;
+                traveledDistance = 0f;
+            }
+
+            if (routeTransitionFrameScratch.Count > 0)
+            {
+                RememberRouteTransitions(routeTransitionFrameScratch);
+            }
+
+            groupTraveledDistance = Mathf.Min(groupTraveledDistance, traveledDistance);
+            railMove.TargetSample = targetSample;
+            railMove.TraveledDistance = traveledDistance;
+            connectedTrainRailMoveScratch[i] = railMove;
+        }
+
+        groupTraveledDistance = Mathf.Max(0f, groupTraveledDistance);
+        float signedWheelDistance = Mathf.Sign(signedStep) * groupTraveledDistance;
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            ConnectedTrainRailMove railMove = connectedTrainRailMoveScratch[i];
+            if (railMove.Train == null)
+            {
+                continue;
+            }
+
+            RailSample targetSample = railMove.TargetSample;
+            if (groupTraveledDistance <= 0.0001f)
+            {
+                targetSample = railMove.StartSample;
+            }
+            else if (Mathf.Abs(railMove.TraveledDistance - groupTraveledDistance) > 0.0001f)
+            {
+                Railload followRail = i > 0 && connectedTrainRailMoveScratch.Count > 0
+                    ? connectedTrainRailMoveScratch[0].TargetSample.Rail
+                    : null;
+                TryAdvanceAlongRailNetwork(
+                    railMove.StartSample,
+                    travelDirection,
+                    groupTraveledDistance,
+                    out targetSample,
+                    out _,
+                    null,
+                    i > 0,
+                    followRail,
+                    followRail != null,
+                    i > 0);
+            }
+
+            railMove.TargetSample = targetSample;
+            connectedTrainRailMoveScratch[i] = railMove;
+
+            Vector2 facingTangent = railMove.Train == this
+                ? ResolveFacingTangent(targetSample.Tangent, currentFacing)
+                : ResolveFollowerFacingTangent(
+                    targetSample.Tangent,
+                    railMove.StartFacingTangent,
+                    travelDirection);
+            ApplyConnectedTrainRailPose(railMove.Train, targetSample, facingTangent, deltaTime);
+            RotateConnectedTrainWheels(railMove.Train, signedWheelDistance);
+        }
+
+        Physics.SyncTransforms();
+        ClearConnectedTrainMovementScratch();
+    }
+
+    private void MoveDrivenTrainToFront()
+    {
+        if (connectedTrainRailMoveScratch.Count <= 1)
+        {
+            return;
+        }
+
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            if (connectedTrainRailMoveScratch[i].Train != this)
+            {
+                continue;
+            }
+
+            if (i > 0)
+            {
+                ConnectedTrainRailMove drivenMove = connectedTrainRailMoveScratch[i];
+                connectedTrainRailMoveScratch[i] = connectedTrainRailMoveScratch[0];
+                connectedTrainRailMoveScratch[0] = drivenMove;
+            }
+
+            return;
+        }
+    }
+
+    private void CollectConnectedTrainGroupForMovement()
+    {
+        connectedTrainGroupScratch.Clear();
+        connectedTrainGroupVisited.Clear();
+        connectedTrainGroupQueue.Clear();
+        connectedTrainGroupQueue.Enqueue(this);
+        connectedTrainGroupVisited.Add(this);
+
+        while (connectedTrainGroupQueue.Count > 0)
+        {
+            Train currentTrain = connectedTrainGroupQueue.Dequeue();
+            if (currentTrain == null || !currentTrain.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            connectedTrainGroupScratch.Add(currentTrain);
+            foreach (Train connectedTrain in currentTrain.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !connectedTrainGroupVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                connectedTrainGroupQueue.Enqueue(connectedTrain);
+            }
+        }
+    }
+
+    private bool TryResolveRailSampleForTrain(
+        Train train,
+        Vector2 preferredDirection,
+        float maxSqrDistance,
+        out RailSample sample,
+        out Vector2 facingTangent)
+    {
+        sample = default;
+        facingTangent = Vector2.zero;
+        if (train == null)
+        {
+            return false;
+        }
+
+        Vector2 currentPoint = new Vector2(
+            train.transform.position.x,
+            train.transform.position.z);
+        if (train.TryGetCurrentRailSample(
+                currentPoint,
+                maxSqrDistance,
+                out Railload rail,
+                out float distanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent,
+                out float sqrDistance))
+        {
+            facingTangent = tangent;
+            if (!rail.TrySampleRenderedPath(distanceAlongPath, out pathPoint, out tangent))
+            {
+                return false;
+            }
+
+            sample.Rail = rail;
+            sample.DistanceAlongPath = distanceAlongPath;
+            sample.Point = pathPoint;
+            sample.Tangent = tangent;
+            sample.SqrDistance = sqrDistance;
+            return true;
+        }
+
+        if (TryFindBestRailSample(
+            currentPoint,
+            preferredDirection,
+            maxSqrDistance,
+            out sample))
+        {
+            Vector2 transformFacing = new Vector2(
+                train.transform.forward.x,
+                train.transform.forward.z);
+            facingTangent = ResolveFollowerFacingTangent(
+                sample.Tangent,
+                transformFacing,
+                preferredDirection);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ApplyConnectedTrainRailPose(
+        Train train,
+        RailSample sample,
+        Vector2 facingTangent,
+        float deltaTime)
+    {
+        if (train == null || sample.Rail == null)
+        {
+            return;
+        }
+
+        if (train is RailHandcar handcar)
+        {
+            handcar.ApplyRailPose(sample, facingTangent, deltaTime, true);
+            return;
+        }
+
+        if (train is FreightCar freightCar)
+        {
+            freightCar.TryApplyRailPose(
+                sample.Rail,
+                sample.DistanceAlongPath,
+                sample.Point,
+                facingTangent,
+                deltaTime,
+                true);
+            return;
+        }
+
+        train.TryApplyRailPose(
+            sample.Rail,
+            sample.DistanceAlongPath,
+            sample.Point,
+            facingTangent);
+    }
+
+    private void RotateConnectedTrainWheels(Train train, float signedWheelDistance)
+    {
+        if (Mathf.Abs(signedWheelDistance) <= 0.0001f
+            || train is not RailHandcar handcar)
+        {
+            return;
+        }
+
+        handcar.RotateWheelsByDistance(signedWheelDistance);
+    }
+
+    private void ClearConnectedTrainMovementScratch()
+    {
+        connectedTrainGroupScratch.Clear();
+        connectedTrainGroupVisited.Clear();
+        connectedTrainGroupQueue.Clear();
+        connectedTrainRailMoveScratch.Clear();
+        routeTransitionFrameScratch.Clear();
+    }
+
+    private void RememberRouteTransitions(List<RailRouteTransition> transitions)
+    {
+        if (transitions == null || transitions.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < transitions.Count; i++)
+        {
+            UpsertRouteTransition(rememberedTrainRouteTransitions, transitions[i]);
+        }
+    }
+
+    private void RememberRouteTransition(
+        RailSample fromSample,
+        Vector2 exitDirection,
+        RailSample connectedSample)
+    {
+        AddRouteTransition(rememberedTrainRouteTransitions, fromSample, exitDirection, connectedSample);
+    }
+
+    private void AddRouteTransition(
+        List<RailRouteTransition> transitions,
+        RailSample fromSample,
+        Vector2 exitDirection,
+        RailSample connectedSample)
+    {
+        if (transitions == null
+            || fromSample.Rail == null
+            || connectedSample.Rail == null
+            || connectedSample.Rail == fromSample.Rail
+            || exitDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        exitDirection.Normalize();
+        UpsertRouteTransition(transitions, new RailRouteTransition
+        {
+            FromRail = fromSample.Rail,
+            FromPoint = fromSample.Point,
+            ExitDirection = exitDirection,
+            ConnectedSample = connectedSample
+        });
+
+        UpsertRouteTransition(transitions, new RailRouteTransition
+        {
+            FromRail = connectedSample.Rail,
+            FromPoint = connectedSample.Point,
+            ExitDirection = -exitDirection,
+            ConnectedSample = fromSample
+        });
+    }
+
+    private void UpsertRouteTransition(
+        List<RailRouteTransition> transitions,
+        RailRouteTransition transition)
+    {
+        if (transitions == null || transition.FromRail == null || transition.ConnectedSample.Rail == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < transitions.Count; i++)
+        {
+            if (!RouteTransitionMatches(
+                    transitions[i],
+                    transition.FromRail,
+                    transition.FromPoint,
+                    transition.ExitDirection))
+            {
+                continue;
+            }
+
+            transitions[i] = transition;
+            return;
+        }
+
+        transitions.Add(transition);
+        while (transitions.Count > MaxRememberedTrainRouteTransitions)
+        {
+            transitions.RemoveAt(0);
+        }
+    }
+
+    private bool TryFindRememberedRouteTransition(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        bool allowNearbyFromRail,
+        out RailSample connectedSample)
+    {
+        connectedSample = default;
+        if (endpointSample.Rail == null
+            || exitDirection.sqrMagnitude <= 0.0001f
+            || rememberedTrainRouteTransitions.Count <= 0)
+        {
+            return false;
+        }
+
+        exitDirection.Normalize();
+        for (int i = rememberedTrainRouteTransitions.Count - 1; i >= 0; i--)
+        {
+            RailRouteTransition transition = rememberedTrainRouteTransitions[i];
+            if (transition.ConnectedSample.Rail == null
+                || transition.ConnectedSample.Rail == excludedRail
+                || !RouteTransitionMatches(
+                    transition,
+                    endpointSample.Rail,
+                    endpointSample.Point,
+                    exitDirection,
+                    allowNearbyFromRail))
+            {
+                continue;
+            }
+
+            return TryCreateRailSampleAtDistance(
+                transition.ConnectedSample.Rail,
+                transition.ConnectedSample.DistanceAlongPath,
+                out connectedSample);
+        }
+
+        return false;
+    }
+
+    private bool RouteTransitionMatches(
+        RailRouteTransition transition,
+        Railload fromRail,
+        Vector2 fromPoint,
+        Vector2 exitDirection,
+        bool allowDifferentFromRail = false)
+    {
+        if ((!allowDifferentFromRail && transition.FromRail != fromRail)
+            || exitDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float maxMatchDistance = Mathf.Max(
+            ResolveRailConnectionMaxDistance(),
+            branchSwitchMaxDistance);
+        if ((transition.FromPoint - fromPoint).sqrMagnitude > maxMatchDistance * maxMatchDistance)
+        {
+            return false;
+        }
+
+        return Vector2.Dot(transition.ExitDirection.normalized, exitDirection.normalized)
+               >= RouteTransitionDirectionMinDot;
     }
 
     private static bool TryCreateRailSampleAtDistance(
@@ -538,6 +1055,58 @@ public class RailHandcar : Train
     private static float ResolveBranchSelectionScore(float inputDot, float progress, float sqrDistance)
     {
         return inputDot * 1.4f + progress * 0.8f - sqrDistance * 2f;
+    }
+
+    private bool TryFindPreferredConnectedRailSample(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        Railload preferredRail,
+        out RailSample connectedSample)
+    {
+        connectedSample = default;
+        if (endpointSample.Rail == null
+            || preferredRail == null
+            || preferredRail == excludedRail
+            || exitDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        exitDirection.Normalize();
+        float maxConnectionDistance = ResolveRailConnectionMaxDistance();
+        if (!TryFindRailConnectionSample(
+                preferredRail,
+                endpointSample.Point,
+                true,
+                out float distanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent,
+                out float sqrDistance)
+            || sqrDistance > maxConnectionDistance * maxConnectionDistance)
+        {
+            return false;
+        }
+
+        float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, tangent));
+        float progress = ResolveRailLookAheadProgress(
+            preferredRail,
+            distanceAlongPath,
+            tangent,
+            endpointSample.Point,
+            exitDirection,
+            railConnectionLookAhead);
+        if (progress <= 0.01f && directionScore < 0.12f)
+        {
+            return false;
+        }
+
+        connectedSample.Rail = preferredRail;
+        connectedSample.DistanceAlongPath = distanceAlongPath;
+        connectedSample.Point = pathPoint;
+        connectedSample.Tangent = tangent;
+        connectedSample.SqrDistance = sqrDistance;
+        return true;
     }
 
     private bool TryFindConnectedRailSample(
@@ -777,7 +1346,59 @@ public class RailHandcar : Train
 
     private Vector2 ResolveFacingTangent(Vector2 railTangent, Vector2 referenceDirection)
     {
-        Vector2 currentFacing = ResolveReferenceFacing();
+        return ResolveFacingTangentWithFallback(
+            railTangent,
+            referenceDirection,
+            ResolveReferenceFacing());
+    }
+
+    private static Vector2 ResolveFollowerFacingTangent(
+        Vector2 railTangent,
+        Vector2 previousFacing,
+        Vector2 travelDirection)
+    {
+        if (railTangent.sqrMagnitude <= 0.0001f)
+        {
+            if (previousFacing.sqrMagnitude > 0.0001f)
+            {
+                return previousFacing.normalized;
+            }
+
+            return travelDirection.sqrMagnitude > 0.0001f
+                ? travelDirection.normalized
+                : Vector2.up;
+        }
+
+        railTangent.Normalize();
+        if (TryResolveTangentReferenceSign(railTangent, previousFacing, out float referenceSign))
+        {
+            return railTangent * referenceSign;
+        }
+
+        if (previousFacing.sqrMagnitude > 0.0001f
+            && travelDirection.sqrMagnitude > 0.0001f)
+        {
+            Vector2 previousFacingNormalized = previousFacing.normalized;
+            Vector2 travelDirectionNormalized = travelDirection.normalized;
+            float facingTravelDot = Vector2.Dot(previousFacingNormalized, travelDirectionNormalized);
+            if (Mathf.Abs(facingTravelDot) > RailDirectionReferenceDeadZone
+                && TryResolveTangentReferenceSign(
+                    railTangent,
+                    travelDirectionNormalized * Mathf.Sign(facingTravelDot),
+                    out referenceSign))
+            {
+                return railTangent * referenceSign;
+            }
+        }
+
+        return ResolveFacingTangentWithFallback(railTangent, travelDirection, previousFacing);
+    }
+
+    private static Vector2 ResolveFacingTangentWithFallback(
+        Vector2 railTangent,
+        Vector2 referenceDirection,
+        Vector2 fallbackDirection)
+    {
         if (railTangent.sqrMagnitude <= 0.0001f)
         {
             if (referenceDirection.sqrMagnitude > 0.0001f)
@@ -785,12 +1406,14 @@ public class RailHandcar : Train
                 return referenceDirection.normalized;
             }
 
-            return currentFacing;
+            return fallbackDirection.sqrMagnitude > 0.0001f
+                ? fallbackDirection.normalized
+                : Vector2.up;
         }
 
         railTangent.Normalize();
         if (TryResolveTangentReferenceSign(railTangent, referenceDirection, out float referenceSign)
-            || TryResolveTangentReferenceSign(railTangent, currentFacing, out referenceSign))
+            || TryResolveTangentReferenceSign(railTangent, fallbackDirection, out referenceSign))
         {
             railTangent *= referenceSign;
         }
