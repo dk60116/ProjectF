@@ -39,6 +39,7 @@ public class RailHandcar : Train
     private const float PushConsistContactPadding = 0.08f;
     private const float PushConsistLateralPadding = 0.08f;
     private const float PushConsistGapTolerance = 0.04f;
+    private const float PushConsistBranchReleaseDistance = 0.28f;
     private const int PushConsistSessionRetainFrameCount = 18;
     private const float PushConsistPreferredContactScoreBias = 0.25f;
     private const float PushConsistKnownGroupScoreBias = 0.05f;
@@ -96,6 +97,7 @@ public class RailHandcar : Train
         public Vector2 PushTravelDirection;
         public float GapDistance;
         public float DesiredSpacing;
+        public bool ReleaseAfterMove;
     }
 
     private struct ConsistPathStateSnapshot
@@ -117,6 +119,8 @@ public class RailHandcar : Train
         public Train PreferredContactTrain;
         public Vector2 TravelDirection;
         public float EndDistance;
+        public float BranchReleaseDistanceRemaining;
+        public bool BranchReleaseCompleted;
         public int LastUsedFrame;
     }
 
@@ -514,6 +518,20 @@ public class RailHandcar : Train
             {
                 ConsistPathStateSnapshot pathSnapshot = CaptureConsistPathState();
                 PushConsistPathSession pushSession = GetOrCreatePushConsistPathSession(contactInfo.Train);
+                float foreignRequestDistance = requestedDistance;
+                if (contactInfo.ReleaseAfterMove)
+                {
+                    if (pushSession.BranchReleaseDistanceRemaining <= 0.0001f)
+                    {
+                        pushSession.BranchReleaseDistanceRemaining = PushConsistBranchReleaseDistance;
+                        pushSession.BranchReleaseCompleted = false;
+                    }
+
+                    foreignRequestDistance = Mathf.Min(
+                        requestedDistance,
+                        pushSession.BranchReleaseDistanceRemaining);
+                }
+
                 RestoreConsistPathState(pushSession);
                 Vector2 pushedTravelDirection = contactInfo.PushTravelDirection.sqrMagnitude > 0.0001f
                     ? contactInfo.PushTravelDirection.normalized
@@ -523,7 +541,7 @@ public class RailHandcar : Train
                     contactInfo.Sample,
                     contactInfo.FacingTangent,
                     pushedTravelDirection,
-                    requestedDistance,
+                    foreignRequestDistance,
                     deltaTime,
                     false,
                     Vector2.zero,
@@ -533,6 +551,21 @@ public class RailHandcar : Train
                 if (movedForeignConsist)
                 {
                     SaveConsistPathState(pushSession, contactInfo.Train);
+                    if (contactInfo.ReleaseAfterMove)
+                    {
+                        pushSession.BranchReleaseDistanceRemaining = Mathf.Max(
+                            0f,
+                            pushSession.BranchReleaseDistanceRemaining - foreignDrivenDistance);
+                        if (pushSession.BranchReleaseDistanceRemaining <= 0.0001f)
+                        {
+                            MarkPushConsistBranchReleaseCompleted(pushSession, contactInfo.Train);
+                        }
+                    }
+                    else
+                    {
+                        pushSession.BranchReleaseDistanceRemaining = 0f;
+                        pushSession.BranchReleaseCompleted = false;
+                    }
                 }
                 else
                 {
@@ -889,6 +922,27 @@ public class RailHandcar : Train
         session.PreferredContactTrain = preferredContactTrain;
         session.TravelDirection = Vector2.zero;
         session.EndDistance = 0f;
+        session.BranchReleaseDistanceRemaining = 0f;
+        session.BranchReleaseCompleted = false;
+        session.LastUsedFrame = Time.frameCount;
+    }
+
+    private void MarkPushConsistBranchReleaseCompleted(PushConsistPathSession session, Train preferredContactTrain)
+    {
+        if (session == null)
+        {
+            return;
+        }
+
+        session.PathSamples.Clear();
+        session.TrainOrder.Clear();
+        session.FollowOffsets.Clear();
+        session.Leader = null;
+        session.PreferredContactTrain = preferredContactTrain;
+        session.TravelDirection = Vector2.zero;
+        session.EndDistance = 0f;
+        session.BranchReleaseDistanceRemaining = 0f;
+        session.BranchReleaseCompleted = true;
         session.LastUsedFrame = Time.frameCount;
     }
 
@@ -1067,9 +1121,6 @@ public class RailHandcar : Train
                 continue;
             }
 
-            bestScore = adjustedScore;
-            bestProjection = projection;
-            float gapDistance = Mathf.Max(0f, projection);
             ConnectedTrainRailMove candidateMove = new ConnectedTrainRailMove
             {
                 Train = candidateTrain,
@@ -1079,15 +1130,45 @@ public class RailHandcar : Train
                 TraveledDistance = 0f,
                 FollowOffset = 0f
             };
-            if (TryEstimateRailGapDistance(
+            float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove.Train, candidateTrain);
+            if (!TryEstimateForwardRailGapDistance(
                     frontMove,
                     candidateMove,
                     frontReferenceDirection,
-                    out float railGapDistance))
+                    out float gapDistance)
+                || gapDistance > desiredSpacing + PushConsistContactPadding)
             {
-                gapDistance = railGapDistance;
+                if (knownSession != null && knownSession.BranchReleaseCompleted)
+                {
+                    continue;
+                }
+
+                gapDistance = Mathf.Max(0f, projection);
+                if (gapDistance > desiredSpacing + PushConsistContactPadding)
+                {
+                    continue;
+                }
+
+                contactInfo = new PushContactInfo
+                {
+                    Train = candidateTrain,
+                    Sample = candidateSample,
+                    FacingTangent = candidateFacing,
+                    PushTravelDirection = ResolveFacingTangentWithFallback(
+                        candidateSample.Tangent,
+                        frontReferenceDirection,
+                        frontReferenceDirection),
+                    GapDistance = gapDistance,
+                    DesiredSpacing = desiredSpacing,
+                    ReleaseAfterMove = true
+                };
+                bestScore = adjustedScore;
+                bestProjection = projection;
+                continue;
             }
 
+            bestScore = adjustedScore;
+            bestProjection = projection;
             contactInfo = new PushContactInfo
             {
                 Train = candidateTrain,
@@ -1098,7 +1179,8 @@ public class RailHandcar : Train
                     frontReferenceDirection,
                     frontReferenceDirection),
                 GapDistance = gapDistance,
-                DesiredSpacing = ResolveDesiredConsistPairSpacing(frontMove.Train, candidateTrain)
+                DesiredSpacing = desiredSpacing,
+                ReleaseAfterMove = false
             };
         }
 
@@ -1227,17 +1309,16 @@ public class RailHandcar : Train
             return false;
         }
 
-        float gapDistance = Mathf.Max(0f, projection);
-        if (TryEstimateRailGapDistance(
+        float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove.Train, candidateTrain);
+        if (!TryEstimateForwardRailGapDistance(
                 frontMove,
                 candidateMove,
                 frontReferenceDirection,
-                out float railGapDistance))
+                out float gapDistance))
         {
-            gapDistance = railGapDistance;
+            return false;
         }
 
-        float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove.Train, candidateTrain);
         float maxRetainedGap = desiredSpacing + PushConsistGapTolerance;
         if (gapDistance > maxRetainedGap)
         {
@@ -1944,7 +2025,7 @@ public class RailHandcar : Train
         return Vector2.Distance(fromSample.Point, toSample.Point);
     }
 
-    private bool TryEstimateRailGapDistance(
+    private bool TryEstimateForwardRailGapDistance(
         ConnectedTrainRailMove backMove,
         ConnectedTrainRailMove frontMove,
         Vector2 fallbackDirection,
@@ -1953,11 +2034,7 @@ public class RailHandcar : Train
         gapDistance = 0f;
         if (backMove.StartSample.Rail == null
             || frontMove.StartSample.Rail == null
-            || !TryResolveInitialConsistSegmentDirection(
-                backMove,
-                frontMove,
-                fallbackDirection,
-                out Vector2 initialTravelDirection))
+            || fallbackDirection.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
@@ -1966,20 +2043,7 @@ public class RailHandcar : Train
         if (TryBuildInitialConsistPathSegmentInDirection(
                 backMove,
                 frontMove,
-                initialTravelDirection,
-                0f,
-                initialConsistSegmentScratch,
-                out gapDistance))
-        {
-            initialConsistSegmentScratch.Clear();
-            return true;
-        }
-
-        initialConsistSegmentScratch.Clear();
-        if (TryBuildInitialConsistPathSegmentInDirection(
-                backMove,
-                frontMove,
-                -initialTravelDirection,
+                fallbackDirection.normalized,
                 0f,
                 initialConsistSegmentScratch,
                 out gapDistance))
