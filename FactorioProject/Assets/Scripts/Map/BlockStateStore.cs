@@ -29,6 +29,12 @@ public partial class BlockStateStore : MonoBehaviour
         public bool hasWorldPose;
         public Vector3 worldPosition;
         public Quaternion worldRotation = Quaternion.identity;
+        public bool hasTrainRailSample;
+        public long trainRailPlacementSequence;
+        public Vector2Int trainRailAnchorCoordinate;
+        public float trainRailDistanceAlongPath;
+        public Vector2 trainRailPathPoint;
+        public Vector2 trainRailFacingTangent;
 
         public InstallationSaveState Clone()
         {
@@ -56,7 +62,13 @@ public partial class BlockStateStore : MonoBehaviour
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
                 hasWorldPose = hasWorldPose,
                 worldPosition = worldPosition,
-                worldRotation = worldRotation
+                worldRotation = worldRotation,
+                hasTrainRailSample = hasTrainRailSample,
+                trainRailPlacementSequence = trainRailPlacementSequence,
+                trainRailAnchorCoordinate = trainRailAnchorCoordinate,
+                trainRailDistanceAlongPath = trainRailDistanceAlongPath,
+                trainRailPathPoint = trainRailPathPoint,
+                trainRailFacingTangent = trainRailFacingTangent
             };
         }
     }
@@ -719,11 +731,25 @@ public partial class BlockStateStore : MonoBehaviour
             state.railVisualPathExtendsEnd = railload.RuntimeVisualPathExtendsEnd;
         }
 
-        if (installationObject is Train)
+        if (installationObject is Train train)
         {
             state.hasWorldPose = true;
             state.worldPosition = installationObject.transform.position;
             state.worldRotation = installationObject.transform.rotation;
+            if (train.TryGetCurrentRailPose(
+                    out Railload rail,
+                    out float distanceAlongPath,
+                    out Vector2 pathPoint,
+                    out Vector2 tangent)
+                && rail != null)
+            {
+                state.hasTrainRailSample = true;
+                state.trainRailPlacementSequence = rail.RuntimePlacementSequence;
+                state.trainRailAnchorCoordinate = rail.RuntimeAnchorCoordinate;
+                state.trainRailDistanceAlongPath = distanceAlongPath;
+                state.trainRailPathPoint = pathPoint;
+                state.trainRailFacingTangent = tangent;
+            }
         }
 
         if (installationObject is InputOutputModule inputOutputModule)

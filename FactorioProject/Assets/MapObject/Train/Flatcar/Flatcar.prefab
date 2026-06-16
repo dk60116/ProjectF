@@ -147,9 +147,6 @@ MonoBehaviour:
   wheelRadius: 0.18
   wheelLocalRotationAxis: {x: 1, y: 0, z: 0}
   invertWheelRotation: 0
-  trainCouplingCenterDistance: 1
-  trainCouplingGapDistance: 0.4
-  trainCouplingSnapMaxDistance: 1.8
   itemPointList:
   - {fileID: 1973605188877043926}
 --- !u!65 &8817530847774380614

@@ -182,12 +182,6 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly List<InstallationObject> railAlignmentInstallationScratch = new List<InstallationObject>(4);
-    private readonly List<MapObject> trainPreviewConnectionScratch = new List<MapObject>(8);
-    private readonly Queue<MapObject> trainPreviewConnectionQueue = new Queue<MapObject>(8);
-    private readonly List<Train> trainPreviewExistingConnectionScratch = new List<Train>(8);
-    private readonly List<Train> trainPreviewConnectionGroupScratch = new List<Train>(8);
-    private readonly Queue<Train> trainPreviewConnectionTrainQueue = new Queue<Train>(8);
-    private readonly HashSet<Train> trainInstallPreviewHighlightedTrains = new HashSet<Train>();
     private readonly List<TrainCollisionBox2D> trainPlacementCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private readonly List<TrainCollisionBox2D> trainPlacementOtherCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private InstallationObject selectedEditableInstallation;
@@ -2159,278 +2153,30 @@ public class InstallationPlacementController : MonoBehaviour
 
     private Color ResolveInstallPreviewTint(MapObject preview)
     {
-        return TryResolveTrainInstallPreviewTint(preview, out Color trainTint)
-            ? trainTint
-            : installPreviewTint;
-    }
-
-    private bool TryResolveTrainInstallPreviewTint(MapObject preview, out Color tint)
-    {
-        tint = default;
-        if (!TryGetTrainPreviewPose(
-                preview,
-                out Vector3 _,
-                out Vector3 _,
-                out float _))
-        {
-            return false;
-        }
-
-        CollectConnectedTrainPreviewComponent(preview);
-        bool hasPreviewConnection = trainPreviewConnectionScratch.Count > 1;
-        bool hasExistingConnection = false;
-        Color existingConnectionColor = default;
-        int existingConnectionSeed = int.MaxValue;
-        int previewSeed = int.MaxValue;
-
-        for (int i = 0; i < trainPreviewConnectionScratch.Count; i++)
-        {
-            MapObject connectedPreview = trainPreviewConnectionScratch[i];
-            if (!TryGetTrainPreviewPose(
-                    connectedPreview,
-                    out Vector3 previewPosition,
-                    out Vector3 previewForward,
-                    out float autoConnectDistance))
-            {
-                continue;
-            }
-
-            previewSeed = Mathf.Min(previewSeed, ResolveTrainPreviewConnectionSeed(connectedPreview));
-            if (Train.TryGetAutoConnectInfoNearPose(
-                    previewPosition,
-                    previewForward,
-                    autoConnectDistance,
-                    out Color candidateExistingColor,
-                    out int candidateExistingSeed,
-                    out _)
-                && candidateExistingSeed < existingConnectionSeed)
-            {
-                existingConnectionColor = candidateExistingColor;
-                existingConnectionSeed = candidateExistingSeed;
-                hasExistingConnection = true;
-            }
-        }
-
-        if (!hasPreviewConnection && !hasExistingConnection)
-        {
-            return false;
-        }
-
-        tint = hasExistingConnection
-            ? existingConnectionColor
-            : Train.GetConnectionColorForSeed(previewSeed == int.MaxValue ? preview.GetInstanceID() : previewSeed);
-        tint.a = Mathf.Max(tint.a, installPreviewTint.a);
-        return true;
-    }
-
-    private void CollectConnectedTrainPreviewComponent(MapObject rootPreview)
-    {
-        trainPreviewConnectionScratch.Clear();
-        trainPreviewConnectionQueue.Clear();
-        if (rootPreview == null)
-        {
-            return;
-        }
-
-        trainPreviewConnectionScratch.Add(rootPreview);
-        trainPreviewConnectionQueue.Enqueue(rootPreview);
-        while (trainPreviewConnectionQueue.Count > 0)
-        {
-            MapObject currentPreview = trainPreviewConnectionQueue.Dequeue();
-            if (!TryGetTrainPreviewPose(
-                    currentPreview,
-                    out Vector3 currentPosition,
-                    out Vector3 currentForward,
-                    out float currentAutoConnectDistance))
-            {
-                continue;
-            }
-
-            for (int i = 0; i < installPreviewInstances.Count; i++)
-            {
-                MapObject candidatePreview = installPreviewInstances[i];
-                if (candidatePreview == null
-                    || candidatePreview == currentPreview
-                    || trainPreviewConnectionScratch.Contains(candidatePreview)
-                    || !TryGetTrainPreviewPose(
-                        candidatePreview,
-                        out Vector3 candidatePosition,
-                        out Vector3 candidateForward,
-                        out float candidateAutoConnectDistance)
-                    || !Train.CanAutoConnectTrainPoses(
-                        currentPosition,
-                        currentForward,
-                        currentAutoConnectDistance,
-                        candidatePosition,
-                        candidateForward,
-                        candidateAutoConnectDistance))
-                {
-                    continue;
-                }
-
-                trainPreviewConnectionScratch.Add(candidatePreview);
-                trainPreviewConnectionQueue.Enqueue(candidatePreview);
-            }
-        }
-    }
-
-    private bool TryGetTrainPreviewPose(
-        MapObject preview,
-        out Vector3 position,
-        out Vector3 forward,
-        out float autoConnectDistance)
-    {
-        position = Vector3.zero;
-        forward = Vector3.forward;
-        autoConnectDistance = Train.GetDefaultAutoConnectDistance();
-        if (preview == null)
-        {
-            return false;
-        }
-
-        MapObject source = ResolveInstallPreviewPlacementSource(preview);
-        Train sourceTrain = ResolveTrainSource(source) ?? ResolveTrainSource(preview);
-        if (sourceTrain == null)
-        {
-            return false;
-        }
-
-        position = preview.transform.position;
-        forward = preview.transform.forward;
-        if (forward.sqrMagnitude <= 0.0001f)
-        {
-            forward = sourceTrain.transform.forward;
-        }
-
-        autoConnectDistance = sourceTrain.AutoConnectDistance;
-        return true;
-    }
-
-    private int ResolveTrainPreviewConnectionSeed(MapObject preview)
-    {
-        if (preview != null
-            && installPreviewPlacementSequencesByPreview.TryGetValue(preview, out long placementSequence)
-            && placementSequence > 0)
-        {
-            return (int)(placementSequence & 0x7fffffff);
-        }
-
-        return preview != null ? preview.GetInstanceID() : 0;
+        return installPreviewTint;
     }
 
     private void RefreshTrainInstallPreviewTints()
     {
-        ClearTrainInstallPreviewConnectionHighlights();
         for (int i = 0; i < installPreviewInstances.Count; i++)
         {
             MapObject preview = installPreviewInstances[i];
-            if (preview == null || !TryGetTrainPreviewPose(preview, out _, out _, out _))
+            if (preview == null)
             {
                 continue;
             }
 
-            bool hasTrainTint = TryResolveTrainInstallPreviewTint(preview, out Color trainTint);
-            if (hasTrainTint)
+            MapObject source = ResolveInstallPreviewPlacementSource(preview);
+            if ((ResolveTrainSource(source) ?? ResolveTrainSource(preview)) == null)
             {
-                HighlightExistingTrainConnectionsForCurrentPreviewComponent(trainTint);
+                continue;
             }
 
             ApplyInstallPreviewTint(
                 preview,
                 preview == activeInstallPreview,
-                hasTrainTint ? trainTint : installPreviewTint);
+                installPreviewTint);
         }
-    }
-
-    private void HighlightExistingTrainConnectionsForCurrentPreviewComponent(Color tint)
-    {
-        trainPreviewExistingConnectionScratch.Clear();
-        for (int i = 0; i < trainPreviewConnectionScratch.Count; i++)
-        {
-            MapObject connectedPreview = trainPreviewConnectionScratch[i];
-            if (!TryGetTrainPreviewPose(
-                    connectedPreview,
-                    out Vector3 previewPosition,
-                    out Vector3 previewForward,
-                    out float autoConnectDistance))
-            {
-                continue;
-            }
-
-            Train.CollectAutoConnectTrainsNearPose(
-                previewPosition,
-                previewForward,
-                autoConnectDistance,
-                trainPreviewExistingConnectionScratch);
-        }
-
-        for (int i = 0; i < trainPreviewExistingConnectionScratch.Count; i++)
-        {
-            HighlightExistingTrainConnectionGroup(trainPreviewExistingConnectionScratch[i], tint);
-        }
-    }
-
-    private void HighlightExistingTrainConnectionGroup(Train root, Color tint)
-    {
-        if (root == null)
-        {
-            return;
-        }
-
-        trainPreviewConnectionGroupScratch.Clear();
-        trainPreviewConnectionTrainQueue.Clear();
-        trainPreviewConnectionGroupScratch.Add(root);
-        trainPreviewConnectionTrainQueue.Enqueue(root);
-
-        while (trainPreviewConnectionTrainQueue.Count > 0)
-        {
-            Train current = trainPreviewConnectionTrainQueue.Dequeue();
-            if (current == null)
-            {
-                continue;
-            }
-
-            current.SetConnectionPreviewVisualOverride(tint);
-            trainInstallPreviewHighlightedTrains.Add(current);
-
-            IReadOnlyList<Train> connectedTrains = current.ConnectedTrains;
-            if (connectedTrains == null)
-            {
-                continue;
-            }
-
-            for (int i = 0; i < connectedTrains.Count; i++)
-            {
-                Train connectedTrain = connectedTrains[i];
-                if (connectedTrain == null || trainPreviewConnectionGroupScratch.Contains(connectedTrain))
-                {
-                    continue;
-                }
-
-                trainPreviewConnectionGroupScratch.Add(connectedTrain);
-                trainPreviewConnectionTrainQueue.Enqueue(connectedTrain);
-            }
-        }
-    }
-
-    private void ClearTrainInstallPreviewConnectionHighlights()
-    {
-        if (trainInstallPreviewHighlightedTrains.Count <= 0)
-        {
-            return;
-        }
-
-        foreach (Train train in trainInstallPreviewHighlightedTrains)
-        {
-            if (train == null)
-            {
-                continue;
-            }
-
-            train.ClearConnectionPreviewVisualOverride();
-        }
-
-        trainInstallPreviewHighlightedTrains.Clear();
     }
 
     private static void RefreshInstallPreviewConveyorShaderProperties(MapObject preview)
@@ -10343,6 +10089,134 @@ public class InstallationPlacementController : MonoBehaviour
         InitializePlacedTrainRailSample(installedObject, anchorCoordinate, null);
     }
 
+    public bool TryRestorePlacedTrainRailSample(
+        MapObject installedObject,
+        BlockStateStore.InstallationSaveState savedState)
+    {
+        if (!(installedObject is Train train)
+            || savedState == null
+            || !savedState.hasTrainRailSample
+            || !TryFindSavedTrainRailSample(savedState, out TrainPlacementRailSample railSample))
+        {
+            return false;
+        }
+
+        Vector2 referenceFacing = savedState.trainRailFacingTangent;
+        if (referenceFacing.sqrMagnitude <= 0.0001f)
+        {
+            Vector3 fallbackForward = savedState.hasWorldPose
+                ? savedState.worldRotation * Vector3.forward
+                : train.transform.forward;
+            referenceFacing = new Vector2(fallbackForward.x, fallbackForward.z);
+        }
+
+        Vector2 facing = ResolveTrainPlacementFacingTangent(railSample.Tangent, referenceFacing);
+        if (facing.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        train.ApplyPlacedRailSample(
+            railSample.Rail,
+            railSample.DistanceAlongPath,
+            railSample.Point,
+            facing);
+        return true;
+    }
+
+    private bool TryFindSavedTrainRailSample(
+        BlockStateStore.InstallationSaveState savedState,
+        out TrainPlacementRailSample railSample)
+    {
+        railSample = default;
+        railSample.SqrDistance = float.MaxValue;
+        if (savedState == null || !savedState.hasTrainRailSample)
+        {
+            return false;
+        }
+
+        if (TryFindSavedTrainRail(savedState, out Railload rail)
+            && rail.TrySampleRenderedPath(
+                Mathf.Max(0f, savedState.trainRailDistanceAlongPath),
+                out Vector2 pathPoint,
+                out Vector2 tangent))
+        {
+            railSample.Rail = rail;
+            railSample.DistanceAlongPath = Mathf.Max(0f, savedState.trainRailDistanceAlongPath);
+            railSample.Point = pathPoint;
+            railSample.Tangent = tangent;
+            railSample.SqrDistance = (pathPoint - savedState.trainRailPathPoint).sqrMagnitude;
+            return true;
+        }
+
+        Vector2 referencePoint = savedState.trainRailPathPoint;
+        if (referencePoint.sqrMagnitude <= 0.0001f && savedState.hasWorldPose)
+        {
+            referencePoint = new Vector2(savedState.worldPosition.x, savedState.worldPosition.z);
+        }
+
+        Vector2Int searchCoordinate = new Vector2Int(
+            Mathf.RoundToInt(referencePoint.x),
+            Mathf.RoundToInt(referencePoint.y));
+        int searchCells = Mathf.CeilToInt(Mathf.Max(1f, TrainPlacementRailSearchRadius));
+        return TryFindNearestTrainPlacementRailSampleAroundCoordinate(
+            searchCoordinate,
+            referencePoint,
+            searchCells,
+            out railSample);
+    }
+
+    private bool TryFindSavedTrainRail(
+        BlockStateStore.InstallationSaveState savedState,
+        out Railload rail)
+    {
+        rail = null;
+        if (savedState == null)
+        {
+            return false;
+        }
+
+        long placementSequence = savedState.trainRailPlacementSequence;
+        if (placementSequence > 0)
+        {
+            Railload[] activeRails = FindObjectsOfType<Railload>(false);
+            for (int i = 0; i < activeRails.Length; i++)
+            {
+                Railload candidate = activeRails[i];
+                if (candidate != null
+                    && candidate.RuntimePlacementSequence == placementSequence)
+                {
+                    rail = candidate;
+                    return true;
+                }
+            }
+        }
+
+        trainPlacementRailSearchScratch.Clear();
+        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            savedState.trainRailAnchorCoordinate,
+            trainPlacementRailSearchScratch);
+        for (int i = 0; i < trainPlacementRailSearchScratch.Count; i++)
+        {
+            if (trainPlacementRailSearchScratch[i] is not Railload candidate)
+            {
+                continue;
+            }
+
+            if (placementSequence <= 0 || candidate.RuntimePlacementSequence == placementSequence)
+            {
+                rail = candidate;
+                trainPlacementRailSearchScratch.Clear();
+                return true;
+            }
+
+            rail ??= candidate;
+        }
+
+        trainPlacementRailSearchScratch.Clear();
+        return rail != null;
+    }
+
     private void InitializePlacedTrainRailSample(
         MapObject installedObject,
         Vector2Int anchorCoordinate,
@@ -10444,9 +10318,6 @@ public class InstallationPlacementController : MonoBehaviour
                 || !train.TryGetPlacementRuntime(out _, out _)
                 || !TrainCollisionBoxesOverlapWith(
                     trainPlacementCollisionBoxes,
-                    sourcePrefab,
-                    position,
-                    rotation,
                     train,
                     train.transform.position,
                     train.transform.rotation))
@@ -10472,9 +10343,6 @@ public class InstallationPlacementController : MonoBehaviour
                 || otherPreviewTrain == null
                 || !TrainCollisionBoxesOverlapWith(
                     trainPlacementCollisionBoxes,
-                    sourcePrefab,
-                    position,
-                    rotation,
                     otherPreviewSource ?? otherPreview,
                     otherPreview.transform.position,
                     otherPreview.transform.rotation))
@@ -10492,33 +10360,27 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TrainCollisionBoxesOverlapWith(
         IReadOnlyList<TrainCollisionBox2D> candidateBoxes,
-        MapObject candidateSource,
-        Vector3 candidatePosition,
-        Quaternion candidateRotation,
         MapObject otherSource,
         Vector3 otherPosition,
         Quaternion otherRotation)
     {
-        Train candidateTrain = ResolveTrainSource(candidateSource);
-        Train otherTrain = ResolveTrainSource(otherSource);
-        BuildTrainCollisionBoxes(otherSource, otherPosition, otherRotation, trainPlacementOtherCollisionBoxes);
+        if (otherSource == null)
+        {
+            return false;
+        }
+
+        BuildTrainCollisionBoxes(
+            otherSource,
+            otherPosition,
+            otherRotation,
+            trainPlacementOtherCollisionBoxes);
         for (int candidateIndex = 0; candidateIndex < candidateBoxes.Count; candidateIndex++)
         {
             TrainCollisionBox2D candidateBox = candidateBoxes[candidateIndex];
             for (int otherIndex = 0; otherIndex < trainPlacementOtherCollisionBoxes.Count; otherIndex++)
             {
                 TrainCollisionBox2D otherBox = trainPlacementOtherCollisionBoxes[otherIndex];
-                if (TrainCollisionBoxesOverlap(candidateBox, otherBox, out float overlapDepth)
-                    && !CanAllowTrainPlacementCouplingOverlap(
-                        candidateTrain,
-                        candidatePosition,
-                        candidateRotation,
-                        otherTrain,
-                        otherPosition,
-                        otherRotation,
-                        candidateBox,
-                        otherBox,
-                        overlapDepth))
+                if (TrainCollisionBoxesOverlap(candidateBox, otherBox, out _))
                 {
                     return true;
                 }
@@ -10526,63 +10388,6 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return false;
-    }
-
-    private static bool CanAllowTrainPlacementCouplingOverlap(
-        Train candidateTrain,
-        Vector3 candidatePosition,
-        Quaternion candidateRotation,
-        Train otherTrain,
-        Vector3 otherPosition,
-        Quaternion otherRotation,
-        TrainCollisionBox2D candidateBox,
-        TrainCollisionBox2D otherBox,
-        float overlapDepth)
-    {
-        if (candidateTrain == null
-            || otherTrain == null
-            || overlapDepth <= 0f
-            || overlapDepth > Mathf.Min(candidateTrain.CouplingOverlapAllowance, otherTrain.CouplingOverlapAllowance))
-        {
-            return false;
-        }
-
-        if (!Train.CanAutoConnectTrainPoses(
-                candidatePosition,
-                candidateRotation * Vector3.forward,
-                candidateTrain.AutoConnectDistance,
-                otherPosition,
-                otherRotation * Vector3.forward,
-                otherTrain.AutoConnectDistance))
-        {
-            return false;
-        }
-
-        Vector2 separation = otherBox.Center - candidateBox.Center;
-        if (separation.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        Vector2 forwardAxis = candidateBox.AxisForward.sqrMagnitude > 0.0001f
-            ? candidateBox.AxisForward.normalized
-            : otherBox.AxisForward.normalized;
-        if (forwardAxis.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        float forwardDistance = Mathf.Abs(Vector2.Dot(separation, forwardAxis));
-        Vector2 rightAxis = new Vector2(forwardAxis.y, -forwardAxis.x);
-        float lateralDistance = Mathf.Abs(Vector2.Dot(separation, rightAxis));
-        float lateralLimit = Mathf.Max(candidateBox.HalfExtents.x, otherBox.HalfExtents.x) + 0.05f;
-        if (lateralDistance > lateralLimit)
-        {
-            return false;
-        }
-
-        float minEndToEndDistance = Mathf.Max(0.05f, Mathf.Min(candidateBox.HalfExtents.y, otherBox.HalfExtents.y) * 0.5f);
-        return forwardDistance >= minEndToEndDistance;
     }
 
     private static void BuildTrainCollisionBoxes(
@@ -29475,7 +29280,6 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ClearInstallPreview()
     {
-        ClearTrainInstallPreviewConnectionHighlights();
         InvalidateInstallPreviewMoveCache();
         railloadInstallationController?.Cancel();
         RefundAllInstallPreviewReservations();

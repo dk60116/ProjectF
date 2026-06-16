@@ -239,6 +239,16 @@ public static class SaveGameBinarySerializer
             WriteVector3(writer, state.worldPosition);
             WriteQuaternion(writer, state.worldRotation);
         }
+
+        writer.Write(state.hasTrainRailSample);
+        if (state.hasTrainRailSample)
+        {
+            writer.Write(state.trainRailPlacementSequence);
+            WriteVector2Int(writer, state.trainRailAnchorCoordinate);
+            writer.Write(state.trainRailDistanceAlongPath);
+            WriteVector2(writer, state.trainRailPathPoint);
+            WriteVector2(writer, state.trainRailFacingTangent);
+        }
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -301,6 +311,19 @@ public static class SaveGameBinarySerializer
             {
                 state.worldPosition = ReadVector3(reader);
                 state.worldRotation = ReadQuaternion(reader);
+            }
+        }
+
+        if (version >= 15)
+        {
+            state.hasTrainRailSample = reader.ReadBoolean();
+            if (state.hasTrainRailSample)
+            {
+                state.trainRailPlacementSequence = reader.ReadInt64();
+                state.trainRailAnchorCoordinate = ReadVector2Int(reader);
+                state.trainRailDistanceAlongPath = reader.ReadSingle();
+                state.trainRailPathPoint = ReadVector2(reader);
+                state.trainRailFacingTangent = ReadVector2(reader);
             }
         }
 

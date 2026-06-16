@@ -866,31 +866,62 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private int CompareInstallationRestoreOrder(Vector2Int left, Vector2Int right)
     {
-        bool leftIsBelt2F = IsSavedInstallationBelt2F(left);
-        bool rightIsBelt2F = IsSavedInstallationBelt2F(right);
-        if (leftIsBelt2F != rightIsBelt2F)
+        int leftPriority = ResolveSavedInstallationRestorePriority(left);
+        int rightPriority = ResolveSavedInstallationRestorePriority(right);
+        if (leftPriority != rightPriority)
         {
-            return leftIsBelt2F ? 1 : -1;
+            return leftPriority.CompareTo(rightPriority);
         }
 
         int xComparison = left.x.CompareTo(right.x);
         return xComparison != 0 ? xComparison : left.y.CompareTo(right.y);
     }
 
-    private bool IsSavedInstallationBelt2F(Vector2Int storageKey)
+    private int ResolveSavedInstallationRestorePriority(Vector2Int storageKey)
     {
         if (resourceStateStore == null
             || !resourceStateStore.TryGetInstallationState(storageKey, out BlockStateStore.InstallationSaveState savedState)
             || savedState == null)
         {
-            return false;
+            return 1;
         }
 
         ItemDefinition definition = ResolveInstallationDefinition(savedState);
-        return ItemDefinitionLookup.IsConveyorBelt2FDefinition(definition)
-               || (savedState.occupiedCoordinates != null
-                   && savedState.occupiedCoordinates.Count > 0
-                   && !savedState.occupiedCoordinates.Contains(savedState.anchorCoordinate));
+        if (IsRailloadDefinition(definition))
+        {
+            return 0;
+        }
+
+        if (IsTrainDefinition(definition))
+        {
+            return 2;
+        }
+
+        if (ItemDefinitionLookup.IsConveyorBelt2FDefinition(definition)
+            || (savedState.occupiedCoordinates != null
+                && savedState.occupiedCoordinates.Count > 0
+                && !savedState.occupiedCoordinates.Contains(savedState.anchorCoordinate)))
+        {
+            return 3;
+        }
+
+        return 1;
+    }
+
+    private static bool IsRailloadDefinition(ItemDefinition definition)
+    {
+        return definition?.mapObject != null
+               && (definition.mapObject is Railload
+                   || definition.mapObject.GetComponent<Railload>() != null
+                   || definition.mapObject.GetComponentInChildren<Railload>(true) != null);
+    }
+
+    private static bool IsTrainDefinition(ItemDefinition definition)
+    {
+        return definition?.mapObject != null
+               && (definition.mapObject is Train
+                   || definition.mapObject.GetComponent<Train>() != null
+                   || definition.mapObject.GetComponentInChildren<Train>(true) != null);
     }
 
     private void RestoreOrBindSavedInstallation(Vector2Int anchorCoordinate)
@@ -1100,9 +1131,15 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        if (!savedState.hasWorldPose && placementController != null && restoredInstallation is Train)
+        if (placementController != null && restoredInstallation is Train)
         {
-            placementController.InitializePlacedTrainRailSample(restoredInstallation, savedState.anchorCoordinate);
+            bool restoredTrainRailSample = placementController.TryRestorePlacedTrainRailSample(
+                restoredInstallation,
+                savedState);
+            if (!restoredTrainRailSample)
+            {
+                placementController.InitializePlacedTrainRailSample(restoredInstallation, savedState.anchorCoordinate);
+            }
         }
 
         if (savedState.robotArmState != null && restoredInstallation is RobotArm robotArm)
