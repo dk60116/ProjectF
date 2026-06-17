@@ -255,8 +255,8 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   vehicleAccelerationPerSecond: 1
-  vehicleMaxSpeed: 20
-  vehicleStopInertiaSeconds: 0.35
+  vehicleMaxSpeed: 2.5
+  vehicleDecelerationPerSecond: 3
   playerPoint:
   - {fileID: 473533616803250247}
   - {fileID: 2952873028820281183}
@@ -274,6 +274,7 @@ MonoBehaviour:
   trainConnectionMaxLateralDistance: 0.45
   trainConnectionMinForwardDot: 0.5
   railMoveSpeedMultiplier: 1
+  railMovementSubstepDistance: 0.12
   railSnapMaxDistance: 0.75
   railRotationInterpolationSpeed: 10
   railSearchRadius: 1.25

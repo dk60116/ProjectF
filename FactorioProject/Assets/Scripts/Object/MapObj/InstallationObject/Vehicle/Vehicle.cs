@@ -7,8 +7,8 @@ public class Vehicle : InstallationObject
     private float vehicleAccelerationPerSecond = 4f;
     [SerializeField, Min(0.01f)]
     private float vehicleMaxSpeed = 1.5f;
-    [SerializeField, Min(0f)]
-    private float vehicleStopInertiaSeconds = 0.35f;
+    [SerializeField, Min(0.01f)]
+    private float vehicleDecelerationPerSecond = 4f;
     [SerializeField]
     private List<Transform> playerPoint;
 
@@ -22,13 +22,10 @@ public class Vehicle : InstallationObject
     private bool invertWheelRotation;
 
     private float currentVehicleSignedSpeed;
-    private float stopInertiaSpeedChangePerSecond;
-    private bool stopInertiaActive;
-    private bool hadVehicleInputLastFrame;
 
     public float VehicleAccelerationPerSecond => Mathf.Max(0.01f, vehicleAccelerationPerSecond);
+    public float VehicleDecelerationPerSecond => Mathf.Max(0.01f, vehicleDecelerationPerSecond);
     public float VehicleMaxSpeed => Mathf.Max(0.01f, vehicleMaxSpeed);
-    public float VehicleStopInertiaSeconds => Mathf.Max(0f, vehicleStopInertiaSeconds);
     protected float CurrentVehicleSignedSpeed => currentVehicleSignedSpeed;
 
     public virtual void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
@@ -44,32 +41,9 @@ public class Vehicle : InstallationObject
             ? normalizedInputAxis * VehicleMaxSpeed
             : 0f;
 
-        if (!hasInput && vehicleStopInertiaSeconds <= 0f)
-        {
-            currentVehicleSignedSpeed = 0f;
-            ClearStopInertiaState();
-            return currentVehicleSignedSpeed;
-        }
-
-        float speedChangePerSecond;
-        if (hasInput)
-        {
-            ClearStopInertiaState();
-            speedChangePerSecond = VehicleAccelerationPerSecond;
-        }
-        else
-        {
-            if (!stopInertiaActive || hadVehicleInputLastFrame)
-            {
-                stopInertiaSpeedChangePerSecond = Mathf.Abs(currentVehicleSignedSpeed)
-                                                   / Mathf.Max(0.001f, vehicleStopInertiaSeconds);
-                stopInertiaActive = stopInertiaSpeedChangePerSecond > 0.0001f;
-            }
-
-            speedChangePerSecond = stopInertiaActive
-                ? stopInertiaSpeedChangePerSecond
-                : VehicleMaxSpeed / Mathf.Max(0.001f, vehicleStopInertiaSeconds);
-        }
+        float speedChangePerSecond = hasInput
+            ? VehicleAccelerationPerSecond
+            : VehicleDecelerationPerSecond;
 
         currentVehicleSignedSpeed = Mathf.MoveTowards(
             currentVehicleSignedSpeed,
@@ -78,24 +52,14 @@ public class Vehicle : InstallationObject
         if (!hasInput && Mathf.Abs(currentVehicleSignedSpeed) <= 0.0001f)
         {
             currentVehicleSignedSpeed = 0f;
-            ClearStopInertiaState();
         }
 
-        hadVehicleInputLastFrame = hasInput;
         return currentVehicleSignedSpeed;
     }
 
     protected void ResetVehicleMotion()
     {
         currentVehicleSignedSpeed = 0f;
-        ClearStopInertiaState();
-    }
-
-    private void ClearStopInertiaState()
-    {
-        stopInertiaSpeedChangePerSecond = 0f;
-        stopInertiaActive = false;
-        hadVehicleInputLastFrame = false;
     }
 
     protected void RotateWheelsByDistance(float signedDistance)

@@ -132,8 +132,8 @@ public class ItemDataEditorWindow : EditorWindow
         public int workableRangeCells = -1;
         public float conveyorSpeed = -1f;
         public float vehicleAccelerationPerSecond = -1f;
+        public float vehicleDecelerationPerSecond = -1f;
         public float vehicleMaxSpeed = -1f;
-        public float vehicleStopInertiaSeconds = -1f;
         public float waterLitersPerSecond = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
@@ -1271,9 +1271,9 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         SerializedProperty accelerationProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleAccelerationPerSecond");
+        SerializedProperty decelerationProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleDecelerationPerSecond");
         SerializedProperty maxSpeedProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleMaxSpeed");
-        SerializedProperty stopInertiaProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleStopInertiaSeconds");
-        if (accelerationProperty == null && maxSpeedProperty == null && stopInertiaProperty == null)
+        if (accelerationProperty == null && decelerationProperty == null && maxSpeedProperty == null)
         {
             return;
         }
@@ -1286,16 +1286,16 @@ public class ItemDataEditorWindow : EditorWindow
             EditorGUILayout.PropertyField(accelerationProperty, new GUIContent("Acceleration / s"));
         }
 
+        if (decelerationProperty != null)
+        {
+            decelerationProperty.floatValue = Mathf.Max(0.01f, decelerationProperty.floatValue);
+            EditorGUILayout.PropertyField(decelerationProperty, new GUIContent("Deceleration / s"));
+        }
+
         if (maxSpeedProperty != null)
         {
             maxSpeedProperty.floatValue = Mathf.Max(0.01f, maxSpeedProperty.floatValue);
             EditorGUILayout.PropertyField(maxSpeedProperty, new GUIContent("Max Speed"));
-        }
-
-        if (stopInertiaProperty != null)
-        {
-            stopInertiaProperty.floatValue = Mathf.Max(0f, stopInertiaProperty.floatValue);
-            EditorGUILayout.PropertyField(stopInertiaProperty, new GUIContent("Stop Inertia (sec)"));
         }
     }
 
@@ -1879,16 +1879,16 @@ public class ItemDataEditorWindow : EditorWindow
             accelerationProperty.floatValue = Mathf.Max(0.01f, entry.vehicleAccelerationPerSecond);
         }
 
+        SerializedProperty decelerationProperty = FindSerializedProperty(serializedMapObject, "vehicleDecelerationPerSecond");
+        if (decelerationProperty != null && entry.vehicleDecelerationPerSecond > 0f)
+        {
+            decelerationProperty.floatValue = Mathf.Max(0.01f, entry.vehicleDecelerationPerSecond);
+        }
+
         SerializedProperty maxSpeedProperty = FindSerializedProperty(serializedMapObject, "vehicleMaxSpeed");
         if (maxSpeedProperty != null && entry.vehicleMaxSpeed > 0f)
         {
             maxSpeedProperty.floatValue = Mathf.Max(0.01f, entry.vehicleMaxSpeed);
-        }
-
-        SerializedProperty stopInertiaProperty = FindSerializedProperty(serializedMapObject, "vehicleStopInertiaSeconds");
-        if (stopInertiaProperty != null && entry.vehicleStopInertiaSeconds >= 0f)
-        {
-            stopInertiaProperty.floatValue = Mathf.Max(0f, entry.vehicleStopInertiaSeconds);
         }
     }
 
@@ -3119,8 +3119,8 @@ public class ItemDataEditorWindow : EditorWindow
             if (ShouldExposeVehicleStats(definition.mapObject) && definition.mapObject is Vehicle vehicle)
             {
                 entry.vehicleAccelerationPerSecond = vehicle.VehicleAccelerationPerSecond;
+                entry.vehicleDecelerationPerSecond = vehicle.VehicleDecelerationPerSecond;
                 entry.vehicleMaxSpeed = vehicle.VehicleMaxSpeed;
-                entry.vehicleStopInertiaSeconds = vehicle.VehicleStopInertiaSeconds;
             }
 
             if (definition.mapObject is InstallationObject installationObject)
