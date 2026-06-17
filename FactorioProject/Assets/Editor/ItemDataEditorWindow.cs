@@ -1180,7 +1180,7 @@ public class ItemDataEditorWindow : EditorWindow
             DrawPumpFields(mapObjectSerializedObject);
         }
 
-        if (mapObject is Vehicle)
+        if (ShouldExposeVehicleStats(mapObject))
         {
             DrawVehicleFields(mapObjectSerializedObject);
         }
@@ -1297,6 +1297,11 @@ public class ItemDataEditorWindow : EditorWindow
             stopInertiaProperty.floatValue = Mathf.Max(0f, stopInertiaProperty.floatValue);
             EditorGUILayout.PropertyField(stopInertiaProperty, new GUIContent("Stop Inertia (sec)"));
         }
+    }
+
+    private static bool ShouldExposeVehicleStats(MapObject mapObject)
+    {
+        return mapObject is Vehicle && !(mapObject is FreightCar);
     }
 
     private void DrawPlacementCenterGridFields(
@@ -3111,7 +3116,7 @@ public class ItemDataEditorWindow : EditorWindow
                 entry.waterLitersPerSecond = pump.WaterLitersPerSecond;
             }
 
-            if (definition.mapObject is Vehicle vehicle)
+            if (ShouldExposeVehicleStats(definition.mapObject) && definition.mapObject is Vehicle vehicle)
             {
                 entry.vehicleAccelerationPerSecond = vehicle.VehicleAccelerationPerSecond;
                 entry.vehicleMaxSpeed = vehicle.VehicleMaxSpeed;
@@ -3454,7 +3459,7 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (mapObject is Vehicle)
+        if (ShouldExposeVehicleStats(mapObject))
         {
             ApplyVehicleJson(serializedMapObject, entry);
         }

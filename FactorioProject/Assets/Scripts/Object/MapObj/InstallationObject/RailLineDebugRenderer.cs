@@ -53,13 +53,14 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private readonly List<RailInfo> rails = new List<RailInfo>();
     private readonly List<LineRenderer> lineRenderers = new List<LineRenderer>();
     private readonly List<LineRenderer> cartArrowRenderers = new List<LineRenderer>();
+    private readonly List<RailHandcar> activeHandcarScratch = new List<RailHandcar>(4);
     private readonly Queue<int> componentQueue = new Queue<int>();
 
     private Transform debugRoot;
     private Material lineMaterial;
     private bool isVisible;
     private bool isDirty = true;
-    private float nextRefreshTime;
+    private float nextCartArrowRefreshTime;
 
     public void SetVisible(bool visible)
     {
@@ -119,13 +120,16 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             return;
         }
 
-        if (!isDirty && Time.unscaledTime < nextRefreshTime)
+        if (isDirty)
         {
-            RefreshCartDirectionArrows();
+            Rebuild();
             return;
         }
 
-        Rebuild();
+        if (Time.unscaledTime >= nextCartArrowRefreshTime)
+        {
+            RefreshCartDirectionArrows();
+        }
     }
 
     private void HandlePlacementRuntimeChanged(InstallationObject installationObject)
@@ -177,7 +181,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         RefreshCartDirectionArrows();
         isDirty = false;
-        nextRefreshTime = Time.unscaledTime + refreshInterval;
+        nextCartArrowRefreshTime = Time.unscaledTime + refreshInterval;
     }
 
     private void CollectRails()
@@ -312,13 +316,21 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private void RefreshCartDirectionArrows()
     {
         EnsureDebugRoot();
+        if (!ShouldShowCartDirectionArrows())
+        {
+            DisableCartArrowRenderers();
+            nextCartArrowRefreshTime = Time.unscaledTime + refreshInterval;
+            return;
+        }
+
         EnsureLineMaterial();
 
         int rendererIndex = 0;
-        RailHandcar[] activeHandcars = FindObjectsOfType<RailHandcar>(false);
-        for (int i = 0; i < activeHandcars.Length; i++)
+        activeHandcarScratch.Clear();
+        RailHandcar.CollectActiveRuntimeHandcars(activeHandcarScratch);
+        for (int i = 0; i < activeHandcarScratch.Count; i++)
         {
-            RailHandcar handcar = activeHandcars[i];
+            RailHandcar handcar = activeHandcarScratch[i];
             if (handcar == null
                 || !handcar.isActiveAndEnabled
                 || !handcar.TryGetRailDebugDirection(out Vector3 cartPosition, out Vector3 direction))
@@ -349,13 +361,15 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             ApplyCartArrowSegment(EnsureCartArrowRenderer(rendererIndex++), tip, headBase - headSide, arrowColor);
         }
 
-        for (int i = rendererIndex; i < cartArrowRenderers.Count; i++)
-        {
-            if (cartArrowRenderers[i] != null)
-            {
-                cartArrowRenderers[i].enabled = false;
-            }
-        }
+        DisableCartArrowRenderers(rendererIndex);
+
+        activeHandcarScratch.Clear();
+        nextCartArrowRefreshTime = Time.unscaledTime + refreshInterval;
+    }
+
+    private static bool ShouldShowCartDirectionArrows()
+    {
+        return GameManager.Instance != null && GameManager.Instance.ShowDirections;
     }
 
     private void ApplyCartArrowSegment(LineRenderer lineRenderer, Vector3 start, Vector3 end, Color color)
@@ -410,7 +424,12 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             }
         }
 
-        for (int i = 0; i < cartArrowRenderers.Count; i++)
+        DisableCartArrowRenderers();
+    }
+
+    private void DisableCartArrowRenderers(int startIndex = 0)
+    {
+        for (int i = Mathf.Max(0, startIndex); i < cartArrowRenderers.Count; i++)
         {
             if (cartArrowRenderers[i] != null)
             {

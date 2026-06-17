@@ -29,6 +29,10 @@ Shader "Custom/ToonCharacter"
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         _QueueOffset("Queue offset", Float) = 0.0
+        _DepthOffsetFactor("Depth Offset Factor", Float) = -1.0
+        _DepthOffsetUnits("Depth Offset Units", Float) = -1.0
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("ZTest", Float) = 4.0
+        _VertexNormalOffset("Vertex Normal Offset", Float) = 0.0
         [ToggleUI] _BlueprintPreview("Blueprint Preview", Float) = 0.0
         _BlueprintTint("Blueprint Tint", Color) = (0.45, 0.95, 1, 1)
         _BlueprintBrightness("Blueprint Brightness", Range(0.5, 2.0)) = 1.8
@@ -79,6 +83,7 @@ Shader "Custom/ToonCharacter"
                 half _Cutoff;
                 half _UseBlackCutout;
                 half _BlackCutoutThreshold;
+                half _VertexNormalOffset;
                 half _BlueprintPreview;
                 half4 _BlueprintTint;
                 half _BlueprintBrightness;
@@ -125,6 +130,11 @@ Shader "Custom/ToonCharacter"
                 half maxTextureChannel = max(max(rawSample.r, rawSample.g), rawSample.b);
                 clip(lerp(1.0h, maxTextureChannel - _BlackCutoutThreshold, saturate(_UseBlackCutout)));
             }
+
+            float3 ApplyVertexNormalOffset(float3 positionOS, float3 normalOS)
+            {
+                return positionOS + normalOS * _VertexNormalOffset;
+            }
         ENDHLSL
 
         Pass
@@ -133,6 +143,8 @@ Shader "Custom/ToonCharacter"
             Tags { "LightMode" = "UniversalForward" }
 
             Blend[_SrcBlend][_DstBlend], [_SrcBlendAlpha][_DstBlendAlpha]
+            Offset[_DepthOffsetFactor], [_DepthOffsetUnits]
+            ZTest[_ZTest]
             ZWrite[_ZWrite]
             Cull[_Cull]
             AlphaToMask[_AlphaToMask]
@@ -200,7 +212,8 @@ Shader "Custom/ToonCharacter"
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-                VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
+                float3 positionOS = ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS);
+                VertexPositionInputs vertexInput = GetVertexPositionInputs(positionOS);
                 VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS);
 
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
@@ -336,6 +349,8 @@ Shader "Custom/ToonCharacter"
             Tags { "LightMode" = "DepthOnly" }
 
             ZWrite On
+            Offset[_DepthOffsetFactor], [_DepthOffsetUnits]
+            ZTest[_ZTest]
             ColorMask 0
             Cull[_Cull]
 
@@ -348,6 +363,7 @@ Shader "Custom/ToonCharacter"
             struct DepthOnlyAttributes
             {
                 float4 positionOS : POSITION;
+                float3 normalOS : NORMAL;
                 float2 uv : TEXCOORD0;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
@@ -368,7 +384,7 @@ Shader "Custom/ToonCharacter"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.positionCS = TransformObjectToHClip(ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS));
                 return output;
             }
 
@@ -391,6 +407,8 @@ Shader "Custom/ToonCharacter"
             Tags { "LightMode" = "DepthNormals" }
 
             ZWrite On
+            Offset[_DepthOffsetFactor], [_DepthOffsetUnits]
+            ZTest[_ZTest]
             Cull[_Cull]
 
             HLSLPROGRAM
@@ -424,7 +442,7 @@ Shader "Custom/ToonCharacter"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.positionCS = TransformObjectToHClip(ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS));
                 output.normalWS = NormalizeNormalPerVertex(TransformObjectToWorldNormal(input.normalOS));
                 return output;
             }

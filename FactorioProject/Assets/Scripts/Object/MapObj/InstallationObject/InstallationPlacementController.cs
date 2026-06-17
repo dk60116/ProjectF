@@ -172,6 +172,8 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<MapObject, long> installPreviewPlacementSequencesByPreview = new Dictionary<MapObject, long>();
     private readonly Dictionary<MapObject, InstallPreviewItemReservation> installPreviewItemReservationsByPreview = new Dictionary<MapObject, InstallPreviewItemReservation>();
     private readonly Dictionary<MapObject, int> installPreviewConveyorRotationSequenceIndexesByPreview = new Dictionary<MapObject, int>();
+    private readonly Dictionary<MapObject, FreightCar> installPreviewFreightCarBoxTargets = new Dictionary<MapObject, FreightCar>();
+    private readonly Dictionary<MapObject, Transform> installPreviewFreightCarBoxPoints = new Dictionary<MapObject, Transform>();
     private readonly Dictionary<Wall, MapObject> installedFenceVariantPreviews = new Dictionary<Wall, MapObject>();
     private readonly List<InstallationObject> trainPlacementRailSearchScratch = new List<InstallationObject>(16);
     private readonly Dictionary<Wall, MapObject> installedFenceVariantPreviewSourcePrefabs = new Dictionary<Wall, MapObject>();
@@ -194,6 +196,8 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly List<InstallationObject> railAlignmentInstallationScratch = new List<InstallationObject>(4);
     private readonly List<TrainCollisionBox2D> trainPlacementCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private readonly List<TrainCollisionBox2D> trainPlacementOtherCollisionBoxes = new List<TrainCollisionBox2D>(4);
+    private readonly List<Train> mapEditRailOccupancyTrainScratch = new List<Train>(16);
+    private readonly List<RendererPropertyBlockState> selectedEditableTintStates = new List<RendererPropertyBlockState>();
     private InstallationObject selectedEditableInstallation;
     private Vector2Int selectedEditableAnchorCoordinate;
     private InstallationEditSession activeInstallationEditSession;
@@ -247,6 +251,7 @@ public class InstallationPlacementController : MonoBehaviour
     private static readonly int SrcBlendAlphaPropertyId = Shader.PropertyToID("_SrcBlendAlpha");
     private static readonly int DstBlendAlphaPropertyId = Shader.PropertyToID("_DstBlendAlpha");
     private static readonly int ZWritePropertyId = Shader.PropertyToID("_ZWrite");
+    private static readonly int CullPropertyId = Shader.PropertyToID("_Cull");
     private static readonly HashSet<Material> runtimeBlueprintPreviewMaterials = new HashSet<Material>();
     private const int ConveyorRotationSequenceCount = 12;
     private static readonly Vector2Int[] WaterPumpCardinalProbeDirections =
@@ -370,11 +375,18 @@ public class InstallationPlacementController : MonoBehaviour
         public int quarterTurns;
         public int conveyorVariantKind = -1;
         public int itemId;
+        public int itemCount = 1;
         public Vector2Int dropCoordinate;
-        public PortableObject portableObject;
-        public bool packedItemStoredInInventory;
-        public bool packedItemStoredInHand;
+        public int packedItemStoredInInventoryCount;
+        public int packedItemStoredInHandCount;
+        public List<PackedPortableDrop> portableDrops = new List<PackedPortableDrop>();
         public Dictionary<Vector2Int, List<int>> pendingDroppedBlockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
+    }
+
+    private sealed class PackedPortableDrop
+    {
+        public PortableObject portableObject;
+        public Vector2Int coordinate;
     }
 
     private sealed class InstallPreviewPlacementPlan
@@ -389,6 +401,10 @@ public class InstallationPlacementController : MonoBehaviour
         public TrainPlacementRailSample trainRailSample;
         public bool hasTrainRailSample;
         public bool bindToFootprintBlocks = true;
+        public bool attachToFreightCarBoxPoint;
+        public bool registerTerrainPersistence = true;
+        public FreightCar freightCarBoxTarget;
+        public Transform freightCarBoxPoint;
         public Vector3 position;
         public Quaternion rotation = Quaternion.identity;
     }
@@ -755,7 +771,8 @@ public class InstallationPlacementController : MonoBehaviour
             BindButton(mapEditButton, HandleMapEditButtonClicked);
             BindButton(mapEditCancelButton, HandleInstallCancelClicked);
             BindButton(mapEditRotationButton, HandleInstallRotationClicked);
-            BindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+            UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+            BindButton(mapEditCompleteButton, HandleMapEditCompleteClicked);
             BindButton(mapEditPackButton, HandleMapEditPackClicked);
             BindButton(mapEditUndoButton, HandleMapEditUndoClicked);
             RefreshMapEditButtonState();
@@ -765,6 +782,7 @@ public class InstallationPlacementController : MonoBehaviour
         UnbindButton(mapEditButton, HandleMapEditButtonClicked);
         UnbindButton(mapEditCancelButton, HandleInstallCancelClicked);
         UnbindButton(mapEditRotationButton, HandleInstallRotationClicked);
+        UnbindButton(mapEditCompleteButton, HandleMapEditCompleteClicked);
         UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
         UnbindButton(mapEditPackButton, HandleMapEditPackClicked);
         UnbindButton(mapEditUndoButton, HandleMapEditUndoClicked);
@@ -779,7 +797,8 @@ public class InstallationPlacementController : MonoBehaviour
         BindButton(mapEditButton, HandleMapEditButtonClicked);
         BindButton(mapEditCancelButton, HandleInstallCancelClicked);
         BindButton(mapEditRotationButton, HandleInstallRotationClicked);
-        BindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        BindButton(mapEditCompleteButton, HandleMapEditCompleteClicked);
         BindButton(mapEditPackButton, HandleMapEditPackClicked);
         BindButton(mapEditUndoButton, HandleMapEditUndoClicked);
         RefreshMapEditButtonState();
@@ -1494,7 +1513,8 @@ public class InstallationPlacementController : MonoBehaviour
         BindButton(mapEditButton, HandleMapEditButtonClicked);
         BindButton(mapEditCancelButton, HandleInstallCancelClicked);
         BindButton(mapEditRotationButton, HandleInstallRotationClicked);
-        BindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
+        BindButton(mapEditCompleteButton, HandleMapEditCompleteClicked);
         BindButton(mapEditPackButton, HandleMapEditPackClicked);
         BindButton(mapEditUndoButton, HandleMapEditUndoClicked);
     }
@@ -1508,6 +1528,7 @@ public class InstallationPlacementController : MonoBehaviour
         UnbindButton(mapEditButton, HandleMapEditButtonClicked);
         UnbindButton(mapEditCancelButton, HandleInstallCancelClicked);
         UnbindButton(mapEditRotationButton, HandleInstallRotationClicked);
+        UnbindButton(mapEditCompleteButton, HandleMapEditCompleteClicked);
         UnbindButton(mapEditCompleteButton, HandleInstallCompleteClicked);
         UnbindButton(mapEditPackButton, HandleMapEditPackClicked);
         UnbindButton(mapEditUndoButton, HandleMapEditUndoClicked);
@@ -1536,18 +1557,26 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RefreshMapEditButtonState()
     {
-        if (mapEditButton == null)
-        {
-            return;
-        }
-
         CleanupSelectedEditableInstallation();
-        mapEditButton.interactable = !IsInstallationModeActive();
+        if (mapEditButton != null)
+        {
+            mapEditButton.interactable = !IsInstallationModeActive();
+        }
 
         bool canPack = mapEditModeActive && CanPackSelectedInstallation();
         if (mapEditPackButton != null)
         {
             mapEditPackButton.interactable = canPack;
+        }
+
+        if (mapEditRotationButton != null)
+        {
+            mapEditRotationButton.interactable = mapEditModeActive && !IsSelectedEditableRail();
+        }
+
+        if (mapEditCompleteButton != null)
+        {
+            mapEditCompleteButton.interactable = mapEditModeActive;
         }
 
         bool canUndo = mapEditModeActive && !IsEditingInstallation() && packedInstallationHistory.Count > 0;
@@ -1574,7 +1603,55 @@ public class InstallationPlacementController : MonoBehaviour
 
         CleanupSelectedEditableInstallation();
         return selectedEditableInstallation != null
-               && selectedEditableInstallation.TryGetPlacementRuntime(out _, out _);
+               && selectedEditableInstallation.TryGetPlacementRuntime(out _, out _)
+               && CanPackEditableInstallation(selectedEditableInstallation);
+    }
+
+    private bool IsSelectedEditableRail()
+    {
+        return selectedEditableInstallation is Railload;
+    }
+
+    private bool CanPackEditableInstallation(InstallationObject installationObject)
+    {
+        return installationObject != null
+               && (!(installationObject is Railload rail) || !IsRailOccupiedByTrain(rail));
+    }
+
+    private bool IsRailOccupiedByTrain(Railload rail)
+    {
+        if (rail == null)
+        {
+            return false;
+        }
+
+        mapEditRailOccupancyTrainScratch.Clear();
+        Train.CollectActiveRuntimeTrains(mapEditRailOccupancyTrainScratch);
+        for (int i = 0; i < mapEditRailOccupancyTrainScratch.Count; i++)
+        {
+            Train train = mapEditRailOccupancyTrainScratch[i];
+            if (train == null)
+            {
+                continue;
+            }
+
+            if (train.TryGetCurrentRailPose(out Railload trainRail, out _, out _, out _)
+                && trainRail == rail)
+            {
+                mapEditRailOccupancyTrainScratch.Clear();
+                return true;
+            }
+
+            if (train.TryGetPlacementRuntime(out Vector2Int trainCoordinate, out _)
+                && CoordinateListContains(rail.RuntimeOccupiedCoordinates, trainCoordinate))
+            {
+                mapEditRailOccupancyTrainScratch.Clear();
+                return true;
+            }
+        }
+
+        mapEditRailOccupancyTrainScratch.Clear();
+        return false;
     }
 
     private void UpdateMapEditSelectionInput()
@@ -1588,6 +1665,12 @@ public class InstallationPlacementController : MonoBehaviour
         {
             if (!IsInstallationModeActive())
             {
+                if (ShouldSelectOnlyInMapEdit(installationObject))
+                {
+                    SelectEditableInstallation(installationObject, anchorCoordinate);
+                    return;
+                }
+
                 if (!BeginInstallationEdit(installationObject))
                 {
                     SelectEditableInstallation(installationObject, anchorCoordinate);
@@ -1600,6 +1683,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ClearEditableInstallationSelection();
+    }
+
+    private static bool ShouldSelectOnlyInMapEdit(InstallationObject installationObject)
+    {
+        return installationObject is Railload;
     }
 
     private bool TryGetEditableInstallationAtPointer(Vector2 pointerPosition, out InstallationObject installationObject, out Vector2Int anchorCoordinate)
@@ -1835,10 +1923,12 @@ public class InstallationPlacementController : MonoBehaviour
         {
             SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
+            ClearSelectedEditableTint();
         }
 
         selectedEditableInstallation = installationObject;
         selectedEditableAnchorCoordinate = anchorCoordinate;
+        ApplySelectedEditableTint(selectedEditableInstallation);
         SetWorkableRangeVisualRequested(selectedEditableInstallation, true);
         SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, true);
         RefreshInstallOrEditWorkableRangeVisualRequest();
@@ -1849,6 +1939,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
         SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
+        ClearSelectedEditableTint();
         selectedEditableInstallation = null;
         selectedEditableAnchorCoordinate = Vector2Int.zero;
         RefreshInstallOrEditWorkableRangeVisualRequest();
@@ -1867,6 +1958,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
+            ClearSelectedEditableTint();
             selectedEditableInstallation = null;
             selectedEditableAnchorCoordinate = Vector2Int.zero;
             RefreshInstallOrEditWorkableRangeVisualRequest();
@@ -1874,6 +1966,58 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         selectedEditableAnchorCoordinate = anchorCoordinate;
+    }
+
+    private void ApplySelectedEditableTint(MapObject mapObject)
+    {
+        ClearSelectedEditableTint();
+        if (mapObject == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = mapObject.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null
+                || renderer.GetComponentInParent<WorkableObjectRangeVisual>() != null
+                || renderer.sharedMaterial == null)
+            {
+                continue;
+            }
+
+            MaterialPropertyBlock originalPropertyBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(originalPropertyBlock);
+            selectedEditableTintStates.Add(new RendererPropertyBlockState
+            {
+                renderer = renderer,
+                propertyBlock = originalPropertyBlock
+            });
+        }
+
+        ApplyInstallPreviewTint(mapObject, true, installPreviewTint);
+    }
+
+    private void ClearSelectedEditableTint()
+    {
+        if (selectedEditableTintStates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < selectedEditableTintStates.Count; i++)
+        {
+            RendererPropertyBlockState rendererState = selectedEditableTintStates[i];
+            if (rendererState == null || rendererState.renderer == null)
+            {
+                continue;
+            }
+
+            rendererState.renderer.SetPropertyBlock(rendererState.propertyBlock);
+        }
+
+        selectedEditableTintStates.Clear();
     }
 
     private static void SetWorkableRangeVisualRequested(MapObject mapObject, bool requested)
@@ -2174,6 +2318,53 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         RefreshInstallPreviewConveyorShaderProperties(preview);
+    }
+
+    private static bool ConfigurePreviewOnlyRuntimeRendering(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return false;
+        }
+
+        RobotArm[] robotArms = preview.GetComponentsInChildren<RobotArm>(true);
+        for (int i = 0; i < robotArms.Length; i++)
+        {
+            RobotArm robotArm = robotArms[i];
+            if (robotArm == null)
+            {
+                continue;
+            }
+
+            robotArm.SetPreviewRenderingMode(true);
+            DisablePreviewAnimators(robotArm);
+        }
+
+        return robotArms.Length > 0;
+    }
+
+    private static void DisablePreviewAnimators(Component previewRoot)
+    {
+        if (previewRoot == null)
+        {
+            return;
+        }
+
+        Animator[] animators = previewRoot.GetComponentsInChildren<Animator>(true);
+        for (int i = 0; i < animators.Length; i++)
+        {
+            if (animators[i] != null)
+            {
+                animators[i].enabled = false;
+            }
+        }
+    }
+
+    private static bool IsRobotArmPreviewRenderer(Renderer renderer)
+    {
+        return renderer != null
+               && renderer.GetComponentInParent<RobotArm>(true) != null
+               && renderer.GetComponentInParent<PortableObject>(true) == null;
     }
 
     private Color ResolveInstallPreviewTint(MapObject preview)
@@ -2525,6 +2716,35 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshMapEditButtonState();
     }
 
+    private void HandleMapEditCompleteClicked()
+    {
+        if (!mapEditModeActive)
+        {
+            if (IsEditingInstallation())
+            {
+                CompleteInstallationEdit();
+            }
+
+            return;
+        }
+
+        if (IsEditingInstallation())
+        {
+            bool hasPackedInstallationsToFinalize = packedInstallationHistory.Count > 0;
+            if (TryCompleteInstallationEdit() || !hasPackedInstallationsToFinalize)
+            {
+                return;
+            }
+
+            if (IsEditingInstallation())
+            {
+                CancelInstallationEdit();
+            }
+        }
+
+        SetMapEditModeActive(false);
+    }
+
     private bool TryPackSelectedInstallation()
     {
         if (!mapEditModeActive)
@@ -2548,6 +2768,11 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             editSession = activeInstallationEditSession;
+            if (!CanPackEditableInstallation(editSession.originalInstallation))
+            {
+                return false;
+            }
+
             targetQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
             activeInstallationEditSession = null;
             PreserveAttachedAreaBoxesForPacking(editSession);
@@ -2557,6 +2782,7 @@ public class InstallationPlacementController : MonoBehaviour
             CleanupSelectedEditableInstallation();
             if (selectedEditableInstallation == null
                 || !selectedEditableInstallation.TryGetPlacementRuntime(out targetAnchorCoordinate, out targetQuarterTurns)
+                || !CanPackEditableInstallation(selectedEditableInstallation)
                 || !TryCreateInstallationEditSession(selectedEditableInstallation, out editSession))
             {
                 return false;
@@ -2579,6 +2805,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        int itemCount = ResolvePackedInstallationItemCount(editSession);
         PackedInstallationSession packedSession = new PackedInstallationSession
         {
             editSession = editSession,
@@ -2586,8 +2813,8 @@ public class InstallationPlacementController : MonoBehaviour
             quarterTurns = ((targetQuarterTurns % 4) + 4) % 4,
             conveyorVariantKind = packedConveyorVariantKind,
             itemId = itemId,
+            itemCount = itemCount,
             dropCoordinate = targetAnchorCoordinate,
-            portableObject = null,
             pendingDroppedBlockStatesByCanonicalOffset = BuildPackedInstallationDroppedBlockStates(editSession)
         };
         packedInstallationHistory.Push(packedSession);
@@ -2596,6 +2823,21 @@ public class InstallationPlacementController : MonoBehaviour
         ClearInstallPreview();
         RefreshInstalledConnectorVariantsAfterRemoval(editSession, targetAnchorCoordinate, targetQuarterTurns);
         return true;
+    }
+
+    private static int ResolvePackedInstallationItemCount(InstallationEditSession editSession)
+    {
+        if (editSession?.originalInstallation is Railload
+            || editSession?.definition?.mapObject is Railload)
+        {
+            int railItemCount = Railload.ResolveRequiredItemCount(editSession.originalOccupiedCoordinates);
+            if (railItemCount > 0)
+            {
+                return railItemCount;
+            }
+        }
+
+        return 1;
     }
 
     private bool TryUndoPackedInstallation()
@@ -2668,9 +2910,9 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private bool TryRemovePackedPortable(PackedInstallationSession packedSession)
+    private bool TryRemovePackedPortable(PackedPortableDrop packedPortableDrop)
     {
-        if (packedSession == null || packedSession.portableObject == null)
+        if (packedPortableDrop == null || packedPortableDrop.portableObject == null)
         {
             return false;
         }
@@ -2681,14 +2923,34 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (terrain.TryGetLoadedBlock(packedSession.dropCoordinate, out Block dropBlock)
+        if (terrain.TryGetLoadedBlock(packedPortableDrop.coordinate, out Block dropBlock)
             && dropBlock != null
-            && dropBlock.TryRemoveFloorObject(packedSession.portableObject))
+            && dropBlock.TryRemoveFloorObject(packedPortableDrop.portableObject))
         {
             return true;
         }
 
         return false;
+    }
+
+    private bool TryRemovePackedPortables(PackedInstallationSession packedSession)
+    {
+        if (packedSession?.portableDrops == null || packedSession.portableDrops.Count <= 0)
+        {
+            return true;
+        }
+
+        for (int i = packedSession.portableDrops.Count - 1; i >= 0; i--)
+        {
+            if (!TryRemovePackedPortable(packedSession.portableDrops[i]))
+            {
+                return false;
+            }
+
+            packedSession.portableDrops.RemoveAt(i);
+        }
+
+        return true;
     }
 
     private bool TryRemovePackedSessionItem(PackedInstallationSession packedSession)
@@ -2698,65 +2960,83 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (packedSession.packedItemStoredInHand && !TryRemovePackedHandItem(packedSession))
+        if (packedSession.packedItemStoredInHandCount > 0 && !TryRemovePackedHandItem(packedSession))
         {
             return false;
         }
 
-        if (packedSession.packedItemStoredInInventory && !TryRemovePackedInventoryItem(packedSession))
+        if (packedSession.packedItemStoredInInventoryCount > 0 && !TryRemovePackedInventoryItem(packedSession))
         {
             return false;
         }
 
-        if (packedSession.portableObject == null)
-        {
-            return true;
-        }
-
-        return TryRemovePackedPortable(packedSession);
+        return TryRemovePackedPortables(packedSession);
     }
 
     private bool TryRemovePackedHandItem(PackedInstallationSession packedSession)
     {
-        if (packedSession == null || !packedSession.packedItemStoredInHand)
+        if (packedSession == null || packedSession.packedItemStoredInHandCount <= 0)
         {
             return true;
         }
 
         Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
         PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
-        if (handBag == null || handBag.RemoveItems(packedSession.itemId, 1) <= 0)
+        if (handBag == null
+            || handBag.GetTotalItemCount(packedSession.itemId) < packedSession.packedItemStoredInHandCount
+            || handBag.RemoveItems(packedSession.itemId, packedSession.packedItemStoredInHandCount)
+               < packedSession.packedItemStoredInHandCount)
         {
             return false;
         }
 
         handBag.RefreshExternalStackCounts(false);
         player?.UpdateCarryState();
-        packedSession.packedItemStoredInHand = false;
+        packedSession.packedItemStoredInHandCount = 0;
         return true;
     }
 
     private bool TryRemovePackedInventoryItem(PackedInstallationSession packedSession)
     {
-        if (packedSession == null || !packedSession.packedItemStoredInInventory)
+        if (packedSession == null || packedSession.packedItemStoredInInventoryCount <= 0)
         {
             return true;
         }
 
         PlayerBag inventoryBag = GetPlayerInventoryBag();
-        if (inventoryBag == null || inventoryBag.RemoveItems(packedSession.itemId, 1) <= 0)
+        if (inventoryBag == null
+            || inventoryBag.GetTotalItemCount(packedSession.itemId) < packedSession.packedItemStoredInInventoryCount
+            || inventoryBag.RemoveItems(packedSession.itemId, packedSession.packedItemStoredInInventoryCount)
+               < packedSession.packedItemStoredInInventoryCount)
         {
             return false;
         }
 
-        packedSession.packedItemStoredInInventory = false;
+        packedSession.packedItemStoredInInventoryCount = 0;
         return true;
     }
 
-    private static bool PackedSessionHasStoredItem(PackedInstallationSession packedSession)
+    private static int GetPackedInstallationAccountedItemCount(PackedInstallationSession packedSession)
     {
-        return packedSession != null
-               && (packedSession.packedItemStoredInInventory || packedSession.packedItemStoredInHand);
+        if (packedSession == null)
+        {
+            return 0;
+        }
+
+        int portableDropCount = packedSession.portableDrops != null ? packedSession.portableDrops.Count : 0;
+        return Mathf.Max(0, packedSession.packedItemStoredInInventoryCount)
+               + Mathf.Max(0, packedSession.packedItemStoredInHandCount)
+               + Mathf.Max(0, portableDropCount);
+    }
+
+    private static int GetPackedInstallationRemainingItemCount(PackedInstallationSession packedSession)
+    {
+        if (packedSession == null)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, packedSession.itemCount - GetPackedInstallationAccountedItemCount(packedSession));
     }
 
     private void FinalizePackedInstallationHistory()
@@ -2768,16 +3048,23 @@ public class InstallationPlacementController : MonoBehaviour
             TryStorePackedItemInPlayerStorage(packedSession, ref packedPortableMoveIndex);
             TransferPackedContentsToPlayerStorage(packedSession, ref packedPortableMoveIndex);
             ApplyPackedInstallationDroppedBlockStates(packedSession);
-            if (!PackedSessionHasStoredItem(packedSession)
-                && packedSession.itemId >= 0
-                && TryDropPackedPortable(
-                    packedSession.itemId,
-                    packedSession.dropCoordinate,
-                    out PortableObject packedPortableObject,
-                    out Vector2Int packedDropCoordinate))
+            int remainingPackedItemCount = GetPackedInstallationRemainingItemCount(packedSession);
+            for (int i = 0; i < remainingPackedItemCount && packedSession.itemId >= 0; i++)
             {
-                packedSession.portableObject = packedPortableObject;
-                packedSession.dropCoordinate = packedDropCoordinate;
+                if (!TryDropPackedPortable(
+                        packedSession.itemId,
+                        packedSession.dropCoordinate,
+                        out PortableObject packedPortableObject,
+                        out Vector2Int packedDropCoordinate))
+                {
+                    break;
+                }
+
+                packedSession.portableDrops.Add(new PackedPortableDrop
+                {
+                    portableObject = packedPortableObject,
+                    coordinate = packedDropCoordinate
+                });
             }
 
             InstallationObject originalInstallation = packedSession?.editSession?.originalInstallation;
@@ -2804,23 +3091,43 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TryStorePackedItemInPlayerStorage(PackedInstallationSession packedSession, ref int moveIndex)
     {
-        if (packedSession == null || packedSession.itemId < 0 || PackedSessionHasStoredItem(packedSession))
+        if (packedSession == null || packedSession.itemId < 0)
         {
             return false;
         }
 
-        if (!TryAddPackedItemToPlayerStorage(
-                packedSession.itemId,
-                ResolvePackedItemMoveStartPosition(packedSession),
-                ref moveIndex,
-                out PackedItemStorageTarget storageTarget))
+        int remainingItemCount = GetPackedInstallationRemainingItemCount(packedSession);
+        if (remainingItemCount <= 0)
         {
             return false;
         }
 
-        packedSession.packedItemStoredInInventory = storageTarget == PackedItemStorageTarget.Inventory;
-        packedSession.packedItemStoredInHand = storageTarget == PackedItemStorageTarget.Hand;
-        return true;
+        bool storedAnyItem = false;
+        Vector3 startPosition = ResolvePackedItemMoveStartPosition(packedSession);
+        for (int i = 0; i < remainingItemCount; i++)
+        {
+            if (!TryAddPackedItemToPlayerStorage(
+                    packedSession.itemId,
+                    startPosition,
+                    ref moveIndex,
+                    out PackedItemStorageTarget storageTarget))
+            {
+                break;
+            }
+
+            if (storageTarget == PackedItemStorageTarget.Inventory)
+            {
+                packedSession.packedItemStoredInInventoryCount++;
+            }
+            else if (storageTarget == PackedItemStorageTarget.Hand)
+            {
+                packedSession.packedItemStoredInHandCount++;
+            }
+
+            storedAnyItem = true;
+        }
+
+        return storedAnyItem;
     }
 
     private void TransferPackedBlockItemsToPlayerStorage(PackedInstallationSession packedSession, ref int moveIndex)
@@ -3154,7 +3461,9 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool BeginInstallationEdit(InstallationObject installationObject)
     {
-        if (installationObject == null || !TryCreateInstallationEditSession(installationObject, out InstallationEditSession editSession))
+        if (installationObject == null
+            || ShouldSelectOnlyInMapEdit(installationObject)
+            || !TryCreateInstallationEditSession(installationObject, out InstallationEditSession editSession))
         {
             return false;
         }
@@ -3901,19 +4210,24 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void CompleteInstallationEdit()
     {
+        TryCompleteInstallationEdit();
+    }
+
+    private bool TryCompleteInstallationEdit()
+    {
         InstallationEditSession editSession = activeInstallationEditSession;
         if (editSession == null)
         {
             ClearInstallPreview();
             SetMapEditModeActive(false);
-            return;
+            return true;
         }
 
         CleanupInstallPreviewReferences();
         if (activeInstallPreview == null || !TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate))
         {
             CancelInstallationEdit();
-            return;
+            return false;
         }
 
         Quaternion previewRotation = activeInstallPreview.transform.rotation;
@@ -3928,7 +4242,7 @@ public class InstallationPlacementController : MonoBehaviour
                 activeInstallPreview))
         {
             InvalidateInstallGrid();
-            return;
+            return false;
         }
 
         activeInstallationEditSession = null;
@@ -3955,6 +4269,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         ClearInstallPreview();
         SetMapEditModeActive(false);
+        return true;
     }
 
     private bool CanRestoreEditedInstallationAt(
@@ -4150,6 +4465,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
+            ClearSelectedEditableTint();
             selectedEditableInstallation = null;
             selectedEditableAnchorCoordinate = Vector2Int.zero;
             FinalizePackedInstallationHistory();
@@ -4646,17 +4962,33 @@ public class InstallationPlacementController : MonoBehaviour
         for (int i = 0; i < placementPlans.Count; i++)
         {
             InstallPreviewPlacementPlan placementPlan = placementPlans[i];
-            TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-            Transform installParent = terrain != null ? terrain.transform : placementPlan.anchorBlock.transform;
+            TerrainGenerator terrain = placementPlan.attachToFreightCarBoxPoint ? null : ResolveInstallPreviewTerrain();
+            Transform installParent = placementPlan.attachToFreightCarBoxPoint && placementPlan.freightCarBoxPoint != null
+                ? placementPlan.freightCarBoxPoint
+                : terrain != null
+                    ? terrain.transform
+                    : placementPlan.anchorBlock != null
+                        ? placementPlan.anchorBlock.transform
+                        : null;
             MapObject installedObject = CreateInstalledObjectInstance(placementPlan.sourcePrefab, installParent, terrain);
             if (installedObject == null)
             {
                 continue;
             }
 
-            installedObject.transform.SetPositionAndRotation(
-                placementPlan.position,
-                placementPlan.rotation);
+            installedObject.transform.SetPositionAndRotation(placementPlan.position, placementPlan.rotation);
+            if (placementPlan.attachToFreightCarBoxPoint)
+            {
+                if (!(installedObject is BoxObject installedBox)
+                    || placementPlan.freightCarBoxTarget == null
+                    || !placementPlan.freightCarBoxTarget.TryAttachBoxObjectToPoint(
+                        installedBox,
+                        placementPlan.freightCarBoxPoint))
+                {
+                    ReleaseInstalledObjectInstance(installedObject as InstallationObject, placementPlan.sourcePrefab, terrain);
+                    continue;
+                }
+            }
 
             if (placementPlan.bindToFootprintBlocks)
             {
@@ -4677,21 +5009,35 @@ public class InstallationPlacementController : MonoBehaviour
 
             Vector2Int installedAnchorCoordinate = placementPlan.hasRuntimeAnchorCoordinate
                 ? placementPlan.runtimeAnchorCoordinate
-                : placementPlan.anchorBlock.Coordinate;
-            ConfigureInstalledObjectRuntime(
-                installedObject,
-                installedAnchorCoordinate,
-                placementPlan.quarterTurns,
-                occupiedCoordinatesOverride: ResolvePlacementPlanRuntimeOccupiedCoordinates(
+                : placementPlan.anchorBlock != null
+                    ? placementPlan.anchorBlock.Coordinate
+                    : RoundWorldPositionToCoordinate(placementPlan.position);
+            if (!placementPlan.attachToFreightCarBoxPoint)
+            {
+                ConfigureInstalledObjectRuntime(
                     installedObject,
                     installedAnchorCoordinate,
-                    placementPlan));
+                    placementPlan.quarterTurns,
+                    occupiedCoordinatesOverride: ResolvePlacementPlanRuntimeOccupiedCoordinates(
+                        installedObject,
+                        installedAnchorCoordinate,
+                        placementPlan));
+            }
+
             InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate, placementPlan);
-            RegisterInstalledObjectPersistence(installedObject);
+            if (placementPlan.registerTerrainPersistence)
+            {
+                RegisterInstalledObjectPersistence(installedObject);
+            }
+
             RememberLastInstalledRotation(activeInstallDefinition, placementPlan.quarterTurns);
 
             placedPreviews.Add(placementPlan.preview);
-            placedAnchorCoordinates.Add(installedAnchorCoordinate);
+            if (!placementPlan.attachToFreightCarBoxPoint)
+            {
+                placedAnchorCoordinates.Add(installedAnchorCoordinate);
+            }
+
             placedObjects.Add(installedObject);
             if (TryConsumeInstallPreviewReservation(placementPlan.preview, out PortableObject reservedSourcePortableObject))
             {
@@ -4782,6 +5128,11 @@ public class InstallationPlacementController : MonoBehaviour
         out InstallPreviewPlacementPlan placementPlan)
     {
         placementPlan = null;
+        if (TryCreateFreightCarBoxInstallPreviewPlacementPlan(preview, out placementPlan))
+        {
+            return true;
+        }
+
         if (preview == null
             || activeInstallDefinition == null
             || !TryGetBlockForPreview(preview, out Block anchorBlock))
@@ -4957,6 +5308,64 @@ public class InstallationPlacementController : MonoBehaviour
             footprintBlocks = footprintBlocks,
             position = ResolvePlacementWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns, preview.transform.position),
             rotation = ResolvePlacementObjectRotation(sourcePrefab, anchorBlock.Coordinate, resolvedQuarterTurns, preview.transform.position)
+        };
+        return true;
+    }
+
+    private bool TryCreateFreightCarBoxInstallPreviewPlacementPlan(
+        MapObject preview,
+        out InstallPreviewPlacementPlan placementPlan)
+    {
+        placementPlan = null;
+        if (preview == null
+            || activeInstallDefinition == null
+            || !IsBoxObjectInstallDefinition(activeInstallDefinition)
+            || !installPreviewFreightCarBoxTargets.TryGetValue(preview, out FreightCar freightCar)
+            || freightCar == null
+            || !installPreviewFreightCarBoxPoints.TryGetValue(preview, out Transform boxPoint)
+            || boxPoint == null
+            || !freightCar.IsBoxPointAvailable(boxPoint)
+            || IsFreightCarBoxPointReservedByPreview(freightCar, boxPoint, preview))
+        {
+            return false;
+        }
+
+        installPreviewSourcePrefabsByPreview.TryGetValue(preview, out MapObject sourcePrefab);
+        if (sourcePrefab == null)
+        {
+            sourcePrefab = activeInstallDefinition.mapObject;
+        }
+
+        if (!TryResolveBoxObject(sourcePrefab, out _))
+        {
+            return false;
+        }
+
+        Vector2Int runtimeAnchorCoordinate = freightCar.TryGetPlacementRuntime(out Vector2Int carAnchorCoordinate, out _)
+            ? carAnchorCoordinate
+            : RoundWorldPositionToCoordinate(boxPoint.position);
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        Block anchorBlock = null;
+        if (terrain != null)
+        {
+            terrain.TryGetLoadedBlock(runtimeAnchorCoordinate, out anchorBlock);
+        }
+
+        placementPlan = new InstallPreviewPlacementPlan
+        {
+            preview = preview,
+            anchorBlock = anchorBlock,
+            sourcePrefab = sourcePrefab,
+            quarterTurns = 0,
+            bindToFootprintBlocks = false,
+            attachToFreightCarBoxPoint = true,
+            registerTerrainPersistence = false,
+            freightCarBoxTarget = freightCar,
+            freightCarBoxPoint = boxPoint,
+            hasRuntimeAnchorCoordinate = true,
+            runtimeAnchorCoordinate = runtimeAnchorCoordinate,
+            position = boxPoint.position,
+            rotation = boxPoint.rotation
         };
         return true;
     }
@@ -15121,9 +15530,20 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         string previewName = nameSourcePrefab != null ? nameSourcePrefab.name : sourcePrefab.name;
+        bool containsRobotArmPreview = preview.GetComponentInChildren<RobotArm>(true) != null;
+        if (containsRobotArmPreview)
+        {
+            preview.gameObject.SetActive(false);
+        }
+
         preview.name = $"{previewName}_Blueprint";
         ConfigureInstallPreview(preview);
         installPreviewSourcePrefabsByPreview[preview] = sourcePrefab;
+        if (containsRobotArmPreview)
+        {
+            preview.gameObject.SetActive(true);
+        }
+
         return preview;
     }
 
@@ -15136,6 +15556,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         ApplyConveyorVariantSharedInstallationSettings(preview);
         ApplyPipeVariantSharedMapObjectSettings(preview);
+        bool containsRobotArmPreview = ConfigurePreviewOnlyRuntimeRendering(preview);
 
         MonoBehaviour[] behaviours = preview.GetComponentsInChildren<MonoBehaviour>(true);
         for (int i = 0; i < behaviours.Length; i++)
@@ -15188,7 +15609,13 @@ public class InstallationPlacementController : MonoBehaviour
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
             Color previewTint = ResolveInstallPreviewTint(preview);
-            ApplyBlueprintPreviewMaterial(renderer, previewTint);
+            bool isRobotArmPreviewRenderer = containsRobotArmPreview && IsRobotArmPreviewRenderer(renderer);
+            if (isRobotArmPreviewRenderer)
+            {
+                renderer.enabled = true;
+            }
+
+            ApplyBlueprintPreviewMaterial(renderer, previewTint, isRobotArmPreviewRenderer);
 
             Material sharedMaterial = renderer.sharedMaterial;
             if (sharedMaterial == null)
@@ -15227,10 +15654,15 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
+        if (containsRobotArmPreview)
+        {
+            ConfigurePreviewOnlyRuntimeRendering(preview);
+        }
+
         SetInstallPreviewSelectionVisual(preview, false);
     }
 
-    private static void ApplyBlueprintPreviewMaterial(Renderer renderer, Color previewTint)
+    private static void ApplyBlueprintPreviewMaterial(Renderer renderer, Color previewTint, bool forceDoubleSided = false)
     {
         if (renderer == null
             || renderer.GetComponentInParent<WorkableObjectRangeVisual>() != null)
@@ -15247,13 +15679,13 @@ public class InstallationPlacementController : MonoBehaviour
         Material[] previewMaterials = new Material[sourceMaterials.Length];
         for (int i = 0; i < previewMaterials.Length; i++)
         {
-            previewMaterials[i] = CreateBlueprintPreviewMaterial(sourceMaterials[i], previewTint);
+            previewMaterials[i] = CreateBlueprintPreviewMaterial(sourceMaterials[i], previewTint, forceDoubleSided);
         }
 
         renderer.sharedMaterials = previewMaterials;
     }
 
-    private static Material CreateBlueprintPreviewMaterial(Material sourceMaterial, Color previewTint)
+    private static Material CreateBlueprintPreviewMaterial(Material sourceMaterial, Color previewTint, bool forceDoubleSided = false)
     {
         if (sourceMaterial == null)
         {
@@ -15267,11 +15699,11 @@ public class InstallationPlacementController : MonoBehaviour
         };
 
         runtimeBlueprintPreviewMaterials.Add(material);
-        ConfigureBlueprintPreviewMaterial(material, previewTint);
+        ConfigureBlueprintPreviewMaterial(material, previewTint, forceDoubleSided);
         return material;
     }
 
-    private static void ConfigureBlueprintPreviewMaterial(Material material, Color previewTint)
+    private static void ConfigureBlueprintPreviewMaterial(Material material, Color previewTint, bool forceDoubleSided = false)
     {
         if (material == null)
         {
@@ -15311,6 +15743,11 @@ public class InstallationPlacementController : MonoBehaviour
         if (material.HasProperty(ZWritePropertyId))
         {
             material.SetFloat(ZWritePropertyId, 1f);
+        }
+
+        if (forceDoubleSided && material.HasProperty(CullPropertyId))
+        {
+            material.SetFloat(CullPropertyId, (float)CullMode.Off);
         }
     }
 
@@ -15452,6 +15889,11 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        if (TryMoveActiveBoxPreviewToFreightCar(pointerPosition))
+        {
+            return;
+        }
+
         Vector3? railReferenceWorldPosition = null;
         if (TryGetInstallPreviewRailReferenceWorldPosition(pointerPosition, out Vector3 worldPoint))
         {
@@ -15483,6 +15925,8 @@ public class InstallationPlacementController : MonoBehaviour
         {
             return false;
         }
+
+        ClearFreightCarBoxPreviewTarget(activeInstallPreview);
 
         bool hasMoveFootprintSource =
             TryResolveInstallPreviewFootprintSourceForPlacement(activeInstallPreview, out MapObject moveFootprintSource);
@@ -17399,10 +17843,18 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        bool shouldSelectOnly = ShouldSelectOnlyInMapEdit(installationObject);
         if (!TryCommitActiveInstallationEditPreview())
         {
             CancelInstallationEdit();
         }
+
+        if (shouldSelectOnly)
+        {
+            SelectEditableInstallation(installationObject, anchorCoordinate);
+            return;
+        }
+
         if (!BeginInstallationEdit(installationObject))
         {
             SelectEditableInstallation(installationObject, anchorCoordinate);
@@ -17467,7 +17919,13 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InvalidateInstallPreviewMoveCache();
+        if (SnapFreightCarBoxPreviewToTarget(activeInstallPreview))
+        {
+            return;
+        }
 
+        bool preservePreviewTransformForEdit = IsEditingInstallation();
+        Vector3 preservedEditPreviewPosition = activeInstallPreview.transform.position;
         int previousQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
         Block anchorBlock = null;
         bool hasAnchorBlock = TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate)
@@ -17591,6 +18049,7 @@ public class InstallationPlacementController : MonoBehaviour
                 activeInstallPreview,
                 nextQuarterTurns);
             shouldReanchorRotatedMultiCellPreview = hasAnchorBlock
+                                                   && !preservePreviewTransformForEdit
                                                    && !IsTrainSource(ResolveInstallPreviewPlacementSource(activeInstallPreview));
         }
 
@@ -17656,8 +18115,26 @@ public class InstallationPlacementController : MonoBehaviour
         {
             rotatedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
         }
+        ConfigurePreviewOnlyRuntimeRendering(activeInstallPreview);
 
-        if (hasAnchorBlock)
+        if (preservePreviewTransformForEdit)
+        {
+            activeInstallPreview.transform.position = preservedEditPreviewPosition;
+            MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
+            if (TryResolveInstallPreviewAnchorCoordinateFromTransform(
+                    activeInstallPreview,
+                    placementSource,
+                    installPreviewQuarterTurns,
+                    out Vector2Int transformAnchorCoordinate))
+            {
+                anchorCoordinate = transformAnchorCoordinate;
+                hasAnchorBlock = ResolveInstallPreviewTerrain() != null
+                                 && ResolveInstallPreviewTerrain().TryGetLoadedBlock(anchorCoordinate, out anchorBlock)
+                                 && anchorBlock != null;
+                installPreviewAnchorCoordinates[activeInstallPreview] = anchorCoordinate;
+            }
+        }
+        else if (hasAnchorBlock)
         {
             MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
             if (!IsTrainSource(placementSource))
@@ -18757,6 +19234,31 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void HandleInstallPreviewClick(Vector2 pointerPosition)
     {
+        if (IsBoxObjectInstallDefinition(activeInstallDefinition)
+            && TryGetPointerFreightCar(pointerPosition, out _, out _))
+        {
+            if (TryResolveFreightCarBoxInstallTarget(
+                    pointerPosition,
+                    null,
+                    out FreightCar freightCar,
+                    out Transform boxPoint))
+            {
+                if (TryGetFreightCarBoxPreviewAtTarget(freightCar, boxPoint, out MapObject freightBoxPreview)
+                    && freightBoxPreview != null)
+                {
+                    RemoveInstallPreview(freightBoxPreview);
+                    return;
+                }
+
+                if (CanCreateAdditionalPreview())
+                {
+                    TryCreateAndPlaceFreightCarBoxPreview(freightCar, boxPoint);
+                }
+            }
+
+            return;
+        }
+
         if (!TryGetPointerBlock(pointerPosition, out Block clickedBlock) || clickedBlock == null)
         {
             return;
@@ -18809,11 +19311,16 @@ public class InstallationPlacementController : MonoBehaviour
         activeInstallPreview = preview;
         installPreviewQuarterTurns = GetPreviewQuarterTurns(preview);
         installPreviewConveyorVariantMode = GetConveyorPreviewVariantMode(preview);
-        activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        if (!SnapFreightCarBoxPreviewToTarget(activeInstallPreview))
+        {
+            activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        }
+
         if (activeInstallPreview is InstallationObject selectedInstallationPreview)
         {
             selectedInstallationPreview.RefreshInstalledDirectionFromCurrentTransform();
         }
+        ConfigurePreviewOnlyRuntimeRendering(activeInstallPreview);
 
         if (refreshDependentVisuals)
         {
@@ -19300,6 +19807,60 @@ public class InstallationPlacementController : MonoBehaviour
         return removedCount;
     }
 
+    public int RefundInstallItemsToPlayer(int itemId, int requestedCount)
+    {
+        if (itemId < 0 || requestedCount <= 0)
+        {
+            return 0;
+        }
+
+        int refundedCount = 0;
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerBag handBag = player != null ? player.GetHandBag() : GetPlayerHandBag();
+        PlayerBag inventoryBag = player != null ? player.GetBag() : GetPlayerInventoryBag();
+        for (int i = 0; i < requestedCount; i++)
+        {
+            if (inventoryBag != null
+                && inventoryBag != handBag
+                && inventoryBag.TryAddObject(itemId, out _))
+            {
+                refundedCount++;
+                continue;
+            }
+
+            if (player != null && player.TryAddToHand(itemId, out _))
+            {
+                refundedCount++;
+                continue;
+            }
+
+            if (handBag != null && handBag.TryAddObject(0, itemId, out _))
+            {
+                refundedCount++;
+                continue;
+            }
+
+            if (inventoryBag != null && inventoryBag.TryAddObject(itemId, out _))
+            {
+                refundedCount++;
+                continue;
+            }
+
+            break;
+        }
+
+        RefreshPlayerHandInstallItemState(player, handBag);
+        return refundedCount;
+    }
+
+    private void RefreshPlayerHandInstallItemState(Player player = null, PlayerBag handBag = null)
+    {
+        player ??= GameManager.Instance != null ? GameManager.Instance.Player : null;
+        handBag ??= player != null ? player.GetHandBag() : GetPlayerHandBag();
+        handBag?.RefreshExternalStackCounts(false);
+        player?.UpdateCarryState();
+    }
+
     private int GetInstallPreviewCount()
     {
         CleanupInstallPreviewReferences();
@@ -19358,6 +19919,8 @@ public class InstallationPlacementController : MonoBehaviour
         RemoveMissingPreviewKeys(installPreviewRailReferenceWorldPositions);
         RemoveMissingPreviewKeys(installPreviewPlacementSequencesByPreview);
         RemoveMissingPreviewKeys(installPreviewConveyorRotationSequenceIndexesByPreview);
+        RemoveMissingPreviewKeys(installPreviewFreightCarBoxTargets);
+        RemoveMissingPreviewKeys(installPreviewFreightCarBoxPoints);
         RemoveMissingPreviewKeys(trainConnectionPreviewTints);
         RemoveMissingPreviewItemReservations();
         RemoveMissingStraightFirstConveyorPreviews();
@@ -19438,6 +20001,292 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         cleanupMapObjectScratch.Clear();
+    }
+
+    private bool TryCreateAndPlaceFreightCarBoxPreview(FreightCar freightCar, Transform boxPoint)
+    {
+        if (freightCar == null
+            || boxPoint == null
+            || activeInstallDefinition == null
+            || !IsBoxObjectInstallDefinition(activeInstallDefinition)
+            || !CanCreateAdditionalPreview()
+            || !freightCar.IsBoxPointAvailable(boxPoint)
+            || IsFreightCarBoxPointReservedByPreview(freightCar, boxPoint, null))
+        {
+            return false;
+        }
+
+        if (!TryReserveInstallPreviewItem(activeInstallDefinition, out InstallPreviewItemReservation reservation))
+        {
+            return false;
+        }
+
+        MapObject preview = CreateInstallPreviewInstance(activeInstallDefinition);
+        if (preview == null)
+        {
+            RefundInstallPreviewReservation(reservation);
+            return false;
+        }
+
+        installPreviewItemReservationsByPreview[preview] = reservation;
+        RegisterInstallPreview(preview, 0);
+        if (!ApplyFreightCarBoxPreviewPlacement(preview, freightCar, boxPoint))
+        {
+            RemoveInstallPreview(preview);
+            return false;
+        }
+
+        SelectInstallPreview(preview);
+        return true;
+    }
+
+    private bool TryMoveActiveBoxPreviewToFreightCar(Vector2 pointerPosition)
+    {
+        if (activeInstallPreview == null || !IsBoxObjectInstallDefinition(activeInstallDefinition))
+        {
+            return false;
+        }
+
+        if (!TryGetPointerFreightCar(pointerPosition, out _, out _))
+        {
+            return false;
+        }
+
+        if (TryResolveFreightCarBoxInstallTarget(
+                pointerPosition,
+                activeInstallPreview,
+                out FreightCar freightCar,
+                out Transform boxPoint))
+        {
+            return ApplyFreightCarBoxPreviewPlacement(activeInstallPreview, freightCar, boxPoint);
+        }
+
+        return true;
+    }
+
+    private bool ApplyFreightCarBoxPreviewPlacement(MapObject preview, FreightCar freightCar, Transform boxPoint)
+    {
+        if (preview == null
+            || freightCar == null
+            || boxPoint == null
+            || !freightCar.IsBoxPointAvailable(boxPoint)
+            || IsFreightCarBoxPointReservedByPreview(freightCar, boxPoint, preview))
+        {
+            return false;
+        }
+
+        installPreviewFreightCarBoxTargets[preview] = freightCar;
+        installPreviewFreightCarBoxPoints[preview] = boxPoint;
+        SetInstallPreviewQuarterTurns(preview, 0);
+
+        Vector2Int anchorCoordinate = freightCar.TryGetPlacementRuntime(out Vector2Int carAnchorCoordinate, out _)
+            ? carAnchorCoordinate
+            : RoundWorldPositionToCoordinate(boxPoint.position);
+        installPreviewAnchorCoordinates[preview] = anchorCoordinate;
+
+        preview.transform.SetPositionAndRotation(boxPoint.position, boxPoint.rotation);
+        if (preview is InstallationObject installationPreview)
+        {
+            installationPreview.RefreshInstalledDirectionFromCurrentTransform();
+        }
+
+        RememberBlueprintRotationForPreview(activeInstallDefinition, preview, 0);
+        InvalidateInstallGridPreview();
+        return true;
+    }
+
+    private bool SnapFreightCarBoxPreviewToTarget(MapObject preview)
+    {
+        if (preview == null
+            || !installPreviewFreightCarBoxTargets.TryGetValue(preview, out FreightCar freightCar)
+            || freightCar == null
+            || !installPreviewFreightCarBoxPoints.TryGetValue(preview, out Transform boxPoint)
+            || boxPoint == null)
+        {
+            return false;
+        }
+
+        Vector2Int anchorCoordinate = freightCar.TryGetPlacementRuntime(out Vector2Int carAnchorCoordinate, out _)
+            ? carAnchorCoordinate
+            : RoundWorldPositionToCoordinate(boxPoint.position);
+        installPreviewAnchorCoordinates[preview] = anchorCoordinate;
+        preview.transform.SetPositionAndRotation(boxPoint.position, boxPoint.rotation);
+        return true;
+    }
+
+    private bool TryResolveFreightCarBoxInstallTarget(
+        Vector2 pointerPosition,
+        MapObject previewToIgnore,
+        out FreightCar freightCar,
+        out Transform boxPoint)
+    {
+        freightCar = null;
+        boxPoint = null;
+        if (!IsBoxObjectInstallDefinition(activeInstallDefinition)
+            || !TryGetPointerFreightCar(pointerPosition, out freightCar, out Vector3 referenceWorldPosition)
+            || freightCar == null)
+        {
+            return false;
+        }
+
+        FreightCar targetFreightCar = freightCar;
+        return targetFreightCar.TryGetBestAvailableBoxPoint(
+            referenceWorldPosition,
+            point => !IsFreightCarBoxPointReservedByPreview(targetFreightCar, point, previewToIgnore),
+            out boxPoint);
+    }
+
+    private bool TryGetPointerFreightCar(
+        Vector2 pointerPosition,
+        out FreightCar freightCar,
+        out Vector3 hitWorldPosition)
+    {
+        freightCar = null;
+        hitWorldPosition = Vector3.zero;
+
+        Camera targetCamera = ResolveInstallPreviewCamera();
+        if (targetCamera == null)
+        {
+            return false;
+        }
+
+        Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
+        int hitCount = Physics.RaycastNonAlloc(
+            ray,
+            pointerRaycastHits,
+            512f,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hitCount <= 0)
+        {
+            return false;
+        }
+
+        float nearestDistance = float.PositiveInfinity;
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit hit = pointerRaycastHits[i];
+            if (hit.collider == null)
+            {
+                continue;
+            }
+
+            MapObject hitMapObject = hit.collider.GetComponentInParent<MapObject>();
+            if (hitMapObject != null && installPreviewInstances.Contains(hitMapObject))
+            {
+                continue;
+            }
+
+            FreightCar candidateFreightCar = hit.collider.GetComponentInParent<FreightCar>();
+            if (candidateFreightCar == null
+                || !candidateFreightCar.gameObject.activeInHierarchy
+                || hit.distance >= nearestDistance)
+            {
+                continue;
+            }
+
+            nearestDistance = hit.distance;
+            freightCar = candidateFreightCar;
+            hitWorldPosition = hit.point;
+        }
+
+        return freightCar != null;
+    }
+
+    private bool TryGetFreightCarBoxPreviewAtTarget(
+        FreightCar freightCar,
+        Transform boxPoint,
+        out MapObject preview)
+    {
+        preview = null;
+        if (freightCar == null || boxPoint == null || installPreviewFreightCarBoxTargets.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<MapObject, FreightCar> entry in installPreviewFreightCarBoxTargets)
+        {
+            MapObject candidatePreview = entry.Key;
+            if (candidatePreview == null
+                || entry.Value != freightCar
+                || !installPreviewFreightCarBoxPoints.TryGetValue(candidatePreview, out Transform candidatePoint)
+                || candidatePoint != boxPoint)
+            {
+                continue;
+            }
+
+            preview = candidatePreview;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsFreightCarBoxPointReservedByPreview(
+        FreightCar freightCar,
+        Transform boxPoint,
+        MapObject previewToIgnore)
+    {
+        if (freightCar == null || boxPoint == null || installPreviewFreightCarBoxTargets.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<MapObject, FreightCar> entry in installPreviewFreightCarBoxTargets)
+        {
+            MapObject preview = entry.Key;
+            if (preview == null
+                || preview == previewToIgnore
+                || entry.Value != freightCar
+                || !installPreviewFreightCarBoxPoints.TryGetValue(preview, out Transform reservedPoint)
+                || reservedPoint != boxPoint)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ClearFreightCarBoxPreviewTarget(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return;
+        }
+
+        installPreviewFreightCarBoxTargets.Remove(preview);
+        installPreviewFreightCarBoxPoints.Remove(preview);
+    }
+
+    private static bool IsBoxObjectInstallDefinition(ItemDefinition definition)
+    {
+        return definition != null && TryResolveBoxObject(definition.mapObject, out _);
+    }
+
+    private static bool TryResolveBoxObject(MapObject mapObject, out BoxObject boxObject)
+    {
+        boxObject = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        boxObject = mapObject as BoxObject;
+        if (boxObject != null)
+        {
+            return true;
+        }
+
+        if (mapObject.TryGetComponent(out boxObject) && boxObject != null)
+        {
+            return true;
+        }
+
+        boxObject = mapObject.GetComponentInChildren<BoxObject>(true);
+        return boxObject != null;
     }
 
     private bool TryCreateAndPlaceInstallPreview(
@@ -19626,6 +20475,7 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewRailReferenceWorldPositions.Remove(preview);
         installPreviewPlacementSequencesByPreview.Remove(preview);
         installPreviewConveyorRotationSequenceIndexesByPreview.Remove(preview);
+        ClearFreightCarBoxPreviewTarget(preview);
         installPreviewAnchorCoordinates.Remove(preview);
         installPreviewItemReservationsByPreview.Remove(preview);
         straightFirstConveyorPreviews.Remove(preview);
@@ -19695,6 +20545,7 @@ public class InstallationPlacementController : MonoBehaviour
             installPreviewRailReferenceWorldPositions.Remove(preview);
             installPreviewPlacementSequencesByPreview.Remove(preview);
             installPreviewConveyorRotationSequenceIndexesByPreview.Remove(preview);
+            ClearFreightCarBoxPreviewTarget(preview);
             installPreviewAnchorCoordinates.Remove(preview);
             installPreviewItemReservationsByPreview.Remove(preview);
             straightFirstConveyorPreviews.Remove(preview);
@@ -23218,10 +24069,14 @@ public class InstallationPlacementController : MonoBehaviour
 
         int quarterTurns = fallbackQuarterTurns;
 
-        Vector2 averageObjectOffset = GetAverageLocalOffset(GetPlacementVisualLocalOffsets(footprintSource, quarterTurns));
-        Vector2Int transformAnchorCoordinate = new Vector2Int(
-            RoundGridCoordinate(preview.transform.position.x - averageObjectOffset.x),
-            RoundGridCoordinate(preview.transform.position.z - averageObjectOffset.y));
+        if (!TryResolveInstallPreviewAnchorCoordinateFromTransform(
+                preview,
+                footprintSource,
+                quarterTurns,
+                out Vector2Int transformAnchorCoordinate))
+        {
+            return false;
+        }
 
         List<Vector2Int> rectGridCoordinates = GetRectGridPlacementCoordinates(
             transformAnchorCoordinate,
@@ -23243,6 +24098,25 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         coordinates = footprintCoordinates;
+        return true;
+    }
+
+    private bool TryResolveInstallPreviewAnchorCoordinateFromTransform(
+        MapObject preview,
+        MapObject footprintSource,
+        int quarterTurns,
+        out Vector2Int anchorCoordinate)
+    {
+        anchorCoordinate = Vector2Int.zero;
+        if (preview == null || footprintSource == null)
+        {
+            return false;
+        }
+
+        Vector2 averageObjectOffset = GetAverageLocalOffset(GetPlacementVisualLocalOffsets(footprintSource, quarterTurns));
+        anchorCoordinate = new Vector2Int(
+            RoundGridCoordinate(preview.transform.position.x - averageObjectOffset.x),
+            RoundGridCoordinate(preview.transform.position.z - averageObjectOffset.y));
         return true;
     }
 
@@ -29625,6 +30499,7 @@ public class InstallationPlacementController : MonoBehaviour
         ResetPreviewPointerTracking();
         ResetInstallPreviewVisualSyncState();
         GameManager.Instance?.SetInstallationPlacementActive(false);
+        RefreshPlayerHandInstallItemState();
         if (IsInstallGridModeActive())
         {
             InvalidateInstallGrid();
@@ -29657,6 +30532,8 @@ public class InstallationPlacementController : MonoBehaviour
         installPreviewRailReferenceWorldPositions.Clear();
         installPreviewPlacementSequencesByPreview.Clear();
         installPreviewConveyorRotationSequenceIndexesByPreview.Clear();
+        installPreviewFreightCarBoxTargets.Clear();
+        installPreviewFreightCarBoxPoints.Clear();
         installPreviewItemReservationsByPreview.Clear();
         straightFirstConveyorPreviews.Clear();
         activeInstallPreview = null;

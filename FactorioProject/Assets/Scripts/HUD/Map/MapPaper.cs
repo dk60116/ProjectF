@@ -13,9 +13,6 @@ public class MapPaper : MonoBehaviour
     [SerializeField]
     private Vector2Int viewRadius = new Vector2Int(100, 100);
 
-    [SerializeField, Min(0.02f)]
-    private float refreshInterval = 0.05f;
-
     [SerializeField, Min(1)]
     private int texturePadding = 2;
 
@@ -29,8 +26,10 @@ public class MapPaper : MonoBehaviour
     private Vector2Int lastTextureSize;
     private bool hasLastCenterCoordinate;
     private bool isDirty = true;
-    private float refreshTimer;
     private bool hasStoredOriginalImageColor;
+    private int lastTerrainGenerationVersion = int.MinValue;
+    private Rect lastUvRect;
+    private bool hasLastUvRect;
 
     private void Awake()
     {
@@ -39,15 +38,15 @@ public class MapPaper : MonoBehaviour
 
     private void OnEnable()
     {
+        ResolveTargetGraphics();
         isDirty = true;
-        refreshTimer = 0f;
+        hasLastUvRect = false;
     }
 
     private void OnValidate()
     {
         viewRadius.x = Mathf.Max(1, viewRadius.x);
         viewRadius.y = Mathf.Max(1, viewRadius.y);
-        refreshInterval = Mathf.Max(0.02f, refreshInterval);
         texturePadding = Mathf.Max(1, texturePadding);
         ResolveTargetGraphics();
         isDirty = true;
@@ -55,7 +54,11 @@ public class MapPaper : MonoBehaviour
 
     private void Update()
     {
-        ResolveTargetGraphics();
+        if (targetImage == null || targetRawImage == null || hostMask == null)
+        {
+            ResolveTargetGraphics();
+        }
+
         ResolveRuntimeReferences();
 
         if (targetImage == null || targetRawImage == null || boundTerrain == null || trackedTarget == null)
@@ -68,22 +71,21 @@ public class MapPaper : MonoBehaviour
             Mathf.FloorToInt(trackedPosition.x),
             Mathf.FloorToInt(trackedPosition.y));
 
-        refreshTimer -= Time.unscaledDeltaTime;
         bool sizeChanged = EnsureTexture();
-        bool movedToNewTile = !hasLastCenterCoordinate || centerCoordinate != lastCenterCoordinate;
-        bool needsPeriodicRefresh = refreshTimer <= 0f;
-        if (!isDirty && !sizeChanged && !movedToNewTile && !needsPeriodicRefresh)
+        int terrainGenerationVersion = boundTerrain.TerrainGenerationVersion;
+        bool terrainChanged = terrainGenerationVersion != lastTerrainGenerationVersion;
+        bool movedOutsideBufferedTexture = !IsInsideBufferedTexture(trackedPosition);
+        if (isDirty || sizeChanged || terrainChanged || movedOutsideBufferedTexture)
         {
-            UpdateViewport(centerCoordinate, trackedPosition);
-            return;
+            Redraw(centerCoordinate);
+            lastCenterCoordinate = centerCoordinate;
+            hasLastCenterCoordinate = true;
+            isDirty = false;
+            lastTerrainGenerationVersion = terrainGenerationVersion;
+            hasLastUvRect = false;
         }
 
-        Redraw(centerCoordinate);
-        UpdateViewport(centerCoordinate, trackedPosition);
-        lastCenterCoordinate = centerCoordinate;
-        hasLastCenterCoordinate = true;
-        isDirty = false;
-        refreshTimer = refreshInterval;
+        UpdateViewport(lastCenterCoordinate, trackedPosition);
     }
 
     private void OnDestroy()
@@ -101,7 +103,6 @@ public class MapPaper : MonoBehaviour
         boundTerrain = terrain;
         trackedTarget = target;
         isDirty = true;
-        refreshTimer = 0f;
     }
 
     public void SetViewRadius(Vector2Int radius)
@@ -117,7 +118,7 @@ public class MapPaper : MonoBehaviour
         viewRadius = clampedRadius;
         isDirty = true;
         hasLastCenterCoordinate = false;
-        refreshTimer = 0f;
+        hasLastUvRect = false;
     }
 
     public Vector2Int ViewRadius => viewRadius;
@@ -211,7 +212,7 @@ public class MapPaper : MonoBehaviour
             return false;
         }
 
-        ReleaseGeneratedResources();
+        ReleaseGeneratedResources(false);
 
         mapTexture = new Texture2D(textureSize.x, textureSize.y, TextureFormat.RGBA32, false)
         {
@@ -226,9 +227,18 @@ public class MapPaper : MonoBehaviour
         {
             targetRawImage.texture = mapTexture;
             targetRawImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+            hasLastUvRect = false;
         }
 
         return true;
+    }
+
+    private bool IsInsideBufferedTexture(Vector2 trackedPosition)
+    {
+        Vector2 offset = trackedPosition - new Vector2(lastCenterCoordinate.x, lastCenterCoordinate.y);
+        return hasLastCenterCoordinate
+               && Mathf.Abs(offset.x) <= texturePadding
+               && Mathf.Abs(offset.y) <= texturePadding;
     }
 
     private void Redraw(Vector2Int centerCoordinate)
@@ -258,7 +268,7 @@ public class MapPaper : MonoBehaviour
         mapTexture.Apply(false, false);
     }
 
-    private void UpdateViewport(Vector2Int centerCoordinate, Vector2 trackedPosition)
+    private void UpdateViewport(Vector2Int drawnCenterCoordinate, Vector2 trackedPosition)
     {
         if (targetRawImage == null || lastTextureSize.x <= 0 || lastTextureSize.y <= 0)
         {
@@ -270,18 +280,33 @@ public class MapPaper : MonoBehaviour
         float fullWidth = lastTextureSize.x;
         float fullHeight = lastTextureSize.y;
 
-        float fractionalX = trackedPosition.x - centerCoordinate.x;
-        float fractionalY = trackedPosition.y - centerCoordinate.y;
+        float offsetX = trackedPosition.x - drawnCenterCoordinate.x;
+        float offsetY = trackedPosition.y - drawnCenterCoordinate.y;
 
         Rect uvRect = new Rect(
-            (texturePadding + fractionalX) / fullWidth,
-            (texturePadding + fractionalY) / fullHeight,
+            (texturePadding + offsetX) / fullWidth,
+            (texturePadding + offsetY) / fullHeight,
             visibleWidth / fullWidth,
             visibleHeight / fullHeight);
+        if (hasLastUvRect && Approximately(lastUvRect, uvRect))
+        {
+            return;
+        }
+
         targetRawImage.uvRect = uvRect;
+        lastUvRect = uvRect;
+        hasLastUvRect = true;
     }
 
-    private void ReleaseGeneratedResources()
+    private static bool Approximately(Rect first, Rect second)
+    {
+        return Mathf.Approximately(first.x, second.x)
+               && Mathf.Approximately(first.y, second.y)
+               && Mathf.Approximately(first.width, second.width)
+               && Mathf.Approximately(first.height, second.height);
+    }
+
+    private void ReleaseGeneratedResources(bool restoreTargetImage = true)
     {
         if (mapTexture != null)
         {
@@ -303,12 +328,13 @@ public class MapPaper : MonoBehaviour
             targetRawImage.uvRect = new Rect(0f, 0f, 1f, 1f);
         }
 
-        if (targetImage != null && hasStoredOriginalImageColor)
+        if (restoreTargetImage && targetImage != null && hasStoredOriginalImageColor)
         {
             targetImage.color = originalTargetImageColor;
         }
 
         pixelBuffer = null;
         lastTextureSize = Vector2Int.zero;
+        hasLastUvRect = false;
     }
 }

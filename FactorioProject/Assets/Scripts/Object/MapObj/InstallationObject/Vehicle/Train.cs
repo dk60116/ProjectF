@@ -364,5 +364,6 @@ public class Train : Vehicle
             RuntimeQuarterTurns,
             new[] { coordinate },
             RuntimePlacementSequence);
+        RobotArm.WakeAroundCoordinate(coordinate);
     }
 }

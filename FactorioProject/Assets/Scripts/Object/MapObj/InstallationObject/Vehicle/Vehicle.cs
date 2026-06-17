@@ -22,6 +22,9 @@ public class Vehicle : InstallationObject
     private bool invertWheelRotation;
 
     private float currentVehicleSignedSpeed;
+    private float stopInertiaSpeedChangePerSecond;
+    private bool stopInertiaActive;
+    private bool hadVehicleInputLastFrame;
 
     public float VehicleAccelerationPerSecond => Mathf.Max(0.01f, vehicleAccelerationPerSecond);
     public float VehicleMaxSpeed => Mathf.Max(0.01f, vehicleMaxSpeed);
@@ -44,22 +47,55 @@ public class Vehicle : InstallationObject
         if (!hasInput && vehicleStopInertiaSeconds <= 0f)
         {
             currentVehicleSignedSpeed = 0f;
+            ClearStopInertiaState();
             return currentVehicleSignedSpeed;
         }
 
-        float speedChangePerSecond = hasInput
-            ? VehicleAccelerationPerSecond
-            : VehicleMaxSpeed / Mathf.Max(0.001f, vehicleStopInertiaSeconds);
+        float speedChangePerSecond;
+        if (hasInput)
+        {
+            ClearStopInertiaState();
+            speedChangePerSecond = VehicleAccelerationPerSecond;
+        }
+        else
+        {
+            if (!stopInertiaActive || hadVehicleInputLastFrame)
+            {
+                stopInertiaSpeedChangePerSecond = Mathf.Abs(currentVehicleSignedSpeed)
+                                                   / Mathf.Max(0.001f, vehicleStopInertiaSeconds);
+                stopInertiaActive = stopInertiaSpeedChangePerSecond > 0.0001f;
+            }
+
+            speedChangePerSecond = stopInertiaActive
+                ? stopInertiaSpeedChangePerSecond
+                : VehicleMaxSpeed / Mathf.Max(0.001f, vehicleStopInertiaSeconds);
+        }
+
         currentVehicleSignedSpeed = Mathf.MoveTowards(
             currentVehicleSignedSpeed,
             targetSpeed,
             speedChangePerSecond * normalizedDeltaTime);
+        if (!hasInput && Mathf.Abs(currentVehicleSignedSpeed) <= 0.0001f)
+        {
+            currentVehicleSignedSpeed = 0f;
+            ClearStopInertiaState();
+        }
+
+        hadVehicleInputLastFrame = hasInput;
         return currentVehicleSignedSpeed;
     }
 
     protected void ResetVehicleMotion()
     {
         currentVehicleSignedSpeed = 0f;
+        ClearStopInertiaState();
+    }
+
+    private void ClearStopInertiaState()
+    {
+        stopInertiaSpeedChangePerSecond = 0f;
+        stopInertiaActive = false;
+        hadVehicleInputLastFrame = false;
     }
 
     protected void RotateWheelsByDistance(float signedDistance)

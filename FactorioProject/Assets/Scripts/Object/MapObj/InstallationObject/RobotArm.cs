@@ -48,6 +48,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         None,
         Floor,
         Box,
+        FreightCar,
         Conveyor,
         InputArea
     }
@@ -127,6 +128,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private RobotArmRenderBatcher renderBatcher;
     private RobotArmInstancedRenderPart[] instancedRenderParts;
     private bool instancedRenderingActive;
+    private bool previewRenderingMode;
     private float runtimeSleepCheckTimer;
     private Transform handItemRestParent;
     private Vector3 handItemRestLocalPosition;
@@ -142,6 +144,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private long cachedInteractionPlacementSequence;
     private Vector2Int cachedPickupCoordinate;
     private Vector2Int cachedDropCoordinate;
+    private readonly List<InstallationObject> freightCarCoordinateScratch = new List<InstallationObject>(4);
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -152,6 +155,18 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     public float BackgroundTurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
+
+    public void SetPreviewRenderingMode(bool enabled)
+    {
+        previewRenderingMode = enabled;
+        if (enabled)
+        {
+            UnregisterInstancedRendering(true);
+            return;
+        }
+
+        EnsureInstancedRenderingRegistered();
+    }
 
     public bool TryGetElectricPowerRequirement(out float wattsPerSecond)
     {
@@ -294,6 +309,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         lastElectricPowerSupplyRatio = 1f;
         hasRuntimeStateInitialized = false;
         runtimeSleeping = false;
+        previewRenderingMode = false;
         UnregisterInstancedRendering();
         SetUpdateTickRegistered(false);
         SetBodyLocalRotation(inputBodyLocalRotation);
@@ -938,9 +954,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private void EnsureInstancedRenderingRegistered()
     {
-        if (!Application.isPlaying || !useInstancedRendering)
+        if (!Application.isPlaying || !useInstancedRendering || previewRenderingMode)
         {
-            SetInstancedRenderingActive(false);
+            SetInstancedRenderingActive(false, previewRenderingMode);
             return;
         }
 
@@ -962,7 +978,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         SetInstancedRenderingActive(true);
     }
 
-    private void UnregisterInstancedRendering()
+    private void UnregisterInstancedRendering(bool forceSourceVisible = false)
     {
         if (renderBatcher != null)
         {
@@ -970,23 +986,30 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             renderBatcher = null;
         }
 
-        SetInstancedRenderingActive(false);
+        SetInstancedRenderingActive(false, forceSourceVisible);
     }
 
-    private void SetInstancedRenderingActive(bool active)
+    private void SetInstancedRenderingActive(bool active, bool forceSourceVisible = false)
     {
         if (instancedRenderingActive == active)
         {
+            if (!active && forceSourceVisible)
+            {
+                EnsureInstancedRenderParts();
+                SetInstancedSourceRenderersEnabled(true, true);
+                RefreshSleepAwakeVisual(true);
+            }
+
             return;
         }
 
         EnsureInstancedRenderParts();
         instancedRenderingActive = active;
-        SetInstancedSourceRenderersEnabled(!instancedRenderingActive);
+        SetInstancedSourceRenderersEnabled(!instancedRenderingActive, forceSourceVisible);
         RefreshSleepAwakeVisual(true);
     }
 
-    private void SetInstancedSourceRenderersEnabled(bool enabled)
+    private void SetInstancedSourceRenderersEnabled(bool enabled, bool forceVisible = false)
     {
         if (instancedRenderParts == null)
         {
@@ -1001,7 +1024,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                 continue;
             }
 
-            part.Renderer.enabled = enabled && part.OriginalRendererEnabled;
+            part.Renderer.enabled = enabled && (forceVisible || part.OriginalRendererEnabled);
         }
     }
 
@@ -1283,6 +1306,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         if (!TryResolvePickupCandidate(
                 out Block pickupBlock,
                 out BoxObject boxObject,
+                out FreightCar freightCar,
                 out RobotArmPickupSource pickupSource,
                 out Vector3 referenceWorldPosition,
                 out pickupWorldPosition))
@@ -1290,34 +1314,48 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
-        return pickupSource switch
+        switch (pickupSource)
         {
-            RobotArmPickupSource.Floor => pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId),
-            RobotArmPickupSource.Box => boxObject != null && boxObject.TryTakeOneContainedObject(AcceptsPickupItem, out pickedItemId),
-            RobotArmPickupSource.Conveyor => pickupBlock.TryTakeOneConveyorObject(
-                referenceWorldPosition,
-                AcceptsPickupItem,
-                GetConveyorPickupSearchRadius(pickupBlock),
-                out pickedItemId),
-            RobotArmPickupSource.InputArea => TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId),
-            _ => false
-        };
+            case RobotArmPickupSource.Floor:
+                return pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId);
+            case RobotArmPickupSource.Box:
+                return boxObject != null && boxObject.TryTakeOneContainedObject(AcceptsPickupItem, out pickedItemId);
+            case RobotArmPickupSource.FreightCar:
+                return freightCar != null
+                       && freightCar.TryTakeOneItem(
+                           referenceWorldPosition,
+                           AcceptsPickupItem,
+                           out pickedItemId,
+                           out pickupWorldPosition);
+            case RobotArmPickupSource.Conveyor:
+                return pickupBlock.TryTakeOneConveyorObject(
+                    referenceWorldPosition,
+                    AcceptsPickupItem,
+                    GetConveyorPickupSearchRadius(pickupBlock),
+                    out pickedItemId);
+            case RobotArmPickupSource.InputArea:
+                return TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId);
+            default:
+                return false;
+        }
     }
 
     private bool CanPickupOneItem()
     {
-        return TryResolvePickupCandidate(out _, out _, out _, out _, out _);
+        return TryResolvePickupCandidate(out _, out _, out _, out _, out _, out _);
     }
 
     private bool TryResolvePickupCandidate(
         out Block pickupBlock,
         out BoxObject boxObject,
+        out FreightCar freightCar,
         out RobotArmPickupSource pickupSource,
         out Vector3 referenceWorldPosition,
         out Vector3 pickupWorldPosition)
     {
         pickupBlock = null;
         boxObject = null;
+        freightCar = null;
         pickupSource = RobotArmPickupSource.None;
         referenceWorldPosition = GetHandWorldPosition();
         pickupWorldPosition = referenceWorldPosition;
@@ -1349,6 +1387,15 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                 && candidateBoxObject.TryGetContainedObjectTopWorldPosition(out candidateWorldPosition))
             {
                 TryChoosePickupSource(RobotArmPickupSource.Box, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
+            }
+        }
+
+        if (TryGetFreightCarObject(pickupBlock, pickupCoordinate, out FreightCar candidateFreightCar))
+        {
+            freightCar = candidateFreightCar;
+            if (candidateFreightCar.TryGetTopItem(referenceWorldPosition, AcceptsPickupItem, out _, out candidateWorldPosition))
+            {
+                TryChoosePickupSource(RobotArmPickupSource.FreightCar, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
             }
         }
 
@@ -1535,14 +1582,27 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
+        int itemId = heldItemId;
+        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
+        Vector3 dropStartWorldPosition = GetHandRestWorldPosition();
+        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
+            && freightCar.TryAddItemStack(
+                itemId,
+                1,
+                dropStartWorldPosition,
+                () => dropStartWorldPosition,
+                0f,
+                out int addedCount)
+            && addedCount > 0)
+        {
+            return true;
+        }
+
         if (HasBlockingDropMapObject(dropBlock))
         {
             return false;
         }
 
-        int itemId = heldItemId;
-        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
-        Vector3 dropStartWorldPosition = GetHandRestWorldPosition();
         if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
             && boxObject.TryPutOneContainedObject(itemId, dropStartWorldPosition, 0f, out _, false, ItemMoveDuration))
         {
@@ -1585,13 +1645,19 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool CanPlaceHeldItem(Block dropBlock, Vector2Int dropCoordinate)
     {
+        int itemId = heldItemId;
+        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
+        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
+            && freightCar.CanAddItem(itemId, dropReferenceWorldPosition))
+        {
+            return true;
+        }
+
         if (HasBlockingDropMapObject(dropBlock))
         {
             return false;
         }
 
-        int itemId = heldItemId;
-        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
         if (TryGetBoxObject(dropBlock, out BoxObject boxObject)
             && boxObject.CanPutOneContainedObject(itemId))
         {
@@ -1769,6 +1835,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return mapObject != null
                && !IsOreMapObject(mapObject)
                && !IsBoxMapObject(mapObject)
+               && !IsFreightCarMapObject(mapObject)
                && !IsConveyorBeltMapObject(mapObject);
     }
 
@@ -1789,6 +1856,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                || (mapObject != null && mapObject.TryGetComponent(out BoxObject _));
     }
 
+    private static bool IsFreightCarMapObject(MapObject mapObject)
+    {
+        return mapObject is FreightCar
+               || (mapObject != null && mapObject.TryGetComponent(out FreightCar _));
+    }
+
     private static bool TryGetBoxObject(Block pickupBlock, out BoxObject boxObject)
     {
         boxObject = null;
@@ -1804,6 +1877,55 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return pickupBlock.MapObject.TryGetComponent(out boxObject);
+    }
+
+    private bool TryGetFreightCarObject(Block block, Vector2Int coordinate, out FreightCar freightCar)
+    {
+        freightCar = null;
+        if (TryResolveFreightCar(block != null ? block.MapObject : null, out freightCar))
+        {
+            return true;
+        }
+
+        freightCarCoordinateScratch.Clear();
+        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(coordinate, freightCarCoordinateScratch);
+        for (int i = 0; i < freightCarCoordinateScratch.Count; i++)
+        {
+            InstallationObject candidate = freightCarCoordinateScratch[i];
+            if (candidate == this || !TryResolveFreightCar(candidate, out freightCar))
+            {
+                continue;
+            }
+
+            freightCarCoordinateScratch.Clear();
+            return true;
+        }
+
+        freightCarCoordinateScratch.Clear();
+        return false;
+    }
+
+    private static bool TryResolveFreightCar(MapObject mapObject, out FreightCar freightCar)
+    {
+        freightCar = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        freightCar = mapObject as FreightCar;
+        if (freightCar != null)
+        {
+            return true;
+        }
+
+        if (mapObject.TryGetComponent(out freightCar) && freightCar != null)
+        {
+            return true;
+        }
+
+        freightCar = mapObject.GetComponentInChildren<FreightCar>(true);
+        return freightCar != null;
     }
 
     public bool TryTakeHeldItemToBag(PlayerBag targetBag, int targetSlotIndex)

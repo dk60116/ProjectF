@@ -3,6 +3,8 @@ using UnityEngine;
 
 public class RailHandcar : Train
 {
+    private static readonly HashSet<RailHandcar> ActiveRuntimeHandcars = new HashSet<RailHandcar>();
+
     [SerializeField, Min(0.01f)]
     private float railMoveSpeedMultiplier = 1f;
     [SerializeField, Min(0.05f)]
@@ -63,6 +65,44 @@ public class RailHandcar : Train
     private Train consistPathLeader;
     private Vector2 consistPathTravelDirection;
     private float consistPathEndDistance;
+
+    public static void CollectActiveRuntimeHandcars(ICollection<RailHandcar> results)
+    {
+        if (results == null || ActiveRuntimeHandcars.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (RailHandcar handcar in ActiveRuntimeHandcars)
+        {
+            if (handcar == null
+                || !handcar.gameObject.activeInHierarchy
+                || !handcar.TryGetPlacementRuntime(out _, out _))
+            {
+                continue;
+            }
+
+            results.Add(handcar);
+        }
+    }
+
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        ActiveRuntimeHandcars.Add(this);
+    }
+
+    protected override void OnDisable()
+    {
+        ActiveRuntimeHandcars.Remove(this);
+        base.OnDisable();
+    }
+
+    public override void PrepareForPool()
+    {
+        ActiveRuntimeHandcars.Remove(this);
+        base.PrepareForPool();
+    }
 
     private struct RailSample
     {

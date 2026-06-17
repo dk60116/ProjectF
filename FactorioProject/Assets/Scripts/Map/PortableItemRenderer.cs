@@ -137,21 +137,27 @@ public sealed class PortableItemRenderer : MonoBehaviour
     {
         ResolveDependencies();
 
-        using (RebuildPortableObjectBatchesMarker.Auto())
+        if (HasPortableObjectRenderWork())
         {
-            if (portableObjectBatchesDirty)
+            using (RebuildPortableObjectBatchesMarker.Auto())
             {
-                RebuildPortableObjectBatches();
-                portableObjectBatchesDirty = false;
+                if (portableObjectBatchesDirty)
+                {
+                    RebuildPortableObjectBatches();
+                    portableObjectBatchesDirty = false;
+                }
+            }
+
+            using (RenderPortableObjectBatchesMarker.Auto())
+            {
+                RenderPortableObjectBatches();
             }
         }
 
-        using (RenderPortableObjectBatchesMarker.Auto())
+        if (HasVirtualConveyorRenderWork())
         {
-            RenderPortableObjectBatches();
+            RenderVirtualConveyorItems();
         }
-
-        RenderVirtualConveyorItems();
     }
 
     private void ResolveDependencies()
@@ -265,6 +271,43 @@ public sealed class PortableItemRenderer : MonoBehaviour
         {
             RenderVirtualConveyorBatches();
         }
+    }
+
+    private bool HasPortableObjectRenderWork()
+    {
+        return portableObjectBatchesDirty
+               || registeredPortableObjects.Count > 0
+               || portableObjectBatches.ActiveBatchCount > 0;
+    }
+
+    private bool HasVirtualConveyorRenderWork()
+    {
+        if (terrainGenerator == null || itemManager == null || !terrainGenerator.VirtualizeConveyorItems)
+        {
+            return HasVirtualConveyorRenderState();
+        }
+
+        return cachedRenderAssetItemManager != itemManager
+               || cachedVirtualConveyorVisualBlockSetVersion != terrainGenerator.ConveyorItemVisualBlockSetVersion
+               || cachedDynamicVirtualConveyorVisualBlockSetVersion != terrainGenerator.DynamicConveyorItemVisualBlockSetVersion
+               || terrainGenerator.ConveyorItemVisualDirtyBlockCount > 0
+               || activeVirtualConveyorRenderBlocks.Count > 0
+               || activeDynamicVirtualConveyorRenderBlocks.Count > 0
+               || virtualConveyorBatches.ActiveBatchCount > 0
+               || dynamicVirtualConveyorBatches.ActiveBatchCount > 0;
+    }
+
+    private bool HasVirtualConveyorRenderState()
+    {
+        return activeVirtualConveyorRenderBlocks.Count > 0
+               || activeVirtualConveyorRenderBlockLookup.Count > 0
+               || activeDynamicVirtualConveyorRenderBlocks.Count > 0
+               || dirtyVirtualConveyorRenderBlocks.Count > 0
+               || virtualConveyorBlockRenderCaches.Count > 0
+               || virtualConveyorBatches.ActiveBatchCount > 0
+               || dynamicVirtualConveyorBatches.ActiveBatchCount > 0
+               || cachedVirtualConveyorVisualBlockSetVersion != int.MinValue
+               || cachedDynamicVirtualConveyorVisualBlockSetVersion != int.MinValue;
     }
 
     private void RebuildVirtualConveyorBatches()
@@ -534,6 +577,16 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RebuildDynamicVirtualConveyorBatches()
     {
+        if (activeDynamicVirtualConveyorRenderBlocks.Count <= 0)
+        {
+            if (dynamicVirtualConveyorBatches.ActiveBatchCount > 0)
+            {
+                dynamicVirtualConveyorBatches.ClearActiveMatrices();
+            }
+
+            return;
+        }
+
         dynamicVirtualConveyorBatches.ClearActiveMatrices();
         Camera renderCamera = mainCamera;
         bool canCullDynamicBlocks = renderCamera != null;

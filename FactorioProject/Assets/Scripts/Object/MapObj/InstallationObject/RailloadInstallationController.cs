@@ -176,6 +176,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
             currentPlan.requiredItemCount);
         if (removedCount < currentPlan.requiredItemCount)
         {
+            placementController.RefundInstallItemsToPlayer(railloadDefinition.id, removedCount);
             terrain.ReleaseInstallationObject(railload, railloadPrefab);
             return false;
         }

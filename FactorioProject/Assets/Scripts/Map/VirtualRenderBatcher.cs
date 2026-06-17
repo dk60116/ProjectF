@@ -235,6 +235,11 @@ public sealed class VirtualRenderBatchCollection
 
     public void RenderBatches(Camera renderCamera = null)
     {
+        if (activeBatchKeys.Count <= 0)
+        {
+            return;
+        }
+
         if (renderCamera == null)
         {
             renderCamera = Camera.main;

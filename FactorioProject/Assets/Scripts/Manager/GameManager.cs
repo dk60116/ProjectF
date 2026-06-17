@@ -8,7 +8,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using UnityEngine;
-using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
 
@@ -72,8 +71,6 @@ public class GameManager : MonoBehaviour
 
         Instance = this;
         DontDestroyOnLoad(gameObject);
-        ConfigureShadowQuality();
-        ApplySceneShadowSettings();
         SceneManager.sceneLoaded += OnSceneLoaded;
         
         uiManager = GetComponentInChildren<UIManager>();
@@ -135,36 +132,7 @@ public class GameManager : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        ApplySceneShadowSettings();
         SyncRailLineRuntimeVisibility(true);
-    }
-
-    private void ConfigureShadowQuality()
-    {
-        QualitySettings.shadows = ShadowQuality.All;
-        QualitySettings.shadowResolution = ShadowResolution.VeryHigh;
-        QualitySettings.shadowProjection = ShadowProjection.StableFit;
-        QualitySettings.shadowCascades = 4;
-
-        if (QualitySettings.shadowDistance < 80f)
-        {
-            QualitySettings.shadowDistance = 80f;
-        }
-    }
-
-    private void ApplySceneShadowSettings()
-    {
-        Light[] lights = FindObjectsOfType<Light>(true);
-
-        foreach (Light lightComponent in lights)
-        {
-            lightComponent.shadows = LightShadows.Soft;
-            lightComponent.shadowStrength = 1f;
-            lightComponent.shadowBias = 0.05f;
-            lightComponent.shadowNormalBias = 0.4f;
-            lightComponent.shadowNearPlane = 0.2f;
-            lightComponent.shadowResolution = UnityEngine.Rendering.LightShadowResolution.VeryHigh;
-        }
     }
 
     public UIManager UIManager => uiManager;

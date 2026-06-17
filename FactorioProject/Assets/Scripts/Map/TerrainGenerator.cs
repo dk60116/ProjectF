@@ -65,6 +65,7 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     public int CurrentSeed => seed;
+    public int TerrainGenerationVersion => terrainGenerationVersion;
     public int CurrentMapSize => GetNormalizedMapSize();
 
     public enum ResourcePlacementMode
@@ -674,6 +675,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
+    private int terrainGenerationVersion;
     private bool isMaterializingVirtualFloorObjects;
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
@@ -769,6 +771,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void InvalidateTerrainGenerationCaches()
     {
+        unchecked
+        {
+            terrainGenerationVersion++;
+        }
+
         InvalidateStarterTreeCache();
         InvalidateTerrainBiomeDataCaches();
         InvalidateTerrainBiomeMaterialCaches();
@@ -804,77 +811,142 @@ public partial class TerrainGenerator : MonoBehaviour
                 activeConveyorDotVisualList.Count);
         }
 
-        using (TickConveyorDataMotionsMarker.Auto())
+        if (ShouldTickConveyorDataMotions(Time.deltaTime))
         {
-            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-            TickActiveConveyorDataMotions(Time.deltaTime);
-            if (profileBeltTicks)
+            using (TickConveyorDataMotionsMarker.Auto())
             {
-                MapObjectTickProfiler.EndNamedSample(
-                    "Belt",
-                    "ConveyorDataMotion",
-                    "Belt Data Motion",
-                    startTimestamp);
+                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+                TickActiveConveyorDataMotions(Time.deltaTime);
+                if (profileBeltTicks)
+                {
+                    MapObjectTickProfiler.EndNamedSample(
+                        "Belt",
+                        "ConveyorDataMotion",
+                        "Belt Data Motion",
+                        startTimestamp);
+                }
             }
         }
 
-        using (TickConveyorsMarker.Auto())
+        if (ShouldTickActiveConveyorRuntime(Time.deltaTime))
         {
-            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-            TickActiveConveyors(Time.deltaTime);
-            if (profileBeltTicks)
+            using (TickConveyorsMarker.Auto())
             {
-                MapObjectTickProfiler.EndNamedSample(
-                    "Belt",
-                    "ActiveConveyor",
-                    "Active Belt Tick",
-                    startTimestamp);
+                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+                TickActiveConveyors(Time.deltaTime);
+                if (profileBeltTicks)
+                {
+                    MapObjectTickProfiler.EndNamedSample(
+                        "Belt",
+                        "ActiveConveyor",
+                        "Active Belt Tick",
+                        startTimestamp);
+                }
             }
         }
 
-        using (TickBackgroundConveyorsMarker.Auto())
+        if (ShouldTickBackgroundConveyors())
         {
-            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-            TickBackgroundConveyors();
-            if (profileBeltTicks)
+            using (TickBackgroundConveyorsMarker.Auto())
             {
-                MapObjectTickProfiler.EndNamedSample(
-                    "Belt",
-                    "BackgroundConveyor",
-                    "Background Belt Tick",
-                    startTimestamp);
+                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+                TickBackgroundConveyors();
+                if (profileBeltTicks)
+                {
+                    MapObjectTickProfiler.EndNamedSample(
+                        "Belt",
+                        "BackgroundConveyor",
+                        "Background Belt Tick",
+                        startTimestamp);
+                }
             }
         }
 
-        using (TickConveyorDotsMarker.Auto())
+        if (ShouldTickConveyorVisualRuntime())
         {
-            long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-            SyncConveyorSlotDotRuntimeVisibility();
-            TickPendingConveyorSlotDotRefreshes();
-            SyncBeltItemLineRuntimeVisibility();
-            TickPendingBeltItemLineDebugRefreshes();
-            SyncBeltDirectionRuntimeVisibility();
-            TickActiveConveyorDotVisuals(Time.deltaTime);
-            DrawActiveBeltDirectionArrows();
-            if (profileBeltTicks)
+            using (TickConveyorDotsMarker.Auto())
             {
-                MapObjectTickProfiler.EndNamedSample(
-                    "Belt",
-                    "ConveyorVisual",
-                    "Belt Visual Tick",
-                    startTimestamp);
+                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+                SyncConveyorSlotDotRuntimeVisibility();
+                TickPendingConveyorSlotDotRefreshes();
+                SyncBeltItemLineRuntimeVisibility();
+                TickPendingBeltItemLineDebugRefreshes();
+                SyncBeltDirectionRuntimeVisibility();
+                TickActiveConveyorDotVisuals(Time.deltaTime);
+                DrawActiveBeltDirectionArrows();
+                if (profileBeltTicks)
+                {
+                    MapObjectTickProfiler.EndNamedSample(
+                        "Belt",
+                        "ConveyorVisual",
+                        "Belt Visual Tick",
+                        startTimestamp);
+                }
             }
         }
 
-        using (RefreshChunksMarker.Auto())
+        if (ShouldRefreshTrackedChunks())
         {
-            RefreshTrackedChunks();
+            using (RefreshChunksMarker.Auto())
+            {
+                RefreshTrackedChunks();
+            }
         }
 
-        using (FloorObjectVirtualizationMarker.Auto())
+        if (ShouldTickFloorObjectVirtualization())
         {
-            TickFloorObjectVirtualization();
+            using (FloorObjectVirtualizationMarker.Auto())
+            {
+                TickFloorObjectVirtualization();
+            }
         }
+    }
+
+    private bool ShouldTickConveyorDataMotions(float deltaTime)
+    {
+        return deltaTime > 0f && activeConveyorDataMotionBlocks.Count > 0;
+    }
+
+    private bool ShouldTickActiveConveyorRuntime(float deltaTime)
+    {
+        return deltaTime > 0f
+               && (activeConveyors.Count > 0
+                   || conveyorWakeQueue.Count > 0
+                   || conveyorLineWakeQueue.Count > 0
+                   || conveyorNetworkSleepCheckQueuedIds.Count > 0);
+    }
+
+    private bool ShouldTickBackgroundConveyors()
+    {
+        return Time.time >= nextBackgroundConveyorSimulationTime;
+    }
+
+    private bool ShouldTickConveyorVisualRuntime()
+    {
+        return !conveyorSlotDotVisibilityInitialized
+               || !beltItemLineVisibilityInitialized
+               || !beltDirectionVisibilityInitialized
+               || pendingConveyorSlotDotRefreshBlocks.Count > 0
+               || pendingBeltItemLineDebugRefreshAll
+               || pendingBeltItemLineDebugRefreshBlocks.Count > 0
+               || activeConveyorDotVisualList.Count > 0
+               || activeBeltDirectionVisualList.Count > 0
+               || conveyorSlotDotInstanceMatrixCount > 0
+               || beltDirectionArrowInstanceMatrixCount > 0
+               || beltItemLineVisualsDirty
+               || applyingBeltItemLineRuntimeVisibility;
+    }
+
+    private bool ShouldRefreshTrackedChunks()
+    {
+        return GetCenterChunkCoordinate() != currentCenterChunk;
+    }
+
+    private bool ShouldTickFloorObjectVirtualization()
+    {
+        return virtualizeDistantFloorObjects
+               && loadedBlocks.Count > 0
+               && Time.time >= nextFloorObjectVirtualizationTime;
     }
 
     private void TickBackgroundConveyors()
@@ -949,6 +1021,7 @@ public partial class TerrainGenerator : MonoBehaviour
     public bool VirtualizeConveyorBelts => virtualizeConveyorBelts;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
     public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;
+    public int ConveyorItemVisualDirtyBlockCount => conveyorItemVisualDirtyBlocks.Count;
 
     public void CopyLoadedBlocks(List<Block> results)
     {
@@ -1089,7 +1162,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
             SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Live);
 
-            if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
+            if (block.MapObject is InstallationObject installationObject
+                && !installationObject.ExcludeFromTerrainPersistence
+                && savedInstallations.Add(installationObject))
             {
                 resourceStateStore.SaveInstallation(installationObject);
                 resourceStateStore.RegisterLiveInstallation(installationObject);
@@ -1121,6 +1196,7 @@ public partial class TerrainGenerator : MonoBehaviour
             InstallationObject installationObject = activeInstallations[i];
             if (installationObject == null
                 || (savedInstallations != null && savedInstallations.Contains(installationObject))
+                || installationObject.ExcludeFromTerrainPersistence
                 || !installationObject.TryGetPlacementRuntime(out _, out _)
                 || !InstallationIntersectsCoordinateFilter(installationObject, coordinateFilter))
             {

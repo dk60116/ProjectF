@@ -46,7 +46,8 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
     private readonly CheckBox showBeltItemLineCheckBox = new CheckBox();
-    private readonly CheckBox showBeltDirectionsCheckBox = new CheckBox();
+    private readonly CheckBox showRailLineCheckBox = new CheckBox();
+    private readonly CheckBox showDirectionsCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
     private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
     private readonly Button applyCameraSizeButton = new Button();
@@ -90,7 +91,7 @@ internal sealed class EditorToolForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
@@ -336,17 +337,25 @@ internal sealed class EditorToolForm : Form
                 showBeltItemLineCheckBox.Checked,
                 "Show Belt Item Line");
 
-        StyleDebugCheckBox(showBeltDirectionsCheckBox, "Show Belt Directions");
-        showBeltDirectionsCheckBox.CheckedChanged += async (_, _) =>
+        StyleDebugCheckBox(showRailLineCheckBox, "ShowRailLine");
+        showRailLineCheckBox.CheckedChanged += async (_, _) =>
             await SendDebugToggleAsync(
-                "showBeltDirections",
-                showBeltDirectionsCheckBox.Checked,
-                "Show Belt Directions");
+                "showRailLine",
+                showRailLineCheckBox.Checked,
+                "ShowRailLine");
+
+        StyleDebugCheckBox(showDirectionsCheckBox, "ShowDirection");
+        showDirectionsCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showDirections",
+                showDirectionsCheckBox.Checked,
+                "ShowDirection");
 
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
-        debugTogglePanel.Controls.Add(showBeltDirectionsCheckBox);
+        debugTogglePanel.Controls.Add(showRailLineCheckBox);
+        debugTogglePanel.Controls.Add(showDirectionsCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 5);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
@@ -915,9 +924,14 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(showBeltItemLineCheckBox, showBeltItemLine);
         }
 
+        if (TryReadProtocolBool(response, "showRailLine", out bool showRailLine))
+        {
+            ApplyRuntimeCheckBoxState(showRailLineCheckBox, showRailLine);
+        }
+
         if (TryReadProtocolBool(response, "showBeltDirections", out bool showBeltDirections))
         {
-            ApplyRuntimeCheckBoxState(showBeltDirectionsCheckBox, showBeltDirections);
+            ApplyRuntimeCheckBoxState(showDirectionsCheckBox, showBeltDirections);
         }
 
         if (TryReadProtocolFloat(response, "cameraMinSize", out float cameraMinSize)
@@ -1244,7 +1258,8 @@ internal sealed class EditorToolForm : Form
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
         showBeltItemLineCheckBox.Enabled = !busy;
-        showBeltDirectionsCheckBox.Enabled = !busy;
+        showRailLineCheckBox.Enabled = !busy;
+        showDirectionsCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;
         cameraMaxSizeInput.Enabled = !busy;
         applyCameraSizeButton.Enabled = !busy;

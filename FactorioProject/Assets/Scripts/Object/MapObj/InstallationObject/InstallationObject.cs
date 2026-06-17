@@ -65,6 +65,8 @@ public class InstallationObject : MapObject
     private List<Vector2Int> runtimeOccupiedCoordinates = new List<Vector2Int>();
     [SerializeField, HideInInspector]
     private long runtimePlacementSequence;
+    [SerializeField, HideInInspector]
+    private bool excludeFromTerrainPersistence;
     [SerializeField, HideInInspector, Min(0f)]
     private float storedFluidLiters;
     [SerializeField, HideInInspector]
@@ -93,6 +95,7 @@ public class InstallationObject : MapObject
     public int RuntimeQuarterTurns => runtimeQuarterTurns;
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
     public long RuntimePlacementSequence => runtimePlacementSequence;
+    public bool ExcludeFromTerrainPersistence => excludeFromTerrainPersistence;
     public bool TryGetPowerLinePoint(out Transform linePoint)
     {
         linePoint = ResolvePowerLinePoint();
@@ -244,6 +247,11 @@ public class InstallationObject : MapObject
         return ClaimPlacementSequence(placementSequence);
     }
 
+    public void SetExcludeFromTerrainPersistence(bool exclude)
+    {
+        excludeFromTerrainPersistence = exclude;
+    }
+
     public bool TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
     {
         anchorCoordinate = runtimeAnchorCoordinate;
@@ -256,6 +264,7 @@ public class InstallationObject : MapObject
         runtimeAnchorCoordinate = default;
         runtimeQuarterTurns = 0;
         runtimePlacementSequence = 0;
+        excludeFromTerrainPersistence = false;
         if (runtimeOccupiedCoordinates != null)
         {
             runtimeOccupiedCoordinates.Clear();

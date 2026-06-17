@@ -138,7 +138,7 @@ public class BoxObject : InstallationObject
     public bool TryGetGroundDropCoordinate(out Vector2Int dropCoordinate)
     {
         dropCoordinate = Vector2Int.zero;
-        if (!isOpen || !isActiveAndEnabled)
+        if (!isOpen || !isActiveAndEnabled || ExcludeFromTerrainPersistence)
         {
             return false;
         }
@@ -918,7 +918,7 @@ public class BoxObject : InstallationObject
 
     private bool TryCollectAreaAcceptedItemIds(ISet<int> acceptedItemIds)
     {
-        if (acceptedItemIds == null)
+        if (acceptedItemIds == null || ExcludeFromTerrainPersistence)
         {
             return false;
         }
@@ -981,6 +981,11 @@ public class BoxObject : InstallationObject
     private bool TryGetContentBlock(out Block contentBlock)
     {
         contentBlock = null;
+        if (ExcludeFromTerrainPersistence)
+        {
+            return false;
+        }
+
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
         if (terrainGenerator == null)
         {

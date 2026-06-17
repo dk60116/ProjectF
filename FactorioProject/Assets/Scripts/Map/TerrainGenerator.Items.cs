@@ -688,6 +688,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterLiveInstallationObject(InstallationObject installationObject)
     {
+        if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
+        {
+            return;
+        }
+
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
@@ -738,6 +743,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterInstallationRuntimeState(InstallationObject installationObject)
     {
+        if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
+        {
+            return;
+        }
+
         EnsureResourceStateStore();
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);

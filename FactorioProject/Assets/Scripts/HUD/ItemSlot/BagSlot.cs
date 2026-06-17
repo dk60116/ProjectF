@@ -314,6 +314,59 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         Vector3 dropOrigin = player != null ? player.transform.position : startWorldPosition;
         int requestedDropCount = Mathf.Max(1, maxDropCount);
+        if (TryGetFocusedFreightCar(player, out FreightCar focusedFreightCar))
+        {
+            int freightItemId = boundBag.GetSlotItemId(slotIndex);
+            int freightSlotCount = boundBag.GetSlotCount(slotIndex);
+            int freightDropCount = Mathf.Min(freightSlotCount, requestedDropCount);
+            if (freightItemId < 0 || freightDropCount <= 0)
+            {
+                return;
+            }
+
+            if (!boundBag.TryRemoveItemsAtSlot(
+                    slotIndex,
+                    freightDropCount,
+                    out int removedItemId,
+                    out int freightRemovedCount,
+                    out startWorldPosition,
+                    false)
+                || freightRemovedCount <= 0)
+            {
+                return;
+            }
+
+            if (removedItemId != freightItemId)
+            {
+                RestoreItemsToSlot(removedItemId, freightRemovedCount);
+                return;
+            }
+
+            bool freightDropped = focusedFreightCar.TryAddItemStack(
+                freightItemId,
+                freightRemovedCount,
+                startWorldPosition,
+                startWorldPositionProvider,
+                0.1f,
+                out int freightDroppedCount);
+
+            if (!freightDropped || freightDroppedCount <= 0)
+            {
+                RestoreItemsToSlot(freightItemId, freightRemovedCount);
+                return;
+            }
+
+            int freightRemainingCount = Mathf.Max(0, freightRemovedCount - freightDroppedCount);
+            if (freightRemainingCount > 0)
+            {
+                RestoreItemsToSlot(freightItemId, freightRemainingCount);
+            }
+
+            player.MarkDropExitGate(dropOrigin, 0.5f);
+            SuppressPickupPreviewAfterDrop(player);
+            return;
+        }
+
         bool isFocusedConveyorDrop = terrainGenerator.TryGetFocusedConveyorDropLimit(out int conveyorDropLimit);
         if (isFocusedConveyorDrop)
         {
@@ -848,6 +901,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return previewItemId >= 0;
         }
 
+        if (TryPreviewFocusedFreightCarPickupSource(player, pickupOrigin, FocusedPickupRange, -1, out previewItemId, out previewPickupCount))
+        {
+            return previewItemId >= 0;
+        }
+
         if (TryPreviewFocusedBoxPickupSource(player, pickupOrigin, FocusedPickupRange, -1, out previewItemId, out previewPickupCount))
         {
             return previewItemId >= 0;
@@ -908,6 +966,27 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && focusedBoxObject.TryPreviewContainedObjectPickup(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount);
     }
 
+    private static bool TryPreviewFocusedFreightCarPickupSource(
+        Player player,
+        Vector3 pickupOrigin,
+        float pickupRange,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount)
+    {
+        previewItemId = -1;
+        previewPickupCount = 0;
+        return TryGetFocusedFreightCar(player, out FreightCar focusedFreightCar)
+               && focusedFreightCar != null
+               && focusedFreightCar.TryPreviewPickupItems(
+                   player,
+                   pickupOrigin,
+                   pickupRange,
+                   preferredItemId,
+                   out previewItemId,
+                   out previewPickupCount);
+    }
+
     private bool TryPreviewOneItemForAutomaticPickup(
         Player player,
         TerrainGenerator terrain,
@@ -935,6 +1014,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 -1,
                 out previewItemId,
                 out previewPickupCount))
+        {
+            return true;
+        }
+
+        if (TryPreviewFocusedFreightCarPickupSource(player, pickupOrigin, FocusedPickupRange, -1, out previewItemId, out previewPickupCount))
         {
             return true;
         }
@@ -3055,6 +3139,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return ShouldDisplayPickupPreviewForItem(previewItemId);
         }
 
+        if (TryPreviewFocusedFreightCarPickup(player, pickupOrigin, FocusedPickupRange, preferredItemId, out previewItemId, out previewPickupCount))
+        {
+            return ShouldDisplayPickupPreviewForItem(previewItemId);
+        }
+
         if (TryPreviewFocusedBoxPickup(player, pickupOrigin, FocusedPickupRange, preferredItemId, out previewItemId, out previewPickupCount))
         {
             return ShouldDisplayPickupPreviewForItem(previewItemId);
@@ -3114,6 +3203,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 out previewItemId,
                 out previewPickupCount)
             && CanPreviewAcceptPickupItem(player, previewItemId))
+        {
+            return true;
+        }
+
+        if (TryPreviewFocusedFreightCarPickup(player, pickupOrigin, FocusedPickupRange, preferredItemId, out previewItemId, out previewPickupCount))
         {
             return true;
         }
@@ -3180,6 +3274,24 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && playerController.TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
                && focusedBoxObject != null
                && focusedBoxObject.TryPreviewContainedObjectPickup(player, pickupOrigin, pickupRange, preferredItemId, out previewItemId, out previewPickupCount)
+               && CanPreviewAcceptPickupItem(player, previewItemId);
+    }
+
+    private bool TryPreviewFocusedFreightCarPickup(
+        Player player,
+        Vector3 pickupOrigin,
+        float pickupRange,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount)
+    {
+        return TryPreviewFocusedFreightCarPickupSource(
+                   player,
+                   pickupOrigin,
+                   pickupRange,
+                   preferredItemId,
+                   out previewItemId,
+                   out previewPickupCount)
                && CanPreviewAcceptPickupItem(player, previewItemId);
     }
 
@@ -3671,6 +3783,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return true;
         }
 
+        if (TryPickupFocusedFreightCarToBag(player, pickupOrigin, FocusedPickupRange, targetSlotIndex, preferredItemId))
+        {
+            return true;
+        }
+
         if (!TryGetGroundPickupBlock(terrain, coordinate, out Block block))
         {
             return false;
@@ -3745,6 +3862,33 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             && focusedConveyorBlock != null;
     }
 
+    protected static bool TryGetFocusedFreightCar(Player player, out FreightCar focusedFreightCar)
+    {
+        focusedFreightCar = null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null
+            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+            || focusedMapObject == null)
+        {
+            return false;
+        }
+
+        focusedFreightCar = focusedMapObject as FreightCar;
+        if (focusedFreightCar == null)
+        {
+            focusedFreightCar = focusedMapObject.GetComponentInParent<FreightCar>();
+        }
+
+        return focusedFreightCar != null
+               && focusedFreightCar.gameObject.activeInHierarchy
+               && focusedFreightCar.AllowsFocus;
+    }
+
     protected static bool TryGetGroundPickupBlock(TerrainGenerator terrain, Vector2Int coordinate, out Block block)
     {
         block = null;
@@ -3766,6 +3910,23 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && playerController.TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
                && focusedBoxObject != null
                && focusedBoxObject.TryPickupContainedObjectToBag(player, pickupOrigin, pickupRange, preferredSlotIndex, preferredItemId);
+    }
+
+    protected static bool TryPickupFocusedFreightCarToBag(
+        Player player,
+        Vector3 pickupOrigin,
+        float pickupRange,
+        int preferredSlotIndex,
+        int preferredItemId)
+    {
+        return TryGetFocusedFreightCar(player, out FreightCar focusedFreightCar)
+               && focusedFreightCar != null
+               && focusedFreightCar.TryPickupOneItemToBag(
+                   player,
+                   pickupOrigin,
+                   pickupRange,
+                   preferredSlotIndex,
+                   preferredItemId);
     }
 
     protected static bool TryPickupFocusedBoxToHand(Player player, Vector3 pickupOrigin, float pickupRange)

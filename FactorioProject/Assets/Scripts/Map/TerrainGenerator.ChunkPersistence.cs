@@ -109,7 +109,9 @@ public partial class TerrainGenerator : MonoBehaviour
                     chunkCoordinates.Add(block.Coordinate);
                     SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Virtual);
 
-                    if (block.MapObject is InstallationObject installationObject && savedInstallations.Add(installationObject))
+                    if (block.MapObject is InstallationObject installationObject
+                        && !installationObject.ExcludeFromTerrainPersistence
+                        && savedInstallations.Add(installationObject))
                     {
                         resourceStateStore.SaveInstallation(installationObject);
                         resourceStateStore.RegisterLiveInstallation(installationObject);

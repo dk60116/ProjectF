@@ -880,6 +880,31 @@ public class PlayerHUD : BagSlot
             AnimateMapEditActionButtons(showMapEditActionButtons);
             lastMapEditExtraButtonsVisible = showMapEditActionButtons;
         }
+
+        if (showMapEditActionButtons && !mapEditButtonsAnimating)
+        {
+            EnsureVisibleMapEditActionButtonsInteractive();
+        }
+    }
+
+    private void EnsureVisibleMapEditActionButtonsInteractive()
+    {
+        EnsureVisibleButtonInteractive(mapEditCancelButton);
+        EnsureVisibleButtonInteractive(mapEditRotationButton);
+        EnsureVisibleButtonInteractive(mapEditCompleteButton);
+        EnsureVisibleButtonInteractive(mapEditPackButton);
+        EnsureVisibleButtonInteractive(mapEditUndoButton);
+    }
+
+    private void EnsureVisibleButtonInteractive(Button button)
+    {
+        if (button == null || !button.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        NormalizeButtonCanvasGroup(button);
+        SetButtonRaycastTargetsEnabled(button, true);
     }
 
     private bool IsMapEditModeActive()
