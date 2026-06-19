@@ -48,6 +48,7 @@ public class ItemInfoDescription : MonoBehaviour
     private RobotArm liveGaugeRobotArm;
     private UtilityPole liveGaugeUtilityPole;
     private InputOutputModule liveGaugeModule;
+    private RailHandcar liveGaugeRailHandcar;
 
     private void Awake()
     {
@@ -192,6 +193,15 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+    }
+
+    public void ShowRailHandcar(RailHandcar railHandcar, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        liveGaugeRailHandcar = railHandcar;
+        SetRailHandcarSpeedGauge(railHandcar);
+        SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
     }
 
     public void ShowInstallationObject(InstallationObject installationObject, Resource underlyingResource = null)
@@ -513,6 +523,7 @@ public class ItemInfoDescription : MonoBehaviour
         liveGaugeRobotArm = null;
         liveGaugeUtilityPole = null;
         liveGaugeModule = null;
+        liveGaugeRailHandcar = null;
     }
 
     private void RefreshLiveGaugeTargets()
@@ -531,6 +542,12 @@ public class ItemInfoDescription : MonoBehaviour
         if (liveGaugeUtilityPole != null && liveGaugeUtilityPole.gameObject.activeInHierarchy)
         {
             RefreshUtilityPoleGaugeTarget(liveGaugeUtilityPole);
+            return;
+        }
+
+        if (liveGaugeRailHandcar != null && liveGaugeRailHandcar.gameObject.activeInHierarchy)
+        {
+            SetRailHandcarSpeedGauge(liveGaugeRailHandcar);
             return;
         }
 
@@ -607,6 +624,31 @@ public class ItemInfoDescription : MonoBehaviour
             true);
 
         SetWorkProgressGauge(workGauge, workFill, workText, module);
+    }
+
+    private void SetRailHandcarSpeedGauge(RailHandcar railHandcar)
+    {
+        float currentSpeed = railHandcar != null ? railHandcar.CurrentVehicleSpeed : 0f;
+        float maxSpeed = railHandcar != null ? railHandcar.EffectiveVehicleMaxSpeed : 0f;
+        float fillAmount = maxSpeed > 0.0001f
+            ? Mathf.Clamp01(currentSpeed / maxSpeed)
+            : 0f;
+
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            fillAmount,
+            ElectricGaugeFillColor,
+            currentSpeed,
+            maxSpeed,
+            true);
+        if (energyText != null)
+        {
+            energyText.text =
+                $"{FormatMetersPerSecond(currentSpeed)} m/s / {FormatMetersPerSecond(maxSpeed)} m/s";
+        }
     }
 
     private void RefreshUtilityPoleGaugeTarget(UtilityPole utilityPole)
@@ -1842,6 +1884,11 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         return FormatGaugeNumber(kilowatts, false);
+    }
+
+    private static string FormatMetersPerSecond(float metersPerSecond)
+    {
+        return FormatGaugeNumber(metersPerSecond, true);
     }
 
     private static string FormatEnergyUseRate(ItemDefinition.EnergyType energyType, float amountPerSecond)

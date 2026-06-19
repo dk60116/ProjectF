@@ -97,7 +97,7 @@ GameObject:
   - component: {fileID: 4863933332349520842}
   - component: {fileID: 2862884122402060625}
   m_Layer: 0
-  m_Name: Mining machine
+  m_Name: Mining Machine
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -153,6 +153,7 @@ MonoBehaviour:
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
+  excludeFromTerrainPersistence: 0
   storedFluidLiters: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20

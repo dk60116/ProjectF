@@ -200,6 +200,10 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly List<RendererPropertyBlockState> selectedEditableTintStates = new List<RendererPropertyBlockState>();
     private InstallationObject selectedEditableInstallation;
     private Vector2Int selectedEditableAnchorCoordinate;
+    private bool isMapEditTrainDragTracking;
+    private bool mapEditTrainDragMoved;
+    private Vector2 mapEditTrainDragStartPosition;
+    private Train mapEditTrainDragTrain;
     private InstallationEditSession activeInstallationEditSession;
     private readonly Stack<PackedInstallationSession> packedInstallationHistory = new Stack<PackedInstallationSession>();
     private bool mapEditModeActive;
@@ -1571,7 +1575,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (mapEditRotationButton != null)
         {
-            mapEditRotationButton.interactable = mapEditModeActive && !IsSelectedEditableRail();
+            mapEditRotationButton.interactable = CanUseMapEditRotationButton();
         }
 
         if (mapEditCompleteButton != null)
@@ -1607,9 +1611,36 @@ public class InstallationPlacementController : MonoBehaviour
                && CanPackEditableInstallation(selectedEditableInstallation);
     }
 
-    private bool IsSelectedEditableRail()
+    private bool IsSelectedEditableSelectionOnly()
     {
-        return selectedEditableInstallation is Railload;
+        return ShouldSelectOnlyInMapEdit(selectedEditableInstallation);
+    }
+
+    private bool CanUseMapEditRotationButton()
+    {
+        if (!mapEditModeActive)
+        {
+            return false;
+        }
+
+        if (!IsEditingInstallation() && CanRotateSelectedSteamTrain())
+        {
+            return true;
+        }
+
+        return !IsSelectedEditableSelectionOnly();
+    }
+
+    private bool CanRotateSelectedSteamTrain()
+    {
+        if (!(selectedEditableInstallation is SteamTrain steamTrain)
+            || !steamTrain.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        return steamTrain.TryGetCurrentRailPose(out _, out _, out _, out Vector2 tangent)
+               && tangent.sqrMagnitude > 0.0001f;
     }
 
     private bool CanPackEditableInstallation(InstallationObject installationObject)
@@ -1656,7 +1687,49 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void UpdateMapEditSelectionInput()
     {
-        if (!TryGetPrimaryPointerDown(out Vector2 pointerPosition) || IsPointerOverBlockingUi(pointerPosition))
+        if (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+            switch (touch.phase)
+            {
+                case TouchPhase.Began:
+                    BeginMapEditSelectionPointerTracking(touch.position, IsPointerOverBlockingUi(touch.position));
+                    break;
+                case TouchPhase.Moved:
+                case TouchPhase.Stationary:
+                    ContinueMapEditSelectionPointerTracking(touch.position);
+                    break;
+                case TouchPhase.Ended:
+                    EndMapEditSelectionPointerTracking();
+                    break;
+                case TouchPhase.Canceled:
+                    EndMapEditSelectionPointerTracking();
+                    break;
+            }
+
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            BeginMapEditSelectionPointerTracking(Input.mousePosition, IsPointerOverBlockingUi(Input.mousePosition));
+        }
+
+        if (Input.GetMouseButton(0))
+        {
+            ContinueMapEditSelectionPointerTracking(Input.mousePosition);
+        }
+
+        if (Input.GetMouseButtonUp(0))
+        {
+            EndMapEditSelectionPointerTracking();
+        }
+    }
+
+    private void BeginMapEditSelectionPointerTracking(Vector2 pointerPosition, bool startedOverUi)
+    {
+        ResetMapEditTrainDragTracking();
+        if (startedOverUi)
         {
             return;
         }
@@ -1668,6 +1741,7 @@ public class InstallationPlacementController : MonoBehaviour
                 if (ShouldSelectOnlyInMapEdit(installationObject))
                 {
                     SelectEditableInstallation(installationObject, anchorCoordinate);
+                    BeginMapEditTrainDragTracking(installationObject as Train, pointerPosition);
                     return;
                 }
 
@@ -1685,9 +1759,141 @@ public class InstallationPlacementController : MonoBehaviour
         ClearEditableInstallationSelection();
     }
 
+    private void BeginMapEditTrainDragTracking(Train train, Vector2 pointerPosition)
+    {
+        if (train == null
+            || !train.gameObject.activeInHierarchy
+            || !train.TryGetCurrentRailPose(out _, out _, out _, out _))
+        {
+            return;
+        }
+
+        isMapEditTrainDragTracking = true;
+        mapEditTrainDragMoved = false;
+        mapEditTrainDragStartPosition = pointerPosition;
+        mapEditTrainDragTrain = train;
+    }
+
+    private void ContinueMapEditSelectionPointerTracking(Vector2 pointerPosition)
+    {
+        if (!isMapEditTrainDragTracking
+            || mapEditTrainDragTrain == null
+            || !mapEditTrainDragTrain.gameObject.activeInHierarchy)
+        {
+            ResetMapEditTrainDragTracking();
+            return;
+        }
+
+        if (!mapEditTrainDragMoved)
+        {
+            float threshold = Mathf.Max(1f, installRotateTapThreshold);
+            if (Vector2.Distance(mapEditTrainDragStartPosition, pointerPosition) < threshold)
+            {
+                return;
+            }
+
+            mapEditTrainDragMoved = true;
+        }
+
+        TryMoveSelectedTrainAlongRail(pointerPosition, mapEditTrainDragTrain);
+    }
+
+    private void EndMapEditSelectionPointerTracking()
+    {
+        ResetMapEditTrainDragTracking();
+    }
+
+    private void ResetMapEditTrainDragTracking()
+    {
+        isMapEditTrainDragTracking = false;
+        mapEditTrainDragMoved = false;
+        mapEditTrainDragStartPosition = Vector2.zero;
+        mapEditTrainDragTrain = null;
+    }
+
+    private bool TryMoveSelectedTrainAlongRail(Vector2 pointerPosition, Train train)
+    {
+        if (train == null
+            || train != selectedEditableInstallation
+            || !train.gameObject.activeInHierarchy
+            || !train.TryGetPlacementRuntime(out _, out _)
+            || !TryGetTrainDragRailSample(pointerPosition, out TrainPlacementRailSample railSample))
+        {
+            return false;
+        }
+
+        float maxRailDistance = RailAlignedPlacementMaxDistance;
+        if (railSample.SqrDistance > maxRailDistance * maxRailDistance)
+        {
+            return false;
+        }
+
+        Vector2 referenceFacing = new Vector2(train.transform.forward.x, train.transform.forward.z);
+        if (train.TryGetCurrentRailPose(out _, out _, out _, out Vector2 currentRailTangent)
+            && currentRailTangent.sqrMagnitude > 0.0001f)
+        {
+            referenceFacing = currentRailTangent;
+        }
+
+        Vector2 facing = ResolveTrainPlacementFacingTangent(railSample.Tangent, referenceFacing);
+        if (facing.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector3 targetPosition = train.transform.position;
+        targetPosition.x = railSample.Point.x;
+        targetPosition.z = railSample.Point.y;
+        Quaternion targetRotation = Quaternion.LookRotation(
+            new Vector3(facing.x, 0f, facing.y),
+            Vector3.up);
+        if (!CanPlaceTrainAtPose(train, targetPosition, targetRotation, train)
+            || !train.TryApplyRailPose(
+                railSample.Rail,
+                railSample.DistanceAlongPath,
+                railSample.Point,
+                facing))
+        {
+            return false;
+        }
+
+        Physics.SyncTransforms();
+        train.ClearTrainConnections();
+        ConnectTrainToNearbyTrains(train);
+        if (train.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+        {
+            selectedEditableAnchorCoordinate = anchorCoordinate;
+        }
+
+        RefreshMapEditButtonState();
+        return true;
+    }
+
+    private bool TryGetTrainDragRailSample(Vector2 pointerPosition, out TrainPlacementRailSample railSample)
+    {
+        railSample = default;
+        Camera targetCamera = ResolveInstallPreviewCamera();
+        if (targetCamera == null
+            || !TryGetGroundPlanePoint(targetCamera.ScreenPointToRay(pointerPosition), out Vector3 worldPoint))
+        {
+            return false;
+        }
+
+        Vector2 referencePoint = new Vector2(worldPoint.x, worldPoint.z);
+        Vector2Int centerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(referencePoint.x),
+            Mathf.RoundToInt(referencePoint.y));
+        int searchCells = Mathf.CeilToInt(Mathf.Max(1f, TrainPlacementRailSearchRadius));
+        return TryFindNearestTrainPlacementRailSampleAroundCoordinate(
+            centerCoordinate,
+            referencePoint,
+            searchCells,
+            out railSample);
+    }
+
     private static bool ShouldSelectOnlyInMapEdit(InstallationObject installationObject)
     {
-        return installationObject is Railload;
+        return installationObject is Railload || installationObject is Train;
     }
 
     private bool TryGetEditableInstallationAtPointer(Vector2 pointerPosition, out InstallationObject installationObject, out Vector2Int anchorCoordinate)
@@ -1711,6 +1917,11 @@ public class InstallationPlacementController : MonoBehaviour
                 return true;
             }
 
+            if (TryGetEditableTrainAtRailPointer(ray, maxDistance, clickedBlock, out installationObject, out anchorCoordinate))
+            {
+                return true;
+            }
+
             if (TryGetEditableInstallationAtBlock(clickedBlock, out installationObject, out anchorCoordinate))
             {
                 return true;
@@ -1718,6 +1929,115 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return TryGetEditableInstallationFromRaycast(ray, maxDistance, out installationObject, out anchorCoordinate);
+    }
+
+    private bool TryGetEditableTrainAtRailPointer(
+        Ray ray,
+        float maxDistance,
+        Block clickedBlock,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+        if (clickedBlock == null || !(clickedBlock.MapObject is Railload))
+        {
+            return false;
+        }
+
+        if (TryGetEditableTrainFromRaycast(ray, maxDistance, out Train raycastTrain, out Vector2Int raycastTrainAnchorCoordinate))
+        {
+            installationObject = raycastTrain;
+            anchorCoordinate = raycastTrainAnchorCoordinate;
+            return true;
+        }
+
+        return TryGetEditableTrainAtCoordinate(clickedBlock.Coordinate, out installationObject, out anchorCoordinate);
+    }
+
+    private bool TryGetEditableTrainFromRaycast(
+        Ray ray,
+        float maxDistance,
+        out Train train,
+        out Vector2Int anchorCoordinate)
+    {
+        train = null;
+        anchorCoordinate = Vector2Int.zero;
+
+        int hitCount = Physics.RaycastNonAlloc(
+            ray,
+            pointerRaycastHits,
+            Mathf.Max(0f, maxDistance),
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hitCount <= 0)
+        {
+            return false;
+        }
+
+        Train bestTrain = null;
+        Vector2Int bestAnchorCoordinate = Vector2Int.zero;
+        float bestDistance = float.PositiveInfinity;
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit hit = pointerRaycastHits[i];
+            Collider hitCollider = hit.collider;
+            if (hitCollider == null || hit.distance >= bestDistance)
+            {
+                continue;
+            }
+
+            Train candidate = hitCollider.GetComponentInParent<Train>();
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.TryGetPlacementRuntime(out Vector2Int candidateAnchorCoordinate, out _))
+            {
+                continue;
+            }
+
+            bestTrain = candidate;
+            bestAnchorCoordinate = candidateAnchorCoordinate;
+            bestDistance = hit.distance;
+        }
+
+        if (bestTrain == null)
+        {
+            return false;
+        }
+
+        train = bestTrain;
+        anchorCoordinate = bestAnchorCoordinate;
+        return true;
+    }
+
+    private bool TryGetEditableTrainAtCoordinate(
+        Vector2Int coordinate,
+        out InstallationObject installationObject,
+        out Vector2Int anchorCoordinate)
+    {
+        installationObject = null;
+        anchorCoordinate = Vector2Int.zero;
+
+        mapEditRailOccupancyTrainScratch.Clear();
+        Train.CollectActiveRuntimeTrains(mapEditRailOccupancyTrainScratch);
+        for (int i = 0; i < mapEditRailOccupancyTrainScratch.Count; i++)
+        {
+            Train train = mapEditRailOccupancyTrainScratch[i];
+            if (train == null
+                || !train.TryGetPlacementRuntime(out Vector2Int trainAnchorCoordinate, out _)
+                || !CoordinateListContains(train.RuntimeOccupiedCoordinates, coordinate))
+            {
+                continue;
+            }
+
+            installationObject = train;
+            anchorCoordinate = trainAnchorCoordinate;
+            mapEditRailOccupancyTrainScratch.Clear();
+            return true;
+        }
+
+        mapEditRailOccupancyTrainScratch.Clear();
+        return false;
     }
 
     private bool TryGetEditableBelt2FAtPointerBlock(
@@ -1937,6 +2257,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ClearEditableInstallationSelection()
     {
+        ResetMapEditTrainDragTracking();
         SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
         SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
         ClearSelectedEditableTint();
@@ -1961,6 +2282,7 @@ public class InstallationPlacementController : MonoBehaviour
             ClearSelectedEditableTint();
             selectedEditableInstallation = null;
             selectedEditableAnchorCoordinate = Vector2Int.zero;
+            ResetMapEditTrainDragTracking();
             RefreshInstallOrEditWorkableRangeVisualRequest();
             return;
         }
@@ -2341,6 +2663,62 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return robotArms.Length > 0;
+    }
+
+    private static void NormalizeInstallPreviewNativeRendering(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return;
+        }
+
+        if (preview is ConveyorBelt conveyorBelt)
+        {
+            conveyorBelt.SetVirtualRenderingSuppressed(false);
+        }
+
+        Renderer[] renderers = preview.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (!ShouldRestoreInstallPreviewRenderer(renderer))
+            {
+                continue;
+            }
+
+            renderer.forceRenderingOff = false;
+            renderer.enabled = true;
+        }
+    }
+
+    private static bool ShouldRestoreInstallPreviewRenderer(Renderer renderer)
+    {
+        return renderer != null
+               && renderer.gameObject.activeInHierarchy
+               && !(renderer is ParticleSystemRenderer)
+               && !(renderer is LineRenderer)
+               && !(renderer is SpriteRenderer)
+               && renderer.GetComponentInParent<WorkableObjectRangeVisual>() == null
+               && !IsPipeFluidDisplayRenderer(renderer)
+               && RendererHasAnyMaterial(renderer);
+    }
+
+    private static bool IsPipeFluidDisplayRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        if (renderer.name == "Fluid DP")
+        {
+            return true;
+        }
+
+        Material sharedMaterial = renderer.sharedMaterial;
+        return sharedMaterial != null
+               && sharedMaterial.name != null
+               && sharedMaterial.name.StartsWith("M_Fluid", System.StringComparison.Ordinal);
     }
 
     private static void DisablePreviewAnimators(Component previewRoot)
@@ -4463,6 +4841,7 @@ public class InstallationPlacementController : MonoBehaviour
         GameManager.Instance?.SetMapEditActive(mapEditModeActive);
         if (!mapEditModeActive)
         {
+            ResetMapEditTrainDragTracking();
             SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
             SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
             ClearSelectedEditableTint();
@@ -4871,6 +5250,11 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        if (TryRotateSelectedSteamTrain())
+        {
+            return;
+        }
+
         if (activeInstallPreview == null)
         {
             CleanupInstallPreviewReferences();
@@ -4884,6 +5268,36 @@ public class InstallationPlacementController : MonoBehaviour
 
         ResetPreviewPointerTracking();
         RotateInstallPreviewClockwise();
+    }
+
+    private bool TryRotateSelectedSteamTrain()
+    {
+        if (!mapEditModeActive
+            || IsEditingInstallation()
+            || !(selectedEditableInstallation is SteamTrain steamTrain)
+            || !steamTrain.TryGetCurrentRailPose(
+                out Railload rail,
+                out float distanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent)
+            || tangent.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        if (!steamTrain.TryApplyRailPose(rail, distanceAlongPath, pathPoint, -tangent))
+        {
+            return false;
+        }
+
+        Physics.SyncTransforms();
+        if (steamTrain.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+        {
+            selectedEditableAnchorCoordinate = anchorCoordinate;
+        }
+
+        RefreshMapEditButtonState();
+        return true;
     }
 
     private void HandleInstallCompleteClicked()
@@ -14447,7 +14861,7 @@ public class InstallationPlacementController : MonoBehaviour
 
             Vector3 desiredPosition = GetPlacementWorldPositionFromAnchorCoordinate(
                 anchorCoordinate,
-                preview,
+                desiredPrefab,
                 normalizedResolvedQuarterTurns);
             if ((preview.transform.position - desiredPosition).sqrMagnitude > 0.0001f)
             {
@@ -14564,6 +14978,8 @@ public class InstallationPlacementController : MonoBehaviour
             activeInstallPreview = replacementPreview;
             installPreviewQuarterTurns = resolvedQuarterTurns;
             installPreviewConveyorVariantMode = GetConveyorPreviewVariantMode(replacementPreview);
+            NormalizeInstallPreviewNativeRendering(replacementPreview);
+            ResetInstallPreviewVisualSyncState();
             RefreshInstallPreviewSelectionVisuals();
         }
 
@@ -15557,6 +15973,7 @@ public class InstallationPlacementController : MonoBehaviour
         ApplyConveyorVariantSharedInstallationSettings(preview);
         ApplyPipeVariantSharedMapObjectSettings(preview);
         bool containsRobotArmPreview = ConfigurePreviewOnlyRuntimeRendering(preview);
+        NormalizeInstallPreviewNativeRendering(preview);
 
         MonoBehaviour[] behaviours = preview.GetComponentsInChildren<MonoBehaviour>(true);
         for (int i = 0; i < behaviours.Length; i++)
@@ -17779,7 +18196,8 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        if (!wasCanceled && !previewPointerStartedOverUi)
+        bool endedOverUi = !wasCanceled && IsPointerOverBlockingUi(pointerPosition);
+        if (!wasCanceled && !previewPointerStartedOverUi && !endedOverUi)
         {
             if (IsEditingInstallation())
             {
@@ -17924,8 +18342,9 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        bool preservePreviewTransformForEdit = IsEditingInstallation();
-        Vector3 preservedEditPreviewPosition = activeInstallPreview.transform.position;
+        bool preservePreviewTransformOnRotation =
+            ShouldPreserveInstallPreviewTransformOnRotation(activeInstallPreview);
+        Vector3 preservedPreviewPosition = activeInstallPreview.transform.position;
         int previousQuarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
         Block anchorBlock = null;
         bool hasAnchorBlock = TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate)
@@ -18049,7 +18468,7 @@ public class InstallationPlacementController : MonoBehaviour
                 activeInstallPreview,
                 nextQuarterTurns);
             shouldReanchorRotatedMultiCellPreview = hasAnchorBlock
-                                                   && !preservePreviewTransformForEdit
+                                                   && !preservePreviewTransformOnRotation
                                                    && !IsTrainSource(ResolveInstallPreviewPlacementSource(activeInstallPreview));
         }
 
@@ -18117,9 +18536,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
         ConfigurePreviewOnlyRuntimeRendering(activeInstallPreview);
 
-        if (preservePreviewTransformForEdit)
+        if (preservePreviewTransformOnRotation)
         {
-            activeInstallPreview.transform.position = preservedEditPreviewPosition;
+            activeInstallPreview.transform.position = preservedPreviewPosition;
             MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
             if (TryResolveInstallPreviewAnchorCoordinateFromTransform(
                     activeInstallPreview,
@@ -18147,10 +18566,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        if (!hasAnchorBlock || previousAnchorCoordinate != anchorCoordinate)
-        {
-            RefreshPreviewRangeVisualsIfNeeded(activeInstallPreview);
-        }
+        RefreshPreviewRangeVisualsIfNeeded(activeInstallPreview);
         RefreshUtilityPolePreviewWires();
         RefreshInstallPreviewAreaMarkers(activeInstallPreview);
         RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
@@ -18159,7 +18575,48 @@ public class InstallationPlacementController : MonoBehaviour
             true);
         RefreshPipePreviewVariantsAroundActivePreview(
             hasAnchorBlock ? anchorCoordinate : (Vector2Int?)null);
+        RefreshTrainInstallPreviewTints();
+        NormalizeInstallPreviewNativeRendering(activeInstallPreview);
+        ResetInstallPreviewVisualSyncState();
+        SetInstallPreviewSelectionVisual(activeInstallPreview, true);
         InvalidateInstallGridPreview();
+    }
+
+    private bool ShouldPreserveInstallPreviewTransformOnRotation(MapObject preview)
+    {
+        if (preview == null)
+        {
+            return false;
+        }
+
+        MapObject placementSource = ResolveInstallPreviewPlacementSource(preview);
+        return !IsTrainSource(placementSource)
+               && !IsBelt2F(placementSource)
+               && !IsSteamGeneratorSource(placementSource);
+    }
+
+    private static bool RendererHasAnyMaterial(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        Material[] materials = renderer.sharedMaterials;
+        if (materials == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < materials.Length; i++)
+        {
+            if (materials[i] != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryRotateWaterPumpPreviewAtShore(
@@ -18369,13 +18826,14 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        List<Vector2Int> previousOffsets = GetFootprintLocalOffsets(
+        // Reanchor against the same visual cells used by world-position placement.
+        List<Vector2Int> previousOffsets = GetPlacementVisualLocalOffsets(
             footprintSource,
             normalizedPreviousQuarterTurns);
-        List<Vector2Int> targetOffsets = GetFootprintLocalOffsets(
+        List<Vector2Int> targetOffsets = GetPlacementVisualLocalOffsets(
             footprintSource,
             normalizedTargetQuarterTurns);
-        if (previousOffsets.Count <= 1 || targetOffsets.Count <= 1)
+        if (previousOffsets.Count <= 0 || targetOffsets.Count <= 0)
         {
             return false;
         }
@@ -20596,7 +21054,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsInstallGridModeActive()
     {
-        return IsInstallationModeActive() || mapEditModeActive;
+        return IsInstallationModeActive();
     }
 
     private void InvalidateInstallGrid()
@@ -30400,29 +30858,6 @@ public class InstallationPlacementController : MonoBehaviour
 
         pointerPosition = Input.mousePosition;
         return true;
-    }
-
-    private bool TryGetPrimaryPointerDown(out Vector2 pointerPosition)
-    {
-        pointerPosition = Vector2.zero;
-
-        if (Input.touchCount > 0)
-        {
-            Touch touch = Input.GetTouch(0);
-            if (touch.phase == TouchPhase.Began)
-            {
-                pointerPosition = touch.position;
-                return true;
-            }
-        }
-
-        if (Input.GetMouseButtonDown(0))
-        {
-            pointerPosition = Input.mousePosition;
-            return true;
-        }
-
-        return false;
     }
 
     private bool IsPrimaryPointerHeld()

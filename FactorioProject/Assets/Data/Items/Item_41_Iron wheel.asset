@@ -10,14 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_41_Wooden wheel
+  m_Name: Item_41_Iron wheel
   m_EditorClassIdentifier: 
-  itemName: Wooden wheel
-  id: 40
+  itemName: Iron wheel
+  id: 41
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
-  icon: {fileID: 21300000, guid: a9a726bb2dab04b4884802cb6f8d2cc5, type: 3}
+  icon: {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}
   interactionButtonList: []
   size: 0
   itemFilter: 0

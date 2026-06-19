@@ -26,6 +26,8 @@ public class Vehicle : InstallationObject
     public float VehicleAccelerationPerSecond => Mathf.Max(0.01f, vehicleAccelerationPerSecond);
     public float VehicleDecelerationPerSecond => Mathf.Max(0.01f, vehicleDecelerationPerSecond);
     public float VehicleMaxSpeed => Mathf.Max(0.01f, vehicleMaxSpeed);
+    public virtual float EffectiveVehicleMaxSpeed => VehicleMaxSpeed;
+    public float CurrentVehicleSpeed => Mathf.Abs(currentVehicleSignedSpeed);
     protected float CurrentVehicleSignedSpeed => currentVehicleSignedSpeed;
 
     public virtual void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
@@ -34,11 +36,17 @@ public class Vehicle : InstallationObject
 
     protected float UpdateVehicleSignedSpeed(float inputAxis, float deltaTime)
     {
+        return UpdateVehicleSignedSpeed(inputAxis, deltaTime, VehicleMaxSpeed);
+    }
+
+    protected float UpdateVehicleSignedSpeed(float inputAxis, float deltaTime, float maxSpeed)
+    {
         float normalizedDeltaTime = Mathf.Max(0f, deltaTime);
         float normalizedInputAxis = Mathf.Clamp(inputAxis, -1f, 1f);
         bool hasInput = Mathf.Abs(normalizedInputAxis) > 0.001f;
+        float resolvedMaxSpeed = Mathf.Max(0.01f, maxSpeed);
         float targetSpeed = hasInput
-            ? normalizedInputAxis * VehicleMaxSpeed
+            ? normalizedInputAxis * resolvedMaxSpeed
             : 0f;
 
         float speedChangePerSecond = hasInput
@@ -54,7 +62,19 @@ public class Vehicle : InstallationObject
             currentVehicleSignedSpeed = 0f;
         }
 
+        ClampCurrentVehicleSignedSpeed(resolvedMaxSpeed);
         return currentVehicleSignedSpeed;
+    }
+
+    protected void ClampCurrentVehicleSignedSpeed(float maxAbsSpeed)
+    {
+        float resolvedMaxSpeed = Mathf.Max(0.01f, maxAbsSpeed);
+        if (Mathf.Abs(currentVehicleSignedSpeed) <= resolvedMaxSpeed)
+        {
+            return;
+        }
+
+        currentVehicleSignedSpeed = Mathf.Sign(currentVehicleSignedSpeed) * resolvedMaxSpeed;
     }
 
     protected void ResetVehicleMotion()

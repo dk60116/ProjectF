@@ -69,6 +69,7 @@ MonoBehaviour:
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
+  excludeFromTerrainPersistence: 0
   storedFluidLiters: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
@@ -122,6 +123,10 @@ MonoBehaviour:
     count: 4
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 4
+  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+    count: 3
+  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+    count: 3
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 2
@@ -167,9 +172,13 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: c0075e53760e0bc4e8a7625ac98e2167, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 29620dee78689b74d8666d2dcf035334, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: ad919f4ddfe2a924194a2ddac61bf5af, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 288b9f932dd1bc740bf07478a3843894, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 228fcd45b59e4994d8b5f8ee23dc4595, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 61dfdca30dedb50479bbba3d4602c4b6, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: c9fc3865549db61429331f9f234e219f, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}

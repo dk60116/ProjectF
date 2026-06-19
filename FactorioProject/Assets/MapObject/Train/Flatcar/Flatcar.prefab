@@ -178,7 +178,7 @@ MonoBehaviour:
   id: 0
   objectName: Flatcar
   objId: 44
-  itemDefinition: {fileID: 11400000, guid: 5f4ebaa8f62b6204d81c556765ae74da, type: 2}
+  itemDefinition: {fileID: 11400000, guid: b130d0f2cf797d447a955d9044573f35, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -203,8 +203,8 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   vehicleAccelerationPerSecond: 1.5
-  vehicleDecelerationPerSecond: 1.5
   vehicleMaxSpeed: 4
+  vehicleDecelerationPerSecond: 1.5
   playerPoint:
   - {fileID: 6814276447122548450}
   - {fileID: 2799771002276875272}
@@ -219,6 +219,7 @@ MonoBehaviour:
   trainConnectionSnapMaxDistance: 0.35
   trainConnectionMaxLateralDistance: 0.45
   trainConnectionMinForwardDot: 0.5
+  trainMass: 5
   railRotationInterpolationSpeed: 10
   itemPointList:
   - {fileID: 1973605188877043926}

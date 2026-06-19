@@ -5,6 +5,8 @@ public class Train : Vehicle
 {
     private const float MinConnectionDistance = 0.05f;
     private const float DefaultConnectionFallbackDistance = 1.4f;
+    private const float TrainLoadSpeedReductionPerMass = 0.01f;
+    private const float MinTrainLoadSpeedMultiplier = 0.01f;
 
     private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
 
@@ -18,6 +20,8 @@ public class Train : Vehicle
     private float trainConnectionMaxLateralDistance = 0.45f;
     [SerializeField, Range(0f, 1f)]
     private float trainConnectionMinForwardDot = 0.5f;
+    [SerializeField, Min(0.01f)]
+    private float trainMass = 1f;
 
     private Rigidbody cachedTrainRigidbody;
     private Railload currentRail;
@@ -31,6 +35,11 @@ public class Train : Vehicle
     public float ConnectionSnapMaxDistance => Mathf.Max(MinConnectionDistance, trainConnectionSnapMaxDistance);
     public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
+    public float TrainMass => Mathf.Max(0.01f, trainMass);
+    public float TrainLoadSpeedMultiplier => Mathf.Clamp(
+        1f - TrainMass * TrainLoadSpeedReductionPerMass,
+        MinTrainLoadSpeedMultiplier,
+        1f);
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
 
     public void RotateTrainWheelsByDistance(float signedDistance)
@@ -229,7 +238,7 @@ public class Train : Vehicle
         TryApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent);
     }
 
-    public bool TryApplyRailPose(
+    public virtual bool TryApplyRailPose(
         Railload rail,
         float distanceAlongPath,
         Vector2 railPoint,
@@ -366,4 +375,12 @@ public class Train : Vehicle
             RuntimePlacementSequence);
         RobotArm.WakeAroundCoordinate(coordinate);
     }
+
+#if UNITY_EDITOR
+    protected override void OnValidate()
+    {
+        base.OnValidate();
+        trainMass = Mathf.Max(0.01f, trainMass);
+    }
+#endif
 }

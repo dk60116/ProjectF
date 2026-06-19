@@ -513,6 +513,7 @@ MonoBehaviour:
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
+  excludeFromTerrainPersistence: 0
   storedFluidLiters: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
@@ -571,9 +572,9 @@ MonoBehaviour:
     count: 2
   - itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 29620dee78689b74d8666d2dcf035334, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: ad919f4ddfe2a924194a2ddac61bf5af, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 288b9f932dd1bc740bf07478a3843894, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 228fcd45b59e4994d8b5f8ee23dc4595, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}

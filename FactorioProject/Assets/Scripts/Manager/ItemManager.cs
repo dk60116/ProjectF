@@ -115,83 +115,7 @@ public class ItemManager : MonoBehaviour
             return;
         }
 
-        if (itemDefinitions == null)
-        {
-            itemDefinitions = new List<ItemDefinition>();
-        }
-
-        Dictionary<string, string> itemFolderLookup = BuildItemFolderLookup();
-
-        string targetDirectory = "Assets/Data/Items";
-        if (!EnsureAssetFolder(targetDirectory))
-        {
-            Debug.LogError($"ItemManager: Failed to create item definition folder at '{targetDirectory}'.");
-            return;
-        }
-
-        Dictionary<int, ItemDefinition> existingById = new Dictionary<int, ItemDefinition>();
-        for (int i = 0; i < itemDefinitions.Count; i++)
-        {
-            ItemDefinition definition = itemDefinitions[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            existingById[definition.id] = definition;
-        }
-
-        for (int i = 0; i < items.Count; i++)
-        {
-            ItemSet itemSet = items[i];
-            if (itemSet.id < 0)
-            {
-                continue;
-            }
-
-            if (!existingById.TryGetValue(itemSet.id, out ItemDefinition definition) || definition == null)
-            {
-                definition = ScriptableObject.CreateInstance<ItemDefinition>();
-                string safeName = string.IsNullOrWhiteSpace(itemSet.name) ? $"Item_{itemSet.id}" : itemSet.name;
-                safeName = SanitizeAssetFileName(safeName);
-                string assetPath = AssetDatabase.GenerateUniqueAssetPath($"{targetDirectory}/Item_{itemSet.id}_{safeName}.asset");
-                if (string.IsNullOrWhiteSpace(assetPath))
-                {
-                    Debug.LogError($"ItemManager: Failed to generate asset path for item '{itemSet.name}' (id {itemSet.id}).");
-                    continue;
-                }
-
-                AssetDatabase.CreateAsset(definition, assetPath);
-                itemDefinitions.Add(definition);
-                existingById[itemSet.id] = definition;
-            }
-
-            definition.id = itemSet.id;
-            definition.itemName = itemSet.name;
-            definition.mapObject = FindMapObjectForItem(itemSet.name, GetItemFolderForName(itemSet.name, itemFolderLookup));
-
-            Mesh definitionPortableMesh = itemSet.portableMesh;
-            Material definitionPortableMaterial = itemSet.portableMat;
-            TryOverrideInstallationPortableAssets(
-                itemSet.name,
-                GetItemFolderForName(itemSet.name, itemFolderLookup),
-                GetMapObjectPrefabRoot(definition.mapObject),
-                ref definitionPortableMesh,
-                ref definitionPortableMaterial);
-            definition.portableMesh = definitionPortableMesh;
-            definition.portableMat = definitionPortableMaterial;
-            definition.icon = itemSet.icon;
-            definition.size = (uint)Mathf.Max(0, itemSet.size);
-            BindMapObjectDefinition(definition);
-            TryBindItemDefinitionToPrefab(itemSet.prefab, definition);
-
-            EditorUtility.SetDirty(definition);
-        }
-
-        SortItemDefinitionsById(itemDefinitions);
-        EditorUtility.SetDirty(this);
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
+        RecreateItemDefinitionsFromItems(items);
     }
 
     [ContextMenu("Rebuild Items From Assets (Definitions)")]
@@ -2352,28 +2276,6 @@ public class ItemManager : MonoBehaviour
 
         Dictionary<string, string> itemFolderLookup = BuildItemFolderLookup();
         List<ItemDefinition> existingDefinitions = CollectExistingItemDefinitions(targetDirectory);
-        Dictionary<int, ItemDefinition> existingDefinitionsById = new Dictionary<int, ItemDefinition>();
-        Dictionary<string, ItemDefinition> existingDefinitionsByName = new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < existingDefinitions.Count; i++)
-        {
-            ItemDefinition existingDefinition = existingDefinitions[i];
-            if (existingDefinition == null)
-            {
-                continue;
-            }
-
-            if (existingDefinition.id >= 0 && !existingDefinitionsById.ContainsKey(existingDefinition.id))
-            {
-                existingDefinitionsById[existingDefinition.id] = existingDefinition;
-            }
-
-            string lookupName = GetItemDefinitionLookupName(existingDefinition);
-            if (!string.IsNullOrWhiteSpace(lookupName) && !existingDefinitionsByName.ContainsKey(lookupName))
-            {
-                existingDefinitionsByName[lookupName] = existingDefinition;
-            }
-        }
-
         List<ItemDefinition> rebuiltDefinitions = new List<ItemDefinition>();
         HashSet<ItemDefinition> usedDefinitions = new HashSet<ItemDefinition>();
 
@@ -2387,8 +2289,8 @@ public class ItemManager : MonoBehaviour
 
             ItemDefinition definition = ResolveExistingItemDefinitionForRebuild(
                 itemSet,
-                existingDefinitionsById,
-                existingDefinitionsByName,
+                targetDirectory,
+                existingDefinitions,
                 usedDefinitions);
             if (definition == null)
             {
@@ -2420,14 +2322,9 @@ public class ItemManager : MonoBehaviour
             definition.portableMesh = definitionPortableMesh;
             definition.portableMat = definitionPortableMaterial;
             definition.icon = itemSet.icon;
+            definition.size = (uint)Mathf.Max(0, itemSet.size);
             rebuiltDefinitions.Add(definition);
             usedDefinitions.Add(definition);
-            existingDefinitionsById[itemSet.id] = definition;
-            string definitionLookupName = GetItemDefinitionLookupName(definition);
-            if (!string.IsNullOrWhiteSpace(definitionLookupName))
-            {
-                existingDefinitionsByName[definitionLookupName] = definition;
-            }
 
             BindMapObjectDefinition(definition);
             TryBindItemDefinitionToPrefab(itemSet.prefab, definition);
@@ -2438,6 +2335,7 @@ public class ItemManager : MonoBehaviour
         itemDefinitions.Clear();
         itemDefinitions.AddRange(rebuiltDefinitions);
         SortItemDefinitionsById(itemDefinitions);
+        DeleteUnusedGeneratedItemDefinitions(targetDirectory, existingDefinitions, usedDefinitions);
         EditorUtility.SetDirty(this);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
@@ -2496,29 +2394,312 @@ public class ItemManager : MonoBehaviour
 
     private static ItemDefinition ResolveExistingItemDefinitionForRebuild(
         ItemSet itemSet,
-        Dictionary<int, ItemDefinition> existingDefinitionsById,
-        Dictionary<string, ItemDefinition> existingDefinitionsByName,
+        string targetDirectory,
+        List<ItemDefinition> existingDefinitions,
         HashSet<ItemDefinition> usedDefinitions)
     {
-        if (existingDefinitionsById != null
-            && existingDefinitionsById.TryGetValue(itemSet.id, out ItemDefinition byIdDefinition)
-            && byIdDefinition != null
-            && !usedDefinitions.Contains(byIdDefinition))
+        if (existingDefinitions == null || existingDefinitions.Count == 0)
         {
-            return byIdDefinition;
+            return null;
         }
 
-        string lookupName = itemSet.name?.Trim();
-        if (!string.IsNullOrWhiteSpace(lookupName)
-            && existingDefinitionsByName != null
-            && existingDefinitionsByName.TryGetValue(lookupName, out ItemDefinition byNameDefinition)
-            && byNameDefinition != null
-            && !usedDefinitions.Contains(byNameDefinition))
+        ItemDefinition bestDefinition = null;
+        int bestScore = int.MinValue;
+        for (int i = 0; i < existingDefinitions.Count; i++)
         {
-            return byNameDefinition;
+            ItemDefinition candidate = existingDefinitions[i];
+            int candidateScore = ScoreExistingItemDefinitionForRebuild(
+                candidate,
+                itemSet,
+                targetDirectory,
+                usedDefinitions);
+            if (candidateScore > bestScore)
+            {
+                bestDefinition = candidate;
+                bestScore = candidateScore;
+            }
+        }
+
+        return bestScore > int.MinValue ? bestDefinition : null;
+    }
+
+    private static int ScoreExistingItemDefinitionForRebuild(
+        ItemDefinition definition,
+        ItemSet itemSet,
+        string targetDirectory,
+        HashSet<ItemDefinition> usedDefinitions)
+    {
+        if (definition == null || (usedDefinitions != null && usedDefinitions.Contains(definition)))
+        {
+            return int.MinValue;
+        }
+
+        string itemName = itemSet.name?.Trim();
+        string definitionName = GetItemDefinitionLookupName(definition);
+        bool idMatches = definition.id == itemSet.id;
+        bool nameMatches = !string.IsNullOrWhiteSpace(itemName)
+                           && !string.IsNullOrWhiteSpace(definitionName)
+                           && string.Equals(definitionName, itemName, StringComparison.OrdinalIgnoreCase);
+        if (!idMatches && !nameMatches)
+        {
+            return int.MinValue;
+        }
+
+        string assetPath = NormalizeAssetPath(AssetDatabase.GetAssetPath(definition));
+        int score = 0;
+        if (idMatches && nameMatches)
+        {
+            score += 1000;
+        }
+        else if (nameMatches)
+        {
+            score += 700;
+        }
+        else
+        {
+            score += 300;
+        }
+
+        if (IsExpectedItemDefinitionAssetPath(assetPath, targetDirectory, itemSet.id, itemName))
+        {
+            score += 2000;
+        }
+        else if (IsGeneratedItemDefinitionAssetPath(assetPath, targetDirectory))
+        {
+            score += 100;
+        }
+
+        if (IsNumberedDuplicateAssetPath(assetPath))
+        {
+            score -= 500;
+        }
+
+        if (IsBlankGeneratedItemDefinition(definition))
+        {
+            score -= 1000;
+        }
+
+        return score;
+    }
+
+    private static void DeleteUnusedGeneratedItemDefinitions(
+        string targetDirectory,
+        List<ItemDefinition> existingDefinitions,
+        HashSet<ItemDefinition> usedDefinitions)
+    {
+        if (existingDefinitions == null || existingDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<string> deletedAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < existingDefinitions.Count; i++)
+        {
+            ItemDefinition definition = existingDefinitions[i];
+            if (definition == null || usedDefinitions.Contains(definition))
+            {
+                continue;
+            }
+
+            string assetPath = NormalizeAssetPath(AssetDatabase.GetAssetPath(definition));
+            if (!IsGeneratedItemDefinitionAssetPath(assetPath, targetDirectory)
+                || !deletedAssetPaths.Add(assetPath)
+                || !ShouldDeleteUnusedGeneratedItemDefinition(definition, usedDefinitions))
+            {
+                continue;
+            }
+
+            ItemDefinition replacementDefinition = FindUsedDefinitionWithSameIdentity(definition, usedDefinitions);
+            if (replacementDefinition != null)
+            {
+                ReplaceItemDefinitionReferencesInPrefabs(definition, replacementDefinition);
+            }
+
+            if (!AssetDatabase.DeleteAsset(assetPath))
+            {
+                Debug.LogWarning($"ItemManager: Failed to delete duplicate item definition at '{assetPath}'.");
+            }
+        }
+    }
+
+    private static bool ShouldDeleteUnusedGeneratedItemDefinition(
+        ItemDefinition definition,
+        HashSet<ItemDefinition> usedDefinitions)
+    {
+        return IsBlankGeneratedItemDefinition(definition)
+               || HasUsedDefinitionWithSameIdentity(definition, usedDefinitions);
+    }
+
+    private static bool HasUsedDefinitionWithSameIdentity(
+        ItemDefinition definition,
+        HashSet<ItemDefinition> usedDefinitions)
+    {
+        return FindUsedDefinitionWithSameIdentity(definition, usedDefinitions) != null;
+    }
+
+    private static ItemDefinition FindUsedDefinitionWithSameIdentity(
+        ItemDefinition definition,
+        HashSet<ItemDefinition> usedDefinitions)
+    {
+        if (definition == null || usedDefinitions == null)
+        {
+            return null;
+        }
+
+        string definitionName = definition.itemName?.Trim();
+        foreach (ItemDefinition usedDefinition in usedDefinitions)
+        {
+            if (usedDefinition == null || usedDefinition == definition)
+            {
+                continue;
+            }
+
+            string usedName = usedDefinition.itemName?.Trim();
+            bool sameName = !string.IsNullOrWhiteSpace(definitionName)
+                            && !string.IsNullOrWhiteSpace(usedName)
+                            && string.Equals(definitionName, usedName, StringComparison.OrdinalIgnoreCase);
+            if (sameName)
+            {
+                return usedDefinition;
+            }
         }
 
         return null;
+    }
+
+    private static void ReplaceItemDefinitionReferencesInPrefabs(
+        ItemDefinition oldDefinition,
+        ItemDefinition newDefinition)
+    {
+        if (oldDefinition == null || newDefinition == null || oldDefinition == newDefinition)
+        {
+            return;
+        }
+
+        string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" });
+        for (int i = 0; i < prefabGuids.Length; i++)
+        {
+            string prefabPath = AssetDatabase.GUIDToAssetPath(prefabGuids[i]);
+            if (string.IsNullOrWhiteSpace(prefabPath))
+            {
+                continue;
+            }
+
+            GameObject prefabRoot = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (prefabRoot == null)
+            {
+                continue;
+            }
+
+            bool changed = false;
+            Component[] components = prefabRoot.GetComponentsInChildren<Component>(true);
+            for (int componentIndex = 0; componentIndex < components.Length; componentIndex++)
+            {
+                changed |= ReplaceItemDefinitionReferences(components[componentIndex], oldDefinition, newDefinition);
+            }
+
+            if (!changed)
+            {
+                continue;
+            }
+
+            EditorUtility.SetDirty(prefabRoot);
+            PrefabUtility.SavePrefabAsset(prefabRoot);
+        }
+    }
+
+    private static bool ReplaceItemDefinitionReferences(
+        UnityEngine.Object target,
+        ItemDefinition oldDefinition,
+        ItemDefinition newDefinition)
+    {
+        if (target == null || oldDefinition == null || newDefinition == null)
+        {
+            return false;
+        }
+
+        SerializedObject serializedObject = new SerializedObject(target);
+        SerializedProperty property = serializedObject.GetIterator();
+        bool changed = false;
+        bool enterChildren = true;
+        while (property.NextVisible(enterChildren))
+        {
+            enterChildren = false;
+            if (property.propertyType != SerializedPropertyType.ObjectReference
+                || property.objectReferenceValue != oldDefinition)
+            {
+                continue;
+            }
+
+            property.objectReferenceValue = newDefinition;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(target);
+        }
+
+        return changed;
+    }
+
+    private static bool IsBlankGeneratedItemDefinition(ItemDefinition definition)
+    {
+        return definition != null
+               && string.IsNullOrWhiteSpace(definition.itemName)
+               && definition.id == 0
+               && definition.mapObject == null
+               && definition.portableMesh == null
+               && definition.portableMat == null
+               && definition.icon == null
+               && (definition.interactionButtonList == null || definition.interactionButtonList.Count == 0);
+    }
+
+    private static bool IsExpectedItemDefinitionAssetPath(
+        string assetPath,
+        string targetDirectory,
+        int itemId,
+        string itemName)
+    {
+        return !string.IsNullOrWhiteSpace(assetPath)
+               && string.Equals(
+                   assetPath,
+                   GetExpectedItemDefinitionAssetPath(targetDirectory, itemId, itemName),
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetExpectedItemDefinitionAssetPath(string targetDirectory, int itemId, string itemName)
+    {
+        string safeName = string.IsNullOrWhiteSpace(itemName) ? $"Item_{itemId}" : itemName;
+        return $"{NormalizeAssetPath(targetDirectory)}/Item_{itemId}_{SanitizeAssetFileName(safeName)}.asset";
+    }
+
+    private static bool IsGeneratedItemDefinitionAssetPath(string assetPath, string targetDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return false;
+        }
+
+        string normalizedTargetDirectory = NormalizeAssetPath(targetDirectory);
+        string fileName = Path.GetFileNameWithoutExtension(assetPath);
+        return assetPath.StartsWith($"{normalizedTargetDirectory}/", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(Path.GetExtension(assetPath), ".asset", StringComparison.OrdinalIgnoreCase)
+               && !string.IsNullOrWhiteSpace(fileName)
+               && fileName.StartsWith("Item_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsNumberedDuplicateAssetPath(string assetPath)
+    {
+        string fileName = Path.GetFileNameWithoutExtension(assetPath);
+        return !string.IsNullOrWhiteSpace(fileName)
+               && fileName.EndsWith(" 1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeAssetPath(string assetPath)
+    {
+        return string.IsNullOrWhiteSpace(assetPath) ? string.Empty : assetPath.Replace("\\", "/");
     }
 
     private static Dictionary<string, ItemDefinition> BuildExistingItemDefinitionLookupByName()

@@ -230,7 +230,7 @@ MonoBehaviour:
   id: 0
   objectName: Rail handcar
   objId: 43
-  itemDefinition: {fileID: 11400000, guid: b130d0f2cf797d447a955d9044573f35, type: 2}
+  itemDefinition: {fileID: 11400000, guid: c9fc3865549db61429331f9f234e219f, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -273,6 +273,7 @@ MonoBehaviour:
   trainConnectionSnapMaxDistance: 0.35
   trainConnectionMaxLateralDistance: 0.45
   trainConnectionMinForwardDot: 0.5
+  trainMass: 10
   railMoveSpeedMultiplier: 1
   railMovementSubstepDistance: 0.12
   railSnapMaxDistance: 0.75

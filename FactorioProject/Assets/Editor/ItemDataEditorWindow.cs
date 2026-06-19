@@ -134,6 +134,7 @@ public class ItemDataEditorWindow : EditorWindow
         public float vehicleAccelerationPerSecond = -1f;
         public float vehicleDecelerationPerSecond = -1f;
         public float vehicleMaxSpeed = -1f;
+        public float trainMass = -1f;
         public float waterLitersPerSecond = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
@@ -1185,6 +1186,11 @@ public class ItemDataEditorWindow : EditorWindow
             DrawVehicleFields(mapObjectSerializedObject);
         }
 
+        if (mapObject is Train)
+        {
+            DrawTrainFields(mapObjectSerializedObject);
+        }
+
         if (mapObject is InstallationObject)
         {
             SerializedProperty mapFilterProperty = mapObjectSerializedObject.FindProperty("mapFilter");
@@ -1302,6 +1308,25 @@ public class ItemDataEditorWindow : EditorWindow
     private static bool ShouldExposeVehicleStats(MapObject mapObject)
     {
         return mapObject is Vehicle && !(mapObject is FreightCar);
+    }
+
+    private static void DrawTrainFields(SerializedObject mapObjectSerializedObject)
+    {
+        if (mapObjectSerializedObject == null)
+        {
+            return;
+        }
+
+        SerializedProperty massProperty = FindSerializedProperty(mapObjectSerializedObject, "trainMass");
+        if (massProperty == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Train", EditorStyles.miniBoldLabel);
+        massProperty.floatValue = Mathf.Max(0.01f, massProperty.floatValue);
+        EditorGUILayout.PropertyField(massProperty, new GUIContent("Mass"));
     }
 
     private void DrawPlacementCenterGridFields(
@@ -1889,6 +1914,20 @@ public class ItemDataEditorWindow : EditorWindow
         if (maxSpeedProperty != null && entry.vehicleMaxSpeed > 0f)
         {
             maxSpeedProperty.floatValue = Mathf.Max(0.01f, entry.vehicleMaxSpeed);
+        }
+    }
+
+    private static void ApplyTrainJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry)
+    {
+        if (serializedMapObject == null || entry == null)
+        {
+            return;
+        }
+
+        SerializedProperty massProperty = FindSerializedProperty(serializedMapObject, "trainMass");
+        if (massProperty != null && entry.trainMass > 0f)
+        {
+            massProperty.floatValue = Mathf.Max(0.01f, entry.trainMass);
         }
     }
 
@@ -3123,6 +3162,11 @@ public class ItemDataEditorWindow : EditorWindow
                 entry.vehicleMaxSpeed = vehicle.VehicleMaxSpeed;
             }
 
+            if (definition.mapObject is Train train)
+            {
+                entry.trainMass = train.TrainMass;
+            }
+
             if (definition.mapObject is InstallationObject installationObject)
             {
                 entry.mapFilter = installationObject.MapFilter.ToString();
@@ -3462,6 +3506,11 @@ public class ItemDataEditorWindow : EditorWindow
         if (ShouldExposeVehicleStats(mapObject))
         {
             ApplyVehicleJson(serializedMapObject, entry);
+        }
+
+        if (mapObject is Train)
+        {
+            ApplyTrainJson(serializedMapObject, entry);
         }
 
         if (mapObject is InputOutputModule)
@@ -4195,8 +4244,30 @@ public class ItemDataEditorWindow : EditorWindow
 
         Color previousColor = GUI.color;
         GUI.color = Color.white;
-        GUI.DrawTextureWithTexCoords(rect, texture, textureCoords);
+        GUI.DrawTextureWithTexCoords(GetAspectFitRect(rect, texture, textureCoords), texture, textureCoords);
         GUI.color = previousColor;
+    }
+
+    private static Rect GetAspectFitRect(Rect targetRect, Texture texture, Rect textureCoords)
+    {
+        if (texture == null || targetRect.width <= 0f || targetRect.height <= 0f)
+        {
+            return targetRect;
+        }
+
+        float sourceWidth = Mathf.Max(1f, textureCoords.width * texture.width);
+        float sourceHeight = Mathf.Max(1f, textureCoords.height * texture.height);
+        float sourceAspect = sourceWidth / sourceHeight;
+        float targetAspect = targetRect.width / targetRect.height;
+
+        if (sourceAspect > targetAspect)
+        {
+            float height = targetRect.width / sourceAspect;
+            return new Rect(targetRect.x, targetRect.y + (targetRect.height - height) * 0.5f, targetRect.width, height);
+        }
+
+        float width = targetRect.height * sourceAspect;
+        return new Rect(targetRect.x + (targetRect.width - width) * 0.5f, targetRect.y, width, targetRect.height);
     }
 
     private static bool TryGetSpriteTextureCoords(Sprite sprite, out Texture texture, out Rect textureCoords)

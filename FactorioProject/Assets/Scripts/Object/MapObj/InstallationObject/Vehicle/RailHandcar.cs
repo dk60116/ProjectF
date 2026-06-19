@@ -41,7 +41,6 @@ public class RailHandcar : Train
     private const float ConsistPathSampleDistanceEpsilon = 0.001f;
     private const float ConsistPathDirectionMinDot = 0.35f;
     private const int MaxPushPropagationDepth = 4;
-    private const int InvalidConsistPathDetachRetryLimit = 4;
     private const float PushConsistContactPadding = 0.08f;
     private const float PushConsistLateralPadding = 0.08f;
     private const float PushConsistGapTolerance = 0.04f;
@@ -59,18 +58,22 @@ public class RailHandcar : Train
     private readonly List<Train> connectedTrainGroupScratch = new List<Train>(8);
     private readonly Queue<Train> connectedTrainGroupQueue = new Queue<Train>(8);
     private readonly HashSet<Train> connectedTrainGroupVisited = new HashSet<Train>();
+    private readonly HashSet<Train> currentMovementLoadTrains = new HashSet<Train>();
     private readonly List<ConnectedTrainRailMove> connectedTrainRailMoveScratch = new List<ConnectedTrainRailMove>(8);
     private readonly List<ConnectedTrainRailMove> connectedTrainOrderScratch = new List<ConnectedTrainRailMove>(8);
     private readonly List<ConsistPathSample> consistPathTape = new List<ConsistPathSample>(64);
     private readonly List<ConsistPathSample> leaderPathFrameScratch = new List<ConsistPathSample>(8);
     private readonly List<ConsistPathSample> initialConsistSegmentScratch = new List<ConsistPathSample>(8);
+    private readonly List<InitialConsistPathRouteNode> initialConsistPathRouteNodes = new List<InitialConsistPathRouteNode>(32);
+    private readonly Queue<int> initialConsistPathRouteQueue = new Queue<int>(32);
+    private readonly List<RailSample> railConnectionSampleScratch = new List<RailSample>(8);
     private readonly List<Train> consistPathTrainOrder = new List<Train>(8);
     private readonly List<float> consistPathFollowOffsets = new List<float>(8);
     private readonly List<PushConsistPathSession> pushConsistPathSessions = new List<PushConsistPathSession>(4);
 
     private Vector2 currentFacingTangent;
     private Vector2 lastRailTravelDirection;
-    private bool detachedInvalidConsistLinkDuringMove;
+    private float currentMovementLoadSpeedMultiplier = 1f;
     private Train consistPathLeader;
     private Vector2 consistPathTravelDirection;
     private float consistPathEndDistance;
@@ -105,6 +108,7 @@ public class RailHandcar : Train
     {
         ActiveRuntimeHandcars.Remove(this);
         lastRailTravelDirection = Vector2.zero;
+        ClearCurrentMovementLoadTracking();
         base.OnDisable();
     }
 
@@ -112,7 +116,154 @@ public class RailHandcar : Train
     {
         ActiveRuntimeHandcars.Remove(this);
         lastRailTravelDirection = Vector2.zero;
+        ClearCurrentMovementLoadTracking();
         base.PrepareForPool();
+    }
+
+    private void BeginCurrentMovementLoadTracking()
+    {
+        ClearCurrentMovementLoadTracking();
+        if (!UsesTrainLoadSpeedReduction)
+        {
+            return;
+        }
+
+        RegisterConnectedTrainGroupForCurrentMovementLoad(this, this);
+        RegisterRetainedPushConsistTrainsForCurrentMovementLoad();
+    }
+
+    private void ClearCurrentMovementLoadTracking()
+    {
+        currentMovementLoadTrains.Clear();
+        currentMovementLoadSpeedMultiplier = 1f;
+    }
+
+    private float ResolveCurrentTrainLoadSpeedMultiplier()
+    {
+        if (!UsesTrainLoadSpeedReduction)
+        {
+            return 1f;
+        }
+
+        float multiplier = 1f;
+        CollectConnectedTrainGroupForMovement(this);
+        for (int i = 0; i < connectedTrainGroupScratch.Count; i++)
+        {
+            Train train = connectedTrainGroupScratch[i];
+            if (train == null || train == this)
+            {
+                continue;
+            }
+
+            multiplier *= train.TrainLoadSpeedMultiplier;
+        }
+
+        if (pushConsistPathSessions.Count > 0)
+        {
+            PruneStalePushConsistPathSessions();
+            for (int i = 0; i < pushConsistPathSessions.Count; i++)
+            {
+                PushConsistPathSession session = pushConsistPathSessions[i];
+                if (session == null || session.BranchReleaseCompleted)
+                {
+                    continue;
+                }
+
+                for (int trainIndex = 0; trainIndex < session.TrainOrder.Count; trainIndex++)
+                {
+                    Train train = session.TrainOrder[trainIndex];
+                    if (train == null
+                        || train == this
+                        || !connectedTrainGroupVisited.Add(train))
+                    {
+                        continue;
+                    }
+
+                    multiplier *= train.TrainLoadSpeedMultiplier;
+                }
+            }
+        }
+
+        return Mathf.Clamp(multiplier, 0.01f, 1f);
+    }
+
+    private float RegisterConnectedTrainGroupForCurrentMovementLoad(Train startTrain, Train excludedTrain)
+    {
+        if (!UsesTrainLoadSpeedReduction || startTrain == null)
+        {
+            return 1f;
+        }
+
+        CollectConnectedTrainGroupForMovement(startTrain);
+        float groupMultiplier = 1f;
+        for (int i = 0; i < connectedTrainGroupScratch.Count; i++)
+        {
+            Train train = connectedTrainGroupScratch[i];
+            if (train == null || train == excludedTrain)
+            {
+                continue;
+            }
+
+            float trainMultiplier = train.TrainLoadSpeedMultiplier;
+            groupMultiplier *= trainMultiplier;
+            RegisterTrainForCurrentMovementLoad(train, trainMultiplier);
+        }
+
+        return Mathf.Clamp(groupMultiplier, 0.01f, 1f);
+    }
+
+    private void RegisterPreparedTrainMovesForCurrentMovementLoad()
+    {
+        if (!UsesTrainLoadSpeedReduction)
+        {
+            return;
+        }
+
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            RegisterTrainForCurrentMovementLoad(connectedTrainRailMoveScratch[i].Train);
+        }
+    }
+
+    private void RegisterRetainedPushConsistTrainsForCurrentMovementLoad()
+    {
+        if (!UsesTrainLoadSpeedReduction || pushConsistPathSessions.Count <= 0)
+        {
+            return;
+        }
+
+        PruneStalePushConsistPathSessions();
+        for (int i = 0; i < pushConsistPathSessions.Count; i++)
+        {
+            PushConsistPathSession session = pushConsistPathSessions[i];
+            if (session == null || session.BranchReleaseCompleted)
+            {
+                continue;
+            }
+
+            for (int trainIndex = 0; trainIndex < session.TrainOrder.Count; trainIndex++)
+            {
+                RegisterTrainForCurrentMovementLoad(session.TrainOrder[trainIndex]);
+            }
+        }
+    }
+
+    private void RegisterTrainForCurrentMovementLoad(Train train)
+    {
+        RegisterTrainForCurrentMovementLoad(train, train != null ? train.TrainLoadSpeedMultiplier : 1f);
+    }
+
+    private void RegisterTrainForCurrentMovementLoad(Train train, float trainMultiplier)
+    {
+        if (train == null || train == this || !currentMovementLoadTrains.Add(train))
+        {
+            return;
+        }
+
+        currentMovementLoadSpeedMultiplier = Mathf.Clamp(
+            currentMovementLoadSpeedMultiplier * Mathf.Clamp(trainMultiplier, 0.01f, 1f),
+            0.01f,
+            1f);
     }
 
     private struct RailSample
@@ -138,6 +289,14 @@ public class RailHandcar : Train
     {
         public RailSample Sample;
         public float Distance;
+    }
+
+    private struct InitialConsistPathRouteNode
+    {
+        public RailSample Sample;
+        public Vector2 TravelDirection;
+        public int ParentIndex;
+        public float PathDistance;
     }
 
     private struct PushContactInfo
@@ -175,6 +334,14 @@ public class RailHandcar : Train
         public int LastUsedFrame;
     }
 
+    public override float EffectiveVehicleMaxSpeed => UsesTrainLoadSpeedReduction
+        ? Mathf.Max(0.01f, VehicleMaxSpeed * Mathf.Min(
+            ResolveCurrentTrainLoadSpeedMultiplier(),
+            Mathf.Clamp(currentMovementLoadSpeedMultiplier, 0.01f, 1f)))
+        : base.EffectiveVehicleMaxSpeed;
+
+    protected virtual bool UsesTrainLoadSpeedReduction => true;
+
     public override void ApplyPlacedRailSample(
         Railload rail,
         float distanceAlongPath,
@@ -182,17 +349,28 @@ public class RailHandcar : Train
         Vector2 facingTangent)
     {
         base.ApplyPlacedRailSample(rail, distanceAlongPath, railPoint, facingTangent);
-        if (facingTangent.sqrMagnitude > 0.0001f)
-        {
-            currentFacingTangent = facingTangent.normalized;
-            lastRailTravelDirection = currentFacingTangent;
-        }
 
         Physics.SyncTransforms();
     }
 
+    public override bool TryApplyRailPose(
+        Railload rail,
+        float distanceAlongPath,
+        Vector2 railPoint,
+        Vector2 facingTangent)
+    {
+        if (!base.TryApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent))
+        {
+            return false;
+        }
+
+        SyncRailFacingTangent(facingTangent, true);
+        return true;
+    }
+
     public override void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
     {
+        BeginCurrentMovementLoadTracking();
         Vector2 inputVector = new Vector2(worldMoveDirection.x, worldMoveDirection.z);
         float inputMagnitude = Mathf.Clamp01(inputVector.magnitude);
         bool hasInput = inputMagnitude > railInputDeadZone;
@@ -246,7 +424,8 @@ public class RailHandcar : Train
             ResetVehicleMotion();
         }
 
-        float signedSpeed = UpdateVehicleSignedSpeed(inputAxis, deltaTime);
+        float effectiveMaxSpeed = EffectiveVehicleMaxSpeed;
+        float signedSpeed = UpdateVehicleSignedSpeed(inputAxis, deltaTime, effectiveMaxSpeed);
         if (Mathf.Abs(signedSpeed) <= 0.0001f)
         {
             ApplyRailPose(currentSample, currentFacing, deltaTime, true);
@@ -262,8 +441,16 @@ public class RailHandcar : Train
             return;
         }
 
-        bool moved = MoveConnectedTrainGroup(currentSample, currentFacing, signedStep, deltaTime, hasInput, inputDirection);
-        if (!moved && !hasInput)
+        bool moved = MoveConnectedTrainGroup(
+            currentSample,
+            currentFacing,
+            signedStep,
+            deltaTime,
+            hasInput,
+            inputDirection,
+            switchedToBranch);
+        ClampCurrentVehicleSignedSpeed(effectiveMaxSpeed);
+        if (!moved)
         {
             ResetVehicleMotion();
         }
@@ -471,7 +658,8 @@ public class RailHandcar : Train
         float signedStep,
         float deltaTime,
         bool hasInput,
-        Vector2 inputDirection)
+        Vector2 inputDirection,
+        bool forceConsistRouteLock)
     {
         float requestedDistance = Mathf.Abs(signedStep);
         if (requestedDistance <= 0.0001f)
@@ -491,12 +679,13 @@ public class RailHandcar : Train
 
         RailSample stepSample = currentSample;
         Vector2 stepFacing = currentFacing;
+        bool lockRouteOnSubstep = forceConsistRouteLock;
         float remainingDistance = requestedDistance;
         float maxSubstepDistance = ResolveRailMovementSubstepDistance(requestedDistance);
         int substepBudget = Mathf.Max(
             1,
             Mathf.CeilToInt(requestedDistance / Mathf.Max(MinRailMovementSubstepDistance, maxSubstepDistance)))
-            + InvalidConsistPathDetachRetryLimit + 2;
+            + 2;
         bool movedAny = false;
         for (int substepIndex = 0;
              substepIndex < substepBudget && remainingDistance > 0.0001f;
@@ -529,11 +718,13 @@ public class RailHandcar : Train
                     hasInput,
                     inputDirection,
                     allowForeignPushTransfer,
+                    lockRouteOnSubstep,
                     out float appliedDistance))
             {
                 break;
             }
 
+            lockRouteOnSubstep = false;
             appliedDistance = Mathf.Min(substepDistance, Mathf.Max(0f, appliedDistance));
             if (appliedDistance <= 0.0001f)
             {
@@ -564,7 +755,6 @@ public class RailHandcar : Train
             return true;
         }
 
-        ApplyRailPose(currentSample, currentFacing, deltaTime, true);
         return false;
     }
 
@@ -577,37 +767,24 @@ public class RailHandcar : Train
         bool hasInput,
         Vector2 inputDirection,
         bool allowForeignPushTransfer,
+        bool forceConsistRouteLock,
         out float appliedDistance)
     {
         appliedDistance = 0f;
-        for (int attempt = 0; attempt <= InvalidConsistPathDetachRetryLimit; attempt++)
-        {
-            detachedInvalidConsistLinkDuringMove = false;
-            if (TryMoveTrainGroupInternal(
-                    this,
-                    currentSample,
-                    currentFacing,
-                    travelDirection,
-                    requestedDistance,
-                    deltaTime,
-                    hasInput,
-                    inputDirection,
-                    allowForeignPushTransfer,
-                    !hasInput,
-                    0,
-                    out appliedDistance))
-            {
-                return true;
-            }
-
-            if (!detachedInvalidConsistLinkDuringMove)
-            {
-                break;
-            }
-        }
-
-        appliedDistance = 0f;
-        return false;
+        return TryMoveTrainGroupInternal(
+            this,
+            currentSample,
+            currentFacing,
+            travelDirection,
+            requestedDistance,
+            deltaTime,
+            hasInput,
+            inputDirection,
+            allowForeignPushTransfer,
+            !hasInput,
+            forceConsistRouteLock,
+            0,
+            out appliedDistance);
     }
 
     private float ResolveRailMovementSubstepDistance(float requestedDistance)
@@ -708,6 +885,7 @@ public class RailHandcar : Train
         Vector2 inputDirection,
         bool allowPushPropagation,
         bool preserveConsistOrder,
+        bool forceConsistRouteLock,
         int pushDepth,
         out float appliedDrivenDistance)
     {
@@ -763,6 +941,7 @@ public class RailHandcar : Train
                         pushSession.BranchReleaseDistanceRemaining);
                 }
 
+                foreignRequestDistance *= RegisterConnectedTrainGroupForCurrentMovementLoad(contactInfo.Train, this);
                 RestoreConsistPathState(pushSession);
                 Vector2 pushedTravelDirection = contactInfo.PushTravelDirection.sqrMagnitude > 0.0001f
                     ? contactInfo.PushTravelDirection.normalized
@@ -778,6 +957,7 @@ public class RailHandcar : Train
                     Vector2.zero,
                     true,
                     true,
+                    false,
                     pushDepth + 1,
                     out foreignDrivenDistance);
                 if (movedForeignConsist)
@@ -846,6 +1026,7 @@ public class RailHandcar : Train
             deltaTime,
             hasInput,
             inputDirection,
+            forceConsistRouteLock,
             out appliedDrivenDistance);
     }
 
@@ -947,12 +1128,23 @@ public class RailHandcar : Train
         float deltaTime,
         bool hasInput,
         Vector2 inputDirection,
+        bool forceConsistRouteLock,
         out float appliedDrivenDistance)
     {
         appliedDrivenDistance = 0f;
-        Vector2 routeLeaderTravelDirection = ResolveRouteLeaderTravelDirection(travelDirection);
-        TrySwitchRouteLeaderToInputBranch(hasInput, inputDirection, routeLeaderTravelDirection);
-        routeLeaderTravelDirection = ResolveRouteLeaderTravelDirection(travelDirection);
+        Vector2 routeLeaderTravelDirection = ResolveRouteLeaderTravelDirection(drivenTrain, travelDirection);
+        bool switchedRouteLeaderToBranch = TrySwitchRouteLeaderToInputBranch(
+            hasInput,
+            inputDirection,
+            routeLeaderTravelDirection);
+        routeLeaderTravelDirection = ResolveRouteLeaderTravelDirection(drivenTrain, travelDirection);
+        bool shouldLockConsistRoute = forceConsistRouteLock || switchedRouteLeaderToBranch;
+        if (shouldLockConsistRoute
+            && !TryLockConsistToRouteLeaderPath(routeLeaderTravelDirection))
+        {
+            ResetConsistPathTape();
+        }
+
         if (!EnsureConsistPathTape(routeLeaderTravelDirection))
         {
             ResetConsistPathTape();
@@ -1038,8 +1230,8 @@ public class RailHandcar : Train
             Vector2 trainTravelDirection = i == 0 && railMove.Train != drivenTrain
                 ? routeLeaderTravelDirection
                 : travelDirection;
-            Vector2 facingTangent = railMove.Train == this
-                ? ResolveFacingTangent(railMove.TargetSample.Tangent, drivenFacing)
+            Vector2 facingTangent = railMove.Train == drivenTrain
+                ? ResolveDrivenTrainFacingTangent(railMove, drivenFacing)
                 : ResolveFollowerFacingTangent(
                     railMove.TargetSample.Tangent,
                     railMove.StartFacingTangent,
@@ -1064,6 +1256,7 @@ public class RailHandcar : Train
                     drivenMove.TargetSample));
         }
 
+        RegisterPreparedTrainMovesForCurrentMovementLoad();
         TrimConsistPathTape(leaderEndPathDistance - maxFollowOffset - ResolveConsistPathTrimPadding());
         Physics.SyncTransforms();
         ClearConnectedTrainMovementScratch();
@@ -1309,6 +1502,55 @@ public class RailHandcar : Train
 
         travelDirection.Normalize();
         Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        float maxSqrDistance = railSnapMaxDistance * railSnapMaxDistance;
+        if (TryGetStoredRailSample(currentPoint, maxSqrDistance, out RailSample currentSample)
+            || TryFindBestRailSample(currentPoint, travelDirection, maxSqrDistance, out currentSample))
+        {
+            ConnectedTrainRailMove currentMove = new ConnectedTrainRailMove
+            {
+                Train = this,
+                StartSample = currentSample,
+                TargetSample = currentSample,
+                StartFacingTangent = ResolveFacingTangent(currentSample.Tangent, travelDirection),
+                TraveledDistance = 0f,
+                FollowOffset = 0f
+            };
+
+            foreach (Train train in ConnectedTrains)
+            {
+                if (train == null
+                    || !train.gameObject.activeInHierarchy
+                    || !TryResolveRailSampleForTrain(
+                        train,
+                        travelDirection,
+                        maxSqrDistance,
+                        out RailSample trainSample,
+                        out Vector2 trainFacing))
+                {
+                    continue;
+                }
+
+                ConnectedTrainRailMove trainMove = new ConnectedTrainRailMove
+                {
+                    Train = train,
+                    StartSample = trainSample,
+                    TargetSample = trainSample,
+                    StartFacingTangent = trainFacing,
+                    TraveledDistance = 0f,
+                    FollowOffset = 0f
+                };
+
+                if (TryEstimateDirectFrontRailGapDistance(
+                    currentMove,
+                    trainMove,
+                    travelDirection,
+                    out _))
+                {
+                    return true;
+                }
+            }
+        }
+
         float minAheadDistance = Mathf.Max(0.01f, ConnectionCenterDistance * 0.25f);
         foreach (Train train in ConnectedTrains)
         {
@@ -1783,6 +2025,35 @@ public class RailHandcar : Train
         int drivenIndex,
         Vector2 travelDirection)
     {
+        int bestRailIndex = -1;
+        float bestRailGapDistance = float.MaxValue;
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            if (i == drivenIndex)
+            {
+                continue;
+            }
+
+            ConnectedTrainRailMove candidateMove = connectedTrainRailMoveScratch[i];
+            if (!TryEstimateDirectFrontRailGapDistance(
+                drivenMove,
+                candidateMove,
+                travelDirection,
+                out float gapDistance)
+                || gapDistance >= bestRailGapDistance)
+            {
+                continue;
+            }
+
+            bestRailGapDistance = gapDistance;
+            bestRailIndex = i;
+        }
+
+        if (bestRailIndex >= 0)
+        {
+            return bestRailIndex;
+        }
+
         int bestIndex = -1;
         float bestProjection = Mathf.Max(0.01f, ConnectionCenterDistance * 0.25f);
         for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
@@ -1811,6 +2082,47 @@ public class RailHandcar : Train
         }
 
         return bestIndex;
+    }
+
+    private bool TryEstimateDirectFrontRailGapDistance(
+        ConnectedTrainRailMove backMove,
+        ConnectedTrainRailMove frontMove,
+        Vector2 travelDirection,
+        out float gapDistance)
+    {
+        gapDistance = 0f;
+        if (!AreTrainsMovementAdjacent(backMove.Train, frontMove.Train)
+            || !TryEstimateForwardRailGapDistance(
+                backMove,
+                frontMove,
+                travelDirection,
+                out gapDistance))
+        {
+            return false;
+        }
+
+        float maxGapDistance = ResolveMaxDirectConnectedRailGapDistance(backMove, frontMove);
+        return gapDistance <= maxGapDistance + ConsistPathSampleDistanceEpsilon;
+    }
+
+    private float ResolveMaxDirectConnectedRailGapDistance(
+        ConnectedTrainRailMove first,
+        ConnectedTrainRailMove second)
+    {
+        float snapDistance = 0f;
+        if (first.Train != null)
+        {
+            snapDistance = Mathf.Max(snapDistance, first.Train.ConnectionSnapMaxDistance);
+        }
+
+        if (second.Train != null)
+        {
+            snapDistance = Mathf.Max(snapDistance, second.Train.ConnectionSnapMaxDistance);
+        }
+
+        return ResolveDesiredConsistPairSpacing(first, second)
+               + Mathf.Max(snapDistance, railSnapMaxDistance)
+               + PushConsistGapTolerance;
     }
 
     private int FindConsistEndpointMoveIndex(int previousIndex, int currentIndex)
@@ -1936,14 +2248,27 @@ public class RailHandcar : Train
                 }
 
                 bool isDirectlyConnected = AreTrainsMovementAdjacent(previousMove.Train, candidateMove.Train);
-                Vector2 delta = candidateMove.StartSample.Point - previousMove.StartSample.Point;
-                float behindDistance = travelDirection.sqrMagnitude > 0.0001f
-                    ? Mathf.Max(0f, -Vector2.Dot(delta, travelDirection.normalized))
-                    : 0f;
-                float lateralDistance = delta.sqrMagnitude - behindDistance * behindDistance;
-                float score = (isDirectlyConnected ? 0f : 1000f)
-                              + lateralDistance
-                              + Mathf.Abs(EstimateConsistSampleDistance(previousMove, candidateMove) - behindDistance) * 0.25f;
+                float score;
+                if (TryEstimateDirectFrontRailGapDistance(
+                    candidateMove,
+                    previousMove,
+                    travelDirection,
+                    out float railGapDistance))
+                {
+                    score = Mathf.Abs(ResolveDesiredConsistPairSpacing(previousMove, candidateMove) - railGapDistance);
+                }
+                else
+                {
+                    Vector2 delta = candidateMove.StartSample.Point - previousMove.StartSample.Point;
+                    float behindDistance = travelDirection.sqrMagnitude > 0.0001f
+                        ? Mathf.Max(0f, -Vector2.Dot(delta, travelDirection.normalized))
+                        : 0f;
+                    float lateralDistance = delta.sqrMagnitude - behindDistance * behindDistance;
+                    score = (isDirectlyConnected ? 0f : 1000f)
+                            + lateralDistance
+                            + Mathf.Abs(EstimateConsistSampleDistance(previousMove, candidateMove) - behindDistance) * 0.25f;
+                }
+
                 if (score >= bestScore)
                 {
                     continue;
@@ -2077,7 +2402,7 @@ public class RailHandcar : Train
         return false;
     }
 
-    private void TrySwitchRouteLeaderToInputBranch(
+    private bool TrySwitchRouteLeaderToInputBranch(
         bool hasInput,
         Vector2 inputDirection,
         Vector2 travelDirection)
@@ -2086,14 +2411,14 @@ public class RailHandcar : Train
             || inputDirection.sqrMagnitude <= 0.0001f
             || connectedTrainRailMoveScratch.Count <= 0)
         {
-            return;
+            return false;
         }
 
         ConnectedTrainRailMove leaderMove = connectedTrainRailMoveScratch[0];
         if (leaderMove.Train == this
             || !TryFindBranchRailSample(leaderMove.StartSample, inputDirection, out RailSample branchSample))
         {
-            return;
+            return false;
         }
 
         leaderMove.StartSample = branchSample;
@@ -2103,9 +2428,25 @@ public class RailHandcar : Train
             leaderMove.StartFacingTangent,
             travelDirection);
         connectedTrainRailMoveScratch[0] = leaderMove;
+        return true;
     }
 
-    private Vector2 ResolveRouteLeaderTravelDirection(Vector2 fallbackDirection)
+    private Vector2 ResolveDrivenTrainFacingTangent(
+        ConnectedTrainRailMove railMove,
+        Vector2 drivenFacing)
+    {
+        if ((railMove.TargetSample.Point - railMove.StartSample.Point).sqrMagnitude
+            <= ConsistPathSampleDistanceEpsilon * ConsistPathSampleDistanceEpsilon)
+        {
+            return drivenFacing.sqrMagnitude > 0.0001f
+                ? drivenFacing.normalized
+                : ResolveFacingTangent(railMove.TargetSample.Tangent, railMove.StartFacingTangent);
+        }
+
+        return ResolveFacingTangent(railMove.TargetSample.Tangent, drivenFacing);
+    }
+
+    private Vector2 ResolveRouteLeaderTravelDirection(Train drivenTrain, Vector2 fallbackDirection)
     {
         if (connectedTrainRailMoveScratch.Count <= 0)
         {
@@ -2115,6 +2456,11 @@ public class RailHandcar : Train
         }
 
         ConnectedTrainRailMove leaderMove = connectedTrainRailMoveScratch[0];
+        if (leaderMove.Train == drivenTrain && fallbackDirection.sqrMagnitude > 0.0001f)
+        {
+            return fallbackDirection.normalized;
+        }
+
         if (connectedTrainRailMoveScratch.Count > 1
             && TryResolveInitialConsistSegmentDirection(
                 connectedTrainRailMoveScratch[1],
@@ -2123,16 +2469,37 @@ public class RailHandcar : Train
                 out Vector2 leaderTravelDirection)
             && leaderTravelDirection.sqrMagnitude > 0.0001f)
         {
-            return leaderTravelDirection.normalized;
+            return AlignDirectionWithReference(leaderTravelDirection, fallbackDirection);
         }
 
         Vector2 leaderReferenceDirection = leaderMove.StartFacingTangent.sqrMagnitude > 0.0001f
             ? leaderMove.StartFacingTangent
             : fallbackDirection;
-        return ResolveFacingTangentWithFallback(
+        return AlignDirectionWithReference(
+            ResolveFacingTangentWithFallback(
             leaderMove.StartSample.Tangent,
             fallbackDirection,
-            leaderReferenceDirection);
+            leaderReferenceDirection),
+            fallbackDirection);
+    }
+
+    private static Vector2 AlignDirectionWithReference(Vector2 direction, Vector2 referenceDirection)
+    {
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return referenceDirection.sqrMagnitude > 0.0001f
+                ? referenceDirection.normalized
+                : Vector2.zero;
+        }
+
+        direction.Normalize();
+        if (referenceDirection.sqrMagnitude > 0.0001f
+            && Vector2.Dot(direction, referenceDirection.normalized) < -RailDirectionReferenceDeadZone)
+        {
+            direction = -direction;
+        }
+
+        return direction;
     }
 
     private static float EstimateConsistSampleDistance(
@@ -2183,25 +2550,62 @@ public class RailHandcar : Train
             return false;
         }
 
-        initialConsistSegmentScratch.Clear();
-        if (TryBuildInitialConsistPathSegmentInDirection(
+        if (TryCommitInitialConsistPathSegmentInDirection(
                 backMove,
                 frontMove,
                 initialTravelDirection,
                 pathStartDistance,
-                initialConsistSegmentScratch,
                 out pathEndDistance))
         {
-            AppendConsistPathFrame(initialConsistSegmentScratch);
-            initialConsistSegmentScratch.Clear();
             return true;
         }
 
+        if (TryCommitInitialConsistPathSegmentWithRouteSearch(
+                backMove,
+                frontMove,
+                initialTravelDirection,
+                pathStartDistance,
+                out pathEndDistance))
+        {
+            return true;
+        }
+
+        if (TryCommitInitialConsistPathSegmentInDirection(
+                backMove,
+                frontMove,
+                -initialTravelDirection,
+                pathStartDistance,
+                out pathEndDistance))
+        {
+            return true;
+        }
+
+        if (TryCommitInitialConsistPathSegmentWithRouteSearch(
+                backMove,
+                frontMove,
+                -initialTravelDirection,
+                pathStartDistance,
+                out pathEndDistance))
+        {
+            return true;
+        }
+
+        pathEndDistance = pathStartDistance;
+        return false;
+    }
+
+    private bool TryCommitInitialConsistPathSegmentInDirection(
+        ConnectedTrainRailMove backMove,
+        ConnectedTrainRailMove frontMove,
+        Vector2 travelDirection,
+        float pathStartDistance,
+        out float pathEndDistance)
+    {
         initialConsistSegmentScratch.Clear();
         if (TryBuildInitialConsistPathSegmentInDirection(
                 backMove,
                 frontMove,
-                -initialTravelDirection,
+                travelDirection,
                 pathStartDistance,
                 initialConsistSegmentScratch,
                 out pathEndDistance))
@@ -2212,8 +2616,306 @@ public class RailHandcar : Train
         }
 
         initialConsistSegmentScratch.Clear();
-        pathEndDistance = pathStartDistance;
         return false;
+    }
+
+    private bool TryCommitInitialConsistPathSegmentWithRouteSearch(
+        ConnectedTrainRailMove backMove,
+        ConnectedTrainRailMove frontMove,
+        Vector2 travelDirection,
+        float pathStartDistance,
+        out float pathEndDistance)
+    {
+        initialConsistSegmentScratch.Clear();
+        if (TryBuildInitialConsistPathSegmentWithRouteSearch(
+                backMove,
+                frontMove,
+                travelDirection,
+                pathStartDistance,
+                initialConsistSegmentScratch,
+                out pathEndDistance))
+        {
+            AppendConsistPathFrame(initialConsistSegmentScratch);
+            initialConsistSegmentScratch.Clear();
+            return true;
+        }
+
+        initialConsistSegmentScratch.Clear();
+        return false;
+    }
+
+    private bool TryBuildInitialConsistPathSegmentWithRouteSearch(
+        ConnectedTrainRailMove backMove,
+        ConnectedTrainRailMove frontMove,
+        Vector2 initialTravelDirection,
+        float pathStartDistance,
+        List<ConsistPathSample> pathSamples,
+        out float pathEndDistance)
+    {
+        pathEndDistance = pathStartDistance;
+        if (backMove.StartSample.Rail == null
+            || frontMove.StartSample.Rail == null
+            || initialTravelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        initialConsistPathRouteNodes.Clear();
+        initialConsistPathRouteQueue.Clear();
+        float maxSearchDistance = ResolveInitialConsistSegmentSearchDistance(backMove, frontMove) * 2f;
+        AddInitialConsistPathRouteNode(
+            backMove.StartSample,
+            initialTravelDirection.normalized,
+            -1,
+            pathStartDistance);
+        initialConsistPathRouteQueue.Enqueue(0);
+
+        int maxNodeCount = RailNetworkAdvanceMaxHops * 6;
+        while (initialConsistPathRouteQueue.Count > 0
+               && initialConsistPathRouteNodes.Count < maxNodeCount)
+        {
+            int currentIndex = initialConsistPathRouteQueue.Dequeue();
+            InitialConsistPathRouteNode currentNode = initialConsistPathRouteNodes[currentIndex];
+            if (TryAddInitialConsistPathTargetRouteNode(
+                    currentIndex,
+                    currentNode,
+                    frontMove.StartSample,
+                    pathStartDistance,
+                    maxSearchDistance,
+                    out int targetIndex))
+            {
+                RebuildInitialConsistPathSamples(targetIndex, pathSamples);
+                pathEndDistance = initialConsistPathRouteNodes[targetIndex].PathDistance;
+                ClearInitialConsistPathRouteScratch();
+                return true;
+            }
+
+            if (currentNode.Sample.Rail == null
+                || !currentNode.Sample.Rail.TryGetRenderedPathLength(out float pathLength))
+            {
+                continue;
+            }
+
+            TryEnqueueInitialConsistPathEndpointRouteNode(
+                currentIndex,
+                currentNode,
+                pathLength,
+                pathStartDistance,
+                maxSearchDistance);
+            TryEnqueueInitialConsistPathConnectionRouteNodes(
+                currentIndex,
+                currentNode,
+                pathLength,
+                pathStartDistance,
+                maxSearchDistance);
+        }
+
+        ClearInitialConsistPathRouteScratch();
+        return false;
+    }
+
+    private bool TryAddInitialConsistPathTargetRouteNode(
+        int currentIndex,
+        InitialConsistPathRouteNode currentNode,
+        RailSample targetSample,
+        float pathStartDistance,
+        float maxSearchDistance,
+        out int targetIndex)
+    {
+        targetIndex = -1;
+        if (currentNode.Sample.Rail == null || currentNode.Sample.Rail != targetSample.Rail)
+        {
+            return false;
+        }
+
+        if (!TryGetDistanceToTargetOnCurrentRail(
+                currentNode.Sample,
+                targetSample,
+                currentNode.TravelDirection,
+                out float distanceToTarget))
+        {
+            return false;
+        }
+
+        float targetPathDistance = currentNode.PathDistance + distanceToTarget;
+        if (targetPathDistance - pathStartDistance
+            > maxSearchDistance + ConsistPathSampleDistanceEpsilon)
+        {
+            return false;
+        }
+
+        targetIndex = AddInitialConsistPathRouteNode(
+            targetSample,
+            currentNode.TravelDirection,
+            currentIndex,
+            targetPathDistance);
+        return true;
+    }
+
+    private void TryEnqueueInitialConsistPathEndpointRouteNode(
+        int currentIndex,
+        InitialConsistPathRouteNode currentNode,
+        float pathLength,
+        float pathStartDistance,
+        float maxSearchDistance)
+    {
+        float travelDot = Vector2.Dot(currentNode.TravelDirection, currentNode.Sample.Tangent);
+        if (Mathf.Abs(travelDot) <= 0.0001f)
+        {
+            return;
+        }
+
+        float directionSign = Mathf.Sign(travelDot);
+        float endpointDistance = directionSign > 0f ? pathLength : 0f;
+        float endpointTravelDistance = directionSign > 0f
+            ? pathLength - currentNode.Sample.DistanceAlongPath
+            : currentNode.Sample.DistanceAlongPath;
+        if (endpointTravelDistance <= ConsistPathSampleDistanceEpsilon
+            || Mathf.Abs(currentNode.Sample.DistanceAlongPath - endpointDistance)
+            <= ConsistPathSampleDistanceEpsilon
+            || !TryCreateRailSampleAtDistance(
+                currentNode.Sample.Rail,
+                endpointDistance,
+                out RailSample endpointSample))
+        {
+            return;
+        }
+
+        Vector2 endpointTravelDirection = directionSign > 0f
+            ? endpointSample.Tangent
+            : -endpointSample.Tangent;
+        if (endpointTravelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        endpointTravelDirection.Normalize();
+        float endpointPathDistance = currentNode.PathDistance + Mathf.Max(0f, endpointTravelDistance);
+        if (endpointPathDistance - pathStartDistance
+            > maxSearchDistance + ConsistPathSampleDistanceEpsilon
+            || HasInitialConsistPathRouteNode(endpointSample, endpointTravelDirection))
+        {
+            return;
+        }
+
+        int endpointIndex = AddInitialConsistPathRouteNode(
+            endpointSample,
+            endpointTravelDirection,
+            currentIndex,
+            endpointPathDistance);
+        initialConsistPathRouteQueue.Enqueue(endpointIndex);
+    }
+
+    private void TryEnqueueInitialConsistPathConnectionRouteNodes(
+        int currentIndex,
+        InitialConsistPathRouteNode currentNode,
+        float pathLength,
+        float pathStartDistance,
+        float maxSearchDistance)
+    {
+        bool atEndEndpoint = Mathf.Abs(currentNode.Sample.DistanceAlongPath - pathLength)
+                             <= ConsistPathSampleDistanceEpsilon;
+        bool atStartEndpoint = currentNode.Sample.DistanceAlongPath <= ConsistPathSampleDistanceEpsilon;
+        if (!atEndEndpoint && !atStartEndpoint)
+        {
+            return;
+        }
+
+        Vector2 exitDirection = currentNode.TravelDirection;
+        if (exitDirection.sqrMagnitude <= 0.0001f
+            || !TryCollectConnectedRailSamples(
+                currentNode.Sample,
+                exitDirection,
+                currentNode.Sample.Rail,
+                railConnectionSampleScratch,
+                false))
+        {
+            return;
+        }
+
+        for (int i = 0; i < railConnectionSampleScratch.Count; i++)
+        {
+            RailSample connectedSample = railConnectionSampleScratch[i];
+            Vector2 connectedTravelDirection = ResolveFacingTangentWithFallback(
+                connectedSample.Tangent,
+                exitDirection,
+                exitDirection);
+            float connectionPathDistance = ResolveRailTransitionPathDistance(
+                currentNode.Sample,
+                connectedSample);
+            float connectedPathDistance = currentNode.PathDistance + connectionPathDistance;
+            if (connectedPathDistance - pathStartDistance
+                > maxSearchDistance + ConsistPathSampleDistanceEpsilon
+                || HasInitialConsistPathRouteNode(connectedSample, connectedTravelDirection))
+            {
+                continue;
+            }
+
+            int connectedIndex = AddInitialConsistPathRouteNode(
+                connectedSample,
+                connectedTravelDirection,
+                currentIndex,
+                connectedPathDistance);
+            initialConsistPathRouteQueue.Enqueue(connectedIndex);
+        }
+
+        railConnectionSampleScratch.Clear();
+    }
+
+    private int AddInitialConsistPathRouteNode(
+        RailSample sample,
+        Vector2 travelDirection,
+        int parentIndex,
+        float pathDistance)
+    {
+        initialConsistPathRouteNodes.Add(new InitialConsistPathRouteNode
+        {
+            Sample = sample,
+            TravelDirection = travelDirection.sqrMagnitude > 0.0001f
+                ? travelDirection.normalized
+                : Vector2.zero,
+            ParentIndex = parentIndex,
+            PathDistance = pathDistance
+        });
+        return initialConsistPathRouteNodes.Count - 1;
+    }
+
+    private bool HasInitialConsistPathRouteNode(RailSample sample, Vector2 travelDirection)
+    {
+        for (int i = 0; i < initialConsistPathRouteNodes.Count; i++)
+        {
+            InitialConsistPathRouteNode node = initialConsistPathRouteNodes[i];
+            if (node.Sample.Rail == sample.Rail
+                && Mathf.Abs(node.Sample.DistanceAlongPath - sample.DistanceAlongPath)
+                    <= ConsistPathSampleDistanceEpsilon
+                && (travelDirection.sqrMagnitude <= 0.0001f
+                    || node.TravelDirection.sqrMagnitude <= 0.0001f
+                    || Vector2.Dot(node.TravelDirection.normalized, travelDirection.normalized)
+                    >= ConsistPathDirectionMinDot))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void RebuildInitialConsistPathSamples(int targetIndex, List<ConsistPathSample> pathSamples)
+    {
+        int currentIndex = targetIndex;
+        while (currentIndex >= 0 && currentIndex < initialConsistPathRouteNodes.Count)
+        {
+            InitialConsistPathRouteNode node = initialConsistPathRouteNodes[currentIndex];
+            AddConsistPathSample(pathSamples, node.PathDistance, node.Sample);
+            currentIndex = node.ParentIndex;
+        }
+    }
+
+    private void ClearInitialConsistPathRouteScratch()
+    {
+        initialConsistPathRouteNodes.Clear();
+        initialConsistPathRouteQueue.Clear();
+        railConnectionSampleScratch.Clear();
     }
 
     private bool TryBuildInitialConsistPathSegmentInDirection(
@@ -2420,6 +3122,19 @@ public class RailHandcar : Train
         }
 
         initialConsistSegmentScratch.Clear();
+        if (TryBuildInitialConsistPathSegmentWithRouteSearch(
+                backMove,
+                frontMove,
+                fallbackDirection.normalized,
+                0f,
+                initialConsistSegmentScratch,
+                out gapDistance))
+        {
+            initialConsistSegmentScratch.Clear();
+            return true;
+        }
+
+        initialConsistSegmentScratch.Clear();
         gapDistance = 0f;
         return false;
     }
@@ -2559,13 +3274,108 @@ public class RailHandcar : Train
                     currentPathDistance,
                     out currentPathDistance))
             {
-                TryDisconnectUnresolvedConsistPathLink(backMove, frontMove, travelDirection);
                 ResetConsistPathTape();
                 return false;
             }
         }
 
         consistPathEndDistance = currentPathDistance;
+        ApplyConnectedTrainFollowOffsets();
+        RememberConsistPathOrder(travelDirection);
+        return true;
+    }
+
+    private bool TryLockConsistToRouteLeaderPath(Vector2 routeLeaderTravelDirection)
+    {
+        if (connectedTrainRailMoveScratch.Count <= 0
+            || routeLeaderTravelDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        routeLeaderTravelDirection.Normalize();
+        ApplyConnectedTrainFollowOffsets();
+
+        ConnectedTrainRailMove leaderMove = connectedTrainRailMoveScratch[0];
+        if (leaderMove.StartSample.Rail == null)
+        {
+            return false;
+        }
+
+        float maxFollowOffset = 0f;
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            maxFollowOffset = Mathf.Max(maxFollowOffset, connectedTrainRailMoveScratch[i].FollowOffset);
+        }
+
+        ResetConsistPathTape();
+        if (maxFollowOffset <= ConsistPathSampleDistanceEpsilon)
+        {
+            AddConsistPathSample(consistPathTape, 0f, leaderMove.StartSample);
+            consistPathEndDistance = 0f;
+            RememberConsistPathOrder(routeLeaderTravelDirection);
+            return true;
+        }
+
+        leaderPathFrameScratch.Clear();
+        bool advancedBackToTail = TryAdvanceAlongRailNetwork(
+            leaderMove.StartSample,
+            -routeLeaderTravelDirection,
+            maxFollowOffset,
+            out _,
+            out float reversedPathDistance,
+            leaderPathFrameScratch,
+            0f);
+        if (!advancedBackToTail
+            || reversedPathDistance + ConsistPathSampleDistanceEpsilon < maxFollowOffset)
+        {
+            ResetConsistPathTape();
+            leaderPathFrameScratch.Clear();
+            return false;
+        }
+
+        for (int i = leaderPathFrameScratch.Count - 1; i >= 0; i--)
+        {
+            ConsistPathSample reverseSample = leaderPathFrameScratch[i];
+            AddConsistPathSample(
+                consistPathTape,
+                reversedPathDistance - reverseSample.Distance,
+                reverseSample.Sample);
+        }
+
+        leaderPathFrameScratch.Clear();
+        consistPathEndDistance = reversedPathDistance;
+        if (consistPathTape.Count <= 0)
+        {
+            ResetConsistPathTape();
+            return false;
+        }
+
+        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
+        {
+            ConnectedTrainRailMove railMove = connectedTrainRailMoveScratch[i];
+            float targetPathDistance = consistPathEndDistance - railMove.FollowOffset;
+            if (!TrySampleConsistPathTape(targetPathDistance, out RailSample routeSample))
+            {
+                ResetConsistPathTape();
+                return false;
+            }
+
+            railMove.StartSample = routeSample;
+            railMove.TargetSample = routeSample;
+            railMove.StartFacingTangent = ResolveFollowerFacingTangent(
+                routeSample.Tangent,
+                railMove.StartFacingTangent,
+                routeLeaderTravelDirection);
+            connectedTrainRailMoveScratch[i] = railMove;
+        }
+
+        RememberConsistPathOrder(routeLeaderTravelDirection);
+        return true;
+    }
+
+    private void ApplyConnectedTrainFollowOffsets()
+    {
         float followOffset = 0f;
         for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
         {
@@ -2580,109 +3390,6 @@ public class RailHandcar : Train
             railMove.FollowOffset = followOffset;
             connectedTrainRailMoveScratch[i] = railMove;
         }
-
-        RememberConsistPathOrder(travelDirection);
-        return true;
-    }
-
-    private bool TryDisconnectUnresolvedConsistPathLink(
-        ConnectedTrainRailMove backMove,
-        ConnectedTrainRailMove frontMove,
-        Vector2 travelDirection)
-    {
-        if (TryDisconnectDirectConsistLink(backMove, frontMove))
-        {
-            return true;
-        }
-
-        return TryDisconnectFirstUnresolvedDirectConsistLink(travelDirection);
-    }
-
-    private bool TryDisconnectFirstUnresolvedDirectConsistLink(Vector2 travelDirection)
-    {
-        for (int firstIndex = 0; firstIndex < connectedTrainRailMoveScratch.Count; firstIndex++)
-        {
-            ConnectedTrainRailMove firstMove = connectedTrainRailMoveScratch[firstIndex];
-            for (int secondIndex = firstIndex + 1; secondIndex < connectedTrainRailMoveScratch.Count; secondIndex++)
-            {
-                ConnectedTrainRailMove secondMove = connectedTrainRailMoveScratch[secondIndex];
-                if (!AreTrainsDirectlyConnected(firstMove.Train, secondMove.Train)
-                    || CanResolveConsistPathLink(firstMove, secondMove, travelDirection)
-                    || CanResolveConsistPathLink(secondMove, firstMove, travelDirection))
-                {
-                    continue;
-                }
-
-                return DisconnectInvalidConsistPathLink(firstMove.Train, secondMove.Train);
-            }
-        }
-
-        return false;
-    }
-
-    private bool TryDisconnectDirectConsistLink(
-        ConnectedTrainRailMove firstMove,
-        ConnectedTrainRailMove secondMove)
-    {
-        if (!AreTrainsDirectlyConnected(firstMove.Train, secondMove.Train))
-        {
-            return false;
-        }
-
-        return DisconnectInvalidConsistPathLink(firstMove.Train, secondMove.Train);
-    }
-
-    private bool DisconnectInvalidConsistPathLink(Train first, Train second)
-    {
-        if (first == null || second == null)
-        {
-            return false;
-        }
-
-        first.DisconnectFrom(second);
-        detachedInvalidConsistLinkDuringMove = true;
-        return true;
-    }
-
-    private bool CanResolveConsistPathLink(
-        ConnectedTrainRailMove backMove,
-        ConnectedTrainRailMove frontMove,
-        Vector2 travelDirection)
-    {
-        if (backMove.StartSample.Rail == null
-            || frontMove.StartSample.Rail == null
-            || !TryResolveInitialConsistSegmentDirection(
-                backMove,
-                frontMove,
-                travelDirection,
-                out Vector2 initialTravelDirection))
-        {
-            return false;
-        }
-
-        initialConsistSegmentScratch.Clear();
-        bool resolved = TryBuildInitialConsistPathSegmentInDirection(
-            backMove,
-            frontMove,
-            initialTravelDirection,
-            0f,
-            initialConsistSegmentScratch,
-            out _);
-
-        if (!resolved)
-        {
-            initialConsistSegmentScratch.Clear();
-            resolved = TryBuildInitialConsistPathSegmentInDirection(
-                backMove,
-                frontMove,
-                -initialTravelDirection,
-                0f,
-                initialConsistSegmentScratch,
-                out _);
-        }
-
-        initialConsistSegmentScratch.Clear();
-        return resolved;
     }
 
     private static float ResolveDesiredConsistPairSpacing(
@@ -3550,6 +4257,55 @@ public class RailHandcar : Train
         out RailSample connectedSample)
     {
         connectedSample = default;
+        if (!TryCollectConnectedRailSamples(
+                endpointSample,
+                exitDirection,
+                excludedRail,
+                railConnectionSampleScratch,
+                true))
+        {
+            return false;
+        }
+
+        exitDirection.Normalize();
+        bool found = false;
+        float bestScore = float.MinValue;
+        for (int i = 0; i < railConnectionSampleScratch.Count; i++)
+        {
+            RailSample candidateSample = railConnectionSampleScratch[i];
+
+            float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, candidateSample.Tangent));
+            float progress = ResolveRailLookAheadProgress(
+                candidateSample.Rail,
+                candidateSample.DistanceAlongPath,
+                candidateSample.Tangent,
+                endpointSample.Point,
+                exitDirection,
+                railConnectionLookAhead);
+
+            float score = progress * 1.2f + directionScore * 0.6f - candidateSample.SqrDistance * 3f;
+            if (score <= bestScore)
+            {
+                continue;
+            }
+
+            bestScore = score;
+            connectedSample = candidateSample;
+            found = true;
+        }
+
+        railConnectionSampleScratch.Clear();
+        return found;
+    }
+
+    private bool TryCollectConnectedRailSamples(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        List<RailSample> results,
+        bool requireDirectionalMatch)
+    {
+        results.Clear();
         if (endpointSample.Rail == null || exitDirection.sqrMagnitude <= 0.0001f)
         {
             return false;
@@ -3560,10 +4316,8 @@ public class RailHandcar : Train
         AddRailCandidates(endpointSample.Point);
         AddRailCandidates(endpointSample.Point + exitDirection * railConnectionLookAhead);
 
-        bool found = false;
         float maxConnectionDistance = ResolveRailConnectionMaxDistance();
         float maxConnectionSqrDistance = maxConnectionDistance * maxConnectionDistance;
-        float bestScore = float.MinValue;
         for (int i = 0; i < railCandidateScratch.Count; i++)
         {
             Railload rail = railCandidateScratch[i];
@@ -3590,29 +4344,24 @@ public class RailHandcar : Train
                 endpointSample.Point,
                 exitDirection,
                 railConnectionLookAhead);
-            if (progress <= 0.01f && directionScore < 0.12f)
+            if (requireDirectionalMatch && progress <= 0.01f && directionScore < 0.12f)
             {
                 continue;
             }
 
-            float score = progress * 1.2f + directionScore * 0.6f - sqrDistance * 3f;
-            if (score <= bestScore)
+            results.Add(new RailSample
             {
-                continue;
-            }
-
-            bestScore = score;
-            connectedSample.Rail = rail;
-            connectedSample.DistanceAlongPath = distanceAlongPath;
-            connectedSample.Point = pathPoint;
-            connectedSample.Tangent = tangent;
-            connectedSample.SqrDistance = sqrDistance;
-            found = true;
+                Rail = rail,
+                DistanceAlongPath = distanceAlongPath,
+                Point = pathPoint,
+                Tangent = tangent,
+                SqrDistance = sqrDistance
+            });
         }
 
         railCandidateScratch.Clear();
         railSearchScratch.Clear();
-        return found;
+        return results.Count > 0;
     }
 
     private bool TryFindRailConnectionSampleNearPoint(
@@ -3972,7 +4721,21 @@ public class RailHandcar : Train
             return;
         }
 
-        currentFacingTangent = facingTangent;
+        SyncRailFacingTangent(facingTangent, false);
         Physics.SyncTransforms();
+    }
+
+    private void SyncRailFacingTangent(Vector2 facingTangent, bool updateLastTravelDirection)
+    {
+        if (facingTangent.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        currentFacingTangent = facingTangent.normalized;
+        if (updateLastTravelDirection)
+        {
+            lastRailTravelDirection = currentFacingTangent;
+        }
     }
 }
