@@ -72,6 +72,7 @@ Shader "Custom/ConveyorBeltScroll"
             Blend[_SrcBlend][_DstBlend], [_SrcBlendAlpha][_DstBlendAlpha]
             ZWrite[_ZWrite]
             Cull[_Cull]
+            Offset -1, -1
             AlphaToMask[_AlphaToMask]
 
             HLSLPROGRAM

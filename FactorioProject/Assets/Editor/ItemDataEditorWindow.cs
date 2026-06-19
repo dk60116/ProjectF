@@ -644,6 +644,47 @@ public class ItemDataEditorWindow : EditorWindow
 
             return string.Compare(left.name, right.name, StringComparison.OrdinalIgnoreCase);
         });
+
+        RemoveDuplicateItemSets(itemSets);
+    }
+
+    private static void RemoveDuplicateItemSets(List<ItemManager.ItemSet> itemSets)
+    {
+        if (itemSets == null || itemSets.Count <= 1)
+        {
+            return;
+        }
+
+        HashSet<int> usedIds = new HashSet<int>();
+        HashSet<string> usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        List<ItemManager.ItemSet> uniqueItemSets = new List<ItemManager.ItemSet>(itemSets.Count);
+        for (int i = 0; i < itemSets.Count; i++)
+        {
+            ItemManager.ItemSet itemSet = itemSets[i];
+            bool hasId = itemSet.id >= 0;
+            string itemName = itemSet.name?.Trim();
+            bool hasName = !string.IsNullOrWhiteSpace(itemName);
+            if ((hasId && usedIds.Contains(itemSet.id))
+                || (hasName && usedNames.Contains(itemName)))
+            {
+                continue;
+            }
+
+            if (hasId)
+            {
+                usedIds.Add(itemSet.id);
+            }
+
+            if (hasName)
+            {
+                usedNames.Add(itemName);
+            }
+
+            uniqueItemSets.Add(itemSet);
+        }
+
+        itemSets.Clear();
+        itemSets.AddRange(uniqueItemSets);
     }
 
     private static ItemDefinition GetDraggedItemDefinition()
@@ -4043,11 +4084,7 @@ public class ItemDataEditorWindow : EditorWindow
         {
             for (int i = 0; i < itemManager.ItemDefinitions.Count; i++)
             {
-                ItemDefinition definition = itemManager.ItemDefinitions[i];
-                if (definition != null)
-                {
-                    cachedDefinitions.Add(definition);
-                }
+                AppendUniqueDefinition(cachedDefinitions, itemManager.ItemDefinitions[i]);
             }
         }
 
@@ -4072,6 +4109,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         HashSet<string> knownAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         HashSet<int> knownIds = new HashSet<int>();
+        HashSet<string> knownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition existingDefinition = definitions[i];
@@ -4089,6 +4127,12 @@ public class ItemDataEditorWindow : EditorWindow
             if (existingDefinition.id >= 0)
             {
                 knownIds.Add(existingDefinition.id);
+            }
+
+            string existingName = GetDefinitionDisplayName(existingDefinition);
+            if (!string.IsNullOrWhiteSpace(existingName))
+            {
+                knownNames.Add(existingName.Trim());
             }
         }
 
@@ -4108,7 +4152,10 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
-            if (definition == null || (definition.id >= 0 && knownIds.Contains(definition.id)))
+            string definitionName = definition != null ? GetDefinitionDisplayName(definition) : string.Empty;
+            if (definition == null
+                || (definition.id >= 0 && knownIds.Contains(definition.id))
+                || (!string.IsNullOrWhiteSpace(definitionName) && knownNames.Contains(definitionName.Trim())))
             {
                 continue;
             }
@@ -4123,10 +4170,72 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 knownIds.Add(definition.id);
             }
+
+            if (!string.IsNullOrWhiteSpace(definitionName))
+            {
+                knownNames.Add(definitionName.Trim());
+            }
         }
 
         SortDefinitionsById(missingDefinitions);
         definitions.AddRange(missingDefinitions);
+    }
+
+    private static void AppendUniqueDefinition(List<ItemDefinition> definitions, ItemDefinition definition)
+    {
+        if (definitions == null || definition == null || ContainsDefinitionIdentity(definitions, definition))
+        {
+            return;
+        }
+
+        definitions.Add(definition);
+    }
+
+    private static bool ContainsDefinitionIdentity(List<ItemDefinition> definitions, ItemDefinition definition)
+    {
+        if (definitions == null || definition == null)
+        {
+            return false;
+        }
+
+        string assetPath = AssetDatabase.GetAssetPath(definition);
+        string definitionName = GetDefinitionDisplayName(definition);
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition existingDefinition = definitions[i];
+            if (existingDefinition == null)
+            {
+                continue;
+            }
+
+            if (existingDefinition == definition)
+            {
+                return true;
+            }
+
+            string existingAssetPath = AssetDatabase.GetAssetPath(existingDefinition);
+            if (!string.IsNullOrWhiteSpace(assetPath)
+                && !string.IsNullOrWhiteSpace(existingAssetPath)
+                && string.Equals(assetPath, existingAssetPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (definition.id >= 0 && existingDefinition.id == definition.id)
+            {
+                return true;
+            }
+
+            string existingName = GetDefinitionDisplayName(existingDefinition);
+            if (!string.IsNullOrWhiteSpace(definitionName)
+                && !string.IsNullOrWhiteSpace(existingName)
+                && string.Equals(definitionName.Trim(), existingName.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ItemDefinition FindDefinitionById(List<ItemDefinition> definitions, int id)

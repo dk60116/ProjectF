@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_34_Utility pole
   m_EditorClassIdentifier: 
   itemName: Utility pole
-  id: 39
+  id: 40
   mapObject: {fileID: 2570451748998091923, guid: 7d1bdc86a2c93b7458f5a0d441e08e32, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}

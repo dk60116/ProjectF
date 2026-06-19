@@ -681,6 +681,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool conveyorNetworkCacheDirty = true;
     private bool conveyorLineCacheDirty = true;
     private int deferredConveyorRuntimeRefreshDepth;
+    private int conveyorLineBlockLoopIterations;
     private float nextConveyorActiveFullScanTime;
     private float nextBackgroundConveyorSimulationTime;
     private Vector2Int currentCenterChunk;

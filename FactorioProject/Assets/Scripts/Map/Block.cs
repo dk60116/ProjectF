@@ -3736,7 +3736,7 @@ public class Block : BaseObject
         {
             WakeConveyorMoveAttemptsAround();
         }
-        else if (HasConveyorReadyLaneForMove(false, false))
+        else if (HasConveyorReadyLaneForMove(false, false) || HasMovableConveyorLaneSleepState())
         {
             WakeConveyorMoveAttemptsAround();
         }
@@ -3793,7 +3793,8 @@ public class Block : BaseObject
             return true;
         }
 
-        return HasConveyorReadyLaneForMove(true);
+        return HasConveyorReadyLaneForMove(true)
+            || HasMovableConveyorLaneSleepState();
     }
 
     public bool HasConveyorWorkIgnoringNetworkThrottle()
@@ -3812,7 +3813,7 @@ public class Block : BaseObject
 
         if (!HasAnyConveyorObjectsNotMoveAttemptSleeping())
         {
-            return false;
+            return HasMovableConveyorLaneSleepState();
         }
 
         return HasConveyorReadyLaneForMove(false);
@@ -7459,6 +7460,21 @@ public class Block : BaseObject
         return false;
     }
 
+    private bool HasMovableConveyorLaneSleepState()
+    {
+        int laneCount = GetConveyorLaneCount();
+        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
+        {
+            if ((IsConveyorLaneBlockedSleep(laneIndex) || IsConveyorLaneCycleBlockedSleep(laneIndex))
+                && CanRetryConveyorLaneMove(laneIndex, true))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool HasMaterializedConveyorItems()
     {
         int laneCount = GetConveyorLaneCount();
@@ -7479,7 +7495,8 @@ public class Block : BaseObject
         CleanupConveyorStack();
         return IsConveyorStackingEnabled()
             && ((!IsConveyorNetworkMoveAttemptThrottled() && HasAnyConveyorObjectsNotMoveAttemptSleeping())
-                || HasConveyorMotionStates());
+                || HasConveyorMotionStates()
+                || HasMovableConveyorLaneSleepState());
     }
 
     private bool IsConveyorNetworkMoveAttemptThrottled()
@@ -8075,7 +8092,7 @@ public class Block : BaseObject
             TryAdvanceVirtualLinearConveyorMotion(portableObject, conveyorSpeed, deltaTime);
         }
 
-        if (HasConveyorReadyLaneForMove(false, false))
+        if (HasConveyorReadyLaneForMove(false, false) || HasMovableConveyorLaneSleepState())
         {
             WakeConveyorMoveAttemptsAround();
         }

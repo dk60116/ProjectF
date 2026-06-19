@@ -46,7 +46,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Railload
-  objId: 42
+  objId: 46
   itemDefinition: {fileID: 11400000, guid: 61dfdca30dedb50479bbba3d4602c4b6, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

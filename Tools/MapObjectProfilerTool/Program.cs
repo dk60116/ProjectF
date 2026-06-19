@@ -430,7 +430,7 @@ internal sealed class ProfilerForm : Form
         else
         {
             summaryLabel.Text =
-                $"Window {snapshot.WindowMs:0.#} ms / Active Update {snapshot.ActiveUpdateTicks:N0} / Belts {snapshot.ActiveBeltTicks:N0} / Belt Motion {snapshot.ActiveBeltDataMotions:N0} / Belt Visual {snapshot.ActiveBeltVisualTicks:N0} / Rows {profileRows.Count:N0}";
+                $"Window {snapshot.WindowMs:0.#} ms / Frames {snapshot.BeltLoopProfileFrames:N0} / Active Update {snapshot.ActiveUpdateTicks:N0} / Belts {snapshot.ActiveBeltTicks:N0} / Loops/f {snapshot.BeltItemLoopIterations:N1} / Data/f {snapshot.BeltDataMotionLoopIterations:N1} / Queue/f {snapshot.BeltActiveLoopIterations:N1} / Line/f {snapshot.BeltStraightLineBlockLoopIterations:N1} / Visual/f {snapshot.BeltVisualLoopIterations:N1} / Rows {profileRows.Count:N0}";
         }
 
         RefreshGrid();
@@ -797,6 +797,24 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("activeBeltVisualTicks")]
     public int ActiveBeltVisualTicks { get; set; }
+
+    [JsonPropertyName("beltLoopProfileFrames")]
+    public int BeltLoopProfileFrames { get; set; }
+
+    [JsonPropertyName("beltItemLoopIterations")]
+    public double BeltItemLoopIterations { get; set; }
+
+    [JsonPropertyName("beltDataMotionLoopIterations")]
+    public double BeltDataMotionLoopIterations { get; set; }
+
+    [JsonPropertyName("beltActiveLoopIterations")]
+    public double BeltActiveLoopIterations { get; set; }
+
+    [JsonPropertyName("beltStraightLineBlockLoopIterations")]
+    public double BeltStraightLineBlockLoopIterations { get; set; }
+
+    [JsonPropertyName("beltVisualLoopIterations")]
+    public double BeltVisualLoopIterations { get; set; }
 
     [JsonPropertyName("rowCount")]
     public int RowCount { get; set; }

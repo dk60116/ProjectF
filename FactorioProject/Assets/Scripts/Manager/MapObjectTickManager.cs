@@ -460,6 +460,12 @@ public static class MapObjectTickProfiler
     private static int activeBeltTickCount;
     private static int activeBeltDataMotionCount;
     private static int activeBeltVisualTickCount;
+    private static long beltDataMotionLoopIterations;
+    private static long beltActiveLoopIterations;
+    private static long beltStraightLineBlockLoopIterations;
+    private static long beltVisualLoopIterations;
+    private static int beltLoopProfileFrameCount;
+    private static int beltLoopProfileLastFrame = -1;
     private static float windowStartTime = -1f;
 
     public static bool IsEnabled
@@ -518,6 +524,35 @@ public static class MapObjectTickProfiler
         activeBeltTickCount = Mathf.Max(0, activeBelts);
         activeBeltDataMotionCount = Mathf.Max(0, dataMotionBelts);
         activeBeltVisualTickCount = Mathf.Max(0, visualBelts);
+
+        if (!IsEnabled)
+        {
+            return;
+        }
+
+        int frame = Time.frameCount;
+        if (frame != beltLoopProfileLastFrame)
+        {
+            beltLoopProfileLastFrame = frame;
+            beltLoopProfileFrameCount++;
+        }
+    }
+
+    public static void AddBeltLoopIterations(
+        int dataMotionLoops,
+        int activeLoops,
+        int straightLineBlockLoops,
+        int visualLoops)
+    {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
+        beltDataMotionLoopIterations += Mathf.Max(0, dataMotionLoops);
+        beltActiveLoopIterations += Mathf.Max(0, activeLoops);
+        beltStraightLineBlockLoopIterations += Mathf.Max(0, straightLineBlockLoops);
+        beltVisualLoopIterations += Mathf.Max(0, visualLoops);
     }
 
     public static void Reset()
@@ -531,6 +566,12 @@ public static class MapObjectTickProfiler
         activeBeltTickCount = 0;
         activeBeltDataMotionCount = 0;
         activeBeltVisualTickCount = 0;
+        beltDataMotionLoopIterations = 0L;
+        beltActiveLoopIterations = 0L;
+        beltStraightLineBlockLoopIterations = 0L;
+        beltVisualLoopIterations = 0L;
+        beltLoopProfileFrameCount = 0;
+        beltLoopProfileLastFrame = -1;
         windowStartTime = Time.unscaledTime;
     }
 
@@ -575,6 +616,18 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("activeBeltTicks", activeBeltTickCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltDataMotions", activeBeltDataMotionCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltVisualTicks", activeBeltVisualTickCount.ToString(CultureInfo.InvariantCulture), true);
+        long beltItemLoopIterations =
+            beltDataMotionLoopIterations
+            + beltActiveLoopIterations
+            + beltStraightLineBlockLoopIterations
+            + beltVisualLoopIterations;
+        int beltLoopFrameCount = Mathf.Max(1, beltLoopProfileFrameCount);
+        AppendJsonProperty("beltLoopProfileFrames", beltLoopProfileFrameCount.ToString(CultureInfo.InvariantCulture), true);
+        AppendJsonProperty("beltItemLoopIterations", FormatBeltLoopsPerFrame(beltItemLoopIterations, beltLoopFrameCount), true);
+        AppendJsonProperty("beltDataMotionLoopIterations", FormatBeltLoopsPerFrame(beltDataMotionLoopIterations, beltLoopFrameCount), true);
+        AppendJsonProperty("beltActiveLoopIterations", FormatBeltLoopsPerFrame(beltActiveLoopIterations, beltLoopFrameCount), true);
+        AppendJsonProperty("beltStraightLineBlockLoopIterations", FormatBeltLoopsPerFrame(beltStraightLineBlockLoopIterations, beltLoopFrameCount), true);
+        AppendJsonProperty("beltVisualLoopIterations", FormatBeltLoopsPerFrame(beltVisualLoopIterations, beltLoopFrameCount), true);
         AppendJsonProperty("rowCount", rowCount.ToString(CultureInfo.InvariantCulture), true);
         jsonBuilder.Append(",\"rows\":[");
 
@@ -610,6 +663,12 @@ public static class MapObjectTickProfiler
         groupStatsByKey.Clear();
         snapshotRows.Clear();
         windowStartTime = now;
+        beltDataMotionLoopIterations = 0L;
+        beltActiveLoopIterations = 0L;
+        beltStraightLineBlockLoopIterations = 0L;
+        beltVisualLoopIterations = 0L;
+        beltLoopProfileFrameCount = 0;
+        beltLoopProfileLastFrame = -1;
 
         if (!enabled)
         {
@@ -618,6 +677,12 @@ public static class MapObjectTickProfiler
         }
 
         return json;
+    }
+
+    private static string FormatBeltLoopsPerFrame(long loopIterations, int frameCount)
+    {
+        double loopsPerFrame = loopIterations / (double)Mathf.Max(1, frameCount);
+        return loopsPerFrame.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private static void RecordSample(string kind, object target, long startTimestamp)

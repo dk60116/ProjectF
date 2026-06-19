@@ -1307,9 +1307,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
         float now = Time.time;
         int processedCount = 0;
+        int loopIterations = 0;
         int processLimit = Mathf.Max(GetEffectiveConveyorWakeQueueProcessLimit(), activeConveyorDataMotionBlocks.Count);
         while (activeConveyorDataMotionBlocks.Count > 0 && processedCount < processLimit)
         {
+            loopIterations++;
             Block block = activeConveyorDataMotionBlocks[0];
             if (block == null || !activeConveyorDataMotionDueTimes.ContainsKey(block))
             {
@@ -1343,6 +1345,11 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 QueueConveyorWake(block);
             }
+        }
+
+        if (loopIterations > 0)
+        {
+            MapObjectTickProfiler.AddBeltLoopIterations(loopIterations, 0, 0, 0);
         }
     }
 
@@ -1533,10 +1540,13 @@ public partial class TerrainGenerator : MonoBehaviour
         int queuedAtFrameStart = conveyorWakeQueue.Count + conveyorLineWakeQueue.Count;
         int processLimit = GetEffectiveConveyorWakeQueueProcessLimit();
         int processedCount = 0;
+        int activeLoopIterations = 0;
+        conveyorLineBlockLoopIterations = 0;
         while ((conveyorLineWakeQueue.Count > 0 || conveyorWakeQueue.Count > 0)
             && processedCount < queuedAtFrameStart
             && processedCount < processLimit)
         {
+            activeLoopIterations++;
             if (conveyorLineWakeQueue.Count > 0)
             {
                 int lineId = conveyorLineWakeQueue.Dequeue();
@@ -1574,6 +1584,11 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 QueueConveyorWake(block);
             }
+        }
+
+        if (activeLoopIterations > 0 || conveyorLineBlockLoopIterations > 0)
+        {
+            MapObjectTickProfiler.AddBeltLoopIterations(0, activeLoopIterations, conveyorLineBlockLoopIterations, 0);
         }
 
         ProcessQueuedConveyorNetworkSleepChecks();
@@ -1703,6 +1718,7 @@ public partial class TerrainGenerator : MonoBehaviour
         bool movedAny = false;
         for (int i = line.blocks.Count - 1; i >= 0; i--)
         {
+            conveyorLineBlockLoopIterations++;
             Block block = line.blocks[i];
             int frontLaneIndex = line.frontLaneIndices[i];
             int backLaneIndex = line.backLaneIndices[i];
@@ -2092,8 +2108,10 @@ public partial class TerrainGenerator : MonoBehaviour
         BeginConveyorSlotDotInstancedRendering();
 
         int index = 0;
+        int loopIterations = 0;
         while (index < activeConveyorDotVisualList.Count)
         {
+            loopIterations++;
             Block block = activeConveyorDotVisualList[index];
             if (block == null || !block.IsConveyorStackingEnabled())
             {
@@ -2107,6 +2125,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         EndConveyorSlotDotInstancedRendering();
+
+        if (loopIterations > 0)
+        {
+            MapObjectTickProfiler.AddBeltLoopIterations(0, 0, 0, loopIterations);
+        }
     }
 
     private void DrawActiveBeltDirectionArrows()

@@ -154,10 +154,9 @@ public class Boiler : InputOutputModule
             return true;
         }
 
-        return TryResolveSteamOutputStorage(
+        return TryGetFluidOutputAvailableLiters(
             outputItemId,
             FluidEpsilon * 2f,
-            out _,
             out _);
     }
 
@@ -594,12 +593,7 @@ public class Boiler : InputOutputModule
             return true;
         }
 
-        if (!TryResolveSteamOutputStorage(
-                outputItemId,
-                maxLitersToEmit,
-                out InstallationObject targetStorage,
-                out float litersToEmit)
-            || targetStorage == null
+        if (!TryGetFluidOutputAvailableLiters(outputItemId, maxLitersToEmit, out float litersToEmit)
             || litersToEmit <= FluidEpsilon)
         {
             return false;
@@ -617,7 +611,7 @@ public class Boiler : InputOutputModule
             return false;
         }
 
-        if (!targetStorage.TryAddFluidLiters(
+        if (!TryEmitFluidOutputToConnectedStorages(
                 outputItemId,
                 litersToEmit,
                 MaxWaterTemperatureCelsiusValue,
@@ -682,28 +676,6 @@ public class Boiler : InputOutputModule
             MapClimate.CurrentWaterTemperatureCelsius,
             MinWaterTemperatureCelsius,
             MaxWaterTemperatureCelsiusValue);
-    }
-
-    private bool TryResolveSteamOutputStorage(
-        int outputItemId,
-        float maxLiters,
-        out InstallationObject targetStorage,
-        out float resolvedLiters)
-    {
-        targetStorage = null;
-        resolvedLiters = 0f;
-        if (maxLiters <= FluidEpsilon)
-        {
-            return false;
-        }
-
-        if (!TryResolveFluidOutputStorage(outputItemId, FluidEpsilon, out targetStorage))
-        {
-            return false;
-        }
-
-        resolvedLiters = Mathf.Min(maxLiters, targetStorage.AvailableFluidStorageLiters);
-        return resolvedLiters > FluidEpsilon;
     }
 
     private void TryPullBoilerInputWater(float deltaTime, int inputItemId)

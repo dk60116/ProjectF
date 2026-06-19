@@ -4747,6 +4747,95 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         return true;
     }
 
+    protected bool TryGetFluidOutputAvailableLiters(
+        int fluidItemId,
+        float maxLiters,
+        out float availableLiters)
+    {
+        availableLiters = 0f;
+        if (!IsFluidItemId(fluidItemId)
+            || maxLiters <= 0.0001f
+            || runtimeOutputCoordinates == null
+            || runtimeOutputCoordinates.Count <= 0
+            || !EnsureFluidOutputStorageCache())
+        {
+            return false;
+        }
+
+        for (int i = 0; i < cachedFluidOutputStorages.Count; i++)
+        {
+            InstallationObject storage = cachedFluidOutputStorages[i];
+            if (!CanUseFluidOutputStorageWithAnySpace(storage, fluidItemId))
+            {
+                continue;
+            }
+
+            availableLiters += Mathf.Max(0f, storage.AvailableFluidStorageLiters);
+            if (availableLiters + 0.0001f >= maxLiters)
+            {
+                availableLiters = maxLiters;
+                return true;
+            }
+        }
+
+        return availableLiters > 0.0001f;
+    }
+
+    protected bool TryEmitFluidOutputToConnectedStorages(
+        int fluidItemId,
+        float requestedLiters,
+        float temperatureCelsius,
+        out float acceptedLiters)
+    {
+        acceptedLiters = 0f;
+        if (!IsFluidItemId(fluidItemId)
+            || requestedLiters <= 0.0001f
+            || runtimeOutputCoordinates == null
+            || runtimeOutputCoordinates.Count <= 0
+            || !EnsureFluidOutputStorageCache())
+        {
+            return false;
+        }
+
+        int maxAttempts = Mathf.Max(1, cachedFluidOutputStorages.Count);
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            float remainingLiters = requestedLiters - acceptedLiters;
+            if (remainingLiters <= 0.0001f)
+            {
+                break;
+            }
+
+            if (!TrySelectFluidOutputStorageWithAnySpaceFromCache(fluidItemId, out InstallationObject targetStorage)
+                || targetStorage == null)
+            {
+                break;
+            }
+
+            float litersToEmit = Mathf.Min(
+                remainingLiters,
+                Mathf.Max(0f, targetStorage.AvailableFluidStorageLiters));
+            if (litersToEmit <= 0.0001f)
+            {
+                break;
+            }
+
+            if (!targetStorage.TryAddFluidLiters(
+                    fluidItemId,
+                    litersToEmit,
+                    temperatureCelsius,
+                    out float acceptedThisAttempt)
+                || acceptedThisAttempt <= 0.0001f)
+            {
+                break;
+            }
+
+            acceptedLiters += Mathf.Max(0f, acceptedThisAttempt);
+        }
+
+        return acceptedLiters > 0.0001f;
+    }
+
     private bool EnsureFluidOutputStorageCache()
     {
         if (cachedFluidOutputStoragesTopologyVersion == fluidTopologyVersion)
@@ -4851,6 +4940,33 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         return targetStorage != null;
     }
 
+    private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(
+        int fluidItemId,
+        out InstallationObject targetStorage)
+    {
+        targetStorage = null;
+        float bestTargetFillRatio = float.PositiveInfinity;
+        for (int i = 0; i < cachedFluidOutputStorages.Count; i++)
+        {
+            InstallationObject storage = cachedFluidOutputStorages[i];
+            if (!CanUseFluidOutputStorageWithAnySpace(storage, fluidItemId))
+            {
+                continue;
+            }
+
+            float fillRatio = GetFluidStorageFillRatio(storage);
+            if (targetStorage != null && fillRatio >= bestTargetFillRatio)
+            {
+                continue;
+            }
+
+            targetStorage = storage;
+            bestTargetFillRatio = fillRatio;
+        }
+
+        return targetStorage != null;
+    }
+
     private void AddFluidOutputStorageCacheCandidatesAtCoordinate(Vector2Int coordinate)
     {
         if (TryResolveConnectedFluidStorageBodyAtCoordinate(
@@ -4889,6 +5005,16 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                && storage.gameObject.activeInHierarchy
                && storage.CanStoreFluid
                && storage.CanAcceptFluidItem(fluidItemId, fluidLiters);
+    }
+
+    private bool CanUseFluidOutputStorageWithAnySpace(InstallationObject storage, int fluidItemId)
+    {
+        return storage != null
+               && storage != this
+               && storage.gameObject.activeInHierarchy
+               && storage.CanStoreFluid
+               && storage.AvailableFluidStorageLiters > 0.0001f
+               && storage.CanAcceptFluidItem(fluidItemId, 0.0001f);
     }
 
     protected bool TryEmitFluidOutputToConnectedStorage(int fluidItemId, int fluidLiters)
