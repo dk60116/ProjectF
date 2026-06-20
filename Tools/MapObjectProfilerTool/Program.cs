@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -32,6 +33,7 @@ internal sealed class ProfilerForm : Form
     private readonly NumericUpDown maxRowsInput = new NumericUpDown();
     private readonly CheckBox enableProfilingCheckBox = new CheckBox();
     private readonly Button refreshButton = new Button();
+    private readonly Button copyTextButton = new Button();
     private readonly Label fpsLabel = new Label();
     private readonly Label summaryLabel = new Label();
     private readonly Panel chartPanel = new Panel();
@@ -42,6 +44,7 @@ internal sealed class ProfilerForm : Form
     private readonly Dictionary<int, Image> iconCache = new Dictionary<int, Image>();
     private readonly List<ProfileRow> profileRows = new List<ProfileRow>();
 
+    private ProfileSnapshot? lastSnapshot;
     private bool applyingRuntimeState;
     private bool polling;
 
@@ -113,12 +116,18 @@ internal sealed class ProfilerForm : Form
         StyleButton(refreshButton, "Refresh");
         refreshButton.Click += async (_, _) => await RefreshNowAsync();
 
+        StyleButton(copyTextButton, "Copy Text");
+        copyTextButton.Margin = new Padding(8, 2, 0, 0);
+        copyTextButton.Enabled = false;
+        copyTextButton.Click += (_, _) => CopyCurrentSnapshotText();
+
         AddLabeledControl(controlPanel, "Host", hostTextBox);
         AddLabeledControl(controlPanel, "Port", portInput);
         AddLabeledControl(controlPanel, "Interval ms", intervalInput);
         AddLabeledControl(controlPanel, "Rows", maxRowsInput);
         controlPanel.Controls.Add(enableProfilingCheckBox);
         controlPanel.Controls.Add(refreshButton);
+        controlPanel.Controls.Add(copyTextButton);
         shell.Controls.Add(controlPanel, 0, 1);
 
         summaryLabel.Text = "측정 꺼짐";
@@ -413,6 +422,7 @@ internal sealed class ProfilerForm : Form
 
     private void ApplySnapshot(ProfileSnapshot? snapshot)
     {
+        lastSnapshot = snapshot;
         profileRows.Clear();
         if (snapshot?.Rows != null)
         {
@@ -430,19 +440,22 @@ internal sealed class ProfilerForm : Form
         else
         {
             summaryLabel.Text =
-                $"Window {snapshot.WindowMs:0.#} ms / Frames {snapshot.BeltLoopProfileFrames:N0} / Active Update {snapshot.ActiveUpdateTicks:N0} / Belts {snapshot.ActiveBeltTicks:N0} / Loops/f {snapshot.BeltItemLoopIterations:N1} / Data/f {snapshot.BeltDataMotionLoopIterations:N1} / Queue/f {snapshot.BeltActiveLoopIterations:N1} / Line/f {snapshot.BeltStraightLineBlockLoopIterations:N1} / Visual/f {snapshot.BeltVisualLoopIterations:N1} / Rows {profileRows.Count:N0}";
+                $"Window {snapshot.WindowMs:0.#} ms / Frames {snapshot.BeltLoopProfileFrames:N0} / Active Update {snapshot.ActiveUpdateTicks:N0} / Belts {snapshot.ActiveBeltTicks:N0} / Loops/f {snapshot.BeltItemLoopIterations:N1} / Data {snapshot.BeltDataMotionLoopIterations:N1} / Queue {snapshot.BeltActiveLoopIterations:N1} / Line {snapshot.BeltStraightLineBlockLoopIterations:N1} / Visual {snapshot.BeltVisualLoopIterations:N1} / Try {snapshot.BeltTryMoveAttempts:N1}:{snapshot.BeltTryMoveSuccesses:N1} / St {snapshot.BeltStraightMoveAttempts:N1}:{snapshot.BeltStraightMoveSuccesses:N1} / Plan {snapshot.BeltPlanMoveCalls:N1} / Apply {snapshot.BeltPlannedMoveApplications:N1} / Touch {snapshot.BeltTouchedBlockRefreshes:N1} / Wake {snapshot.BeltWakeAroundCalls:N1} / Ref {snapshot.BeltActivityRefreshCalls:N1} / Rows {profileRows.Count:N0}";
         }
 
         RefreshGrid();
         chartPanel.Invalidate();
+        UpdateCopyButtonEnabled();
     }
 
     private void ApplyEmptyState(string message)
     {
+        lastSnapshot = null;
         profileRows.Clear();
         summaryLabel.Text = message;
         rowsGrid.Rows.Clear();
         chartPanel.Invalidate();
+        UpdateCopyButtonEnabled();
     }
 
     private void ApplyOfflineState(string message)
@@ -684,7 +697,93 @@ internal sealed class ProfilerForm : Form
         maxRowsInput.Enabled = !busy;
         enableProfilingCheckBox.Enabled = !busy;
         refreshButton.Enabled = !busy;
+        UpdateCopyButtonEnabled(busy);
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
+    }
+
+    private void UpdateCopyButtonEnabled(bool busy = false)
+    {
+        copyTextButton.Enabled = !busy && lastSnapshot != null && lastSnapshot.Enabled;
+    }
+
+    private void CopyCurrentSnapshotText()
+    {
+        if (lastSnapshot == null)
+        {
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(BuildSnapshotClipboardText(lastSnapshot));
+            AppendLog("Profile snapshot copied to clipboard");
+        }
+        catch (Exception exception) when (exception is ExternalException || exception is ThreadStateException)
+        {
+            AppendLog($"clipboard copy failed: {exception.Message}");
+        }
+    }
+
+    private string BuildSnapshotClipboardText(ProfileSnapshot snapshot)
+    {
+        StringBuilder builder = new StringBuilder(4096);
+        builder.AppendLine("MapObject Profiler Snapshot");
+        builder.AppendLine($"CopiedAt\t{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        builder.AppendLine($"Enabled\t{snapshot.Enabled}");
+        builder.AppendLine($"Frame\t{snapshot.Frame}");
+        builder.AppendLine($"WindowMs\t{snapshot.WindowMs.ToString("0.###", CultureInfo.InvariantCulture)}");
+        builder.AppendLine($"BeltLoopProfileFrames\t{snapshot.BeltLoopProfileFrames.ToString(CultureInfo.InvariantCulture)}");
+        builder.AppendLine($"ActiveUpdateTicks\t{snapshot.ActiveUpdateTicks.ToString(CultureInfo.InvariantCulture)}");
+        builder.AppendLine($"ActiveBeltTicks\t{snapshot.ActiveBeltTicks.ToString(CultureInfo.InvariantCulture)}");
+        builder.AppendLine($"ActiveBeltDataMotions\t{snapshot.ActiveBeltDataMotions.ToString(CultureInfo.InvariantCulture)}");
+        builder.AppendLine($"ActiveBeltVisualTicks\t{snapshot.ActiveBeltVisualTicks.ToString(CultureInfo.InvariantCulture)}");
+        builder.AppendLine();
+        builder.AppendLine("BeltCountersPerFrame");
+        AppendMetric(builder, "Loops", snapshot.BeltItemLoopIterations);
+        AppendMetric(builder, "DataMotionLoops", snapshot.BeltDataMotionLoopIterations);
+        AppendMetric(builder, "ActiveQueueLoops", snapshot.BeltActiveLoopIterations);
+        AppendMetric(builder, "StraightLineBlockLoops", snapshot.BeltStraightLineBlockLoopIterations);
+        AppendMetric(builder, "VisualLoops", snapshot.BeltVisualLoopIterations);
+        AppendMetric(builder, "TryMoveAttempts", snapshot.BeltTryMoveAttempts);
+        AppendMetric(builder, "TryMoveSuccesses", snapshot.BeltTryMoveSuccesses);
+        AppendMetric(builder, "StraightMoveAttempts", snapshot.BeltStraightMoveAttempts);
+        AppendMetric(builder, "StraightMoveSuccesses", snapshot.BeltStraightMoveSuccesses);
+        AppendMetric(builder, "PlanMoveCalls", snapshot.BeltPlanMoveCalls);
+        AppendMetric(builder, "PlannedMoveApplications", snapshot.BeltPlannedMoveApplications);
+        AppendMetric(builder, "TouchedBlockRefreshes", snapshot.BeltTouchedBlockRefreshes);
+        AppendMetric(builder, "WakeAroundCalls", snapshot.BeltWakeAroundCalls);
+        AppendMetric(builder, "ActivityRefreshCalls", snapshot.BeltActivityRefreshCalls);
+        builder.AppendLine();
+        builder.AppendLine("Rows");
+        builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tMaxUs");
+        for (int i = 0; i < profileRows.Count; i++)
+        {
+            ProfileRow row = profileRows[i];
+            builder.Append(row.Rank.ToString(CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append(SanitizeClipboardCell(row.Kind)).Append('\t');
+            builder.Append(SanitizeClipboardCell(ResolveRowDisplayName(row))).Append('\t');
+            builder.Append(SanitizeClipboardCell(row.Type)).Append('\t');
+            builder.Append(row.ItemId.ToString(CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append(row.ActiveCount.ToString(CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append(row.Samples.ToString(CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append((row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append(row.AvgUs.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
+            builder.AppendLine(row.MaxUs.ToString("0.###", CultureInfo.InvariantCulture));
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendMetric(StringBuilder builder, string name, double value)
+    {
+        builder.Append(name).Append('\t').AppendLine(value.ToString("0.###", CultureInfo.InvariantCulture));
+    }
+
+    private static string SanitizeClipboardCell(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
     }
 
     private static async Task<string> SendProtocolLineAsync(string host, int port, string command)
@@ -815,6 +914,33 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("beltVisualLoopIterations")]
     public double BeltVisualLoopIterations { get; set; }
+
+    [JsonPropertyName("beltTryMoveAttempts")]
+    public double BeltTryMoveAttempts { get; set; }
+
+    [JsonPropertyName("beltTryMoveSuccesses")]
+    public double BeltTryMoveSuccesses { get; set; }
+
+    [JsonPropertyName("beltStraightMoveAttempts")]
+    public double BeltStraightMoveAttempts { get; set; }
+
+    [JsonPropertyName("beltStraightMoveSuccesses")]
+    public double BeltStraightMoveSuccesses { get; set; }
+
+    [JsonPropertyName("beltPlanMoveCalls")]
+    public double BeltPlanMoveCalls { get; set; }
+
+    [JsonPropertyName("beltPlannedMoveApplications")]
+    public double BeltPlannedMoveApplications { get; set; }
+
+    [JsonPropertyName("beltTouchedBlockRefreshes")]
+    public double BeltTouchedBlockRefreshes { get; set; }
+
+    [JsonPropertyName("beltWakeAroundCalls")]
+    public double BeltWakeAroundCalls { get; set; }
+
+    [JsonPropertyName("beltActivityRefreshCalls")]
+    public double BeltActivityRefreshCalls { get; set; }
 
     [JsonPropertyName("rowCount")]
     public int RowCount { get; set; }

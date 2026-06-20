@@ -104,6 +104,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorLineWakeQueuedIds.Clear();
         deferredConveyorRuntimeRefreshBlocks.Clear();
         deferredConveyorNetworkWakeBlocks.Clear();
+        deferredConveyorMoveAttemptWakeAroundBlocks.Clear();
         deferredConveyorRuntimeRefreshDepth = 0;
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
@@ -141,6 +142,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        FlushDeferredConveyorMoveAttemptWakeArounds();
         FlushDeferredConveyorRuntimeRefreshes();
         FlushDeferredConveyorNetworkWakes();
     }
@@ -163,6 +165,80 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         deferredConveyorNetworkWakeBlocks.Add(block);
+    }
+
+    public void QueueDeferredConveyorMoveAttemptWakeAround(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        deferredConveyorMoveAttemptWakeAroundBlocks.Add(block);
+    }
+
+    public void WakeAndRefreshConveyorRuntimeBlocks(
+        IList<Block> blocks,
+        bool queueWake = true,
+        bool refreshDebugVisuals = true)
+    {
+        if (!Application.isPlaying || blocks == null || blocks.Count == 0)
+        {
+            return;
+        }
+
+        BeginConveyorRuntimeRefreshBatch();
+        try
+        {
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                Block block = blocks[i];
+                if (block == null)
+                {
+                    continue;
+                }
+
+                block.WakeConveyorMoveAttemptsAround();
+                block.RefreshConveyorActivityRegistration(queueWake, refreshDebugVisuals);
+            }
+        }
+        finally
+        {
+            EndConveyorRuntimeRefreshBatch();
+        }
+    }
+
+    private void FlushDeferredConveyorMoveAttemptWakeArounds()
+    {
+        if (deferredConveyorMoveAttemptWakeAroundBlocks.Count == 0)
+        {
+            return;
+        }
+
+        conveyorTickBuffer.Clear();
+        foreach (Block block in deferredConveyorMoveAttemptWakeAroundBlocks)
+        {
+            if (IsLoadedBlockReference(block))
+            {
+                conveyorTickBuffer.Add(block);
+            }
+        }
+
+        deferredConveyorMoveAttemptWakeAroundBlocks.Clear();
+        deferredConveyorRuntimeRefreshDepth++;
+        try
+        {
+            for (int i = 0; i < conveyorTickBuffer.Count; i++)
+            {
+                conveyorTickBuffer[i]?.WakeConveyorMoveAttemptsAroundImmediate();
+            }
+        }
+        finally
+        {
+            deferredConveyorRuntimeRefreshDepth--;
+        }
+
+        conveyorTickBuffer.Clear();
     }
 
     private void FlushDeferredConveyorRuntimeRefreshes()
@@ -1339,8 +1415,17 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            block.CompleteDueVirtualConveyorDataMotions(now);
-            block.RefreshConveyorActivityRegistration(false);
+            BeginConveyorRuntimeRefreshBatch();
+            try
+            {
+                block.CompleteDueVirtualConveyorDataMotions(now);
+                block.RefreshConveyorActivityRegistration(false);
+            }
+            finally
+            {
+                EndConveyorRuntimeRefreshBatch();
+            }
+
             if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);
@@ -1579,7 +1664,16 @@ public partial class TerrainGenerator : MonoBehaviour
                 SetConveyorActive(block, true, false);
             }
 
-            block.TickConveyor(deltaTime);
+            BeginConveyorRuntimeRefreshBatch();
+            try
+            {
+                block.TickConveyor(deltaTime);
+            }
+            finally
+            {
+                EndConveyorRuntimeRefreshBatch();
+            }
+
             if (activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);
@@ -1656,6 +1750,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return true;
         }
 
+        WakeAndRefreshConveyorRuntimeBlocks(conveyorLineTouchedBlocks, false);
+
         bool queuedNextTick = false;
         for (int i = 0; i < conveyorLineTouchedBlocks.Count; i++)
         {
@@ -1665,8 +1761,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            block.WakeConveyorMoveAttemptsAround();
-            block.RefreshConveyorActivityRegistration(false);
             if (!queuedNextTick && activeConveyors.Contains(block) && block.ShouldTickActiveConveyor())
             {
                 QueueConveyorWake(block);

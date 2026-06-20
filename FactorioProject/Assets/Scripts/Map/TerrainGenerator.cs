@@ -662,6 +662,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorRuntimeRefreshBlocks = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorNetworkWakeBlocks = new HashSet<Block>();
+    private readonly HashSet<Block> deferredConveyorMoveAttemptWakeAroundBlocks = new HashSet<Block>();
     private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
     private readonly Queue<Vector2Int> floorObjectVirtualizationWorkQueue = new Queue<Vector2Int>();
     private readonly HashSet<Vector2Int> floorObjectVirtualizationQueuedCoordinates = new HashSet<Vector2Int>();
@@ -810,6 +811,10 @@ public partial class TerrainGenerator : MonoBehaviour
                 activeConveyors.Count,
                 activeConveyorDataMotionBlocks.Count,
                 activeConveyorDotVisualList.Count);
+        }
+        else
+        {
+            MapObjectTickProfiler.SetBeltProfilingFrameEnabled(false);
         }
 
         if (ShouldTickConveyorDataMotions(Time.deltaTime))
