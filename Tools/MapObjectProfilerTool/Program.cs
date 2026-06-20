@@ -33,7 +33,8 @@ internal sealed class ProfilerForm : Form
     private readonly NumericUpDown maxRowsInput = new NumericUpDown();
     private readonly CheckBox enableProfilingCheckBox = new CheckBox();
     private readonly Button refreshButton = new Button();
-    private readonly Button copyTextButton = new Button();
+    private readonly Button openTextWindowButton = new Button();
+    private readonly Button openBackgroundObjectWindowButton = new Button();
     private readonly Label fpsLabel = new Label();
     private readonly Label summaryLabel = new Label();
     private readonly Panel chartPanel = new Panel();
@@ -45,6 +46,8 @@ internal sealed class ProfilerForm : Form
     private readonly List<ProfileRow> profileRows = new List<ProfileRow>();
 
     private ProfileSnapshot? lastSnapshot;
+    private SnapshotTextForm? snapshotTextForm;
+    private SnapshotBackgroundObjectForm? snapshotBackgroundObjectForm;
     private bool applyingRuntimeState;
     private bool polling;
 
@@ -116,10 +119,15 @@ internal sealed class ProfilerForm : Form
         StyleButton(refreshButton, "Refresh");
         refreshButton.Click += async (_, _) => await RefreshNowAsync();
 
-        StyleButton(copyTextButton, "Copy Text");
-        copyTextButton.Margin = new Padding(8, 2, 0, 0);
-        copyTextButton.Enabled = false;
-        copyTextButton.Click += (_, _) => CopyCurrentSnapshotText();
+        StyleButton(openTextWindowButton, "Open Text");
+        openTextWindowButton.Margin = new Padding(8, 2, 0, 0);
+        openTextWindowButton.Enabled = false;
+        openTextWindowButton.Click += (_, _) => OpenSnapshotTextWindow();
+
+        StyleButton(openBackgroundObjectWindowButton, "Open BGObj");
+        openBackgroundObjectWindowButton.Margin = new Padding(8, 2, 0, 0);
+        openBackgroundObjectWindowButton.Enabled = false;
+        openBackgroundObjectWindowButton.Click += (_, _) => OpenBackgroundObjectWindow();
 
         AddLabeledControl(controlPanel, "Host", hostTextBox);
         AddLabeledControl(controlPanel, "Port", portInput);
@@ -127,7 +135,8 @@ internal sealed class ProfilerForm : Form
         AddLabeledControl(controlPanel, "Rows", maxRowsInput);
         controlPanel.Controls.Add(enableProfilingCheckBox);
         controlPanel.Controls.Add(refreshButton);
-        controlPanel.Controls.Add(copyTextButton);
+        controlPanel.Controls.Add(openTextWindowButton);
+        controlPanel.Controls.Add(openBackgroundObjectWindowButton);
         shell.Controls.Add(controlPanel, 0, 1);
 
         summaryLabel.Text = "측정 꺼짐";
@@ -175,6 +184,8 @@ internal sealed class ProfilerForm : Form
         FormClosed += (_, _) =>
         {
             pollTimer.Stop();
+            snapshotTextForm?.Close();
+            snapshotBackgroundObjectForm?.Close();
             ClearIconCache();
         };
         pollTimer.Start();
@@ -226,7 +237,7 @@ internal sealed class ProfilerForm : Form
         };
     }
 
-    private static void StyleButton(Button button, string text)
+    internal static void StyleButton(Button button, string text)
     {
         button.Text = text;
         button.Width = 108;
@@ -445,7 +456,9 @@ internal sealed class ProfilerForm : Form
 
         RefreshGrid();
         chartPanel.Invalidate();
-        UpdateCopyButtonEnabled();
+        UpdateSnapshotWindowButtonsEnabled();
+        RefreshSnapshotTextWindow();
+        RefreshBackgroundObjectWindow();
     }
 
     private void ApplyEmptyState(string message)
@@ -455,7 +468,9 @@ internal sealed class ProfilerForm : Form
         summaryLabel.Text = message;
         rowsGrid.Rows.Clear();
         chartPanel.Invalidate();
-        UpdateCopyButtonEnabled();
+        UpdateSnapshotWindowButtonsEnabled();
+        RefreshSnapshotTextWindow();
+        RefreshBackgroundObjectWindow();
     }
 
     private void ApplyOfflineState(string message)
@@ -697,34 +712,134 @@ internal sealed class ProfilerForm : Form
         maxRowsInput.Enabled = !busy;
         enableProfilingCheckBox.Enabled = !busy;
         refreshButton.Enabled = !busy;
-        UpdateCopyButtonEnabled(busy);
+        UpdateSnapshotWindowButtonsEnabled(busy);
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }
 
-    private void UpdateCopyButtonEnabled(bool busy = false)
+    private void UpdateSnapshotWindowButtonsEnabled(bool busy = false)
     {
-        copyTextButton.Enabled = !busy && lastSnapshot != null && lastSnapshot.Enabled;
+        bool hasSnapshot = !busy && lastSnapshot != null && lastSnapshot.Enabled;
+        openTextWindowButton.Enabled = hasSnapshot;
+        openBackgroundObjectWindowButton.Enabled = hasSnapshot;
     }
 
-    private void CopyCurrentSnapshotText()
+    private void OpenSnapshotTextWindow()
     {
         if (lastSnapshot == null)
         {
             return;
         }
 
-        try
+        if (snapshotTextForm == null || snapshotTextForm.IsDisposed)
         {
-            Clipboard.SetText(BuildSnapshotClipboardText(lastSnapshot));
-            AppendLog("Profile snapshot copied to clipboard");
+            snapshotTextForm = new SnapshotTextForm();
+            snapshotTextForm.FormClosed += (_, _) => snapshotTextForm = null;
         }
-        catch (Exception exception) when (exception is ExternalException || exception is ThreadStateException)
-        {
-            AppendLog($"clipboard copy failed: {exception.Message}");
-        }
+
+        RefreshSnapshotTextWindow();
+        snapshotTextForm.Show(this);
+        snapshotTextForm.BringToFront();
+        snapshotTextForm.Focus();
+        AppendLog("Profile snapshot opened in text window");
     }
 
-    private string BuildSnapshotClipboardText(ProfileSnapshot snapshot)
+    private void RefreshSnapshotTextWindow()
+    {
+        if (snapshotTextForm == null || snapshotTextForm.IsDisposed)
+        {
+            return;
+        }
+
+        snapshotTextForm.SetSnapshotText(lastSnapshot != null
+            ? BuildSnapshotText(lastSnapshot)
+            : summaryLabel.Text);
+    }
+
+    private void OpenBackgroundObjectWindow()
+    {
+        if (lastSnapshot == null)
+        {
+            return;
+        }
+
+        if (snapshotBackgroundObjectForm == null || snapshotBackgroundObjectForm.IsDisposed)
+        {
+            snapshotBackgroundObjectForm = new SnapshotBackgroundObjectForm();
+            snapshotBackgroundObjectForm.FormClosed += (_, _) => snapshotBackgroundObjectForm = null;
+        }
+
+        RefreshBackgroundObjectWindow();
+        snapshotBackgroundObjectForm.Show(this);
+        snapshotBackgroundObjectForm.BringToFront();
+        snapshotBackgroundObjectForm.Focus();
+        AppendLog("Background conveyor profile opened in graph window");
+    }
+
+    private void RefreshBackgroundObjectWindow()
+    {
+        if (snapshotBackgroundObjectForm == null || snapshotBackgroundObjectForm.IsDisposed)
+        {
+            return;
+        }
+
+        snapshotBackgroundObjectForm.SetSnapshot(lastSnapshot);
+    }
+
+    internal static BackgroundConveyorMetric[] BuildBackgroundConveyorMetrics(ProfileSnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return Array.Empty<BackgroundConveyorMetric>();
+        }
+
+        return new[]
+        {
+            new BackgroundConveyorMetric(
+                "SavedBlocks",
+                "Saved blocks",
+                snapshot.BackgroundConveyorSavedBlocks,
+                BackgroundConveyorMetricIcon.Blocks,
+                Color.FromArgb(104, 181, 255)),
+            new BackgroundConveyorMetric(
+                "SavedItems",
+                "Saved items",
+                snapshot.BackgroundConveyorSavedItems,
+                BackgroundConveyorMetricIcon.Items,
+                Color.FromArgb(119, 218, 151)),
+            new BackgroundConveyorMetric(
+                "Candidates",
+                "Candidates",
+                snapshot.BackgroundConveyorCandidates,
+                BackgroundConveyorMetricIcon.Candidates,
+                Color.FromArgb(235, 189, 92)),
+            new BackgroundConveyorMetric(
+                "Passes",
+                "Passes",
+                snapshot.BackgroundConveyorPasses,
+                BackgroundConveyorMetricIcon.Passes,
+                Color.FromArgb(176, 141, 255)),
+            new BackgroundConveyorMetric(
+                "MoveAttempts",
+                "Move attempts",
+                snapshot.BackgroundConveyorMoveAttempts,
+                BackgroundConveyorMetricIcon.Attempts,
+                Color.FromArgb(245, 150, 92)),
+            new BackgroundConveyorMetric(
+                "MoveSuccesses",
+                "Move successes",
+                snapshot.BackgroundConveyorMoveSuccesses,
+                BackgroundConveyorMetricIcon.Successes,
+                Color.FromArgb(111, 213, 196)),
+            new BackgroundConveyorMetric(
+                "DirtyCoordinates",
+                "Dirty coordinates",
+                snapshot.BackgroundConveyorDirtyCoordinates,
+                BackgroundConveyorMetricIcon.Dirty,
+                Color.FromArgb(236, 104, 94))
+        };
+    }
+
+    private string BuildSnapshotText(ProfileSnapshot snapshot)
     {
         StringBuilder builder = new StringBuilder(4096);
         builder.AppendLine("MapObject Profiler Snapshot");
@@ -753,6 +868,15 @@ internal sealed class ProfilerForm : Form
         AppendMetric(builder, "TouchedBlockRefreshes", snapshot.BeltTouchedBlockRefreshes);
         AppendMetric(builder, "WakeAroundCalls", snapshot.BeltWakeAroundCalls);
         AppendMetric(builder, "ActivityRefreshCalls", snapshot.BeltActivityRefreshCalls);
+        builder.AppendLine();
+        builder.AppendLine("BackgroundConveyorPerTick");
+        builder.AppendLine($"Samples\t{snapshot.BackgroundConveyorProfileSamples.ToString(CultureInfo.InvariantCulture)}");
+        BackgroundConveyorMetric[] backgroundMetrics = BuildBackgroundConveyorMetrics(snapshot);
+        for (int i = 0; i < backgroundMetrics.Length; i++)
+        {
+            AppendMetric(builder, backgroundMetrics[i].Key, backgroundMetrics[i].Value);
+        }
+
         builder.AppendLine();
         builder.AppendLine("Rows");
         builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tMaxUs");
@@ -871,6 +995,449 @@ internal sealed class ProfilerForm : Form
     }
 }
 
+internal sealed class SnapshotBackgroundObjectForm : Form
+{
+    private readonly Label summaryLabel = new Label();
+    private readonly BackgroundConveyorGraphPanel graphPanel = new BackgroundConveyorGraphPanel();
+    private readonly Button copyButton = new Button();
+    private readonly Button closeButton = new Button();
+
+    private ProfileSnapshot? snapshot;
+    private BackgroundConveyorMetric[] metrics = Array.Empty<BackgroundConveyorMetric>();
+
+    public SnapshotBackgroundObjectForm()
+    {
+        Text = "MapObject Profiler BGObj";
+        MinimumSize = new Size(760, 520);
+        Size = new Size(940, 680);
+        StartPosition = FormStartPosition.CenterParent;
+        Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
+        BackColor = Color.FromArgb(28, 31, 34);
+
+        TableLayoutPanel shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(16),
+            BackColor = Color.FromArgb(28, 31, 34)
+        };
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
+
+        Panel headerPanel = new Panel { Dock = DockStyle.Fill };
+        Label titleLabel = new Label
+        {
+            Text = "Background Conveyor",
+            AutoSize = true,
+            Font = new Font(Font.FontFamily, 18f, FontStyle.Bold),
+            ForeColor = Color.FromArgb(238, 232, 212),
+            Location = new Point(0, 0)
+        };
+        summaryLabel.AutoSize = true;
+        summaryLabel.ForeColor = Color.FromArgb(165, 174, 178);
+        summaryLabel.Location = new Point(2, 32);
+        headerPanel.Controls.Add(titleLabel);
+        headerPanel.Controls.Add(summaryLabel);
+        shell.Controls.Add(headerPanel, 0, 0);
+
+        graphPanel.Dock = DockStyle.Fill;
+        graphPanel.BackColor = Color.FromArgb(34, 38, 41);
+        shell.Controls.Add(graphPanel, 0, 1);
+
+        FlowLayoutPanel actionPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = new Padding(0, 8, 0, 0)
+        };
+
+        ProfilerForm.StyleButton(closeButton, "Close");
+        closeButton.Click += (_, _) => Close();
+
+        ProfilerForm.StyleButton(copyButton, "Copy");
+        copyButton.Margin = new Padding(8, 2, 0, 0);
+        copyButton.Click += (_, _) => CopyBackgroundText();
+
+        actionPanel.Controls.Add(closeButton);
+        actionPanel.Controls.Add(copyButton);
+        shell.Controls.Add(actionPanel, 0, 2);
+        Controls.Add(shell);
+
+        SetSnapshot(null);
+    }
+
+    public void SetSnapshot(ProfileSnapshot? nextSnapshot)
+    {
+        snapshot = nextSnapshot;
+        metrics = snapshot != null
+            ? ProfilerForm.BuildBackgroundConveyorMetrics(snapshot)
+            : Array.Empty<BackgroundConveyorMetric>();
+
+        if (snapshot == null || !snapshot.Enabled)
+        {
+            summaryLabel.Text = "No background conveyor snapshot";
+            copyButton.Enabled = false;
+            graphPanel.SetMetrics(metrics, 0, 0, 0.0);
+            return;
+        }
+
+        summaryLabel.Text =
+            $"Samples {snapshot.BackgroundConveyorProfileSamples:N0} / Frame {snapshot.Frame:N0} / Window {snapshot.WindowMs:0.#} ms";
+        copyButton.Enabled = true;
+        graphPanel.SetMetrics(
+            metrics,
+            snapshot.BackgroundConveyorProfileSamples,
+            snapshot.Frame,
+            snapshot.WindowMs);
+    }
+
+    private void CopyBackgroundText()
+    {
+        if (snapshot == null)
+        {
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder(512);
+        builder.AppendLine("BackgroundConveyorPerTick");
+        builder.AppendLine($"CopiedAt\t{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        builder.AppendLine($"Samples\t{snapshot.BackgroundConveyorProfileSamples.ToString(CultureInfo.InvariantCulture)}");
+        for (int i = 0; i < metrics.Length; i++)
+        {
+            builder.Append(metrics[i].Key).Append('\t')
+                .AppendLine(metrics[i].Value.ToString("0.###", CultureInfo.InvariantCulture));
+        }
+
+        try
+        {
+            Clipboard.SetText(builder.ToString());
+        }
+        catch (Exception exception) when (exception is ExternalException || exception is ThreadStateException)
+        {
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "Clipboard copy failed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+}
+
+internal sealed class BackgroundConveyorGraphPanel : Panel
+{
+    private BackgroundConveyorMetric[] metrics = Array.Empty<BackgroundConveyorMetric>();
+    private int sampleCount;
+    private int frame;
+    private double windowMs;
+
+    public BackgroundConveyorGraphPanel()
+    {
+        DoubleBuffered = true;
+    }
+
+    public void SetMetrics(BackgroundConveyorMetric[] nextMetrics, int nextSampleCount, int nextFrame, double nextWindowMs)
+    {
+        metrics = nextMetrics ?? Array.Empty<BackgroundConveyorMetric>();
+        sampleCount = Math.Max(0, nextSampleCount);
+        frame = Math.Max(0, nextFrame);
+        windowMs = Math.Max(0.0, nextWindowMs);
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.Clear(BackColor);
+
+        Rectangle bounds = ClientRectangle;
+        if (bounds.Width <= 2 || bounds.Height <= 2)
+        {
+            return;
+        }
+
+        using Font titleFont = new Font(Font.FontFamily, 11f, FontStyle.Bold);
+        using Font textFont = new Font(Font.FontFamily, 9.5f, FontStyle.Regular);
+        using Brush textBrush = new SolidBrush(Color.FromArgb(229, 234, 232));
+        using Brush dimBrush = new SolidBrush(Color.FromArgb(157, 168, 172));
+        using Pen dividerPen = new Pen(Color.FromArgb(55, 62, 66));
+
+        Rectangle inner = Rectangle.Inflate(bounds, -18, -16);
+        e.Graphics.DrawString(
+            $"Per background tick average / Samples {sampleCount:N0} / Frame {frame:N0} / Window {windowMs:0.#} ms",
+            titleFont,
+            textBrush,
+            inner.X,
+            inner.Y);
+
+        int graphTop = inner.Y + 38;
+        if (metrics.Length <= 0 || sampleCount <= 0)
+        {
+            e.Graphics.DrawString("No background conveyor samples yet", textFont, dimBrush, inner.X, graphTop);
+            return;
+        }
+
+        double maxValue = 1.0;
+        for (int i = 0; i < metrics.Length; i++)
+        {
+            maxValue = Math.Max(maxValue, metrics[i].Value);
+        }
+
+        int rowHeight = Math.Max(52, (inner.Bottom - graphTop) / Math.Max(1, metrics.Length));
+        int iconSize = 30;
+        int labelWidth = Math.Min(190, Math.Max(130, inner.Width / 4));
+        int valueWidth = 92;
+        int barX = inner.X + iconSize + 14 + labelWidth;
+        int barRight = inner.Right - valueWidth - 10;
+        int barWidth = Math.Max(80, barRight - barX);
+
+        for (int i = 0; i < metrics.Length; i++)
+        {
+            BackgroundConveyorMetric metric = metrics[i];
+            int y = graphTop + (i * rowHeight);
+            Rectangle rowRect = new Rectangle(inner.X, y, inner.Width, rowHeight);
+            Rectangle iconRect = new Rectangle(inner.X + 2, y + ((rowHeight - iconSize) / 2), iconSize, iconSize);
+            Rectangle barBackRect = new Rectangle(barX, y + ((rowHeight - 18) / 2), barWidth, 18);
+            int fillWidth = (int)Math.Round(barWidth * Math.Clamp(metric.Value / maxValue, 0.0, 1.0));
+            Rectangle barFillRect = new Rectangle(barBackRect.X, barBackRect.Y, fillWidth, barBackRect.Height);
+
+            e.Graphics.DrawLine(dividerPen, rowRect.X, rowRect.Bottom - 1, rowRect.Right, rowRect.Bottom - 1);
+            DrawMetricIcon(e.Graphics, iconRect, metric);
+
+            using Brush labelBrush = new SolidBrush(Color.FromArgb(229, 234, 232));
+            using Brush barBrush = new SolidBrush(metric.Color);
+            using Brush barBackBrush = new SolidBrush(Color.FromArgb(48, 55, 59));
+            using Pen barBorderPen = new Pen(Color.FromArgb(73, 82, 87));
+
+            e.Graphics.DrawString(metric.Label, textFont, labelBrush, inner.X + iconSize + 12, y + 11);
+            e.Graphics.FillRectangle(barBackBrush, barBackRect);
+            if (barFillRect.Width > 0)
+            {
+                e.Graphics.FillRectangle(barBrush, barFillRect);
+            }
+
+            e.Graphics.DrawRectangle(barBorderPen, barBackRect);
+
+            string valueText = metric.Value.ToString("0.###", CultureInfo.InvariantCulture);
+            using StringFormat valueFormat = new StringFormat
+            {
+                Alignment = StringAlignment.Far,
+                LineAlignment = StringAlignment.Center
+            };
+            e.Graphics.DrawString(
+                valueText,
+                textFont,
+                labelBrush,
+                new RectangleF(barRight + 8, barBackRect.Y - 2, valueWidth, barBackRect.Height + 4),
+                valueFormat);
+        }
+    }
+
+    private static void DrawMetricIcon(Graphics graphics, Rectangle rect, BackgroundConveyorMetric metric)
+    {
+        using Brush fillBrush = new SolidBrush(Color.FromArgb(58, 65, 69));
+        using Brush accentBrush = new SolidBrush(metric.Color);
+        using Pen accentPen = new Pen(metric.Color, 2.2f)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round
+        };
+        using Pen dimPen = new Pen(Color.FromArgb(91, 101, 106), 1.4f);
+
+        graphics.FillEllipse(fillBrush, rect);
+        graphics.DrawEllipse(dimPen, rect);
+
+        Rectangle content = Rectangle.Inflate(rect, -7, -7);
+        switch (metric.Icon)
+        {
+            case BackgroundConveyorMetricIcon.Blocks:
+                int cell = Math.Max(5, content.Width / 2 - 1);
+                graphics.FillRectangle(accentBrush, content.X, content.Y, cell, cell);
+                graphics.FillRectangle(accentBrush, content.X + cell + 2, content.Y, cell, cell);
+                graphics.FillRectangle(accentBrush, content.X, content.Y + cell + 2, cell, cell);
+                graphics.FillRectangle(accentBrush, content.X + cell + 2, content.Y + cell + 2, cell, cell);
+                break;
+            case BackgroundConveyorMetricIcon.Items:
+                graphics.FillEllipse(accentBrush, content);
+                graphics.DrawEllipse(Pens.White, Rectangle.Inflate(content, -4, -4));
+                break;
+            case BackgroundConveyorMetricIcon.Candidates:
+                graphics.DrawLine(accentPen, content.Left, content.Top + content.Height / 2, content.Right - 3, content.Top + content.Height / 2);
+                graphics.FillPolygon(accentBrush, new[]
+                {
+                    new Point(content.Right, content.Top + content.Height / 2),
+                    new Point(content.Right - 7, content.Top + 2),
+                    new Point(content.Right - 7, content.Bottom - 2)
+                });
+                break;
+            case BackgroundConveyorMetricIcon.Passes:
+                graphics.DrawArc(accentPen, content, 35, 285);
+                graphics.FillPolygon(accentBrush, new[]
+                {
+                    new Point(content.Right - 2, content.Top + 5),
+                    new Point(content.Right - 10, content.Top + 3),
+                    new Point(content.Right - 6, content.Top + 12)
+                });
+                break;
+            case BackgroundConveyorMetricIcon.Attempts:
+                graphics.FillPolygon(accentBrush, new[]
+                {
+                    new Point(content.Left + content.Width / 2, content.Top),
+                    new Point(content.Right, content.Bottom),
+                    new Point(content.Left, content.Bottom)
+                });
+                break;
+            case BackgroundConveyorMetricIcon.Successes:
+                graphics.DrawLines(accentPen, new[]
+                {
+                    new Point(content.Left + 1, content.Top + content.Height / 2),
+                    new Point(content.Left + content.Width / 3, content.Bottom - 2),
+                    new Point(content.Right, content.Top + 2)
+                });
+                break;
+            case BackgroundConveyorMetricIcon.Dirty:
+                graphics.FillPolygon(accentBrush, new[]
+                {
+                    new Point(content.Left + content.Width / 2, content.Top),
+                    new Point(content.Right, content.Top + content.Height / 2),
+                    new Point(content.Left + content.Width / 2, content.Bottom),
+                    new Point(content.Left, content.Top + content.Height / 2)
+                });
+                break;
+        }
+    }
+}
+
+internal readonly struct BackgroundConveyorMetric
+{
+    public readonly string Key;
+    public readonly string Label;
+    public readonly double Value;
+    public readonly BackgroundConveyorMetricIcon Icon;
+    public readonly Color Color;
+
+    public BackgroundConveyorMetric(
+        string key,
+        string label,
+        double value,
+        BackgroundConveyorMetricIcon icon,
+        Color color)
+    {
+        Key = key;
+        Label = label;
+        Value = value;
+        Icon = icon;
+        Color = color;
+    }
+}
+
+internal enum BackgroundConveyorMetricIcon
+{
+    Blocks,
+    Items,
+    Candidates,
+    Passes,
+    Attempts,
+    Successes,
+    Dirty
+}
+
+internal sealed class SnapshotTextForm : Form
+{
+    private readonly TextBox snapshotTextBox = new TextBox();
+    private readonly Button copyButton = new Button();
+    private readonly Button closeButton = new Button();
+
+    public SnapshotTextForm()
+    {
+        Text = "MapObject Profiler Snapshot";
+        MinimumSize = new Size(760, 520);
+        Size = new Size(920, 680);
+        StartPosition = FormStartPosition.CenterParent;
+        Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
+        BackColor = Color.FromArgb(28, 31, 34);
+
+        TableLayoutPanel shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Padding = new Padding(14),
+            BackColor = Color.FromArgb(28, 31, 34)
+        };
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
+
+        snapshotTextBox.Dock = DockStyle.Fill;
+        snapshotTextBox.Multiline = true;
+        snapshotTextBox.ScrollBars = ScrollBars.Both;
+        snapshotTextBox.WordWrap = false;
+        snapshotTextBox.ReadOnly = true;
+        snapshotTextBox.BorderStyle = BorderStyle.None;
+        snapshotTextBox.BackColor = Color.FromArgb(34, 38, 41);
+        snapshotTextBox.ForeColor = Color.FromArgb(222, 228, 226);
+        snapshotTextBox.Font = new Font("Consolas", 10f, FontStyle.Regular, GraphicsUnit.Point);
+        shell.Controls.Add(snapshotTextBox, 0, 0);
+
+        FlowLayoutPanel actionPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = new Padding(0, 8, 0, 0)
+        };
+
+        ProfilerForm.StyleButton(closeButton, "Close");
+        closeButton.Click += (_, _) => Close();
+
+        ProfilerForm.StyleButton(copyButton, "Copy");
+        copyButton.Margin = new Padding(8, 2, 0, 0);
+        copyButton.Click += (_, _) => CopySnapshotText();
+
+        actionPanel.Controls.Add(closeButton);
+        actionPanel.Controls.Add(copyButton);
+        shell.Controls.Add(actionPanel, 0, 1);
+        Controls.Add(shell);
+    }
+
+    public void SetSnapshotText(string text)
+    {
+        string nextText = text ?? string.Empty;
+        if (snapshotTextBox.Text == nextText)
+        {
+            return;
+        }
+
+        int selectionStart = snapshotTextBox.Focused
+            ? Math.Min(snapshotTextBox.SelectionStart, nextText.Length)
+            : 0;
+        snapshotTextBox.Text = nextText;
+        snapshotTextBox.SelectionStart = selectionStart;
+        snapshotTextBox.SelectionLength = 0;
+    }
+
+    private void CopySnapshotText()
+    {
+        try
+        {
+            Clipboard.SetText(snapshotTextBox.Text);
+        }
+        catch (Exception exception) when (exception is ExternalException || exception is ThreadStateException)
+        {
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "Clipboard copy failed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+}
+
 internal sealed class ProfileSnapshot
 {
     [JsonPropertyName("enabled")]
@@ -941,6 +1508,30 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("beltActivityRefreshCalls")]
     public double BeltActivityRefreshCalls { get; set; }
+
+    [JsonPropertyName("backgroundConveyorProfileSamples")]
+    public int BackgroundConveyorProfileSamples { get; set; }
+
+    [JsonPropertyName("backgroundConveyorSavedBlocks")]
+    public double BackgroundConveyorSavedBlocks { get; set; }
+
+    [JsonPropertyName("backgroundConveyorSavedItems")]
+    public double BackgroundConveyorSavedItems { get; set; }
+
+    [JsonPropertyName("backgroundConveyorCandidates")]
+    public double BackgroundConveyorCandidates { get; set; }
+
+    [JsonPropertyName("backgroundConveyorPasses")]
+    public double BackgroundConveyorPasses { get; set; }
+
+    [JsonPropertyName("backgroundConveyorMoveAttempts")]
+    public double BackgroundConveyorMoveAttempts { get; set; }
+
+    [JsonPropertyName("backgroundConveyorMoveSuccesses")]
+    public double BackgroundConveyorMoveSuccesses { get; set; }
+
+    [JsonPropertyName("backgroundConveyorDirtyCoordinates")]
+    public double BackgroundConveyorDirtyCoordinates { get; set; }
 
     [JsonPropertyName("rowCount")]
     public int RowCount { get; set; }

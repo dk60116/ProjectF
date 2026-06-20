@@ -400,9 +400,27 @@ public partial class BlockStateStore
         }
 
         long nowTicks = DateTime.UtcNow.Ticks;
-        BuildConveyorSimulationItems(nowTicks);
+        bool profileBackgroundSimulation = MapObjectTickProfiler.IsEnabled;
+        BuildConveyorSimulationItems(
+            nowTicks,
+            profileBackgroundSimulation,
+            out int savedBlockCount,
+            out int savedItemCount);
+        int candidateCount = conveyorSimulationItems.Count;
         if (conveyorSimulationItems.Count <= 0)
         {
+            if (profileBackgroundSimulation)
+            {
+                MapObjectTickProfiler.AddBackgroundConveyorSimulation(
+                    savedBlockCount,
+                    savedItemCount,
+                    candidateCount,
+                    0,
+                    0,
+                    0,
+                    conveyorSimulationDirtyCoordinates.Count);
+            }
+
             FlushConveyorSimulationDirtyStates();
             CopyConveyorSimulationDirtyCoordinates(dirtyCoordinates);
             ClearConveyorSimulationBuffers();
@@ -413,8 +431,16 @@ public partial class BlockStateStore
             ? Mathf.Max(1, maxPassesOverride * ConveyorBackgroundSimulationPassMultiplier)
             : ConveyorBackgroundDefaultSimulationPasses;
 
+        int actualPassCount = 0;
+        int moveAttemptCount = 0;
+        int moveSuccessCount = 0;
         for (int passIndex = 0; passIndex < passLimit; passIndex++)
         {
+            if (profileBackgroundSimulation)
+            {
+                actualPassCount++;
+            }
+
             bool movedAny = false;
             for (int itemIndex = 0; itemIndex < conveyorSimulationItems.Count; itemIndex++)
             {
@@ -426,12 +452,22 @@ public partial class BlockStateStore
                     continue;
                 }
 
+                if (profileBackgroundSimulation)
+                {
+                    moveAttemptCount++;
+                }
+
                 if (!TryMoveConveyorSimulationItem(ref item))
                 {
                     continue;
                 }
 
                 conveyorSimulationItems[itemIndex] = item;
+                if (profileBackgroundSimulation)
+                {
+                    moveSuccessCount++;
+                }
+
                 movedAny = true;
             }
 
@@ -441,13 +477,31 @@ public partial class BlockStateStore
             }
         }
 
+        if (profileBackgroundSimulation)
+        {
+            MapObjectTickProfiler.AddBackgroundConveyorSimulation(
+                savedBlockCount,
+                savedItemCount,
+                candidateCount,
+                actualPassCount,
+                moveAttemptCount,
+                moveSuccessCount,
+                conveyorSimulationDirtyCoordinates.Count);
+        }
+
         FlushConveyorSimulationDirtyStates();
         CopyConveyorSimulationDirtyCoordinates(dirtyCoordinates);
         ClearConveyorSimulationBuffers();
     }
 
-    private void BuildConveyorSimulationItems(long nowTicks)
+    private void BuildConveyorSimulationItems(
+        long nowTicks,
+        bool collectProfileCounters,
+        out int savedBlockCount,
+        out int savedItemCount)
     {
+        savedBlockCount = 0;
+        savedItemCount = 0;
         conveyorSimulationOccupancy.Clear();
         conveyorSimulationItems.Clear();
         conveyorSimulationDirtyCoordinates.Clear();
@@ -460,6 +514,7 @@ public partial class BlockStateStore
                 continue;
             }
 
+            int validItemCount = 0;
             for (int i = 0; i < state.lanes.Count; i++)
             {
                 ConveyorItemLaneSaveState lane = state.lanes[i];
@@ -471,6 +526,16 @@ public partial class BlockStateStore
                 }
 
                 conveyorSimulationOccupancy[new ConveyorLaneKey(pair.Key, lane.laneIndex)] = lane;
+                if (collectProfileCounters)
+                {
+                    validItemCount++;
+                }
+            }
+
+            if (collectProfileCounters && validItemCount > 0)
+            {
+                savedBlockCount++;
+                savedItemCount += validItemCount;
             }
         }
 
