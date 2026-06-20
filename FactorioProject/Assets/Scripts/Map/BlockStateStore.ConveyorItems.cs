@@ -8,9 +8,18 @@ public partial class BlockStateStore
     private const float ConveyorBackgroundSimulationEpsilon = 0.0001f;
     private const int ConveyorBackgroundSimulationPassMultiplier = 64;
     private const int ConveyorBackgroundDefaultSimulationPasses = 256;
+    private const double ConveyorBackgroundBlockedRetrySeconds = 1.0;
     private const float VirtualConveyorLanePathLength = 0.5f;
     private const int ConveyorSingleLineFrontLaneIndex = 0;
     private const int ConveyorSingleLineBackLaneIndex = 2;
+    private static readonly Vector2Int[] SavedConveyorExternalWakeOffsets =
+    {
+        Vector2Int.zero,
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
 
     private sealed class ConveyorLaneLinkSaveState
     {
@@ -67,10 +76,42 @@ public partial class BlockStateStore
         public float budgetDistance;
     }
 
+    private readonly struct ConveyorScheduledLane
+    {
+        public readonly ConveyorLaneKey key;
+        public readonly long readyTicks;
+        public readonly int version;
+
+        public ConveyorScheduledLane(ConveyorLaneKey key, long readyTicks, int version)
+        {
+            this.key = key;
+            this.readyTicks = readyTicks;
+            this.version = version;
+        }
+    }
+
+    private struct ConveyorScheduleState
+    {
+        public long readyTicks;
+        public int version;
+        public bool blocked;
+        public bool slowRetry;
+        public ConveyorLaneKey blockedDestination;
+    }
+
     private readonly Dictionary<Vector2Int, ConveyorItemBlockState> savedConveyorItemStates = new Dictionary<Vector2Int, ConveyorItemBlockState>();
-    private readonly Dictionary<ConveyorLaneKey, ConveyorItemLaneSaveState> conveyorSimulationOccupancy = new Dictionary<ConveyorLaneKey, ConveyorItemLaneSaveState>();
-    private readonly List<ConveyorSimulationItem> conveyorSimulationItems = new List<ConveyorSimulationItem>();
-    private readonly HashSet<Vector2Int> conveyorSimulationDirtyCoordinates = new HashSet<Vector2Int>();
+    private readonly Dictionary<ConveyorLaneKey, ConveyorScheduleState> conveyorScheduleStates = new Dictionary<ConveyorLaneKey, ConveyorScheduleState>();
+    private readonly Dictionary<ConveyorLaneKey, List<ConveyorLaneKey>> conveyorBlockedWaitersByDestination = new Dictionary<ConveyorLaneKey, List<ConveyorLaneKey>>();
+    private readonly List<ConveyorScheduledLane> conveyorReadyLaneHeap = new List<ConveyorScheduledLane>();
+    private readonly List<ConveyorLaneKey> conveyorSimulationActiveLaneKeys = new List<ConveyorLaneKey>();
+    private readonly List<ConveyorLaneKey> conveyorSimulationNextActiveLaneKeys = new List<ConveyorLaneKey>();
+    private readonly HashSet<ConveyorLaneKey> conveyorSimulationNextActiveLaneKeySet = new HashSet<ConveyorLaneKey>();
+    private readonly HashSet<Vector2Int> conveyorSimulationOccupancyDirtyCoordinates = new HashSet<Vector2Int>();
+    private readonly Dictionary<Vector2Int, float> conveyorSimulationRemainingBudgetByCoordinate = new Dictionary<Vector2Int, float>();
+    private bool conveyorScheduleDirty = true;
+    private int conveyorScheduleVersion;
+    private int cachedConveyorScheduleSavedBlockCount;
+    private int cachedConveyorScheduleSavedItemCount;
 
     private static bool IsSavedConveyorActiveLaneIndex(int laneIndex)
     {
@@ -136,6 +177,7 @@ public partial class BlockStateStore
         if (block == null || !block.IsRuntimeConveyor)
         {
             savedConveyorItemStates.Remove(worldCoordinate);
+            InvalidateConveyorSchedule();
             return;
         }
 
@@ -169,12 +211,14 @@ public partial class BlockStateStore
 
         TryPopulateVirtualConveyorItemState(worldCoordinate, state);
         savedConveyorItemStates[worldCoordinate] = state;
+        InvalidateConveyorSchedule();
         SyncConveyorFloorObjects(worldCoordinate, state);
     }
 
     public void RemoveConveyorItems(Vector2Int worldCoordinate)
     {
         savedConveyorItemStates.Remove(worldCoordinate);
+        InvalidateConveyorSchedule();
     }
 
     public bool TryGetConveyorItems(Vector2Int worldCoordinate, out List<ConveyorItemLaneSaveState> lanes)
@@ -236,7 +280,9 @@ public partial class BlockStateStore
         }
 
         itemId = lane.itemId;
+        int laneIndex = lane.laneIndex;
         state.lanes.Remove(lane);
+        NotifySavedConveyorLaneVacatedExternally(worldCoordinate, laneIndex);
         SyncConveyorFloorObjects(worldCoordinate, state);
         return true;
     }
@@ -276,6 +322,7 @@ public partial class BlockStateStore
         state.laneCount = Mathf.Max(state.laneCount, laneIndex + 1);
         state.lastBackgroundSimulationTicks = DateTime.UtcNow.Ticks;
         savedConveyorItemStates[worldCoordinate] = state;
+        NotifySavedConveyorLaneOccupiedExternally(worldCoordinate, laneIndex);
         SyncConveyorFloorObjects(worldCoordinate, state);
         return true;
     }
@@ -345,6 +392,7 @@ public partial class BlockStateStore
         }
 
         savedConveyorItemStates[destinationCoordinate] = destinationState;
+        NotifySavedConveyorLaneOccupiedExternally(destinationCoordinate, destinationLaneIndex);
         SyncConveyorFloorObjects(destinationCoordinate, destinationState);
         return true;
     }
@@ -354,6 +402,7 @@ public partial class BlockStateStore
         if (lanes == null || lanes.Count <= 0)
         {
             savedConveyorItemStates.Remove(worldCoordinate);
+            InvalidateConveyorSchedule();
             return;
         }
 
@@ -379,6 +428,7 @@ public partial class BlockStateStore
         if (state.lanes.Count <= 0)
         {
             savedConveyorItemStates.Remove(worldCoordinate);
+            InvalidateConveyorSchedule();
             return;
         }
 
@@ -389,6 +439,7 @@ public partial class BlockStateStore
         TryPopulateVirtualConveyorItemState(worldCoordinate, state);
         state.lastBackgroundSimulationTicks = DateTime.UtcNow.Ticks;
         savedConveyorItemStates[worldCoordinate] = state;
+        InvalidateConveyorSchedule();
         SyncConveyorFloorObjects(worldCoordinate, state);
     }
 
@@ -401,13 +452,17 @@ public partial class BlockStateStore
 
         long nowTicks = DateTime.UtcNow.Ticks;
         bool profileBackgroundSimulation = MapObjectTickProfiler.IsEnabled;
-        BuildConveyorSimulationItems(
+        PrepareConveyorSimulationCandidates(
             nowTicks,
             profileBackgroundSimulation,
             out int savedBlockCount,
-            out int savedItemCount);
-        int candidateCount = conveyorSimulationItems.Count;
-        if (conveyorSimulationItems.Count <= 0)
+            out int savedItemCount,
+            out int candidateCount,
+            out int readyHeapSize,
+            out int skippedNotReadyCount,
+            out int staleScheduleDropCount,
+            out int slowRetryCandidateCount);
+        if (conveyorSimulationActiveLaneKeys.Count <= 0)
         {
             if (profileBackgroundSimulation)
             {
@@ -418,9 +473,17 @@ public partial class BlockStateStore
                     0,
                     0,
                     0,
-                    conveyorSimulationDirtyCoordinates.Count);
+                    conveyorSimulationOccupancyDirtyCoordinates.Count,
+                    0,
+                    readyHeapSize,
+                    candidateCount,
+                    skippedNotReadyCount,
+                    CountConveyorBlockedWaiters(),
+                    staleScheduleDropCount,
+                    slowRetryCandidateCount);
             }
 
+            RebaseConveyorSimulationTicks(nowTicks);
             FlushConveyorSimulationDirtyStates();
             CopyConveyorSimulationDirtyCoordinates(dirtyCoordinates);
             ClearConveyorSimulationBuffers();
@@ -436,45 +499,48 @@ public partial class BlockStateStore
         int moveSuccessCount = 0;
         for (int passIndex = 0; passIndex < passLimit; passIndex++)
         {
+            if (passIndex > 0 && conveyorSimulationActiveLaneKeys.Count <= 0)
+            {
+                break;
+            }
+
             if (profileBackgroundSimulation)
             {
                 actualPassCount++;
             }
 
             bool movedAny = false;
-            for (int itemIndex = 0; itemIndex < conveyorSimulationItems.Count; itemIndex++)
+            if (passIndex == 0)
             {
-                ConveyorSimulationItem item = conveyorSimulationItems[itemIndex];
-                if (item.lane == null
-                    || item.lane.itemId < 0
-                    || item.budgetDistance <= ConveyorBackgroundSimulationEpsilon)
+                for (int i = 0; i < conveyorSimulationActiveLaneKeys.Count; i++)
                 {
-                    continue;
+                    movedAny |= TryProcessConveyorSimulationLaneKey(
+                        conveyorSimulationActiveLaneKeys[i],
+                        nowTicks,
+                        profileBackgroundSimulation,
+                        ref moveAttemptCount,
+                        ref moveSuccessCount);
                 }
-
-                if (profileBackgroundSimulation)
+            }
+            else
+            {
+                for (int i = 0; i < conveyorSimulationActiveLaneKeys.Count; i++)
                 {
-                    moveAttemptCount++;
+                    movedAny |= TryProcessConveyorSimulationLaneKey(
+                        conveyorSimulationActiveLaneKeys[i],
+                        nowTicks,
+                        profileBackgroundSimulation,
+                        ref moveAttemptCount,
+                        ref moveSuccessCount);
                 }
-
-                if (!TryMoveConveyorSimulationItem(ref item))
-                {
-                    continue;
-                }
-
-                conveyorSimulationItems[itemIndex] = item;
-                if (profileBackgroundSimulation)
-                {
-                    moveSuccessCount++;
-                }
-
-                movedAny = true;
             }
 
             if (!movedAny)
             {
                 break;
             }
+
+            PrepareNextConveyorSimulationPass();
         }
 
         if (profileBackgroundSimulation)
@@ -486,25 +552,91 @@ public partial class BlockStateStore
                 actualPassCount,
                 moveAttemptCount,
                 moveSuccessCount,
-                conveyorSimulationDirtyCoordinates.Count);
+                conveyorSimulationOccupancyDirtyCoordinates.Count,
+                0,
+                conveyorReadyLaneHeap.Count,
+                candidateCount,
+                skippedNotReadyCount,
+                CountConveyorBlockedWaiters(),
+                staleScheduleDropCount,
+                slowRetryCandidateCount);
         }
 
+        RebaseConveyorSimulationTicks(nowTicks);
         FlushConveyorSimulationDirtyStates();
         CopyConveyorSimulationDirtyCoordinates(dirtyCoordinates);
         ClearConveyorSimulationBuffers();
     }
 
-    private void BuildConveyorSimulationItems(
+    private void PrepareConveyorSimulationCandidates(
         long nowTicks,
         bool collectProfileCounters,
         out int savedBlockCount,
-        out int savedItemCount)
+        out int savedItemCount,
+        out int candidateCount,
+        out int readyHeapSize,
+        out int skippedNotReadyCount,
+        out int staleScheduleDropCount,
+        out int slowRetryCandidateCount)
     {
-        savedBlockCount = 0;
-        savedItemCount = 0;
-        conveyorSimulationOccupancy.Clear();
-        conveyorSimulationItems.Clear();
-        conveyorSimulationDirtyCoordinates.Clear();
+        conveyorSimulationActiveLaneKeys.Clear();
+        conveyorSimulationNextActiveLaneKeys.Clear();
+        conveyorSimulationNextActiveLaneKeySet.Clear();
+        conveyorSimulationOccupancyDirtyCoordinates.Clear();
+        conveyorSimulationRemainingBudgetByCoordinate.Clear();
+        staleScheduleDropCount = 0;
+        slowRetryCandidateCount = 0;
+
+        if (conveyorScheduleDirty || (conveyorScheduleStates.Count <= 0 && savedConveyorItemStates.Count > 0))
+        {
+            RebuildConveyorSchedule(nowTicks);
+        }
+
+        while (conveyorReadyLaneHeap.Count > 0)
+        {
+            ConveyorScheduledLane scheduledLane = conveyorReadyLaneHeap[0];
+            if (scheduledLane.readyTicks > nowTicks)
+            {
+                break;
+            }
+
+            PopConveyorReadyLane();
+            if (!conveyorScheduleStates.TryGetValue(scheduledLane.key, out ConveyorScheduleState scheduleState)
+                || scheduleState.version != scheduledLane.version
+                || scheduleState.readyTicks != scheduledLane.readyTicks)
+            {
+                staleScheduleDropCount++;
+                continue;
+            }
+
+            conveyorScheduleStates.Remove(scheduledLane.key);
+            if (scheduleState.slowRetry)
+            {
+                slowRetryCandidateCount++;
+            }
+
+            if (scheduleState.blocked)
+            {
+                RemoveConveyorBlockedWaiter(scheduleState.blockedDestination, scheduledLane.key);
+            }
+
+            conveyorSimulationActiveLaneKeys.Add(scheduledLane.key);
+        }
+
+        savedBlockCount = collectProfileCounters ? cachedConveyorScheduleSavedBlockCount : 0;
+        savedItemCount = collectProfileCounters ? cachedConveyorScheduleSavedItemCount : 0;
+        candidateCount = conveyorSimulationActiveLaneKeys.Count;
+        readyHeapSize = conveyorReadyLaneHeap.Count;
+        skippedNotReadyCount = Mathf.Max(0, conveyorScheduleStates.Count);
+    }
+
+    private void RebuildConveyorSchedule(long nowTicks)
+    {
+        conveyorScheduleStates.Clear();
+        conveyorBlockedWaitersByDestination.Clear();
+        conveyorReadyLaneHeap.Clear();
+        cachedConveyorScheduleSavedBlockCount = 0;
+        cachedConveyorScheduleSavedItemCount = 0;
 
         foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
         {
@@ -525,53 +657,207 @@ public partial class BlockStateStore
                     continue;
                 }
 
-                conveyorSimulationOccupancy[new ConveyorLaneKey(pair.Key, lane.laneIndex)] = lane;
-                if (collectProfileCounters)
-                {
-                    validItemCount++;
-                }
+                validItemCount++;
+                ConveyorLaneKey laneKey = new ConveyorLaneKey(pair.Key, lane.laneIndex);
+                ScheduleConveyorLane(laneKey, state, lane, nowTicks, -1f, out _);
             }
 
-            if (collectProfileCounters && validItemCount > 0)
+            if (validItemCount > 0)
             {
-                savedBlockCount++;
-                savedItemCount += validItemCount;
+                cachedConveyorScheduleSavedBlockCount++;
+                cachedConveyorScheduleSavedItemCount += validItemCount;
             }
         }
 
-        foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
+        conveyorScheduleDirty = false;
+    }
+
+    private bool ScheduleConveyorLane(
+        ConveyorLaneKey laneKey,
+        ConveyorItemBlockState state,
+        ConveyorItemLaneSaveState lane,
+        long nowTicks,
+        float availableBudgetDistance,
+        out long readyTicks)
+    {
+        readyTicks = nowTicks;
+        if (state == null
+            || lane == null
+            || lane.itemId < 0
+            || lane.laneIndex != laneKey.laneIndex)
         {
-            ConveyorItemBlockState state = pair.Value;
-            if (state == null || state.lanes.Count <= 0)
-            {
-                continue;
-            }
+            conveyorScheduleStates.Remove(laneKey);
+            return false;
+        }
 
-            float budgetDistance = ResolveConveyorSimulationBudgetDistance(state, nowTicks);
-            state.lastBackgroundSimulationTicks = nowTicks;
-            if (budgetDistance <= ConveyorBackgroundSimulationEpsilon)
-            {
-                continue;
-            }
+        if (state.conveyorSpeed <= ConveyorBackgroundSimulationEpsilon
+            || !TryGetConveyorLaneLink(state, lane.laneIndex, out ConveyorLaneLinkSaveState link)
+            || link == null
+            || link.pathLength <= ConveyorBackgroundSimulationEpsilon)
+        {
+            readyTicks = ResolveConveyorBlockedRetryTicks(nowTicks);
+            PushConveyorScheduleState(laneKey, readyTicks, false, default, true);
+            return true;
+        }
 
-            for (int i = 0; i < state.lanes.Count; i++)
-            {
-                ConveyorItemLaneSaveState lane = state.lanes[i];
-                if (lane == null
-                    || lane.itemId < 0
-                    || !IsSavedConveyorActiveLaneIndex(lane.laneIndex))
-                {
-                    continue;
-                }
+        float budgetDistance = availableBudgetDistance >= 0f
+            ? availableBudgetDistance
+            : ResolveConveyorSimulationBudgetDistance(state, nowTicks);
+        float requiredDistance = ResolveSavedConveyorLaneBoundaryDistance(lane, link);
+        readyTicks = ResolveConveyorLaneReadyTicks(state, nowTicks, budgetDistance, requiredDistance);
+        PushConveyorScheduleState(laneKey, readyTicks, false, default);
+        return true;
+    }
 
-                conveyorSimulationItems.Add(new ConveyorSimulationItem
-                {
-                    coordinate = pair.Key,
-                    lane = lane,
-                    budgetDistance = budgetDistance
-                });
+    private static long ResolveConveyorLaneReadyTicks(
+        ConveyorItemBlockState state,
+        long nowTicks,
+        float budgetDistance,
+        float requiredDistance)
+    {
+        if (state == null
+            || state.conveyorSpeed <= ConveyorBackgroundSimulationEpsilon
+            || requiredDistance <= ConveyorBackgroundSimulationEpsilon
+            || budgetDistance + ConveyorBackgroundSimulationEpsilon >= requiredDistance)
+        {
+            return nowTicks;
+        }
+
+        double remainingSeconds = (requiredDistance - budgetDistance) / state.conveyorSpeed;
+        if (remainingSeconds <= ConveyorBackgroundSimulationEpsilon)
+        {
+            return nowTicks;
+        }
+
+        double remainingTicks = remainingSeconds * TimeSpan.TicksPerSecond;
+        if (remainingTicks <= 0d)
+        {
+            return nowTicks;
+        }
+
+        if (remainingTicks >= long.MaxValue - nowTicks)
+        {
+            return long.MaxValue;
+        }
+
+        return nowTicks + (long)Math.Ceiling(remainingTicks);
+    }
+
+    private static long ResolveConveyorBlockedRetryTicks(long nowTicks)
+    {
+        double retryTicks = ConveyorBackgroundBlockedRetrySeconds * TimeSpan.TicksPerSecond;
+        if (retryTicks >= long.MaxValue - nowTicks)
+        {
+            return long.MaxValue;
+        }
+
+        return nowTicks + Math.Max(1L, (long)Math.Ceiling(retryTicks));
+    }
+
+    private void PushConveyorScheduleState(
+        ConveyorLaneKey laneKey,
+        long readyTicks,
+        bool blocked,
+        ConveyorLaneKey blockedDestination)
+    {
+        PushConveyorScheduleState(laneKey, readyTicks, blocked, blockedDestination, blocked);
+    }
+
+    private void PushConveyorScheduleState(
+        ConveyorLaneKey laneKey,
+        long readyTicks,
+        bool blocked,
+        ConveyorLaneKey blockedDestination,
+        bool slowRetry)
+    {
+        ConveyorScheduleState scheduleState = new ConveyorScheduleState
+        {
+            readyTicks = readyTicks,
+            version = ++conveyorScheduleVersion,
+            blocked = blocked,
+            slowRetry = slowRetry,
+            blockedDestination = blockedDestination
+        };
+        conveyorScheduleStates[laneKey] = scheduleState;
+        PushConveyorReadyLane(new ConveyorScheduledLane(laneKey, readyTicks, scheduleState.version));
+    }
+
+    private int CountConveyorBlockedWaiters()
+    {
+        int count = 0;
+        foreach (KeyValuePair<ConveyorLaneKey, List<ConveyorLaneKey>> pair in conveyorBlockedWaitersByDestination)
+        {
+            if (pair.Value != null)
+            {
+                count += pair.Value.Count;
             }
         }
+
+        return count;
+    }
+
+    private void PushConveyorReadyLane(ConveyorScheduledLane scheduledLane)
+    {
+        conveyorReadyLaneHeap.Add(scheduledLane);
+        int index = conveyorReadyLaneHeap.Count - 1;
+        while (index > 0)
+        {
+            int parentIndex = (index - 1) / 2;
+            if (CompareConveyorScheduledLane(conveyorReadyLaneHeap[parentIndex], scheduledLane) <= 0)
+            {
+                break;
+            }
+
+            conveyorReadyLaneHeap[index] = conveyorReadyLaneHeap[parentIndex];
+            index = parentIndex;
+        }
+
+        conveyorReadyLaneHeap[index] = scheduledLane;
+    }
+
+    private ConveyorScheduledLane PopConveyorReadyLane()
+    {
+        ConveyorScheduledLane result = conveyorReadyLaneHeap[0];
+        int lastIndex = conveyorReadyLaneHeap.Count - 1;
+        ConveyorScheduledLane lastLane = conveyorReadyLaneHeap[lastIndex];
+        conveyorReadyLaneHeap.RemoveAt(lastIndex);
+        if (lastIndex <= 0)
+        {
+            return result;
+        }
+
+        int index = 0;
+        while (true)
+        {
+            int leftIndex = (index * 2) + 1;
+            if (leftIndex >= conveyorReadyLaneHeap.Count)
+            {
+                break;
+            }
+
+            int rightIndex = leftIndex + 1;
+            int childIndex = rightIndex < conveyorReadyLaneHeap.Count
+                && CompareConveyorScheduledLane(conveyorReadyLaneHeap[rightIndex], conveyorReadyLaneHeap[leftIndex]) < 0
+                    ? rightIndex
+                    : leftIndex;
+
+            if (CompareConveyorScheduledLane(lastLane, conveyorReadyLaneHeap[childIndex]) <= 0)
+            {
+                break;
+            }
+
+            conveyorReadyLaneHeap[index] = conveyorReadyLaneHeap[childIndex];
+            index = childIndex;
+        }
+
+        conveyorReadyLaneHeap[index] = lastLane;
+        return result;
+    }
+
+    private static int CompareConveyorScheduledLane(ConveyorScheduledLane left, ConveyorScheduledLane right)
+    {
+        int readyCompare = left.readyTicks.CompareTo(right.readyTicks);
+        return readyCompare != 0 ? readyCompare : left.version.CompareTo(right.version);
     }
 
     private static float ResolveConveyorSimulationBudgetDistance(ConveyorItemBlockState state, long nowTicks)
@@ -595,49 +881,172 @@ public partial class BlockStateStore
         return Mathf.Max(0f, (float)Math.Min(elapsedSeconds * state.conveyorSpeed, float.MaxValue));
     }
 
-    private bool TryAdvanceSavedConveyorLaneMotion(
-        ConveyorItemBlockState sourceState,
-        ref ConveyorSimulationItem item,
-        ConveyorLaneLinkSaveState link,
-        out bool motionCompleted)
+    private bool TryProcessConveyorSimulationLaneKey(
+        ConveyorLaneKey laneKey,
+        long nowTicks,
+        bool collectProfileCounters,
+        ref int moveAttemptCount,
+        ref int moveSuccessCount)
     {
-        motionCompleted = false;
-        ConveyorItemLaneSaveState lane = item.lane;
-        float budgetDistance = item.budgetDistance;
-
-        if (lane == null || !lane.hasMotion)
+        if (!TryGetSavedConveyorLane(laneKey, out ConveyorItemBlockState sourceState, out ConveyorItemLaneSaveState lane)
+            || sourceState == null
+            || lane == null
+            || lane.itemId < 0)
         {
             return false;
         }
 
-        float pathLength = ResolveSavedConveyorMotionPathLength(lane);
-        if (pathLength <= ConveyorBackgroundSimulationEpsilon)
+        float budgetDistance = ResolveConveyorSimulationBudgetDistance(sourceState, nowTicks);
+        ConveyorSimulationItem item = new ConveyorSimulationItem
         {
-            pathLength = link != null ? link.pathLength : 0f;
+            coordinate = laneKey.coordinate,
+            lane = lane,
+            budgetDistance = budgetDistance
+        };
+
+        if (item.budgetDistance <= ConveyorBackgroundSimulationEpsilon)
+        {
+            ScheduleConveyorLane(laneKey, sourceState, lane, nowTicks, budgetDistance, out _);
+            return false;
         }
 
-        if (pathLength <= ConveyorBackgroundSimulationEpsilon)
+        if (collectProfileCounters)
         {
-            ClearSavedConveyorMotion(lane);
-            conveyorSimulationDirtyCoordinates.Add(item.coordinate);
-            motionCompleted = true;
-            return true;
+            moveAttemptCount++;
         }
 
-        float remainingDistance = pathLength * (1f - Mathf.Clamp01(lane.progress));
-        if (budgetDistance + ConveyorBackgroundSimulationEpsilon < remainingDistance)
+        if (!TryMoveConveyorSimulationItem(
+                ref item,
+                out bool vacatedLane,
+                out ConveyorLaneKey vacatedLaneKey,
+                out bool blockedByOccupiedDestination,
+                out ConveyorLaneKey blockedDestinationKey))
         {
-            lane.progress = Mathf.Clamp01(lane.progress + (budgetDistance / pathLength));
-            item.budgetDistance = 0f;
-            conveyorSimulationDirtyCoordinates.Add(item.coordinate);
-            return true;
+            if (blockedByOccupiedDestination)
+            {
+                BlockConveyorScheduledLane(laneKey, blockedDestinationKey, nowTicks);
+            }
+            else if (TryGetSavedConveyorLane(laneKey, out _, out _))
+            {
+                PushConveyorScheduleState(
+                    laneKey,
+                    ResolveConveyorBlockedRetryTicks(nowTicks),
+                    false,
+                    default,
+                    true);
+            }
+
+            RecordConveyorSimulationRemainingBudget(laneKey.coordinate, item.budgetDistance);
+            return false;
         }
 
-        lane.progress = 1f;
-        item.budgetDistance = Mathf.Max(0f, budgetDistance - remainingDistance);
-        conveyorSimulationDirtyCoordinates.Add(item.coordinate);
-        motionCompleted = true;
+        if (collectProfileCounters)
+        {
+            moveSuccessCount++;
+        }
+
+        ConveyorLaneKey movedLaneKey = new ConveyorLaneKey(item.coordinate, item.lane.laneIndex);
+        if (item.lane != null
+            && item.lane.itemId >= 0
+            && item.budgetDistance > ConveyorBackgroundSimulationEpsilon)
+        {
+            if (TryGetSavedConveyorLane(movedLaneKey, out ConveyorItemBlockState movedState, out ConveyorItemLaneSaveState movedLane)
+                && ScheduleConveyorLane(movedLaneKey, movedState, movedLane, nowTicks, item.budgetDistance, out long readyTicks)
+                && readyTicks <= nowTicks)
+            {
+                QueueNextConveyorSimulationLaneKey(movedLaneKey);
+            }
+        }
+        else if (TryGetSavedConveyorLane(movedLaneKey, out ConveyorItemBlockState settledState, out ConveyorItemLaneSaveState settledLane))
+        {
+            ScheduleConveyorLane(movedLaneKey, settledState, settledLane, nowTicks, item.budgetDistance, out _);
+        }
+
+        if (vacatedLane)
+        {
+            WakeConveyorBlockedWaitersForVacatedLane(vacatedLaneKey, nowTicks);
+        }
+
+        RecordConveyorSimulationRemainingBudget(vacatedLaneKey.coordinate, 0f);
+        RecordConveyorSimulationRemainingBudget(item.coordinate, item.budgetDistance);
         return true;
+    }
+
+    private void BlockConveyorScheduledLane(ConveyorLaneKey laneKey, ConveyorLaneKey destinationKey, long nowTicks)
+    {
+        AddConveyorBlockedWaiter(destinationKey, laneKey);
+        PushConveyorScheduleState(
+            laneKey,
+            ResolveConveyorBlockedRetryTicks(nowTicks),
+            true,
+            destinationKey);
+    }
+
+    private void AddConveyorBlockedWaiter(ConveyorLaneKey destinationKey, ConveyorLaneKey laneKey)
+    {
+        if (!conveyorBlockedWaitersByDestination.TryGetValue(destinationKey, out List<ConveyorLaneKey> waiters))
+        {
+            waiters = new List<ConveyorLaneKey>(1);
+            conveyorBlockedWaitersByDestination[destinationKey] = waiters;
+        }
+
+        if (!waiters.Contains(laneKey))
+        {
+            waiters.Add(laneKey);
+        }
+    }
+
+    private void RemoveConveyorBlockedWaiter(ConveyorLaneKey destinationKey, ConveyorLaneKey laneKey)
+    {
+        if (!conveyorBlockedWaitersByDestination.TryGetValue(destinationKey, out List<ConveyorLaneKey> waiters))
+        {
+            return;
+        }
+
+        waiters.Remove(laneKey);
+        if (waiters.Count <= 0)
+        {
+            conveyorBlockedWaitersByDestination.Remove(destinationKey);
+        }
+    }
+
+    private void WakeConveyorBlockedWaitersForVacatedLane(ConveyorLaneKey laneKey, long nowTicks)
+    {
+        if (!conveyorBlockedWaitersByDestination.TryGetValue(laneKey, out List<ConveyorLaneKey> waiters))
+        {
+            return;
+        }
+
+        for (int i = 0; i < waiters.Count; i++)
+        {
+            ConveyorLaneKey waiterKey = waiters[i];
+            if (!TryGetSavedConveyorLane(waiterKey, out _, out _))
+            {
+                conveyorScheduleStates.Remove(waiterKey);
+                continue;
+            }
+
+            PushConveyorScheduleState(waiterKey, nowTicks, false, default);
+            QueueNextConveyorSimulationLaneKey(waiterKey);
+        }
+
+        conveyorBlockedWaitersByDestination.Remove(laneKey);
+    }
+
+    private void QueueNextConveyorSimulationLaneKey(ConveyorLaneKey laneKey)
+    {
+        if (conveyorSimulationNextActiveLaneKeySet.Add(laneKey))
+        {
+            conveyorSimulationNextActiveLaneKeys.Add(laneKey);
+        }
+    }
+
+    private void PrepareNextConveyorSimulationPass()
+    {
+        conveyorSimulationActiveLaneKeys.Clear();
+        conveyorSimulationActiveLaneKeys.AddRange(conveyorSimulationNextActiveLaneKeys);
+        conveyorSimulationNextActiveLaneKeys.Clear();
+        conveyorSimulationNextActiveLaneKeySet.Clear();
     }
 
     private static float ResolveSavedConveyorMotionPathLength(ConveyorItemLaneSaveState lane)
@@ -663,8 +1072,46 @@ public partial class BlockStateStore
         return pathLength;
     }
 
-    private bool TryMoveConveyorSimulationItem(ref ConveyorSimulationItem item)
+    private static float ResolveSavedConveyorLaneBoundaryDistance(
+        ConveyorItemLaneSaveState lane,
+        ConveyorLaneLinkSaveState link)
     {
+        if (lane == null)
+        {
+            return 0f;
+        }
+
+        if (!lane.hasMotion)
+        {
+            return link != null ? Mathf.Max(0f, link.pathLength) : 0f;
+        }
+
+        float pathLength = ResolveSavedConveyorMotionPathLength(lane);
+        if (pathLength <= ConveyorBackgroundSimulationEpsilon)
+        {
+            pathLength = link != null ? link.pathLength : 0f;
+        }
+
+        if (pathLength <= ConveyorBackgroundSimulationEpsilon)
+        {
+            return 0f;
+        }
+
+        return Mathf.Max(0f, pathLength * (1f - Mathf.Clamp01(lane.progress)));
+    }
+
+    private bool TryMoveConveyorSimulationItem(
+        ref ConveyorSimulationItem item,
+        out bool vacatedLane,
+        out ConveyorLaneKey vacatedLaneKey,
+        out bool blockedByOccupiedDestination,
+        out ConveyorLaneKey blockedDestinationKey)
+    {
+        vacatedLane = false;
+        vacatedLaneKey = default;
+        blockedByOccupiedDestination = false;
+        blockedDestinationKey = default;
+
         if (item.lane == null
             || item.lane.itemId < 0
             || !TryEnsureConveyorItemState(item.coordinate, out ConveyorItemBlockState sourceState)
@@ -677,30 +1124,6 @@ public partial class BlockStateStore
             return false;
         }
 
-        if (item.lane.hasMotion)
-        {
-            if (!TryAdvanceSavedConveyorLaneMotion(sourceState, ref item, link, out bool motionCompleted))
-            {
-                return false;
-            }
-
-            if (!motionCompleted)
-            {
-                return true;
-            }
-        }
-        else if (item.budgetDistance + ConveyorBackgroundSimulationEpsilon < link.pathLength)
-        {
-            BeginSavedConveyorLaneMotion(item.lane, item.coordinate, link, item.budgetDistance / link.pathLength);
-            item.budgetDistance = 0f;
-            conveyorSimulationDirtyCoordinates.Add(item.coordinate);
-            return true;
-        }
-        else
-        {
-            item.budgetDistance = Mathf.Max(0f, item.budgetDistance - link.pathLength);
-        }
-
         if (!TryEnsureConveyorItemState(link.destinationCoordinate, out ConveyorItemBlockState destinationState)
             || !IsValidConveyorDestinationLane(destinationState, link.destinationLaneIndex))
         {
@@ -709,81 +1132,39 @@ public partial class BlockStateStore
 
         ConveyorLaneKey sourceKey = new ConveyorLaneKey(item.coordinate, item.lane.laneIndex);
         ConveyorLaneKey destinationKey = new ConveyorLaneKey(link.destinationCoordinate, link.destinationLaneIndex);
-        if (sourceKey.Equals(destinationKey) || conveyorSimulationOccupancy.ContainsKey(destinationKey))
+        if (sourceKey.Equals(destinationKey))
         {
-            if (item.lane.hasMotion)
-            {
-                item.lane.progress = 1f;
-                conveyorSimulationDirtyCoordinates.Add(item.coordinate);
-            }
-
             return false;
         }
 
-        conveyorSimulationOccupancy.Remove(sourceKey);
+        float requiredDistance = ResolveSavedConveyorLaneBoundaryDistance(item.lane, link);
+        if (item.budgetDistance + ConveyorBackgroundSimulationEpsilon < requiredDistance)
+        {
+            return false;
+        }
+
+        if (GetSavedConveyorLaneItemId(destinationState, link.destinationLaneIndex) >= 0)
+        {
+            blockedByOccupiedDestination = true;
+            blockedDestinationKey = destinationKey;
+            return false;
+        }
+
+        item.budgetDistance = Mathf.Max(0f, item.budgetDistance - requiredDistance);
         sourceState.lanes.Remove(item.lane);
 
         item.lane.laneIndex = link.destinationLaneIndex;
         SetSavedConveyorLaneSettled(item.lane, link.destinationCoordinate);
         destinationState.lanes.Add(item.lane);
         destinationState.laneCount = Mathf.Max(destinationState.laneCount, link.destinationLaneIndex + 1);
-        conveyorSimulationOccupancy[destinationKey] = item.lane;
 
-        conveyorSimulationDirtyCoordinates.Add(item.coordinate);
-        conveyorSimulationDirtyCoordinates.Add(link.destinationCoordinate);
+        conveyorSimulationOccupancyDirtyCoordinates.Add(item.coordinate);
+        conveyorSimulationOccupancyDirtyCoordinates.Add(link.destinationCoordinate);
 
         item.coordinate = link.destinationCoordinate;
+        vacatedLane = true;
+        vacatedLaneKey = sourceKey;
         return true;
-    }
-
-    private void BeginSavedConveyorLaneMotion(
-        ConveyorItemLaneSaveState lane,
-        Vector2Int sourceCoordinate,
-        ConveyorLaneLinkSaveState link,
-        float progress)
-    {
-        if (lane == null || link == null)
-        {
-            return;
-        }
-
-        lane.hasMotion = true;
-        lane.useCornerMotion = IsVirtualCornerInternalLink(sourceCoordinate, lane.laneIndex, link);
-        lane.sourceLaneIndex = lane.laneIndex;
-        lane.destinationLaneIndex = link.destinationLaneIndex;
-        lane.startWorldPosition = lane.visualWorldPosition;
-        lane.hasViaWorldPosition = false;
-        lane.viaWorldPosition = default;
-        lane.progress = Mathf.Clamp01(progress);
-        lane.pathLength = Mathf.Max(ConveyorBackgroundSimulationEpsilon, link.pathLength);
-        lane.durationPathLength = lane.pathLength;
-        lane.cornerContinuationActive = false;
-        lane.cornerContinuationBlockCoordinate = default;
-        lane.cornerContinuationSourceLaneIndex = -1;
-        lane.cornerContinuationDestinationLaneIndex = -1;
-        lane.cornerContinuationStartWorldPosition = default;
-        lane.cornerContinuationStartProgress = 0f;
-        lane.cornerContinuationPathLength = 0f;
-        lane.cornerContinuationDurationPathLength = 0f;
-    }
-
-    private bool IsVirtualCornerInternalLink(
-        Vector2Int sourceCoordinate,
-        int sourceLaneIndex,
-        ConveyorLaneLinkSaveState link)
-    {
-        return link != null
-            && link.destinationCoordinate == sourceCoordinate
-            && sourceLaneIndex >= 2
-            && link.destinationLaneIndex >= 0
-            && link.destinationLaneIndex <= 1
-            && TryResolveVirtualConveyor(
-                sourceCoordinate,
-                out ConveyorBelt conveyor,
-                out _,
-                out _)
-            && conveyor != null
-            && conveyor.IsCornerVariant;
     }
 
     private bool TryEnsureConveyorItemState(Vector2Int worldCoordinate, out ConveyorItemBlockState state)
@@ -806,6 +1187,37 @@ public partial class BlockStateStore
 
         savedConveyorItemStates[worldCoordinate] = state;
         return true;
+    }
+
+    private bool TryGetSavedConveyorLane(
+        ConveyorLaneKey laneKey,
+        out ConveyorItemBlockState state,
+        out ConveyorItemLaneSaveState lane)
+    {
+        lane = null;
+        if (!savedConveyorItemStates.TryGetValue(laneKey.coordinate, out state)
+            || state == null
+            || state.lanes.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < state.lanes.Count; i++)
+        {
+            ConveyorItemLaneSaveState candidate = state.lanes[i];
+            if (candidate == null
+                || candidate.itemId < 0
+                || candidate.laneIndex != laneKey.laneIndex
+                || !TryNormalizeSavedConveyorLaneState(candidate))
+            {
+                continue;
+            }
+
+            lane = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryFindSavedConveyorItemLane(
@@ -1205,7 +1617,7 @@ public partial class BlockStateStore
 
     private void FlushConveyorSimulationDirtyStates()
     {
-        foreach (Vector2Int coordinate in conveyorSimulationDirtyCoordinates)
+        foreach (Vector2Int coordinate in conveyorSimulationOccupancyDirtyCoordinates)
         {
             savedConveyorItemStates.TryGetValue(coordinate, out ConveyorItemBlockState state);
             SyncConveyorFloorObjects(coordinate, state);
@@ -1219,17 +1631,128 @@ public partial class BlockStateStore
             return;
         }
 
-        foreach (Vector2Int coordinate in conveyorSimulationDirtyCoordinates)
+        foreach (Vector2Int coordinate in conveyorSimulationOccupancyDirtyCoordinates)
         {
             results.Add(coordinate);
         }
     }
 
+    private void RebaseConveyorSimulationTicks(long nowTicks)
+    {
+        foreach (Vector2Int coordinate in conveyorSimulationOccupancyDirtyCoordinates)
+        {
+            if (!conveyorSimulationRemainingBudgetByCoordinate.ContainsKey(coordinate))
+            {
+                conveyorSimulationRemainingBudgetByCoordinate[coordinate] = 0f;
+            }
+        }
+
+        foreach (KeyValuePair<Vector2Int, float> pair in conveyorSimulationRemainingBudgetByCoordinate)
+        {
+            if (!savedConveyorItemStates.TryGetValue(pair.Key, out ConveyorItemBlockState state)
+                || state == null)
+            {
+                continue;
+            }
+
+            state.lastBackgroundSimulationTicks = ResolveRebasedConveyorSimulationTicks(
+                state,
+                nowTicks,
+                pair.Value);
+        }
+    }
+
+    private void RecordConveyorSimulationRemainingBudget(Vector2Int coordinate, float remainingBudgetDistance)
+    {
+        remainingBudgetDistance = Mathf.Max(0f, remainingBudgetDistance);
+        if (!conveyorSimulationRemainingBudgetByCoordinate.TryGetValue(coordinate, out float currentBudget)
+            || remainingBudgetDistance > currentBudget)
+        {
+            conveyorSimulationRemainingBudgetByCoordinate[coordinate] = remainingBudgetDistance;
+        }
+    }
+
+    private static long ResolveRebasedConveyorSimulationTicks(
+        ConveyorItemBlockState state,
+        long nowTicks,
+        float remainingBudgetDistance)
+    {
+        if (state == null
+            || state.lanes.Count <= 0
+            || state.conveyorSpeed <= ConveyorBackgroundSimulationEpsilon
+            || remainingBudgetDistance <= ConveyorBackgroundSimulationEpsilon)
+        {
+            return nowTicks;
+        }
+
+        double remainingSeconds = remainingBudgetDistance / state.conveyorSpeed;
+        if (remainingSeconds <= ConveyorBackgroundSimulationEpsilon)
+        {
+            return nowTicks;
+        }
+
+        double remainingTicks = remainingSeconds * TimeSpan.TicksPerSecond;
+        if (remainingTicks <= 0d)
+        {
+            return nowTicks;
+        }
+
+        long clampedRemainingTicks = remainingTicks >= nowTicks
+            ? nowTicks
+            : (long)remainingTicks;
+        return Math.Max(0L, nowTicks - clampedRemainingTicks);
+    }
+
     private void ClearConveyorSimulationBuffers()
     {
-        conveyorSimulationOccupancy.Clear();
-        conveyorSimulationItems.Clear();
-        conveyorSimulationDirtyCoordinates.Clear();
+        conveyorSimulationActiveLaneKeys.Clear();
+        conveyorSimulationNextActiveLaneKeys.Clear();
+        conveyorSimulationNextActiveLaneKeySet.Clear();
+        conveyorSimulationOccupancyDirtyCoordinates.Clear();
+        conveyorSimulationRemainingBudgetByCoordinate.Clear();
+    }
+
+    private void InvalidateConveyorSchedule()
+    {
+        MarkConveyorScheduleDirty();
+        conveyorScheduleStates.Clear();
+        conveyorBlockedWaitersByDestination.Clear();
+        conveyorReadyLaneHeap.Clear();
+    }
+
+    private void MarkConveyorScheduleDirty()
+    {
+        conveyorScheduleDirty = true;
+        cachedConveyorScheduleSavedBlockCount = 0;
+        cachedConveyorScheduleSavedItemCount = 0;
+    }
+
+    private void NotifySavedConveyorLaneVacatedExternally(Vector2Int coordinate, int laneIndex)
+    {
+        ConveyorLaneKey laneKey = new ConveyorLaneKey(coordinate, laneIndex);
+        conveyorScheduleStates.Remove(laneKey);
+        WakeConveyorBlockedWaitersForVacatedLane(laneKey, DateTime.UtcNow.Ticks);
+        MarkConveyorScheduleDirty();
+        NotifySavedConveyorExternalOccupancyChanged(coordinate);
+    }
+
+    private void NotifySavedConveyorLaneOccupiedExternally(Vector2Int coordinate, int laneIndex)
+    {
+        conveyorScheduleStates.Remove(new ConveyorLaneKey(coordinate, laneIndex));
+        MarkConveyorScheduleDirty();
+        NotifySavedConveyorExternalOccupancyChanged(coordinate);
+    }
+
+    private static void NotifySavedConveyorExternalOccupancyChanged(Vector2Int coordinate)
+    {
+        TerrainGenerator.ResolveActive()?.WakeLoadedConveyorsNearBackgroundConveyorChange(coordinate);
+
+        for (int i = 0; i < SavedConveyorExternalWakeOffsets.Length; i++)
+        {
+            Vector2Int wakeCoordinate = coordinate + SavedConveyorExternalWakeOffsets[i];
+            RobotArm.WakeAroundCoordinate(wakeCoordinate);
+            InputOutputModule.WakeRuntimeModulesAtCoordinate(wakeCoordinate);
+        }
     }
 
     private void SyncConveyorFloorObjects(Vector2Int worldCoordinate, ConveyorItemBlockState state)

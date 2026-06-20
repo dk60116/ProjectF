@@ -528,6 +528,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedResourceItemIds.Clear();
         savedFloorObjectStates.Clear();
         savedConveyorItemStates.Clear();
+        InvalidateConveyorSchedule();
         savedInstallationStates.Clear();
         savedInstallationCountsByItemId.Clear();
         savedInstallationItemTotal = 0;

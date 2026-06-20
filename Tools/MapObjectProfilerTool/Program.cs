@@ -831,11 +831,53 @@ internal sealed class ProfilerForm : Form
                 BackgroundConveyorMetricIcon.Successes,
                 Color.FromArgb(111, 213, 196)),
             new BackgroundConveyorMetric(
+                "MotionDirtyCoordinates",
+                "Motion dirty",
+                snapshot.BackgroundConveyorMotionDirtyCoordinates,
+                BackgroundConveyorMetricIcon.MotionDirty,
+                Color.FromArgb(208, 136, 255)),
+            new BackgroundConveyorMetric(
                 "DirtyCoordinates",
                 "Dirty coordinates",
                 snapshot.BackgroundConveyorDirtyCoordinates,
                 BackgroundConveyorMetricIcon.Dirty,
-                Color.FromArgb(236, 104, 94))
+                Color.FromArgb(236, 104, 94)),
+            new BackgroundConveyorMetric(
+                "ReadyHeapSize",
+                "Ready heap",
+                snapshot.BackgroundConveyorReadyHeapSize,
+                BackgroundConveyorMetricIcon.Candidates,
+                Color.FromArgb(132, 177, 255)),
+            new BackgroundConveyorMetric(
+                "DueCandidates",
+                "Due candidates",
+                snapshot.BackgroundConveyorDueCandidates,
+                BackgroundConveyorMetricIcon.Candidates,
+                Color.FromArgb(255, 208, 112)),
+            new BackgroundConveyorMetric(
+                "SkippedNotReady",
+                "Skipped not ready",
+                snapshot.BackgroundConveyorSkippedNotReady,
+                BackgroundConveyorMetricIcon.Items,
+                Color.FromArgb(152, 196, 138)),
+            new BackgroundConveyorMetric(
+                "BlockedWaiters",
+                "Blocked waiters",
+                snapshot.BackgroundConveyorBlockedWaiters,
+                BackgroundConveyorMetricIcon.Attempts,
+                Color.FromArgb(247, 128, 116)),
+            new BackgroundConveyorMetric(
+                "StaleScheduleDrops",
+                "Stale drops",
+                snapshot.BackgroundConveyorStaleScheduleDrops,
+                BackgroundConveyorMetricIcon.MotionDirty,
+                Color.FromArgb(197, 142, 245)),
+            new BackgroundConveyorMetric(
+                "SlowRetryCandidates",
+                "Slow retries",
+                snapshot.BackgroundConveyorSlowRetryCandidates,
+                BackgroundConveyorMetricIcon.Passes,
+                Color.FromArgb(178, 154, 122))
         };
     }
 
@@ -1299,6 +1341,19 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
                     new Point(content.Right, content.Top + 2)
                 });
                 break;
+            case BackgroundConveyorMetricIcon.MotionDirty:
+                graphics.DrawBezier(
+                    accentPen,
+                    content.Left,
+                    content.Top + content.Height / 2,
+                    content.Left + content.Width / 3,
+                    content.Top,
+                    content.Left + (content.Width * 2 / 3),
+                    content.Bottom,
+                    content.Right,
+                    content.Top + content.Height / 2);
+                graphics.FillEllipse(accentBrush, content.Right - 4, content.Top + content.Height / 2 - 3, 6, 6);
+                break;
             case BackgroundConveyorMetricIcon.Dirty:
                 graphics.FillPolygon(accentBrush, new[]
                 {
@@ -1343,6 +1398,7 @@ internal enum BackgroundConveyorMetricIcon
     Passes,
     Attempts,
     Successes,
+    MotionDirty,
     Dirty
 }
 
@@ -1532,6 +1588,27 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("backgroundConveyorDirtyCoordinates")]
     public double BackgroundConveyorDirtyCoordinates { get; set; }
+
+    [JsonPropertyName("backgroundConveyorMotionDirtyCoordinates")]
+    public double BackgroundConveyorMotionDirtyCoordinates { get; set; }
+
+    [JsonPropertyName("backgroundConveyorReadyHeapSize")]
+    public double BackgroundConveyorReadyHeapSize { get; set; }
+
+    [JsonPropertyName("backgroundConveyorDueCandidates")]
+    public double BackgroundConveyorDueCandidates { get; set; }
+
+    [JsonPropertyName("backgroundConveyorSkippedNotReady")]
+    public double BackgroundConveyorSkippedNotReady { get; set; }
+
+    [JsonPropertyName("backgroundConveyorBlockedWaiters")]
+    public double BackgroundConveyorBlockedWaiters { get; set; }
+
+    [JsonPropertyName("backgroundConveyorStaleScheduleDrops")]
+    public double BackgroundConveyorStaleScheduleDrops { get; set; }
+
+    [JsonPropertyName("backgroundConveyorSlowRetryCandidates")]
+    public double BackgroundConveyorSlowRetryCandidates { get; set; }
 
     [JsonPropertyName("rowCount")]
     public int RowCount { get; set; }

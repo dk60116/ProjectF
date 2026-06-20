@@ -481,6 +481,13 @@ public static class MapObjectTickProfiler
     private static long backgroundConveyorMoveAttempts;
     private static long backgroundConveyorMoveSuccesses;
     private static long backgroundConveyorDirtyCoordinates;
+    private static long backgroundConveyorMotionDirtyCoordinates;
+    private static long backgroundConveyorReadyHeapSize;
+    private static long backgroundConveyorDueCandidates;
+    private static long backgroundConveyorSkippedNotReady;
+    private static long backgroundConveyorBlockedWaiters;
+    private static long backgroundConveyorStaleScheduleDrops;
+    private static long backgroundConveyorSlowRetryCandidates;
     private static int beltLoopProfileFrameCount;
     private static int beltLoopProfileLastFrame = -1;
     private static bool beltFrameProfilingEnabled;
@@ -656,7 +663,14 @@ public static class MapObjectTickProfiler
         int passCount,
         int moveAttemptCount,
         int moveSuccessCount,
-        int dirtyCoordinateCount)
+        int dirtyCoordinateCount,
+        int motionDirtyCoordinateCount,
+        int readyHeapSize,
+        int dueCandidateCount,
+        int skippedNotReadyCount,
+        int blockedWaiterCount,
+        int staleScheduleDropCount,
+        int slowRetryCandidateCount)
     {
         if (!IsEnabled)
         {
@@ -671,6 +685,13 @@ public static class MapObjectTickProfiler
         backgroundConveyorMoveAttempts += Mathf.Max(0, moveAttemptCount);
         backgroundConveyorMoveSuccesses += Mathf.Max(0, moveSuccessCount);
         backgroundConveyorDirtyCoordinates += Mathf.Max(0, dirtyCoordinateCount);
+        backgroundConveyorMotionDirtyCoordinates += Mathf.Max(0, motionDirtyCoordinateCount);
+        backgroundConveyorReadyHeapSize += Mathf.Max(0, readyHeapSize);
+        backgroundConveyorDueCandidates += Mathf.Max(0, dueCandidateCount);
+        backgroundConveyorSkippedNotReady += Mathf.Max(0, skippedNotReadyCount);
+        backgroundConveyorBlockedWaiters += Mathf.Max(0, blockedWaiterCount);
+        backgroundConveyorStaleScheduleDrops += Mathf.Max(0, staleScheduleDropCount);
+        backgroundConveyorSlowRetryCandidates += Mathf.Max(0, slowRetryCandidateCount);
     }
 
     public static void Reset()
@@ -705,6 +726,13 @@ public static class MapObjectTickProfiler
         backgroundConveyorMoveAttempts = 0L;
         backgroundConveyorMoveSuccesses = 0L;
         backgroundConveyorDirtyCoordinates = 0L;
+        backgroundConveyorMotionDirtyCoordinates = 0L;
+        backgroundConveyorReadyHeapSize = 0L;
+        backgroundConveyorDueCandidates = 0L;
+        backgroundConveyorSkippedNotReady = 0L;
+        backgroundConveyorBlockedWaiters = 0L;
+        backgroundConveyorStaleScheduleDrops = 0L;
+        backgroundConveyorSlowRetryCandidates = 0L;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;
@@ -781,6 +809,13 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("backgroundConveyorMoveAttempts", FormatBackgroundConveyorAverage(backgroundConveyorMoveAttempts), true);
         AppendJsonProperty("backgroundConveyorMoveSuccesses", FormatBackgroundConveyorAverage(backgroundConveyorMoveSuccesses), true);
         AppendJsonProperty("backgroundConveyorDirtyCoordinates", FormatBackgroundConveyorAverage(backgroundConveyorDirtyCoordinates), true);
+        AppendJsonProperty("backgroundConveyorMotionDirtyCoordinates", FormatBackgroundConveyorAverage(backgroundConveyorMotionDirtyCoordinates), true);
+        AppendJsonProperty("backgroundConveyorReadyHeapSize", FormatBackgroundConveyorAverage(backgroundConveyorReadyHeapSize), true);
+        AppendJsonProperty("backgroundConveyorDueCandidates", FormatBackgroundConveyorAverage(backgroundConveyorDueCandidates), true);
+        AppendJsonProperty("backgroundConveyorSkippedNotReady", FormatBackgroundConveyorAverage(backgroundConveyorSkippedNotReady), true);
+        AppendJsonProperty("backgroundConveyorBlockedWaiters", FormatBackgroundConveyorAverage(backgroundConveyorBlockedWaiters), true);
+        AppendJsonProperty("backgroundConveyorStaleScheduleDrops", FormatBackgroundConveyorAverage(backgroundConveyorStaleScheduleDrops), true);
+        AppendJsonProperty("backgroundConveyorSlowRetryCandidates", FormatBackgroundConveyorAverage(backgroundConveyorSlowRetryCandidates), true);
         AppendJsonProperty("rowCount", rowCount.ToString(CultureInfo.InvariantCulture), true);
         jsonBuilder.Append(",\"rows\":[");
 
@@ -837,6 +872,7 @@ public static class MapObjectTickProfiler
         backgroundConveyorMoveAttempts = 0L;
         backgroundConveyorMoveSuccesses = 0L;
         backgroundConveyorDirtyCoordinates = 0L;
+        backgroundConveyorMotionDirtyCoordinates = 0L;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;

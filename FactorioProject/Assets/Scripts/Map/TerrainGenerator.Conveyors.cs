@@ -101,6 +101,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorWakeQueue.Clear();
         conveyorLineWakeQueue.Clear();
         conveyorWakeQueued.Clear();
+        conveyorDirectWakeBlocks.Clear();
         conveyorLineWakeQueuedIds.Clear();
         deferredConveyorRuntimeRefreshBlocks.Clear();
         deferredConveyorNetworkWakeBlocks.Clear();
@@ -351,6 +352,48 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        if (conveyorWakeQueued.Contains(block))
+        {
+            return;
+        }
+
+        conveyorWakeQueued.Add(block);
+        conveyorWakeQueue.Enqueue(block);
+    }
+
+    public void QueueConveyorDirectWakeAround(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        QueueConveyorDirectWake(block);
+        Vector2Int coordinate = block.Coordinate;
+        QueueConveyorDirectWakeAt(coordinate + Vector2Int.up);
+        QueueConveyorDirectWakeAt(coordinate + Vector2Int.right);
+        QueueConveyorDirectWakeAt(coordinate + Vector2Int.down);
+        QueueConveyorDirectWakeAt(coordinate + Vector2Int.left);
+    }
+
+    private void QueueConveyorDirectWakeAt(Vector2Int coordinate)
+    {
+        if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
+        {
+            return;
+        }
+
+        QueueConveyorDirectWake(block);
+    }
+
+    private void QueueConveyorDirectWake(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        conveyorDirectWakeBlocks.Add(block);
         if (conveyorWakeQueued.Contains(block))
         {
             return;
@@ -1649,7 +1692,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            if (TryTickStraightConveyorLine(block))
+            bool forceDirectWake = conveyorDirectWakeBlocks.Remove(block);
+            if (!forceDirectWake && TryTickStraightConveyorLine(block))
             {
                 continue;
             }
@@ -1716,10 +1760,15 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        return TryTickStraightConveyorLine(lineId);
+        return TryTickStraightConveyorLine(lineId, triggerBlock);
     }
 
     private bool TryTickStraightConveyorLine(int lineId)
+    {
+        return TryTickStraightConveyorLine(lineId, null);
+    }
+
+    private bool TryTickStraightConveyorLine(int lineId, Block directFallbackBlock)
     {
         if (lineId <= 0)
         {
@@ -1735,6 +1784,12 @@ public partial class TerrainGenerator : MonoBehaviour
         if (!CanTickStraightConveyorLine(line))
         {
             return false;
+        }
+
+        if (HasStraightConveyorLineFastPathRuntimeBlocker(line))
+        {
+            QueueStraightConveyorLineDirectFallback(line, directFallbackBlock);
+            return directFallbackBlock == null;
         }
 
         conveyorLinesTickedThisFrame.Add(lineId);
@@ -1795,6 +1850,45 @@ public partial class TerrainGenerator : MonoBehaviour
             && !line.isCycle
             && line.simulationCacheValid
             && line.blocks.Count > 0;
+    }
+
+    private static bool HasStraightConveyorLineFastPathRuntimeBlocker(ConveyorLine line)
+    {
+        if (line == null)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < line.blocks.Count; i++)
+        {
+            if (line.blocks[i] == null || line.blocks[i].HasStraightConveyorLineFastPathRuntimeBlocker())
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void QueueStraightConveyorLineDirectFallback(ConveyorLine line, Block directFallbackBlock)
+    {
+        if (line == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < line.blocks.Count; i++)
+        {
+            Block block = line.blocks[i];
+            if (block == null
+                || block == directFallbackBlock
+                || !block.HasStraightConveyorLineFastPathRuntimeBlocker())
+            {
+                continue;
+            }
+
+            QueueConveyorDirectWake(block);
+        }
     }
 
     private int GetEffectiveConveyorWakeQueueProcessLimit()
@@ -2015,6 +2109,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorLinesTickedThisFrame.Clear();
         conveyorLineTouchedBlocks.Clear();
         conveyorLineTouchedSet.Clear();
+        conveyorDirectWakeBlocks.Clear();
         ClearConveyorLineWakeQueue();
         conveyorLineCacheDirty = true;
     }

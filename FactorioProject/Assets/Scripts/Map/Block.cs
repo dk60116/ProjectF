@@ -2338,7 +2338,7 @@ public class Block : BaseObject
         if (itemId < 0)
         {
             ClearConveyorItemAtLane(laneIndex);
-            WakeConveyorMoveAttemptsAround();
+            NotifyConveyorLaneVacatedExternally(laneIndex);
             ReleaseFloorObject(portableObject);
             return false;
         }
@@ -2346,7 +2346,7 @@ public class Block : BaseObject
         portableObject = MaterializeConveyorObjectForTransfer(portableObject, itemId, laneIndex);
         ClearConveyorItemAtLane(laneIndex);
         NotifyRuntimeItemStackChanged();
-        WakeConveyorMoveAttemptsAround();
+        NotifyConveyorLaneVacatedExternally(laneIndex);
         ReleaseFloorObject(portableObject);
         takenItemId = itemId;
         return true;
@@ -3440,6 +3440,11 @@ public class Block : BaseObject
             && !HasUnsettledConveyorObjects();
     }
 
+    public bool HasStraightConveyorLineFastPathRuntimeBlocker()
+    {
+        return HasMaterializedConveyorItems() || HasPortableConveyorMotionStates();
+    }
+
     public bool CanUseStraightConveyorLineSimulationStructureOnly()
     {
         EnsureFloorObjectsInitialized();
@@ -3450,7 +3455,6 @@ public class Block : BaseObject
             && !TryGetBelt2FBridgeCenterBelt(out _)
             && !IsCornerConveyor()
             && ShouldUseVirtualConveyorItemRendering()
-            && !HasMaterializedConveyorItems()
             && TryGetConveyorLaneLayout(out _, out _);
     }
 
@@ -3688,8 +3692,6 @@ public class Block : BaseObject
         return Application.isPlaying
             && IsConveyorStackingEnabled()
             && ShouldUseVirtualConveyorItemRendering()
-            && !HasMaterializedConveyorItems()
-            && !HasPortableConveyorMotionStates()
             && HasConveyorDataMotionStates();
     }
 
@@ -4048,6 +4050,19 @@ public class Block : BaseObject
 
     private void NotifyConveyorMotionSettled()
     {
+        WakeConveyorMoveAttemptsAround();
+        RefreshConveyorActivityRegistration();
+    }
+
+    private void NotifyConveyorLaneVacatedExternally(int laneIndex)
+    {
+        if (!IsConveyorStorageLaneIndex(laneIndex))
+        {
+            return;
+        }
+
+        InvalidateConveyorCanMoveCaches();
+        TerrainGenerator.Active?.QueueConveyorDirectWakeAround(this);
         WakeConveyorMoveAttemptsAround();
         RefreshConveyorActivityRegistration();
     }

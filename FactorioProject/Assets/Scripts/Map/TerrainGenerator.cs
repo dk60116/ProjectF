@@ -651,6 +651,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Queue<Block> conveyorWakeQueue = new Queue<Block>();
     private readonly Queue<int> conveyorLineWakeQueue = new Queue<int>();
     private readonly HashSet<Block> conveyorWakeQueued = new HashSet<Block>();
+    private readonly HashSet<Block> conveyorDirectWakeBlocks = new HashSet<Block>();
     private readonly HashSet<int> conveyorLineWakeQueuedIds = new HashSet<int>();
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
     private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
@@ -1008,6 +1009,13 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         backgroundConveyorWakeCoordinates.Clear();
+    }
+
+    public void WakeLoadedConveyorsNearBackgroundConveyorChange(Vector2Int coordinate)
+    {
+        backgroundConveyorDirtyCoordinates.Clear();
+        backgroundConveyorDirtyCoordinates.Add(coordinate);
+        WakeLoadedConveyorsNearBackgroundConveyorChanges();
     }
 
     private void OnDisable()
