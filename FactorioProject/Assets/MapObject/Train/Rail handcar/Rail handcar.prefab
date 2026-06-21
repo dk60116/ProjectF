@@ -230,7 +230,7 @@ MonoBehaviour:
   id: 0
   objectName: Rail handcar
   objId: 50
-  itemDefinition: {fileID: 11400000, guid: c9fc3865549db61429331f9f234e219f, type: 2}
+  itemDefinition: {fileID: 11400000, guid: 9524753a56ea05540be3c118174151dd, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1

@@ -5,6 +5,8 @@ using UnityEngine.Rendering;
 public class Railload : InstallationObject
 {
     public const int RailCellsPerItem = 3;
+    public const float ConnectionEndpointSnapMaxDistance = 0.55f;
+
     private const int CurveSegmentCount = 12;
     private const float CurveRadius = 0.5f;
     private const int CenterPathSmoothingIterations = 2;

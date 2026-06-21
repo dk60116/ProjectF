@@ -8,6 +8,7 @@ public partial class BlockStateStore : MonoBehaviour
     {
         public Vector2Int anchorCoordinate;
         public int itemId;
+        public string itemName = string.Empty;
         public int quarterTurns;
         public long placementSequence;
         public bool hasStorageKey;
@@ -35,6 +36,9 @@ public partial class BlockStateStore : MonoBehaviour
         public float trainRailDistanceAlongPath;
         public Vector2 trainRailPathPoint;
         public Vector2 trainRailFacingTangent;
+        public bool hasSteamTrainBurnEnergyState;
+        public float steamTrainStoredBurnEnergy;
+        public float steamTrainBurnEnergyGaugeCapacity;
 
         public InstallationSaveState Clone()
         {
@@ -42,6 +46,7 @@ public partial class BlockStateStore : MonoBehaviour
             {
                 anchorCoordinate = anchorCoordinate,
                 itemId = itemId,
+                itemName = itemName,
                 quarterTurns = quarterTurns,
                 placementSequence = placementSequence,
                 hasStorageKey = hasStorageKey,
@@ -68,7 +73,10 @@ public partial class BlockStateStore : MonoBehaviour
                 trainRailAnchorCoordinate = trainRailAnchorCoordinate,
                 trainRailDistanceAlongPath = trainRailDistanceAlongPath,
                 trainRailPathPoint = trainRailPathPoint,
-                trainRailFacingTangent = trainRailFacingTangent
+                trainRailFacingTangent = trainRailFacingTangent,
+                hasSteamTrainBurnEnergyState = hasSteamTrainBurnEnergyState,
+                steamTrainStoredBurnEnergy = steamTrainStoredBurnEnergy,
+                steamTrainBurnEnergyGaugeCapacity = steamTrainBurnEnergyGaugeCapacity
             };
         }
     }
@@ -701,6 +709,7 @@ public partial class BlockStateStore : MonoBehaviour
         {
             anchorCoordinate = anchorCoordinate,
             itemId = itemId,
+            itemName = ResolveInstallationSaveItemName(itemId, installationObject),
             quarterTurns = ((quarterTurns % 4) + 4) % 4,
             placementSequence = installationObject.RuntimePlacementSequence,
             occupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
@@ -751,6 +760,14 @@ public partial class BlockStateStore : MonoBehaviour
                 state.trainRailPathPoint = pathPoint;
                 state.trainRailFacingTangent = tangent;
             }
+        }
+
+        if (installationObject is SteamTrain steamTrain)
+        {
+            steamTrain.CaptureBurnEnergyState(
+                out state.steamTrainStoredBurnEnergy,
+                out state.steamTrainBurnEnergyGaugeCapacity);
+            state.hasSteamTrainBurnEnergyState = true;
         }
 
         if (installationObject is InputOutputModule inputOutputModule)
@@ -810,6 +827,28 @@ public partial class BlockStateStore : MonoBehaviour
         return matchingDefinition != null && matchingDefinition.id >= 0
             ? matchingDefinition.id
             : fallbackItemId;
+    }
+
+    private static string ResolveInstallationSaveItemName(int itemId, InstallationObject installationObject)
+    {
+        IReadOnlyList<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        ItemDefinition definition = FindInstallationDefinitionByObject(definitions, installationObject)
+                                    ?? ItemDefinitionLookup.ResolveInstallationById(definitions, itemId);
+
+        if (definition != null)
+        {
+            if (!string.IsNullOrWhiteSpace(definition.itemName))
+            {
+                return definition.itemName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(definition.name))
+            {
+                return definition.name;
+            }
+        }
+
+        return installationObject != null ? installationObject.name : string.Empty;
     }
 
     private static ItemDefinition FindInstallationDefinitionByObject(

@@ -34,6 +34,15 @@ public class Vehicle : InstallationObject
     {
     }
 
+    public virtual void HandleMountedInput(
+        Vector3 worldMoveDirection,
+        float moveSpeed,
+        float deltaTime,
+        Player mountedPlayer)
+    {
+        HandleMountedInput(worldMoveDirection, moveSpeed, deltaTime);
+    }
+
     protected float UpdateVehicleSignedSpeed(float inputAxis, float deltaTime)
     {
         return UpdateVehicleSignedSpeed(inputAxis, deltaTime, VehicleMaxSpeed);

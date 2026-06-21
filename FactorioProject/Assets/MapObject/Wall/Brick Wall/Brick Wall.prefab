@@ -197,7 +197,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Brick wall
-  objId: 39
+  objId: 38
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

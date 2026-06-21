@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEditor.U2D;
 using UnityEngine;
 using UnityEngine.U2D;
@@ -19,8 +20,27 @@ public class ItemDataEditorWindow : EditorWindow
     private const float PlacementCenterGridCellSize = 30f;
     private const float PlacementCenterGridCellSpacing = 4f;
     private const string ItemDefinitionAssetFolder = "Assets/Data/Items";
+    private const int CurrentCraftingTreeFileVersion = 4;
     private const string UiIconAtlasFolder = "Assets/Image/UI/Item";
     private const string UiIconAtlasPath = UiIconAtlasFolder + "/ItemUIIcons.spriteatlas";
+    private const string TrainStationItemGuid = "2cbd885291664af429fdc0ef3784d40d";
+    private static readonly string[] CompactTrainItemGuids =
+    {
+        "ad919f4ddfe2a924194a2ddac61bf5af",
+        "228fcd45b59e4994d8b5f8ee23dc4595",
+        "61dfdca30dedb50479bbba3d4602c4b6",
+        "b130d0f2cf797d447a955d9044573f35",
+        "c9fc3865549db61429331f9f234e219f",
+        "9e8fd46d9731ca640a3e8716a7b6cfe0"
+    };
+    private static readonly DuplicateItemDefinition[] DuplicateTrainItems =
+    {
+        new DuplicateItemDefinition("ad919f4ddfe2a924194a2ddac61bf5af", "ad919f4ddfe2a924194a2ddac61bf5af", 42),
+        new DuplicateItemDefinition("228fcd45b59e4994d8b5f8ee23dc4595", "228fcd45b59e4994d8b5f8ee23dc4595", 44),
+        new DuplicateItemDefinition("61dfdca30dedb50479bbba3d4602c4b6", "61dfdca30dedb50479bbba3d4602c4b6", 46),
+        new DuplicateItemDefinition("b130d0f2cf797d447a955d9044573f35", "b130d0f2cf797d447a955d9044573f35", 43),
+        new DuplicateItemDefinition("c9fc3865549db61429331f9f234e219f", "c9fc3865549db61429331f9f234e219f", 47)
+    };
     private static readonly RectGridPaletteEntry[] RectGridPaletteEntries =
     {
         new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.Object, "Object", "Object", new Color(0.35f, 0.45f, 0.62f, 1f)),
@@ -147,6 +167,67 @@ public class ItemDataEditorWindow : EditorWindow
         public List<InputOutputPairJsonEntry> ioPairs = new List<InputOutputPairJsonEntry>();
     }
 
+    private readonly struct DuplicateItemDefinition
+    {
+        public readonly string oldGuid;
+        public readonly string newGuid;
+        public readonly int oldItemId;
+
+        public DuplicateItemDefinition(string oldGuid, string newGuid, int oldItemId)
+        {
+            this.oldGuid = oldGuid;
+            this.newGuid = newGuid;
+            this.oldItemId = oldItemId;
+        }
+    }
+
+    [Serializable]
+    private sealed class CraftingTreeJsonFile
+    {
+        public string format = "ProjectF.CraftingTree";
+        public int version = 2;
+        public List<CraftingTreeJsonEntry> recipes = new List<CraftingTreeJsonEntry>();
+        public List<CraftingTreeJsonEntry> items = new List<CraftingTreeJsonEntry>();
+        public List<CraftingTreeJsonEntry> entries = new List<CraftingTreeJsonEntry>();
+    }
+
+    [Serializable]
+    private sealed class CraftingTreeJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName = string.Empty;
+        public string definitionAssetPath = string.Empty;
+        public int outputCount = 1;
+        public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
+        public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
+        public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
+    }
+
+    [Serializable]
+    private sealed class CraftingIngredientJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName = string.Empty;
+        public string definitionAssetPath = string.Empty;
+        public int count = 1;
+    }
+
+    [Serializable]
+    private sealed class CraftingMapObjectJsonEntry
+    {
+        public int itemId = -1;
+        public string mapObjectName = string.Empty;
+        public string assetPath = string.Empty;
+    }
+
+    private sealed class CraftingTreeBinaryEntry
+    {
+        public int itemId;
+        public int outputCount = 1;
+        public readonly List<int> requiredMapObjectItemIds = new List<int>();
+        public readonly List<InputOutputJsonEntry> ingredients = new List<InputOutputJsonEntry>();
+    }
+
     [Serializable]
     private class InputOutputJsonEntry
     {
@@ -177,6 +258,57 @@ public class ItemDataEditorWindow : EditorWindow
         ItemDataEditorWindow window = GetWindow<ItemDataEditorWindow>("Item Data");
         window.minSize = new Vector2(720f, 420f);
         window.Show();
+    }
+
+    [MenuItem("Tools/ProjectF/Normalize Item IDs")]
+    public static void NormalizeItemIdsAndExportData()
+    {
+        ReplaceDuplicateItemDefinitionReferences();
+        DeleteDuplicateItemDefinitions();
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        List<ItemDefinition> definitions = LoadItemDefinitionsFromAssets();
+        List<ItemDefinition> orderedDefinitions = BuildCompactItemDefinitionOrder(definitions);
+        if (orderedDefinitions.Count == 0)
+        {
+            Debug.LogError("ItemDataEditorWindow: no ItemDefinitions found while normalizing item IDs.");
+            return;
+        }
+
+        Dictionary<int, int> itemIdRemap = BuildCompactItemIdRemap(definitions, orderedDefinitions);
+        for (int i = 0; i < orderedDefinitions.Count; i++)
+        {
+            ItemDefinition definition = orderedDefinitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            definition.id = i;
+            EditorUtility.SetDirty(definition);
+        }
+
+        RenameItemDefinitionAssets(orderedDefinitions);
+
+        ItemManager itemManager = FindItemManagerUncached();
+        if (itemManager != null)
+        {
+            ApplyDefinitionOrderToItemManager(itemManager, orderedDefinitions);
+            SyncItemManagerItemSets(itemManager, orderedDefinitions);
+            itemManager.ApplyItemIdsToPrefabs();
+            itemManager.MarkEditorDirty();
+        }
+
+        RewriteCraftingTreeWithIdRemap(itemIdRemap, orderedDefinitions);
+        WriteItemDataJson(GetDefaultItemDataJsonPath(), orderedDefinitions);
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        EditorSceneManager.SaveOpenScenes();
+        CraftingTreeRuntime.ForceReload();
+        CraftingTreeEditorWindow.ReloadOpenWindows();
+        Debug.Log($"ItemDataEditorWindow: normalized {orderedDefinitions.Count} item IDs and exported item data.");
     }
 
     private void OnEnable()
@@ -526,7 +658,7 @@ public class ItemDataEditorWindow : EditorWindow
         itemManager.ApplyItemIdsToPrefabs();
         CraftingTreeItemIdRemapper.RewritePersistedCraftingTree(craftingTreeSnapshot, definitions);
         CraftingTreeEditorWindow.ReloadOpenWindows();
-        EditorUtility.SetDirty(itemManager);
+        itemManager.MarkEditorDirty();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         InvalidateDefinitionCache();
@@ -568,7 +700,7 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             serializedManager.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(itemManager);
+            itemManager.MarkEditorDirty();
             return;
         }
 
@@ -587,7 +719,7 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        EditorUtility.SetDirty(itemManager);
+        itemManager.MarkEditorDirty();
     }
 
     private static void SyncItemManagerItemSets(ItemManager itemManager, List<ItemDefinition> definitions)
@@ -2802,7 +2934,7 @@ public class ItemDataEditorWindow : EditorWindow
         itemManager.RebuildItemDefinitionsFromAssets();
         itemManager.ApplyItemIdsToPrefabs();
         int productionMachineRecipeCount = ProductionMachineRecipeAutoFill.SyncProductionMachines(itemManager);
-        EditorUtility.SetDirty(itemManager);
+        itemManager.MarkEditorDirty();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         InvalidateDefinitionCache();
@@ -2998,6 +3130,596 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private sealed class ItemDefinitionRenameEntry
+    {
+        public ItemDefinition definition;
+        public string finalPath;
+    }
+
+    private static void ReplaceDuplicateItemDefinitionReferences()
+    {
+        string dataPath = Application.dataPath;
+        if (string.IsNullOrWhiteSpace(dataPath) || !Directory.Exists(dataPath))
+        {
+            return;
+        }
+
+        string[] textExtensions = { ".asset", ".prefab", ".unity", ".json" };
+        foreach (string filePath in Directory.EnumerateFiles(dataPath, "*.*", SearchOption.AllDirectories))
+        {
+            string extension = Path.GetExtension(filePath);
+            bool isTextAsset = false;
+            for (int i = 0; i < textExtensions.Length; i++)
+            {
+                if (string.Equals(extension, textExtensions[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    isTextAsset = true;
+                    break;
+                }
+            }
+
+            if (!isTextAsset)
+            {
+                continue;
+            }
+
+            string text = File.ReadAllText(filePath);
+            string replaced = text;
+            for (int i = 0; i < DuplicateTrainItems.Length; i++)
+            {
+                DuplicateItemDefinition duplicate = DuplicateTrainItems[i];
+                replaced = replaced.Replace(duplicate.oldGuid, duplicate.newGuid);
+            }
+
+            if (!string.Equals(text, replaced, StringComparison.Ordinal))
+            {
+                File.WriteAllText(filePath, replaced);
+            }
+        }
+    }
+
+    private static void DeleteDuplicateItemDefinitions()
+    {
+        for (int i = 0; i < DuplicateTrainItems.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(DuplicateTrainItems[i].oldGuid);
+            if (!string.IsNullOrWhiteSpace(assetPath))
+            {
+                AssetDatabase.DeleteAsset(assetPath);
+            }
+        }
+    }
+
+    private static List<ItemDefinition> LoadItemDefinitionsFromAssets()
+    {
+        List<ItemDefinition> definitions = new List<ItemDefinition>();
+        string[] guids = AssetDatabase.FindAssets("t:ItemDefinition", new[] { ItemDefinitionAssetFolder });
+        for (int i = 0; i < guids.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(guids[i]);
+            ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
+            if (definition != null)
+            {
+                definitions.Add(definition);
+            }
+        }
+
+        SortDefinitionsById(definitions);
+        return definitions;
+    }
+
+    private static List<ItemDefinition> BuildCompactItemDefinitionOrder(List<ItemDefinition> definitions)
+    {
+        List<ItemDefinition> orderedDefinitions = new List<ItemDefinition>();
+        HashSet<ItemDefinition> addedDefinitions = new HashSet<ItemDefinition>();
+
+        for (int id = 0; id <= 40; id++)
+        {
+            AddDefinitionIfFound(orderedDefinitions, addedDefinitions, FindDefinitionById(definitions, id));
+        }
+
+        AddDefinitionIfFound(orderedDefinitions, addedDefinitions, FindDefinitionByGuid(TrainStationItemGuid));
+        for (int i = 0; i < CompactTrainItemGuids.Length; i++)
+        {
+            AddDefinitionIfFound(orderedDefinitions, addedDefinitions, FindDefinitionByGuid(CompactTrainItemGuids[i]));
+        }
+
+        return orderedDefinitions;
+    }
+
+    private static Dictionary<int, int> BuildCompactItemIdRemap(
+        List<ItemDefinition> sourceDefinitions,
+        List<ItemDefinition> orderedDefinitions)
+    {
+        Dictionary<int, int> remap = new Dictionary<int, int>();
+        for (int i = 0; i < orderedDefinitions.Count; i++)
+        {
+            ItemDefinition definition = orderedDefinitions[i];
+            if (definition != null && definition.id >= 0)
+            {
+                remap[definition.id] = i;
+            }
+        }
+
+        for (int i = 0; i < DuplicateTrainItems.Length; i++)
+        {
+            DuplicateItemDefinition duplicate = DuplicateTrainItems[i];
+            int canonicalId = FindOrderedDefinitionIndexByGuid(orderedDefinitions, duplicate.newGuid);
+            if (canonicalId >= 0)
+            {
+                remap[duplicate.oldItemId] = canonicalId;
+            }
+        }
+
+        if (sourceDefinitions != null)
+        {
+            for (int i = 0; i < sourceDefinitions.Count; i++)
+            {
+                ItemDefinition definition = sourceDefinitions[i];
+                if (definition == null || definition.id < 0 || remap.ContainsKey(definition.id))
+                {
+                    continue;
+                }
+
+                int compactId = orderedDefinitions.IndexOf(definition);
+                if (compactId >= 0)
+                {
+                    remap[definition.id] = compactId;
+                }
+            }
+        }
+
+        return remap;
+    }
+
+    private static void RenameItemDefinitionAssets(List<ItemDefinition> definitions)
+    {
+        if (definitions == null || definitions.Count == 0)
+        {
+            return;
+        }
+
+        List<ItemDefinitionRenameEntry> renameEntries = new List<ItemDefinitionRenameEntry>();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string currentPath = AssetDatabase.GetAssetPath(definition);
+            if (string.IsNullOrWhiteSpace(currentPath))
+            {
+                continue;
+            }
+
+            string finalPath = GetExpectedItemDefinitionAssetPath(definition);
+            string finalName = Path.GetFileNameWithoutExtension(finalPath);
+            definition.name = finalName;
+            EditorUtility.SetDirty(definition);
+            if (!string.Equals(currentPath, finalPath, StringComparison.OrdinalIgnoreCase))
+            {
+                renameEntries.Add(new ItemDefinitionRenameEntry
+                {
+                    definition = definition,
+                    finalPath = finalPath
+                });
+            }
+        }
+
+        for (int i = 0; i < renameEntries.Count; i++)
+        {
+            ItemDefinition definition = renameEntries[i].definition;
+            string currentPath = AssetDatabase.GetAssetPath(definition);
+            if (string.IsNullOrWhiteSpace(currentPath))
+            {
+                continue;
+            }
+
+            string tempName = $"__ItemIdNormalize_{AssetDatabase.AssetPathToGUID(currentPath)}";
+            string error = AssetDatabase.RenameAsset(currentPath, tempName);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                Debug.LogWarning($"ItemDataEditorWindow: failed temp rename for '{currentPath}'. {error}");
+            }
+        }
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        for (int i = 0; i < renameEntries.Count; i++)
+        {
+            ItemDefinition definition = renameEntries[i].definition;
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string currentPath = AssetDatabase.GetAssetPath(definition);
+            string finalName = Path.GetFileNameWithoutExtension(renameEntries[i].finalPath);
+            if (string.IsNullOrWhiteSpace(currentPath))
+            {
+                continue;
+            }
+
+            string error = AssetDatabase.RenameAsset(currentPath, finalName);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                Debug.LogWarning($"ItemDataEditorWindow: failed final rename for '{currentPath}'. {error}");
+            }
+
+            definition.name = finalName;
+            EditorUtility.SetDirty(definition);
+        }
+    }
+
+    private static void RewriteCraftingTreeWithIdRemap(
+        Dictionary<int, int> itemIdRemap,
+        List<ItemDefinition> definitions)
+    {
+        List<CraftingTreeBinaryEntry> entries = ReadCraftingTreeBinary(GetCraftingTreeAssetPath());
+        if (entries.Count == 0)
+        {
+            entries = ReadCraftingTreeBinary(GetCraftingTreeResourcesPath());
+        }
+
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<int, CraftingTreeBinaryEntry> remappedEntries = new Dictionary<int, CraftingTreeBinaryEntry>();
+        for (int i = 0; i < entries.Count; i++)
+        {
+            CraftingTreeBinaryEntry sourceEntry = entries[i];
+            int targetItemId = RemapItemId(sourceEntry.itemId, itemIdRemap);
+            if (targetItemId < 0)
+            {
+                continue;
+            }
+
+            CraftingTreeBinaryEntry targetEntry = new CraftingTreeBinaryEntry
+            {
+                itemId = targetItemId,
+                outputCount = Mathf.Max(1, sourceEntry.outputCount)
+            };
+
+            HashSet<int> seenMapObjectIds = new HashSet<int>();
+            for (int mapObjectIndex = 0; mapObjectIndex < sourceEntry.requiredMapObjectItemIds.Count; mapObjectIndex++)
+            {
+                int mapObjectId = RemapItemId(sourceEntry.requiredMapObjectItemIds[mapObjectIndex], itemIdRemap);
+                if (mapObjectId >= 0 && seenMapObjectIds.Add(mapObjectId))
+                {
+                    targetEntry.requiredMapObjectItemIds.Add(mapObjectId);
+                }
+            }
+
+            for (int ingredientIndex = 0; ingredientIndex < sourceEntry.ingredients.Count; ingredientIndex++)
+            {
+                InputOutputJsonEntry ingredient = sourceEntry.ingredients[ingredientIndex];
+                int ingredientId = RemapItemId(ingredient.id, itemIdRemap);
+                if (ingredientId < 0)
+                {
+                    continue;
+                }
+
+                targetEntry.ingredients.Add(new InputOutputJsonEntry
+                {
+                    id = ingredientId,
+                    count = Mathf.Max(1, ingredient.count)
+                });
+            }
+
+            remappedEntries[targetItemId] = targetEntry;
+        }
+
+        List<CraftingTreeBinaryEntry> sortedEntries = new List<CraftingTreeBinaryEntry>(remappedEntries.Values);
+        sortedEntries.Sort((left, right) => left.itemId.CompareTo(right.itemId));
+        WriteCraftingTreeBinary(GetCraftingTreeAssetPath(), sortedEntries);
+        WriteCraftingTreeBinary(GetCraftingTreeResourcesPath(), sortedEntries);
+        WriteCraftingTreeJson(GetCraftingTreeJsonPath(), sortedEntries, definitions);
+    }
+
+    private static List<CraftingTreeBinaryEntry> ReadCraftingTreeBinary(string path)
+    {
+        List<CraftingTreeBinaryEntry> entries = new List<CraftingTreeBinaryEntry>();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return entries;
+        }
+
+        using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read))
+        using (BinaryReader reader = new BinaryReader(stream))
+        {
+            int version = reader.ReadInt32();
+            if (version != CurrentCraftingTreeFileVersion)
+            {
+                return entries;
+            }
+
+            int recipeCount = Mathf.Max(0, reader.ReadInt32());
+            for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
+            {
+                CraftingTreeBinaryEntry entry = new CraftingTreeBinaryEntry
+                {
+                    itemId = reader.ReadInt32()
+                };
+
+                int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+                for (int mapObjectIndex = 0; mapObjectIndex < mapObjectCount; mapObjectIndex++)
+                {
+                    entry.requiredMapObjectItemIds.Add(reader.ReadInt32());
+                }
+
+                entry.outputCount = Mathf.Max(1, reader.ReadInt32());
+                int ingredientCount = Mathf.Max(0, reader.ReadInt32());
+                for (int ingredientIndex = 0; ingredientIndex < ingredientCount; ingredientIndex++)
+                {
+                    entry.ingredients.Add(new InputOutputJsonEntry
+                    {
+                        id = reader.ReadInt32(),
+                        count = Mathf.Max(1, reader.ReadInt32())
+                    });
+                }
+
+                entries.Add(entry);
+            }
+        }
+
+        return entries;
+    }
+
+    private static void WriteCraftingTreeBinary(string path, List<CraftingTreeBinaryEntry> entries)
+    {
+        EnsureParentFolder(path);
+        using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+        using (BinaryWriter writer = new BinaryWriter(stream))
+        {
+            writer.Write(CurrentCraftingTreeFileVersion);
+            writer.Write(entries != null ? entries.Count : 0);
+            if (entries == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                CraftingTreeBinaryEntry entry = entries[i];
+                writer.Write(entry.itemId);
+                writer.Write(entry.requiredMapObjectItemIds.Count);
+                for (int mapObjectIndex = 0; mapObjectIndex < entry.requiredMapObjectItemIds.Count; mapObjectIndex++)
+                {
+                    writer.Write(entry.requiredMapObjectItemIds[mapObjectIndex]);
+                }
+
+                writer.Write(Mathf.Max(1, entry.outputCount));
+                writer.Write(entry.ingredients.Count);
+                for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
+                {
+                    InputOutputJsonEntry ingredient = entry.ingredients[ingredientIndex];
+                    writer.Write(ingredient.id);
+                    writer.Write(Mathf.Max(1, ingredient.count));
+                }
+            }
+        }
+    }
+
+    private static void WriteCraftingTreeJson(
+        string path,
+        List<CraftingTreeBinaryEntry> entries,
+        List<ItemDefinition> definitions)
+    {
+        CraftingTreeJsonFile file = new CraftingTreeJsonFile();
+        if (entries != null)
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                CraftingTreeJsonEntry entry = BuildCraftingTreeJsonEntry(entries[i], definitions);
+                file.recipes.Add(entry);
+                file.items.Add(entry);
+                file.entries.Add(entry);
+            }
+        }
+
+        EnsureParentFolder(path);
+        File.WriteAllText(path, JsonUtility.ToJson(file, true));
+    }
+
+    private static CraftingTreeJsonEntry BuildCraftingTreeJsonEntry(
+        CraftingTreeBinaryEntry sourceEntry,
+        List<ItemDefinition> definitions)
+    {
+        ItemDefinition targetDefinition = FindDefinitionById(definitions, sourceEntry.itemId);
+        CraftingTreeJsonEntry entry = new CraftingTreeJsonEntry
+        {
+            itemId = sourceEntry.itemId,
+            itemName = GetDefinitionDisplayName(targetDefinition),
+            definitionAssetPath = AssetDatabase.GetAssetPath(targetDefinition),
+            outputCount = Mathf.Max(1, sourceEntry.outputCount)
+        };
+
+        for (int i = 0; i < sourceEntry.requiredMapObjectItemIds.Count; i++)
+        {
+            CraftingMapObjectJsonEntry mapObjectEntry = BuildCraftingMapObjectJsonEntry(
+                sourceEntry.requiredMapObjectItemIds[i],
+                definitions);
+            entry.craftingMapObjects.Add(mapObjectEntry);
+            entry.requiredMapObjects.Add(mapObjectEntry);
+        }
+
+        for (int i = 0; i < sourceEntry.ingredients.Count; i++)
+        {
+            InputOutputJsonEntry sourceIngredient = sourceEntry.ingredients[i];
+            ItemDefinition ingredientDefinition = FindDefinitionById(definitions, sourceIngredient.id);
+            entry.ingredients.Add(new CraftingIngredientJsonEntry
+            {
+                itemId = sourceIngredient.id,
+                itemName = GetDefinitionDisplayName(ingredientDefinition),
+                definitionAssetPath = AssetDatabase.GetAssetPath(ingredientDefinition),
+                count = Mathf.Max(1, sourceIngredient.count)
+            });
+        }
+
+        return entry;
+    }
+
+    private static CraftingMapObjectJsonEntry BuildCraftingMapObjectJsonEntry(
+        int itemId,
+        List<ItemDefinition> definitions)
+    {
+        ItemDefinition definition = FindDefinitionById(definitions, itemId);
+        MapObject mapObject = definition != null ? definition.mapObject : null;
+        GameObject prefabRoot = null;
+        if (mapObject != null)
+        {
+            prefabRoot = mapObject.transform.root != null ? mapObject.transform.root.gameObject : mapObject.gameObject;
+        }
+
+        return new CraftingMapObjectJsonEntry
+        {
+            itemId = itemId,
+            mapObjectName = prefabRoot != null ? prefabRoot.name : GetDefinitionDisplayName(definition),
+            assetPath = prefabRoot != null ? AssetDatabase.GetAssetPath(prefabRoot) : string.Empty
+        };
+    }
+
+    private static void WriteItemDataJson(string path, List<ItemDefinition> definitions)
+    {
+        ItemDataJsonFile file = new ItemDataJsonFile();
+        if (definitions != null)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition != null)
+                {
+                    file.items.Add(BuildJsonEntry(definition));
+                }
+            }
+        }
+
+        EnsureParentFolder(path);
+        File.WriteAllText(path, JsonUtility.ToJson(file, true));
+    }
+
+    private static void AddDefinitionIfFound(
+        List<ItemDefinition> definitions,
+        HashSet<ItemDefinition> addedDefinitions,
+        ItemDefinition definition)
+    {
+        if (definition != null && addedDefinitions.Add(definition))
+        {
+            definitions.Add(definition);
+        }
+    }
+
+    private static ItemDefinition FindDefinitionByGuid(string guid)
+    {
+        if (string.IsNullOrWhiteSpace(guid))
+        {
+            return null;
+        }
+
+        string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+        return string.IsNullOrWhiteSpace(assetPath)
+            ? null
+            : AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
+    }
+
+    private static int FindOrderedDefinitionIndexByGuid(List<ItemDefinition> definitions, string guid)
+    {
+        if (definitions == null || string.IsNullOrWhiteSpace(guid))
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string assetPath = AssetDatabase.GetAssetPath(definition);
+            if (!string.IsNullOrWhiteSpace(assetPath)
+                && string.Equals(AssetDatabase.AssetPathToGUID(assetPath), guid, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int RemapItemId(int itemId, Dictionary<int, int> itemIdRemap)
+    {
+        if (itemId < 0)
+        {
+            return -1;
+        }
+
+        return itemIdRemap != null && itemIdRemap.TryGetValue(itemId, out int remappedId)
+            ? remappedId
+            : itemId;
+    }
+
+    private static string GetExpectedItemDefinitionAssetPath(ItemDefinition definition)
+    {
+        string displayName = GetDefinitionDisplayName(definition);
+        string safeName = SanitizeAssetFileName(string.IsNullOrWhiteSpace(displayName)
+            ? $"Item_{definition.id}"
+            : displayName);
+        return $"{ItemDefinitionAssetFolder}/Item_{definition.id}_{safeName}.asset";
+    }
+
+    private static string SanitizeAssetFileName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "Item";
+        }
+
+        string sanitized = value.Trim();
+        char[] invalidChars = Path.GetInvalidFileNameChars();
+        for (int i = 0; i < invalidChars.Length; i++)
+        {
+            sanitized = sanitized.Replace(invalidChars[i].ToString(), string.Empty);
+        }
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "Item" : sanitized;
+    }
+
+    private static string GetDefaultItemDataJsonPath()
+    {
+        return Path.Combine(Application.dataPath, "Data", "Items", "item_data.json");
+    }
+
+    private static string GetCraftingTreeAssetPath()
+    {
+        return Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.bytes");
+    }
+
+    private static string GetCraftingTreeResourcesPath()
+    {
+        return Path.Combine(Application.dataPath, "Resources", "Data", "CraftingTree", "crafting_tree.bytes");
+    }
+
+    private static string GetCraftingTreeJsonPath()
+    {
+        return Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
+    }
+
+    private static void EnsureParentFolder(string path)
+    {
+        string folderPath = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(folderPath) && !Directory.Exists(folderPath))
+        {
+            Directory.CreateDirectory(folderPath);
+        }
+    }
+
     private void ExportJson()
     {
         ItemManager itemManager = FindItemManager();
@@ -3021,20 +3743,7 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        ItemDataJsonFile file = new ItemDataJsonFile();
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            ItemDataJsonEntry entry = BuildJsonEntry(definition);
-            file.items.Add(entry);
-        }
-
-        File.WriteAllText(exportPath, JsonUtility.ToJson(file, true));
+        WriteItemDataJson(exportPath, definitions);
         AssetDatabase.Refresh();
     }
 
@@ -3088,7 +3797,7 @@ public class ItemDataEditorWindow : EditorWindow
             ApplyDefinitionOrderToItemManager(itemManager, definitions);
             SyncItemManagerItemSets(itemManager, definitions);
             itemManager.ApplyItemIdsToPrefabs();
-            EditorUtility.SetDirty(itemManager);
+            itemManager.MarkEditorDirty();
         }
 
         AssetDatabase.SaveAssets();

@@ -12,7 +12,6 @@ public sealed class RailloadInstallationController : MonoBehaviour
     private const float VisualBezierHandleFactor = 0.55f;
     private const float VisualBezierCrossAxisHandleFactor = 0.18f;
     private const float VisualBezierMinHandleLength = 0.35f;
-    private const float ConnectionEndpointSnapMaxDistance = 0.55f;
     private const float ConnectionAngleScoreEpsilon = 0.001f;
     private const float ConnectionSideScoreWeight = 2f;
     private const float ConnectionSideEpsilon = 0.05f;
@@ -813,7 +812,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return false;
         }
 
-        float maxSqrDistance = ConnectionEndpointSnapMaxDistance * ConnectionEndpointSnapMaxDistance;
+        float maxSqrDistance = Railload.ConnectionEndpointSnapMaxDistance * Railload.ConnectionEndpointSnapMaxDistance;
         float bestSqrDistance = float.MaxValue;
         Vector2 bestPoint = endpoint;
         Vector2 bestDirection = normalizedPreferredDirection;
@@ -901,7 +900,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
             }
         }
 
-        return sqrDistance <= ConnectionEndpointSnapMaxDistance * ConnectionEndpointSnapMaxDistance
+        return sqrDistance <= Railload.ConnectionEndpointSnapMaxDistance * Railload.ConnectionEndpointSnapMaxDistance
                && TryNormalize(guideTangent, out guideTangent);
     }
 

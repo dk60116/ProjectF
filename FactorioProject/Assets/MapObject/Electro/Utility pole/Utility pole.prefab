@@ -110,7 +110,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Utility pole
-  objId: 40
+  objId: 39
   itemDefinition: {fileID: 11400000, guid: c0075e53760e0bc4e8a7625ac98e2167, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

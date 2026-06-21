@@ -8,7 +8,7 @@ public partial class BlockStateStore
     private const float ConveyorBackgroundSimulationEpsilon = 0.0001f;
     private const int ConveyorBackgroundSimulationPassMultiplier = 64;
     private const int ConveyorBackgroundDefaultSimulationPasses = 256;
-    private const double ConveyorBackgroundBlockedRetrySeconds = 1.0;
+    private const double ConveyorBackgroundTopologyRetrySeconds = 8.0;
     private const float VirtualConveyorLanePathLength = 0.5f;
     private const int ConveyorSingleLineFrontLaneIndex = 0;
     private const int ConveyorSingleLineBackLaneIndex = 2;
@@ -76,6 +76,16 @@ public partial class BlockStateStore
         public float budgetDistance;
     }
 
+    private enum ConveyorSimulationMoveResult
+    {
+        Moved,
+        NotReady,
+        BlockedByOccupiedDestination,
+        InvalidSource,
+        InvalidTopology,
+        InvalidDestination
+    }
+
     private readonly struct ConveyorScheduledLane
     {
         public readonly ConveyorLaneKey key;
@@ -94,15 +104,14 @@ public partial class BlockStateStore
     {
         public long readyTicks;
         public int version;
-        public bool blocked;
         public bool slowRetry;
-        public ConveyorLaneKey blockedDestination;
     }
 
     private readonly Dictionary<Vector2Int, ConveyorItemBlockState> savedConveyorItemStates = new Dictionary<Vector2Int, ConveyorItemBlockState>();
     private readonly Dictionary<ConveyorLaneKey, ConveyorScheduleState> conveyorScheduleStates = new Dictionary<ConveyorLaneKey, ConveyorScheduleState>();
     private readonly Dictionary<ConveyorLaneKey, List<ConveyorLaneKey>> conveyorBlockedWaitersByDestination = new Dictionary<ConveyorLaneKey, List<ConveyorLaneKey>>();
     private readonly List<ConveyorScheduledLane> conveyorReadyLaneHeap = new List<ConveyorScheduledLane>();
+    private readonly Dictionary<ConveyorLaneKey, int> conveyorReadyLaneHeapIndicesByKey = new Dictionary<ConveyorLaneKey, int>();
     private readonly List<ConveyorLaneKey> conveyorSimulationActiveLaneKeys = new List<ConveyorLaneKey>();
     private readonly List<ConveyorLaneKey> conveyorSimulationNextActiveLaneKeys = new List<ConveyorLaneKey>();
     private readonly HashSet<ConveyorLaneKey> conveyorSimulationNextActiveLaneKeySet = new HashSet<ConveyorLaneKey>();
@@ -112,6 +121,7 @@ public partial class BlockStateStore
     private int conveyorScheduleVersion;
     private int cachedConveyorScheduleSavedBlockCount;
     private int cachedConveyorScheduleSavedItemCount;
+    private int conveyorBlockedWaiterCount;
 
     private static bool IsSavedConveyorActiveLaneIndex(int laneIndex)
     {
@@ -587,7 +597,10 @@ public partial class BlockStateStore
         staleScheduleDropCount = 0;
         slowRetryCandidateCount = 0;
 
-        if (conveyorScheduleDirty || (conveyorScheduleStates.Count <= 0 && savedConveyorItemStates.Count > 0))
+        if (conveyorScheduleDirty
+            || (conveyorScheduleStates.Count <= 0
+                && conveyorBlockedWaiterCount <= 0
+                && savedConveyorItemStates.Count > 0))
         {
             RebuildConveyorSchedule(nowTicks);
         }
@@ -615,11 +628,6 @@ public partial class BlockStateStore
                 slowRetryCandidateCount++;
             }
 
-            if (scheduleState.blocked)
-            {
-                RemoveConveyorBlockedWaiter(scheduleState.blockedDestination, scheduledLane.key);
-            }
-
             conveyorSimulationActiveLaneKeys.Add(scheduledLane.key);
         }
 
@@ -634,7 +642,9 @@ public partial class BlockStateStore
     {
         conveyorScheduleStates.Clear();
         conveyorBlockedWaitersByDestination.Clear();
+        conveyorBlockedWaiterCount = 0;
         conveyorReadyLaneHeap.Clear();
+        conveyorReadyLaneHeapIndicesByKey.Clear();
         cachedConveyorScheduleSavedBlockCount = 0;
         cachedConveyorScheduleSavedItemCount = 0;
 
@@ -686,7 +696,7 @@ public partial class BlockStateStore
             || lane.itemId < 0
             || lane.laneIndex != laneKey.laneIndex)
         {
-            conveyorScheduleStates.Remove(laneKey);
+            RemoveConveyorScheduleState(laneKey);
             return false;
         }
 
@@ -695,8 +705,8 @@ public partial class BlockStateStore
             || link == null
             || link.pathLength <= ConveyorBackgroundSimulationEpsilon)
         {
-            readyTicks = ResolveConveyorBlockedRetryTicks(nowTicks);
-            PushConveyorScheduleState(laneKey, readyTicks, false, default, true);
+            readyTicks = ResolveConveyorTopologyRetryTicks(nowTicks);
+            PushConveyorScheduleState(laneKey, readyTicks, true);
             return true;
         }
 
@@ -705,7 +715,45 @@ public partial class BlockStateStore
             : ResolveConveyorSimulationBudgetDistance(state, nowTicks);
         float requiredDistance = ResolveSavedConveyorLaneBoundaryDistance(lane, link);
         readyTicks = ResolveConveyorLaneReadyTicks(state, nowTicks, budgetDistance, requiredDistance);
-        PushConveyorScheduleState(laneKey, readyTicks, false, default);
+        if (readyTicks <= nowTicks
+            && TryHandleReadyConveyorLaneDestination(laneKey, link, nowTicks, out readyTicks))
+        {
+            return true;
+        }
+
+        PushConveyorScheduleState(laneKey, readyTicks);
+        return true;
+    }
+
+    private bool TryHandleReadyConveyorLaneDestination(
+        ConveyorLaneKey laneKey,
+        ConveyorLaneLinkSaveState link,
+        long nowTicks,
+        out long readyTicks)
+    {
+        readyTicks = nowTicks;
+        if (link == null)
+        {
+            return false;
+        }
+
+        ConveyorLaneKey destinationKey = new ConveyorLaneKey(link.destinationCoordinate, link.destinationLaneIndex);
+        if (laneKey.Equals(destinationKey)
+            || !TryEnsureConveyorItemState(link.destinationCoordinate, out ConveyorItemBlockState destinationState)
+            || !IsValidConveyorDestinationLane(destinationState, link.destinationLaneIndex))
+        {
+            readyTicks = ResolveConveyorTopologyRetryTicks(nowTicks);
+            PushConveyorScheduleState(laneKey, readyTicks, true);
+            return true;
+        }
+
+        if (GetSavedConveyorLaneItemId(destinationState, link.destinationLaneIndex) < 0)
+        {
+            return false;
+        }
+
+        readyTicks = long.MaxValue;
+        BlockConveyorScheduledLane(laneKey, destinationKey);
         return true;
     }
 
@@ -743,9 +791,9 @@ public partial class BlockStateStore
         return nowTicks + (long)Math.Ceiling(remainingTicks);
     }
 
-    private static long ResolveConveyorBlockedRetryTicks(long nowTicks)
+    private static long ResolveConveyorTopologyRetryTicks(long nowTicks)
     {
-        double retryTicks = ConveyorBackgroundBlockedRetrySeconds * TimeSpan.TicksPerSecond;
+        double retryTicks = ConveyorBackgroundTopologyRetrySeconds * TimeSpan.TicksPerSecond;
         if (retryTicks >= long.MaxValue - nowTicks)
         {
             return long.MaxValue;
@@ -757,49 +805,67 @@ public partial class BlockStateStore
     private void PushConveyorScheduleState(
         ConveyorLaneKey laneKey,
         long readyTicks,
-        bool blocked,
-        ConveyorLaneKey blockedDestination)
+        bool slowRetry = false)
     {
-        PushConveyorScheduleState(laneKey, readyTicks, blocked, blockedDestination, blocked);
-    }
+        if (conveyorScheduleStates.TryGetValue(laneKey, out ConveyorScheduleState existingState)
+            && existingState.readyTicks == readyTicks
+            && existingState.slowRetry == slowRetry
+            && conveyorReadyLaneHeapIndicesByKey.TryGetValue(laneKey, out int duplicateIndex)
+            && duplicateIndex >= 0
+            && duplicateIndex < conveyorReadyLaneHeap.Count
+            && conveyorReadyLaneHeap[duplicateIndex].key.Equals(laneKey))
+        {
+            return;
+        }
 
-    private void PushConveyorScheduleState(
-        ConveyorLaneKey laneKey,
-        long readyTicks,
-        bool blocked,
-        ConveyorLaneKey blockedDestination,
-        bool slowRetry)
-    {
         ConveyorScheduleState scheduleState = new ConveyorScheduleState
         {
             readyTicks = readyTicks,
             version = ++conveyorScheduleVersion,
-            blocked = blocked,
-            slowRetry = slowRetry,
-            blockedDestination = blockedDestination
+            slowRetry = slowRetry
         };
         conveyorScheduleStates[laneKey] = scheduleState;
         PushConveyorReadyLane(new ConveyorScheduledLane(laneKey, readyTicks, scheduleState.version));
     }
 
+    private bool RemoveConveyorScheduleState(ConveyorLaneKey laneKey)
+    {
+        bool removedState = conveyorScheduleStates.Remove(laneKey);
+        bool removedHeap = RemoveConveyorReadyLane(laneKey);
+        return removedState || removedHeap;
+    }
+
     private int CountConveyorBlockedWaiters()
     {
-        int count = 0;
-        foreach (KeyValuePair<ConveyorLaneKey, List<ConveyorLaneKey>> pair in conveyorBlockedWaitersByDestination)
-        {
-            if (pair.Value != null)
-            {
-                count += pair.Value.Count;
-            }
-        }
-
-        return count;
+        return Math.Max(0, conveyorBlockedWaiterCount);
     }
 
     private void PushConveyorReadyLane(ConveyorScheduledLane scheduledLane)
     {
+        if (conveyorReadyLaneHeapIndicesByKey.TryGetValue(scheduledLane.key, out int existingIndex)
+            && existingIndex >= 0
+            && existingIndex < conveyorReadyLaneHeap.Count
+            && conveyorReadyLaneHeap[existingIndex].key.Equals(scheduledLane.key))
+        {
+            SetConveyorReadyLaneHeapEntry(existingIndex, scheduledLane);
+            FixConveyorReadyLaneHeapAt(existingIndex);
+            return;
+        }
+
         conveyorReadyLaneHeap.Add(scheduledLane);
         int index = conveyorReadyLaneHeap.Count - 1;
+        conveyorReadyLaneHeapIndicesByKey[scheduledLane.key] = index;
+        SiftUpConveyorReadyLane(index);
+    }
+
+    private void SiftUpConveyorReadyLane(int index)
+    {
+        if (index < 0 || index >= conveyorReadyLaneHeap.Count)
+        {
+            return;
+        }
+
+        ConveyorScheduledLane scheduledLane = conveyorReadyLaneHeap[index];
         while (index > 0)
         {
             int parentIndex = (index - 1) / 2;
@@ -808,25 +874,82 @@ public partial class BlockStateStore
                 break;
             }
 
-            conveyorReadyLaneHeap[index] = conveyorReadyLaneHeap[parentIndex];
+            SetConveyorReadyLaneHeapEntry(index, conveyorReadyLaneHeap[parentIndex]);
             index = parentIndex;
         }
 
-        conveyorReadyLaneHeap[index] = scheduledLane;
+        SetConveyorReadyLaneHeapEntry(index, scheduledLane);
     }
 
     private ConveyorScheduledLane PopConveyorReadyLane()
     {
         ConveyorScheduledLane result = conveyorReadyLaneHeap[0];
-        int lastIndex = conveyorReadyLaneHeap.Count - 1;
-        ConveyorScheduledLane lastLane = conveyorReadyLaneHeap[lastIndex];
-        conveyorReadyLaneHeap.RemoveAt(lastIndex);
-        if (lastIndex <= 0)
+        RemoveConveyorReadyLaneAt(0);
+        return result;
+    }
+
+    private bool RemoveConveyorReadyLane(ConveyorLaneKey laneKey)
+    {
+        if (!conveyorReadyLaneHeapIndicesByKey.TryGetValue(laneKey, out int index)
+            || index < 0
+            || index >= conveyorReadyLaneHeap.Count
+            || !conveyorReadyLaneHeap[index].key.Equals(laneKey))
         {
-            return result;
+            conveyorReadyLaneHeapIndicesByKey.Remove(laneKey);
+            return false;
         }
 
-        int index = 0;
+        RemoveConveyorReadyLaneAt(index);
+        return true;
+    }
+
+    private void RemoveConveyorReadyLaneAt(int index)
+    {
+        if (index < 0 || index >= conveyorReadyLaneHeap.Count)
+        {
+            return;
+        }
+
+        int lastIndex = conveyorReadyLaneHeap.Count - 1;
+        ConveyorScheduledLane removedLane = conveyorReadyLaneHeap[index];
+        conveyorReadyLaneHeapIndicesByKey.Remove(removedLane.key);
+        ConveyorScheduledLane lastLane = conveyorReadyLaneHeap[lastIndex];
+        conveyorReadyLaneHeap.RemoveAt(lastIndex);
+        if (index == lastIndex)
+        {
+            return;
+        }
+
+        SetConveyorReadyLaneHeapEntry(index, lastLane);
+        FixConveyorReadyLaneHeapAt(index);
+    }
+
+    private void FixConveyorReadyLaneHeapAt(int index)
+    {
+        if (index < 0 || index >= conveyorReadyLaneHeap.Count)
+        {
+            return;
+        }
+
+        int parentIndex = (index - 1) / 2;
+        if (index > 0 && CompareConveyorScheduledLane(conveyorReadyLaneHeap[index], conveyorReadyLaneHeap[parentIndex]) < 0)
+        {
+            SiftUpConveyorReadyLane(index);
+        }
+        else
+        {
+            SiftDownConveyorReadyLane(index);
+        }
+    }
+
+    private void SiftDownConveyorReadyLane(int index)
+    {
+        if (index < 0 || index >= conveyorReadyLaneHeap.Count)
+        {
+            return;
+        }
+
+        ConveyorScheduledLane scheduledLane = conveyorReadyLaneHeap[index];
         while (true)
         {
             int leftIndex = (index * 2) + 1;
@@ -841,17 +964,22 @@ public partial class BlockStateStore
                     ? rightIndex
                     : leftIndex;
 
-            if (CompareConveyorScheduledLane(lastLane, conveyorReadyLaneHeap[childIndex]) <= 0)
+            if (CompareConveyorScheduledLane(scheduledLane, conveyorReadyLaneHeap[childIndex]) <= 0)
             {
                 break;
             }
 
-            conveyorReadyLaneHeap[index] = conveyorReadyLaneHeap[childIndex];
+            SetConveyorReadyLaneHeapEntry(index, conveyorReadyLaneHeap[childIndex]);
             index = childIndex;
         }
 
-        conveyorReadyLaneHeap[index] = lastLane;
-        return result;
+        SetConveyorReadyLaneHeapEntry(index, scheduledLane);
+    }
+
+    private void SetConveyorReadyLaneHeapEntry(int index, ConveyorScheduledLane scheduledLane)
+    {
+        conveyorReadyLaneHeap[index] = scheduledLane;
+        conveyorReadyLaneHeapIndicesByKey[scheduledLane.key] = index;
     }
 
     private static int CompareConveyorScheduledLane(ConveyorScheduledLane left, ConveyorScheduledLane right)
@@ -910,32 +1038,26 @@ public partial class BlockStateStore
             return false;
         }
 
-        if (collectProfileCounters)
+        ConveyorSimulationMoveResult moveResult = TryMoveConveyorSimulationItem(
+            ref item,
+            out bool vacatedLane,
+            out ConveyorLaneKey vacatedLaneKey,
+            out ConveyorLaneKey blockedDestinationKey);
+        if (collectProfileCounters && IsConveyorMoveAttemptResult(moveResult))
         {
             moveAttemptCount++;
         }
 
-        if (!TryMoveConveyorSimulationItem(
-                ref item,
-                out bool vacatedLane,
-                out ConveyorLaneKey vacatedLaneKey,
-                out bool blockedByOccupiedDestination,
-                out ConveyorLaneKey blockedDestinationKey))
+        if (moveResult != ConveyorSimulationMoveResult.Moved)
         {
-            if (blockedByOccupiedDestination)
-            {
-                BlockConveyorScheduledLane(laneKey, blockedDestinationKey, nowTicks);
-            }
-            else if (TryGetSavedConveyorLane(laneKey, out _, out _))
-            {
-                PushConveyorScheduleState(
-                    laneKey,
-                    ResolveConveyorBlockedRetryTicks(nowTicks),
-                    false,
-                    default,
-                    true);
-            }
-
+            HandleFailedConveyorSimulationMove(
+                moveResult,
+                laneKey,
+                sourceState,
+                lane,
+                nowTicks,
+                item.budgetDistance,
+                blockedDestinationKey);
             RecordConveyorSimulationRemainingBudget(laneKey.coordinate, item.budgetDistance);
             return false;
         }
@@ -972,14 +1094,54 @@ public partial class BlockStateStore
         return true;
     }
 
-    private void BlockConveyorScheduledLane(ConveyorLaneKey laneKey, ConveyorLaneKey destinationKey, long nowTicks)
+    private static bool IsConveyorMoveAttemptResult(ConveyorSimulationMoveResult result)
+    {
+        return result == ConveyorSimulationMoveResult.Moved
+            || result == ConveyorSimulationMoveResult.BlockedByOccupiedDestination;
+    }
+
+    private void HandleFailedConveyorSimulationMove(
+        ConveyorSimulationMoveResult result,
+        ConveyorLaneKey laneKey,
+        ConveyorItemBlockState sourceState,
+        ConveyorItemLaneSaveState lane,
+        long nowTicks,
+        float budgetDistance,
+        ConveyorLaneKey blockedDestinationKey)
+    {
+        switch (result)
+        {
+            case ConveyorSimulationMoveResult.NotReady:
+                ScheduleConveyorLane(laneKey, sourceState, lane, nowTicks, budgetDistance, out _);
+                break;
+            case ConveyorSimulationMoveResult.BlockedByOccupiedDestination:
+                BlockConveyorScheduledLane(laneKey, blockedDestinationKey);
+                break;
+            case ConveyorSimulationMoveResult.InvalidTopology:
+            case ConveyorSimulationMoveResult.InvalidDestination:
+                if (TryGetSavedConveyorLane(laneKey, out _, out _))
+                {
+                    PushConveyorScheduleState(
+                        laneKey,
+                        ResolveConveyorTopologyRetryTicks(nowTicks),
+                        true);
+                }
+                else
+                {
+                    RemoveConveyorScheduleState(laneKey);
+                }
+
+                break;
+            case ConveyorSimulationMoveResult.InvalidSource:
+                RemoveConveyorScheduleState(laneKey);
+                break;
+        }
+    }
+
+    private void BlockConveyorScheduledLane(ConveyorLaneKey laneKey, ConveyorLaneKey destinationKey)
     {
         AddConveyorBlockedWaiter(destinationKey, laneKey);
-        PushConveyorScheduleState(
-            laneKey,
-            ResolveConveyorBlockedRetryTicks(nowTicks),
-            true,
-            destinationKey);
+        RemoveConveyorScheduleState(laneKey);
     }
 
     private void AddConveyorBlockedWaiter(ConveyorLaneKey destinationKey, ConveyorLaneKey laneKey)
@@ -993,6 +1155,7 @@ public partial class BlockStateStore
         if (!waiters.Contains(laneKey))
         {
             waiters.Add(laneKey);
+            conveyorBlockedWaiterCount++;
         }
     }
 
@@ -1003,7 +1166,11 @@ public partial class BlockStateStore
             return;
         }
 
-        waiters.Remove(laneKey);
+        if (waiters.Remove(laneKey))
+        {
+            conveyorBlockedWaiterCount = Math.Max(0, conveyorBlockedWaiterCount - 1);
+        }
+
         if (waiters.Count <= 0)
         {
             conveyorBlockedWaitersByDestination.Remove(destinationKey);
@@ -1022,14 +1189,15 @@ public partial class BlockStateStore
             ConveyorLaneKey waiterKey = waiters[i];
             if (!TryGetSavedConveyorLane(waiterKey, out _, out _))
             {
-                conveyorScheduleStates.Remove(waiterKey);
+                RemoveConveyorScheduleState(waiterKey);
                 continue;
             }
 
-            PushConveyorScheduleState(waiterKey, nowTicks, false, default);
+            PushConveyorScheduleState(waiterKey, nowTicks);
             QueueNextConveyorSimulationLaneKey(waiterKey);
         }
 
+        conveyorBlockedWaiterCount = Math.Max(0, conveyorBlockedWaiterCount - waiters.Count);
         conveyorBlockedWaitersByDestination.Remove(laneKey);
     }
 
@@ -1100,54 +1268,55 @@ public partial class BlockStateStore
         return Mathf.Max(0f, pathLength * (1f - Mathf.Clamp01(lane.progress)));
     }
 
-    private bool TryMoveConveyorSimulationItem(
+    private ConveyorSimulationMoveResult TryMoveConveyorSimulationItem(
         ref ConveyorSimulationItem item,
         out bool vacatedLane,
         out ConveyorLaneKey vacatedLaneKey,
-        out bool blockedByOccupiedDestination,
         out ConveyorLaneKey blockedDestinationKey)
     {
         vacatedLane = false;
         vacatedLaneKey = default;
-        blockedByOccupiedDestination = false;
         blockedDestinationKey = default;
 
         if (item.lane == null
             || item.lane.itemId < 0
             || !TryEnsureConveyorItemState(item.coordinate, out ConveyorItemBlockState sourceState)
-            || sourceState == null
-            || !TryGetConveyorLaneLink(sourceState, item.lane.laneIndex, out ConveyorLaneLinkSaveState link)
+            || sourceState == null)
+        {
+            return ConveyorSimulationMoveResult.InvalidSource;
+        }
+
+        if (!TryGetConveyorLaneLink(sourceState, item.lane.laneIndex, out ConveyorLaneLinkSaveState link)
             || link == null
             || link.destinationLaneIndex < 0
             || link.pathLength <= ConveyorBackgroundSimulationEpsilon)
         {
-            return false;
+            return ConveyorSimulationMoveResult.InvalidTopology;
         }
 
         if (!TryEnsureConveyorItemState(link.destinationCoordinate, out ConveyorItemBlockState destinationState)
             || !IsValidConveyorDestinationLane(destinationState, link.destinationLaneIndex))
         {
-            return false;
+            return ConveyorSimulationMoveResult.InvalidDestination;
         }
 
         ConveyorLaneKey sourceKey = new ConveyorLaneKey(item.coordinate, item.lane.laneIndex);
         ConveyorLaneKey destinationKey = new ConveyorLaneKey(link.destinationCoordinate, link.destinationLaneIndex);
         if (sourceKey.Equals(destinationKey))
         {
-            return false;
+            return ConveyorSimulationMoveResult.InvalidTopology;
         }
 
         float requiredDistance = ResolveSavedConveyorLaneBoundaryDistance(item.lane, link);
         if (item.budgetDistance + ConveyorBackgroundSimulationEpsilon < requiredDistance)
         {
-            return false;
+            return ConveyorSimulationMoveResult.NotReady;
         }
 
         if (GetSavedConveyorLaneItemId(destinationState, link.destinationLaneIndex) >= 0)
         {
-            blockedByOccupiedDestination = true;
             blockedDestinationKey = destinationKey;
-            return false;
+            return ConveyorSimulationMoveResult.BlockedByOccupiedDestination;
         }
 
         item.budgetDistance = Mathf.Max(0f, item.budgetDistance - requiredDistance);
@@ -1164,7 +1333,7 @@ public partial class BlockStateStore
         item.coordinate = link.destinationCoordinate;
         vacatedLane = true;
         vacatedLaneKey = sourceKey;
-        return true;
+        return ConveyorSimulationMoveResult.Moved;
     }
 
     private bool TryEnsureConveyorItemState(Vector2Int worldCoordinate, out ConveyorItemBlockState state)
@@ -1717,7 +1886,9 @@ public partial class BlockStateStore
         MarkConveyorScheduleDirty();
         conveyorScheduleStates.Clear();
         conveyorBlockedWaitersByDestination.Clear();
+        conveyorBlockedWaiterCount = 0;
         conveyorReadyLaneHeap.Clear();
+        conveyorReadyLaneHeapIndicesByKey.Clear();
     }
 
     private void MarkConveyorScheduleDirty()
@@ -1730,7 +1901,7 @@ public partial class BlockStateStore
     private void NotifySavedConveyorLaneVacatedExternally(Vector2Int coordinate, int laneIndex)
     {
         ConveyorLaneKey laneKey = new ConveyorLaneKey(coordinate, laneIndex);
-        conveyorScheduleStates.Remove(laneKey);
+        RemoveConveyorScheduleState(laneKey);
         WakeConveyorBlockedWaitersForVacatedLane(laneKey, DateTime.UtcNow.Ticks);
         MarkConveyorScheduleDirty();
         NotifySavedConveyorExternalOccupancyChanged(coordinate);
@@ -1738,7 +1909,7 @@ public partial class BlockStateStore
 
     private void NotifySavedConveyorLaneOccupiedExternally(Vector2Int coordinate, int laneIndex)
     {
-        conveyorScheduleStates.Remove(new ConveyorLaneKey(coordinate, laneIndex));
+        RemoveConveyorScheduleState(new ConveyorLaneKey(coordinate, laneIndex));
         MarkConveyorScheduleDirty();
         NotifySavedConveyorExternalOccupancyChanged(coordinate);
     }

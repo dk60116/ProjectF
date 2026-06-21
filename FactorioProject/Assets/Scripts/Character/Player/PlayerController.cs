@@ -590,7 +590,7 @@ public class PlayerController : MonoBehaviour
             if (interactionPointSnapVehicle != null)
             {
                 float mountedMoveSpeed = player != null ? player.Stat.currentMoveSpeed : 0f;
-                interactionPointSnapVehicle.HandleMountedInput(moveDirection, mountedMoveSpeed, Time.deltaTime);
+                interactionPointSnapVehicle.HandleMountedInput(moveDirection, mountedMoveSpeed, Time.deltaTime, player);
                 ApplyInteractionPointSnap();
             }
 

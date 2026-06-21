@@ -1144,6 +1144,13 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
+        if (savedState.hasSteamTrainBurnEnergyState && restoredInstallation is SteamTrain steamTrain)
+        {
+            steamTrain.ApplyBurnEnergyState(
+                savedState.steamTrainStoredBurnEnergy,
+                savedState.steamTrainBurnEnergyGaugeCapacity);
+        }
+
         if (savedState.robotArmState != null && restoredInstallation is RobotArm robotArm)
         {
             robotArm.ApplyPersistentState(savedState.robotArmState);
@@ -2047,6 +2054,21 @@ public partial class TerrainGenerator : MonoBehaviour
             return null;
         }
 
+        List<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+        ItemDefinition namedDefinition = ItemDefinitionLookup.ResolveInstallationByStableName(
+            definitions,
+            savedState.itemName);
+        if (namedDefinition != null)
+        {
+            return namedDefinition;
+        }
+
+        ItemDefinition legacyDefinition = ResolveLegacyInstallationDefinition(savedState, definitions);
+        if (legacyDefinition != null)
+        {
+            return legacyDefinition;
+        }
+
         ItemDefinition definition = ResolveInstallationDefinition(savedState.itemId);
         if (!ItemDefinitionLookup.LooksLikeLegacyConveyorBelt2FState(
                 savedState.itemId,
@@ -2056,8 +2078,27 @@ public partial class TerrainGenerator : MonoBehaviour
             return definition;
         }
 
-        List<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
         ItemDefinition belt2FDefinition = ItemDefinitionLookup.ResolveConveyorBelt2F(definitions);
         return belt2FDefinition != null ? belt2FDefinition : definition;
+    }
+
+    private static ItemDefinition ResolveLegacyInstallationDefinition(
+        BlockStateStore.InstallationSaveState savedState,
+        IReadOnlyList<ItemDefinition> definitions)
+    {
+        if (savedState == null || definitions == null)
+        {
+            return null;
+        }
+
+        return savedState.itemId switch
+        {
+            44 when savedState.hasWorldPose => ItemDefinitionLookup.ResolveInstallationByStableName(definitions, "Flatcar"),
+            45 when savedState.hasWorldPose => ItemDefinitionLookup.ResolveInstallationByStableName(definitions, "Rail handcar"),
+            46 when savedState.hasWorldPose => ItemDefinitionLookup.ResolveInstallationByStableName(definitions, "Steam train"),
+            47 when savedState.railVisualPathPoints != null && savedState.railVisualPathPoints.Count > 0
+                => ItemDefinitionLookup.ResolveInstallationByStableName(definitions, "Railload"),
+            _ => null
+        };
     }
 }

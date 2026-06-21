@@ -71,6 +71,7 @@ public static class SaveGameBinarySerializer
     {
         writer.Write(data.version);
         writer.Write(data.savedAtUtcTicks);
+        WriteItemCatalog(writer, data.itemCatalog);
         WriteTerrain(writer, data.terrain);
         WriteMap(writer, data.map);
         WritePlayer(writer, data.player);
@@ -81,13 +82,37 @@ public static class SaveGameBinarySerializer
         SaveGameData data = new SaveGameData
         {
             version = reader.ReadInt32(),
-            savedAtUtcTicks = reader.ReadInt64(),
-            terrain = ReadTerrain(reader, fileVersion),
-            map = ReadMap(reader, fileVersion),
-            player = ReadPlayer(reader, fileVersion)
+            savedAtUtcTicks = reader.ReadInt64()
         };
 
+        data.itemCatalog = fileVersion >= 17
+            ? ReadList(reader, () => ReadItemCatalogEntry(reader))
+            : new List<SaveItemCatalogEntry>();
+        data.terrain = ReadTerrain(reader, fileVersion);
+        data.map = ReadMap(reader, fileVersion);
+        data.player = ReadPlayer(reader, fileVersion);
         return data;
+    }
+
+    private static void WriteItemCatalog(BinaryWriter writer, List<SaveItemCatalogEntry> itemCatalog)
+    {
+        WriteList(writer, itemCatalog, WriteItemCatalogEntry);
+    }
+
+    private static void WriteItemCatalogEntry(BinaryWriter writer, SaveItemCatalogEntry entry)
+    {
+        entry ??= new SaveItemCatalogEntry();
+        writer.Write(entry.itemId);
+        writer.Write(entry.itemName ?? string.Empty);
+    }
+
+    private static SaveItemCatalogEntry ReadItemCatalogEntry(BinaryReader reader)
+    {
+        return new SaveItemCatalogEntry
+        {
+            itemId = reader.ReadInt32(),
+            itemName = reader.ReadString()
+        };
     }
 
     private static void WriteTerrain(BinaryWriter writer, TerrainSaveData terrain)
@@ -210,6 +235,7 @@ public static class SaveGameBinarySerializer
 
         WriteVector2Int(writer, state.anchorCoordinate);
         writer.Write(state.itemId);
+        writer.Write(state.itemName ?? string.Empty);
         writer.Write(state.quarterTurns);
         writer.Write(state.placementSequence);
         writer.Write(state.conveyorVariantKind);
@@ -249,6 +275,13 @@ public static class SaveGameBinarySerializer
             WriteVector2(writer, state.trainRailPathPoint);
             WriteVector2(writer, state.trainRailFacingTangent);
         }
+
+        writer.Write(state.hasSteamTrainBurnEnergyState);
+        if (state.hasSteamTrainBurnEnergyState)
+        {
+            writer.Write(state.steamTrainStoredBurnEnergy);
+            writer.Write(state.steamTrainBurnEnergyGaugeCapacity);
+        }
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -262,6 +295,7 @@ public static class SaveGameBinarySerializer
         {
             anchorCoordinate = ReadVector2Int(reader),
             itemId = reader.ReadInt32(),
+            itemName = version >= 17 ? reader.ReadString() : string.Empty,
             quarterTurns = reader.ReadInt32(),
             placementSequence = reader.ReadInt64(),
             conveyorVariantKind = reader.ReadInt32(),
@@ -324,6 +358,16 @@ public static class SaveGameBinarySerializer
                 state.trainRailDistanceAlongPath = reader.ReadSingle();
                 state.trainRailPathPoint = ReadVector2(reader);
                 state.trainRailFacingTangent = ReadVector2(reader);
+            }
+        }
+
+        if (version >= 16)
+        {
+            state.hasSteamTrainBurnEnergyState = reader.ReadBoolean();
+            if (state.hasSteamTrainBurnEnergyState)
+            {
+                state.steamTrainStoredBurnEnergy = reader.ReadSingle();
+                state.steamTrainBurnEnergyGaugeCapacity = reader.ReadSingle();
             }
         }
 

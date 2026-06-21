@@ -21054,7 +21054,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsInstallGridModeActive()
     {
-        return IsInstallationModeActive();
+        return IsInstallationModeActive() || mapEditModeActive;
     }
 
     private void InvalidateInstallGrid()

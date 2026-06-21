@@ -16,6 +16,7 @@ public class ItemInfoDescription : MonoBehaviour
     private const float GaugeFillSnapThreshold = 0.0025f;
     private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
     private static readonly Color ElectricGaugeFillColor = new Color(1f, 0.72f, 0.08f, 1f);
+    private static readonly Color BurnEnergyGaugeFillColor = new Color(1f, 0.42f, 0.08f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
     private static readonly Dictionary<Image, float> GaugeFillTargets = new Dictionary<Image, float>();
@@ -199,8 +200,17 @@ public class ItemInfoDescription : MonoBehaviour
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeRailHandcar = railHandcar;
-        SetRailHandcarSpeedGauge(railHandcar);
-        SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        if (railHandcar is SteamTrain steamTrain)
+        {
+            SetSteamTrainBurnEnergyGauge(steamTrain);
+            SetRailHandcarSpeedGauge(workGauge, workFill, workText, railHandcar);
+        }
+        else
+        {
+            SetRailHandcarSpeedGauge(railHandcar);
+            SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        }
+
         SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
     }
 
@@ -547,7 +557,16 @@ public class ItemInfoDescription : MonoBehaviour
 
         if (liveGaugeRailHandcar != null && liveGaugeRailHandcar.gameObject.activeInHierarchy)
         {
-            SetRailHandcarSpeedGauge(liveGaugeRailHandcar);
+            if (liveGaugeRailHandcar is SteamTrain steamTrain)
+            {
+                SetSteamTrainBurnEnergyGauge(steamTrain);
+                SetRailHandcarSpeedGauge(workGauge, workFill, workText, liveGaugeRailHandcar);
+            }
+            else
+            {
+                SetRailHandcarSpeedGauge(liveGaugeRailHandcar);
+            }
+
             return;
         }
 
@@ -628,6 +647,15 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetRailHandcarSpeedGauge(RailHandcar railHandcar)
     {
+        SetRailHandcarSpeedGauge(energyGauge, energyFill, energyText, railHandcar);
+    }
+
+    private void SetRailHandcarSpeedGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        RailHandcar railHandcar)
+    {
         float currentSpeed = railHandcar != null ? railHandcar.CurrentVehicleSpeed : 0f;
         float maxSpeed = railHandcar != null ? railHandcar.EffectiveVehicleMaxSpeed : 0f;
         float fillAmount = maxSpeed > 0.0001f
@@ -635,19 +663,40 @@ public class ItemInfoDescription : MonoBehaviour
             : 0f;
 
         SetGauge(
-            energyGauge,
-            energyFill,
-            energyText,
+            root,
+            fill,
+            text,
             true,
             fillAmount,
             ElectricGaugeFillColor,
             currentSpeed,
             maxSpeed,
             true);
-        if (energyText != null)
+        if (text != null)
+        {
+            text.text =
+                $"{FormatMetersPerSecond(currentSpeed)} m/s / {FormatMetersPerSecond(maxSpeed)} m/s";
+        }
+    }
+
+    private void SetSteamTrainBurnEnergyGauge(SteamTrain steamTrain)
+    {
+        float storedEnergy = steamTrain != null ? steamTrain.ObjectInfoStoredBurnEnergy : 0f;
+        float gaugeCapacity = steamTrain != null ? steamTrain.ObjectInfoBurnEnergyGaugeCapacity : 0f;
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            steamTrain != null ? steamTrain.ObjectInfoBurnEnergyGaugeFillAmount : 0f,
+            BurnEnergyGaugeFillColor,
+            storedEnergy,
+            gaugeCapacity,
+            true);
+        if (energyText != null && steamTrain != null)
         {
             energyText.text =
-                $"{FormatMetersPerSecond(currentSpeed)} m/s / {FormatMetersPerSecond(maxSpeed)} m/s";
+                $"{FormatGaugeNumber(storedEnergy, true)} / {FormatGaugeNumber(gaugeCapacity, true)} ({FormatGaugeNumber(steamTrain.ObjectInfoBurnEnergyUseRatePerSecond, true)} / s)";
         }
     }
 

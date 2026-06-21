@@ -251,7 +251,7 @@ MonoBehaviour:
   id: 0
   objectName: Steam train
   objId: 52
-  itemDefinition: {fileID: 11400000, guid: 9e8fd46d9731ca640a3e8716a7b6cfe0, type: 2}
+  itemDefinition: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1

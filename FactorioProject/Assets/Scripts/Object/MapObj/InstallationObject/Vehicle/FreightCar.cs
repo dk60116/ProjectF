@@ -243,7 +243,41 @@ public class FreightCar : Train
         out int takenItemId,
         out Vector3 pickupWorldPosition)
     {
+        return TryTakeOneItemInternal(
+            referenceWorldPosition,
+            itemFilter,
+            out takenItemId,
+            out pickupWorldPosition,
+            out _,
+            false);
+    }
+
+    public bool TryTakeOneItem(
+        Vector3 referenceWorldPosition,
+        Predicate<int> itemFilter,
+        out int takenItemId,
+        out Vector3 pickupWorldPosition,
+        out PortableObject takenPortableObject)
+    {
+        return TryTakeOneItemInternal(
+            referenceWorldPosition,
+            itemFilter,
+            out takenItemId,
+            out pickupWorldPosition,
+            out takenPortableObject,
+            true);
+    }
+
+    private bool TryTakeOneItemInternal(
+        Vector3 referenceWorldPosition,
+        Predicate<int> itemFilter,
+        out int takenItemId,
+        out Vector3 pickupWorldPosition,
+        out PortableObject takenPortableObject,
+        bool releasePortableObject)
+    {
         takenItemId = -1;
+        takenPortableObject = null;
         if (!TryFindClosestTopItem(
                 referenceWorldPosition,
                 itemFilter,
@@ -263,7 +297,16 @@ public class FreightCar : Train
         }
 
         stack.RemoveAt(stack.Count - 1);
-        DestroyPortableObject(portableObject);
+        if (releasePortableObject)
+        {
+            ReleaseTakenPortableObject(portableObject);
+            takenPortableObject = portableObject;
+        }
+        else
+        {
+            DestroyPortableObject(portableObject);
+        }
+
         NotifyRobotArmsAtRuntimeCoordinates();
         takenItemId = itemId;
         return takenItemId >= 0;
@@ -1140,6 +1183,25 @@ public class FreightCar : Train
         }
 
         DestroyPortableObject(portableObject);
+    }
+
+    private static void ReleaseTakenPortableObject(PortableObject portableObject)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
+        gate?.ClearGate();
+
+        portableObject.CancelMove();
+        portableObject.SetBatchedRendering(false);
+        portableObject.transform.SetParent(null, true);
+        if (!portableObject.gameObject.activeSelf)
+        {
+            portableObject.gameObject.SetActive(true);
+        }
     }
 
     private void ClearLoadedItems()

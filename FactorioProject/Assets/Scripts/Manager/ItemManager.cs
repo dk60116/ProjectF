@@ -5,6 +5,7 @@ using System.IO;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
+using UnityEditor.SceneManagement;
 #endif
 
 public class ItemManager : MonoBehaviour
@@ -154,6 +155,7 @@ public class ItemManager : MonoBehaviour
         Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
         Dictionary<string, ItemDefinition> existingDefinitionsByName = BuildExistingItemDefinitionLookupByName();
         HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
+        HashSet<int> assignedIds = new HashSet<int>();
 
         List<ItemSet> rebuiltItems = new List<ItemSet>();
 
@@ -174,9 +176,11 @@ public class ItemManager : MonoBehaviour
             TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
 
             int itemId = preservedIdsByItemName.TryGetValue(itemName, out int preservedId)
+                         && assignedIds.Add(preservedId)
                 ? preservedId
                 : GetNextAvailableId(usedIds);
             usedIds.Add(itemId);
+            assignedIds.Add(itemId);
 
             Sprite resolvedIcon = ResolveItemIcon(itemFolder, itemName, hasPreviousItem ? previousItem.icon : null);
 
@@ -200,7 +204,7 @@ public class ItemManager : MonoBehaviour
         SortItemDefinitionsById(itemDefinitions);
         MigrateResourceDefinitionsFromResources();
         SyncTerrainGeneratorResourceDefinitions();
-        EditorUtility.SetDirty(this);
+        MarkEditorDirty();
     }
 
     private static Dictionary<string, ItemSet> BuildItemSetLookupByName(List<ItemSet> sourceItems)
@@ -2336,9 +2340,18 @@ public class ItemManager : MonoBehaviour
         itemDefinitions.AddRange(rebuiltDefinitions);
         SortItemDefinitionsById(itemDefinitions);
         DeleteUnusedGeneratedItemDefinitions(targetDirectory, existingDefinitions, usedDefinitions);
-        EditorUtility.SetDirty(this);
+        MarkEditorDirty();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+    }
+
+    public void MarkEditorDirty()
+    {
+        EditorUtility.SetDirty(this);
+        if (!Application.isPlaying && gameObject != null && gameObject.scene.IsValid())
+        {
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+        }
     }
 
     private List<ItemDefinition> CollectExistingItemDefinitions(string targetDirectory)

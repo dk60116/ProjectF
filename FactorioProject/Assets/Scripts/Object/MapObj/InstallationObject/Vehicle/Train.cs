@@ -7,6 +7,7 @@ public class Train : Vehicle
     private const float DefaultConnectionFallbackDistance = 1.4f;
     private const float TrainLoadSpeedReductionPerMass = 0.01f;
     private const float MinTrainLoadSpeedMultiplier = 0.01f;
+    private const float ConnectionSideEpsilon = 0.01f;
 
     private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
 
@@ -169,6 +170,12 @@ public class Train : Vehicle
         }
 
         Vector2 delta = secondPoint - firstPoint;
+        if (!first.CanConnectToTrainAtOffset(second, delta, firstTangent)
+            || !second.CanConnectToTrainAtOffset(first, -delta, secondTangent))
+        {
+            return false;
+        }
+
         float alongDistance = Mathf.Abs(Vector2.Dot(delta, firstTangent));
         float maxCenterDistance = ResolveConnectionMaxCenterDistance(first, second);
         if (alongDistance > maxCenterDistance)
@@ -181,6 +188,26 @@ public class Train : Vehicle
             first.ConnectionMaxLateralDistance,
             second.ConnectionMaxLateralDistance);
         return lateralDistance <= maxLateralDistance;
+    }
+
+    protected virtual bool CanConnectToTrainAtOffset(
+        Train other,
+        Vector2 offsetToOther,
+        Vector2 forwardTangent)
+    {
+        return other != null
+               && forwardTangent.sqrMagnitude > 0.0001f;
+    }
+
+    protected static bool IsConnectionOffsetAhead(Vector2 offsetToOther, Vector2 forwardTangent)
+    {
+        if (forwardTangent.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        forwardTangent.Normalize();
+        return Vector2.Dot(offsetToOther, forwardTangent) > ConnectionSideEpsilon;
     }
 
     private static bool TryGetConnectionPose(Train train, out Vector2 point, out Vector2 tangent)

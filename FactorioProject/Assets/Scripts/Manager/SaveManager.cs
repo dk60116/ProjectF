@@ -77,6 +77,7 @@ public class SaveManager : MonoBehaviour
         {
             version = SaveGameData.CurrentVersion,
             savedAtUtcTicks = DateTime.UtcNow.Ticks,
+            itemCatalog = SaveGameItemIdRemapper.CaptureItemCatalog(GameManager.Instance?.ItemManger?.ItemDefinitions),
             terrain = terrain.CaptureTerrainSaveState(),
             map = terrain.CaptureMapSaveState(),
             player = player != null ? player.CaptureSaveState() : new PlayerSaveData()
@@ -119,6 +120,7 @@ public class SaveManager : MonoBehaviour
                 return true;
             }
 
+            SaveGameItemIdRemapper.RemapToCurrentDefinitions(data, GameManager.Instance?.ItemManger?.ItemDefinitions);
             ApplySaveData(data);
             SetRecentSlot(slotIndex);
             Debug.Log($"[SaveManager] Slot {slotIndex + 1} 로드 완료: {path}");

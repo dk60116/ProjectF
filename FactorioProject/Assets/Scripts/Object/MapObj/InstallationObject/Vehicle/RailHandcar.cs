@@ -38,6 +38,10 @@ public class RailHandcar : Train
     private const float RailDebugBlockedProbeDistance = 0.12f;
     private const float RailDebugBlockedDistanceEpsilon = 0.01f;
     private const float EndpointBranchSwitchEpsilon = 0.01f;
+    private const float BranchSwitchScoreMargin = 0.05f;
+    private const float BranchInternalOverlapMinTangentDot = 0.8f;
+    private const float BranchInternalProgressMin = 0.03f;
+    private const float BranchExtendedLookAheadMultiplier = 4f;
     private const float ConsistPathSampleDistanceEpsilon = 0.001f;
     private const float ConsistPathDirectionMinDot = 0.35f;
     private const int MaxPushPropagationDepth = 4;
@@ -392,30 +396,23 @@ public class RailHandcar : Train
             return;
         }
 
-        bool isPushingByInput = hasInput && HasConnectedTrainAhead(inputDirection);
-        bool switchedToBranch = false;
-        if (hasInput
-            && !isPushingByInput
-            && TryFindBranchRailSample(currentSample, inputDirection, out RailSample branchSample))
-        {
-            currentSample = branchSample;
-            switchedToBranch = true;
-        }
-
         Vector2 facingReference = hasInput
             ? ResolveReferenceFacing()
             : ResolveCoastFacingDirection();
-        Vector2 currentFacing = switchedToBranch
-            ? ResolveBranchFacingTangent(currentSample.Tangent, inputDirection)
-            : ResolveFacingTangent(currentSample.Tangent, facingReference);
-        float inputAxis = 0f;
-        if (hasInput)
+        Vector2 currentFacing = ResolveFacingTangent(currentSample.Tangent, facingReference);
+        float inputAxis = ResolveRailInputAxis(hasInput, inputDirection, inputMagnitude, currentFacing);
+        bool isPushingByInput = hasInput && HasConnectedTrainAhead(inputDirection);
+        bool brakingAgainstCurrentSpeed = IsInputBrakingAgainstCurrentSpeed(inputAxis);
+        bool switchedToBranch = false;
+        if (hasInput
+            && !isPushingByInput
+            && !brakingAgainstCurrentSpeed
+            && TryFindBranchRailSample(currentSample, inputDirection, out RailSample branchSample))
         {
-            inputAxis = Vector2.Dot(inputDirection, currentFacing) * inputMagnitude;
-            if (Mathf.Abs(inputAxis) <= railInputDeadZone)
-            {
-                inputAxis = 0f;
-            }
+            currentSample = branchSample;
+            currentFacing = ResolveBranchFacingTangent(currentSample.Tangent, inputDirection);
+            inputAxis = ResolveRailInputAxis(hasInput, inputDirection, inputMagnitude, currentFacing);
+            switchedToBranch = true;
         }
 
         if (ShouldReleaseForeignPushForReverseInput(inputAxis, CurrentVehicleSignedSpeed))
@@ -426,6 +423,12 @@ public class RailHandcar : Train
 
         float effectiveMaxSpeed = EffectiveVehicleMaxSpeed;
         float signedSpeed = UpdateVehicleSignedSpeed(inputAxis, deltaTime, effectiveMaxSpeed);
+        if (brakingAgainstCurrentSpeed && IsStillMovingAgainstInput(inputAxis, signedSpeed))
+        {
+            ApplyRailPose(currentSample, currentFacing, deltaTime, true);
+            return;
+        }
+
         if (Mathf.Abs(signedSpeed) <= 0.0001f)
         {
             ApplyRailPose(currentSample, currentFacing, deltaTime, true);
@@ -454,6 +457,37 @@ public class RailHandcar : Train
         {
             ResetVehicleMotion();
         }
+    }
+
+    private float ResolveRailInputAxis(
+        bool hasInput,
+        Vector2 inputDirection,
+        float inputMagnitude,
+        Vector2 facing)
+    {
+        if (!hasInput
+            || inputDirection.sqrMagnitude <= 0.0001f
+            || facing.sqrMagnitude <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        float inputAxis = Vector2.Dot(inputDirection, facing.normalized) * Mathf.Clamp01(inputMagnitude);
+        return Mathf.Abs(inputAxis) <= railInputDeadZone ? 0f : inputAxis;
+    }
+
+    private bool IsInputBrakingAgainstCurrentSpeed(float inputAxis)
+    {
+        return Mathf.Abs(inputAxis) > railInputDeadZone
+               && Mathf.Abs(CurrentVehicleSignedSpeed) > 0.0001f
+               && Mathf.Sign(inputAxis) != Mathf.Sign(CurrentVehicleSignedSpeed);
+    }
+
+    private bool IsStillMovingAgainstInput(float inputAxis, float signedSpeed)
+    {
+        return Mathf.Abs(inputAxis) > railInputDeadZone
+               && Mathf.Abs(signedSpeed) > 0.0001f
+               && Mathf.Sign(inputAxis) != Mathf.Sign(signedSpeed);
     }
 
     public bool TryGetRailDebugDirection(out Vector3 worldPosition, out Vector3 worldDirection)
@@ -4071,10 +4105,7 @@ public class RailHandcar : Train
 
         inputDirection.Normalize();
         float maxBranchSnapDistance = Mathf.Min(branchSwitchMaxDistance, ResolveRailConnectionMaxDistance());
-        if (IsNearCurrentRailEndpoint(currentSample, Mathf.Max(maxBranchSnapDistance, EndpointBranchSwitchEpsilon)))
-        {
-            return false;
-        }
+        float branchLookAheadDistance = ResolveBranchLookAheadDistance();
 
         float maxBranchSqrDistance = maxBranchSnapDistance * maxBranchSnapDistance;
         float currentInputDot = Mathf.Abs(Vector2.Dot(inputDirection, currentSample.Tangent));
@@ -4084,7 +4115,7 @@ public class RailHandcar : Train
             currentSample.Tangent,
             currentSample.Point,
             inputDirection,
-            branchSwitchLookAhead);
+            branchLookAheadDistance);
         float currentScore = ResolveBranchSelectionScore(currentInputDot, currentProgress, 0f);
 
         railCandidateScratch.Clear();
@@ -4092,15 +4123,15 @@ public class RailHandcar : Train
         AddRailCandidates(currentSample.Point + inputDirection * branchSwitchLookAhead);
 
         bool found = false;
-        float bestScore = currentScore + 0.05f;
+        float bestScore = currentScore + BranchSwitchScoreMargin;
         for (int i = 0; i < railCandidateScratch.Count; i++)
         {
             Railload rail = railCandidateScratch[i];
             if (rail == null
                 || rail == currentSample.Rail
-                || !TryFindRailConnectionSampleNearPoint(
+                || !TryFindBranchRailSampleNearPoint(
                     rail,
-                    currentSample.Point,
+                    currentSample,
                     out float distanceAlongPath,
                     out Vector2 pathPoint,
                     out Vector2 tangent,
@@ -4122,8 +4153,8 @@ public class RailHandcar : Train
                 tangent,
                 currentSample.Point,
                 inputDirection,
-                branchSwitchLookAhead);
-            if (progress <= 0.03f)
+                branchLookAheadDistance);
+            if (progress <= BranchInternalProgressMin)
             {
                 continue;
             }
@@ -4146,6 +4177,16 @@ public class RailHandcar : Train
         railCandidateScratch.Clear();
         railSearchScratch.Clear();
         return found;
+    }
+
+    private float ResolveBranchLookAheadDistance()
+    {
+        return Mathf.Max(
+            branchSwitchLookAhead,
+            railConnectionLookAhead,
+            railSearchRadius,
+            0.05f)
+               * BranchExtendedLookAheadMultiplier;
     }
 
     private static bool IsNearCurrentRailEndpoint(RailSample sample, float maxDistance)
@@ -4364,23 +4405,72 @@ public class RailHandcar : Train
         return results.Count > 0;
     }
 
-    private bool TryFindRailConnectionSampleNearPoint(
+    private bool TryFindBranchRailSampleNearPoint(
         Railload rail,
-        Vector2 point,
+        RailSample currentSample,
         out float distanceAlongPath,
         out Vector2 pathPoint,
         out Vector2 tangent,
         out float sqrDistance)
     {
-        // Branch switching should use real rail endpoints only; internal crossings are pass-through.
-        return TryFindRailConnectionSample(
+        distanceAlongPath = 0f;
+        pathPoint = currentSample.Point;
+        tangent = Vector2.zero;
+        sqrDistance = float.MaxValue;
+        if (rail == null || currentSample.Rail == null)
+        {
+            return false;
+        }
+
+        if (TryFindRailConnectionSample(
             rail,
-            point,
+            currentSample.Point,
             false,
             out distanceAlongPath,
             out pathPoint,
             out tangent,
+            out sqrDistance))
+        {
+            return true;
+        }
+
+        return TryFindOverlappingBranchRailSample(
+            rail,
+            currentSample,
+            out distanceAlongPath,
+            out pathPoint,
+            out tangent,
             out sqrDistance);
+    }
+
+    private bool TryFindOverlappingBranchRailSample(
+        Railload rail,
+        RailSample currentSample,
+        out float distanceAlongPath,
+        out Vector2 pathPoint,
+        out Vector2 tangent,
+        out float sqrDistance)
+    {
+        distanceAlongPath = 0f;
+        pathPoint = currentSample.Point;
+        tangent = Vector2.zero;
+        sqrDistance = float.MaxValue;
+        if (rail == null
+            || currentSample.Rail == null
+            || currentSample.Tangent.sqrMagnitude <= 0.0001f
+            || !rail.TryFindNearestRenderedPathSample(
+                currentSample.Point,
+                out distanceAlongPath,
+                out pathPoint,
+                out tangent,
+                out sqrDistance)
+            || tangent.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float tangentDot = Mathf.Abs(Vector2.Dot(currentSample.Tangent.normalized, tangent.normalized));
+        return tangentDot >= BranchInternalOverlapMinTangentDot;
     }
 
     private bool TryFindRailConnectionSample(
@@ -4642,16 +4732,16 @@ public class RailHandcar : Train
         Vector2 currentFacing = ResolveReferenceFacing();
         if (railTangent.sqrMagnitude <= 0.0001f)
         {
-            return currentFacing.sqrMagnitude > 0.0001f
-                ? currentFacing.normalized
-                : inputDirection.sqrMagnitude > 0.0001f
-                    ? inputDirection.normalized
+            return inputDirection.sqrMagnitude > 0.0001f
+                ? inputDirection.normalized
+                : currentFacing.sqrMagnitude > 0.0001f
+                    ? currentFacing.normalized
                     : Vector2.up;
         }
 
         railTangent.Normalize();
-        if (TryResolveTangentReferenceSign(railTangent, currentFacing, out float referenceSign)
-            || TryResolveTangentReferenceSign(railTangent, inputDirection, out referenceSign))
+        if (TryResolveTangentReferenceSign(railTangent, inputDirection, out float referenceSign)
+            || TryResolveTangentReferenceSign(railTangent, currentFacing, out referenceSign))
         {
             railTangent *= referenceSign;
         }

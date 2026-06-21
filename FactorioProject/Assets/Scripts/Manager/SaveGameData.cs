@@ -5,13 +5,21 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 15;
+    public const int CurrentVersion = 17;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
+    public List<SaveItemCatalogEntry> itemCatalog = new List<SaveItemCatalogEntry>();
     public TerrainSaveData terrain = new TerrainSaveData();
     public MapSaveData map = new MapSaveData();
     public PlayerSaveData player = new PlayerSaveData();
+}
+
+[Serializable]
+public sealed class SaveItemCatalogEntry
+{
+    public int itemId = -1;
+    public string itemName = string.Empty;
 }
 
 [Serializable]

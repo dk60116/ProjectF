@@ -118,7 +118,6 @@ public class Block : BaseObject
     private readonly HashSet<ConveyorLaneKey> conveyorMoveVisiting = new HashSet<ConveyorLaneKey>();
     private readonly List<ConveyorLaneMove> conveyorPlannedMoves = new List<ConveyorLaneMove>();
     private readonly HashSet<ConveyorLaneKey> conveyorCanMoveVisiting = new HashSet<ConveyorLaneKey>();
-    private readonly List<ConveyorLaneMove> conveyorCanMovePlannedMoves = new List<ConveyorLaneMove>();
     private readonly bool[] conveyorCanMoveCacheValid = new bool[ConveyorStackLaneLimit * 2];
     private readonly int[] conveyorCanMoveCacheFrames = new int[ConveyorStackLaneLimit * 2];
     private readonly int[] conveyorCanMoveCacheVersions = new int[ConveyorStackLaneLimit * 2];
@@ -3652,39 +3651,18 @@ public class Block : BaseObject
         return true;
     }
 
-    public bool TryAdvanceStraightConveyorLineBoundaryLane(int sourceLaneIndex)
+    public bool TryAdvanceStraightConveyorLineLane(int sourceLaneIndex, bool ignoreMoveAttemptThrottle = false)
     {
         if (!IsConveyorStackingEnabled() || IsCornerConveyor())
         {
             return false;
         }
 
-        return TryMoveConveyorLane(sourceLaneIndex);
-    }
-
-    public bool CanAdvanceStraightConveyorLineBoundaryLane(int sourceLaneIndex)
-    {
-        if (!IsConveyorStackingEnabled()
-            || IsCornerConveyor()
-            || !IsValidConveyorLaneIndex(sourceLaneIndex)
-            || !HasConveyorItemAtLane(sourceLaneIndex)
-            || WasConveyorItemMovedThisFrame(sourceLaneIndex)
-            || !IsConveyorItemReadyToMoveAtLane(sourceLaneIndex)
-            || !TryGetConveyorSuccessor(
-                sourceLaneIndex,
-                out Block destinationBlock,
-                out int destinationLaneIndex,
-                out _)
-            || destinationBlock == null
-            || !destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
-            || (destinationBlock == this && destinationLaneIndex == sourceLaneIndex))
-        {
-            return false;
-        }
-
-        return !destinationBlock.HasConveyorItemAtLane(destinationLaneIndex)
-            || (destinationBlock.IsConveyorItemReadyToMoveAtLane(destinationLaneIndex)
-                && !destinationBlock.WasConveyorItemMovedThisFrame(destinationLaneIndex));
+        return TryMoveConveyorLane(
+            sourceLaneIndex,
+            out _,
+            out _,
+            ignoreMoveAttemptThrottle);
     }
 
     public bool HasActiveVirtualConveyorDataMotion()
@@ -6941,6 +6919,11 @@ public class Block : BaseObject
             return false;
         }
 
+        if (ShouldKeepSoloConveyorLaneAwake(laneIndex))
+        {
+            return false;
+        }
+
         if (CanRetryConveyorLaneMove(laneIndex, true))
         {
             return false;
@@ -6948,6 +6931,35 @@ public class Block : BaseObject
 
         conveyorLaneBlockedSleepStates[laneIndex] = true;
         nextConveyorLaneMoveAttemptTimes[laneIndex] = 0f;
+        return true;
+    }
+
+    private bool ShouldKeepSoloConveyorLaneAwake(int laneIndex)
+    {
+        if (!HasConveyorItemAtLane(laneIndex)
+            || WasConveyorItemMovedThisFrame(laneIndex)
+            || !IsConveyorItemSettledAtLane(laneIndex))
+        {
+            return false;
+        }
+
+        if (!TryGetConveyorSuccessor(
+                laneIndex,
+                out Block destinationBlock,
+                out int destinationLaneIndex,
+                out _)
+            || destinationBlock == null
+            || !destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
+            || (destinationBlock == this && destinationLaneIndex == laneIndex))
+        {
+            return false;
+        }
+
+        if (destinationBlock.HasConveyorItemAtLane(destinationLaneIndex))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -6979,6 +6991,11 @@ public class Block : BaseObject
             return false;
         }
 
+        if (ShouldKeepSoloConveyorLaneAwake(laneIndex))
+        {
+            return false;
+        }
+
         conveyorLaneCycleBlockedSleepStates[laneIndex] = true;
         nextConveyorLaneMoveAttemptTimes[laneIndex] = 0f;
         return true;
@@ -7000,7 +7017,8 @@ public class Block : BaseObject
         {
             bool laneBlockedSleep = IsConveyorLaneBlockedSleep(laneIndex);
             bool cycleBlockedSleep = IsConveyorLaneCycleBlockedSleep(laneIndex);
-            if ((!laneBlockedSleep && !cycleBlockedSleep) || !CanRetryConveyorLaneMove(laneIndex, true))
+            if ((!laneBlockedSleep && !cycleBlockedSleep)
+                || (!CanRetryConveyorLaneMove(laneIndex, true) && !ShouldKeepSoloConveyorLaneAwake(laneIndex)))
             {
                 continue;
             }
@@ -7559,7 +7577,9 @@ public class Block : BaseObject
             && HasConveyorItemAtLane(laneIndex)
             && !WasConveyorItemMovedThisFrame(laneIndex)
             && IsConveyorItemReadyToMoveAtLane(laneIndex)
-            && (CanMoveConveyorLaneDirect(laneIndex) || CanMoveConveyorLaneToUnloadedSuccessor(laneIndex));
+            && (CanMoveConveyorLaneDirect(laneIndex)
+                || CanMoveConveyorLaneToUnloadedSuccessor(laneIndex)
+                || ShouldKeepSoloConveyorLaneAwake(laneIndex));
     }
 
     private bool HasMaterializedConveyorItems()
@@ -8831,6 +8851,12 @@ public class Block : BaseObject
             return true;
         }
 
+        if (TryGetCachedConveyorPlanFailure(sourceLaneIndex, ignoreMoveAttemptThrottle))
+        {
+            DelayConveyorLaneMoveAttempt(sourceLaneIndex, GetConveyorBlockedRetryDelay());
+            return false;
+        }
+
         ConveyorLaneKey rootLane = new ConveyorLaneKey(this, sourceLaneIndex);
         conveyorMoveVisiting.Clear();
         conveyorPlannedMoves.Clear();
@@ -8911,20 +8937,20 @@ public class Block : BaseObject
 
         ConveyorLaneKey rootLane = new ConveyorLaneKey(this, sourceLaneIndex);
         conveyorCanMoveVisiting.Clear();
-        conveyorCanMovePlannedMoves.Clear();
         conveyorCanMoveVisiting.Add(rootLane);
 
         bool canMove = TryPlanConveyorLaneMove(
             rootLane,
             rootLane,
             conveyorCanMoveVisiting,
-            conveyorCanMovePlannedMoves,
+            null,
             ignoreMoveAttemptThrottle,
-            false)
-            && conveyorCanMovePlannedMoves.Count > 0;
+            markBlockedCycles: false,
+            recordPlannedMoves: false,
+            countPlanCall: false,
+            cacheFailures: false);
 
         conveyorCanMoveVisiting.Clear();
-        conveyorCanMovePlannedMoves.Clear();
         return canMove;
     }
 
@@ -8996,9 +9022,14 @@ public class Block : BaseObject
     private static bool CacheConveyorPlanFailureAndReturnFalse(
         Block block,
         int laneIndex,
-        bool ignoreMoveAttemptThrottle)
+        bool ignoreMoveAttemptThrottle,
+        bool cacheFailure = true)
     {
-        block?.CacheConveyorPlanFailure(laneIndex, ignoreMoveAttemptThrottle);
+        if (cacheFailure)
+        {
+            block?.CacheConveyorPlanFailure(laneIndex, ignoreMoveAttemptThrottle);
+        }
+
         return false;
     }
 
@@ -9375,10 +9406,11 @@ public class Block : BaseObject
         HashSet<ConveyorLaneKey> visiting,
         List<ConveyorLaneMove> plannedMoves,
         bool ignoreMoveAttemptThrottle,
-        bool markBlockedCycles = true)
+        bool markBlockedCycles = true,
+        bool recordPlannedMoves = true,
+        bool countPlanCall = true,
+        bool cacheFailures = true)
     {
-        MapObjectTickProfiler.AddBeltPlanMoveCall();
-
         Block currentBlock = currentLane.Block;
         if (currentBlock == null
             || currentLane.LaneIndex < 0
@@ -9387,9 +9419,19 @@ public class Block : BaseObject
             return false;
         }
 
-        if (currentBlock.TryGetCachedConveyorPlanFailure(currentLane.LaneIndex, ignoreMoveAttemptThrottle))
+        if (cacheFailures && currentBlock.TryGetCachedConveyorPlanFailure(currentLane.LaneIndex, ignoreMoveAttemptThrottle))
         {
             return false;
+        }
+
+        if (recordPlannedMoves && plannedMoves == null)
+        {
+            return false;
+        }
+
+        if (countPlanCall)
+        {
+            MapObjectTickProfiler.AddBeltPlanMoveCall();
         }
 
         int itemId = currentBlock.GetConveyorItemIdAtLane(currentLane.LaneIndex);
@@ -9401,7 +9443,8 @@ public class Block : BaseObject
             return CacheConveyorPlanFailureAndReturnFalse(
                 currentBlock,
                 currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle);
+                ignoreMoveAttemptThrottle,
+                cacheFailures);
         }
 
         if (!currentBlock.TryGetConveyorSuccessor(
@@ -9413,7 +9456,8 @@ public class Block : BaseObject
             return CacheConveyorPlanFailureAndReturnFalse(
                 currentBlock,
                 currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle);
+                ignoreMoveAttemptThrottle,
+                cacheFailures);
         }
 
         ConveyorLaneKey destinationLane = new ConveyorLaneKey(destinationBlock, destinationLaneIndex);
@@ -9422,7 +9466,8 @@ public class Block : BaseObject
             return CacheConveyorPlanFailureAndReturnFalse(
                 currentBlock,
                 currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle);
+                ignoreMoveAttemptThrottle,
+                cacheFailures);
         }
 
         if (destinationBlock == currentBlock && destinationLaneIndex == currentLane.LaneIndex)
@@ -9430,22 +9475,33 @@ public class Block : BaseObject
             return CacheConveyorPlanFailureAndReturnFalse(
                 currentBlock,
                 currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle);
+                ignoreMoveAttemptThrottle,
+                cacheFailures);
         }
 
         if (destinationLane.Equals(rootLane))
         {
-            return TryAppendConveyorLaneMove(
-                plannedMoves,
-                currentBlock,
-                currentLane.LaneIndex,
-                destinationBlock,
-                destinationLaneIndex,
-                useCornerMotion);
+            return !recordPlannedMoves
+                || TryAppendConveyorLaneMove(
+                    plannedMoves,
+                    currentBlock,
+                    currentLane.LaneIndex,
+                    destinationBlock,
+                    destinationLaneIndex,
+                    useCornerMotion);
         }
 
         if (destinationBlock.HasConveyorItemAtLane(destinationLaneIndex))
         {
+            if (cacheFailures && destinationBlock.TryGetCachedConveyorPlanFailure(destinationLaneIndex, ignoreMoveAttemptThrottle))
+            {
+                return CacheConveyorPlanFailureAndReturnFalse(
+                    currentBlock,
+                    currentLane.LaneIndex,
+                    ignoreMoveAttemptThrottle,
+                    cacheFailures);
+            }
+
             if ((!ignoreMoveAttemptThrottle && destinationBlock.IsConveyorLaneMoveAttemptThrottled(destinationLaneIndex))
                 || destinationBlock.WasConveyorItemMovedThisFrame(destinationLaneIndex)
                 || (!destinationBlock.IsConveyorItemReadyToMoveAtLane(destinationLaneIndex)
@@ -9454,7 +9510,8 @@ public class Block : BaseObject
                 return CacheConveyorPlanFailureAndReturnFalse(
                     currentBlock,
                     currentLane.LaneIndex,
-                    ignoreMoveAttemptThrottle);
+                    ignoreMoveAttemptThrottle,
+                    cacheFailures);
             }
 
             if (!visiting.Add(destinationLane))
@@ -9473,15 +9530,24 @@ public class Block : BaseObject
                 visiting,
                 plannedMoves,
                 ignoreMoveAttemptThrottle,
-                markBlockedCycles);
+                markBlockedCycles,
+                recordPlannedMoves,
+                countPlanCall,
+                cacheFailures);
             visiting.Remove(destinationLane);
             if (!planned)
             {
                 return CacheConveyorPlanFailureAndReturnFalse(
                     currentBlock,
                     currentLane.LaneIndex,
-                    ignoreMoveAttemptThrottle);
+                    ignoreMoveAttemptThrottle,
+                    cacheFailures);
             }
+        }
+
+        if (!recordPlannedMoves)
+        {
+            return true;
         }
 
         bool appended = TryAppendConveyorLaneMove(
@@ -9495,7 +9561,8 @@ public class Block : BaseObject
             || CacheConveyorPlanFailureAndReturnFalse(
                 currentBlock,
                 currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle);
+                ignoreMoveAttemptThrottle,
+                cacheFailures);
     }
 
     private void ApplyPlannedConveyorLaneMoves(List<ConveyorLaneMove> plannedMoves)

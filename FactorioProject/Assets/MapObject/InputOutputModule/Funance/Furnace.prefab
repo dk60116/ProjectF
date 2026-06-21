@@ -83,7 +83,7 @@ MonoBehaviour:
   - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
-    count: 1
+    count: 2
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
     count: 2

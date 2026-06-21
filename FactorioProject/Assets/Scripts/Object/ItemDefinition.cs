@@ -144,14 +144,49 @@ public static class ItemDefinitionLookup
             return null;
         }
 
-        ItemDefinition exactDefinition = FindByExactId(definitions, itemId);
+        ItemDefinition exactDefinition = FindByExactInstallationId(definitions, itemId);
         if (exactDefinition != null)
         {
-            return IsInstallationDefinition(exactDefinition) ? exactDefinition : null;
+            return exactDefinition;
         }
 
         ItemDefinition legacyDefinition = ResolveLegacyDefinition(definitions, itemId);
         return IsInstallationDefinition(legacyDefinition) ? legacyDefinition : null;
+    }
+
+    public static ItemDefinition ResolveByStableName(IReadOnlyList<ItemDefinition> definitions, string itemName)
+    {
+        return ResolveByStableName(definitions, itemName, false);
+    }
+
+    public static ItemDefinition ResolveInstallationByStableName(IReadOnlyList<ItemDefinition> definitions, string itemName)
+    {
+        return ResolveByStableName(definitions, itemName, true);
+    }
+
+    public static string NormalizeStableName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        value = StripGeneratedItemNamePrefix(StripUnityCloneSuffix(value.Trim()));
+
+        char[] buffer = new char[value.Length];
+        int count = 0;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (!char.IsLetterOrDigit(c))
+            {
+                continue;
+            }
+
+            buffer[count++] = char.ToLowerInvariant(c);
+        }
+
+        return count > 0 ? new string(buffer, 0, count) : string.Empty;
     }
 
     public static bool IsConveyorBelt2FDefinition(ItemDefinition definition)
@@ -201,6 +236,20 @@ public static class ItemDefinitionLookup
         return null;
     }
 
+    private static ItemDefinition FindByExactInstallationId(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId && IsInstallationDefinition(definition))
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
     private static ItemDefinition FindByExactId(IReadOnlyList<ItemDefinition> definitions, int itemId)
     {
         for (int i = 0; i < definitions.Count; i++)
@@ -213,6 +262,49 @@ public static class ItemDefinitionLookup
         }
 
         return null;
+    }
+
+    private static ItemDefinition ResolveByStableName(
+        IReadOnlyList<ItemDefinition> definitions,
+        string itemName,
+        bool requireInstallation)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        string normalizedName = NormalizeStableName(itemName);
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return null;
+        }
+
+        ItemDefinition fallback = null;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null
+                || definition.id < 0
+                || (requireInstallation && !IsInstallationDefinition(definition)))
+            {
+                continue;
+            }
+
+            if (NormalizeStableName(definition.itemName) == normalizedName)
+            {
+                return definition;
+            }
+
+            if (fallback == null
+                && (NormalizeStableName(definition.name) == normalizedName
+                    || (definition.mapObject != null && NormalizeStableName(definition.mapObject.name) == normalizedName)))
+            {
+                fallback = definition;
+            }
+        }
+
+        return fallback;
     }
 
     private static ItemDefinition ResolveLegacyDefinition(IReadOnlyList<ItemDefinition> definitions, int itemId)
@@ -235,6 +327,32 @@ public static class ItemDefinitionLookup
         return definition.mapObject is InstallationObject
                || definition.mapObject.GetComponent<InstallationObject>() != null
                || definition.mapObject.GetComponentInChildren<InstallationObject>(true) != null;
+    }
+
+    private static string StripGeneratedItemNamePrefix(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !value.StartsWith("Item_", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        int index = "Item_".Length;
+        while (index < value.Length && char.IsDigit(value[index]))
+        {
+            index++;
+        }
+
+        return index < value.Length && value[index] == '_'
+            ? value.Substring(index + 1)
+            : value;
+    }
+
+    private static string StripUnityCloneSuffix(string value)
+    {
+        const string CloneSuffix = "(Clone)";
+        return !string.IsNullOrWhiteSpace(value) && value.EndsWith(CloneSuffix, StringComparison.Ordinal)
+            ? value.Substring(0, value.Length - CloneSuffix.Length)
+            : value;
     }
 
     private static bool NameMatches(string value)

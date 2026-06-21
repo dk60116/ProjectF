@@ -151,6 +151,46 @@ public partial class TerrainGenerator : MonoBehaviour
         public bool IsCycle => isCycle;
     }
 
+    private struct ConveyorLineWakeRange
+    {
+        public int minSlotIndex;
+        public int maxSlotIndex;
+        public bool fullLine;
+
+        public ConveyorLineWakeRange(int minSlotIndex, int maxSlotIndex, bool fullLine)
+        {
+            this.minSlotIndex = minSlotIndex;
+            this.maxSlotIndex = maxSlotIndex;
+            this.fullLine = fullLine;
+        }
+
+        public void Include(ConveyorLineWakeRange other)
+        {
+            if (fullLine || other.fullLine)
+            {
+                fullLine = true;
+                minSlotIndex = 0;
+                maxSlotIndex = int.MaxValue;
+                return;
+            }
+
+            minSlotIndex = Mathf.Min(minSlotIndex, other.minSlotIndex);
+            maxSlotIndex = Mathf.Max(maxSlotIndex, other.maxSlotIndex);
+        }
+    }
+
+    private struct ConveyorLineRetryState
+    {
+        public ConveyorLineWakeRange wakeRange;
+        public float retryTime;
+
+        public ConveyorLineRetryState(ConveyorLineWakeRange wakeRange, float retryTime)
+        {
+            this.wakeRange = wakeRange;
+            this.retryTime = retryTime;
+        }
+    }
+
     private readonly struct BeltItemLineLaneKey : IEquatable<BeltItemLineLaneKey>
     {
         public BeltItemLineLaneKey(Block block, int laneIndex)
@@ -652,7 +692,11 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Queue<int> conveyorLineWakeQueue = new Queue<int>();
     private readonly HashSet<Block> conveyorWakeQueued = new HashSet<Block>();
     private readonly HashSet<Block> conveyorDirectWakeBlocks = new HashSet<Block>();
-    private readonly HashSet<int> conveyorLineWakeQueuedIds = new HashSet<int>();
+    private readonly Dictionary<int, ConveyorLineWakeRange> conveyorLineWakeRangesById = new Dictionary<int, ConveyorLineWakeRange>();
+    private readonly Queue<int> deferredConveyorLineWakeQueue = new Queue<int>();
+    private readonly Dictionary<int, ConveyorLineWakeRange> deferredConveyorLineWakeRangesById = new Dictionary<int, ConveyorLineWakeRange>();
+    private readonly Dictionary<int, ConveyorLineRetryState> conveyorLineRetryStatesById = new Dictionary<int, ConveyorLineRetryState>();
+    private readonly List<int> conveyorLineRetryDueIds = new List<int>();
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
     private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
     private readonly Dictionary<Block, ConveyorLineSlot> conveyorLineSlots = new Dictionary<Block, ConveyorLineSlot>();
@@ -684,6 +728,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool conveyorLineCacheDirty = true;
     private int deferredConveyorRuntimeRefreshDepth;
     private int conveyorLineBlockLoopIterations;
+    private float nextConveyorLineRetryTime = float.PositiveInfinity;
     private float nextConveyorActiveFullScanTime;
     private float nextBackgroundConveyorSimulationTime;
     private Vector2Int currentCenterChunk;
@@ -920,6 +965,8 @@ public partial class TerrainGenerator : MonoBehaviour
                && (activeConveyors.Count > 0
                    || conveyorWakeQueue.Count > 0
                    || conveyorLineWakeQueue.Count > 0
+                   || deferredConveyorLineWakeQueue.Count > 0
+                   || HasDueStraightConveyorLineRetry()
                    || conveyorNetworkSleepCheckQueuedIds.Count > 0);
     }
 

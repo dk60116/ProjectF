@@ -16,7 +16,7 @@ public class ItemManagerEditor : Editor
             Undo.RecordObject(itemManager, "Rebuild Item Data");
             itemManager.RebuildItemDefinitionsFromAssets();
             itemManager.ApplyItemIdsToPrefabs();
-            EditorUtility.SetDirty(itemManager);
+            itemManager.MarkEditorDirty();
         }
 
         if (GUILayout.Button("Open Item Data UI"))
