@@ -71,6 +71,12 @@ public class PlayerHUD : BagSlot
     private int itemFilterUiOpenedFrame = -1;
 
     [SerializeField]
+    private TrainStationFilter trainStationFilter;
+
+    [SerializeField]
+    private TrainFilter trainFilter;
+
+    [SerializeField]
     private MapPaper mapPaper;
     [SerializeField]
     private ObjectInfoPanel objectInfoPanel;

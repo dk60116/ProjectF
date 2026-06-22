@@ -10,14 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_47_Steam train
+  m_Name: Item_52_Steam train
   m_EditorClassIdentifier: 
-  itemName: Railload
+  itemName: Steam train
   id: 47
-  mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
+  mapObject: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
-  icon: {fileID: 21300000, guid: 9752cfc4014843b41be1065fbf6c05ab, type: 3}
+  icon: {fileID: 21300000, guid: aff0c0704d440b54f9d91a471d455277, type: 3}
   interactionButtonList:
   - {fileID: 21300000, guid: 4fade2dbe45025648acb64b3e0bfe229, type: 3}
   - {fileID: 21300000, guid: 7b654ce797ed8754f8f5bfc320ab51fb, type: 3}
@@ -30,8 +30,8 @@ MonoBehaviour:
   energyType: 0
   energyAmount: 0
   useEnergyType: 1
-  useEnergyAmount: 2.5
+  useEnergyAmount: 1.8
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
-  craftingDurationSeconds: 10
+  craftingDurationSeconds: 5

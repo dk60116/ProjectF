@@ -788,6 +788,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (!virtualizeConveyorBelts)
         {
             UnregisterVirtualConveyorBelt(conveyorBelt);
+            conveyorBelt.SetRuntimeRenderingHidden(IsBeltRenderingHidden());
             return;
         }
 
@@ -802,6 +803,28 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         virtualConveyorBeltRenderer?.Unregister(conveyorBelt, restoreNativeRenderers);
+    }
+
+    public void RefreshBeltRenderingVisibility()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        bool hideBelts = IsBeltRenderingHidden();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            if (pair.Value != null && pair.Value.MapObject is ConveyorBelt conveyorBelt)
+            {
+                conveyorBelt.SetRuntimeRenderingHidden(hideBelts);
+            }
+        }
+    }
+
+    private static bool IsBeltRenderingHidden()
+    {
+        return GameManager.Instance != null && GameManager.Instance.HideBelts;
     }
 
     public void RemoveInstallationPersistence(Vector2Int anchorCoordinate)

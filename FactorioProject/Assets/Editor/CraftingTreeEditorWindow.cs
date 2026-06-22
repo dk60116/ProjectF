@@ -137,7 +137,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
         if (definitions == null || definitions.Count == 0)
         {
             EditorGUILayout.HelpBox("ItemDefinitions가 비어있습니다.", MessageType.Warning);
@@ -252,7 +252,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
         if (definitions == null || definitions.Count == 0)
         {
             EditorGUILayout.HelpBox("ItemDefinitions가 비어있습니다.", MessageType.Warning);
@@ -424,7 +424,8 @@ public class CraftingTreeEditorWindow : EditorWindow
         EnsureParentFolder(path);
         EnsureParentFolder(resourcePath);
 
-        List<int> itemIds = CollectRecipeItemIds();
+        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(FindItemManager());
+        List<int> itemIds = CollectRecipeItemIds(definitions);
 
         WriteCraftingTree(path, itemIds);
         WriteCraftingTree(resourcePath, itemIds);
@@ -442,7 +443,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
         string defaultPath = Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
         string exportPath = EditorUtility.SaveFilePanel("Export CraftingTree JSON", Path.GetDirectoryName(defaultPath), Path.GetFileNameWithoutExtension(defaultPath), "json");
         if (string.IsNullOrWhiteSpace(exportPath))
@@ -451,7 +452,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         CraftingTreeJsonFile file = new CraftingTreeJsonFile();
-        List<int> itemIds = CollectRecipeItemIds();
+        List<int> itemIds = CollectRecipeItemIds(definitions);
         for (int i = 0; i < itemIds.Count; i++)
         {
             CraftingTreeJsonEntry entry = BuildJsonEntry(itemIds[i], definitions);
@@ -494,7 +495,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
         if (definitions == null || definitions.Count == 0)
         {
             EditorUtility.DisplayDialog("CraftingTree", "ItemDefinitions가 비어 있습니다.", "OK");
@@ -883,7 +884,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
     }
 
-    private List<int> CollectRecipeItemIds()
+    private List<int> CollectRecipeItemIds(List<ItemDefinition> definitions)
     {
         HashSet<int> ids = new HashSet<int>();
 
@@ -902,8 +903,27 @@ public class CraftingTreeEditorWindow : EditorWindow
             ids.Add(key);
         }
 
-        List<int> results = new List<int>(ids);
-        results.Sort();
+        List<int> results = new List<int>();
+        bool hasDefinitions = definitions != null && definitions.Count > 0;
+        if (hasDefinitions)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition != null && ids.Remove(definition.id))
+                {
+                    results.Add(definition.id);
+                }
+            }
+        }
+
+        if (!hasDefinitions && ids.Count > 0)
+        {
+            List<int> unresolvedIds = new List<int>(ids);
+            unresolvedIds.Sort();
+            results.AddRange(unresolvedIds);
+        }
+
         return results;
     }
 
@@ -1212,35 +1232,65 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
         }
 
-        results.Sort((left, right) =>
-        {
-            if (ReferenceEquals(left, right))
-            {
-                return 0;
-            }
-
-            if (left == null)
-            {
-                return 1;
-            }
-
-            if (right == null)
-            {
-                return -1;
-            }
-
-            int idCompare = left.id.CompareTo(right.id);
-            if (idCompare != 0)
-            {
-                return idCompare;
-            }
-
-            string leftName = GetDefinitionDisplayName(left);
-            string rightName = GetDefinitionDisplayName(right);
-            return string.Compare(leftName, rightName, StringComparison.OrdinalIgnoreCase);
-        });
+        results.Sort(CompareDefinitionsByItemDataOrder);
 
         return results;
+    }
+
+    private static List<ItemDefinition> GetItemDataOrderedDefinitions(ItemManager itemManager)
+    {
+        return itemManager != null
+            ? GetItemDataOrderedDefinitions(itemManager.ItemDefinitions)
+            : new List<ItemDefinition>();
+    }
+
+    private static List<ItemDefinition> GetItemDataOrderedDefinitions(List<ItemDefinition> definitions)
+    {
+        List<ItemDefinition> results = new List<ItemDefinition>();
+        if (definitions == null)
+        {
+            return results;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null)
+            {
+                results.Add(definition);
+            }
+        }
+
+        results.Sort(CompareDefinitionsByItemDataOrder);
+        return results;
+    }
+
+    private static int CompareDefinitionsByItemDataOrder(ItemDefinition left, ItemDefinition right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        int idCompare = left.id.CompareTo(right.id);
+        if (idCompare != 0)
+        {
+            return idCompare;
+        }
+
+        string leftName = GetDefinitionDisplayName(left);
+        string rightName = GetDefinitionDisplayName(right);
+        return string.Compare(leftName, rightName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool MatchesDefinitionSearch(ItemDefinition definition, string searchText)

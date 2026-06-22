@@ -355,8 +355,57 @@ internal static class CraftingTreeItemIdRemapper
             entries.Add(entry);
         }
 
-        entries.Sort((left, right) => left.itemId.CompareTo(right.itemId));
+        entries.Sort((left, right) => CompareRecipeEntriesByDefinitionOrder(left, right, lookup.definitions));
         return entries;
+    }
+
+    private static int CompareRecipeEntriesByDefinitionOrder(
+        BinaryRecipeEntry left,
+        BinaryRecipeEntry right,
+        IReadOnlyList<ItemDefinition> definitions)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        int leftOrder = FindDefinitionOrderById(definitions, left.itemId);
+        int rightOrder = FindDefinitionOrderById(definitions, right.itemId);
+        if (leftOrder != rightOrder)
+        {
+            return leftOrder.CompareTo(rightOrder);
+        }
+
+        return left.itemId.CompareTo(right.itemId);
+    }
+
+    private static int FindDefinitionOrderById(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        if (definitions == null)
+        {
+            return int.MaxValue;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && definition.id == itemId)
+            {
+                return i;
+            }
+        }
+
+        return int.MaxValue;
     }
 
     private static int ResolveMapObjectItemId(CapturedMapObjectEntry capturedMapObject, DefinitionLookup lookup)

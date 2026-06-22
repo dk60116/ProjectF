@@ -249,7 +249,10 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RenderVirtualConveyorItems()
     {
-        if (terrainGenerator == null || itemManager == null || !terrainGenerator.VirtualizeConveyorItems)
+        if (terrainGenerator == null
+            || itemManager == null
+            || !terrainGenerator.VirtualizeConveyorItems
+            || IsBeltItemRenderingHidden())
         {
             ClearVirtualConveyorRenderState();
             activeVirtualConveyorRenderBlocks.Clear();
@@ -282,7 +285,10 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private bool HasVirtualConveyorRenderWork()
     {
-        if (terrainGenerator == null || itemManager == null || !terrainGenerator.VirtualizeConveyorItems)
+        if (terrainGenerator == null
+            || itemManager == null
+            || !terrainGenerator.VirtualizeConveyorItems
+            || IsBeltItemRenderingHidden())
         {
             return HasVirtualConveyorRenderState();
         }
@@ -308,6 +314,11 @@ public sealed class PortableItemRenderer : MonoBehaviour
                || dynamicVirtualConveyorBatches.ActiveBatchCount > 0
                || cachedVirtualConveyorVisualBlockSetVersion != int.MinValue
                || cachedDynamicVirtualConveyorVisualBlockSetVersion != int.MinValue;
+    }
+
+    private static bool IsBeltItemRenderingHidden()
+    {
+        return GameManager.Instance != null && GameManager.Instance.HideBeltItems;
     }
 
     private void RebuildVirtualConveyorBatches()

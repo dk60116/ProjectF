@@ -69,6 +69,9 @@ public class PlayerController : MonoBehaviour
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
+    private readonly List<Train> itemFilterTrainScratch = new List<Train>(8);
+    private readonly Queue<Train> itemFilterTrainQueue = new Queue<Train>(8);
+    private readonly HashSet<Train> itemFilterTrainVisited = new HashSet<Train>();
     private readonly Dictionary<Block, MapObject> interactionFocusTargetOverrides = new Dictionary<Block, MapObject>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
     private readonly List<WorkableObject> nearbyWorkableRangeObjects = new List<WorkableObject>();
@@ -2319,7 +2322,7 @@ public class PlayerController : MonoBehaviour
     public bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
     {
         focusedMapObject = null;
-        if (currentFocusedBlocks.Count == 0 || player == null)
+        if (player == null)
         {
             return false;
         }
@@ -2336,31 +2339,175 @@ public class PlayerController : MonoBehaviour
 
         foreach (Block block in currentFocusedBlocks)
         {
-            MapObject mapObject = block != null ? block.MapObject : null;
+            MapObject mapObject = ResolveInteractionFocusTarget(block);
             if (mapObject == null || !mapObject.gameObject.activeInHierarchy || !mapObject.AllowsFocus)
             {
                 continue;
             }
 
-            bool supportsItemFilter = IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
-                                      || TryResolveRobotArm(mapObject, out _)
-                                      || TryResolveProductionMachine(mapObject, out _);
-            if (!supportsItemFilter)
+            if (!TryResolveFocusedItemFilterTarget(mapObject, definitions, origin, out MapObject filterTarget))
             {
                 continue;
             }
 
-            float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(mapObject, block, origin);
+            float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(filterTarget, block, origin);
             if (distanceSqr >= nearestDistanceSqr)
             {
                 continue;
             }
 
             nearestDistanceSqr = distanceSqr;
-            focusedMapObject = mapObject;
+            focusedMapObject = filterTarget;
         }
 
+        TryFindFreightCarAttachedBoxFilterTarget(
+            definitions,
+            origin,
+            ref nearestDistanceSqr,
+            ref focusedMapObject);
+
         return focusedMapObject != null;
+    }
+
+    private bool TryFindFreightCarAttachedBoxFilterTarget(
+        List<ItemDefinition> definitions,
+        Vector3 origin,
+        ref float nearestDistanceSqr,
+        ref MapObject focusedMapObject)
+    {
+        itemFilterTrainScratch.Clear();
+        Train.CollectActiveRuntimeTrains(itemFilterTrainScratch);
+        if (itemFilterTrainScratch.Count <= 0)
+        {
+            return false;
+        }
+
+        bool found = false;
+        Train mountedTrain = MountedVehicle as Train;
+        for (int i = 0; i < itemFilterTrainScratch.Count; i++)
+        {
+            if (!(itemFilterTrainScratch[i] is FreightCar freightCar)
+                || freightCar == null
+                || !freightCar.gameObject.activeInHierarchy
+                || !freightCar.AllowsFocus)
+            {
+                continue;
+            }
+
+            bool isMountedTrainGroup = mountedTrain != null
+                                       && IsSameConnectedTrainGroup(mountedTrain, freightCar);
+            float freightCarDistanceSqr = GetMapObjectFocusSelectionDistanceSqr(freightCar, null, origin);
+            if (!isMountedTrainGroup)
+            {
+                float focusRadius = Mathf.Max(0f, freightCar.FocusActivationRadius);
+                if (focusRadius <= 0f || freightCarDistanceSqr > focusRadius * focusRadius)
+                {
+                    continue;
+                }
+            }
+
+            if (!freightCar.TryGetClosestAttachedBoxObject(origin, out BoxObject attachedBox)
+                || attachedBox == null
+                || !attachedBox.gameObject.activeInHierarchy
+                || !SupportsItemFilter(attachedBox, definitions))
+            {
+                continue;
+            }
+
+            float attachedBoxDistanceSqr = GetMapObjectFocusSelectionDistanceSqr(attachedBox, null, origin);
+            if (attachedBoxDistanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = attachedBoxDistanceSqr;
+            focusedMapObject = attachedBox;
+            found = true;
+        }
+
+        itemFilterTrainScratch.Clear();
+        itemFilterTrainQueue.Clear();
+        itemFilterTrainVisited.Clear();
+        return found;
+    }
+
+    private bool IsSameConnectedTrainGroup(Train first, Train second)
+    {
+        if (first == null || second == null)
+        {
+            return false;
+        }
+
+        if (first == second)
+        {
+            return true;
+        }
+
+        itemFilterTrainQueue.Clear();
+        itemFilterTrainVisited.Clear();
+        itemFilterTrainQueue.Enqueue(first);
+        itemFilterTrainVisited.Add(first);
+        while (itemFilterTrainQueue.Count > 0)
+        {
+            Train train = itemFilterTrainQueue.Dequeue();
+            foreach (Train connectedTrain in train.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !itemFilterTrainVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                if (connectedTrain == second)
+                {
+                    return true;
+                }
+
+                itemFilterTrainQueue.Enqueue(connectedTrain);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveFocusedItemFilterTarget(
+        MapObject mapObject,
+        List<ItemDefinition> definitions,
+        Vector3 origin,
+        out MapObject filterTarget)
+    {
+        filterTarget = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        if (SupportsItemFilter(mapObject, definitions))
+        {
+            filterTarget = mapObject;
+            return true;
+        }
+
+        if (TryResolveFreightCar(mapObject, out FreightCar freightCar)
+            && freightCar.TryGetClosestAttachedBoxObject(origin, out BoxObject attachedBox)
+            && attachedBox != null
+            && attachedBox.gameObject.activeInHierarchy
+            && SupportsItemFilter(attachedBox, definitions))
+        {
+            filterTarget = attachedBox;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool SupportsItemFilter(MapObject mapObject, List<ItemDefinition> definitions)
+    {
+        return mapObject != null
+               && (IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
+                   || TryResolveRobotArm(mapObject, out _)
+                   || TryResolveProductionMachine(mapObject, out _));
     }
 
     private static bool TryResolveProductionMachine(MapObject mapObject, out ProductionMachine productionMachine)
@@ -2408,6 +2555,29 @@ public class PlayerController : MonoBehaviour
 
         robotArm = mapObject.GetComponentInChildren<RobotArm>(true);
         return robotArm != null;
+    }
+
+    private static bool TryResolveFreightCar(MapObject mapObject, out FreightCar freightCar)
+    {
+        freightCar = null;
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        freightCar = mapObject as FreightCar;
+        if (freightCar != null)
+        {
+            return true;
+        }
+
+        if (mapObject.TryGetComponent(out freightCar) && freightCar != null)
+        {
+            return true;
+        }
+
+        freightCar = mapObject.GetComponentInChildren<FreightCar>(true);
+        return freightCar != null;
     }
 
     private bool FindCurrentInputOutputModuleFocusBlocks(List<Block> results, ref InteractionFocusCandidate nearestFocusCandidate)

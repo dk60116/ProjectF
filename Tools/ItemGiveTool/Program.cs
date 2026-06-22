@@ -46,6 +46,8 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
     private readonly CheckBox showBeltItemLineCheckBox = new CheckBox();
+    private readonly CheckBox hideBeltItemsCheckBox = new CheckBox();
+    private readonly CheckBox hideBeltsCheckBox = new CheckBox();
     private readonly CheckBox showRailLineCheckBox = new CheckBox();
     private readonly CheckBox showDirectionsCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
@@ -68,7 +70,7 @@ internal sealed class EditorToolForm : Form
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 900);
+        MinimumSize = new Size(760, 930);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -93,7 +95,7 @@ internal sealed class EditorToolForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -337,6 +339,20 @@ internal sealed class EditorToolForm : Form
                 showBeltItemLineCheckBox.Checked,
                 "Show Belt Item Line");
 
+        StyleDebugCheckBox(hideBeltItemsCheckBox, "Hide Belt Item");
+        hideBeltItemsCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "hideBeltItems",
+                hideBeltItemsCheckBox.Checked,
+                "Hide Belt Item");
+
+        StyleDebugCheckBox(hideBeltsCheckBox, "Hide Belt");
+        hideBeltsCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "hideBelts",
+                hideBeltsCheckBox.Checked,
+                "Hide Belt");
+
         StyleDebugCheckBox(showRailLineCheckBox, "ShowRailLine");
         showRailLineCheckBox.CheckedChanged += async (_, _) =>
             await SendDebugToggleAsync(
@@ -354,6 +370,8 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
+        debugTogglePanel.Controls.Add(hideBeltItemsCheckBox);
+        debugTogglePanel.Controls.Add(hideBeltsCheckBox);
         debugTogglePanel.Controls.Add(showRailLineCheckBox);
         debugTogglePanel.Controls.Add(showDirectionsCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 5);
@@ -924,6 +942,16 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(showBeltItemLineCheckBox, showBeltItemLine);
         }
 
+        if (TryReadProtocolBool(response, "hideBeltItems", out bool hideBeltItems))
+        {
+            ApplyRuntimeCheckBoxState(hideBeltItemsCheckBox, hideBeltItems);
+        }
+
+        if (TryReadProtocolBool(response, "hideBelts", out bool hideBelts))
+        {
+            ApplyRuntimeCheckBoxState(hideBeltsCheckBox, hideBelts);
+        }
+
         if (TryReadProtocolBool(response, "showRailLine", out bool showRailLine))
         {
             ApplyRuntimeCheckBoxState(showRailLineCheckBox, showRailLine);
@@ -1258,6 +1286,8 @@ internal sealed class EditorToolForm : Form
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
         showBeltItemLineCheckBox.Enabled = !busy;
+        hideBeltItemsCheckBox.Enabled = !busy;
+        hideBeltsCheckBox.Enabled = !busy;
         showRailLineCheckBox.Enabled = !busy;
         showDirectionsCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;

@@ -67,6 +67,7 @@ public class ConveyorBelt : InstallationObject
     private bool beltTopTransformStateCached;
     private bool virtualRenderingSuppressed;
     private bool virtualRenderingSuppressBeltTopOnly;
+    private bool runtimeRenderingHidden;
 
     private struct BeltTopRenderInfo
     {
@@ -321,6 +322,7 @@ public class ConveyorBelt : InstallationObject
         TerrainGenerator.Active?.UnregisterVirtualConveyorBelt(this, false);
         virtualRenderingSuppressed = false;
         virtualRenderingSuppressBeltTopOnly = false;
+        runtimeRenderingHidden = false;
         base.OnDisable();
     }
 
@@ -431,6 +433,18 @@ public class ConveyorBelt : InstallationObject
     {
         virtualRenderingSuppressed = isSuppressed;
         virtualRenderingSuppressBeltTopOnly = isSuppressed && beltTopOnly;
+        ApplyVirtualRenderingSuppression();
+    }
+
+    public void SetRuntimeRenderingHidden(bool isHidden)
+    {
+        if (runtimeRenderingHidden == isHidden)
+        {
+            ApplyVirtualRenderingSuppression();
+            return;
+        }
+
+        runtimeRenderingHidden = isHidden;
         ApplyVirtualRenderingSuppression();
     }
 
@@ -1339,6 +1353,12 @@ public class ConveyorBelt : InstallationObject
 
     private void ApplyVirtualRenderingSuppression()
     {
+        if (runtimeRenderingHidden)
+        {
+            SetNativeRenderersEnabled(false);
+            return;
+        }
+
         if (!virtualRenderingSuppressed)
         {
             SetNativeRenderersEnabled(true);

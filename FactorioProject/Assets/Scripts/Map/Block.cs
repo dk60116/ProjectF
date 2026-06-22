@@ -7754,10 +7754,25 @@ public class Block : BaseObject
         return generator != null && generator.VirtualizeConveyorItems;
     }
 
+    private static bool ShouldHideBeltItemRendering()
+    {
+        return GameManager.Instance != null && GameManager.Instance.HideBeltItems;
+    }
+
     private void ApplyConveyorObjectRenderingMode(PortableObject portableObject)
     {
         if (portableObject == null)
         {
+            return;
+        }
+
+        if (ShouldHideBeltItemRendering())
+        {
+            if (!portableObject.IsVisualRenderingSuppressed)
+            {
+                portableObject.SetVisualRenderingSuppressed(true);
+            }
+
             return;
         }
 
@@ -7792,6 +7807,21 @@ public class Block : BaseObject
         {
             portableObject.SetBatchedRendering(true);
         }
+    }
+
+    public void RefreshConveyorObjectRenderingMode()
+    {
+        if (conveyorStack == null || conveyorStack.Count <= 0)
+        {
+            return;
+        }
+
+        for (int laneIndex = 0; laneIndex < conveyorStack.Count; laneIndex++)
+        {
+            ApplyConveyorObjectRenderingMode(conveyorStack[laneIndex]);
+        }
+
+        MarkConveyorItemVisualDirty();
     }
 
     private bool TryVirtualizeSettledConveyorPortableObject(int laneIndex, PortableObject portableObject)

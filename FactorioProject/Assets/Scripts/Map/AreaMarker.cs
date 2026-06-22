@@ -381,6 +381,7 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
     private bool forceMarkerVisibility;
     private int markerSortingOrderOffset;
     private bool renderMarkersOnTop;
+    private float markerVerticalOffset;
 
     public void Configure(
         AreaMarkerPool pool,
@@ -388,7 +389,8 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         bool forceVisible = false,
         int sortingOrderOffset = 0,
         bool renderOnTop = false,
-        Transform markerParent = null)
+        Transform markerParent = null,
+        float? verticalOffsetOverride = null)
     {
         if (areaMarkerPool != null && areaMarkerPool != pool)
         {
@@ -399,6 +401,9 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         forceMarkerVisibility = forceVisible;
         markerSortingOrderOffset = sortingOrderOffset;
         renderMarkersOnTop = renderOnTop;
+        markerVerticalOffset = verticalOffsetOverride.HasValue
+            ? Mathf.Max(0f, verticalOffsetOverride.Value)
+            : verticalOffset;
 
         if (areaMarkerPool == null || markerRequests == null || markerRequests.Count <= 0)
         {
@@ -525,7 +530,7 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         }
 
         Transform markerTransform = marker.transform;
-        Vector3 targetPosition = request.WorldPosition + Vector3.up * verticalOffset;
+        Vector3 targetPosition = request.WorldPosition + Vector3.up * markerVerticalOffset;
         if ((markerTransform.position - targetPosition).sqrMagnitude > 0.000001f)
         {
             markerTransform.position = targetPosition;

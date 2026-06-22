@@ -18,7 +18,10 @@ public class InstallationPlacementController : MonoBehaviour
     private const float BlueprintPreviewRimPower = 2.2f;
     private const float InstallPreviewFootprintFillAlpha = 0.08f;
     private const string PipePassMarkerIconAssetPath = "Assets/Image/UI/Item/Fluid.png";
+    private const string TrainStationMarkerIconAssetPath = "Assets/Image/UI/Item/Station.png";
     private const int InstallPreviewAreaMarkerSortingOrderOffset = 6000;
+    private const int TrainStationAreaMarkerSortingOrderOffset = 6000;
+    private const float TrainStationAreaMarkerVerticalOffset = 0.15f;
     private const int Belt2FDefaultFootprintWidth = 1;
     private const int Belt2FDefaultFootprintLength = 3;
     private const float ConveyorDebugArrowWorldLift = 0.55f;
@@ -34,6 +37,7 @@ public class InstallationPlacementController : MonoBehaviour
     private const float FallbackTrainCollisionHalfWidth = 0.25f;
     private const float FallbackTrainCollisionHalfLength = 0.4f;
     private const int MaxPipeFluidCompatibilitySearchNodes = 1024;
+    private const string TrainStationLookupName = "trainstation";
 
     [SerializeField]
     private Button installButton;
@@ -93,6 +97,8 @@ public class InstallationPlacementController : MonoBehaviour
     private AreaMarkerPool areaMarkerPool;
     [SerializeField]
     private Sprite pipePassMarkerIcon;
+    [SerializeField]
+    private Sprite trainStationMarkerIcon;
     private MaterialPropertyBlock installPreviewPropertyBlock;
     private bool waitForPointerReleaseAfterPreviewSpawn;
     private bool isPreviewPointerTracking;
@@ -529,57 +535,89 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void Update()
     {
-        ResolveInstallButtons();
-        RefreshInstallButton();
-        RefreshMapEditButtonState();
-        if (TryHandleModeCancelInput())
+        bool profileRuntime = MapObjectTickProfiler.IsEnabled;
+        long startTimestamp = profileRuntime ? MapObjectTickProfiler.BeginSample() : 0L;
+        try
         {
-            return;
-        }
-
-        if (!IsInstallationModeActive())
-        {
-            if (mapEditModeActive)
+            ResolveInstallButtons();
+            RefreshInstallButton();
+            RefreshMapEditButtonState();
+            if (TryHandleModeCancelInput())
             {
-                UpdateMapEditSelectionInput();
+                return;
             }
 
-            UpdateInstallGrid();
-            return;
-        }
-
-        if (waitForPointerReleaseAfterPreviewSpawn)
-        {
-            if (IsPrimaryPointerHeld())
+            if (!IsInstallationModeActive())
             {
+                if (mapEditModeActive)
+                {
+                    UpdateMapEditSelectionInput();
+                }
+
                 UpdateInstallGrid();
                 return;
             }
 
-            waitForPointerReleaseAfterPreviewSpawn = false;
-        }
-
-        if (IsRailloadInstallationModeActive())
-        {
-            if (railloadInstallationController.Tick())
+            if (waitForPointerReleaseAfterPreviewSpawn)
             {
-                ClearInstallPreview();
+                if (IsPrimaryPointerHeld())
+                {
+                    UpdateInstallGrid();
+                    return;
+                }
+
+                waitForPointerReleaseAfterPreviewSpawn = false;
             }
 
-            UpdateInstallGrid();
-            return;
-        }
+            if (IsRailloadInstallationModeActive())
+            {
+                if (railloadInstallationController.Tick())
+                {
+                    ClearInstallPreview();
+                }
 
-        UpdateInstallPreviewPointerInput();
-        UpdateInstallGrid();
+                UpdateInstallGrid();
+                return;
+            }
+
+            UpdateInstallPreviewPointerInput();
+            UpdateInstallGrid();
+        }
+        finally
+        {
+            if (profileRuntime)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Runtime",
+                    "InstallationPlacementController",
+                    "Installation Placement Update",
+                    startTimestamp);
+            }
+        }
     }
 
     private void LateUpdate()
     {
-        RefreshInstallPreviewVisualsAfterLateTransformChanges();
-        if ((installGridDirty || installGridPreviewDirty) && ShouldUpdateInstallGridLate())
+        bool profileRuntime = MapObjectTickProfiler.IsEnabled;
+        long startTimestamp = profileRuntime ? MapObjectTickProfiler.BeginSample() : 0L;
+        try
         {
-            UpdateInstallGrid();
+            RefreshInstallPreviewVisualsAfterLateTransformChanges();
+            if ((installGridDirty || installGridPreviewDirty) && ShouldUpdateInstallGridLate())
+            {
+                UpdateInstallGrid();
+            }
+        }
+        finally
+        {
+            if (profileRuntime)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Runtime",
+                    "InstallationPlacementController",
+                    "Installation Placement LateUpdate",
+                    startTimestamp);
+            }
         }
     }
 
@@ -5682,6 +5720,16 @@ public class InstallationPlacementController : MonoBehaviour
             resolvedQuarterTurns = waterPumpQuarterTurns;
         }
 
+        if (TryResolveTrainStationFacingQuarterTurns(
+                anchorBlock.Coordinate,
+                sourcePrefab,
+                preview,
+                resolvedQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            resolvedQuarterTurns = trainStationQuarterTurns;
+        }
+
         if (IsTrainSource(sourcePrefab)
             && TryCreateTrainInstallPreviewPlacementPlan(
                 preview,
@@ -5960,6 +6008,16 @@ public class InstallationPlacementController : MonoBehaviour
             resolvedQuarterTurns = waterPumpQuarterTurns;
         }
 
+        if (TryResolveTrainStationFacingQuarterTurns(
+                anchorCoordinate,
+                sourcePrefab,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            resolvedQuarterTurns = trainStationQuarterTurns;
+        }
+
         if (!TryGetFootprintBlocks(
                 anchorCoordinate,
                 sourcePrefab,
@@ -6072,6 +6130,11 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ConfigureInstalledInputOutputMarkers(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
     {
+        if (ConfigureTrainStationRailMarkers(installedObject, installedObject, anchorCoordinate, quarterTurns, false))
+        {
+            return;
+        }
+
         ConfigureInputOutputMarkers(installedObject, anchorCoordinate, quarterTurns, false);
     }
 
@@ -6101,6 +6164,12 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns = GetPreviewAreaQuarterTurns(preview);
         MapObject footprintSource = ResolveInstallPreviewPlacementSource(preview);
         if (ConfigureRobotArmInstallDirectionMarkers(preview, footprintSource, anchorCoordinate, quarterTurns))
+        {
+            RememberInstallPreviewVisualSyncState(preview, true, anchorCoordinate, quarterTurns);
+            return;
+        }
+
+        if (ConfigureTrainStationRailMarkers(preview, footprintSource, anchorCoordinate, quarterTurns, true))
         {
             RememberInstallPreviewVisualSyncState(preview, true, anchorCoordinate, quarterTurns);
             return;
@@ -6358,27 +6427,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        AreaMarkerPool pool = ResolveAreaMarkerPool();
-        if (pool == null)
-        {
-            ClearInputOutputMarkers(mapObject);
-            return;
-        }
-
-        InputOutputModuleAreaMarkerController markerController = mapObject.GetComponent<InputOutputModuleAreaMarkerController>();
-        if (markerController == null)
-        {
-            markerController = mapObject.gameObject.AddComponent<InputOutputModuleAreaMarkerController>();
-        }
-
-        markerController.enabled = true;
-        markerController.Configure(
-            pool,
-            areaMarkerRequestScratch,
-            isInstallPreview,
-            isInstallPreview ? InstallPreviewAreaMarkerSortingOrderOffset : 0,
-            isInstallPreview,
-            isInstallPreview ? mapObject.transform : null);
+        ConfigureAreaMarkers(mapObject, areaMarkerRequestScratch, isInstallPreview);
     }
 
     private bool ConfigureRobotArmInstallDirectionMarkers(
@@ -6420,11 +6469,78 @@ public class InstallationPlacementController : MonoBehaviour
             new AreaMarkerSpawnRequest(outputMarkerWorldPosition, arrowIcon, iconRotationZ)
         };
 
+        ConfigureAreaMarkers(mapObject, markerRequests, true);
+        return true;
+    }
+
+    private bool ConfigureTrainStationRailMarkers(
+        MapObject mapObject,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        bool isInstallPreview)
+    {
+        if (mapObject == null || !IsTrainStationSource(footprintSource))
+        {
+            return false;
+        }
+
+        Sprite stationIcon = ResolveTrainStationMarkerIcon(mapObject, footprintSource);
+        if (stationIcon == null)
+        {
+            ClearInputOutputMarkers(mapObject);
+            return true;
+        }
+
+        areaMarkerRequestScratch.Clear();
+        MapObject previewToIgnore = isInstallPreview ? mapObject : null;
+        if (TryResolveTrainStationSelectedRailCoordinate(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore,
+                out Vector2Int railCoordinate))
+        {
+            areaMarkerRequestScratch.Add(new AreaMarkerSpawnRequest(
+                GetAreaMarkerWorldPosition(railCoordinate),
+                stationIcon));
+        }
+
+        if (areaMarkerRequestScratch.Count <= 0)
+        {
+            ClearInputOutputMarkers(mapObject);
+            return true;
+        }
+
+        ConfigureAreaMarkers(
+            mapObject,
+            areaMarkerRequestScratch,
+            isInstallPreview,
+            TrainStationAreaMarkerSortingOrderOffset,
+            false,
+            TrainStationAreaMarkerVerticalOffset);
+        return true;
+    }
+
+    private bool ConfigureAreaMarkers(
+        MapObject mapObject,
+        IReadOnlyList<AreaMarkerSpawnRequest> markerRequests,
+        bool isInstallPreview,
+        int? sortingOrderOffsetOverride = null,
+        bool? renderOnTopOverride = null,
+        float? verticalOffsetOverride = null)
+    {
+        if (mapObject == null || markerRequests == null || markerRequests.Count <= 0)
+        {
+            ClearInputOutputMarkers(mapObject);
+            return false;
+        }
+
         AreaMarkerPool pool = ResolveAreaMarkerPool();
         if (pool == null)
         {
             ClearInputOutputMarkers(mapObject);
-            return true;
+            return false;
         }
 
         InputOutputModuleAreaMarkerController markerController = mapObject.GetComponent<InputOutputModuleAreaMarkerController>();
@@ -6437,11 +6553,107 @@ public class InstallationPlacementController : MonoBehaviour
         markerController.Configure(
             pool,
             markerRequests,
-            true,
-            InstallPreviewAreaMarkerSortingOrderOffset,
-            true,
-            mapObject.transform);
+            isInstallPreview,
+            sortingOrderOffsetOverride ?? (isInstallPreview ? InstallPreviewAreaMarkerSortingOrderOffset : 0),
+            renderOnTopOverride ?? isInstallPreview,
+            isInstallPreview ? mapObject.transform : null,
+            verticalOffsetOverride);
         return true;
+    }
+
+    private bool TryResolveTrainStationSelectedRailCoordinate(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore,
+        out Vector2Int railCoordinate)
+    {
+        railCoordinate = default;
+        int normalizedQuarterTurns = NormalizePlacementQuarterTurnsForObject(footprintSource, quarterTurns);
+        if (!IsTrainStationSource(footprintSource)
+            || !Trainstation.TryGetFacingDirection(
+                normalizedQuarterTurns,
+                out Vector2Int selectedDirection))
+        {
+            return false;
+        }
+
+        List<Vector2Int> stationCoordinates = GetPlacementVisualCoordinates(
+            anchorCoordinate,
+            footprintSource,
+            normalizedQuarterTurns);
+        if (stationCoordinates.Count <= 0)
+        {
+            stationCoordinates.Add(anchorCoordinate);
+        }
+
+        for (int i = 0; i < stationCoordinates.Count; i++)
+        {
+            Vector2Int candidateRailCoordinate = stationCoordinates[i] + selectedDirection;
+            if (!HasRailloadForTrainStationAtCoordinate(candidateRailCoordinate, previewToIgnore))
+            {
+                continue;
+            }
+
+            railCoordinate = candidateRailCoordinate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private Sprite ResolveTrainStationMarkerIcon(MapObject mapObject, MapObject footprintSource)
+    {
+        if (TryGetTrainStation(mapObject, out Trainstation station)
+            && station.StationMarkerIcon != null)
+        {
+            return station.StationMarkerIcon;
+        }
+
+        if (TryGetTrainStation(footprintSource, out station)
+            && station.StationMarkerIcon != null)
+        {
+            return station.StationMarkerIcon;
+        }
+
+        if (trainStationMarkerIcon != null)
+        {
+            return trainStationMarkerIcon;
+        }
+
+#if UNITY_EDITOR
+        trainStationMarkerIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(TrainStationMarkerIconAssetPath);
+        if (trainStationMarkerIcon != null)
+        {
+            return trainStationMarkerIcon;
+        }
+#endif
+
+        ItemDefinition stationDefinition = ResolveItemDefinition(footprintSource) ?? ResolveItemDefinition(mapObject);
+        return stationDefinition != null ? stationDefinition.icon : null;
+    }
+
+    private static bool TryGetTrainStation(MapObject mapObject, out Trainstation station)
+    {
+        station = mapObject as Trainstation;
+        if (station != null)
+        {
+            return true;
+        }
+
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        station = mapObject.GetComponent<Trainstation>();
+        if (station != null)
+        {
+            return true;
+        }
+
+        station = mapObject.GetComponentInChildren<Trainstation>(true);
+        return station != null;
     }
 
     private void ConfigureInstalledInputOutputEnergyAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -11751,6 +11963,57 @@ public class InstallationPlacementController : MonoBehaviour
         return ResolveTrainSource(sourcePrefab) != null;
     }
 
+    private static bool IsTrainStationSource(MapObject sourcePrefab)
+    {
+        if (sourcePrefab == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = sourcePrefab.BoundItemDefinition;
+        return IsTrainStationLookupName(definition != null ? definition.itemName : null)
+               || IsTrainStationLookupName(definition != null ? definition.name : null)
+               || IsTrainStationLookupName(sourcePrefab.name)
+               || IsTrainStationLookupName(sourcePrefab.gameObject != null ? sourcePrefab.gameObject.name : null);
+    }
+
+    private static bool IsTrainStationLookupName(string value)
+    {
+        return NormalizePlacementLookupName(value) == TrainStationLookupName;
+    }
+
+    private static string NormalizePlacementLookupName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Replace("(Clone)", string.Empty)
+            .Replace("_Blueprint", string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace("_", string.Empty)
+            .Replace("-", string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+    }
+
+    private static bool IsRailloadSource(MapObject sourcePrefab)
+    {
+        if (sourcePrefab == null)
+        {
+            return false;
+        }
+
+        if (sourcePrefab is Railload)
+        {
+            return true;
+        }
+
+        return sourcePrefab.GetComponent<Railload>() != null
+               || sourcePrefab.GetComponentInChildren<Railload>(true) != null;
+    }
+
     private static Train ResolveTrainSource(MapObject sourcePrefab)
     {
         if (sourcePrefab == null)
@@ -16413,7 +16676,18 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         MapObject activePlacementSourceForMove = ResolveInstallPreviewPlacementSource(activeInstallPreview)
-                                             ?? moveFootprintSource;
+                                             ?? moveFootprintSource
+                                             ?? waterPumpRotationSource;
+        if (TryResolveTrainStationFacingQuarterTurns(
+                anchorBlock.Coordinate,
+                activePlacementSourceForMove,
+                activeInstallPreview,
+                resolvedQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            resolvedQuarterTurns = trainStationQuarterTurns;
+        }
+
         if (!IsTrainSource(activePlacementSourceForMove)
             && TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int currentAnchorCoordinate)
             && currentAnchorCoordinate == anchorBlock.Coordinate
@@ -17212,6 +17486,20 @@ public class InstallationPlacementController : MonoBehaviour
                     out _);
             }
 
+            if (IsTrainStationSource(footprintSource))
+            {
+                int preferredQuarterTurns = activeInstallPreview != null
+                    ? GetPreviewQuarterTurns(activeInstallPreview)
+                    : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, null);
+                return TryResolvePlaceableInstallPreviewTarget(
+                    block,
+                    activeInstallPreview,
+                    preferredQuarterTurns,
+                    false,
+                    out _,
+                    out _);
+            }
+
             if (HasMultiCellMapSize(footprintSource))
             {
                 int preferredQuarterTurns = activeInstallPreview != null
@@ -17295,6 +17583,19 @@ public class InstallationPlacementController : MonoBehaviour
             ? 2
             : GetPlacementRotationCandidateCount(footprintSource);
         int baseQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (rectGridWidth == 1
+            && rectGridHeight == 1
+            && TryResolveTrainStationFacingQuarterTurns(
+                clickedBlock.Coordinate,
+                footprintSource,
+                previewToIgnore,
+                baseQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            baseQuarterTurns = trainStationQuarterTurns;
+            candidateCount = 1;
+        }
+
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
@@ -17373,6 +17674,19 @@ public class InstallationPlacementController : MonoBehaviour
                 ? 2
                 : GetPlacementRotationCandidateCount(footprintSource);
         int baseQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
+        if (rectGridWidth == 1
+            && rectGridHeight == 1
+            && TryResolveTrainStationFacingQuarterTurns(
+                clickedBlock.Coordinate,
+                footprintSource,
+                previewToIgnore,
+                baseQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            baseQuarterTurns = trainStationQuarterTurns;
+            candidateCount = 1;
+        }
+
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
@@ -18342,6 +18656,11 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        if (TryRotateActiveTrainStationPreviewToNextRail())
+        {
+            return;
+        }
+
         bool preservePreviewTransformOnRotation =
             ShouldPreserveInstallPreviewTransformOnRotation(activeInstallPreview);
         Vector3 preservedPreviewPosition = activeInstallPreview.transform.position;
@@ -18580,6 +18899,41 @@ public class InstallationPlacementController : MonoBehaviour
         ResetInstallPreviewVisualSyncState();
         SetInstallPreviewSelectionVisual(activeInstallPreview, true);
         InvalidateInstallGridPreview();
+    }
+
+    private bool TryRotateActiveTrainStationPreviewToNextRail()
+    {
+        if (activeInstallPreview == null
+            || !TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate))
+        {
+            return false;
+        }
+
+        MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview) ?? activeInstallPreview;
+        if (!TryResolveNextTrainStationFacingQuarterTurns(
+                anchorCoordinate,
+                placementSource,
+                activeInstallPreview,
+                installPreviewQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            return false;
+        }
+
+        installPreviewQuarterTurns = trainStationQuarterTurns;
+        installPreviewQuarterTurnsByPreview[activeInstallPreview] = trainStationQuarterTurns;
+        activeInstallPreview.transform.rotation = GetInstallPreviewRotation();
+        if (activeInstallPreview is InstallationObject installationPreview)
+        {
+            installationPreview.RefreshInstalledDirectionFromCurrentTransform();
+        }
+
+        RefreshPreviewRangeVisualsIfNeeded(activeInstallPreview);
+        RefreshUtilityPolePreviewWires();
+        RefreshInstallPreviewAreaMarkers(activeInstallPreview);
+        RememberBlueprintRotationForPreview(activeInstallDefinition, activeInstallPreview, installPreviewQuarterTurns);
+        InvalidateInstallGridPreview();
+        return true;
     }
 
     private bool ShouldPreserveInstallPreviewTransformOnRotation(MapObject preview)
@@ -20871,7 +21225,18 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        installPreviewQuarterTurns = NormalizePlacementQuarterTurnsForObject(activeInstallPreview, resolvedQuarterTurns);
+        MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview) ?? activeInstallPreview;
+        if (TryResolveTrainStationFacingQuarterTurns(
+                anchorBlock.Coordinate,
+                placementSource,
+                activeInstallPreview,
+                resolvedQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            resolvedQuarterTurns = trainStationQuarterTurns;
+        }
+
+        installPreviewQuarterTurns = NormalizePlacementQuarterTurnsForObject(placementSource, resolvedQuarterTurns);
         installPreviewQuarterTurnsByPreview[activeInstallPreview] = installPreviewQuarterTurns;
         installPreviewAnchorCoordinates[activeInstallPreview] = anchorBlock.Coordinate;
 
@@ -20879,7 +21244,6 @@ public class InstallationPlacementController : MonoBehaviour
         RefreshActiveFencePreviewVariant(true);
         RefreshActivePipePreviewVariant();
 
-        MapObject placementSource = ResolveInstallPreviewPlacementSource(activeInstallPreview);
         Vector3 targetPosition = ResolvePlacementWorldPosition(
             anchorBlock,
             placementSource,
@@ -21108,7 +21472,8 @@ public class InstallationPlacementController : MonoBehaviour
             : activeInstallDefinition != null
                 ? activeInstallDefinition.mapObject
                 : null;
-        return IsTrainSource(rotationSource);
+        return IsTrainSource(rotationSource)
+               || IsTrainStationSource(rotationSource);
     }
 
     private void CacheInstallPreviewMoveResult(Block block, bool result, bool preserveRotation)
@@ -21216,6 +21581,16 @@ public class InstallationPlacementController : MonoBehaviour
         if (footprintSource == null)
         {
             return false;
+        }
+
+        if (TryResolveTrainStationFacingQuarterTurns(
+                block.Coordinate,
+                footprintSource,
+                previewToIgnore,
+                quarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            quarterTurns = trainStationQuarterTurns;
         }
 
         if (IsTrainSource(footprintSource))
@@ -21351,6 +21726,19 @@ public class InstallationPlacementController : MonoBehaviour
         if (block == null)
         {
             return false;
+        }
+
+        if (TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject trainStationFootprintSource)
+            && TryResolveTrainStationFacingQuarterTurns(
+                block.Coordinate,
+                trainStationFootprintSource,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out int trainStationQuarterTurns)
+            && CanPlacePreviewOnBlock(block, previewToIgnore, trainStationQuarterTurns))
+        {
+            resolvedQuarterTurns = trainStationQuarterTurns;
+            return true;
         }
 
         if (TryResolveInstallPreviewFootprintSourceForPlacement(previewToIgnore, out MapObject waterPumpFootprintSource)
@@ -21800,6 +22188,16 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             return false;
+        }
+
+        if (TryResolveTrainStationFacingQuarterTurns(
+                clickedBlock.Coordinate,
+                footprintSource,
+                previewToIgnore,
+                resolvedQuarterTurns,
+                out int trainStationQuarterTurns))
+        {
+            resolvedQuarterTurns = trainStationQuarterTurns;
         }
 
         if (TryResolveFixedRotationSteamGeneratorChainTarget(
@@ -25201,6 +25599,17 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (IsWaterPumpSource(footprintSource)
             && !IsWaterPumpCardinalShoreCoordinate(anchorCoordinate ?? block.Coordinate))
+        {
+            return false;
+        }
+
+        if (IsTrainStationSource(footprintSource)
+            && !TryResolveTrainStationSelectedRailCoordinate(
+                anchorCoordinate ?? block.Coordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore,
+                out _))
         {
             return false;
         }
@@ -30114,6 +30523,128 @@ public class InstallationPlacementController : MonoBehaviour
                    out _,
                    out _)
                && savedSourcePrefab is Railload;
+    }
+
+    private bool TryResolveTrainStationFacingQuarterTurns(
+        Vector2Int coordinate,
+        MapObject sourcePrefab,
+        MapObject previewToIgnore,
+        int fallbackQuarterTurns,
+        out int quarterTurns)
+    {
+        quarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, fallbackQuarterTurns);
+        if (!IsTrainStationSource(sourcePrefab))
+        {
+            return false;
+        }
+
+        int normalizedFallbackQuarterTurns = quarterTurns;
+        for (int offset = 0; offset < PipeCardinalDirections.Length; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                sourcePrefab,
+                normalizedFallbackQuarterTurns + offset);
+            if (!TryResolveTrainStationSelectedRailCoordinate(
+                    coordinate,
+                    sourcePrefab,
+                    candidateQuarterTurns,
+                    previewToIgnore,
+                    out _))
+            {
+                continue;
+            }
+
+            quarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveNextTrainStationFacingQuarterTurns(
+        Vector2Int coordinate,
+        MapObject sourcePrefab,
+        MapObject previewToIgnore,
+        int currentQuarterTurns,
+        out int quarterTurns)
+    {
+        quarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, currentQuarterTurns);
+        if (!IsTrainStationSource(sourcePrefab))
+        {
+            return false;
+        }
+
+        int normalizedCurrentQuarterTurns = NormalizePlacementQuarterTurnsForObject(sourcePrefab, currentQuarterTurns);
+        for (int offset = 1; offset <= PipeCardinalDirections.Length; offset++)
+        {
+            int candidateQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                sourcePrefab,
+                normalizedCurrentQuarterTurns + offset);
+            if (!TryResolveTrainStationSelectedRailCoordinate(
+                    coordinate,
+                    sourcePrefab,
+                    candidateQuarterTurns,
+                    previewToIgnore,
+                    out _))
+            {
+                continue;
+            }
+
+            quarterTurns = candidateQuarterTurns;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool HasRailloadForTrainStationAtCoordinate(Vector2Int coordinate, MapObject previewToIgnore)
+    {
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot)
+            && IsRailloadSource(ResolveInstallPreviewFootprintSource(previewSnapshot.mapObject) ?? previewSnapshot.mapObject))
+        {
+            return true;
+        }
+
+        if (CoordinateHasRuntimeRailload(coordinate))
+        {
+            return true;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && IsRailloadAllowedForPlacement(
+                block,
+                GetOccupyingObjectForPlacement(block, previewToIgnore),
+                InstallationMapFilter.Railload))
+        {
+            return true;
+        }
+
+        return TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
+               && IsRailloadSource(savedSnapshot.mapObject);
+    }
+
+    private bool CoordinateHasRuntimeRailload(Vector2Int coordinate)
+    {
+        trainPlacementRailSearchScratch.Clear();
+        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            coordinate,
+            trainPlacementRailSearchScratch);
+
+        bool hasRail = false;
+        for (int i = 0; i < trainPlacementRailSearchScratch.Count; i++)
+        {
+            if (trainPlacementRailSearchScratch[i] is Railload)
+            {
+                hasRail = true;
+                break;
+            }
+        }
+
+        trainPlacementRailSearchScratch.Clear();
+        return hasRail;
     }
 
     private bool IsPipeAllowedForPlacement(

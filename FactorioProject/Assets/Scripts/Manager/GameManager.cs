@@ -30,6 +30,10 @@ public class GameManager : MonoBehaviour
     private bool showSleepAwake;
     [SerializeField]
     private bool showBeltItemLine;
+    [SerializeField, InspectorName("Hide Belt Item")]
+    private bool hideBeltItems;
+    [SerializeField, InspectorName("Hide Belt")]
+    private bool hideBelts;
     [SerializeField]
     private bool showRailLine;
     [FormerlySerializedAs("showBeltDirections")]
@@ -49,6 +53,10 @@ public class GameManager : MonoBehaviour
     private bool lastRuntimeShowSleepAwake;
     private bool beltItemLineRuntimeStateInitialized;
     private bool lastRuntimeShowBeltItemLine;
+    private bool beltItemRenderingRuntimeStateInitialized;
+    private bool lastRuntimeHideBeltItems;
+    private bool beltRenderingRuntimeStateInitialized;
+    private bool lastRuntimeHideBelts;
     private bool railLineRuntimeStateInitialized;
     private bool lastRuntimeShowRailLine;
     private bool beltDirectionRuntimeStateInitialized;
@@ -104,6 +112,8 @@ public class GameManager : MonoBehaviour
         SyncConveyorSlotDotRuntimeVisibility();
         SyncSleepAwakeRuntimeVisibility();
         SyncBeltItemLineRuntimeVisibility();
+        SyncBeltItemRenderingRuntimeVisibility();
+        SyncBeltRenderingRuntimeVisibility();
         SyncRailLineRuntimeVisibility();
         SyncBeltDirectionRuntimeVisibility();
         SyncMapObjectTickProfilingRuntimeState();
@@ -116,6 +126,8 @@ public class GameManager : MonoBehaviour
             SyncConveyorSlotDotRuntimeVisibility(true);
             SyncSleepAwakeRuntimeVisibility(true);
             SyncBeltItemLineRuntimeVisibility(true);
+            SyncBeltItemRenderingRuntimeVisibility(true);
+            SyncBeltRenderingRuntimeVisibility(true);
             SyncRailLineRuntimeVisibility(true);
             SyncBeltDirectionRuntimeVisibility(true);
             SyncMapObjectTickProfilingRuntimeState(true);
@@ -132,6 +144,8 @@ public class GameManager : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        SyncBeltItemRenderingRuntimeVisibility(true);
+        SyncBeltRenderingRuntimeVisibility(true);
         SyncRailLineRuntimeVisibility(true);
     }
 
@@ -145,6 +159,8 @@ public class GameManager : MonoBehaviour
     public bool ShowConveyorSlotDots => showConveyorSlotDots;
     public bool ShowSleepAwake => showSleepAwake;
     public bool ShowBeltItemLine => showBeltItemLine;
+    public bool HideBeltItems => hideBeltItems;
+    public bool HideBelts => hideBelts;
     public bool ShowRailLine => showRailLine;
     public bool ShowDirections => showDirections;
     public bool ShowBeltDirections => ShowDirections;
@@ -201,6 +217,18 @@ public class GameManager : MonoBehaviour
     {
         showBeltItemLine = show;
         SyncBeltItemLineRuntimeVisibility(true);
+    }
+
+    public void SetHideBeltItems(bool hide)
+    {
+        hideBeltItems = hide;
+        SyncBeltItemRenderingRuntimeVisibility(true);
+    }
+
+    public void SetHideBelts(bool hide)
+    {
+        hideBelts = hide;
+        SyncBeltRenderingRuntimeVisibility(true);
     }
 
     public void SetShowRailLine(bool show)
@@ -291,6 +319,44 @@ public class GameManager : MonoBehaviour
         {
             PortableObject.RefreshAllBeltItemLineDebugVisuals();
         }
+    }
+
+    private void SyncBeltItemRenderingRuntimeVisibility(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && beltItemRenderingRuntimeStateInitialized
+            && lastRuntimeHideBeltItems == hideBeltItems)
+        {
+            return;
+        }
+
+        beltItemRenderingRuntimeStateInitialized = true;
+        lastRuntimeHideBeltItems = hideBeltItems;
+        TerrainGenerator.Active?.RefreshBeltItemRenderingVisibility();
+    }
+
+    private void SyncBeltRenderingRuntimeVisibility(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && beltRenderingRuntimeStateInitialized
+            && lastRuntimeHideBelts == hideBelts)
+        {
+            return;
+        }
+
+        beltRenderingRuntimeStateInitialized = true;
+        lastRuntimeHideBelts = hideBelts;
+        TerrainGenerator.Active?.RefreshBeltRenderingVisibility();
     }
 
     private void SyncRailLineRuntimeVisibility(bool force = false)
@@ -926,7 +992,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -1022,6 +1088,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
         bool currentShowBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
+        bool currentHideBeltItems = gameManager != null && gameManager.HideBeltItems;
+        bool currentHideBelts = gameManager != null && gameManager.HideBelts;
         bool currentShowRailLine = gameManager != null && gameManager.ShowRailLine;
         bool currentShowBeltDirections = gameManager != null && gameManager.ShowDirections;
         string extraTokens = BuildStatusExtraTokens(
@@ -1038,6 +1106,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             currentShowConveyorSlotDots,
             currentShowSleepAwake,
             currentShowBeltItemLine,
+            currentHideBeltItems,
+            currentHideBelts,
             currentShowRailLine,
             currentShowBeltDirections,
             extraTokens);
@@ -1065,6 +1135,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private ToolResult GetPerfSnapshotResult(int maxRows)
     {
         int resolvedMaxRows = Mathf.Max(1, maxRows);
+        MapObjectTickProfiler.ClearRuntimeCounters();
+        TerrainGenerator.Active?.AppendRuntimeProfilerCounters();
         string json = MapObjectTickProfiler.BuildAndResetSnapshotJson(resolvedMaxRows);
         string encodedJson = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
         return ToolResult.Success(
@@ -2444,6 +2516,24 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showBeltItemLine={(value ? 1 : 0)}");
         }
 
+        if (string.Equals(toggleName, "hideBeltItems", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "hideBeltItem", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "hideConveyorItems", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "hideConveyorItem", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetHideBeltItems(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"hideBeltItems={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "hideBelts", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "hideBelt", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "hideConveyorBelts", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "hideConveyorBelt", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetHideBelts(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"hideBelts={(value ? 1 : 0)}");
+        }
+
         if (string.Equals(toggleName, "showRailLine", StringComparison.OrdinalIgnoreCase)
             || string.Equals(toggleName, "railLine", StringComparison.OrdinalIgnoreCase)
             || string.Equals(toggleName, "showRailloadLine", StringComparison.OrdinalIgnoreCase)
@@ -2583,6 +2673,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             bool showConveyorSlotDots,
             bool showSleepAwake,
             bool showBeltItemLine,
+            bool hideBeltItems,
+            bool hideBelts,
             bool showRailLine,
             bool showBeltDirections,
             string message,
@@ -2603,6 +2695,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             ShowConveyorSlotDots = showConveyorSlotDots;
             ShowSleepAwake = showSleepAwake;
             ShowBeltItemLine = showBeltItemLine;
+            HideBeltItems = hideBeltItems;
+            HideBelts = hideBelts;
             ShowRailLine = showRailLine;
             ShowBeltDirections = showBeltDirections;
             Message = message;
@@ -2624,6 +2718,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         private bool ShowConveyorSlotDots { get; }
         private bool ShowSleepAwake { get; }
         private bool ShowBeltItemLine { get; }
+        private bool HideBeltItems { get; }
+        private bool HideBelts { get; }
         private bool ShowRailLine { get; }
         private bool ShowBeltDirections { get; }
         private string Message { get; }
@@ -2631,17 +2727,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         public static ToolResult Success(int itemId, int requested, int given, int bag, int hand, int dropped, string message = "ok", string extraTokens = "")
         {
-            return new ToolResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", false, false, false, false, false, message, extraTokens);
+            return new ToolResult(true, itemId, requested, given, bag, hand, dropped, -1f, -1f, 0, 0, "-", false, false, false, false, false, false, false, message, extraTokens);
         }
 
         public static ToolResult Error(int itemId, int requested, string message, string extraTokens = "")
         {
-            return new ToolResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, false, false, message, extraTokens);
+            return new ToolResult(false, itemId, requested, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, false, false, false, false, message, extraTokens);
         }
 
         public static ToolResult Ping()
         {
-            return new ToolResult(true, 0, 0, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, false, false, "pong", string.Empty);
+            return new ToolResult(true, 0, 0, 0, 0, 0, 0, -1f, -1f, 0, 0, "-", false, false, false, false, false, false, false, "pong", string.Empty);
         }
 
         public static ToolResult Status(
@@ -2653,6 +2749,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             bool showConveyorSlotDots,
             bool showSleepAwake,
             bool showBeltItemLine,
+            bool hideBeltItems,
+            bool hideBelts,
             bool showRailLine,
             bool showBeltDirections,
             string extraTokens = "")
@@ -2673,6 +2771,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 showConveyorSlotDots,
                 showSleepAwake,
                 showBeltItemLine,
+                hideBeltItems,
+                hideBelts,
                 showRailLine,
                 showBeltDirections,
                 "status",
@@ -2687,7 +2787,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             {
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} showConveyorSlotDots={12} showSleepAwake={13} showBeltItemLine={14} showRailLine={15} showBeltDirections={16}{17} message=\"{18}\"",
+                    "{0} itemId={1} requested={2} given={3} bag={4} hand={5} dropped={6} fps={7:0.0} frameMs={8:0.0} installTotal={9} beltItems={10} installTypes={11} showConveyorSlotDots={12} showSleepAwake={13} showBeltItemLine={14} hideBeltItems={15} hideBelts={16} showRailLine={17} showBeltDirections={18}{19} message=\"{20}\"",
                     prefix,
                     ItemId,
                     Requested,
@@ -2703,6 +2803,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     ShowConveyorSlotDots ? 1 : 0,
                     ShowSleepAwake ? 1 : 0,
                     ShowBeltItemLine ? 1 : 0,
+                    HideBeltItems ? 1 : 0,
+                    HideBelts ? 1 : 0,
                     ShowRailLine ? 1 : 0,
                     ShowBeltDirections ? 1 : 0,
                     extra,

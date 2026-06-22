@@ -1015,6 +1015,21 @@ internal sealed class ProfilerForm : Form
             AppendMetric(builder, backgroundMetrics[i].Key, backgroundMetrics[i].Value);
         }
 
+        if (snapshot.RuntimeCounters != null && snapshot.RuntimeCounters.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("RuntimeCounters");
+            builder.AppendLine("Group\tName\tValue\tNote");
+            for (int i = 0; i < snapshot.RuntimeCounters.Count; i++)
+            {
+                RuntimeCounter counter = snapshot.RuntimeCounters[i];
+                builder.Append(SanitizeClipboardCell(counter.Group)).Append('\t');
+                builder.Append(SanitizeClipboardCell(counter.Name)).Append('\t');
+                builder.Append(SanitizeClipboardCell(counter.Value)).Append('\t');
+                builder.AppendLine(SanitizeClipboardCell(counter.Note));
+            }
+        }
+
         builder.AppendLine();
         builder.AppendLine("Rows");
         builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tMaxUs");
@@ -1806,11 +1821,32 @@ internal sealed class ProfileSnapshot
     [JsonPropertyName("backgroundConveyorSlowRetryCandidates")]
     public double BackgroundConveyorSlowRetryCandidates { get; set; }
 
+    [JsonPropertyName("runtimeCounterCount")]
+    public int RuntimeCounterCount { get; set; }
+
+    [JsonPropertyName("runtimeCounters")]
+    public List<RuntimeCounter>? RuntimeCounters { get; set; }
+
     [JsonPropertyName("rowCount")]
     public int RowCount { get; set; }
 
     [JsonPropertyName("rows")]
     public List<ProfileRow>? Rows { get; set; }
+}
+
+internal sealed class RuntimeCounter
+{
+    [JsonPropertyName("group")]
+    public string Group { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+
+    [JsonPropertyName("note")]
+    public string Note { get; set; } = string.Empty;
 }
 
 internal sealed class ProfileRow

@@ -28,18 +28,10 @@ public class ItemDataEditorWindow : EditorWindow
     {
         "ad919f4ddfe2a924194a2ddac61bf5af",
         "228fcd45b59e4994d8b5f8ee23dc4595",
-        "61dfdca30dedb50479bbba3d4602c4b6",
-        "b130d0f2cf797d447a955d9044573f35",
-        "c9fc3865549db61429331f9f234e219f",
-        "9e8fd46d9731ca640a3e8716a7b6cfe0"
-    };
-    private static readonly DuplicateItemDefinition[] DuplicateTrainItems =
-    {
-        new DuplicateItemDefinition("ad919f4ddfe2a924194a2ddac61bf5af", "ad919f4ddfe2a924194a2ddac61bf5af", 42),
-        new DuplicateItemDefinition("228fcd45b59e4994d8b5f8ee23dc4595", "228fcd45b59e4994d8b5f8ee23dc4595", 44),
-        new DuplicateItemDefinition("61dfdca30dedb50479bbba3d4602c4b6", "61dfdca30dedb50479bbba3d4602c4b6", 46),
-        new DuplicateItemDefinition("b130d0f2cf797d447a955d9044573f35", "b130d0f2cf797d447a955d9044573f35", 43),
-        new DuplicateItemDefinition("c9fc3865549db61429331f9f234e219f", "c9fc3865549db61429331f9f234e219f", 47)
+        "5e8eb859a7abfe04b919401e00125622",
+        "1944e65739557ca4485c86a1309a15c6",
+        "9524753a56ea05540be3c118174151dd",
+        "4d68593c4bba3a34487b0f60cff9fd9e"
     };
     private static readonly RectGridPaletteEntry[] RectGridPaletteEntries =
     {
@@ -167,20 +159,6 @@ public class ItemDataEditorWindow : EditorWindow
         public List<InputOutputPairJsonEntry> ioPairs = new List<InputOutputPairJsonEntry>();
     }
 
-    private readonly struct DuplicateItemDefinition
-    {
-        public readonly string oldGuid;
-        public readonly string newGuid;
-        public readonly int oldItemId;
-
-        public DuplicateItemDefinition(string oldGuid, string newGuid, int oldItemId)
-        {
-            this.oldGuid = oldGuid;
-            this.newGuid = newGuid;
-            this.oldItemId = oldItemId;
-        }
-    }
-
     [Serializable]
     private sealed class CraftingTreeJsonFile
     {
@@ -263,11 +241,6 @@ public class ItemDataEditorWindow : EditorWindow
     [MenuItem("Tools/ProjectF/Normalize Item IDs")]
     public static void NormalizeItemIdsAndExportData()
     {
-        ReplaceDuplicateItemDefinitionReferences();
-        DeleteDuplicateItemDefinitions();
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-
         List<ItemDefinition> definitions = LoadItemDefinitionsFromAssets();
         List<ItemDefinition> orderedDefinitions = BuildCompactItemDefinitionOrder(definitions);
         if (orderedDefinitions.Count == 0)
@@ -3136,60 +3109,6 @@ public class ItemDataEditorWindow : EditorWindow
         public string finalPath;
     }
 
-    private static void ReplaceDuplicateItemDefinitionReferences()
-    {
-        string dataPath = Application.dataPath;
-        if (string.IsNullOrWhiteSpace(dataPath) || !Directory.Exists(dataPath))
-        {
-            return;
-        }
-
-        string[] textExtensions = { ".asset", ".prefab", ".unity", ".json" };
-        foreach (string filePath in Directory.EnumerateFiles(dataPath, "*.*", SearchOption.AllDirectories))
-        {
-            string extension = Path.GetExtension(filePath);
-            bool isTextAsset = false;
-            for (int i = 0; i < textExtensions.Length; i++)
-            {
-                if (string.Equals(extension, textExtensions[i], StringComparison.OrdinalIgnoreCase))
-                {
-                    isTextAsset = true;
-                    break;
-                }
-            }
-
-            if (!isTextAsset)
-            {
-                continue;
-            }
-
-            string text = File.ReadAllText(filePath);
-            string replaced = text;
-            for (int i = 0; i < DuplicateTrainItems.Length; i++)
-            {
-                DuplicateItemDefinition duplicate = DuplicateTrainItems[i];
-                replaced = replaced.Replace(duplicate.oldGuid, duplicate.newGuid);
-            }
-
-            if (!string.Equals(text, replaced, StringComparison.Ordinal))
-            {
-                File.WriteAllText(filePath, replaced);
-            }
-        }
-    }
-
-    private static void DeleteDuplicateItemDefinitions()
-    {
-        for (int i = 0; i < DuplicateTrainItems.Length; i++)
-        {
-            string assetPath = AssetDatabase.GUIDToAssetPath(DuplicateTrainItems[i].oldGuid);
-            if (!string.IsNullOrWhiteSpace(assetPath))
-            {
-                AssetDatabase.DeleteAsset(assetPath);
-            }
-        }
-    }
-
     private static List<ItemDefinition> LoadItemDefinitionsFromAssets()
     {
         List<ItemDefinition> definitions = new List<ItemDefinition>();
@@ -3238,16 +3157,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (definition != null && definition.id >= 0)
             {
                 remap[definition.id] = i;
-            }
-        }
-
-        for (int i = 0; i < DuplicateTrainItems.Length; i++)
-        {
-            DuplicateItemDefinition duplicate = DuplicateTrainItems[i];
-            int canonicalId = FindOrderedDefinitionIndexByGuid(orderedDefinitions, duplicate.newGuid);
-            if (canonicalId >= 0)
-            {
-                remap[duplicate.oldItemId] = canonicalId;
             }
         }
 
@@ -3625,32 +3534,6 @@ public class ItemDataEditorWindow : EditorWindow
         return string.IsNullOrWhiteSpace(assetPath)
             ? null
             : AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
-    }
-
-    private static int FindOrderedDefinitionIndexByGuid(List<ItemDefinition> definitions, string guid)
-    {
-        if (definitions == null || string.IsNullOrWhiteSpace(guid))
-        {
-            return -1;
-        }
-
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            string assetPath = AssetDatabase.GetAssetPath(definition);
-            if (!string.IsNullOrWhiteSpace(assetPath)
-                && string.Equals(AssetDatabase.AssetPathToGUID(assetPath), guid, StringComparison.OrdinalIgnoreCase))
-            {
-                return i;
-            }
-        }
-
-        return -1;
     }
 
     private static int RemapItemId(int itemId, Dictionary<int, int> itemIdRemap)
@@ -4801,6 +4684,8 @@ public class ItemDataEditorWindow : EditorWindow
         {
             AppendMissingItemDefinitionAssets(cachedDefinitions);
         }
+
+        SortDefinitionsById(cachedDefinitions);
         cachedDefinitionsItemManager = itemManager;
         cachedDefinitionsItemManagerCount = itemManagerDefinitionCount;
         definitionsCacheDirty = false;
@@ -4817,7 +4702,6 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         HashSet<string> knownAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        HashSet<int> knownIds = new HashSet<int>();
         HashSet<string> knownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < definitions.Count; i++)
         {
@@ -4831,11 +4715,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (!string.IsNullOrWhiteSpace(existingAssetPath))
             {
                 knownAssetPaths.Add(existingAssetPath);
-            }
-
-            if (existingDefinition.id >= 0)
-            {
-                knownIds.Add(existingDefinition.id);
             }
 
             string existingName = GetDefinitionDisplayName(existingDefinition);
@@ -4863,7 +4742,6 @@ public class ItemDataEditorWindow : EditorWindow
             ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
             string definitionName = definition != null ? GetDefinitionDisplayName(definition) : string.Empty;
             if (definition == null
-                || (definition.id >= 0 && knownIds.Contains(definition.id))
                 || (!string.IsNullOrWhiteSpace(definitionName) && knownNames.Contains(definitionName.Trim())))
             {
                 continue;
@@ -4873,11 +4751,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (!string.IsNullOrWhiteSpace(assetPath))
             {
                 knownAssetPaths.Add(assetPath);
-            }
-
-            if (definition.id >= 0)
-            {
-                knownIds.Add(definition.id);
             }
 
             if (!string.IsNullOrWhiteSpace(definitionName))

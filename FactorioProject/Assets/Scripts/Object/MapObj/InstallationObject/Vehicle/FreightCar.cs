@@ -195,6 +195,44 @@ public class FreightCar : Train
                && !IsBoxPointOccupied(pointIndex);
     }
 
+    public bool TryGetClosestAttachedBoxObject(Vector3 referenceWorldPosition, out BoxObject boxObject)
+    {
+        boxObject = null;
+        EnsureBoxPointBoxes();
+        if (boxPointBoxes.Count <= 0)
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        for (int i = 0; i < boxPointBoxes.Count; i++)
+        {
+            if (!IsBoxPointStorageActive(i))
+            {
+                continue;
+            }
+
+            BoxObject candidate = boxPointBoxes[i];
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            Vector3 offset = candidate.transform.position - referenceWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (boxObject != null && distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            bestDistanceSqr = distanceSqr;
+            boxObject = candidate;
+        }
+
+        return boxObject != null;
+    }
+
     public bool TryAttachBoxObject(BoxObject boxObject, Vector3 referenceWorldPosition)
     {
         if (boxObject == null

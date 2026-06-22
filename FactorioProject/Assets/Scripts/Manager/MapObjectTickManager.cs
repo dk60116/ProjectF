@@ -442,6 +442,22 @@ public sealed class MapObjectTickManager : MonoBehaviour
     }
 }
 
+public readonly struct MapObjectRuntimeCounter
+{
+    public MapObjectRuntimeCounter(string group, string name, string value, string note = "")
+    {
+        Group = string.IsNullOrWhiteSpace(group) ? "Runtime" : group;
+        Name = string.IsNullOrWhiteSpace(name) ? "Counter" : name;
+        Value = string.IsNullOrWhiteSpace(value) ? "0" : value;
+        Note = string.IsNullOrWhiteSpace(note) ? string.Empty : note;
+    }
+
+    public string Group { get; }
+    public string Name { get; }
+    public string Value { get; }
+    public string Note { get; }
+}
+
 public static class MapObjectTickProfiler
 {
     private const double MicrosecondsPerSecond = 1000000.0;
@@ -453,6 +469,7 @@ public static class MapObjectTickProfiler
     private static readonly Dictionary<object, TargetDescriptor> targetDescriptorByObject =
         new Dictionary<object, TargetDescriptor>(512);
     private static readonly List<GroupStats> snapshotRows = new List<GroupStats>(128);
+    private static readonly List<MapObjectRuntimeCounter> runtimeCounters = new List<MapObjectRuntimeCounter>(96);
     private static readonly StringBuilder jsonBuilder = new StringBuilder(8192);
     private static readonly double stopwatchTickToMicroseconds = MicrosecondsPerSecond / Stopwatch.Frequency;
 
@@ -694,12 +711,43 @@ public static class MapObjectTickProfiler
         backgroundConveyorSlowRetryCandidates += Mathf.Max(0, slowRetryCandidateCount);
     }
 
+    public static void ClearRuntimeCounters()
+    {
+        runtimeCounters.Clear();
+    }
+
+    public static void AddRuntimeCounter(string group, string name, int value, string note = "")
+    {
+        AddRuntimeCounter(group, name, value.ToString(CultureInfo.InvariantCulture), note);
+    }
+
+    public static void AddRuntimeCounter(string group, string name, long value, string note = "")
+    {
+        AddRuntimeCounter(group, name, value.ToString(CultureInfo.InvariantCulture), note);
+    }
+
+    public static void AddRuntimeCounter(string group, string name, bool value, string note = "")
+    {
+        AddRuntimeCounter(group, name, value ? "1" : "0", note);
+    }
+
+    public static void AddRuntimeCounter(string group, string name, float value, string note = "")
+    {
+        AddRuntimeCounter(group, name, value.ToString("0.###", CultureInfo.InvariantCulture), note);
+    }
+
+    public static void AddRuntimeCounter(string group, string name, string value, string note = "")
+    {
+        runtimeCounters.Add(new MapObjectRuntimeCounter(group, name, value, note));
+    }
+
     public static void Reset()
     {
         groupStatsByKey.Clear();
         activeUpdateStatsByKey.Clear();
         targetDescriptorByObject.Clear();
         snapshotRows.Clear();
+        runtimeCounters.Clear();
         jsonBuilder.Length = 0;
         activeUpdateTickCount = 0;
         activeBeltTickCount = 0;
@@ -816,6 +864,25 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("backgroundConveyorBlockedWaiters", FormatBackgroundConveyorAverage(backgroundConveyorBlockedWaiters), true);
         AppendJsonProperty("backgroundConveyorStaleScheduleDrops", FormatBackgroundConveyorAverage(backgroundConveyorStaleScheduleDrops), true);
         AppendJsonProperty("backgroundConveyorSlowRetryCandidates", FormatBackgroundConveyorAverage(backgroundConveyorSlowRetryCandidates), true);
+        AppendJsonProperty("runtimeCounterCount", runtimeCounters.Count.ToString(CultureInfo.InvariantCulture), true);
+        jsonBuilder.Append(",\"runtimeCounters\":[");
+        for (int i = 0; i < runtimeCounters.Count; i++)
+        {
+            if (i > 0)
+            {
+                jsonBuilder.Append(',');
+            }
+
+            MapObjectRuntimeCounter counter = runtimeCounters[i];
+            jsonBuilder.Append('{');
+            AppendJsonStringProperty("group", counter.Group, false);
+            AppendJsonStringProperty("name", counter.Name, true);
+            AppendJsonStringProperty("value", counter.Value, true);
+            AppendJsonStringProperty("note", counter.Note, true);
+            jsonBuilder.Append('}');
+        }
+
+        jsonBuilder.Append(']');
         AppendJsonProperty("rowCount", rowCount.ToString(CultureInfo.InvariantCulture), true);
         jsonBuilder.Append(",\"rows\":[");
 
@@ -850,6 +917,7 @@ public static class MapObjectTickProfiler
 
         groupStatsByKey.Clear();
         snapshotRows.Clear();
+        runtimeCounters.Clear();
         windowStartTime = now;
         beltDataMotionLoopIterations = 0L;
         beltActiveLoopIterations = 0L;
@@ -873,6 +941,12 @@ public static class MapObjectTickProfiler
         backgroundConveyorMoveSuccesses = 0L;
         backgroundConveyorDirtyCoordinates = 0L;
         backgroundConveyorMotionDirtyCoordinates = 0L;
+        backgroundConveyorReadyHeapSize = 0L;
+        backgroundConveyorDueCandidates = 0L;
+        backgroundConveyorSkippedNotReady = 0L;
+        backgroundConveyorBlockedWaiters = 0L;
+        backgroundConveyorStaleScheduleDrops = 0L;
+        backgroundConveyorSlowRetryCandidates = 0L;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;

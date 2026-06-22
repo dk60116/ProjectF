@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading.Tasks;
 using Unity.Profiling;
 using UnityEngine;
@@ -1188,6 +1189,28 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         conveyorItemVisualDirtyBlocks.Add(block);
+    }
+
+    public void RefreshBeltItemRenderingVisibility()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        foreach (Block block in conveyorItemVisualBlocks)
+        {
+            if (block == null)
+            {
+                continue;
+            }
+
+            block.RefreshConveyorObjectRenderingMode();
+            conveyorItemVisualDirtyBlocks.Add(block);
+        }
+
+        conveyorItemVisualBlockSetVersion++;
+        dynamicConveyorItemVisualBlockSetVersion++;
     }
 
     private void TrackConveyorItemVisualBlock(Block block)
@@ -2930,6 +2953,200 @@ public partial class TerrainGenerator : MonoBehaviour
         mesh.triangles = triangles;
         mesh.RecalculateBounds();
         return mesh;
+    }
+
+    private readonly List<Renderer> runtimeCounterRendererScratch = new List<Renderer>(256);
+    private readonly List<Collider> runtimeCounterColliderScratch = new List<Collider>(128);
+
+    public void AppendRuntimeProfilerCounters()
+    {
+        int loadedMapObjectCount = 0;
+        int loadedInstallationCount = 0;
+        int loadedConveyorBeltCount = 0;
+        int rendererCount = 0;
+        int enabledRendererCount = 0;
+        int activeEnabledRendererCount = 0;
+        int beltRendererCount = 0;
+        int enabledBeltRendererCount = 0;
+        int colliderCount = 0;
+        int enabledColliderCount = 0;
+        int beltColliderCount = 0;
+        int enabledBeltColliderCount = 0;
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block == null || block.MapObject == null)
+            {
+                continue;
+            }
+
+            MapObject mapObject = block.MapObject;
+            loadedMapObjectCount++;
+            if (mapObject is InstallationObject)
+            {
+                loadedInstallationCount++;
+            }
+
+            bool isBelt = mapObject is ConveyorBelt;
+            if (isBelt)
+            {
+                loadedConveyorBeltCount++;
+            }
+
+            CountRuntimeComponents(
+                mapObject,
+                isBelt,
+                ref rendererCount,
+                ref enabledRendererCount,
+                ref activeEnabledRendererCount,
+                ref beltRendererCount,
+                ref enabledBeltRendererCount,
+                ref colliderCount,
+                ref enabledColliderCount,
+                ref beltColliderCount,
+                ref enabledBeltColliderCount);
+        }
+
+        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedBlocks", loadedBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedMapObjects", loadedMapObjectCount);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedInstallations", loadedInstallationCount);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedConveyorBelts", loadedConveyorBeltCount);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "SleepingChunks", sleepingChunkViews.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "SleepingInstallationViews", sleepingInstallationViews.Count);
+
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "MapObjectRenderers", rendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledMapObjectRenderers", enabledRendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledMapObjectRenderers", activeEnabledRendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledMapObjectRenderers", rendererCount - enabledRendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "BeltRenderers", beltRendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledBeltRenderers", enabledBeltRendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
+
+        MapObjectTickProfiler.AddRuntimeCounter("Physics", "MapObjectColliders", colliderCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledMapObjectColliders", enabledColliderCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Physics", "DisabledMapObjectColliders", colliderCount - enabledColliderCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Physics", "BeltColliders", beltColliderCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledBeltColliders", enabledBeltColliderCount);
+
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "LoadedConveyorItems", cachedLoadedConveyorItemCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "ActiveConveyors", activeConveyors.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DataMotionBlocks", activeConveyorDataMotionBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "ItemVisualBlocks", conveyorItemVisualBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DirtyItemVisualBlocks", conveyorItemVisualDirtyBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DynamicItemVisualBlocks", dynamicConveyorItemVisualBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "SlotDotVisualBlocks", activeConveyorDotVisualList.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DirectionVisualBlocks", activeBeltDirectionVisualList.Count);
+
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueue", conveyorWakeQueue.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueuedSet", conveyorWakeQueued.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DirectWakeBlocks", conveyorDirectWakeBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineWakeQueue", conveyorLineWakeQueue.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredLineWakeQueue", deferredConveyorLineWakeQueue.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineRetryStates", conveyorLineRetryStatesById.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "NetworkSleepChecks", conveyorNetworkSleepCheckQueuedIds.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredRuntimeRefreshBlocks", deferredConveyorRuntimeRefreshBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredNetworkWakeBlocks", deferredConveyorNetworkWakeBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredWakeAroundBlocks", deferredConveyorMoveAttemptWakeAroundBlocks.Count);
+
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "LineCacheDirty", conveyorLineCacheDirty);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkCacheDirty", conveyorNetworkCacheDirty);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "Lines", conveyorLines.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "LineSlots", conveyorLineSlots.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "Networks", conveyorNetworkBlocksById.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkIds", conveyorNetworkIds.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkSleeping", conveyorNetworkSleepingIds.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkActive", conveyorNetworkActiveIds.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkRetries", conveyorNetworkRetryTimes.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NextLineRetryMs", FormatRuntimeRetryMs());
+
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualizedFloorObjects", virtualizedFloorObjectCoordinates.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "FloorVirtualizationWorkQueue", floorObjectVirtualizationWorkQueue.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "FloorVirtualizationQueued", floorObjectVirtualizationQueuedCoordinates.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "BackgroundConveyorDirtyCoordinates", backgroundConveyorDirtyCoordinates.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "BackgroundConveyorWakeCoordinates", backgroundConveyorWakeCoordinates.Count);
+    }
+
+    private void CountRuntimeComponents(
+        MapObject mapObject,
+        bool isBelt,
+        ref int rendererCount,
+        ref int enabledRendererCount,
+        ref int activeEnabledRendererCount,
+        ref int beltRendererCount,
+        ref int enabledBeltRendererCount,
+        ref int colliderCount,
+        ref int enabledColliderCount,
+        ref int beltColliderCount,
+        ref int enabledBeltColliderCount)
+    {
+        runtimeCounterRendererScratch.Clear();
+        mapObject.GetComponentsInChildren(true, runtimeCounterRendererScratch);
+        for (int i = 0; i < runtimeCounterRendererScratch.Count; i++)
+        {
+            Renderer renderer = runtimeCounterRendererScratch[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            rendererCount++;
+            if (renderer.enabled)
+            {
+                enabledRendererCount++;
+                if (renderer.gameObject.activeInHierarchy)
+                {
+                    activeEnabledRendererCount++;
+                }
+            }
+
+            if (isBelt)
+            {
+                beltRendererCount++;
+                if (renderer.enabled)
+                {
+                    enabledBeltRendererCount++;
+                }
+            }
+        }
+
+        runtimeCounterColliderScratch.Clear();
+        mapObject.GetComponentsInChildren(true, runtimeCounterColliderScratch);
+        for (int i = 0; i < runtimeCounterColliderScratch.Count; i++)
+        {
+            Collider targetCollider = runtimeCounterColliderScratch[i];
+            if (targetCollider == null)
+            {
+                continue;
+            }
+
+            colliderCount++;
+            if (targetCollider.enabled)
+            {
+                enabledColliderCount++;
+            }
+
+            if (isBelt)
+            {
+                beltColliderCount++;
+                if (targetCollider.enabled)
+                {
+                    enabledBeltColliderCount++;
+                }
+            }
+        }
+    }
+
+    private string FormatRuntimeRetryMs()
+    {
+        if (float.IsNaN(nextConveyorLineRetryTime) || float.IsInfinity(nextConveyorLineRetryTime))
+        {
+            return "inf";
+        }
+
+        float retryMs = Mathf.Max(0f, nextConveyorLineRetryTime - Time.time) * 1000f;
+        return retryMs.ToString("0.#", CultureInfo.InvariantCulture);
     }
 
     private static int CompareActiveConveyorTickOrder(Block left, Block right)

@@ -62,6 +62,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         bool beltTopOnly = conveyorBelt.IsCornerVariant;
         RefreshBeltRenderCache(conveyorBelt, cache, beltTopOnly);
         conveyorBelt.SetVirtualRenderingSuppressed(true, beltTopOnly);
+        conveyorBelt.SetRuntimeRenderingHidden(IsBeltRenderingHidden());
     }
 
     public void Unregister(ConveyorBelt conveyorBelt, bool restoreNativeRenderers = true)
@@ -85,7 +86,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!Application.isPlaying || batches.ActiveBatchCount == 0)
+        if (!Application.isPlaying || batches.ActiveBatchCount == 0 || IsBeltRenderingHidden())
         {
             return;
         }
@@ -162,6 +163,11 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private void RenderBatches()
     {
         batches.RenderBatches(mainCamera);
+    }
+
+    private static bool IsBeltRenderingHidden()
+    {
+        return GameManager.Instance != null && GameManager.Instance.HideBelts;
     }
 
     private static bool HasOddNegativeScale(Matrix4x4 matrix)
