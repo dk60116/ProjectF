@@ -2744,7 +2744,41 @@ public class Block : BaseObject
             return;
         }
 
+        AppendVirtualConveyorItemRenderDataCore(results, false);
+    }
+
+    public void AppendDynamicVirtualConveyorItemRenderData(List<VirtualConveyorItemRenderData> results)
+    {
+        if (results == null || !Application.isPlaying)
+        {
+            return;
+        }
+
+        if (floorObjects == null || floorObjects.Count == 0)
+        {
+            EnsureFloorObjectsInitialized();
+        }
+
+        if (!IsConveyorStackingEnabled()
+            || !HasConveyorMotionStates())
+        {
+            return;
+        }
+
+        AppendVirtualConveyorItemRenderDataCore(results, true);
+    }
+
+    private void AppendVirtualConveyorItemRenderDataCore(
+        List<VirtualConveyorItemRenderData> results,
+        bool useDynamicFastPath)
+    {
         int laneCount = GetConveyorLaneCount();
+        bool useIdentityRotation = useDynamicFastPath && !HasRuntimeBelt2FConveyor();
+        GameManager gameManager = useDynamicFastPath ? GameManager.Instance : null;
+        TerrainGenerator terrainGenerator = useDynamicFastPath ? TerrainGenerator.Active : null;
+        bool showSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
+        bool showBeltItemLine = gameManager != null && gameManager.ShowBeltItemLine;
+
         for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
         {
             PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
@@ -2754,15 +2788,36 @@ public class Block : BaseObject
                 continue;
             }
 
-            ApplyConveyorObjectRenderingMode(portableObject);
-            Vector3 position = GetConveyorItemVisualWorldPosition(laneIndex);
-            Quaternion rotation = GetConveyorItemVisualWorldRotation(laneIndex, position);
-            bool useBeltItemLineDebugColor = TryGetBeltItemLineDebugColor(laneIndex, out Color32 beltItemLineDebugColor);
+            if (useDynamicFastPath)
+            {
+                ApplyConveyorObjectVirtualRenderingSuppressionIfNeeded(portableObject);
+            }
+            else
+            {
+                ApplyConveyorObjectRenderingMode(portableObject);
+            }
+
+            Vector3 position = GetConveyorItemVisualWorldPosition(laneIndex, portableObject);
+            Quaternion rotation = useIdentityRotation
+                ? Quaternion.identity
+                : GetConveyorItemVisualWorldRotation(laneIndex, position);
+            bool useSleepAwakeDarkTint = useDynamicFastPath
+                ? showSleepAwake && IsConveyorItemSleepAwakeSleeping(laneIndex)
+                : ShouldUseSleepAwakeDarkTint(laneIndex);
+            Color32 beltItemLineDebugColor;
+            bool useBeltItemLineDebugColor = useDynamicFastPath
+                ? TryGetBeltItemLineDebugColorFast(
+                    terrainGenerator,
+                    showBeltItemLine,
+                    laneIndex,
+                    out beltItemLineDebugColor)
+                : TryGetBeltItemLineDebugColor(laneIndex, out beltItemLineDebugColor);
+
             results.Add(new VirtualConveyorItemRenderData(
                 itemId,
                 Matrix4x4.TRS(position, rotation, Vector3.one),
                 gameObject.layer,
-                ShouldUseSleepAwakeDarkTint(laneIndex),
+                useSleepAwakeDarkTint,
                 useBeltItemLineDebugColor,
                 beltItemLineDebugColor));
         }
@@ -7104,6 +7159,18 @@ public class Block : BaseObject
             && generator.TryGetBeltItemLineDebugColor(this, laneIndex, out color);
     }
 
+    private bool TryGetBeltItemLineDebugColorFast(
+        TerrainGenerator generator,
+        bool showBeltItemLine,
+        int laneIndex,
+        out Color32 color)
+    {
+        color = Color.white;
+        return showBeltItemLine
+               && generator != null
+               && generator.TryGetBeltItemLineDebugColor(this, laneIndex, out color);
+    }
+
     private void MarkConveyorItemVisualDirty()
     {
         InvalidateConveyorCanMoveCaches();
@@ -7837,6 +7904,26 @@ public class Block : BaseObject
         }
     }
 
+    private void ApplyConveyorObjectVirtualRenderingSuppressionIfNeeded(PortableObject portableObject)
+    {
+        if (portableObject == null)
+        {
+            return;
+        }
+
+        if (!portableObject.IsVisualRenderingSuppressed)
+        {
+            portableObject.SetVisualRenderingSuppressed(true);
+        }
+
+        if (!portableObject.IsMovingToTarget && portableObject.CachedGameObject.activeSelf)
+        {
+            DroppedItemPickupGate gate = portableObject.PickupGate;
+            gate?.SetPreserveStateOnDisable(true);
+            portableObject.SetCachedActive(false);
+        }
+    }
+
     public void RefreshConveyorObjectRenderingMode()
     {
         if (conveyorStack == null || conveyorStack.Count <= 0)
@@ -7912,7 +7999,11 @@ public class Block : BaseObject
 
     private Vector3 GetConveyorItemVisualWorldPosition(int laneIndex)
     {
-        PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
+        return GetConveyorItemVisualWorldPosition(laneIndex, GetConveyorPortableObjectAtLane(laneIndex));
+    }
+
+    private Vector3 GetConveyorItemVisualWorldPosition(int laneIndex, PortableObject portableObject)
+    {
         if (portableObject != null)
         {
             return GetConveyorObjectVisualWorldPosition(laneIndex, portableObject);

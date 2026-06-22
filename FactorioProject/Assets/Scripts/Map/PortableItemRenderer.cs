@@ -45,7 +45,13 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private float portableObjectBatchCellSize = 8f;
 
     [SerializeField, Min(1f)]
-    private float virtualConveyorItemBatchCellSize = 8f;
+    private float virtualConveyorItemBatchCellSize = 64f;
+
+    [SerializeField, Min(0.25f)]
+    private float dynamicVirtualConveyorItemCullBoundsSize = 2.25f;
+
+    [SerializeField, Min(0.5f)]
+    private float dynamicVirtualConveyorItemCullBoundsHeight = 2.5f;
 
     private readonly HashSet<PortableObject> registeredPortableObjects = new HashSet<PortableObject>();
     private readonly VirtualRenderBatchCollection portableObjectBatches = new VirtualRenderBatchCollection();
@@ -63,8 +69,12 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private readonly VirtualRenderBatchCollection dynamicVirtualConveyorBatches = new VirtualRenderBatchCollection();
     private readonly Dictionary<Block, BlockRenderCache> virtualConveyorBlockRenderCaches =
         new Dictionary<Block, BlockRenderCache>();
+    private readonly HashSet<Block> activeDynamicVirtualConveyorRenderBlockLookup = new HashSet<Block>();
+    private readonly Dictionary<Block, DynamicBlockRenderCache> dynamicVirtualConveyorBlockRenderCaches =
+        new Dictionary<Block, DynamicBlockRenderCache>();
     private readonly Dictionary<int, ItemRenderAsset> renderAssetsByItemId = new Dictionary<int, ItemRenderAsset>();
     private readonly List<Block> staleVirtualConveyorCacheBlocks = new List<Block>(64);
+    private readonly List<Block> staleDynamicVirtualConveyorCacheBlocks = new List<Block>(64);
 
     private TerrainGenerator terrainGenerator;
     private ItemManager itemManager;
@@ -72,8 +82,41 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private Camera mainCamera;
     private int cachedVirtualConveyorVisualBlockSetVersion = int.MinValue;
     private int cachedDynamicVirtualConveyorVisualBlockSetVersion = int.MinValue;
+    private int lastDynamicVirtualConveyorCullSourceBlocks;
+    private int lastDynamicVirtualConveyorCullCandidateBlocks;
+    private int lastDynamicVirtualConveyorCullLayerSkippedBlocks;
+    private int lastDynamicVirtualConveyorCullFrustumSkippedBlocks;
+    private int lastDynamicVirtualConveyorCullPassedBlocks;
+    private int lastDynamicVirtualConveyorRenderedItems;
+    private int lastDynamicVirtualConveyorKeyCacheHits;
+    private int lastDynamicVirtualConveyorKeyCacheMisses;
+    private int lastDynamicVirtualConveyorKeyRebuilds;
 
     public int RegisteredPortableObjectCount => registeredPortableObjects.Count;
+    public int StaticVirtualConveyorItemBatchCount => virtualConveyorBatches.ActiveBatchCount;
+    public int StaticVirtualConveyorItemInstanceCount => virtualConveyorBatches.ActiveMatrixCount;
+    public int StaticVirtualConveyorItemDrawCallCount => virtualConveyorBatches.EstimatedDrawCallCount;
+    public int DynamicVirtualConveyorItemBatchCount => dynamicVirtualConveyorBatches.ActiveBatchCount;
+    public int DynamicVirtualConveyorItemInstanceCount => dynamicVirtualConveyorBatches.ActiveMatrixCount;
+    public int DynamicVirtualConveyorItemDrawCallCount => dynamicVirtualConveyorBatches.EstimatedDrawCallCount;
+    public int ActiveVirtualConveyorRenderBlockCount => activeVirtualConveyorRenderBlocks.Count;
+    public int DynamicVirtualConveyorRenderBlockCount => activeDynamicVirtualConveyorRenderBlocks.Count;
+    public int DirtyVirtualConveyorRenderBlockCount => dirtyVirtualConveyorRenderBlocks.Count;
+    public int CachedVirtualConveyorRenderBlockCount => virtualConveyorBlockRenderCaches.Count;
+    public int CachedDynamicVirtualConveyorRenderBlockCount => dynamicVirtualConveyorBlockRenderCaches.Count;
+    public int CachedItemRenderAssetCount => renderAssetsByItemId.Count;
+    public int DynamicVirtualConveyorCullSourceBlocks => lastDynamicVirtualConveyorCullSourceBlocks;
+    public int DynamicVirtualConveyorCullCandidateBlocks => lastDynamicVirtualConveyorCullCandidateBlocks;
+    public int DynamicVirtualConveyorCullLayerSkippedBlocks => lastDynamicVirtualConveyorCullLayerSkippedBlocks;
+    public int DynamicVirtualConveyorCullFrustumSkippedBlocks => lastDynamicVirtualConveyorCullFrustumSkippedBlocks;
+    public int DynamicVirtualConveyorCullPassedBlocks => lastDynamicVirtualConveyorCullPassedBlocks;
+    public int DynamicVirtualConveyorRenderedItems => lastDynamicVirtualConveyorRenderedItems;
+    public int DynamicVirtualConveyorKeyCacheHits => lastDynamicVirtualConveyorKeyCacheHits;
+    public int DynamicVirtualConveyorKeyCacheMisses => lastDynamicVirtualConveyorKeyCacheMisses;
+    public int DynamicVirtualConveyorKeyRebuilds => lastDynamicVirtualConveyorKeyRebuilds;
+    public float VirtualConveyorItemBatchCellSize => virtualConveyorItemBatchCellSize;
+    public float DynamicVirtualConveyorCullBoundsSize => dynamicVirtualConveyorItemCullBoundsSize;
+    public float DynamicVirtualConveyorCullBoundsHeight => dynamicVirtualConveyorItemCullBoundsHeight;
 
     public static PortableItemRenderer EnsureFor(GameObject host)
     {
@@ -255,11 +298,14 @@ public sealed class PortableItemRenderer : MonoBehaviour
             || IsBeltItemRenderingHidden())
         {
             ClearVirtualConveyorRenderState();
+            ResetDynamicVirtualConveyorRenderCounters();
             activeVirtualConveyorRenderBlocks.Clear();
             activeVirtualConveyorRenderBlockLookup.Clear();
             activeDynamicVirtualConveyorRenderBlocks.Clear();
+            activeDynamicVirtualConveyorRenderBlockLookup.Clear();
             dirtyVirtualConveyorRenderBlocks.Clear();
             virtualConveyorBlockRenderCaches.Clear();
+            dynamicVirtualConveyorBlockRenderCaches.Clear();
             cachedVirtualConveyorVisualBlockSetVersion = int.MinValue;
             cachedDynamicVirtualConveyorVisualBlockSetVersion = int.MinValue;
             return;
@@ -267,12 +313,28 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
         using (RebuildVirtualConveyorBatchesMarker.Auto())
         {
-            RebuildVirtualConveyorBatches();
+            long startTimestamp = BeginRuntimeProfileSample(out bool profileRebuild);
+            try
+            {
+                RebuildVirtualConveyorBatches();
+            }
+            finally
+            {
+                EndRuntimeProfileSample(profileRebuild, "Conveyor Item Rebuild", startTimestamp);
+            }
         }
 
         using (RenderVirtualConveyorBatchesMarker.Auto())
         {
-            RenderVirtualConveyorBatches();
+            long startTimestamp = BeginRuntimeProfileSample(out bool profileRender);
+            try
+            {
+                RenderVirtualConveyorBatches();
+            }
+            finally
+            {
+                EndRuntimeProfileSample(profileRender, "Conveyor Item Render", startTimestamp);
+            }
         }
     }
 
@@ -308,8 +370,10 @@ public sealed class PortableItemRenderer : MonoBehaviour
         return activeVirtualConveyorRenderBlocks.Count > 0
                || activeVirtualConveyorRenderBlockLookup.Count > 0
                || activeDynamicVirtualConveyorRenderBlocks.Count > 0
+               || activeDynamicVirtualConveyorRenderBlockLookup.Count > 0
                || dirtyVirtualConveyorRenderBlocks.Count > 0
                || virtualConveyorBlockRenderCaches.Count > 0
+               || dynamicVirtualConveyorBlockRenderCaches.Count > 0
                || virtualConveyorBatches.ActiveBatchCount > 0
                || dynamicVirtualConveyorBatches.ActiveBatchCount > 0
                || cachedVirtualConveyorVisualBlockSetVersion != int.MinValue
@@ -321,30 +385,123 @@ public sealed class PortableItemRenderer : MonoBehaviour
         return GameManager.Instance != null && GameManager.Instance.HideBeltItems;
     }
 
+    private static long BeginRuntimeProfileSample(out bool profile)
+    {
+        profile = MapObjectTickProfiler.IsEnabled;
+        return profile ? MapObjectTickProfiler.BeginSample() : 0L;
+    }
+
+    private static void EndRuntimeProfileSample(bool profile, string itemName, long startTimestamp)
+    {
+        if (!profile)
+        {
+            return;
+        }
+
+        MapObjectTickProfiler.EndNamedSample(
+            "Runtime",
+            nameof(PortableItemRenderer),
+            itemName,
+            startTimestamp);
+    }
+
+    private static void EndRuntimeProfileElapsedSample(bool profile, string itemName, long elapsedTicks)
+    {
+        if (!profile || elapsedTicks <= 0L)
+        {
+            return;
+        }
+
+        long syntheticStartTimestamp = MapObjectTickProfiler.BeginSample() - elapsedTicks;
+        EndRuntimeProfileSample(true, itemName, syntheticStartTimestamp);
+    }
+
+    private static long MeasureRuntimeProfilePhase(bool profile, long startTimestamp)
+    {
+        if (!profile)
+        {
+            return 0L;
+        }
+
+        return System.Math.Max(0L, MapObjectTickProfiler.BeginSample() - startTimestamp);
+    }
+
     private void RebuildVirtualConveyorBatches()
     {
         if (cachedRenderAssetItemManager != itemManager)
         {
-            renderAssetsByItemId.Clear();
-            ClearVirtualConveyorRenderState();
-            cachedVirtualConveyorVisualBlockSetVersion = int.MinValue;
-            cachedDynamicVirtualConveyorVisualBlockSetVersion = int.MinValue;
-            cachedRenderAssetItemManager = itemManager;
+            long resetStartTimestamp = BeginRuntimeProfileSample(out bool profileReset);
+            try
+            {
+                renderAssetsByItemId.Clear();
+                ClearVirtualConveyorRenderState();
+                cachedVirtualConveyorVisualBlockSetVersion = int.MinValue;
+                cachedDynamicVirtualConveyorVisualBlockSetVersion = int.MinValue;
+                cachedRenderAssetItemManager = itemManager;
+            }
+            finally
+            {
+                EndRuntimeProfileSample(profileReset, "Conveyor Item Reset Render Assets", resetStartTimestamp);
+            }
         }
 
-        bool activeSetChanged = RefreshActiveVirtualConveyorRenderBlocksIfNeeded();
-        bool dynamicSetChanged = RefreshDynamicVirtualConveyorRenderBlocksIfNeeded();
+        bool activeSetChanged;
+        long activeSetStartTimestamp = BeginRuntimeProfileSample(out bool profileActiveSet);
+        try
+        {
+            activeSetChanged = RefreshActiveVirtualConveyorRenderBlocksIfNeeded();
+        }
+        finally
+        {
+            EndRuntimeProfileSample(profileActiveSet, "Conveyor Item Refresh Active Set", activeSetStartTimestamp);
+        }
+
+        bool dynamicSetChanged;
+        long dynamicSetStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicSet);
+        try
+        {
+            dynamicSetChanged = RefreshDynamicVirtualConveyorRenderBlocksIfNeeded();
+        }
+        finally
+        {
+            EndRuntimeProfileSample(profileDynamicSet, "Conveyor Item Refresh Dynamic Set", dynamicSetStartTimestamp);
+        }
+
         if (activeSetChanged)
         {
-            ReconcileActiveVirtualConveyorRenderBlockCaches();
+            long staticCacheStartTimestamp = BeginRuntimeProfileSample(out bool profileStaticCache);
+            try
+            {
+                ReconcileActiveVirtualConveyorRenderBlockCaches();
+            }
+            finally
+            {
+                EndRuntimeProfileSample(profileStaticCache, "Conveyor Item Reconcile Static Cache", staticCacheStartTimestamp);
+            }
         }
 
         if (dynamicSetChanged)
         {
-            ReconcileDynamicVirtualConveyorRenderBlockCaches();
+            long dynamicCacheStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicCache);
+            try
+            {
+                ReconcileDynamicVirtualConveyorRenderBlockCaches();
+            }
+            finally
+            {
+                EndRuntimeProfileSample(profileDynamicCache, "Conveyor Item Reconcile Dynamic Cache", dynamicCacheStartTimestamp);
+            }
         }
 
-        RefreshDirtyVirtualConveyorRenderBlockCaches();
+        long dirtyCacheStartTimestamp = BeginRuntimeProfileSample(out bool profileDirtyCache);
+        try
+        {
+            RefreshDirtyVirtualConveyorRenderBlockCaches();
+        }
+        finally
+        {
+            EndRuntimeProfileSample(profileDirtyCache, "Conveyor Item Refresh Dirty Cache", dirtyCacheStartTimestamp);
+        }
     }
 
     private bool RefreshActiveVirtualConveyorRenderBlocksIfNeeded()
@@ -389,6 +546,17 @@ public sealed class PortableItemRenderer : MonoBehaviour
         }
 
         terrainGenerator.CopyDynamicConveyorItemVisualBlocks(activeDynamicVirtualConveyorRenderBlocks);
+        activeDynamicVirtualConveyorRenderBlockLookup.Clear();
+        for (int i = 0; i < activeDynamicVirtualConveyorRenderBlocks.Count; i++)
+        {
+            Block block = activeDynamicVirtualConveyorRenderBlocks[i];
+            if (block != null)
+            {
+                activeDynamicVirtualConveyorRenderBlockLookup.Add(block);
+            }
+        }
+
+        PruneDynamicVirtualConveyorRenderBlockCaches();
         cachedDynamicVirtualConveyorVisualBlockSetVersion = version;
         return true;
     }
@@ -442,6 +610,23 @@ public sealed class PortableItemRenderer : MonoBehaviour
         for (int i = 0; i < activeDynamicVirtualConveyorRenderBlocks.Count; i++)
         {
             RemoveVirtualConveyorBlockRenderCache(activeDynamicVirtualConveyorRenderBlocks[i]);
+        }
+    }
+
+    private void PruneDynamicVirtualConveyorRenderBlockCaches()
+    {
+        staleDynamicVirtualConveyorCacheBlocks.Clear();
+        foreach (KeyValuePair<Block, DynamicBlockRenderCache> pair in dynamicVirtualConveyorBlockRenderCaches)
+        {
+            if (pair.Key == null || !activeDynamicVirtualConveyorRenderBlockLookup.Contains(pair.Key))
+            {
+                staleDynamicVirtualConveyorCacheBlocks.Add(pair.Key);
+            }
+        }
+
+        for (int i = 0; i < staleDynamicVirtualConveyorCacheBlocks.Count; i++)
+        {
+            dynamicVirtualConveyorBlockRenderCaches.Remove(staleDynamicVirtualConveyorCacheBlocks[i]);
         }
     }
 
@@ -510,6 +695,25 @@ public sealed class PortableItemRenderer : MonoBehaviour
         virtualConveyorBlockRenderCaches.Remove(block);
     }
 
+    private DynamicBlockRenderCache GetOrCreateDynamicVirtualConveyorBlockRenderCache(Block block)
+    {
+        if (!dynamicVirtualConveyorBlockRenderCaches.TryGetValue(block, out DynamicBlockRenderCache cache))
+        {
+            cache = new DynamicBlockRenderCache();
+            dynamicVirtualConveyorBlockRenderCaches.Add(block, cache);
+        }
+
+        return cache;
+    }
+
+    private void RemoveDynamicVirtualConveyorBlockRenderCache(Block block)
+    {
+        if (block != null)
+        {
+            dynamicVirtualConveyorBlockRenderCaches.Remove(block);
+        }
+    }
+
     private void RefreshVirtualConveyorBlockRenderCache(Block block, BlockRenderCache cache)
     {
         RemoveVirtualConveyorBlockBatchEntries(cache);
@@ -570,6 +774,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
     {
         virtualConveyorBatches.Clear();
         dynamicVirtualConveyorBatches.Clear();
+        dynamicVirtualConveyorBlockRenderCaches.Clear();
 
         foreach (KeyValuePair<Block, BlockRenderCache> pair in virtualConveyorBlockRenderCaches)
         {
@@ -581,79 +786,252 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RenderVirtualConveyorBatches()
     {
-        RebuildDynamicVirtualConveyorBatches();
-        virtualConveyorBatches.RenderBatches(mainCamera);
-        dynamicVirtualConveyorBatches.RenderBatches(mainCamera);
+        long dynamicRebuildStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicRebuild);
+        try
+        {
+            RebuildDynamicVirtualConveyorBatches();
+        }
+        finally
+        {
+            EndRuntimeProfileSample(profileDynamicRebuild, "Conveyor Item Rebuild Dynamic", dynamicRebuildStartTimestamp);
+        }
+
+        long staticRenderStartTimestamp = BeginRuntimeProfileSample(out bool profileStaticRender);
+        try
+        {
+            virtualConveyorBatches.RenderBatches(mainCamera);
+        }
+        finally
+        {
+            EndRuntimeProfileSample(profileStaticRender, "Conveyor Item Render Static", staticRenderStartTimestamp);
+        }
+
+        long dynamicRenderStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicRender);
+        try
+        {
+            dynamicVirtualConveyorBatches.RenderBatches(mainCamera);
+        }
+        finally
+        {
+            EndRuntimeProfileSample(profileDynamicRender, "Conveyor Item Render Dynamic", dynamicRenderStartTimestamp);
+        }
     }
 
     private void RebuildDynamicVirtualConveyorBatches()
     {
+        bool profileBreakdown = MapObjectTickProfiler.IsEnabled;
+        ResetDynamicVirtualConveyorRenderCounters();
+        lastDynamicVirtualConveyorCullSourceBlocks = activeDynamicVirtualConveyorRenderBlocks.Count;
+
         if (activeDynamicVirtualConveyorRenderBlocks.Count <= 0)
         {
             if (dynamicVirtualConveyorBatches.ActiveBatchCount > 0)
             {
+                long clearStartTimestamp = BeginRuntimeProfileSample(out bool profileClear);
                 dynamicVirtualConveyorBatches.ClearActiveMatrices();
+                EndRuntimeProfileSample(profileClear, "Conveyor Item Dynamic Clear", clearStartTimestamp);
             }
 
             return;
         }
 
+        long phaseStartTimestamp = BeginRuntimeProfileSample(out bool profileClearActiveMatrices);
         dynamicVirtualConveyorBatches.ClearActiveMatrices();
+        EndRuntimeProfileSample(
+            profileClearActiveMatrices,
+            "Conveyor Item Dynamic Clear",
+            phaseStartTimestamp);
+
         Camera renderCamera = mainCamera;
         bool canCullDynamicBlocks = renderCamera != null;
         if (canCullDynamicBlocks)
         {
+            phaseStartTimestamp = BeginRuntimeProfileSample(out bool profileFrustum);
             GeometryUtility.CalculateFrustumPlanes(renderCamera, dynamicVirtualConveyorRenderFrustumPlanes);
+            EndRuntimeProfileSample(
+                profileFrustum,
+                "Conveyor Item Dynamic Frustum",
+                phaseStartTimestamp);
         }
+
+        long cullTicks = 0L;
+        long cacheTicks = 0L;
+        long appendDataTicks = 0L;
+        long addMatrixTicks = 0L;
+        long trimCacheTicks = 0L;
 
         for (int i = 0; i < activeDynamicVirtualConveyorRenderBlocks.Count; i++)
         {
+            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             Block block = activeDynamicVirtualConveyorRenderBlocks[i];
             if (block == null || !block.HasDynamicVirtualConveyorItemVisuals())
             {
+                cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+                RemoveDynamicVirtualConveyorBlockRenderCache(block);
                 continue;
             }
 
-            if (canCullDynamicBlocks && !ShouldRenderDynamicVirtualConveyorBlock(block, renderCamera))
+            lastDynamicVirtualConveyorCullCandidateBlocks++;
+            if (canCullDynamicBlocks)
             {
-                continue;
+                DynamicVirtualConveyorCullResult cullResult =
+                    GetDynamicVirtualConveyorBlockCullResult(block, renderCamera);
+                if (cullResult != DynamicVirtualConveyorCullResult.Render)
+                {
+                    AddDynamicVirtualConveyorCullSkip(cullResult);
+                    cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+                    continue;
+                }
             }
 
+            cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            lastDynamicVirtualConveyorCullPassedBlocks++;
+
+            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            DynamicBlockRenderCache blockCache = GetOrCreateDynamicVirtualConveyorBlockRenderCache(block);
+            if (blockCache.version != block.ConveyorItemVisualVersion)
+            {
+                blockCache.itemKeyCaches.Clear();
+                blockCache.version = block.ConveyorItemVisualVersion;
+            }
+            cacheTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+
+            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             scratchVirtualConveyorRenderItems.Clear();
-            block.AppendVirtualConveyorItemRenderData(scratchVirtualConveyorRenderItems);
+            block.AppendDynamicVirtualConveyorItemRenderData(scratchVirtualConveyorRenderItems);
+            appendDataTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+
+            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             for (int itemIndex = 0; itemIndex < scratchVirtualConveyorRenderItems.Count; itemIndex++)
             {
-                AddDynamicVirtualConveyorRenderItem(scratchVirtualConveyorRenderItems[itemIndex]);
+                if (AddDynamicVirtualConveyorRenderItem(
+                        blockCache,
+                        itemIndex,
+                        scratchVirtualConveyorRenderItems[itemIndex]))
+                {
+                    lastDynamicVirtualConveyorRenderedItems++;
+                }
             }
+            addMatrixTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+
+            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            if (blockCache.itemKeyCaches.Count > scratchVirtualConveyorRenderItems.Count)
+            {
+                blockCache.itemKeyCaches.RemoveRange(
+                    scratchVirtualConveyorRenderItems.Count,
+                    blockCache.itemKeyCaches.Count - scratchVirtualConveyorRenderItems.Count);
+            }
+
+            blockCache.isValid = true;
+            trimCacheTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
         }
 
         scratchVirtualConveyorRenderItems.Clear();
+        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic Cull", cullTicks);
+        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic Cache", cacheTicks);
+        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic AppendData", appendDataTicks);
+        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic AddMatrix", addMatrixTicks);
+        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic TrimCache", trimCacheTicks);
     }
 
-    private bool ShouldRenderDynamicVirtualConveyorBlock(Block block, Camera renderCamera)
+    private DynamicVirtualConveyorCullResult GetDynamicVirtualConveyorBlockCullResult(Block block, Camera renderCamera)
     {
         if (block == null || renderCamera == null || !IsLayerVisibleToCamera(renderCamera, block.gameObject.layer))
+        {
+            return DynamicVirtualConveyorCullResult.Layer;
+        }
+
+        Bounds bounds = CreateDynamicVirtualConveyorBlockCullBounds(block);
+        if (!GeometryUtility.TestPlanesAABB(dynamicVirtualConveyorRenderFrustumPlanes, bounds))
+        {
+            return DynamicVirtualConveyorCullResult.Frustum;
+        }
+
+        return DynamicVirtualConveyorCullResult.Render;
+    }
+
+    private Bounds CreateDynamicVirtualConveyorBlockCullBounds(Block block)
+    {
+        float horizontalSize = Mathf.Max(0.25f, dynamicVirtualConveyorItemCullBoundsSize);
+        float verticalSize = Mathf.Max(0.5f, dynamicVirtualConveyorItemCullBoundsHeight);
+        return new Bounds(
+            block.transform.position + Vector3.up * (verticalSize * 0.5f),
+            new Vector3(horizontalSize, verticalSize, horizontalSize));
+    }
+
+    private bool AddDynamicVirtualConveyorRenderItem(
+        DynamicBlockRenderCache blockCache,
+        int itemIndex,
+        VirtualConveyorItemRenderData renderData)
+    {
+        if (!TryGetDynamicVirtualConveyorBatchKey(blockCache, itemIndex, renderData, out VirtualRenderBatchKey key))
         {
             return false;
         }
 
-        float boundsSize = Mathf.Max(4f, virtualConveyorItemBatchCellSize);
-        Bounds bounds = new Bounds(block.transform.position + Vector3.up, new Vector3(boundsSize, boundsSize, boundsSize));
-        return GeometryUtility.TestPlanesAABB(dynamicVirtualConveyorRenderFrustumPlanes, bounds);
+        dynamicVirtualConveyorBatches.AddMatrix(key, renderData.Matrix);
+        return true;
     }
 
-    private void AddDynamicVirtualConveyorRenderItem(VirtualConveyorItemRenderData renderData)
+    private bool TryGetDynamicVirtualConveyorBatchKey(
+        DynamicBlockRenderCache blockCache,
+        int itemIndex,
+        VirtualConveyorItemRenderData renderData,
+        out VirtualRenderBatchKey key)
     {
-        if (!TryCreateVirtualConveyorBatchKey(renderData, out VirtualRenderBatchKey key))
+        key = default;
+        if (blockCache == null || itemIndex < 0)
         {
-            return;
+            lastDynamicVirtualConveyorKeyCacheMisses++;
+            return TryCreateVirtualConveyorBatchKey(renderData, out key);
         }
 
-        dynamicVirtualConveyorBatches.AddMatrix(key, renderData.Matrix);
+        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
+        int cellX = GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize);
+        int cellZ = GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize);
+
+        while (blockCache.itemKeyCaches.Count <= itemIndex)
+        {
+            blockCache.itemKeyCaches.Add(default);
+        }
+
+        DynamicItemRenderKeyCache itemKeyCache = blockCache.itemKeyCaches[itemIndex];
+        if (itemKeyCache.Matches(renderData, cellX, cellZ))
+        {
+            key = itemKeyCache.Key;
+            lastDynamicVirtualConveyorKeyCacheHits++;
+            return true;
+        }
+
+        lastDynamicVirtualConveyorKeyCacheMisses++;
+        if (!TryCreateVirtualConveyorBatchKey(renderData, cellX, cellZ, out key))
+        {
+            blockCache.itemKeyCaches[itemIndex] = default;
+            return false;
+        }
+
+        blockCache.itemKeyCaches[itemIndex] =
+            new DynamicItemRenderKeyCache(renderData, cellX, cellZ, key);
+        lastDynamicVirtualConveyorKeyRebuilds++;
+        return true;
     }
 
     private bool TryCreateVirtualConveyorBatchKey(
         VirtualConveyorItemRenderData renderData,
+        out VirtualRenderBatchKey key)
+    {
+        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
+        return TryCreateVirtualConveyorBatchKey(
+            renderData,
+            GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize),
+            GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize),
+            out key);
+    }
+
+    private bool TryCreateVirtualConveyorBatchKey(
+        VirtualConveyorItemRenderData renderData,
+        int cellX,
+        int cellZ,
         out VirtualRenderBatchKey key)
     {
         key = default;
@@ -674,7 +1052,6 @@ public sealed class PortableItemRenderer : MonoBehaviour
             material.enableInstancing = true;
         }
 
-        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
         key = new VirtualRenderBatchKey(
             mesh,
             material,
@@ -688,8 +1065,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
             renderData.UseBeltItemLineDebugColor,
             renderData.BeltItemLineDebugColor,
             renderData.ItemId,
-            GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize),
-            GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize));
+            cellX,
+            cellZ);
         return true;
     }
 
@@ -711,6 +1088,39 @@ public sealed class PortableItemRenderer : MonoBehaviour
             || (camera.cullingMask & (1 << layer)) != 0;
     }
 
+    private void ResetDynamicVirtualConveyorRenderCounters()
+    {
+        lastDynamicVirtualConveyorCullSourceBlocks = 0;
+        lastDynamicVirtualConveyorCullCandidateBlocks = 0;
+        lastDynamicVirtualConveyorCullLayerSkippedBlocks = 0;
+        lastDynamicVirtualConveyorCullFrustumSkippedBlocks = 0;
+        lastDynamicVirtualConveyorCullPassedBlocks = 0;
+        lastDynamicVirtualConveyorRenderedItems = 0;
+        lastDynamicVirtualConveyorKeyCacheHits = 0;
+        lastDynamicVirtualConveyorKeyCacheMisses = 0;
+        lastDynamicVirtualConveyorKeyRebuilds = 0;
+    }
+
+    private void AddDynamicVirtualConveyorCullSkip(DynamicVirtualConveyorCullResult cullResult)
+    {
+        switch (cullResult)
+        {
+            case DynamicVirtualConveyorCullResult.Layer:
+                lastDynamicVirtualConveyorCullLayerSkippedBlocks++;
+                break;
+            case DynamicVirtualConveyorCullResult.Frustum:
+                lastDynamicVirtualConveyorCullFrustumSkippedBlocks++;
+                break;
+        }
+    }
+
+    private enum DynamicVirtualConveyorCullResult
+    {
+        Render,
+        Layer,
+        Frustum
+    }
+
     private sealed class BlockRenderCache : IVirtualRenderBatchOwner
     {
         public readonly List<VirtualRenderBatchEntry> batchEntries = new List<VirtualRenderBatchEntry>(4);
@@ -729,6 +1139,56 @@ public sealed class PortableItemRenderer : MonoBehaviour
             VirtualRenderBatchEntry entry = batchEntries[entryIndex];
             entry.MatrixIndex = matrixIndex;
             batchEntries[entryIndex] = entry;
+        }
+    }
+
+    private sealed class DynamicBlockRenderCache
+    {
+        public readonly List<DynamicItemRenderKeyCache> itemKeyCaches =
+            new List<DynamicItemRenderKeyCache>(4);
+        public int version = int.MinValue;
+        public bool isValid;
+    }
+
+    private readonly struct DynamicItemRenderKeyCache
+    {
+        public DynamicItemRenderKeyCache(
+            VirtualConveyorItemRenderData renderData,
+            int cellX,
+            int cellZ,
+            VirtualRenderBatchKey key)
+        {
+            ItemId = renderData.ItemId;
+            Layer = renderData.Layer;
+            CellX = cellX;
+            CellZ = cellZ;
+            UseSleepAwakeDarkTint = renderData.UseSleepAwakeDarkTint;
+            UseBeltItemLineDebugColor = renderData.UseBeltItemLineDebugColor;
+            BeltItemLineDebugColor = renderData.BeltItemLineDebugColor;
+            Key = key;
+            IsValid = true;
+        }
+
+        public readonly int ItemId;
+        public readonly int Layer;
+        public readonly int CellX;
+        public readonly int CellZ;
+        public readonly bool UseSleepAwakeDarkTint;
+        public readonly bool UseBeltItemLineDebugColor;
+        public readonly Color32 BeltItemLineDebugColor;
+        public readonly VirtualRenderBatchKey Key;
+        public readonly bool IsValid;
+
+        public bool Matches(VirtualConveyorItemRenderData renderData, int cellX, int cellZ)
+        {
+            return IsValid
+                   && ItemId == renderData.ItemId
+                   && Layer == renderData.Layer
+                   && CellX == cellX
+                   && CellZ == cellZ
+                   && UseSleepAwakeDarkTint == renderData.UseSleepAwakeDarkTint
+                   && UseBeltItemLineDebugColor == renderData.UseBeltItemLineDebugColor
+                   && BeltItemLineDebugColor.Equals(renderData.BeltItemLineDebugColor);
         }
     }
 

@@ -638,6 +638,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
     private readonly Dictionary<Vector2Int, Transform> sleepingChunkViews = new Dictionary<Vector2Int, Transform>();
     private readonly Dictionary<Vector2Int, InstallationObject> sleepingInstallationViews = new Dictionary<Vector2Int, InstallationObject>();
+    private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
+    private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
     private readonly List<Block> conveyorTickBuffer = new List<Block>();
     private readonly List<Block> activeConveyorDataMotionBlocks = new List<Block>();
@@ -688,12 +690,14 @@ public partial class TerrainGenerator : MonoBehaviour
     private int lastConveyorItemLoadSavedBlocks;
     private int lastConveyorItemLoadSavedLanes;
     private int lastConveyorItemLoadLoadedBlocks;
-    private int lastConveyorItemLoadMissingBlocks;
+    private int lastConveyorItemLoadPendingBlocks;
+    private int lastConveyorItemLoadPendingLanes;
     private int lastConveyorItemLoadNotRuntimeBlocks;
     private int lastConveyorItemLoadZeroLaneBlocks;
     private int lastConveyorItemLoadAppliedLanes;
     private int lastConveyorItemLoadFallbackBlocks;
-    private int lastConveyorItemLoadFailedBlocks;
+    private int lastConveyorItemLoadActualFailedBlocks;
+    private int lastConveyorItemLoadActualFailedLanes;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, List<Block>> conveyorNetworkBlocksById = new Dictionary<int, List<Block>>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
@@ -1038,6 +1042,10 @@ public partial class TerrainGenerator : MonoBehaviour
             BackgroundConveyorSimulationPassesPerTick,
             backgroundConveyorDirtyCoordinates);
         WakeLoadedConveyorsNearBackgroundConveyorChanges();
+        if (resourceStateStore.LastBackgroundConveyorBudgetHit > 0)
+        {
+            nextBackgroundConveyorSimulationTime = Time.time;
+        }
     }
 
     private void WakeLoadedConveyorsNearBackgroundConveyorChanges()
@@ -1473,12 +1481,13 @@ public partial class TerrainGenerator : MonoBehaviour
         MapSaveData mapSaveData,
         bool updateLoadStats)
     {
+        int laneCount = updateLoadStats ? CountConveyorItemSaveLanes(lanes) : 0;
         if (block == null)
         {
             if (updateLoadStats)
             {
-                lastConveyorItemLoadMissingBlocks++;
-                lastConveyorItemLoadFailedBlocks++;
+                lastConveyorItemLoadPendingBlocks++;
+                lastConveyorItemLoadPendingLanes += laneCount;
             }
 
             return 0;
@@ -1494,7 +1503,8 @@ public partial class TerrainGenerator : MonoBehaviour
             if (updateLoadStats)
             {
                 lastConveyorItemLoadNotRuntimeBlocks++;
-                lastConveyorItemLoadFailedBlocks++;
+                lastConveyorItemLoadActualFailedBlocks++;
+                lastConveyorItemLoadActualFailedLanes += laneCount;
             }
 
             return 0;
@@ -1505,7 +1515,8 @@ public partial class TerrainGenerator : MonoBehaviour
             if (updateLoadStats)
             {
                 lastConveyorItemLoadZeroLaneBlocks++;
-                lastConveyorItemLoadFailedBlocks++;
+                lastConveyorItemLoadActualFailedBlocks++;
+                lastConveyorItemLoadActualFailedLanes += laneCount;
             }
 
             return 0;
@@ -1542,7 +1553,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (updateLoadStats)
         {
-            lastConveyorItemLoadFailedBlocks++;
+            lastConveyorItemLoadActualFailedBlocks++;
+            lastConveyorItemLoadActualFailedLanes += laneCount;
         }
 
         return 0;
@@ -1553,12 +1565,14 @@ public partial class TerrainGenerator : MonoBehaviour
         lastConveyorItemLoadSavedBlocks = 0;
         lastConveyorItemLoadSavedLanes = 0;
         lastConveyorItemLoadLoadedBlocks = 0;
-        lastConveyorItemLoadMissingBlocks = 0;
+        lastConveyorItemLoadPendingBlocks = 0;
+        lastConveyorItemLoadPendingLanes = 0;
         lastConveyorItemLoadNotRuntimeBlocks = 0;
         lastConveyorItemLoadZeroLaneBlocks = 0;
         lastConveyorItemLoadAppliedLanes = 0;
         lastConveyorItemLoadFallbackBlocks = 0;
-        lastConveyorItemLoadFailedBlocks = 0;
+        lastConveyorItemLoadActualFailedBlocks = 0;
+        lastConveyorItemLoadActualFailedLanes = 0;
     }
 
     private static int CountConveyorItemSaveLanes(IReadOnlyList<ConveyorItemLaneSaveState> lanes)
@@ -1885,7 +1899,8 @@ public partial class TerrainGenerator : MonoBehaviour
         int normalizedChunkSize = Mathf.Max(4, chunkSize);
         int normalizedLoadRadius = GetEffectiveLoadRadius();
         int normalizedUnloadRadius = GetEffectiveUnloadRadius();
-        List<Vector2Int> chunksToGenerate = new List<Vector2Int>();
+        List<Vector2Int> chunksToGenerate = chunksToGenerateScratch;
+        chunksToGenerate.Clear();
 
         using (RefreshChunkLoadScanMarker.Auto())
         {
@@ -1909,12 +1924,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
         using (RefreshChunkLoadSortMarker.Auto())
         {
-            chunksToGenerate.Sort((left, right) =>
+            if (chunksToGenerate.Count > 1)
             {
-                int leftDistance = GetChunkDistanceSqr(left, centerChunk);
-                int rightDistance = GetChunkDistanceSqr(right, centerChunk);
-                return leftDistance.CompareTo(rightDistance);
-            });
+                chunkDistanceComparer.CenterChunk = centerChunk;
+                chunksToGenerate.Sort(chunkDistanceComparer);
+            }
         }
 
         using (RefreshChunkGenerationQueueMarker.Auto())
@@ -1924,6 +1938,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 QueueChunkGeneration(chunksToGenerate[i], normalizedChunkSize);
             }
 
+            chunksToGenerate.Clear();
             EnsureChunkGenerationProcessing();
         }
 
@@ -1943,6 +1958,18 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             EnsureChunkUnloadProcessing();
+        }
+    }
+
+    private sealed class ChunkDistanceComparer : IComparer<Vector2Int>
+    {
+        public Vector2Int CenterChunk { get; set; }
+
+        public int Compare(Vector2Int left, Vector2Int right)
+        {
+            int leftDistance = GetChunkDistanceSqr(left, CenterChunk);
+            int rightDistance = GetChunkDistanceSqr(right, CenterChunk);
+            return leftDistance.CompareTo(rightDistance);
         }
     }
 

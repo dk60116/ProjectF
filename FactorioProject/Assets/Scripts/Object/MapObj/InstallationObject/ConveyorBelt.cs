@@ -114,9 +114,16 @@ public class ConveyorBelt : InstallationObject
     public int PlacementRotationQuarterTurnOffset => IsCornerVariant ? 3 : 0;
     public bool IsVirtualizedSourceViewHidden => virtualSourceViewHidden;
     public int VirtualizedSourceViewHiddenObjectCount => virtualSourceViewHidden ? virtualSourceViewObjects.Count : 0;
+    public bool IsVirtualRenderingSuppressed => virtualRenderingSuppressed;
+    public bool IsVirtualRenderingSuppressBeltTopOnly => virtualRenderingSuppressed && virtualRenderingSuppressBeltTopOnly;
     public bool IsRuntimeRootSuspended => runtimeRootSuspended;
     public bool IsRuntimeRootAvailable => gameObject != null
         && (gameObject.activeSelf || runtimeRootSuspended);
+    public int NativeRendererCount => CountNativeRenderers(false, false);
+    public int EnabledNativeRendererCount => CountNativeRenderers(true, false);
+    public int ActiveEnabledNativeRendererCount => CountNativeRenderers(true, true);
+    public int SuppressedNativeRendererCount => Mathf.Max(0, NativeRendererCount - EnabledNativeRendererCount);
+    public int TopOnlyKeptNativeRendererCount => CountTopOnlyKeptNativeRenderers();
 
     public static bool TryGetFlowDirection(Quaternion rotation, out Vector2Int flowDirection)
     {
@@ -1624,6 +1631,61 @@ public class ConveyorBelt : InstallationObject
                 renderer.enabled = isEnabled;
             }
         }
+    }
+
+    private int CountNativeRenderers(bool onlyEnabled, bool onlyActiveEnabled)
+    {
+        EnsureRendererCache();
+        int count = 0;
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (onlyEnabled && !renderer.enabled)
+            {
+                continue;
+            }
+
+            if (onlyActiveEnabled
+                && (renderer.gameObject == null || !renderer.gameObject.activeInHierarchy))
+            {
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private int CountTopOnlyKeptNativeRenderers()
+    {
+        if (!virtualRenderingSuppressed || !virtualRenderingSuppressBeltTopOnly)
+        {
+            return 0;
+        }
+
+        RefreshBeltTopRenderInfo();
+        EnsureRendererCache();
+        int count = 0;
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (!IsRuntimeRendererObjectAvailable(renderer)
+                || !renderer.enabled
+                || TryGetBeltTopRenderInfo(renderer, out _))
+            {
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
     }
 
     private static bool IsRuntimeRendererObjectAvailable(MeshRenderer renderer)

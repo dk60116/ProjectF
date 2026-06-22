@@ -137,6 +137,13 @@ public sealed class VirtualItemStackState
         return new VirtualItemStackState(null, runs, count);
     }
 
+    public static VirtualItemStackState FromOwnedRawItems(int[] itemIds)
+    {
+        return itemIds != null && itemIds.Length > 0
+            ? new VirtualItemStackState(itemIds, null, itemIds.Length)
+            : null;
+    }
+
     public List<int> ToList()
     {
         List<int> itemIds = new List<int>(itemCount);
@@ -389,6 +396,46 @@ public sealed class VirtualObjectWorld : MonoBehaviour
             return default;
         }
 
+        return UpsertFloorItemStackState(
+            coordinate,
+            itemIds[0],
+            itemIds.Count,
+            VirtualItemStackState.FromItems(itemIds),
+            residency);
+    }
+
+    public VirtualObjectId UpsertFloorItemStackRaw(
+        Vector2Int coordinate,
+        int[] itemIds,
+        VirtualObjectResidency residency = VirtualObjectResidency.Virtual)
+    {
+        if (itemIds == null || itemIds.Length <= 0)
+        {
+            RemoveFloorItemStack(coordinate);
+            return default;
+        }
+
+        return UpsertFloorItemStackState(
+            coordinate,
+            itemIds[0],
+            itemIds.Length,
+            VirtualItemStackState.FromOwnedRawItems(itemIds),
+            residency);
+    }
+
+    private VirtualObjectId UpsertFloorItemStackState(
+        Vector2Int coordinate,
+        int firstItemId,
+        int itemCount,
+        VirtualItemStackState itemStack,
+        VirtualObjectResidency residency)
+    {
+        if (itemStack == null || itemCount <= 0)
+        {
+            RemoveFloorItemStack(coordinate);
+            return default;
+        }
+
         VirtualObjectRecord record = GetOrCreateIndexedRecord(
             floorStackRecordByCoordinate,
             coordinate,
@@ -399,9 +446,9 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.worldPosition = new Vector3(coordinate.x, 0f, coordinate.y);
         record.worldRotation = Quaternion.identity;
         record.quarterTurns = 0;
-        record.itemId = itemIds[0];
-        record.count = itemIds.Count;
-        record.itemStack = VirtualItemStackState.FromItems(itemIds);
+        record.itemId = firstItemId;
+        record.count = itemCount;
+        record.itemStack = itemStack;
         record.liveInstanceId = 0;
         ReplaceOccupiedCoordinates(record, coordinate);
         StoreRecord(record);

@@ -463,9 +463,10 @@ public static class MapObjectTickProfiler
     private const double MicrosecondsPerSecond = 1000000.0;
     private const int DefaultSnapshotMaxRows = 64;
 
-    private static readonly Dictionary<string, GroupStats> groupStatsByKey = new Dictionary<string, GroupStats>(128);
-    private static readonly Dictionary<string, GroupStats> activeUpdateStatsByKey =
-        new Dictionary<string, GroupStats>(128);
+    private static readonly Dictionary<ProfilerGroupKey, GroupStats> groupStatsByKey =
+        new Dictionary<ProfilerGroupKey, GroupStats>(128);
+    private static readonly Dictionary<ProfilerGroupKey, GroupStats> activeUpdateStatsByKey =
+        new Dictionary<ProfilerGroupKey, GroupStats>(128);
     private static readonly Dictionary<object, TargetDescriptor> targetDescriptorByObject =
         new Dictionary<object, TargetDescriptor>(512);
     private static readonly List<GroupStats> snapshotRows = new List<GroupStats>(128);
@@ -531,13 +532,13 @@ public static class MapObjectTickProfiler
 
     public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp)
     {
-        TargetDescriptor descriptor = new TargetDescriptor
-        {
-            TypeName = string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName,
-            ItemId = -1,
-            ItemName = string.IsNullOrWhiteSpace(itemName) ? typeName : itemName
-        };
-        RecordSample(string.IsNullOrWhiteSpace(kind) ? "Update" : kind, descriptor, startTimestamp);
+        string resolvedTypeName = string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName;
+        RecordSample(
+            string.IsNullOrWhiteSpace(kind) ? "Update" : kind,
+            resolvedTypeName,
+            -1,
+            string.IsNullOrWhiteSpace(itemName) ? resolvedTypeName : itemName,
+            startTimestamp);
     }
 
     public static void SetActiveTickCount(int updateCount)
@@ -795,7 +796,7 @@ public static class MapObjectTickProfiler
         float windowSeconds = Mathf.Max(0f, now - startTime);
 
         snapshotRows.Clear();
-        foreach (KeyValuePair<string, GroupStats> pair in groupStatsByKey)
+        foreach (KeyValuePair<ProfilerGroupKey, GroupStats> pair in groupStatsByKey)
         {
             pair.Value.ActiveCount = activeUpdateStatsByKey.TryGetValue(pair.Key, out GroupStats activeStats)
                 ? activeStats.ActiveCount
@@ -807,7 +808,7 @@ public static class MapObjectTickProfiler
             }
         }
 
-        foreach (KeyValuePair<string, GroupStats> pair in activeUpdateStatsByKey)
+        foreach (KeyValuePair<ProfilerGroupKey, GroupStats> pair in activeUpdateStatsByKey)
         {
             if (!groupStatsByKey.ContainsKey(pair.Key) && pair.Value.ActiveCount > 0)
             {
@@ -1001,7 +1002,11 @@ public static class MapObjectTickProfiler
         }
 
         string resolvedKind = string.IsNullOrWhiteSpace(kind) ? "Update" : kind;
-        string key = BuildGroupKey(resolvedKind, descriptor);
+        ProfilerGroupKey key = BuildGroupKey(
+            resolvedKind,
+            descriptor.TypeName,
+            descriptor.ItemId,
+            descriptor.ItemName);
         if (!activeUpdateStatsByKey.TryGetValue(key, out GroupStats stats))
         {
             stats = new GroupStats
@@ -1024,6 +1029,16 @@ public static class MapObjectTickProfiler
             return;
         }
 
+        RecordSample(kind, descriptor.TypeName, descriptor.ItemId, descriptor.ItemName, startTimestamp);
+    }
+
+    private static void RecordSample(
+        string kind,
+        string typeName,
+        int itemId,
+        string itemName,
+        long startTimestamp)
+    {
         long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
         if (elapsedTicks <= 0L)
         {
@@ -1035,15 +1050,15 @@ public static class MapObjectTickProfiler
             windowStartTime = Time.unscaledTime;
         }
 
-        string key = BuildGroupKey(kind, descriptor);
+        ProfilerGroupKey key = BuildGroupKey(kind, typeName, itemId, itemName);
         if (!groupStatsByKey.TryGetValue(key, out GroupStats stats))
         {
             stats = new GroupStats
             {
                 Kind = kind,
-                TypeName = descriptor.TypeName,
-                ItemId = descriptor.ItemId,
-                ItemName = descriptor.ItemName
+                TypeName = typeName,
+                ItemId = itemId,
+                ItemName = itemName
             };
             groupStatsByKey[key] = stats;
         }
@@ -1056,9 +1071,9 @@ public static class MapObjectTickProfiler
         }
     }
 
-    private static string BuildGroupKey(string kind, TargetDescriptor descriptor)
+    private static ProfilerGroupKey BuildGroupKey(string kind, string typeName, int itemId, string itemName)
     {
-        return string.Concat(kind, "|", descriptor.TypeName, "|", descriptor.ItemId.ToString(CultureInfo.InvariantCulture));
+        return new ProfilerGroupKey(kind, typeName, itemId, itemName);
     }
 
     private static TargetDescriptor ResolveTargetDescriptor(object target)
@@ -1218,5 +1233,47 @@ public static class MapObjectTickProfiler
         public long SampleCount;
         public long TotalStopwatchTicks;
         public long MaxStopwatchTicks;
+    }
+
+    private readonly struct ProfilerGroupKey : IEquatable<ProfilerGroupKey>
+    {
+        private readonly string kind;
+        private readonly string typeName;
+        private readonly string itemName;
+        private readonly int itemId;
+
+        public ProfilerGroupKey(string kind, string typeName, int itemId, string itemName)
+        {
+            this.kind = kind ?? string.Empty;
+            this.typeName = typeName ?? string.Empty;
+            this.itemName = itemName ?? string.Empty;
+            this.itemId = itemId;
+        }
+
+        public bool Equals(ProfilerGroupKey other)
+        {
+            return itemId == other.itemId
+                   && string.Equals(kind, other.kind, StringComparison.Ordinal)
+                   && string.Equals(typeName, other.typeName, StringComparison.Ordinal)
+                   && string.Equals(itemName, other.itemName, StringComparison.Ordinal);
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is ProfilerGroupKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = (hash * 31) + kind.GetHashCode();
+                hash = (hash * 31) + typeName.GetHashCode();
+                hash = (hash * 31) + itemName.GetHashCode();
+                hash = (hash * 31) + itemId;
+                return hash;
+            }
+        }
     }
 }

@@ -169,6 +169,13 @@ public partial class BlockStateStore : MonoBehaviour
             return new FloorObjectSaveState(null, runs, count);
         }
 
+        public static FloorObjectSaveState FromOwnedRawItems(int[] itemIds)
+        {
+            return itemIds != null && itemIds.Length > 0
+                ? new FloorObjectSaveState(itemIds, null, itemIds.Length)
+                : null;
+        }
+
         public List<int> ToSerializedList()
         {
             List<int> itemIds = new List<int>(itemCount);
@@ -302,6 +309,27 @@ public partial class BlockStateStore : MonoBehaviour
 
         savedFloorObjectStates[worldCoordinate] = state;
         ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds);
+    }
+
+    private void SetFloorObjectsFromOwnedRawItems(Vector2Int worldCoordinate, int[] itemIds)
+    {
+        if (itemIds == null || itemIds.Length <= 0)
+        {
+            savedFloorObjectStates.Remove(worldCoordinate);
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
+            return;
+        }
+
+        FloorObjectSaveState state = FloorObjectSaveState.FromOwnedRawItems(itemIds);
+        if (state == null)
+        {
+            savedFloorObjectStates.Remove(worldCoordinate);
+            ResolveVirtualObjectWorld()?.RemoveFloorItemStack(worldCoordinate);
+            return;
+        }
+
+        savedFloorObjectStates[worldCoordinate] = state;
+        ResolveVirtualObjectWorld()?.UpsertFloorItemStackRaw(worldCoordinate, itemIds);
     }
 
     public void SetFloorObjectsResidency(Vector2Int worldCoordinate, VirtualObjectResidency residency)
@@ -537,6 +565,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedFloorObjectStates.Clear();
         savedConveyorItemStates.Clear();
         InvalidateConveyorSchedule();
+        ClearPendingConveyorFloorSyncs();
         savedInstallationStates.Clear();
         savedInstallationCountsByItemId.Clear();
         savedInstallationItemTotal = 0;
@@ -553,7 +582,7 @@ public partial class BlockStateStore : MonoBehaviour
             return;
         }
 
-        SimulateSavedConveyorItems();
+        SimulateSavedConveyorItems(flushAllFloorSyncs: true);
 
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
         mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
