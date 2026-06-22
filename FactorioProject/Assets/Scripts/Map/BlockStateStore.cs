@@ -564,8 +564,11 @@ public partial class BlockStateStore : MonoBehaviour
         mapSaveData.installations.Clear();
         mapSaveData.conveyorItems.Clear();
 
-        foreach (KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair in savedStates)
+        List<KeyValuePair<Vector2Int, Resource.ResourceSaveState>> savedStateSnapshot =
+            new List<KeyValuePair<Vector2Int, Resource.ResourceSaveState>>(savedStates);
+        for (int i = 0; i < savedStateSnapshot.Count; i++)
         {
+            KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair = savedStateSnapshot[i];
             savedResourceItemIds.TryGetValue(pair.Key, out int itemId);
             mapSaveData.resources.Add(new ResourceSaveEntry
             {
@@ -575,8 +578,11 @@ public partial class BlockStateStore : MonoBehaviour
             });
         }
 
-        foreach (KeyValuePair<Vector2Int, FloorObjectSaveState> pair in savedFloorObjectStates)
+        List<KeyValuePair<Vector2Int, FloorObjectSaveState>> savedFloorObjectSnapshot =
+            new List<KeyValuePair<Vector2Int, FloorObjectSaveState>>(savedFloorObjectStates);
+        for (int i = 0; i < savedFloorObjectSnapshot.Count; i++)
         {
+            KeyValuePair<Vector2Int, FloorObjectSaveState> pair = savedFloorObjectSnapshot[i];
             if (pair.Value == null)
             {
                 continue;
@@ -589,8 +595,11 @@ public partial class BlockStateStore : MonoBehaviour
             });
         }
 
-        foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
+        List<KeyValuePair<Vector2Int, ConveyorItemBlockState>> savedConveyorItemSnapshot =
+            new List<KeyValuePair<Vector2Int, ConveyorItemBlockState>>(savedConveyorItemStates);
+        for (int i = 0; i < savedConveyorItemSnapshot.Count; i++)
         {
+            KeyValuePair<Vector2Int, ConveyorItemBlockState> pair = savedConveyorItemSnapshot[i];
             ConveyorItemBlockState state = pair.Value;
             if (state == null || state.lanes.Count <= 0)
             {
@@ -604,8 +613,11 @@ public partial class BlockStateStore : MonoBehaviour
             });
         }
 
-        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        List<KeyValuePair<Vector2Int, InstallationSaveState>> savedInstallationSnapshot =
+            new List<KeyValuePair<Vector2Int, InstallationSaveState>>(savedInstallationStates);
+        for (int i = 0; i < savedInstallationSnapshot.Count; i++)
         {
+            KeyValuePair<Vector2Int, InstallationSaveState> pair = savedInstallationSnapshot[i];
             if (pair.Value == null)
             {
                 continue;
@@ -616,6 +628,8 @@ public partial class BlockStateStore : MonoBehaviour
                 state = pair.Value.Clone()
             });
         }
+
+        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
     }
 
     public void ApplySaveState(MapSaveData mapSaveData)
@@ -626,6 +640,7 @@ public partial class BlockStateStore : MonoBehaviour
             return;
         }
 
+        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
 
         if (mapSaveData.resources != null)

@@ -183,11 +183,13 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         public ConveyorLineWakeRange wakeRange;
         public float retryTime;
+        public int attemptCount;
 
-        public ConveyorLineRetryState(ConveyorLineWakeRange wakeRange, float retryTime)
+        public ConveyorLineRetryState(ConveyorLineWakeRange wakeRange, float retryTime, int attemptCount)
         {
             this.wakeRange = wakeRange;
             this.retryTime = retryTime;
+            this.attemptCount = attemptCount;
         }
     }
 
@@ -339,6 +341,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Min(0.02f)]
     private float conveyorActiveFullScanInterval = 0.25f;
+
+    [SerializeField, Min(1)]
+    private int conveyorActiveSafetyScanBudget = 32;
 
     [SerializeField]
     private Transform trackingTarget;
@@ -680,6 +685,15 @@ public partial class TerrainGenerator : MonoBehaviour
     private int conveyorItemVisualBlockSetVersion;
     private int dynamicConveyorItemVisualBlockSetVersion;
     private int cachedLoadedConveyorItemCount;
+    private int lastConveyorItemLoadSavedBlocks;
+    private int lastConveyorItemLoadSavedLanes;
+    private int lastConveyorItemLoadLoadedBlocks;
+    private int lastConveyorItemLoadMissingBlocks;
+    private int lastConveyorItemLoadNotRuntimeBlocks;
+    private int lastConveyorItemLoadZeroLaneBlocks;
+    private int lastConveyorItemLoadAppliedLanes;
+    private int lastConveyorItemLoadFallbackBlocks;
+    private int lastConveyorItemLoadFailedBlocks;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, List<Block>> conveyorNetworkBlocksById = new Dictionary<int, List<Block>>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
@@ -696,6 +710,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Queue<int> deferredConveyorLineWakeQueue = new Queue<int>();
     private readonly Dictionary<int, ConveyorLineWakeRange> deferredConveyorLineWakeRangesById = new Dictionary<int, ConveyorLineWakeRange>();
     private readonly Dictionary<int, ConveyorLineRetryState> conveyorLineRetryStatesById = new Dictionary<int, ConveyorLineRetryState>();
+    private readonly Dictionary<int, int> conveyorLineRetryAttemptsByDueLineId = new Dictionary<int, int>();
     private readonly List<int> conveyorLineRetryDueIds = new List<int>();
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
     private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
@@ -730,6 +745,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private int conveyorLineBlockLoopIterations;
     private float nextConveyorLineRetryTime = float.PositiveInfinity;
     private float nextConveyorActiveFullScanTime;
+    private int activeConveyorSafetyScanIndex;
     private float nextBackgroundConveyorSimulationTime;
     private Vector2Int currentCenterChunk;
     private float nextFloorObjectVirtualizationTime;
@@ -1121,6 +1137,34 @@ public partial class TerrainGenerator : MonoBehaviour
         return count;
     }
 
+    public int GetConveyorItemCount()
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return GetLoadedConveyorItemCount();
+        }
+
+        int count = resourceStateStore.GetSavedConveyorItemCount();
+        List<KeyValuePair<Vector2Int, Block>> loadedBlockSnapshot =
+            new List<KeyValuePair<Vector2Int, Block>>(loadedBlocks);
+        for (int i = 0; i < loadedBlockSnapshot.Count; i++)
+        {
+            KeyValuePair<Vector2Int, Block> pair = loadedBlockSnapshot[i];
+            Block block = pair.Value;
+            if (block == null)
+            {
+                continue;
+            }
+
+            int savedCount = resourceStateStore.GetSavedConveyorItemCount(pair.Key);
+            int liveCount = block.IsRuntimeConveyor ? block.GetRuntimeConveyorItemCount() : 0;
+            count += liveCount - savedCount;
+        }
+
+        return Mathf.Max(0, count);
+    }
+
     public int GetInstallationItemCounts(Dictionary<int, int> countsByItemId)
     {
         EnsureResourceStateStore();
@@ -1154,6 +1198,7 @@ public partial class TerrainGenerator : MonoBehaviour
         FlushLoadedRuntimeStateToStore();
         resourceStateStore.CaptureSaveState(mapSaveData);
         CaptureLoadedConveyorItemSaveStates(mapSaveData);
+        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         return mapSaveData;
     }
 
@@ -1181,15 +1226,18 @@ public partial class TerrainGenerator : MonoBehaviour
 
         InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
-        ClearLoadedChunks();
+        ClearLoadedChunks(false, true);
+        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
 
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
         RefreshChunks(currentCenterChunk, true);
         ProcessQueuedChunkGenerationsImmediate();
+        RefreshLoadedConveyorBeltRuntimeViews();
         ApplyLoadedConveyorItemSaveStates(mapSaveData);
         RefreshLoadedRuntimeRegistrations();
+        RefreshLoadedRuntimeVisibility();
     }
 
     public void StartNewGeneratedMap(bool randomizeSeed)
@@ -1213,8 +1261,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        List<KeyValuePair<Vector2Int, Block>> loadedBlockSnapshot =
+            new List<KeyValuePair<Vector2Int, Block>>(loadedBlocks);
+        for (int i = 0; i < loadedBlockSnapshot.Count; i++)
         {
+            KeyValuePair<Vector2Int, Block> pair = loadedBlockSnapshot[i];
             Block block = pair.Value;
             if (block == null)
             {
@@ -1309,8 +1360,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
 
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        List<KeyValuePair<Vector2Int, Block>> loadedBlockSnapshot =
+            new List<KeyValuePair<Vector2Int, Block>>(loadedBlocks);
+        for (int i = 0; i < loadedBlockSnapshot.Count; i++)
         {
+            KeyValuePair<Vector2Int, Block> pair = loadedBlockSnapshot[i];
             Block block = pair.Value;
             if (block == null || !block.IsRuntimeConveyor)
             {
@@ -1322,7 +1376,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 coordinate = pair.Key
             };
             block.CaptureConveyorItemSaveStates(entry.lanes);
-            int existingEntryIndex = FindConveyorItemSaveEntryIndex(mapSaveData.conveyorItems, pair.Key);
+            int existingEntryIndex = SaveGameConveyorItemBackfill.FindConveyorItemEntryIndex(
+                mapSaveData.conveyorItems,
+                pair.Key);
             if (entry.lanes.Count > 0)
             {
                 if (existingEntryIndex >= 0)
@@ -1341,27 +1397,9 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private static int FindConveyorItemSaveEntryIndex(List<ConveyorItemBlockSaveEntry> entries, Vector2Int coordinate)
-    {
-        if (entries == null)
-        {
-            return -1;
-        }
-
-        for (int i = 0; i < entries.Count; i++)
-        {
-            ConveyorItemBlockSaveEntry entry = entries[i];
-            if (entry != null && entry.coordinate == coordinate)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
     private void ApplyLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
     {
+        ResetLastConveyorItemLoadStats();
         if (mapSaveData?.conveyorItems == null)
         {
             return;
@@ -1372,8 +1410,7 @@ public partial class TerrainGenerator : MonoBehaviour
             ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
             if (entry == null
                 || entry.lanes == null
-                || !loadedBlocks.TryGetValue(entry.coordinate, out Block block)
-                || block == null)
+                || entry.lanes.Count <= 0)
             {
                 continue;
             }
@@ -1386,8 +1423,201 @@ public partial class TerrainGenerator : MonoBehaviour
                 lanes = storedLanes;
             }
 
-            block.ApplyConveyorItemSaveStates(lanes);
+            int savedLaneCount = CountConveyorItemSaveLanes(lanes);
+            if (savedLaneCount <= 0)
+            {
+                continue;
+            }
+
+            lastConveyorItemLoadSavedBlocks++;
+            lastConveyorItemLoadSavedLanes += savedLaneCount;
+
+            loadedBlocks.TryGetValue(entry.coordinate, out Block block);
+            ApplyLoadedConveyorItemSaveStatesToBlock(entry.coordinate, block, lanes, mapSaveData, true);
         }
+    }
+
+    private void ApplyStoredConveyorItemSaveStates(Block[] blocks)
+    {
+        if (blocks == null || blocks.Length <= 0)
+        {
+            return;
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < blocks.Length; i++)
+        {
+            Block block = blocks[i];
+            if (block == null
+                || !resourceStateStore.TryGetConveyorItems(
+                    block.Coordinate,
+                    out List<ConveyorItemLaneSaveState> lanes)
+                || CountConveyorItemSaveLanes(lanes) <= 0)
+            {
+                continue;
+            }
+
+            ApplyLoadedConveyorItemSaveStatesToBlock(block.Coordinate, block, lanes, null, false);
+        }
+    }
+
+    private int ApplyLoadedConveyorItemSaveStatesToBlock(
+        Vector2Int coordinate,
+        Block block,
+        IReadOnlyList<ConveyorItemLaneSaveState> lanes,
+        MapSaveData mapSaveData,
+        bool updateLoadStats)
+    {
+        if (block == null)
+        {
+            if (updateLoadStats)
+            {
+                lastConveyorItemLoadMissingBlocks++;
+                lastConveyorItemLoadFailedBlocks++;
+            }
+
+            return 0;
+        }
+
+        if (updateLoadStats)
+        {
+            lastConveyorItemLoadLoadedBlocks++;
+        }
+
+        if (!block.IsRuntimeConveyor)
+        {
+            if (updateLoadStats)
+            {
+                lastConveyorItemLoadNotRuntimeBlocks++;
+                lastConveyorItemLoadFailedBlocks++;
+            }
+
+            return 0;
+        }
+
+        if (block.GetRuntimeConveyorLaneCount() <= 0)
+        {
+            if (updateLoadStats)
+            {
+                lastConveyorItemLoadZeroLaneBlocks++;
+                lastConveyorItemLoadFailedBlocks++;
+            }
+
+            return 0;
+        }
+
+        int restoredItemCount = block.ApplyConveyorItemSaveStates(lanes);
+        if (restoredItemCount > 0)
+        {
+            if (updateLoadStats)
+            {
+                lastConveyorItemLoadAppliedLanes += restoredItemCount;
+            }
+
+            MarkLoadedConveyorItemBlockLive(coordinate);
+            return restoredItemCount;
+        }
+
+        if (TryGetLoadedConveyorItemFloorObjectFallback(coordinate, mapSaveData, out List<int> fallbackItemIds))
+        {
+            block.ApplyFloorObjectState(fallbackItemIds);
+            int fallbackItemCount = block.GetRuntimeConveyorItemCount();
+            if (fallbackItemCount > 0)
+            {
+                if (updateLoadStats)
+                {
+                    lastConveyorItemLoadAppliedLanes += fallbackItemCount;
+                    lastConveyorItemLoadFallbackBlocks++;
+                }
+
+                MarkLoadedConveyorItemBlockLive(coordinate);
+                return fallbackItemCount;
+            }
+        }
+
+        if (updateLoadStats)
+        {
+            lastConveyorItemLoadFailedBlocks++;
+        }
+
+        return 0;
+    }
+
+    private void ResetLastConveyorItemLoadStats()
+    {
+        lastConveyorItemLoadSavedBlocks = 0;
+        lastConveyorItemLoadSavedLanes = 0;
+        lastConveyorItemLoadLoadedBlocks = 0;
+        lastConveyorItemLoadMissingBlocks = 0;
+        lastConveyorItemLoadNotRuntimeBlocks = 0;
+        lastConveyorItemLoadZeroLaneBlocks = 0;
+        lastConveyorItemLoadAppliedLanes = 0;
+        lastConveyorItemLoadFallbackBlocks = 0;
+        lastConveyorItemLoadFailedBlocks = 0;
+    }
+
+    private static int CountConveyorItemSaveLanes(IReadOnlyList<ConveyorItemLaneSaveState> lanes)
+    {
+        if (lanes == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < lanes.Count; i++)
+        {
+            ConveyorItemLaneSaveState lane = lanes[i];
+            if (lane != null && lane.itemId >= 0 && lane.laneIndex >= 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void MarkLoadedConveyorItemBlockLive(Vector2Int coordinate)
+    {
+        resourceStateStore?.SetFloorObjectsResidency(coordinate, VirtualObjectResidency.Live);
+        virtualizedFloorObjectCoordinates.Remove(coordinate);
+        RobotArm.WakeAroundCoordinate(coordinate);
+    }
+
+    private bool TryGetLoadedConveyorItemFloorObjectFallback(
+        Vector2Int coordinate,
+        MapSaveData mapSaveData,
+        out List<int> itemIds)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore != null
+            && resourceStateStore.TryGetFloorObjects(coordinate, out itemIds)
+            && HasConveyorFloorObjectFallback(itemIds))
+        {
+            return true;
+        }
+
+        if (mapSaveData?.floorObjects != null)
+        {
+            for (int i = 0; i < mapSaveData.floorObjects.Count; i++)
+            {
+                FloorObjectSaveEntry entry = mapSaveData.floorObjects[i];
+                if (entry != null
+                    && entry.coordinate == coordinate
+                    && HasConveyorFloorObjectFallback(entry.itemIds))
+                {
+                    itemIds = entry.itemIds;
+                    return true;
+                }
+            }
+        }
+
+        itemIds = null;
+        return false;
     }
 
     private void RefreshLoadedRuntimeRegistrations()
@@ -1396,6 +1626,50 @@ public partial class TerrainGenerator : MonoBehaviour
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             RefreshRestoredBlockRuntimeRegistration(pair.Value);
+        }
+    }
+
+    private void RefreshLoadedConveyorBeltRuntimeViews()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        List<ConveyorBelt> conveyorBelts = new List<ConveyorBelt>();
+        HashSet<ConveyorBelt> uniqueConveyorBelts = new HashSet<ConveyorBelt>();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            if (pair.Value?.MapObject is ConveyorBelt conveyorBelt
+                && uniqueConveyorBelts.Add(conveyorBelt))
+            {
+                conveyorBelts.Add(conveyorBelt);
+            }
+        }
+
+        if (conveyorBelts.Count <= 0)
+        {
+            return;
+        }
+
+        virtualConveyorBeltRenderer?.Clear();
+        for (int i = 0; i < conveyorBelts.Count; i++)
+        {
+            conveyorBelts[i]?.RefreshEndpointVisuals();
+        }
+
+        ConvayorBelt2F.MarkCoverageDirty();
+        for (int i = 0; i < conveyorBelts.Count; i++)
+        {
+            if (conveyorBelts[i] is ConvayorBelt2F belt2F)
+            {
+                belt2F.RefreshCoveredConveyorTopology();
+            }
+        }
+
+        for (int i = 0; i < conveyorBelts.Count; i++)
+        {
+            RegisterVirtualConveyorBelt(conveyorBelts[i]);
         }
     }
 
@@ -1414,6 +1688,15 @@ public partial class TerrainGenerator : MonoBehaviour
 
         block.RefreshConveyorActivityRegistration(shouldWakeConveyor);
         block.RefreshConveyorSlotDotVisuals();
+    }
+
+    private void RefreshLoadedRuntimeVisibility()
+    {
+        RefreshBeltItemRenderingVisibility();
+        RefreshBeltRenderingVisibility();
+        RefreshConveyorSlotDotRuntimeVisibility();
+        RefreshBeltItemLineRuntimeVisibility();
+        RefreshBeltDirectionRuntimeVisibility();
     }
 
     public void CopyConveyorItemVisualBlocks(List<Block> results)
@@ -1478,7 +1761,7 @@ public partial class TerrainGenerator : MonoBehaviour
         InitializeSeedForGeneration();
         InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
-        ClearLoadedChunks();
+        ClearLoadedChunks(false, true);
         resourceStateStore?.ClearStates();
 
         currentCenterChunk = GetCenterChunkCoordinate();
@@ -1778,6 +2061,10 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
+        Block[] chunkBlocks = GetDirectChunkBlocks(chunkObject.transform);
+        RefreshChunkBlockRuntimeViews(chunkBlocks);
+        ApplyStoredConveyorItemSaveStates(chunkBlocks);
+
         ChunkSurfaceBuildData chunkSurface;
         if (Application.isPlaying)
         {
@@ -1928,14 +2215,21 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void ClearLoadedChunks()
+    private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
     {
+        if (releaseLiveInstallations)
+        {
+            ReleaseLiveInstallationsForReload();
+        }
+
         List<Transform> chunkObjects = new List<Transform>(loadedChunks.Values);
 
         for (int i = transform.childCount - 1; i >= 0; i--)
         {
             Transform child = transform.GetChild(i);
-            if (!chunkObjects.Contains(child))
+            if (child != null
+                && !chunkObjects.Contains(child)
+                && HasDirectChunkBlocks(child))
             {
                 chunkObjects.Add(child);
             }
@@ -1945,7 +2239,11 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (chunkObjects[i] != null)
             {
-                SaveChunkResourceStates(chunkObjects[i]);
+                if (preserveRuntimeState)
+                {
+                    SaveChunkResourceStates(chunkObjects[i]);
+                }
+
                 RemoveChunkBlocksFromLookup(chunkObjects[i]);
                 ReleaseChunkBlocksToPool(chunkObjects[i]);
                 DestroyChunkObject(chunkObjects[i].gameObject);
@@ -1959,7 +2257,58 @@ public partial class TerrainGenerator : MonoBehaviour
         ClearConveyorRuntimeState();
         virtualizedFloorObjectCoordinates.Clear();
         ClearFloorObjectVirtualizationScan();
-        CleanupOrphanedLiveInstallations();
+        if (!releaseLiveInstallations && preserveRuntimeState)
+        {
+            CleanupOrphanedLiveInstallations();
+        }
+    }
+
+    private static bool HasDirectChunkBlocks(Transform chunkTransform)
+    {
+        if (chunkTransform == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < chunkTransform.childCount; i++)
+        {
+            Transform child = chunkTransform.GetChild(i);
+            if (child != null && child.TryGetComponent(out Block block) && block != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ReleaseLiveInstallationsForReload()
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Vector2Int> liveAnchors = resourceStateStore.GetLiveInstallationStorageKeys();
+        if (liveAnchors == null || liveAnchors.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < liveAnchors.Count; i++)
+        {
+            Vector2Int storageKey = liveAnchors[i];
+            if (!resourceStateStore.TryDetachLiveInstallation(
+                    storageKey,
+                    out InstallationObject installationObject,
+                    out BlockStateStore.InstallationSaveState state))
+            {
+                continue;
+            }
+
+            ReleaseInstallationObject(installationObject, ResolveInstallationSourcePrefab(state));
+        }
     }
 
     private void DestroyChunkObject(GameObject chunkObject)

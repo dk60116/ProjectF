@@ -92,6 +92,116 @@ public sealed class ConveyorItemLaneSaveState
     public float cornerContinuationDurationPathLength;
 }
 
+public static class SaveGameConveyorItemBackfill
+{
+    public static void BackfillFromFloorObjects(MapSaveData map)
+    {
+        if (map?.floorObjects == null || map.floorObjects.Count <= 0)
+        {
+            return;
+        }
+
+        map.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
+        for (int i = 0; i < map.floorObjects.Count; i++)
+        {
+            FloorObjectSaveEntry floorEntry = map.floorObjects[i];
+            if (!TryCreateConveyorItemEntry(floorEntry, out ConveyorItemBlockSaveEntry conveyorEntry))
+            {
+                continue;
+            }
+
+            int existingIndex = FindConveyorItemEntryIndex(map.conveyorItems, conveyorEntry.coordinate);
+            if (existingIndex < 0)
+            {
+                map.conveyorItems.Add(conveyorEntry);
+                continue;
+            }
+
+            ConveyorItemBlockSaveEntry existingEntry = map.conveyorItems[existingIndex];
+            if (existingEntry == null || existingEntry.lanes == null || existingEntry.lanes.Count <= 0)
+            {
+                map.conveyorItems[existingIndex] = conveyorEntry;
+            }
+        }
+    }
+
+    private static bool TryCreateConveyorItemEntry(
+        FloorObjectSaveEntry floorEntry,
+        out ConveyorItemBlockSaveEntry conveyorEntry)
+    {
+        conveyorEntry = null;
+        if (floorEntry?.itemIds == null || floorEntry.itemIds.Count <= 0)
+        {
+            return false;
+        }
+
+        List<ConveyorItemLaneSaveState> lanes = null;
+        List<int> itemIds = floorEntry.itemIds;
+        for (int i = 0; i < itemIds.Count; i++)
+        {
+            if (itemIds[i] != Block.ConveyorStackStateSentinel)
+            {
+                continue;
+            }
+
+            if (i + 1 >= itemIds.Count)
+            {
+                break;
+            }
+
+            int laneCount = Mathf.Max(0, itemIds[++i]);
+            for (int laneIndex = 0; laneIndex < laneCount && i + 1 < itemIds.Count; laneIndex++)
+            {
+                int laneItemId = itemIds[++i];
+                if (laneItemId < 0)
+                {
+                    continue;
+                }
+
+                lanes ??= new List<ConveyorItemLaneSaveState>();
+                lanes.Add(new ConveyorItemLaneSaveState
+                {
+                    laneIndex = laneIndex,
+                    itemId = laneItemId
+                });
+            }
+        }
+
+        if (lanes == null || lanes.Count <= 0)
+        {
+            return false;
+        }
+
+        conveyorEntry = new ConveyorItemBlockSaveEntry
+        {
+            coordinate = floorEntry.coordinate,
+            lanes = lanes
+        };
+        return true;
+    }
+
+    public static int FindConveyorItemEntryIndex(
+        List<ConveyorItemBlockSaveEntry> entries,
+        Vector2Int coordinate)
+    {
+        if (entries == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            ConveyorItemBlockSaveEntry entry = entries[i];
+            if (entry != null && entry.coordinate == coordinate)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+}
+
 [Serializable]
 public sealed class PlayerSaveData
 {

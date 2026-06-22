@@ -3080,6 +3080,11 @@ public class PlayerController : MonoBehaviour
 
     private Bounds GetMapObjectFocusBounds(MapObject mapObject, Block block, float focusPadding = 0f)
     {
+        if (mapObject is ConveyorBelt)
+        {
+            return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
+        }
+
         Renderer[] renderers = mapObject != null
             ? mapObject.GetComponentsInChildren<Renderer>(true)
             : null;
@@ -3122,7 +3127,16 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        Vector3 center = block != null ? block.transform.position : mapObject.transform.position;
+        return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
+    }
+
+    private static Bounds CreateMapObjectStatusFocusBounds(MapObject mapObject, Block block, float focusPadding)
+    {
+        Vector3 center = block != null
+            ? block.transform.position
+            : mapObject != null
+                ? mapObject.transform.position
+                : Vector3.zero;
         Vector3 size = Vector3.one;
         if (mapObject != null)
         {

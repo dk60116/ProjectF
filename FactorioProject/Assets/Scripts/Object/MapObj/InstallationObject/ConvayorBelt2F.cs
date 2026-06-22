@@ -51,13 +51,31 @@ public class ConvayorBelt2F : ConveyorBelt
 
     protected override void OnDisable()
     {
-        ActiveBelts.Remove(this);
+        if (!IsRuntimeRootSuspended)
+        {
+            ActiveBelts.Remove(this);
+        }
+
         MarkCoverageDirty();
         base.OnDisable();
     }
 
+    public override void PrepareForPool()
+    {
+        ActiveBelts.Remove(this);
+        MarkCoverageDirty();
+        base.PrepareForPool();
+    }
+
     public static void MarkCoverageDirty()
     {
+        coverageLookupDirty = true;
+    }
+
+    public static void ClearRuntimeCoverageLookup()
+    {
+        ActiveBelts.Clear();
+        CoverageByCoordinate.Clear();
         coverageLookupDirty = true;
     }
 
@@ -153,9 +171,9 @@ public class ConvayorBelt2F : ConveyorBelt
     private static bool IsValidRegisteredBelt(ConvayorBelt2F belt)
     {
         return belt != null
-               && belt.isActiveAndEnabled
                && belt.gameObject != null
-               && belt.gameObject.activeInHierarchy;
+               && (belt.enabled || belt.IsRuntimeRootSuspended)
+               && belt.IsRuntimeRootAvailable;
     }
 
     public bool CoversCoordinate(Vector2Int coordinate)

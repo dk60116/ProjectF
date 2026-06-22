@@ -68,6 +68,11 @@ public class ConveyorBelt : InstallationObject
     private bool virtualRenderingSuppressed;
     private bool virtualRenderingSuppressBeltTopOnly;
     private bool runtimeRenderingHidden;
+    private bool runtimeRootSuspended;
+    private readonly List<GameObject> virtualSourceViewObjects = new List<GameObject>(8);
+    private readonly List<bool> virtualSourceViewObjectActiveStates = new List<bool>(8);
+    private bool virtualSourceViewObjectsCached;
+    private bool virtualSourceViewHidden;
 
     private struct BeltTopRenderInfo
     {
@@ -107,6 +112,11 @@ public class ConveyorBelt : InstallationObject
     public bool IsCornerVariant => isCornerVariant || isReverseCornerVariant;
     public bool IsReverseCornerVariant => isReverseCornerVariant;
     public int PlacementRotationQuarterTurnOffset => IsCornerVariant ? 3 : 0;
+    public bool IsVirtualizedSourceViewHidden => virtualSourceViewHidden;
+    public int VirtualizedSourceViewHiddenObjectCount => virtualSourceViewHidden ? virtualSourceViewObjects.Count : 0;
+    public bool IsRuntimeRootSuspended => runtimeRootSuspended;
+    public bool IsRuntimeRootAvailable => gameObject != null
+        && (gameObject.activeSelf || runtimeRootSuspended);
 
     public static bool TryGetFlowDirection(Quaternion rotation, out Vector2Int flowDirection)
     {
@@ -310,7 +320,8 @@ public class ConveyorBelt : InstallationObject
 
     protected override void OnDisable()
     {
-        if (Application.isPlaying)
+        bool isSuspendingRoot = runtimeRootSuspended;
+        if (Application.isPlaying && !isSuspendingRoot)
         {
             EndpointRuntimeState previousState = lastEndpointRuntimeState;
             SetEndpointVisualsActive(false, false, false, false);
@@ -320,16 +331,30 @@ public class ConveyorBelt : InstallationObject
         }
 
         TerrainGenerator.Active?.UnregisterVirtualConveyorBelt(this, false);
+        SetVirtualizedSourceViewHidden(false);
         virtualRenderingSuppressed = false;
         virtualRenderingSuppressBeltTopOnly = false;
-        runtimeRenderingHidden = false;
+        if (!isSuspendingRoot)
+        {
+            runtimeRenderingHidden = false;
+        }
+
         base.OnDisable();
+    }
+
+    public override void PrepareForPool()
+    {
+        runtimeRootSuspended = false;
+        runtimeRenderingHidden = false;
+        SetVirtualizedSourceViewHidden(false);
+        base.PrepareForPool();
     }
 
     public void SetVirtualRuntimeRenderingEnabled(bool isEnabled)
     {
         if (!Application.isPlaying)
         {
+            SetVirtualizedSourceViewHidden(false);
             SetVirtualRenderingSuppressed(false);
             return;
         }
@@ -347,6 +372,7 @@ public class ConveyorBelt : InstallationObject
             }
             else
             {
+                SetVirtualizedSourceViewHidden(false);
                 SetVirtualRenderingSuppressed(false);
             }
         }
@@ -364,7 +390,7 @@ public class ConveyorBelt : InstallationObject
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
             MeshRenderer renderer = cachedRenderers[i];
-            if (renderer == null || !renderer.gameObject.activeInHierarchy)
+            if (!IsRuntimeRendererObjectAvailable(renderer))
             {
                 continue;
             }
@@ -446,6 +472,70 @@ public class ConveyorBelt : InstallationObject
 
         runtimeRenderingHidden = isHidden;
         ApplyVirtualRenderingSuppression();
+    }
+
+    public void SetRuntimeRootSuspended(bool isSuspended)
+    {
+        if (!Application.isPlaying)
+        {
+            isSuspended = false;
+        }
+
+        bool desiredActive = !isSuspended;
+        if (runtimeRootSuspended == isSuspended)
+        {
+            if (!isSuspended
+                || gameObject == null
+                || gameObject.activeSelf == desiredActive)
+            {
+                return;
+            }
+        }
+
+        if (isSuspended)
+        {
+            runtimeRootSuspended = true;
+            if (gameObject != null && gameObject.activeSelf)
+            {
+                gameObject.SetActive(false);
+            }
+
+            return;
+        }
+
+        bool wasSuspended = runtimeRootSuspended;
+        runtimeRootSuspended = false;
+        if (gameObject != null && !gameObject.activeSelf)
+        {
+            gameObject.SetActive(true);
+        }
+
+        if (wasSuspended)
+        {
+            TerrainGenerator.Active?.RegisterVirtualConveyorBelt(this);
+        }
+    }
+
+    public void SetVirtualizedSourceViewHidden(bool isHidden)
+    {
+        if (!Application.isPlaying)
+        {
+            isHidden = false;
+        }
+
+        if (virtualSourceViewHidden == isHidden)
+        {
+            return;
+        }
+
+        if (isHidden)
+        {
+            HideVirtualizedSourceViewObjects();
+        }
+        else
+        {
+            RestoreVirtualizedSourceViewObjects();
+        }
     }
 
     public void RefreshBeltTopShaderProperties()
@@ -790,7 +880,7 @@ public class ConveyorBelt : InstallationObject
 
         if (block.MapObject is ConveyorBelt mappedBelt
             && mappedBelt != null
-            && mappedBelt.gameObject.activeInHierarchy)
+            && mappedBelt.IsRuntimeRootAvailable)
         {
             conveyorBelt = mappedBelt;
             return true;
@@ -798,7 +888,7 @@ public class ConveyorBelt : InstallationObject
 
         if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F coveringBelt)
             && coveringBelt != null
-            && coveringBelt.gameObject.activeInHierarchy)
+            && coveringBelt.IsRuntimeRootAvailable)
         {
             conveyorBelt = coveringBelt;
             return true;
@@ -878,6 +968,7 @@ public class ConveyorBelt : InstallationObject
 
         cachedRenderers = null;
         cachedRendererMeshFilters = null;
+        InvalidateVirtualSourceViewObjectCache();
         beltTopTransformStateCached = false;
     }
 
@@ -1351,6 +1442,143 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
+    private void EnsureVirtualSourceViewObjectCache()
+    {
+        if (virtualSourceViewObjectsCached)
+        {
+            return;
+        }
+
+        virtualSourceViewObjects.Clear();
+        virtualSourceViewObjectActiveStates.Clear();
+
+        EnsureRendererCache();
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            if (!TryGetVirtualSourceViewObject(cachedRenderers[i], out GameObject sourceObject))
+            {
+                continue;
+            }
+
+            if (!virtualSourceViewObjects.Contains(sourceObject))
+            {
+                virtualSourceViewObjects.Add(sourceObject);
+            }
+        }
+
+        virtualSourceViewObjectsCached = true;
+    }
+
+    private bool TryGetVirtualSourceViewObject(MeshRenderer renderer, out GameObject sourceObject)
+    {
+        sourceObject = null;
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        GameObject rendererObject = renderer.gameObject;
+        if (rendererObject == null
+            || rendererObject == gameObject
+            || IsEndpointVisualObject(rendererObject))
+        {
+            return false;
+        }
+
+        Transform rendererTransform = rendererObject.transform;
+        if (rendererTransform == null
+            || rendererTransform == transform
+            || !rendererTransform.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        if (rendererObject.GetComponent<Collider>() != null
+            || rendererObject.GetComponent<MonoBehaviour>() != null)
+        {
+            return false;
+        }
+
+        sourceObject = rendererObject;
+        return true;
+    }
+
+    private bool IsEndpointVisualObject(GameObject candidate)
+    {
+        if (candidate == null
+            || candidate == endStartObject
+            || candidate == endEndObject
+            || candidate == seamStartObject
+            || candidate == seamEndObject)
+        {
+            return true;
+        }
+
+        string objectName = candidate.name;
+        return objectName == EndStartObjectName
+               || objectName == EndEndObjectName
+               || objectName == SeamStartObjectName
+               || objectName == SeamEndObjectName;
+    }
+
+    private void HideVirtualizedSourceViewObjects()
+    {
+        EnsureVirtualSourceViewObjectCache();
+        virtualSourceViewObjectActiveStates.Clear();
+        if (virtualSourceViewObjects.Count == 0)
+        {
+            virtualSourceViewHidden = false;
+            return;
+        }
+
+        for (int i = 0; i < virtualSourceViewObjects.Count; i++)
+        {
+            GameObject sourceObject = virtualSourceViewObjects[i];
+            bool wasActive = sourceObject != null && sourceObject.activeSelf;
+            virtualSourceViewObjectActiveStates.Add(wasActive);
+            if (wasActive)
+            {
+                sourceObject.SetActive(false);
+            }
+        }
+
+        virtualSourceViewHidden = true;
+    }
+
+    private void RestoreVirtualizedSourceViewObjects()
+    {
+        int stateCount = virtualSourceViewObjectActiveStates.Count;
+        for (int i = 0; i < virtualSourceViewObjects.Count; i++)
+        {
+            GameObject sourceObject = virtualSourceViewObjects[i];
+            if (sourceObject == null)
+            {
+                continue;
+            }
+
+            bool wasActive = i < stateCount && virtualSourceViewObjectActiveStates[i];
+            if (sourceObject.activeSelf != wasActive)
+            {
+                sourceObject.SetActive(wasActive);
+            }
+        }
+
+        virtualSourceViewObjectActiveStates.Clear();
+        virtualSourceViewHidden = false;
+    }
+
+    private void InvalidateVirtualSourceViewObjectCache()
+    {
+        if (virtualSourceViewHidden)
+        {
+            RestoreVirtualizedSourceViewObjects();
+        }
+
+        virtualSourceViewObjects.Clear();
+        virtualSourceViewObjectActiveStates.Clear();
+        virtualSourceViewObjectsCached = false;
+    }
+
     private void ApplyVirtualRenderingSuppression()
     {
         if (runtimeRenderingHidden)
@@ -1374,7 +1602,7 @@ public class ConveyorBelt : InstallationObject
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
             MeshRenderer renderer = cachedRenderers[i];
-            if (renderer == null || !renderer.gameObject.activeInHierarchy)
+            if (!IsRuntimeRendererObjectAvailable(renderer))
             {
                 continue;
             }
@@ -1398,6 +1626,13 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
+    private static bool IsRuntimeRendererObjectAvailable(MeshRenderer renderer)
+    {
+        return renderer != null
+               && renderer.gameObject != null
+               && renderer.gameObject.activeSelf;
+    }
+
 #if UNITY_EDITOR
     protected override void OnValidate()
     {
@@ -1405,6 +1640,7 @@ public class ConveyorBelt : InstallationObject
 
         cachedRenderers = null;
         cachedRendererMeshFilters = null;
+        InvalidateVirtualSourceViewObjectCache();
         beltTopTransformStates.Clear();
         beltTopTransformStateCached = false;
 

@@ -37,6 +37,7 @@ internal sealed class EditorToolForm : Form
     private readonly Button giveButton = new Button();
     private readonly Button pingButton = new Button();
     private readonly Button conveyorLineButton = new Button();
+    private readonly Button conveyorItemFillButton = new Button();
     private readonly ComboBox saveSlotComboBox = new ComboBox();
     private readonly Button saveSlotButton = new Button();
     private readonly Button loadSlotButton = new Button();
@@ -222,6 +223,10 @@ internal sealed class EditorToolForm : Form
         conveyorLineButton.Width = 190;
         conveyorLineButton.Click += async (_, _) => await SendConveyorLineAsync();
 
+        StyleSecondaryButton(conveyorItemFillButton, "컨베이어 아이템 50개");
+        conveyorItemFillButton.Width = 190;
+        conveyorItemFillButton.Click += async (_, _) => await SendConveyorItemFillAsync();
+
         statusLabel.Text = "대기 중";
         statusLabel.AutoSize = true;
         statusLabel.ForeColor = Color.FromArgb(176, 177, 158);
@@ -230,6 +235,7 @@ internal sealed class EditorToolForm : Form
         buttonPanel.Controls.Add(giveButton);
         buttonPanel.Controls.Add(pingButton);
         buttonPanel.Controls.Add(conveyorLineButton);
+        buttonPanel.Controls.Add(conveyorItemFillButton);
         buttonPanel.Controls.Add(statusLabel);
         layout.Controls.Add(buttonPanel, 0, 2);
         layout.SetColumnSpan(buttonPanel, 2);
@@ -785,6 +791,15 @@ internal sealed class EditorToolForm : Form
         await RefreshStatusAsync();
     }
 
+    private async Task SendConveyorItemFillAsync()
+    {
+        const int conveyorItemCount = 50;
+        await SendCommandAsync(
+            $"beltitems {conveyorItemCount}",
+            $"Conveyor item fill random, count={conveyorItemCount}");
+        await RefreshStatusAsync();
+    }
+
     private async Task SendSaveSlotAsync()
     {
         int slotNumber = GetSelectedSaveSlotNumber();
@@ -1277,6 +1292,7 @@ internal sealed class EditorToolForm : Form
         giveButton.Enabled = !busy;
         pingButton.Enabled = !busy;
         conveyorLineButton.Enabled = !busy;
+        conveyorItemFillButton.Enabled = !busy;
         saveSlotComboBox.Enabled = !busy;
         saveSlotButton.Enabled = !busy;
         loadSlotButton.Enabled = !busy;

@@ -42,14 +42,108 @@ public readonly struct VirtualConveyorBeltRenderData
 public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 {
     private static readonly ProfilerMarker RenderBatchesMarker = new ProfilerMarker("VirtualConveyorBeltRenderer.RenderBatches");
+    private const bool VirtualizeCornerBeltsTopOnly = true;
+    private const float DefaultMergedBatchCellSize = 64f;
 
     [SerializeField, Min(1f)]
     private float batchCellSize = 8f;
+    [SerializeField, Min(1f)]
+    private float minimumMergedBatchCellSize = DefaultMergedBatchCellSize;
 
     private readonly Dictionary<ConveyorBelt, BeltRenderCache> beltRenderCaches = new Dictionary<ConveyorBelt, BeltRenderCache>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<VirtualConveyorBeltRenderData> scratchRenderData = new List<VirtualConveyorBeltRenderData>(8);
     private Camera mainCamera;
+
+    public int RegisteredBeltCount => beltRenderCaches.Count;
+    public int ActiveBatchCount => batches.ActiveBatchCount;
+    public int ActiveInstanceCount => batches.ActiveMatrixCount;
+    public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
+    public float EffectiveBatchCellSize => Mathf.Max(batchCellSize, ResolveMinimumMergedBatchCellSize());
+    public int HiddenSourceViewBeltCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+            {
+                if (pair.Key != null && pair.Key.IsVirtualizedSourceViewHidden)
+                {
+                    total++;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public int HiddenSourceViewObjectCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+            {
+                if (pair.Key != null)
+                {
+                    total += pair.Key.VirtualizedSourceViewHiddenObjectCount;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public int RegisteredCornerBeltCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+            {
+                if (pair.Value != null && pair.Value.IsCornerVariant)
+                {
+                    total++;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public int TopOnlyBeltCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+            {
+                if (pair.Value != null && pair.Value.TopOnly)
+                {
+                    total++;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public int ActiveEntryCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+            {
+                if (pair.Value != null)
+                {
+                    total += pair.Value.batchEntries.Count;
+                }
+            }
+
+            return total;
+        }
+    }
 
     public void Register(ConveyorBelt conveyorBelt)
     {
@@ -59,10 +153,15 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         }
 
         BeltRenderCache cache = GetOrCreateBeltRenderCache(conveyorBelt);
-        bool beltTopOnly = conveyorBelt.IsCornerVariant;
+        bool beltTopOnly = VirtualizeCornerBeltsTopOnly && conveyorBelt.IsCornerVariant;
+        cache.IsCornerVariant = conveyorBelt.IsCornerVariant;
+        cache.TopOnly = beltTopOnly;
+        conveyorBelt.SetVirtualizedSourceViewHidden(false);
         RefreshBeltRenderCache(conveyorBelt, cache, beltTopOnly);
-        conveyorBelt.SetVirtualRenderingSuppressed(true, beltTopOnly);
+        bool hasVirtualRenderData = cache.batchEntries.Count > 0;
+        conveyorBelt.SetVirtualRenderingSuppressed(hasVirtualRenderData, beltTopOnly);
         conveyorBelt.SetRuntimeRenderingHidden(IsBeltRenderingHidden());
+        conveyorBelt.SetVirtualizedSourceViewHidden(hasVirtualRenderData && !beltTopOnly);
     }
 
     public void Unregister(ConveyorBelt conveyorBelt, bool restoreNativeRenderers = true)
@@ -78,10 +177,34 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             beltRenderCaches.Remove(conveyorBelt);
         }
 
+        conveyorBelt.SetVirtualizedSourceViewHidden(false);
+
         if (restoreNativeRenderers)
         {
             conveyorBelt.SetVirtualRenderingSuppressed(false);
         }
+    }
+
+    public void Clear(bool restoreNativeRenderers = true)
+    {
+        foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+        {
+            ConveyorBelt conveyorBelt = pair.Key;
+            if (conveyorBelt == null)
+            {
+                continue;
+            }
+
+            conveyorBelt.SetVirtualizedSourceViewHidden(false);
+            if (restoreNativeRenderers)
+            {
+                conveyorBelt.SetVirtualRenderingSuppressed(false);
+            }
+        }
+
+        beltRenderCaches.Clear();
+        batches.Clear();
+        scratchRenderData.Clear();
     }
 
     private void LateUpdate()
@@ -96,9 +219,25 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             mainCamera = Camera.main;
         }
 
-        using (RenderBatchesMarker.Auto())
+        bool profileRender = MapObjectTickProfiler.IsEnabled;
+        long startTimestamp = profileRender ? MapObjectTickProfiler.BeginSample() : 0L;
+        try
         {
-            RenderBatches();
+            using (RenderBatchesMarker.Auto())
+            {
+                RenderBatches();
+            }
+        }
+        finally
+        {
+            if (profileRender)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Runtime",
+                    nameof(VirtualConveyorBeltRenderer),
+                    "Virtual Belt Render",
+                    startTimestamp);
+            }
         }
     }
 
@@ -140,8 +279,9 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         }
 
         Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
-        int cellX = GetBatchCell(worldPosition.x, batchCellSize);
-        int cellZ = GetBatchCell(worldPosition.z, batchCellSize);
+        float effectiveBatchCellSize = EffectiveBatchCellSize;
+        int cellX = GetBatchCell(worldPosition.x, effectiveBatchCellSize);
+        int cellZ = GetBatchCell(worldPosition.z, effectiveBatchCellSize);
         VirtualRenderBatchKey key = new VirtualRenderBatchKey(
             renderData.Mesh,
             renderData.Material,
@@ -188,9 +328,18 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         return Mathf.FloorToInt(worldCoordinate / Mathf.Max(1f, cellSize));
     }
 
+    private float ResolveMinimumMergedBatchCellSize()
+    {
+        return minimumMergedBatchCellSize > 0f
+            ? minimumMergedBatchCellSize
+            : DefaultMergedBatchCellSize;
+    }
+
     private sealed class BeltRenderCache : IVirtualRenderBatchOwner
     {
         public readonly List<VirtualRenderBatchEntry> batchEntries = new List<VirtualRenderBatchEntry>(4);
+        public bool IsCornerVariant;
+        public bool TopOnly;
 
         public int BatchEntryCount => batchEntries.Count;
 

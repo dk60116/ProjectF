@@ -46,6 +46,8 @@ public class InstallationObject : MapObject
 
 
     private static readonly HashSet<InstallationObject> ActiveInstances = new HashSet<InstallationObject>();
+    private static readonly Dictionary<Vector2Int, List<InstallationObject>> ActiveInstancesByRuntimeGridCoordinate =
+        new Dictionary<Vector2Int, List<InstallationObject>>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private static long nextPlacementSequence = 1;
@@ -79,6 +81,7 @@ public class InstallationObject : MapObject
     private float fluidInLastReceiveTime = -1f;
     private float fluidInRateLitersPerSecond;
     private readonly List<Renderer> runtimeShadowRenderers = new List<Renderer>();
+    private bool runtimeCoordinateIndexRegistered;
 
     [SerializeField]
     private Transform powerLinePoint;
@@ -156,40 +159,61 @@ public class InstallationObject : MapObject
         Vector2Int coordinate,
         List<InstallationObject> results)
     {
-        if (results == null || ActiveInstances.Count <= 0)
+        if (results == null
+            || ActiveInstancesByRuntimeGridCoordinate.Count <= 0
+            || !ActiveInstancesByRuntimeGridCoordinate.TryGetValue(coordinate, out List<InstallationObject> installations)
+            || installations == null
+            || installations.Count <= 0)
         {
             return false;
         }
 
         bool addedAny = false;
-        foreach (InstallationObject installationObject in ActiveInstances)
+        for (int i = installations.Count - 1; i >= 0; i--)
         {
+            InstallationObject installationObject = installations[i];
             if (installationObject == null
                 || !installationObject.gameObject.activeInHierarchy
+                || !installationObject.runtimeCoordinateIndexRegistered
                 || installationObject.runtimeOccupiedCoordinates == null
-                || installationObject.runtimeOccupiedCoordinates.Count <= 0)
+                || installationObject.runtimeOccupiedCoordinates.Count <= 0
+                || !installationObject.ContainsRuntimeCoordinate(coordinate))
             {
+                installations.RemoveAt(i);
                 continue;
             }
 
-            for (int i = 0; i < installationObject.runtimeOccupiedCoordinates.Count; i++)
+            if (!results.Contains(installationObject))
             {
-                if (installationObject.runtimeOccupiedCoordinates[i] != coordinate)
-                {
-                    continue;
-                }
-
-                if (!results.Contains(installationObject))
-                {
-                    results.Add(installationObject);
-                    addedAny = true;
-                }
-
-                break;
+                results.Add(installationObject);
+                addedAny = true;
             }
         }
 
+        if (installations.Count == 0)
+        {
+            ActiveInstancesByRuntimeGridCoordinate.Remove(coordinate);
+        }
+
         return addedAny;
+    }
+
+    private bool ContainsRuntimeCoordinate(Vector2Int coordinate)
+    {
+        if (runtimeOccupiedCoordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < runtimeOccupiedCoordinates.Count; i++)
+        {
+            if (runtimeOccupiedCoordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void ConfigurePlacementRuntime(
@@ -198,6 +222,8 @@ public class InstallationObject : MapObject
         IReadOnlyList<Vector2Int> occupiedCoordinates,
         long placementSequence = 0)
     {
+        UnregisterRuntimeCoordinateIndex(this);
+
         runtimeAnchorCoordinate = anchorCoordinate;
         runtimeQuarterTurns = ((quarterTurns % 4) + 4) % 4;
         runtimePlacementSequence = ClaimPlacementSequence(placementSequence);
@@ -224,6 +250,7 @@ public class InstallationObject : MapObject
             }
         }
 
+        RegisterRuntimeCoordinateIndex(this);
         OnPlacementRuntimeChanged();
     }
 
@@ -261,6 +288,8 @@ public class InstallationObject : MapObject
 
     public virtual void PrepareForPool()
     {
+        UnregisterRuntimeCoordinateIndex(this);
+
         runtimeAnchorCoordinate = default;
         runtimeQuarterTurns = 0;
         runtimePlacementSequence = 0;
@@ -630,6 +659,7 @@ public class InstallationObject : MapObject
     protected virtual void OnEnable()
     {
         ActiveInstances.Add(this);
+        RegisterRuntimeCoordinateIndex(this);
         globalMaxFocusActivationRadiusDirty = true;
         RefreshInstalledDirectionFromCurrentTransform();
         ApplyRuntimeShadowSettings();
@@ -637,8 +667,68 @@ public class InstallationObject : MapObject
 
     protected virtual void OnDisable()
     {
+        UnregisterRuntimeCoordinateIndex(this);
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
+    }
+
+    private static void RegisterRuntimeCoordinateIndex(InstallationObject installationObject)
+    {
+        if (installationObject == null
+            || installationObject.runtimeCoordinateIndexRegistered
+            || !installationObject.isActiveAndEnabled
+            || installationObject.runtimeOccupiedCoordinates == null
+            || installationObject.runtimeOccupiedCoordinates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < installationObject.runtimeOccupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = installationObject.runtimeOccupiedCoordinates[i];
+            if (!ActiveInstancesByRuntimeGridCoordinate.TryGetValue(coordinate, out List<InstallationObject> installations)
+                || installations == null)
+            {
+                installations = new List<InstallationObject>(1);
+                ActiveInstancesByRuntimeGridCoordinate[coordinate] = installations;
+            }
+
+            if (!installations.Contains(installationObject))
+            {
+                installations.Add(installationObject);
+            }
+        }
+
+        installationObject.runtimeCoordinateIndexRegistered = true;
+    }
+
+    private static void UnregisterRuntimeCoordinateIndex(InstallationObject installationObject)
+    {
+        if (installationObject == null || !installationObject.runtimeCoordinateIndexRegistered)
+        {
+            return;
+        }
+
+        if (installationObject.runtimeOccupiedCoordinates != null)
+        {
+            for (int i = 0; i < installationObject.runtimeOccupiedCoordinates.Count; i++)
+            {
+                Vector2Int coordinate = installationObject.runtimeOccupiedCoordinates[i];
+                if (!ActiveInstancesByRuntimeGridCoordinate.TryGetValue(coordinate, out List<InstallationObject> installations)
+                    || installations == null)
+                {
+                    continue;
+                }
+
+                installations.Remove(installationObject);
+                if (installations.Count == 0)
+                {
+                    ActiveInstancesByRuntimeGridCoordinate.Remove(coordinate);
+                }
+            }
+        }
+
+        installationObject.runtimeCoordinateIndexRegistered = false;
     }
 
     protected Animator ResolveInstallationAnimator()

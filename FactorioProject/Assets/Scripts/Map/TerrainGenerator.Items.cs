@@ -817,7 +817,16 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (pair.Value != null && pair.Value.MapObject is ConveyorBelt conveyorBelt)
             {
-                conveyorBelt.SetRuntimeRenderingHidden(hideBelts);
+                if (hideBelts)
+                {
+                    conveyorBelt.SetRuntimeRenderingHidden(true);
+                    conveyorBelt.SetRuntimeRootSuspended(true);
+                }
+                else
+                {
+                    conveyorBelt.SetRuntimeRootSuspended(false);
+                    conveyorBelt.SetRuntimeRenderingHidden(false);
+                }
             }
         }
     }

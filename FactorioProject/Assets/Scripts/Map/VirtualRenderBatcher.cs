@@ -159,6 +159,46 @@ public sealed class VirtualRenderBatchCollection
 
     public int ActiveBatchCount => activeBatchKeys.Count;
 
+    public int ActiveMatrixCount
+    {
+        get
+        {
+            int total = 0;
+            for (int i = 0; i < activeBatchKeys.Count; i++)
+            {
+                if (batchesByKey.TryGetValue(activeBatchKeys[i], out BatchRenderCache batchCache))
+                {
+                    total += batchCache.Matrices.Count;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public int EstimatedDrawCallCount
+    {
+        get
+        {
+            int total = 0;
+            for (int i = 0; i < activeBatchKeys.Count; i++)
+            {
+                if (!batchesByKey.TryGetValue(activeBatchKeys[i], out BatchRenderCache batchCache))
+                {
+                    continue;
+                }
+
+                int matrixCount = batchCache.Matrices.Count;
+                if (matrixCount > 0)
+                {
+                    total += Mathf.CeilToInt(matrixCount / (float)MaxInstancesPerDraw);
+                }
+            }
+
+            return total;
+        }
+    }
+
     public void Clear()
     {
         batchesByKey.Clear();

@@ -245,6 +245,31 @@ public partial class BlockStateStore
         return false;
     }
 
+    public int GetSavedConveyorItemCount()
+    {
+        if (savedConveyorItemStates.Count <= 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        List<KeyValuePair<Vector2Int, ConveyorItemBlockState>> savedConveyorItemSnapshot =
+            new List<KeyValuePair<Vector2Int, ConveyorItemBlockState>>(savedConveyorItemStates);
+        for (int i = 0; i < savedConveyorItemSnapshot.Count; i++)
+        {
+            count += CountSavedConveyorItems(savedConveyorItemSnapshot[i].Value);
+        }
+
+        return count;
+    }
+
+    public int GetSavedConveyorItemCount(Vector2Int worldCoordinate)
+    {
+        return savedConveyorItemStates.TryGetValue(worldCoordinate, out ConveyorItemBlockState state)
+            ? CountSavedConveyorItems(state)
+            : 0;
+    }
+
     public bool TryPeekSavedConveyorItem(
         Vector2Int worldCoordinate,
         Predicate<int> itemFilter,
@@ -648,8 +673,11 @@ public partial class BlockStateStore
         cachedConveyorScheduleSavedBlockCount = 0;
         cachedConveyorScheduleSavedItemCount = 0;
 
-        foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
+        List<KeyValuePair<Vector2Int, ConveyorItemBlockState>> savedConveyorItemSnapshot =
+            new List<KeyValuePair<Vector2Int, ConveyorItemBlockState>>(savedConveyorItemStates);
+        for (int snapshotIndex = 0; snapshotIndex < savedConveyorItemSnapshot.Count; snapshotIndex++)
         {
+            KeyValuePair<Vector2Int, ConveyorItemBlockState> pair = savedConveyorItemSnapshot[snapshotIndex];
             ConveyorItemBlockState state = pair.Value;
             if (state == null || state.lanes.Count <= 0)
             {
@@ -1978,6 +2006,26 @@ public partial class BlockStateStore
         }
 
         return -1;
+    }
+
+    private static int CountSavedConveyorItems(ConveyorItemBlockState state)
+    {
+        if (state?.lanes == null || state.lanes.Count <= 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < state.lanes.Count; i++)
+        {
+            ConveyorItemLaneSaveState lane = state.lanes[i];
+            if (lane != null && lane.itemId >= 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private static int GetMaxConveyorLaneIndex(ConveyorItemBlockState state)

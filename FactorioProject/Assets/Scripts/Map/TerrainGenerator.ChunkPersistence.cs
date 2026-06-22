@@ -1203,8 +1203,6 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        RegisterVirtualConveyorBelt(installedObject as ConveyorBelt);
-
         IReadOnlyList<Vector2Int> bindingCoordinates = occupiedCoordinates;
         if (installedObject is InstallationObject installationObject
             && installationObject.RuntimeOccupiedCoordinates != null
@@ -1226,6 +1224,8 @@ public partial class TerrainGenerator : MonoBehaviour
             ConvayorBelt2F.MarkCoverageDirty();
             belt2F.RefreshCoveredConveyorTopology();
         }
+
+        RegisterVirtualConveyorBelt(installedObject as ConveyorBelt);
         }
     }
 
@@ -1425,6 +1425,7 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             chunkTransform.gameObject.SetActive(true);
             RefreshChunkBlockRuntimeViews(chunkBlocks);
+            ApplyStoredConveyorItemSaveStates(chunkBlocks);
         }
     }
 

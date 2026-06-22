@@ -17,8 +17,10 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int BeltDirectionArrowRenderQueue = 5000;
     private const int MaxBeltItemLineDebugRefreshesPerFrame = 128;
     private const float ConveyorLineBlockedRetryInterval = 0.12f;
+    private const float ConveyorLineBlockedRetryMaxInterval = 1.2f;
     private const float ConveyorLineBlockedRetryJitterStep = 0.02f;
     private const int ConveyorLineBlockedRetryJitterSteps = 4;
+    private const int ConveyorLineBlockedRetryMaxBackoffExponent = 4;
     private const float ConveyorSlotDotInstancedDiameter = 0.08f;
     private static readonly Color ConveyorSlotDotInstancedColor = new Color(1f, 0.36f, 0.08f, 1f);
     private static readonly Color BeltDirectionArrowInstancedColor = new Color(1f, 0.92f, 0.08f, 1f);
@@ -87,6 +89,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearConveyorRuntimeState()
     {
+        virtualConveyorBeltRenderer?.Clear();
+        ConvayorBelt2F.ClearRuntimeCoverageLookup();
         activeConveyors.Clear();
         conveyorTickBuffer.Clear();
         activeConveyorDataMotionBlocks.Clear();
@@ -117,6 +121,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorNetworkCacheDirty = true;
         ClearConveyorLineCache();
         nextConveyorActiveFullScanTime = 0f;
+        activeConveyorSafetyScanIndex = 0;
         ClearConveyorDotVisualState();
         ClearBeltDirectionVisualState();
         conveyorSlotDotVisibilityInitialized = false;
@@ -369,6 +374,28 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorWakeQueue.Enqueue(block);
     }
 
+    private void QueueConveyorSafetyWake(Block block)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (TryGetCachedNonCycleConveyorLineSlot(block, out int queuedLineId, out _, out _))
+        {
+            QueueConveyorLineWake(queuedLineId);
+            return;
+        }
+
+        if (conveyorWakeQueued.Contains(block))
+        {
+            return;
+        }
+
+        conveyorWakeQueued.Add(block);
+        conveyorWakeQueue.Enqueue(block);
+    }
+
     public void QueueConveyorDirectWakeAround(Block block)
     {
         if (!Application.isPlaying || block == null)
@@ -484,6 +511,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (Time.time >= retryState.retryTime)
         {
             conveyorLineRetryStatesById.Remove(lineId);
+            conveyorLineRetryAttemptsByDueLineId[lineId] = retryState.attemptCount;
             return false;
         }
 
@@ -510,24 +538,44 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ConveyorLineWakeRange wakeRange = new ConveyorLineWakeRange(minSlotIndex, maxSlotIndex, false);
-        float retryTime = Time.time + GetStraightConveyorLineBlockedRetryDelay(lineId, minSlotIndex, maxSlotIndex);
-        if (conveyorLineRetryStatesById.TryGetValue(lineId, out ConveyorLineRetryState retryState)
-            && Time.time < retryState.retryTime)
+        int previousAttemptCount = 0;
+        if (conveyorLineRetryStatesById.TryGetValue(lineId, out ConveyorLineRetryState retryState))
         {
-            retryState.wakeRange.Include(wakeRange);
-            retryState.retryTime = Mathf.Max(retryState.retryTime, retryTime);
-            conveyorLineRetryStatesById[lineId] = retryState;
-            TrackNextStraightConveyorLineRetryTime(retryState.retryTime);
-            return;
+            previousAttemptCount = retryState.attemptCount;
+            if (Time.time < retryState.retryTime)
+            {
+                int mergedAttemptCount = Mathf.Max(1, previousAttemptCount);
+                float mergedRetryTime = Time.time + GetStraightConveyorLineBlockedRetryDelay(lineId, minSlotIndex, maxSlotIndex, mergedAttemptCount);
+                retryState.wakeRange.Include(wakeRange);
+                retryState.retryTime = Mathf.Max(retryState.retryTime, mergedRetryTime);
+                retryState.attemptCount = mergedAttemptCount;
+                conveyorLineRetryStatesById[lineId] = retryState;
+                TrackNextStraightConveyorLineRetryTime(retryState.retryTime);
+                return;
+            }
+        }
+        else if (conveyorLineRetryAttemptsByDueLineId.TryGetValue(lineId, out int dueAttemptCount))
+        {
+            previousAttemptCount = dueAttemptCount;
         }
 
-        conveyorLineRetryStatesById[lineId] = new ConveyorLineRetryState(wakeRange, retryTime);
+        conveyorLineRetryAttemptsByDueLineId.Remove(lineId);
+        int attemptCount = Mathf.Max(0, previousAttemptCount) + 1;
+        float retryTime = Time.time + GetStraightConveyorLineBlockedRetryDelay(lineId, minSlotIndex, maxSlotIndex, attemptCount);
+
+        conveyorLineRetryStatesById[lineId] = new ConveyorLineRetryState(wakeRange, retryTime, attemptCount);
         TrackNextStraightConveyorLineRetryTime(retryTime);
     }
 
     private void ClearStraightConveyorLineRetry(int lineId)
     {
-        if (lineId > 0 && conveyorLineRetryStatesById.Remove(lineId) && conveyorLineRetryStatesById.Count == 0)
+        if (lineId <= 0)
+        {
+            return;
+        }
+
+        conveyorLineRetryAttemptsByDueLineId.Remove(lineId);
+        if (conveyorLineRetryStatesById.Remove(lineId) && conveyorLineRetryStatesById.Count == 0)
         {
             nextConveyorLineRetryTime = float.PositiveInfinity;
         }
@@ -541,11 +589,13 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private static float GetStraightConveyorLineBlockedRetryDelay(int lineId, int minSlotIndex, int maxSlotIndex)
+    private static float GetStraightConveyorLineBlockedRetryDelay(int lineId, int minSlotIndex, int maxSlotIndex, int attemptCount)
     {
         uint hash = unchecked((uint)((lineId * 73856093) ^ (minSlotIndex * 19349663) ^ (maxSlotIndex * 83492791)));
         float jitter = (hash % ConveyorLineBlockedRetryJitterSteps) * ConveyorLineBlockedRetryJitterStep;
-        return ConveyorLineBlockedRetryInterval + jitter;
+        int exponent = Mathf.Clamp(attemptCount - 1, 0, ConveyorLineBlockedRetryMaxBackoffExponent);
+        float retryInterval = ConveyorLineBlockedRetryInterval * (1 << exponent);
+        return Mathf.Min(ConveyorLineBlockedRetryMaxInterval, retryInterval + jitter);
     }
 
     private bool HasDueStraightConveyorLineRetry()
@@ -601,6 +651,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             conveyorLineRetryStatesById.Remove(lineId);
+            conveyorLineRetryAttemptsByDueLineId[lineId] = retryState.attemptCount;
             QueueConveyorLineWake(lineId, retryState.wakeRange);
         }
 
@@ -1965,21 +2016,54 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void MaybeEnqueueActiveConveyorSafetyScan()
     {
-        if (activeConveyors.Count == 0 || Time.time < nextConveyorActiveFullScanTime)
+        if (activeConveyors.Count == 0)
+        {
+            activeConveyorSafetyScanIndex = 0;
+            return;
+        }
+
+        if (Time.time < nextConveyorActiveFullScanTime)
         {
             return;
         }
 
         nextConveyorActiveFullScanTime = Time.time + Mathf.Max(0.02f, conveyorActiveFullScanInterval);
         EnsureSortedActiveConveyors();
-        for (int i = 0; i < sortedActiveConveyors.Count; i++)
+        int conveyorCount = sortedActiveConveyors.Count;
+        if (conveyorCount == 0)
         {
-            Block block = sortedActiveConveyors[i];
+            activeConveyorSafetyScanIndex = 0;
+            return;
+        }
+
+        if (activeConveyorSafetyScanIndex < 0 || activeConveyorSafetyScanIndex >= conveyorCount)
+        {
+            activeConveyorSafetyScanIndex = 0;
+        }
+
+        int scanBudget = GetEffectiveActiveConveyorSafetyScanBudget(conveyorCount);
+        for (int scannedCount = 0; scannedCount < scanBudget; scannedCount++)
+        {
+            Block block = sortedActiveConveyors[activeConveyorSafetyScanIndex];
+            activeConveyorSafetyScanIndex = (activeConveyorSafetyScanIndex + 1) % conveyorCount;
             if (IsLoadedRuntimeBlock(block) && block.ShouldTickActiveConveyor())
             {
-                QueueConveyorWake(block);
+                QueueConveyorSafetyWake(block);
             }
         }
+    }
+
+    private int GetEffectiveActiveConveyorSafetyScanBudget(int conveyorCount)
+    {
+        if (conveyorCount <= 0)
+        {
+            return 0;
+        }
+
+        int dynamicBudget = Mathf.Max(
+            conveyorActiveSafetyScanBudget,
+            Mathf.CeilToInt(conveyorCount / 16f));
+        return Mathf.Clamp(dynamicBudget, 1, conveyorCount);
     }
 
     private bool TryTickStraightConveyorLine(Block triggerBlock)
@@ -2018,10 +2102,17 @@ public partial class TerrainGenerator : MonoBehaviour
         ConveyorLine line = FindConveyorLine(lineId);
         if (!CanTickStraightConveyorLine(line))
         {
+            ClearStraightConveyorLineRetry(lineId);
             return false;
         }
 
         ResolveStraightConveyorLineWakeRange(line, ref wakeRange, out int minSlotIndex, out int maxSlotIndex);
+
+        if (!HasStraightConveyorLineRetryWork(line, minSlotIndex, maxSlotIndex))
+        {
+            ClearStraightConveyorLineRetry(line.id);
+            return true;
+        }
 
         if (HasStraightConveyorLineFastPathRuntimeBlocker(line, minSlotIndex, maxSlotIndex))
         {
@@ -2039,7 +2130,15 @@ public partial class TerrainGenerator : MonoBehaviour
         if (!movedAny)
         {
             NotifyStraightConveyorLineTickCompleted(line, minSlotIndex, maxSlotIndex);
-            DelayStraightConveyorLineRetry(line.id, minSlotIndex, maxSlotIndex);
+            if (HasStraightConveyorLineRetryWork(line, minSlotIndex, maxSlotIndex))
+            {
+                DelayStraightConveyorLineRetry(line.id, minSlotIndex, maxSlotIndex);
+            }
+            else
+            {
+                ClearStraightConveyorLineRetry(line.id);
+            }
+
             return directFallbackBlock == null;
         }
 
@@ -2048,6 +2147,25 @@ public partial class TerrainGenerator : MonoBehaviour
         DeferMovedStraightConveyorLineWake(line);
 
         return true;
+    }
+
+    private static bool HasStraightConveyorLineRetryWork(ConveyorLine line, int minSlotIndex, int maxSlotIndex)
+    {
+        if (line == null || line.blocks.Count <= 0)
+        {
+            return false;
+        }
+
+        ResolveStraightConveyorLineSlotRange(line, ref minSlotIndex, ref maxSlotIndex);
+        for (int i = minSlotIndex; i <= maxSlotIndex; i++)
+        {
+            if (line.blocks[i] != null && line.blocks[i].HasStraightConveyorLineRetryWork())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void NotifyStraightConveyorLineTickCompleted(ConveyorLine line, int minSlotIndex, int maxSlotIndex)
@@ -2414,6 +2532,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private void ClearStraightConveyorLineRetries()
     {
         conveyorLineRetryStatesById.Clear();
+        conveyorLineRetryAttemptsByDueLineId.Clear();
         conveyorLineRetryDueIds.Clear();
         nextConveyorLineRetryTime = float.PositiveInfinity;
     }
@@ -2955,6 +3074,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return mesh;
     }
 
+    private readonly List<Transform> runtimeCounterTransformScratch = new List<Transform>(512);
     private readonly List<Renderer> runtimeCounterRendererScratch = new List<Renderer>(256);
     private readonly List<Collider> runtimeCounterColliderScratch = new List<Collider>(128);
 
@@ -2963,11 +3083,23 @@ public partial class TerrainGenerator : MonoBehaviour
         int loadedMapObjectCount = 0;
         int loadedInstallationCount = 0;
         int loadedConveyorBeltCount = 0;
+        int activeBlockRootCount = 0;
+        int inactiveBlockRootCount = 0;
+        int activeMapObjectRootCount = 0;
+        int inactiveMapObjectRootCount = 0;
+        int activeBeltRootCount = 0;
+        int inactiveBeltRootCount = 0;
+        int suspendedBeltRootCount = 0;
+        int transformCount = 0;
+        int activeTransformCount = 0;
+        int beltTransformCount = 0;
+        int activeBeltTransformCount = 0;
         int rendererCount = 0;
         int enabledRendererCount = 0;
         int activeEnabledRendererCount = 0;
         int beltRendererCount = 0;
         int enabledBeltRendererCount = 0;
+        int activeEnabledBeltRendererCount = 0;
         int colliderCount = 0;
         int enabledColliderCount = 0;
         int beltColliderCount = 0;
@@ -2976,13 +3108,36 @@ public partial class TerrainGenerator : MonoBehaviour
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             Block block = pair.Value;
-            if (block == null || block.MapObject == null)
+            if (block == null)
+            {
+                continue;
+            }
+
+            if (block.gameObject.activeInHierarchy)
+            {
+                activeBlockRootCount++;
+            }
+            else
+            {
+                inactiveBlockRootCount++;
+            }
+
+            if (block.MapObject == null)
             {
                 continue;
             }
 
             MapObject mapObject = block.MapObject;
             loadedMapObjectCount++;
+            if (mapObject.gameObject.activeInHierarchy)
+            {
+                activeMapObjectRootCount++;
+            }
+            else
+            {
+                inactiveMapObjectRootCount++;
+            }
+
             if (mapObject is InstallationObject)
             {
                 loadedInstallationCount++;
@@ -2992,21 +3147,62 @@ public partial class TerrainGenerator : MonoBehaviour
             if (isBelt)
             {
                 loadedConveyorBeltCount++;
+                if (mapObject is ConveyorBelt conveyorBelt && conveyorBelt.IsRuntimeRootSuspended)
+                {
+                    suspendedBeltRootCount++;
+                }
+
+                if (mapObject.gameObject.activeInHierarchy)
+                {
+                    activeBeltRootCount++;
+                }
+                else
+                {
+                    inactiveBeltRootCount++;
+                }
             }
 
             CountRuntimeComponents(
                 mapObject,
                 isBelt,
+                ref transformCount,
+                ref activeTransformCount,
+                ref beltTransformCount,
+                ref activeBeltTransformCount,
                 ref rendererCount,
                 ref enabledRendererCount,
                 ref activeEnabledRendererCount,
                 ref beltRendererCount,
                 ref enabledBeltRendererCount,
+                ref activeEnabledBeltRendererCount,
                 ref colliderCount,
                 ref enabledColliderCount,
                 ref beltColliderCount,
                 ref enabledBeltColliderCount);
         }
+
+        int retryAttemptSampleCount = 0;
+        int totalLineRetryAttempts = 0;
+        int maxLineRetryAttempt = 0;
+        foreach (KeyValuePair<int, ConveyorLineRetryState> pair in conveyorLineRetryStatesById)
+        {
+            int attemptCount = Mathf.Max(0, pair.Value.attemptCount);
+            retryAttemptSampleCount++;
+            totalLineRetryAttempts += attemptCount;
+            maxLineRetryAttempt = Mathf.Max(maxLineRetryAttempt, attemptCount);
+        }
+
+        foreach (KeyValuePair<int, int> pair in conveyorLineRetryAttemptsByDueLineId)
+        {
+            int attemptCount = Mathf.Max(0, pair.Value);
+            retryAttemptSampleCount++;
+            totalLineRetryAttempts += attemptCount;
+            maxLineRetryAttempt = Mathf.Max(maxLineRetryAttempt, attemptCount);
+        }
+
+        float averageLineRetryAttempt = retryAttemptSampleCount > 0
+            ? totalLineRetryAttempts / (float)retryAttemptSampleCount
+            : 0f;
 
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedBlocks", loadedBlocks.Count);
@@ -3016,12 +3212,27 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("World", "SleepingChunks", sleepingChunkViews.Count);
         MapObjectTickProfiler.AddRuntimeCounter("World", "SleepingInstallationViews", sleepingInstallationViews.Count);
 
+        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBlockRoots", activeBlockRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBlockRoots", inactiveBlockRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveMapObjectRoots", activeMapObjectRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveMapObjectRoots", inactiveMapObjectRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBeltRoots", activeBeltRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBeltRoots", inactiveBeltRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "SuspendedBeltRoots", suspendedBeltRootCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "MapObjectTransforms", transformCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveMapObjectTransforms", activeTransformCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveMapObjectTransforms", transformCount - activeTransformCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "BeltTransforms", beltTransformCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBeltTransforms", activeBeltTransformCount);
+        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBeltTransforms", beltTransformCount - activeBeltTransformCount);
+
         MapObjectTickProfiler.AddRuntimeCounter("Render", "MapObjectRenderers", rendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledMapObjectRenderers", enabledRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledMapObjectRenderers", activeEnabledRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledMapObjectRenderers", rendererCount - enabledRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "BeltRenderers", beltRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledBeltRenderers", enabledBeltRendererCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledBeltRenderers", activeEnabledBeltRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
 
         MapObjectTickProfiler.AddRuntimeCounter("Physics", "MapObjectColliders", colliderCount);
@@ -3031,6 +3242,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledBeltColliders", enabledBeltColliderCount);
 
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "LoadedConveyorItems", cachedLoadedConveyorItemCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "TotalConveyorItems", GetConveyorItemCount());
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "ActiveConveyors", activeConveyors.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DataMotionBlocks", activeConveyorDataMotionBlocks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "ItemVisualBlocks", conveyorItemVisualBlocks.Count);
@@ -3039,12 +3251,27 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "SlotDotVisualBlocks", activeConveyorDotVisualList.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DirectionVisualBlocks", activeBeltDirectionVisualList.Count);
 
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "SavedBlocks", lastConveyorItemLoadSavedBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "SavedLanes", lastConveyorItemLoadSavedLanes);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "LoadedBlocks", lastConveyorItemLoadLoadedBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "MissingBlocks", lastConveyorItemLoadMissingBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "NotRuntimeBlocks", lastConveyorItemLoadNotRuntimeBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "ZeroLaneBlocks", lastConveyorItemLoadZeroLaneBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "AppliedLanes", lastConveyorItemLoadAppliedLanes);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "FallbackBlocks", lastConveyorItemLoadFallbackBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "FailedBlocks", lastConveyorItemLoadFailedBlocks);
+
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueue", conveyorWakeQueue.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueuedSet", conveyorWakeQueued.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DirectWakeBlocks", conveyorDirectWakeBlocks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineWakeQueue", conveyorLineWakeQueue.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredLineWakeQueue", deferredConveyorLineWakeQueue.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineRetryStates", conveyorLineRetryStatesById.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineRetryDueLines", conveyorLineRetryAttemptsByDueLineId.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "MaxLineRetryAttempt", maxLineRetryAttempt);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "AvgLineRetryAttempt", averageLineRetryAttempt);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "ActiveSafetyScanBudget", GetEffectiveActiveConveyorSafetyScanBudget(activeConveyors.Count));
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "ActiveSafetyScanIndex", activeConveyorSafetyScanIndex);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "NetworkSleepChecks", conveyorNetworkSleepCheckQueuedIds.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredRuntimeRefreshBlocks", deferredConveyorRuntimeRefreshBlocks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredNetworkWakeBlocks", deferredConveyorNetworkWakeBlocks.Count);
@@ -3066,21 +3293,62 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "FloorVirtualizationQueued", floorObjectVirtualizationQueuedCoordinates.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "BackgroundConveyorDirtyCoordinates", backgroundConveyorDirtyCoordinates.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "BackgroundConveyorWakeCoordinates", backgroundConveyorWakeCoordinates.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltRegistered", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.RegisteredBeltCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltCorners", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.RegisteredCornerBeltCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltTopOnly", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.TopOnlyBeltCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltSourceHidden", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewBeltCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltSourceHiddenObjects", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewObjectCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEffectiveBatchCellSize", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.EffectiveBatchCellSize : 0f);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveEntryCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltInstances", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveInstanceCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDrawCalls", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.EstimatedDrawCallCount : 0);
     }
 
     private void CountRuntimeComponents(
         MapObject mapObject,
         bool isBelt,
+        ref int transformCount,
+        ref int activeTransformCount,
+        ref int beltTransformCount,
+        ref int activeBeltTransformCount,
         ref int rendererCount,
         ref int enabledRendererCount,
         ref int activeEnabledRendererCount,
         ref int beltRendererCount,
         ref int enabledBeltRendererCount,
+        ref int activeEnabledBeltRendererCount,
         ref int colliderCount,
         ref int enabledColliderCount,
         ref int beltColliderCount,
         ref int enabledBeltColliderCount)
     {
+        runtimeCounterTransformScratch.Clear();
+        mapObject.GetComponentsInChildren(true, runtimeCounterTransformScratch);
+        for (int i = 0; i < runtimeCounterTransformScratch.Count; i++)
+        {
+            Transform targetTransform = runtimeCounterTransformScratch[i];
+            if (targetTransform == null)
+            {
+                continue;
+            }
+
+            transformCount++;
+            if (targetTransform.gameObject.activeInHierarchy)
+            {
+                activeTransformCount++;
+            }
+
+            if (isBelt)
+            {
+                beltTransformCount++;
+                if (targetTransform.gameObject.activeInHierarchy)
+                {
+                    activeBeltTransformCount++;
+                }
+            }
+        }
+
         runtimeCounterRendererScratch.Clear();
         mapObject.GetComponentsInChildren(true, runtimeCounterRendererScratch);
         for (int i = 0; i < runtimeCounterRendererScratch.Count; i++)
@@ -3098,6 +3366,10 @@ public partial class TerrainGenerator : MonoBehaviour
                 if (renderer.gameObject.activeInHierarchy)
                 {
                     activeEnabledRendererCount++;
+                    if (isBelt)
+                    {
+                        activeEnabledBeltRendererCount++;
+                    }
                 }
             }
 

@@ -60,7 +60,8 @@ public partial class TerrainGenerator
         bool hasDetailedConveyorItems = block.IsRuntimeConveyor
             && resourceStateStore.TryGetConveyorItems(block.Coordinate, out conveyorItems);
 
-        if (resourceStateStore.TryGetFloorObjects(block.Coordinate, out List<int> itemIds))
+        bool hasFloorObjects = resourceStateStore.TryGetFloorObjects(block.Coordinate, out List<int> itemIds);
+        if (hasFloorObjects)
         {
             if (!hasDetailedConveyorItems && ShouldKeepFloorObjectsVirtual(block.Coordinate, itemIds))
             {
@@ -86,12 +87,36 @@ public partial class TerrainGenerator
 
         if (hasDetailedConveyorItems)
         {
-            block.ApplyConveyorItemSaveStates(conveyorItems);
+            int restoredItemCount = block.ApplyConveyorItemSaveStates(conveyorItems);
+            if (restoredItemCount <= 0
+                && HasConveyorFloorObjectFallback(itemIds))
+            {
+                block.ApplyFloorObjectState(itemIds);
+            }
+
             resourceStateStore.SetFloorObjectsResidency(block.Coordinate, VirtualObjectResidency.Live);
             virtualizedFloorObjectCoordinates.Remove(block.Coordinate);
         }
 
         RobotArm.WakeAroundCoordinate(block.Coordinate);
+    }
+
+    private static bool HasConveyorFloorObjectFallback(IReadOnlyList<int> itemIds)
+    {
+        if (itemIds == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < itemIds.Count; i++)
+        {
+            if (itemIds[i] == Block.ConveyorStackStateSentinel)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void TickFloorObjectVirtualization()

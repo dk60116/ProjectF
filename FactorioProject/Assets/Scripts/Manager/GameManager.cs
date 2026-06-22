@@ -5,9 +5,13 @@ using System.IO;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
+using Unity.Profiling;
+using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine;
+using UnityEngine.Profiling;
 using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
 
@@ -467,12 +471,21 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int MaxItemsPerRequest = 1000;
     private const int ConveyorLineDefaultCount = 100;
     private const int MaxConveyorsPerRequest = 100;
+    private const int ConveyorItemFillDefaultCount = 50;
+    private const int MaxConveyorItemsPerRequest = 500;
     private const int ConveyorLineFillSearchLimit = 4096;
+    private const float ConveyorItemFillSearchRadius = 32f;
     private const int RequestTimeoutMilliseconds = 5000;
     private const int MaxRequestsPerFrame = 4;
     private const int MaxRequestsPerFrameDuringChunkStreaming = 1;
     private const float StatusWorldStatsRefreshInterval = 1f;
     private const float StatusSaveSlotRefreshInterval = 5f;
+    private const int RuntimeProfilerRecorderCapacity = 128;
+    private const int RuntimeProfilerRecorderRelevantNamesMaxLength = 360;
+    private const ProfilerRecorderOptions RuntimeProfilerRecorderBaseOptions =
+        ProfilerRecorderOptions.StartImmediately
+        | ProfilerRecorderOptions.WrapAroundWhenCapacityReached
+        | ProfilerRecorderOptions.SumAllSamplesInFrame;
 
     private static readonly Vector2Int[] ConveyorLineCardinalDirections =
     {
@@ -487,6 +500,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private readonly Dictionary<int, int> installationCountsByItemId = new Dictionary<int, int>();
     private readonly List<KeyValuePair<int, int>> installationCountSortBuffer = new List<KeyValuePair<int, int>>();
     private readonly StringBuilder installationCountTokenBuilder = new StringBuilder(128);
+    private readonly FrameTiming[] frameTimingBuffer = new FrameTiming[1];
+    private readonly List<RuntimeProfilerRecorder> runtimeProfilerRecorders = new List<RuntimeProfilerRecorder>();
+    private readonly List<ProfilerRecorderHandle> runtimeProfilerRecorderHandles = new List<ProfilerRecorderHandle>(256);
+    private readonly Dictionary<string, ProfilerRecorderHandle> runtimeProfilerRecorderHandlesByKey = new Dictionary<string, ProfilerRecorderHandle>();
+    private readonly StringBuilder runtimeProfilerRecorderTextBuilder = new StringBuilder(512);
     private TcpListener listener;
     private Thread listenerThread;
     private int port = DefaultPort;
@@ -503,7 +521,111 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private string cachedSaveSlotsExtraTokens = string.Empty;
     private SaveManager cachedSaveManager;
     private PlayerCamera cachedPlayerCamera;
+    private bool hasGcCollectionSnapshot;
+    private int lastGen0CollectionCount;
+    private int lastGen1CollectionCount;
+    private int lastGen2CollectionCount;
+    private bool runtimeProfilerRecordersInitialized;
+    private int availableRuntimeProfilerRecorderCount;
+    private string availableRuntimeProfilerRecorderRelevantNames = string.Empty;
+    private bool runtimeProfilerRecorderRelevantNamesTruncated;
     private volatile bool stopRequested;
+
+    private static readonly RuntimeProfilerRecorderSpec[] RuntimeProfilerRecorderSpecs =
+    {
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerCPU",
+            "MainThreadMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Internal("Main Thread")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerCPU",
+            "RenderThreadMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Internal("Render Thread")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerCPU",
+            "WaitForTargetFpsMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("VSync", "WaitForTargetFPS"),
+            RuntimeProfilerRecorderCandidate.Internal("WaitForTargetFPS"),
+            RuntimeProfilerRecorderCandidate.Internal("WaitForTargetFPS.FreeTime")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerCPU",
+            "GfxWaitForPresentMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Render("Gfx.WaitForPresentOnGfxThread"),
+            RuntimeProfilerRecorderCandidate.Internal("Gfx.WaitForPresentOnGfxThread"),
+            RuntimeProfilerRecorderCandidate.Render("Gfx.PresentFrame"),
+            RuntimeProfilerRecorderCandidate.Internal("Gfx.PresentFrame")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "CameraRenderMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Render("Camera.Render"),
+            RuntimeProfilerRecorderCandidate.Internal("Camera.Render")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "RenderLoopDrawMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Render("RenderLoop.Draw"),
+            RuntimeProfilerRecorderCandidate.Internal("RenderLoop.Draw")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerGPU",
+            "FrameGpuMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Render("FrameTime.GPU")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "DrawCalls",
+            RuntimeProfilerRecorderUnit.Count,
+            RuntimeProfilerRecorderCandidate.Render("Draw Calls Count")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "Batches",
+            RuntimeProfilerRecorderUnit.Count,
+            RuntimeProfilerRecorderCandidate.Render("Batches Count")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "SetPassCalls",
+            RuntimeProfilerRecorderUnit.Count,
+            RuntimeProfilerRecorderCandidate.Render("SetPass Calls Count")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "Triangles",
+            RuntimeProfilerRecorderUnit.Count,
+            RuntimeProfilerRecorderCandidate.Render("Triangles Count")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "Vertices",
+            RuntimeProfilerRecorderUnit.Count,
+            RuntimeProfilerRecorderCandidate.Render("Vertices Count")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerRender",
+            "ShadowCasters",
+            RuntimeProfilerRecorderUnit.Count,
+            RuntimeProfilerRecorderCandidate.Render("Shadow Casters Count")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerMemory",
+            "GcAllocFrameKB",
+            RuntimeProfilerRecorderUnit.BytesToKilobytes,
+            RuntimeProfilerRecorderCandidate.Memory("GC Allocated In Frame")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerGC",
+            "GcCollectMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("GC", "GC.Collect")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerMemory",
+            "GcUsedMB",
+            RuntimeProfilerRecorderUnit.BytesToMegabytes,
+            RuntimeProfilerRecorderCandidate.Memory("GC Used Memory")),
+        new RuntimeProfilerRecorderSpec(
+            "ProfilerMemory",
+            "TotalUsedMB",
+            RuntimeProfilerRecorderUnit.BytesToMegabytes,
+            RuntimeProfilerRecorderCandidate.Memory("Total Used Memory"))
+    };
 
     public void Configure(int listenPort)
     {
@@ -520,6 +642,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     public void StopServer()
     {
         stopRequested = true;
+        DisposeRuntimeProfilerRecorders();
 
         try
         {
@@ -584,6 +707,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.CreateConveyorLine:
                 request.Result = CreateConveyorLine(request.ItemId, request.Count);
                 break;
+            case ToolCommand.FillConveyorItems:
+                request.Result = FillRandomConveyorItems(request.Count);
+                break;
             case ToolCommand.SaveSlot:
                 request.Result = SaveSlot(request.SlotIndex);
                 break;
@@ -607,6 +733,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void UpdateFrameStats()
     {
+        FrameTimingManager.CaptureFrameTimings();
+
         float deltaTime = Time.unscaledDeltaTime;
         if (deltaTime <= 0f)
         {
@@ -643,6 +771,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return;
         }
 
+        EnsureRuntimeProfilerRecorders();
         listenerThread = new Thread(ListenLoop)
         {
             IsBackground = true,
@@ -990,9 +1119,33 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts.Length >= 1
+            && (string.Equals(parts[0], "beltitems", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "conveyoritems", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.FillConveyorItems;
+            itemId = -1;
+            count = ConveyorItemFillDefaultCount;
+
+            if (parts.Length >= 2 && (!int.TryParse(parts[1], out count) || count <= 0))
+            {
+                error = "count must be a positive integer";
+                return false;
+            }
+
+            if (parts.Length > 2)
+            {
+                error = "usage: beltitems [count]";
+                return false;
+            }
+
+            count = Math.Min(Math.Max(count, 1), MaxConveyorItemsPerRequest);
+            return true;
+        }
+
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | beltitems [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -1135,7 +1288,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private ToolResult GetPerfSnapshotResult(int maxRows)
     {
         int resolvedMaxRows = Mathf.Max(1, maxRows);
+        EnsureRuntimeProfilerRecorders();
         MapObjectTickProfiler.ClearRuntimeCounters();
+        AppendFrameRuntimeProfilerCounters();
         TerrainGenerator.Active?.AppendRuntimeProfilerCounters();
         string json = MapObjectTickProfiler.BuildAndResetSnapshotJson(resolvedMaxRows);
         string encodedJson = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
@@ -1148,6 +1303,616 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             "perf",
             $"perfData={encodedJson}");
+    }
+
+    private void AppendFrameRuntimeProfilerCounters()
+    {
+        float fps = currentFps;
+        float frameMs = currentFrameMs;
+        if (fps <= 0f && Time.unscaledDeltaTime > 0f)
+        {
+            fps = 1f / Time.unscaledDeltaTime;
+            frameMs = Time.unscaledDeltaTime * 1000f;
+        }
+
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "Fps", fps);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "FrameMs", frameMs);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "UnscaledDeltaMs", Time.unscaledDeltaTime * 1000f);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "SmoothDeltaMs", Time.smoothDeltaTime * 1000f);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "TimeScale", Time.timeScale);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "TargetFrameRate", Application.targetFrameRate);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "VSyncCount", QualitySettings.vSyncCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "ScreenRefreshRate", FormatScreenRefreshRate());
+        MapObjectTickProfiler.AddRuntimeCounter("Frame", "IsEditor", Application.isEditor);
+
+        uint frameTimingCount = FrameTimingManager.GetLatestTimings((uint)frameTimingBuffer.Length, frameTimingBuffer);
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "Samples", (int)frameTimingCount);
+        if (frameTimingCount > 0)
+        {
+            FrameTiming timing = frameTimingBuffer[0];
+            AddFrameTimingCounter("CpuFrameMs", timing, "cpuFrameTime");
+            AddFrameTimingCounter("CpuMainThreadMs", timing, "cpuMainThreadFrameTime");
+            AddFrameTimingCounter("CpuRenderThreadMs", timing, "cpuRenderThreadFrameTime");
+            AddFrameTimingCounter("CpuPresentWaitMs", timing, "cpuMainThreadPresentWaitTime");
+            AddFrameTimingCounter("GpuFrameMs", timing, "gpuFrameTime");
+        }
+        else
+        {
+            AddUnavailableFrameTimingCounters();
+        }
+
+        AppendMemoryRuntimeProfilerCounters();
+        AppendProfilerRecorderRuntimeCounters();
+        AppendEditorRenderRuntimeProfilerCounters();
+    }
+
+    private void AppendMemoryRuntimeProfilerCounters()
+    {
+        int gen0CollectionCount = GC.CollectionCount(0);
+        int gen1CollectionCount = GC.CollectionCount(1);
+        int gen2CollectionCount = GC.CollectionCount(2);
+        int gen0Delta = hasGcCollectionSnapshot ? Mathf.Max(0, gen0CollectionCount - lastGen0CollectionCount) : 0;
+        int gen1Delta = hasGcCollectionSnapshot ? Mathf.Max(0, gen1CollectionCount - lastGen1CollectionCount) : 0;
+        int gen2Delta = hasGcCollectionSnapshot ? Mathf.Max(0, gen2CollectionCount - lastGen2CollectionCount) : 0;
+        hasGcCollectionSnapshot = true;
+        lastGen0CollectionCount = gen0CollectionCount;
+        lastGen1CollectionCount = gen1CollectionCount;
+        lastGen2CollectionCount = gen2CollectionCount;
+
+        MapObjectTickProfiler.AddRuntimeCounter("Memory", "ManagedHeapMB", FormatBytesMb(GC.GetTotalMemory(false)));
+        MapObjectTickProfiler.AddRuntimeCounter("Memory", "UnityAllocatedMB", FormatBytesMb(Profiler.GetTotalAllocatedMemoryLong()));
+        MapObjectTickProfiler.AddRuntimeCounter("Memory", "UnityReservedMB", FormatBytesMb(Profiler.GetTotalReservedMemoryLong()));
+        MapObjectTickProfiler.AddRuntimeCounter("Memory", "UnityUnusedReservedMB", FormatBytesMb(Profiler.GetTotalUnusedReservedMemoryLong()));
+        MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen0Total", gen0CollectionCount);
+        MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen1Total", gen1CollectionCount);
+        MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen2Total", gen2CollectionCount);
+        MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen0Delta", gen0Delta);
+        MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen1Delta", gen1Delta);
+        MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen2Delta", gen2Delta);
+    }
+
+    private static void AppendEditorRenderRuntimeProfilerCounters()
+    {
+#if UNITY_EDITOR
+        Type unityStatsType = Type.GetType("UnityEditor.UnityStats, UnityEditor");
+        AddEditorRenderStat(unityStatsType, "DrawCalls", "drawCalls");
+        AddEditorRenderStat(unityStatsType, "Batches", "batches");
+        AddEditorRenderStat(unityStatsType, "SetPassCalls", "setPassCalls");
+        AddEditorRenderStat(unityStatsType, "Triangles", "triangles");
+        AddEditorRenderStat(unityStatsType, "Vertices", "vertices");
+        AddEditorRenderStat(unityStatsType, "ShadowCasters", "shadowCasters");
+        AddEditorRenderStat(unityStatsType, "RenderTextureChanges", "renderTextureChanges");
+        AddEditorRenderStat(unityStatsType, "VisibleSkinnedMeshes", "visibleSkinnedMeshes");
+#else
+        MapObjectTickProfiler.AddRuntimeCounter("RenderStats", "EditorStats", "unavailable", "UNITY_EDITOR only");
+#endif
+    }
+
+#if UNITY_EDITOR
+    private static void AddEditorRenderStat(Type unityStatsType, string counterName, string memberName)
+    {
+        if (unityStatsType == null || string.IsNullOrWhiteSpace(memberName))
+        {
+            MapObjectTickProfiler.AddRuntimeCounter("RenderStats", counterName, "n/a", "UnityStats unavailable");
+            return;
+        }
+
+        const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Static;
+        object rawValue = null;
+        PropertyInfo property = unityStatsType.GetProperty(memberName, bindingFlags);
+        if (property != null)
+        {
+            rawValue = property.GetValue(null, null);
+        }
+        else
+        {
+            FieldInfo field = unityStatsType.GetField(memberName, bindingFlags);
+            if (field != null)
+            {
+                rawValue = field.GetValue(null);
+            }
+        }
+
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RenderStats",
+            counterName,
+            rawValue != null ? Convert.ToString(rawValue, CultureInfo.InvariantCulture) : "n/a",
+            "Editor");
+    }
+#endif
+
+    private void EnsureRuntimeProfilerRecorders()
+    {
+        if (runtimeProfilerRecordersInitialized)
+        {
+            return;
+        }
+
+        runtimeProfilerRecordersInitialized = true;
+        RefreshAvailableRuntimeProfilerRecorders();
+
+        for (int i = 0; i < RuntimeProfilerRecorderSpecs.Length; i++)
+        {
+            if (TryCreateRuntimeProfilerRecorder(RuntimeProfilerRecorderSpecs[i], out RuntimeProfilerRecorder recorder))
+            {
+                runtimeProfilerRecorders.Add(recorder);
+            }
+        }
+    }
+
+    private void DisposeRuntimeProfilerRecorders()
+    {
+        for (int i = 0; i < runtimeProfilerRecorders.Count; i++)
+        {
+            runtimeProfilerRecorders[i].Dispose();
+        }
+
+        runtimeProfilerRecorders.Clear();
+        runtimeProfilerRecorderHandles.Clear();
+        runtimeProfilerRecorderHandlesByKey.Clear();
+        availableRuntimeProfilerRecorderCount = 0;
+        availableRuntimeProfilerRecorderRelevantNames = string.Empty;
+        runtimeProfilerRecorderRelevantNamesTruncated = false;
+        runtimeProfilerRecordersInitialized = false;
+    }
+
+    private void RefreshAvailableRuntimeProfilerRecorders()
+    {
+        runtimeProfilerRecorderHandles.Clear();
+        runtimeProfilerRecorderHandlesByKey.Clear();
+        runtimeProfilerRecorderTextBuilder.Length = 0;
+        availableRuntimeProfilerRecorderCount = 0;
+        availableRuntimeProfilerRecorderRelevantNames = string.Empty;
+        runtimeProfilerRecorderRelevantNamesTruncated = false;
+
+        try
+        {
+            ProfilerRecorderHandle.GetAvailable(runtimeProfilerRecorderHandles);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException || exception is NotSupportedException)
+        {
+            availableRuntimeProfilerRecorderRelevantNames = $"discovery failed: {exception.GetType().Name}";
+            return;
+        }
+
+        availableRuntimeProfilerRecorderCount = runtimeProfilerRecorderHandles.Count;
+        for (int i = 0; i < runtimeProfilerRecorderHandles.Count; i++)
+        {
+            ProfilerRecorderHandle handle = runtimeProfilerRecorderHandles[i];
+            if (!handle.Valid)
+            {
+                continue;
+            }
+
+            ProfilerRecorderDescription description;
+            try
+            {
+                description = ProfilerRecorderHandle.GetDescription(handle);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException || exception is ArgumentException)
+            {
+                continue;
+            }
+
+            string counterName = description.Name;
+            string categoryName = description.Category.Name;
+            if (string.IsNullOrWhiteSpace(counterName) || string.IsNullOrWhiteSpace(categoryName))
+            {
+                continue;
+            }
+
+            string key = BuildRuntimeProfilerRecorderKey(categoryName, counterName);
+            if (!runtimeProfilerRecorderHandlesByKey.ContainsKey(key))
+            {
+                runtimeProfilerRecorderHandlesByKey.Add(key, handle);
+            }
+
+            if (IsRelevantRuntimeProfilerRecorderName(categoryName, counterName))
+            {
+                AppendRelevantRuntimeProfilerRecorderName(categoryName, counterName);
+            }
+        }
+
+        if (runtimeProfilerRecorderTextBuilder.Length > 0)
+        {
+            availableRuntimeProfilerRecorderRelevantNames = runtimeProfilerRecorderTextBuilder.ToString();
+        }
+    }
+
+    private bool TryCreateRuntimeProfilerRecorder(RuntimeProfilerRecorderSpec spec, out RuntimeProfilerRecorder runtimeRecorder)
+    {
+        runtimeRecorder = null;
+        bool allowDirectFallback = availableRuntimeProfilerRecorderCount <= 0;
+        for (int i = 0; i < spec.Candidates.Length; i++)
+        {
+            RuntimeProfilerRecorderCandidate candidate = spec.Candidates[i];
+            string categoryName = candidate.Category.Name;
+            string key = BuildRuntimeProfilerRecorderKey(categoryName, candidate.CounterName);
+            if (runtimeProfilerRecorderHandlesByKey.TryGetValue(key, out ProfilerRecorderHandle handle)
+                && TryStartRuntimeProfilerRecorder(spec, candidate, handle, out runtimeRecorder))
+            {
+                return true;
+            }
+
+            if (allowDirectFallback
+                && TryStartRuntimeProfilerRecorder(spec, candidate, out runtimeRecorder))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryStartRuntimeProfilerRecorder(
+        RuntimeProfilerRecorderSpec spec,
+        RuntimeProfilerRecorderCandidate candidate,
+        ProfilerRecorderHandle handle,
+        out RuntimeProfilerRecorder runtimeRecorder)
+    {
+        runtimeRecorder = null;
+        ProfilerRecorder recorder = default;
+        try
+        {
+            recorder = new ProfilerRecorder(
+                handle,
+                RuntimeProfilerRecorderCapacity,
+                RuntimeProfilerRecorderBaseOptions | spec.ExtraOptions);
+            if (!recorder.Valid)
+            {
+                recorder.Dispose();
+                return false;
+            }
+
+            if (!recorder.IsRunning)
+            {
+                recorder.Start();
+            }
+
+            runtimeRecorder = new RuntimeProfilerRecorder(spec, candidate, recorder);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+            || exception is InvalidOperationException
+            || exception is NotSupportedException)
+        {
+            recorder.Dispose();
+            return false;
+        }
+    }
+
+    private static bool TryStartRuntimeProfilerRecorder(
+        RuntimeProfilerRecorderSpec spec,
+        RuntimeProfilerRecorderCandidate candidate,
+        out RuntimeProfilerRecorder runtimeRecorder)
+    {
+        runtimeRecorder = null;
+        ProfilerRecorder recorder = default;
+        try
+        {
+            recorder = ProfilerRecorder.StartNew(
+                candidate.Category,
+                candidate.CounterName,
+                RuntimeProfilerRecorderCapacity,
+                RuntimeProfilerRecorderBaseOptions | spec.ExtraOptions);
+            if (!recorder.Valid)
+            {
+                recorder.Dispose();
+                return false;
+            }
+
+            runtimeRecorder = new RuntimeProfilerRecorder(spec, candidate, recorder);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+            || exception is InvalidOperationException
+            || exception is NotSupportedException)
+        {
+            recorder.Dispose();
+            return false;
+        }
+    }
+
+    private void AppendProfilerRecorderRuntimeCounters()
+    {
+        MapObjectTickProfiler.AddRuntimeCounter("ProfilerRecorder", "AvailableCounters", availableRuntimeProfilerRecorderCount);
+        MapObjectTickProfiler.AddRuntimeCounter("ProfilerRecorder", "ActiveRecorders", runtimeProfilerRecorders.Count);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ProfilerRecorder",
+            "MissingRecorders",
+            Math.Max(0, RuntimeProfilerRecorderSpecs.Length - runtimeProfilerRecorders.Count));
+
+        if (!string.IsNullOrWhiteSpace(availableRuntimeProfilerRecorderRelevantNames))
+        {
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "ProfilerRecorder",
+                "RelevantAvailable",
+                availableRuntimeProfilerRecorderRelevantNames);
+        }
+
+        for (int i = 0; i < runtimeProfilerRecorders.Count; i++)
+        {
+            RuntimeProfilerRecorder runtimeRecorder = runtimeProfilerRecorders[i];
+            ProfilerRecorder recorder = runtimeRecorder.Recorder;
+            if (!recorder.Valid)
+            {
+                MapObjectTickProfiler.AddRuntimeCounter(
+                    runtimeRecorder.Group,
+                    runtimeRecorder.Name,
+                    "n/a",
+                    $"invalid source={runtimeRecorder.CategoryName}/{runtimeRecorder.CounterName}");
+                continue;
+            }
+
+            if (!recorder.IsRunning)
+            {
+                recorder.Start();
+            }
+
+            if (!TryCalculateRuntimeProfilerRecorderAverage(recorder, out double averageRawValue, out int sampleCount))
+            {
+                MapObjectTickProfiler.AddRuntimeCounter(
+                    runtimeRecorder.Group,
+                    runtimeRecorder.Name,
+                    "n/a",
+                    $"no samples source={runtimeRecorder.CategoryName}/{runtimeRecorder.CounterName}");
+                continue;
+            }
+
+            string averageValue = FormatRuntimeProfilerRecorderValue(averageRawValue, runtimeRecorder.Unit);
+            string lastValue = FormatRuntimeProfilerRecorderValue(recorder.LastValue, runtimeRecorder.Unit);
+            MapObjectTickProfiler.AddRuntimeCounter(
+                runtimeRecorder.Group,
+                runtimeRecorder.Name,
+                averageValue,
+                $"last={lastValue} samples={sampleCount} source={runtimeRecorder.CategoryName}/{runtimeRecorder.CounterName}");
+        }
+    }
+
+    private static bool TryCalculateRuntimeProfilerRecorderAverage(
+        ProfilerRecorder recorder,
+        out double averageRawValue,
+        out int sampleCount)
+    {
+        averageRawValue = 0d;
+        sampleCount = recorder.Count;
+        if (sampleCount <= 0)
+        {
+            return false;
+        }
+
+        double total = 0d;
+        for (int i = 0; i < sampleCount; i++)
+        {
+            total += recorder.GetSample(i).Value;
+        }
+
+        averageRawValue = total / sampleCount;
+        return true;
+    }
+
+    private void AppendRelevantRuntimeProfilerRecorderName(string categoryName, string counterName)
+    {
+        string entry = $"{categoryName}/{counterName}";
+        int separatorLength = runtimeProfilerRecorderTextBuilder.Length > 0 ? 2 : 0;
+        if (runtimeProfilerRecorderTextBuilder.Length + separatorLength + entry.Length > RuntimeProfilerRecorderRelevantNamesMaxLength)
+        {
+            if (!runtimeProfilerRecorderRelevantNamesTruncated
+                && runtimeProfilerRecorderTextBuilder.Length <= RuntimeProfilerRecorderRelevantNamesMaxLength - 3)
+            {
+                runtimeProfilerRecorderTextBuilder.Append("...");
+            }
+
+            runtimeProfilerRecorderRelevantNamesTruncated = true;
+            return;
+        }
+
+        if (runtimeProfilerRecorderTextBuilder.Length > 0)
+        {
+            runtimeProfilerRecorderTextBuilder.Append(", ");
+        }
+
+        runtimeProfilerRecorderTextBuilder.Append(entry);
+    }
+
+    private static bool IsRelevantRuntimeProfilerRecorderName(string categoryName, string counterName)
+    {
+        string text = $"{categoryName} {counterName}".ToLowerInvariant();
+        return text.Contains("thread")
+            || text.Contains("render")
+            || text.Contains("draw")
+            || text.Contains("batch")
+            || text.Contains("pass")
+            || text.Contains("triangle")
+            || text.Contains("vertex")
+            || text.Contains("memory")
+            || text.Contains("gc")
+            || text.Contains("present")
+            || text.Contains("wait")
+            || text.Contains("gfx")
+            || text.Contains("camera");
+    }
+
+    private static string BuildRuntimeProfilerRecorderKey(string categoryName, string counterName)
+    {
+        return $"{categoryName}\n{counterName}";
+    }
+
+    private static string FormatRuntimeProfilerRecorderValue(double rawValue, RuntimeProfilerRecorderUnit unit)
+    {
+        double value = unit switch
+        {
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds => rawValue / 1000000d,
+            RuntimeProfilerRecorderUnit.BytesToMegabytes => rawValue / (1024d * 1024d),
+            RuntimeProfilerRecorderUnit.BytesToKilobytes => rawValue / 1024d,
+            _ => rawValue
+        };
+
+        return value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private static void AddFrameTimingCounter(string counterName, FrameTiming timing, string memberName)
+    {
+        if (TryReadFrameTimingMember(timing, memberName, out float value))
+        {
+            MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", counterName, value);
+            return;
+        }
+
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", counterName, "n/a");
+    }
+
+    private static void AddUnavailableFrameTimingCounters()
+    {
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "CpuFrameMs", "n/a");
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "CpuMainThreadMs", "n/a");
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "CpuRenderThreadMs", "n/a");
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "CpuPresentWaitMs", "n/a");
+        MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "GpuFrameMs", "n/a");
+    }
+
+    private static bool TryReadFrameTimingMember(FrameTiming timing, string memberName, out float value)
+    {
+        value = 0f;
+        if (string.IsNullOrWhiteSpace(memberName))
+        {
+            return false;
+        }
+
+        const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
+        Type timingType = typeof(FrameTiming);
+        object rawValue = null;
+        FieldInfo field = timingType.GetField(memberName, bindingFlags);
+        if (field != null)
+        {
+            rawValue = field.GetValue(timing);
+        }
+        else
+        {
+            PropertyInfo property = timingType.GetProperty(memberName, bindingFlags);
+            if (property != null)
+            {
+                rawValue = property.GetValue(timing, null);
+            }
+        }
+
+        if (rawValue == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            value = Convert.ToSingle(rawValue, CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch (Exception exception) when (exception is FormatException || exception is InvalidCastException || exception is OverflowException)
+        {
+            value = 0f;
+            return false;
+        }
+    }
+
+    private static string FormatBytesMb(long bytes)
+    {
+        float mb = Math.Max(0L, bytes) / (1024f * 1024f);
+        return mb.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatScreenRefreshRate()
+    {
+        Resolution resolution = Screen.currentResolution;
+        Type resolutionType = typeof(Resolution);
+        const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
+        object refreshRateRatio = null;
+        PropertyInfo ratioProperty = resolutionType.GetProperty("refreshRateRatio", bindingFlags);
+        if (ratioProperty != null)
+        {
+            refreshRateRatio = ratioProperty.GetValue(resolution, null);
+        }
+        else
+        {
+            FieldInfo ratioField = resolutionType.GetField("refreshRateRatio", bindingFlags);
+            if (ratioField != null)
+            {
+                refreshRateRatio = ratioField.GetValue(resolution);
+            }
+        }
+
+        if (TryFormatRefreshRateRatio(refreshRateRatio, out string ratioText))
+        {
+            return ratioText;
+        }
+
+        object refreshRate = null;
+        PropertyInfo refreshRateProperty = resolutionType.GetProperty("refreshRate", bindingFlags);
+        if (refreshRateProperty != null)
+        {
+            refreshRate = refreshRateProperty.GetValue(resolution, null);
+        }
+        else
+        {
+            FieldInfo refreshRateField = resolutionType.GetField("refreshRate", bindingFlags);
+            if (refreshRateField != null)
+            {
+                refreshRate = refreshRateField.GetValue(resolution);
+            }
+        }
+
+        return refreshRate != null
+            ? Convert.ToString(refreshRate, CultureInfo.InvariantCulture)
+            : "n/a";
+    }
+
+    private static bool TryFormatRefreshRateRatio(object refreshRateRatio, out string text)
+    {
+        text = null;
+        if (refreshRateRatio == null)
+        {
+            return false;
+        }
+
+        Type ratioType = refreshRateRatio.GetType();
+        const BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
+        object numerator = ReadMemberValue(ratioType, refreshRateRatio, "numerator", bindingFlags);
+        object denominator = ReadMemberValue(ratioType, refreshRateRatio, "denominator", bindingFlags);
+        if (numerator == null || denominator == null)
+        {
+            text = Convert.ToString(refreshRateRatio, CultureInfo.InvariantCulture);
+            return !string.IsNullOrWhiteSpace(text);
+        }
+
+        try
+        {
+            double numeratorValue = Convert.ToDouble(numerator, CultureInfo.InvariantCulture);
+            double denominatorValue = Convert.ToDouble(denominator, CultureInfo.InvariantCulture);
+            if (denominatorValue <= 0.0)
+            {
+                return false;
+            }
+
+            text = (numeratorValue / denominatorValue).ToString("0.###", CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch (Exception exception) when (exception is FormatException || exception is InvalidCastException || exception is OverflowException)
+        {
+            text = null;
+            return false;
+        }
+    }
+
+    private static object ReadMemberValue(Type targetType, object target, string memberName, BindingFlags bindingFlags)
+    {
+        PropertyInfo property = targetType.GetProperty(memberName, bindingFlags);
+        if (property != null)
+        {
+            return property.GetValue(target, null);
+        }
+
+        FieldInfo field = targetType.GetField(memberName, bindingFlags);
+        return field != null ? field.GetValue(target) : null;
     }
 
     private ToolResult SaveSlot(int slotIndex)
@@ -1403,7 +2168,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         cachedInstalledObjectTotal = terrain.GetInstallationItemCounts(installationCountsByItemId);
-        cachedConveyorItemTotal = terrain.GetLoadedConveyorItemCount();
+        cachedConveyorItemTotal = terrain.GetConveyorItemCount();
         cachedInstallationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
         cachedStatusWorldStatsTime = now;
 
@@ -1666,6 +2431,181 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             0,
             $"beltline placed={placedCount} start={startCoordinate.x},{startCoordinate.y} mode=fill dir={preferredOutputDirection.x},{preferredOutputDirection.y}");
+    }
+
+    private ToolResult FillRandomConveyorItems(int count)
+    {
+        GameManager gameManager = GameManager.Instance;
+        Player player = gameManager != null ? gameManager.Player : FindObjectOfType<Player>();
+        if (player == null)
+        {
+            return ToolResult.Error(-1, count, "player not found");
+        }
+
+        ItemManager itemManager = gameManager != null ? gameManager.ItemManger : FindObjectOfType<ItemManager>();
+        if (itemManager == null)
+        {
+            return ToolResult.Error(-1, count, "item manager not found");
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(-1, count, "terrain not found");
+        }
+
+        List<int> randomItemIds = BuildConveyorItemFillItemIds(itemManager);
+        if (randomItemIds.Count <= 0)
+        {
+            return ToolResult.Error(-1, count, "no portable item definitions found");
+        }
+
+        List<Block> candidates = new List<Block>();
+        CollectNearbyConveyorItemFillCandidates(terrain, player.transform.position, candidates);
+        if (candidates.Count <= 0)
+        {
+            return ToolResult.Error(-1, count, "no empty conveyor near player");
+        }
+
+        int placedCount = 0;
+        int attemptBudget = Mathf.Max(count * 8, candidates.Count * 2);
+        Vector3 playerPosition = player.transform.position;
+        for (int attempt = 0; attempt < attemptBudget && placedCount < count && candidates.Count > 0; attempt++)
+        {
+            int candidateIndex = UnityEngine.Random.Range(0, candidates.Count);
+            Block candidateBlock = candidates[candidateIndex];
+            if (candidateBlock == null || !candidateBlock.CanAddConveyorObjects(1))
+            {
+                candidates.RemoveAt(candidateIndex);
+                continue;
+            }
+
+            int itemId = randomItemIds[UnityEngine.Random.Range(0, randomItemIds.Count)];
+            Vector3 placementReference = BuildRandomConveyorItemPlacementReference(candidateBlock);
+            if (candidateBlock.TryAddConveyorObjectAnimatedAtPlacement(
+                    itemId,
+                    placementReference,
+                    playerPosition,
+                    0f,
+                    out _,
+                    null,
+                    null,
+                    0f,
+                    false,
+                    0f))
+            {
+                placedCount++;
+            }
+            else
+            {
+                candidates.RemoveAt(candidateIndex);
+                continue;
+            }
+
+            if (!candidateBlock.CanAddConveyorObjects(1))
+            {
+                candidates.RemoveAt(candidateIndex);
+            }
+        }
+
+        if (placedCount <= 0)
+        {
+            return ToolResult.Error(-1, count, "no conveyor item slot accepted a random item");
+        }
+
+        return ToolResult.Success(
+            -1,
+            count,
+            placedCount,
+            0,
+            0,
+            0,
+            $"beltitems placed={placedCount} candidates={candidates.Count}");
+    }
+
+    private static void CollectNearbyConveyorItemFillCandidates(
+        TerrainGenerator terrain,
+        Vector3 playerPosition,
+        List<Block> results)
+    {
+        results.Clear();
+        if (terrain == null)
+        {
+            return;
+        }
+
+        terrain.CopyLoadedBlocks(results);
+        float radiusSqr = ConveyorItemFillSearchRadius * ConveyorItemFillSearchRadius;
+        for (int i = results.Count - 1; i >= 0; i--)
+        {
+            Block block = results[i];
+            if (block == null || !block.CanAddConveyorObjects(1))
+            {
+                results.RemoveAt(i);
+                continue;
+            }
+
+            Vector3 offset = block.transform.position - playerPosition;
+            offset.y = 0f;
+            if (offset.sqrMagnitude > radiusSqr)
+            {
+                results.RemoveAt(i);
+            }
+        }
+    }
+
+    private static List<int> BuildConveyorItemFillItemIds(ItemManager itemManager)
+    {
+        List<int> itemIds = new List<int>();
+        List<ItemDefinition> definitions = itemManager != null ? itemManager.ItemDefinitions : null;
+        if (definitions == null)
+        {
+            return itemIds;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && definition.id >= 0
+                && !definition.storesFluid
+                && !InputOutputModule.IsFluidItemId(definition.id)
+                && !ItemDefinition.IsElectricityItemDefinition(definition)
+                && definition.portableMesh != null
+                && definition.portableMat != null)
+            {
+                itemIds.Add(definition.id);
+            }
+        }
+
+        if (itemIds.Count > 0)
+        {
+            return itemIds;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && definition.id >= 0
+                && !definition.storesFluid
+                && !InputOutputModule.IsFluidItemId(definition.id)
+                && !ItemDefinition.IsElectricityItemDefinition(definition))
+            {
+                itemIds.Add(definition.id);
+            }
+        }
+
+        return itemIds;
+    }
+
+    private static Vector3 BuildRandomConveyorItemPlacementReference(Block block)
+    {
+        Vector3 position = block != null ? block.transform.position : Vector3.zero;
+        return position + new Vector3(
+            UnityEngine.Random.Range(-0.35f, 0.35f),
+            0f,
+            UnityEngine.Random.Range(-0.35f, 0.35f));
     }
 
     private static bool TryFindConveyorFillStart(
@@ -2599,6 +3539,107 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public Vector2Int OutputDirection;
     }
 
+    private enum RuntimeProfilerRecorderUnit
+    {
+        Count,
+        NanosecondsToMilliseconds,
+        BytesToMegabytes,
+        BytesToKilobytes
+    }
+
+    private readonly struct RuntimeProfilerRecorderCandidate
+    {
+        public RuntimeProfilerRecorderCandidate(ProfilerCategory category, string counterName)
+        {
+            Category = category;
+            CounterName = counterName;
+        }
+
+        public ProfilerCategory Category { get; }
+        public string CounterName { get; }
+
+        public static RuntimeProfilerRecorderCandidate Internal(string counterName)
+        {
+            return new RuntimeProfilerRecorderCandidate(ProfilerCategory.Internal, counterName);
+        }
+
+        public static RuntimeProfilerRecorderCandidate Render(string counterName)
+        {
+            return new RuntimeProfilerRecorderCandidate(ProfilerCategory.Render, counterName);
+        }
+
+        public static RuntimeProfilerRecorderCandidate Memory(string counterName)
+        {
+            return new RuntimeProfilerRecorderCandidate(ProfilerCategory.Memory, counterName);
+        }
+
+        public static RuntimeProfilerRecorderCandidate CustomCategory(string categoryName, string counterName)
+        {
+            return new RuntimeProfilerRecorderCandidate(new ProfilerCategory(categoryName), counterName);
+        }
+    }
+
+    private sealed class RuntimeProfilerRecorderSpec
+    {
+        public RuntimeProfilerRecorderSpec(
+            string group,
+            string name,
+            RuntimeProfilerRecorderUnit unit,
+            params RuntimeProfilerRecorderCandidate[] candidates)
+            : this(group, name, unit, ProfilerRecorderOptions.Default, candidates)
+        {
+        }
+
+        public RuntimeProfilerRecorderSpec(
+            string group,
+            string name,
+            RuntimeProfilerRecorderUnit unit,
+            ProfilerRecorderOptions extraOptions,
+            params RuntimeProfilerRecorderCandidate[] candidates)
+        {
+            Group = group;
+            Name = name;
+            Unit = unit;
+            ExtraOptions = extraOptions;
+            Candidates = candidates ?? Array.Empty<RuntimeProfilerRecorderCandidate>();
+        }
+
+        public string Group { get; }
+        public string Name { get; }
+        public RuntimeProfilerRecorderUnit Unit { get; }
+        public ProfilerRecorderOptions ExtraOptions { get; }
+        public RuntimeProfilerRecorderCandidate[] Candidates { get; }
+    }
+
+    private sealed class RuntimeProfilerRecorder : IDisposable
+    {
+        public RuntimeProfilerRecorder(
+            RuntimeProfilerRecorderSpec spec,
+            RuntimeProfilerRecorderCandidate candidate,
+            ProfilerRecorder recorder)
+        {
+            Group = spec.Group;
+            Name = spec.Name;
+            Unit = spec.Unit;
+            CategoryName = candidate.Category.Name;
+            CounterName = candidate.CounterName;
+            Recorder = recorder;
+        }
+
+        public string Group { get; }
+        public string Name { get; }
+        public RuntimeProfilerRecorderUnit Unit { get; }
+        public string CategoryName { get; }
+        public string CounterName { get; }
+        public ProfilerRecorder Recorder { get; private set; }
+
+        public void Dispose()
+        {
+            Recorder.Dispose();
+            Recorder = default;
+        }
+    }
+
     private enum ToolCommand
     {
         Give,
@@ -2608,6 +3649,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         SetCameraSizeRange,
         SetSeed,
         CreateConveyorLine,
+        FillConveyorItems,
         SaveSlot,
         LoadSlot,
         ResetMap,
