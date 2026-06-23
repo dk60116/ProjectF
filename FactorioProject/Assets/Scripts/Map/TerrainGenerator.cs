@@ -18,6 +18,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float IslandCoastDetailNoiseScale = 0.067f;
     private const float IslandCoastIrregularity = 0.09f;
     private const float BackgroundConveyorSimulationInterval = 0.05f;
+    private const float BackgroundConveyorBudgetContinuationInterval = 0.02f;
     private const int BackgroundConveyorSimulationPassesPerTick = 1;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
@@ -151,6 +152,46 @@ public partial class TerrainGenerator : MonoBehaviour
         public bool IsCycle => isCycle;
     }
 
+    private sealed class ConveyorCornerGroup
+    {
+        public int id;
+        public bool isCycle;
+        public readonly List<Block> blocks = new List<Block>();
+
+        public ConveyorCornerGroup(int id)
+        {
+            this.id = id;
+        }
+    }
+
+    private readonly struct ConveyorCornerGroupSlot
+    {
+        public ConveyorCornerGroupSlot(int groupId, int slotIndex, int groupLength, bool isCycle)
+        {
+            this.groupId = groupId;
+            this.slotIndex = slotIndex;
+            this.groupLength = groupLength;
+            this.isCycle = isCycle;
+        }
+
+        private readonly int groupId;
+        private readonly int slotIndex;
+        private readonly int groupLength;
+        private readonly bool isCycle;
+
+        public int GroupId => groupId;
+        public int SlotIndex => slotIndex;
+        public int GroupLength => groupLength;
+        public bool IsCycle => isCycle;
+    }
+
+    public enum ConveyorRuntimeWakeMode
+    {
+        None,
+        Flow,
+        Around
+    }
+
     private struct ConveyorLineWakeRange
     {
         public int minSlotIndex;
@@ -184,12 +225,18 @@ public partial class TerrainGenerator : MonoBehaviour
         public ConveyorLineWakeRange wakeRange;
         public float retryTime;
         public int attemptCount;
+        public bool readyDelay;
 
-        public ConveyorLineRetryState(ConveyorLineWakeRange wakeRange, float retryTime, int attemptCount)
+        public ConveyorLineRetryState(
+            ConveyorLineWakeRange wakeRange,
+            float retryTime,
+            int attemptCount,
+            bool readyDelay = false)
         {
             this.wakeRange = wakeRange;
             this.retryTime = retryTime;
             this.attemptCount = attemptCount;
+            this.readyDelay = readyDelay;
         }
     }
 
@@ -716,6 +763,11 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<int, ConveyorLineRetryState> conveyorLineRetryStatesById = new Dictionary<int, ConveyorLineRetryState>();
     private readonly Dictionary<int, int> conveyorLineRetryAttemptsByDueLineId = new Dictionary<int, int>();
     private readonly List<int> conveyorLineRetryDueIds = new List<int>();
+    private readonly Dictionary<ConveyorLaneCoordinateKey, List<ConveyorLaneCoordinateKey>> conveyorBlockedSourcesByDestinationLane =
+        new Dictionary<ConveyorLaneCoordinateKey, List<ConveyorLaneCoordinateKey>>();
+    private readonly Dictionary<ConveyorLaneCoordinateKey, ConveyorLaneCoordinateKey> conveyorBlockedDestinationBySourceLane =
+        new Dictionary<ConveyorLaneCoordinateKey, ConveyorLaneCoordinateKey>();
+    private readonly List<ConveyorLaneCoordinateKey> conveyorBlockedWaiterWakeBuffer = new List<ConveyorLaneCoordinateKey>(4);
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
     private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
     private readonly Dictionary<Block, ConveyorLineSlot> conveyorLineSlots = new Dictionary<Block, ConveyorLineSlot>();
@@ -724,9 +776,20 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<int> conveyorLinesTickedThisFrame = new HashSet<int>();
     private readonly List<Block> conveyorLineTouchedBlocks = new List<Block>();
     private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
+    private readonly Queue<int> conveyorCornerGroupWakeQueue = new Queue<int>();
+    private readonly HashSet<int> conveyorCornerGroupWakeQueued = new HashSet<int>();
+    private readonly Dictionary<int, List<Block>> conveyorCornerGroupWakeBlocksById = new Dictionary<int, List<Block>>();
+    private readonly HashSet<Block> conveyorCornerGroupWakeQueuedBlocks = new HashSet<Block>();
+    private readonly List<ConveyorCornerGroup> conveyorCornerGroups = new List<ConveyorCornerGroup>();
+    private readonly Dictionary<int, ConveyorCornerGroup> conveyorCornerGroupsById = new Dictionary<int, ConveyorCornerGroup>();
+    private readonly Dictionary<Block, ConveyorCornerGroupSlot> conveyorCornerGroupSlots = new Dictionary<Block, ConveyorCornerGroupSlot>();
+    private readonly HashSet<Block> conveyorCornerGroupVisited = new HashSet<Block>();
+    private readonly Dictionary<Block, int> conveyorCornerGroupBuildIndices = new Dictionary<Block, int>();
+    private readonly List<Block> conveyorCornerGroupTickBlocks = new List<Block>();
     private readonly HashSet<Block> deferredConveyorRuntimeRefreshBlocks = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorNetworkWakeBlocks = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorMoveAttemptWakeAroundBlocks = new HashSet<Block>();
+    private readonly HashSet<Block> deferredConveyorMoveAttemptWakeFlowBlocks = new HashSet<Block>();
     private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
     private readonly Queue<Vector2Int> floorObjectVirtualizationWorkQueue = new Queue<Vector2Int>();
     private readonly HashSet<Vector2Int> floorObjectVirtualizationQueuedCoordinates = new HashSet<Vector2Int>();
@@ -747,6 +810,32 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool conveyorLineCacheDirty = true;
     private int deferredConveyorRuntimeRefreshDepth;
     private int conveyorLineBlockLoopIterations;
+    private int conveyorLineTouchedMinSlotIndex = int.MaxValue;
+    private int conveyorLineTouchedMaxSlotIndex = -1;
+    private int lastActiveConveyorTickFrame;
+    private int lastActiveConveyorQueuedAtStart;
+    private int lastActiveConveyorProcessLimit;
+    private int lastActiveConveyorProcessed;
+    private int lastActiveConveyorLineWakesProcessed;
+    private int lastActiveConveyorBlockWakesProcessed;
+    private int lastActiveConveyorCornerGroupWakesProcessed;
+    private int lastActiveConveyorCornerGroupBlocksProcessed;
+    private int lastActiveConveyorCornerGroupBlocksQueued;
+    private int lastActiveConveyorCornerGroupBlocksSelected;
+    private int lastActiveConveyorCornerGroupBlocksSkipped;
+    private int lastActiveConveyorBlockWakeTicks;
+    private int lastActiveConveyorBlockWakeLineFallbacks;
+    private int lastActiveConveyorFullLineWakesProcessed;
+    private int lastActiveConveyorRangedLineWakesProcessed;
+    private int lastActiveConveyorDeferredLineWakesPromoted;
+    private int lastActiveConveyorRetryStatesScanned;
+    private int lastActiveConveyorRetryWakesQueued;
+    private int lastActiveConveyorReadyDelayStates;
+    private int lastActiveConveyorSafetyWakesQueued;
+    private int lastActiveConveyorMovedLineWakesScheduled;
+    private int lastActiveConveyorMovedLineWakeSlots;
+    private int lastActiveConveyorBlockedWaiterRegistrations;
+    private int lastActiveConveyorBlockedWaitersWoken;
     private float nextConveyorLineRetryTime = float.PositiveInfinity;
     private float nextConveyorActiveFullScanTime;
     private int activeConveyorSafetyScanIndex;
@@ -985,6 +1074,7 @@ public partial class TerrainGenerator : MonoBehaviour
                && (activeConveyors.Count > 0
                    || conveyorWakeQueue.Count > 0
                    || conveyorLineWakeQueue.Count > 0
+                   || conveyorCornerGroupWakeQueue.Count > 0
                    || deferredConveyorLineWakeQueue.Count > 0
                    || HasDueStraightConveyorLineRetry()
                    || conveyorNetworkSleepCheckQueuedIds.Count > 0);
@@ -1044,7 +1134,7 @@ public partial class TerrainGenerator : MonoBehaviour
         WakeLoadedConveyorsNearBackgroundConveyorChanges();
         if (resourceStateStore.LastBackgroundConveyorBudgetHit > 0)
         {
-            nextBackgroundConveyorSimulationTime = Time.time;
+            nextBackgroundConveyorSimulationTime = Time.time + BackgroundConveyorBudgetContinuationInterval;
         }
     }
 
@@ -1075,7 +1165,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            block.WakeConveyorMoveAttemptsAround();
+            block.WakeConveyorMoveAttemptsAlongRuntimeFlow();
             block.RefreshConveyorActivityRegistration();
         }
 

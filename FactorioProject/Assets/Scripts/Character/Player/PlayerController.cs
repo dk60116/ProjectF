@@ -27,6 +27,8 @@ public class PlayerController : MonoBehaviour
     private const float WaterBoundarySlideScoreTolerance = 0.01f;
     private const float DefaultMultiFocusFacingScoreWeight = 0.75f;
     private const float TemporaryDropFocusDuration = 0.18f;
+    private const int InitialMouseFocusRaycastHitBufferSize = 32;
+    private const int MaxMouseFocusRaycastHitBufferSize = 128;
     private static readonly Vector2[] WaterBoundarySampleDirections =
     {
         new Vector2(1f, 0f),
@@ -61,12 +63,14 @@ public class PlayerController : MonoBehaviour
     private readonly List<Block> nearbyInstallationFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyWorkableFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyBoxFocusBlocks = new List<Block>();
+    private readonly List<Resource> nearbyResourceCandidates = new List<Resource>(16);
     private readonly HashSet<Block> currentMouseFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> mouseFocusBlocks = new List<Block>();
     private readonly List<Block> mouseFocusRemovalBuffer = new List<Block>();
     private readonly List<FocusMarkerGroup> focusMarkerGroups = new List<FocusMarkerGroup>();
     private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
+    private RaycastHit[] mouseFocusRaycastHits = new RaycastHit[InitialMouseFocusRaycastHitBufferSize];
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Train> itemFilterTrainScratch = new List<Train>(8);
@@ -107,6 +111,9 @@ public class PlayerController : MonoBehaviour
     private Block temporaryDropFocusBlock;
     private float temporaryDropFocusUntilTime;
     private MapObject currentMouseFocusedMapObject;
+    private Camera cachedMouseFocusCamera;
+    private int mouseFocusRefreshFrame = -1;
+    private bool mouseFocusRefreshInteractionLocked;
     private PointerEventData pointerEventData;
     private int nearbyWaterBiomeCacheFrame = -1;
     private Vector2Int nearbyWaterBiomeCacheCoordinate;
@@ -218,6 +225,7 @@ public class PlayerController : MonoBehaviour
         focusRemovalBuffer.Clear();
         mouseFocusRemovalBuffer.Clear();
         mouseFocusBlocks.Clear();
+        mouseFocusRefreshFrame = -1;
         UpdateSelectedWorkableRangeVisuals(null);
         singleFocusedBlockBuffer.Clear();
     }
@@ -1703,6 +1711,12 @@ public class PlayerController : MonoBehaviour
         Resource bestResource = null;
 
         IReadOnlyList<Resource> resources = Resource.ActiveResources;
+        bool usingNearbyResourceCandidates = TryCollectNearbyResourceCandidates(origin, harvestRange, out IReadOnlyList<Resource> nearbyResources);
+        if (usingNearbyResourceCandidates)
+        {
+            resources = nearbyResources;
+        }
+
         for (int i = 0; i < resources.Count; i++)
         {
             Resource resource = resources[i];
@@ -1747,7 +1761,31 @@ public class PlayerController : MonoBehaviour
             bestResource = resource;
         }
 
+        if (usingNearbyResourceCandidates)
+        {
+            nearbyResourceCandidates.Clear();
+        }
+
         return bestResource;
+    }
+
+    private bool TryCollectNearbyResourceCandidates(
+        Vector3 origin,
+        float harvestRange,
+        out IReadOnlyList<Resource> resources)
+    {
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(origin.x),
+            Mathf.RoundToInt(origin.z));
+        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(harvestRange + 1f));
+        if (Resource.TryCollectActiveResourcesInCoordinateRange(center, searchRadius, nearbyResourceCandidates))
+        {
+            resources = nearbyResourceCandidates;
+            return true;
+        }
+
+        resources = null;
+        return false;
     }
 
     private static Block ResolveResourceOwningBlock(Resource resource)
@@ -3428,7 +3466,17 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshMouseMapObjectFocus()
     {
-        if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
+        bool isInteractionLocked = GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
+        if (mouseFocusRefreshFrame == Time.frameCount
+            && mouseFocusRefreshInteractionLocked == isInteractionLocked)
+        {
+            return;
+        }
+
+        mouseFocusRefreshFrame = Time.frameCount;
+        mouseFocusRefreshInteractionLocked = isInteractionLocked;
+
+        if (isInteractionLocked)
         {
             SetMouseFocusedBlocks(null);
             return;
@@ -3457,7 +3505,7 @@ public class PlayerController : MonoBehaviour
         mapObject = null;
         fallbackBlock = null;
 
-        Camera targetCamera = Camera.main;
+        Camera targetCamera = ResolveMouseFocusCamera();
         if (targetCamera == null)
         {
             return false;
@@ -3465,32 +3513,33 @@ public class PlayerController : MonoBehaviour
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
         float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
-        RaycastHit[] hits = Physics.RaycastAll(
-            ray,
-            Mathf.Max(0f, maxDistance),
-            Physics.DefaultRaycastLayers,
-            QueryTriggerInteraction.Ignore);
-        if (hits != null && hits.Length > 0)
+        int hitCount = RaycastMouseFocus(ray, Mathf.Max(0f, maxDistance));
+        MapObject closestCandidate = null;
+        float closestDistance = float.MaxValue;
+        for (int i = 0; i < hitCount; i++)
         {
-            System.Array.Sort(hits, CompareRaycastHits);
-            for (int i = 0; i < hits.Length; i++)
+            RaycastHit hit = mouseFocusRaycastHits[i];
+            Collider hitCollider = hit.collider;
+            if (hitCollider == null || hit.distance >= closestDistance)
             {
-                Collider hitCollider = hits[i].collider;
-                if (hitCollider == null)
-                {
-                    continue;
-                }
-
-                MapObject candidate = hitCollider.GetComponentInParent<MapObject>();
-                if (!IsValidMouseFocusMapObject(candidate))
-                {
-                    continue;
-                }
-
-                mapObject = candidate;
-                TryResolveMouseFocusFallbackBlock(candidate, ray, out fallbackBlock);
-                return true;
+                continue;
             }
+
+            MapObject candidate = hitCollider.GetComponentInParent<MapObject>();
+            if (!IsValidMouseFocusMapObject(candidate))
+            {
+                continue;
+            }
+
+            closestCandidate = candidate;
+            closestDistance = hit.distance;
+        }
+
+        if (closestCandidate != null)
+        {
+            mapObject = closestCandidate;
+            TryResolveMouseFocusFallbackBlock(closestCandidate, ray, out fallbackBlock);
+            return true;
         }
 
         if (!TryGetPointerBlockFromGroundPlane(ray, out fallbackBlock))
@@ -3519,6 +3568,49 @@ public class PlayerController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private Camera ResolveMouseFocusCamera()
+    {
+        if (cachedMouseFocusCamera != null
+            && cachedMouseFocusCamera.isActiveAndEnabled
+            && cachedMouseFocusCamera.CompareTag("MainCamera"))
+        {
+            return cachedMouseFocusCamera;
+        }
+
+        cachedMouseFocusCamera = Camera.main;
+        return cachedMouseFocusCamera;
+    }
+
+    private int RaycastMouseFocus(Ray ray, float maxDistance)
+    {
+        int hitCount = Physics.RaycastNonAlloc(
+            ray,
+            mouseFocusRaycastHits,
+            maxDistance,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+
+        while (hitCount >= mouseFocusRaycastHits.Length
+               && mouseFocusRaycastHits.Length < MaxMouseFocusRaycastHitBufferSize)
+        {
+            int nextSize = Mathf.Min(mouseFocusRaycastHits.Length * 2, MaxMouseFocusRaycastHitBufferSize);
+            if (nextSize <= mouseFocusRaycastHits.Length)
+            {
+                break;
+            }
+
+            System.Array.Resize(ref mouseFocusRaycastHits, nextSize);
+            hitCount = Physics.RaycastNonAlloc(
+                ray,
+                mouseFocusRaycastHits,
+                maxDistance,
+                Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore);
+        }
+
+        return hitCount;
     }
 
     private static bool IsValidMouseFocusMapObject(MapObject mapObject)
@@ -3778,11 +3870,6 @@ public class PlayerController : MonoBehaviour
 
         pointerRaycastResults.Clear();
         return false;
-    }
-
-    private static int CompareRaycastHits(RaycastHit left, RaycastHit right)
-    {
-        return left.distance.CompareTo(right.distance);
     }
 
     private void SetMouseFocusedBlocks(List<Block> nextBlocks, MapObject nextMapObject = null)

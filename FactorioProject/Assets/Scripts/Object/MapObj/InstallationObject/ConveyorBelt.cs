@@ -29,6 +29,7 @@ public class ConveyorBelt : InstallationObject
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
     private static readonly int UvLengthScaleShaderId = Shader.PropertyToID("_UvLengthScale");
     private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
+    private static Mesh virtualBeltTopMesh;
 
     [SerializeField]
     private ConveyorBelt straightVariantPrefab;
@@ -115,7 +116,6 @@ public class ConveyorBelt : InstallationObject
     public bool IsVirtualizedSourceViewHidden => virtualSourceViewHidden;
     public int VirtualizedSourceViewHiddenObjectCount => virtualSourceViewHidden ? virtualSourceViewObjects.Count : 0;
     public bool IsVirtualRenderingSuppressed => virtualRenderingSuppressed;
-    public bool IsVirtualRenderingSuppressBeltTopOnly => virtualRenderingSuppressed && virtualRenderingSuppressBeltTopOnly;
     public bool IsRuntimeRootSuspended => runtimeRootSuspended;
     public bool IsRuntimeRootAvailable => gameObject != null
         && (gameObject.activeSelf || runtimeRootSuspended);
@@ -123,7 +123,6 @@ public class ConveyorBelt : InstallationObject
     public int EnabledNativeRendererCount => CountNativeRenderers(true, false);
     public int ActiveEnabledNativeRendererCount => CountNativeRenderers(true, true);
     public int SuppressedNativeRendererCount => Mathf.Max(0, NativeRendererCount - EnabledNativeRendererCount);
-    public int TopOnlyKeptNativeRendererCount => CountTopOnlyKeptNativeRenderers();
 
     public static bool TryGetFlowDirection(Quaternion rotation, out Vector2Int flowDirection)
     {
@@ -385,14 +384,15 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
-    public void AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results, bool beltTopOnly = false)
+    public bool AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results, bool beltTopOnly = false)
     {
         if (results == null)
         {
-            return;
+            return false;
         }
 
         RefreshBeltTopRenderInfo();
+        bool hasCompleteCoverage = true;
 
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
@@ -412,6 +412,7 @@ public class ConveyorBelt : InstallationObject
             Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
             if (mesh == null)
             {
+                hasCompleteCoverage = false;
                 continue;
             }
 
@@ -420,10 +421,23 @@ public class ConveyorBelt : InstallationObject
             int materialCount = sharedMaterialBuffer.Count;
             if (materialCount <= 0)
             {
+                hasCompleteCoverage = false;
                 continue;
             }
 
-            int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
+            bool usesDedicatedBeltTopMesh = false;
+            Mesh renderMesh = mesh;
+            Matrix4x4 matrix = renderer.localToWorldMatrix;
+            if (!IsCornerVariant
+                && hasUvScroll
+                && TryCreateDedicatedBeltTopMatrix(mesh, matrix, out Matrix4x4 dedicatedMatrix))
+            {
+                renderMesh = GetVirtualBeltTopMesh();
+                matrix = dedicatedMatrix;
+                usesDedicatedBeltTopMesh = true;
+            }
+
+            int subMeshCount = Mathf.Max(1, renderMesh.subMeshCount);
             int entryCount = Mathf.Max(materialCount, subMeshCount);
             float uvScrollY = hasUvScroll ? -ConveyorSpeed * 0.75f : 0f;
             float uvLengthScale = 1f;
@@ -434,8 +448,8 @@ public class ConveyorBelt : InstallationObject
                 uvLengthOffset = beltTopInfo.UvLengthOffset;
             }
 
-            Matrix4x4 matrix = renderer.localToWorldMatrix;
             int layer = renderer.gameObject.layer;
+            int addedEntriesForRenderer = 0;
 
             for (int passIndex = 0; passIndex < entryCount; passIndex++)
             {
@@ -449,7 +463,7 @@ public class ConveyorBelt : InstallationObject
                 int subMeshIndex = Mathf.Min(passIndex, subMeshCount - 1);
 
                 results.Add(new VirtualConveyorBeltRenderData(
-                    mesh,
+                    renderMesh,
                     material,
                     matrix,
                     layer,
@@ -457,15 +471,29 @@ public class ConveyorBelt : InstallationObject
                     hasUvScroll,
                     uvScrollY,
                     uvLengthScale,
-                    uvLengthOffset));
+                    uvLengthOffset,
+                    usesDedicatedBeltTopMesh));
+                addedEntriesForRenderer++;
+            }
+
+            if (addedEntriesForRenderer <= 0)
+            {
+                hasCompleteCoverage = false;
             }
         }
+
+        return hasCompleteCoverage;
     }
 
     public void SetVirtualRenderingSuppressed(bool isSuppressed, bool beltTopOnly = false)
     {
         virtualRenderingSuppressed = isSuppressed;
         virtualRenderingSuppressBeltTopOnly = isSuppressed && beltTopOnly;
+        if (!isSuppressed && !runtimeRenderingHidden)
+        {
+            RestoreNativeRuntimeRenderersAfterVirtualization();
+        }
+
         ApplyVirtualRenderingSuppression();
     }
 
@@ -473,11 +501,21 @@ public class ConveyorBelt : InstallationObject
     {
         if (runtimeRenderingHidden == isHidden)
         {
+            if (!isHidden)
+            {
+                RestoreNativeRuntimeRenderersAfterVirtualization();
+            }
+
             ApplyVirtualRenderingSuppression();
             return;
         }
 
         runtimeRenderingHidden = isHidden;
+        if (!runtimeRenderingHidden)
+        {
+            RestoreNativeRuntimeRenderersAfterVirtualization();
+        }
+
         ApplyVirtualRenderingSuppression();
     }
 
@@ -1404,6 +1442,84 @@ public class ConveyorBelt : InstallationObject
         return Mathf.Max(currentAspect / UvLengthReferenceAspect, 0.0001f);
     }
 
+    private static bool TryCreateDedicatedBeltTopMatrix(
+        Mesh sourceMesh,
+        Matrix4x4 sourceLocalToWorld,
+        out Matrix4x4 matrix)
+    {
+        matrix = sourceLocalToWorld;
+        if (sourceMesh == null)
+        {
+            return false;
+        }
+
+        Bounds sourceBounds = sourceMesh.bounds;
+        Vector3 size = sourceBounds.size;
+        if (size.x <= 0.0001f || size.z <= 0.0001f)
+        {
+            return false;
+        }
+
+        Matrix4x4 boundsMatrix = Matrix4x4.TRS(
+            sourceBounds.center,
+            Quaternion.identity,
+            new Vector3(size.x, 1f, size.z));
+        matrix = sourceLocalToWorld * boundsMatrix;
+        return true;
+    }
+
+    private static Mesh GetVirtualBeltTopMesh()
+    {
+        if (virtualBeltTopMesh != null)
+        {
+            return virtualBeltTopMesh;
+        }
+
+        virtualBeltTopMesh = new Mesh
+        {
+            name = "Virtual Conveyor Belt Top Quad",
+            hideFlags = HideFlags.HideAndDontSave
+        };
+        virtualBeltTopMesh.vertices = new[]
+        {
+            new Vector3(-0.5f, 0f, -0.5f),
+            new Vector3(0.5f, 0f, -0.5f),
+            new Vector3(-0.5f, 0f, 0.5f),
+            new Vector3(0.5f, 0f, 0.5f)
+        };
+        virtualBeltTopMesh.uv = new[]
+        {
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f),
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f)
+        };
+        virtualBeltTopMesh.normals = new[]
+        {
+            Vector3.up,
+            Vector3.up,
+            Vector3.up,
+            Vector3.up
+        };
+        virtualBeltTopMesh.tangents = new[]
+        {
+            new Vector4(1f, 0f, 0f, 1f),
+            new Vector4(1f, 0f, 0f, 1f),
+            new Vector4(1f, 0f, 0f, 1f),
+            new Vector4(1f, 0f, 0f, 1f)
+        };
+        virtualBeltTopMesh.triangles = new[]
+        {
+            0, 2, 1,
+            1, 2, 3,
+            0, 1, 2,
+            1, 3, 2
+        };
+        virtualBeltTopMesh.bounds = new Bounds(Vector3.zero, new Vector3(1f, 0.25f, 1f));
+        virtualBeltTopMesh.UploadMeshData(true);
+        return virtualBeltTopMesh;
+    }
+
     private void ConfigureRuntimeRenderers()
     {
         if (!Application.isPlaying)
@@ -1487,6 +1603,7 @@ public class ConveyorBelt : InstallationObject
         GameObject rendererObject = renderer.gameObject;
         if (rendererObject == null
             || rendererObject == gameObject
+            || IsBodyVisualObject(rendererObject)
             || IsEndpointVisualObject(rendererObject))
         {
             return false;
@@ -1554,6 +1671,16 @@ public class ConveyorBelt : InstallationObject
 
     private void RestoreVirtualizedSourceViewObjects()
     {
+        RestoreVirtualizedSourceViewObjects(false);
+    }
+
+    private void RestoreVirtualizedSourceViewObjects(bool forceVisible)
+    {
+        if (forceVisible)
+        {
+            EnsureVirtualSourceViewObjectCache();
+        }
+
         int stateCount = virtualSourceViewObjectActiveStates.Count;
         for (int i = 0; i < virtualSourceViewObjects.Count; i++)
         {
@@ -1563,7 +1690,7 @@ public class ConveyorBelt : InstallationObject
                 continue;
             }
 
-            bool wasActive = i < stateCount && virtualSourceViewObjectActiveStates[i];
+            bool wasActive = forceVisible || (i < stateCount && virtualSourceViewObjectActiveStates[i]);
             if (sourceObject.activeSelf != wasActive)
             {
                 sourceObject.SetActive(wasActive);
@@ -1572,6 +1699,32 @@ public class ConveyorBelt : InstallationObject
 
         virtualSourceViewObjectActiveStates.Clear();
         virtualSourceViewHidden = false;
+    }
+
+    private void RestoreNativeRuntimeRenderersAfterVirtualization()
+    {
+        if (!Application.isPlaying || runtimeRenderingHidden)
+        {
+            return;
+        }
+
+        RestoreVirtualizedSourceViewObjects(true);
+        EnsureRendererCache();
+        for (int i = 0; i < cachedRenderers.Length; i++)
+        {
+            MeshRenderer renderer = cachedRenderers[i];
+            if (renderer == null || renderer.gameObject == null || IsEndpointVisualObject(renderer.gameObject))
+            {
+                continue;
+            }
+
+            if (!renderer.gameObject.activeSelf)
+            {
+                renderer.gameObject.SetActive(true);
+            }
+
+            renderer.enabled = true;
+        }
     }
 
     private void InvalidateVirtualSourceViewObjectCache()
@@ -1662,37 +1815,23 @@ public class ConveyorBelt : InstallationObject
         return count;
     }
 
-    private int CountTopOnlyKeptNativeRenderers()
-    {
-        if (!virtualRenderingSuppressed || !virtualRenderingSuppressBeltTopOnly)
-        {
-            return 0;
-        }
-
-        RefreshBeltTopRenderInfo();
-        EnsureRendererCache();
-        int count = 0;
-        for (int i = 0; i < cachedRenderers.Length; i++)
-        {
-            MeshRenderer renderer = cachedRenderers[i];
-            if (!IsRuntimeRendererObjectAvailable(renderer)
-                || !renderer.enabled
-                || TryGetBeltTopRenderInfo(renderer, out _))
-            {
-                continue;
-            }
-
-            count++;
-        }
-
-        return count;
-    }
-
     private static bool IsRuntimeRendererObjectAvailable(MeshRenderer renderer)
     {
         return renderer != null
                && renderer.gameObject != null
                && renderer.gameObject.activeSelf;
+    }
+
+    private static bool IsBodyVisualObject(GameObject candidate)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        string objectName = candidate.name;
+        return objectName == "Body"
+               || objectName.StartsWith("Body_", System.StringComparison.Ordinal);
     }
 
 #if UNITY_EDITOR

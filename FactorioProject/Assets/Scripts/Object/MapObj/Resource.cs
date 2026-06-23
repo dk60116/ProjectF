@@ -46,6 +46,8 @@ public class Resource : MapObject
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
+    private static readonly Dictionary<Vector2Int, List<Resource>> ActiveResourcesByCoordinate =
+        new Dictionary<Vector2Int, List<Resource>>();
 
     [SerializeField]
     private HarvestMode harvestMode = HarvestMode.Auto;
@@ -88,6 +90,8 @@ public class Resource : MapObject
     private int bodyYawStep;
     private int initialResourceCount;
     private Block owningBlock;
+    private bool activeResourceCoordinateRegistered;
+    private Vector2Int activeResourceCoordinate;
     private ResourceBatchRenderer batchRenderer;
     private readonly List<BatchRenderEntry> batchedRenderEntries = new List<BatchRenderEntry>();
     private bool batchComponentsResolved;
@@ -184,11 +188,14 @@ public class Resource : MapObject
         {
             ActiveResourcesInternal.Add(this);
         }
+
+        RegisterActiveResourceCoordinate();
     }
 
     private void OnDisable()
     {
         SetBatchedRendering(false);
+        UnregisterActiveResourceCoordinate();
         ActiveResourcesInternal.Remove(this);
 
         if (!Application.isPlaying || owningBlock == null || owningBlock.MapObject != this)
@@ -1330,7 +1337,149 @@ public class Resource : MapObject
 
     public void SetOwningBlock(Block block)
     {
+        if (owningBlock == block)
+        {
+            RegisterActiveResourceCoordinate();
+            return;
+        }
+
+        UnregisterActiveResourceCoordinate();
         owningBlock = block;
+        RegisterActiveResourceCoordinate();
+    }
+
+    public static bool TryCollectActiveResourcesInCoordinateRange(
+        Vector2Int center,
+        int radius,
+        List<Resource> results)
+    {
+        if (results == null)
+        {
+            return false;
+        }
+
+        results.Clear();
+        if (ActiveResourcesByCoordinate.Count <= 0)
+        {
+            return false;
+        }
+
+        int clampedRadius = Mathf.Max(0, radius);
+        for (int offsetY = -clampedRadius; offsetY <= clampedRadius; offsetY++)
+        {
+            for (int offsetX = -clampedRadius; offsetX <= clampedRadius; offsetX++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
+                if (!ActiveResourcesByCoordinate.TryGetValue(coordinate, out List<Resource> resources)
+                    || resources == null
+                    || resources.Count <= 0)
+                {
+                    continue;
+                }
+
+                for (int i = resources.Count - 1; i >= 0; i--)
+                {
+                    Resource resource = resources[i];
+                    if (!IsActiveResourceCoordinateEntryValid(resource, coordinate))
+                    {
+                        resources.RemoveAt(i);
+                        RefreshStaleCoordinateEntry(resource, coordinate);
+                        continue;
+                    }
+
+                    results.Add(resource);
+                }
+
+                if (resources.Count <= 0)
+                {
+                    ActiveResourcesByCoordinate.Remove(coordinate);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsActiveResourceCoordinateEntryValid(Resource resource, Vector2Int coordinate)
+    {
+        return resource != null
+               && resource.activeResourceCoordinateRegistered
+               && resource.activeResourceCoordinate == coordinate
+               && resource.owningBlock != null
+               && resource.owningBlock.Coordinate == coordinate
+               && resource.gameObject.activeInHierarchy;
+    }
+
+    private static void RefreshStaleCoordinateEntry(Resource resource, Vector2Int coordinate)
+    {
+        if (resource == null
+            || !resource.activeResourceCoordinateRegistered
+            || resource.activeResourceCoordinate != coordinate)
+        {
+            return;
+        }
+
+        resource.activeResourceCoordinateRegistered = false;
+        resource.activeResourceCoordinate = default;
+        resource.RegisterActiveResourceCoordinate();
+    }
+
+    private void RegisterActiveResourceCoordinate()
+    {
+        if (!CanRegisterActiveResourceCoordinate())
+        {
+            return;
+        }
+
+        Vector2Int coordinate = owningBlock.Coordinate;
+        if (activeResourceCoordinateRegistered && activeResourceCoordinate == coordinate)
+        {
+            return;
+        }
+
+        UnregisterActiveResourceCoordinate();
+        if (!ActiveResourcesByCoordinate.TryGetValue(coordinate, out List<Resource> resources)
+            || resources == null)
+        {
+            resources = new List<Resource>();
+            ActiveResourcesByCoordinate[coordinate] = resources;
+        }
+
+        if (!resources.Contains(this))
+        {
+            resources.Add(this);
+        }
+
+        activeResourceCoordinate = coordinate;
+        activeResourceCoordinateRegistered = true;
+    }
+
+    private void UnregisterActiveResourceCoordinate()
+    {
+        if (!activeResourceCoordinateRegistered)
+        {
+            return;
+        }
+
+        if (ActiveResourcesByCoordinate.TryGetValue(activeResourceCoordinate, out List<Resource> resources)
+            && resources != null)
+        {
+            resources.Remove(this);
+            if (resources.Count <= 0)
+            {
+                ActiveResourcesByCoordinate.Remove(activeResourceCoordinate);
+            }
+        }
+
+        activeResourceCoordinateRegistered = false;
+        activeResourceCoordinate = default;
+    }
+
+    private bool CanRegisterActiveResourceCoordinate()
+    {
+        return Application.isPlaying
+               && isActiveAndEnabled
+               && owningBlock != null;
     }
 
     public void SetBatchedRendering(bool shouldUseBatchedRendering)

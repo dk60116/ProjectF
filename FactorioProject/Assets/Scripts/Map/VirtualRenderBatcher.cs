@@ -258,6 +258,31 @@ public sealed class VirtualRenderBatchCollection
         AddMatrixBounds(key, batchCache, matrix);
     }
 
+    public bool TryUpdateOwnedMatrix(
+        List<VirtualRenderBatchEntry> ownerEntries,
+        int entryIndex,
+        VirtualRenderBatchKey key,
+        Matrix4x4 matrix)
+    {
+        if (ownerEntries == null || entryIndex < 0 || entryIndex >= ownerEntries.Count)
+        {
+            return false;
+        }
+
+        VirtualRenderBatchEntry entry = ownerEntries[entryIndex];
+        if (!entry.BatchKey.Equals(key)
+            || !batchesByKey.TryGetValue(entry.BatchKey, out BatchRenderCache batchCache)
+            || entry.MatrixIndex < 0
+            || entry.MatrixIndex >= batchCache.Matrices.Count)
+        {
+            return false;
+        }
+
+        batchCache.Matrices[entry.MatrixIndex] = matrix;
+        batchCache.MarkBoundsDirty();
+        return true;
+    }
+
     public void RemoveOwnedEntries(List<VirtualRenderBatchEntry> ownerEntries)
     {
         if (ownerEntries == null)

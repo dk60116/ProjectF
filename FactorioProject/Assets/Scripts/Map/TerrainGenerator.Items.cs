@@ -785,10 +785,17 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        bool hideBelts = IsBeltRenderingHidden();
+        conveyorBelt.SetRuntimeRootSuspended(hideBelts);
+        conveyorBelt.SetRuntimeRenderingHidden(hideBelts);
+        if (hideBelts)
+        {
+            return;
+        }
+
         if (!virtualizeConveyorBelts)
         {
             UnregisterVirtualConveyorBelt(conveyorBelt);
-            conveyorBelt.SetRuntimeRenderingHidden(IsBeltRenderingHidden());
             return;
         }
 
