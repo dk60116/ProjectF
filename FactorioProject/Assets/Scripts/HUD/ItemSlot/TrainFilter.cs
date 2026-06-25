@@ -5,6 +5,19 @@ using UnityEngine.UI;
 
 public class TrainFilter : MonoBehaviour
 {
+    private static readonly string[] FuelOptions =
+    {
+        "Free",
+        "Full"
+    };
+
+    private static readonly string[] FreightOptions =
+    {
+        "Free",
+        "Full",
+        "Empty"
+    };
+
     [SerializeField]
     private Image trainIcon;
     [SerializeField]
@@ -17,6 +30,7 @@ public class TrainFilter : MonoBehaviour
     private SteamTrain boundTrain;
     private readonly List<string> stationNameScratch = new List<string>(8);
     private readonly List<TMP_Dropdown.OptionData> stationOptionScratch = new List<TMP_Dropdown.OptionData>(8);
+    private readonly List<TMP_Dropdown.OptionData> filterOptionScratch = new List<TMP_Dropdown.OptionData>(4);
 
     private void OnEnable()
     {
@@ -45,6 +59,7 @@ public class TrainFilter : MonoBehaviour
         }
 
         RefreshStationTargetDropdowns();
+        RefreshFilterDropdowns();
     }
 
     private static Sprite ResolveTrainIcon(SteamTrain train)
@@ -106,16 +121,54 @@ public class TrainFilter : MonoBehaviour
         dropdown.RefreshShownValue();
     }
 
+    private void RefreshFilterDropdowns()
+    {
+        RefreshFixedOptionDropdown(fuel, FuelOptions);
+        RefreshFixedOptionDropdown(freight, FreightOptions);
+    }
+
+    private void RefreshFixedOptionDropdown(TMP_Dropdown dropdown, IReadOnlyList<string> options)
+    {
+        if (dropdown == null)
+        {
+            return;
+        }
+
+        string previouslySelectedOption = ResolveSelectedOptionText(dropdown);
+        filterOptionScratch.Clear();
+        if (options != null)
+        {
+            for (int i = 0; i < options.Count; i++)
+            {
+                filterOptionScratch.Add(new TMP_Dropdown.OptionData(options[i]));
+            }
+        }
+
+        dropdown.ClearOptions();
+        if (filterOptionScratch.Count > 0)
+        {
+            dropdown.AddOptions(filterOptionScratch);
+            dropdown.SetValueWithoutNotify(ResolveOptionIndex(previouslySelectedOption, options));
+        }
+
+        dropdown.RefreshShownValue();
+    }
+
     private int ResolveStationOptionIndex(string stationName)
     {
-        if (stationNameScratch.Count <= 0)
+        return ResolveOptionIndex(stationName, stationNameScratch);
+    }
+
+    private static int ResolveOptionIndex(string optionText, IReadOnlyList<string> options)
+    {
+        if (options == null || options.Count <= 0)
         {
             return 0;
         }
 
-        for (int i = 0; i < stationNameScratch.Count; i++)
+        for (int i = 0; i < options.Count; i++)
         {
-            if (string.Equals(stationNameScratch[i], stationName, System.StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(options[i], optionText, System.StringComparison.OrdinalIgnoreCase))
             {
                 return i;
             }

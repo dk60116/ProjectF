@@ -17,8 +17,11 @@ public class SteamTrain : RailHandcar
     private const float RearFreightCarMinBehindDistance = 0.01f;
     private const float WaterUseRatePerSecond = 0.8f;
     private const int WaterPipeNetworkSearchMaxNodes = 128;
-    private const float WaterPipeDockRailCoordinateSampleMaxDistance = 1.25f;
+    private const float WaterPipeDockRailCoordinateSampleMaxDistance = 0.6f;
     private const float WaterPipeDockFacingDotEpsilon = 0.05f;
+    private const float WaterPipeDockMinAlongDistance = 0.45f;
+    private const float WaterPipeDockMaxAlongDistance = 1.35f;
+    private const float WaterPipeDockMaxLateralDistance = 0.35f;
     private static readonly Vector2Int[] CardinalDirections =
     {
         Vector2Int.up,
@@ -660,6 +663,17 @@ public class SteamTrain : RailHandcar
             return false;
         }
 
+        if (!TryGetWaterPipeDockOffsetMetrics(
+                pathPoint,
+                lockedWaterPipeDockDirectionFromTrainToPipe,
+                lockedWaterPipeDockCoordinate,
+                out _,
+                out _))
+        {
+            ClearWaterPipeDockLock();
+            return false;
+        }
+
         dockSample.Rail = lockedWaterPipeDockRail;
         dockSample.DistanceAlongPath = lockedWaterPipeDockDistanceAlongPath;
         dockSample.Point = pathPoint;
@@ -798,6 +812,16 @@ public class SteamTrain : RailHandcar
                         continue;
                     }
 
+                    if (!TryGetWaterPipeDockOffsetMetrics(
+                            candidateSample.Point,
+                            -directionFromPipeToTrain,
+                            candidatePipeCoordinate,
+                            out float alongDistance,
+                            out float lateralDistance))
+                    {
+                        continue;
+                    }
+
                     if (!hasCheckedWaterSource)
                     {
                         hasWaterSource = WaterPipeNetworkHasWaterSource(candidatePipeCoordinate, waterItemId);
@@ -806,6 +830,8 @@ public class SteamTrain : RailHandcar
 
                     float score = candidatePathDistance
                                   + candidateSqrDistance * 0.25f
+                                  + Mathf.Abs(1f - alongDistance) * 0.2f
+                                  + lateralDistance * 0.35f
                                   + (hasWaterSource ? 0f : 0.1f);
                     if (score >= bestScore)
                     {
@@ -856,6 +882,35 @@ public class SteamTrain : RailHandcar
         dockSample.Tangent = tangent;
         dockSample.SqrDistance = sqrDistance;
         return true;
+    }
+
+    private bool TryGetWaterPipeDockOffsetMetrics(
+        Vector2 trainPoint,
+        Vector2Int directionFromTrainToPipe,
+        Vector2Int pipeCoordinate,
+        out float alongDistance,
+        out float lateralDistance)
+    {
+        alongDistance = 0f;
+        lateralDistance = 0f;
+        if (directionFromTrainToPipe == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2 pipeDirection = new Vector2(directionFromTrainToPipe.x, directionFromTrainToPipe.y);
+        if (pipeDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        pipeDirection.Normalize();
+        Vector2 offsetToPipe = new Vector2(pipeCoordinate.x, pipeCoordinate.y) - trainPoint;
+        alongDistance = Vector2.Dot(offsetToPipe, pipeDirection);
+        lateralDistance = Mathf.Abs((pipeDirection.x * offsetToPipe.y) - (pipeDirection.y * offsetToPipe.x));
+        return alongDistance >= WaterPipeDockMinAlongDistance
+               && alongDistance <= WaterPipeDockMaxAlongDistance
+               && lateralDistance <= WaterPipeDockMaxLateralDistance;
     }
 
     private bool WaterPipeNetworkHasWaterSource(Vector2Int startCoordinate, int waterItemId)

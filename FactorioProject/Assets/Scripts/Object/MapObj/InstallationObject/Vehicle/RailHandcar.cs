@@ -370,7 +370,11 @@ public class RailHandcar : Train
         Vector2 railPoint,
         Vector2 facingTangent)
     {
-        base.ApplyPlacedRailSample(rail, distanceAlongPath, railPoint, facingTangent);
+        Vector2 resolvedFacingTangent = ResolveAlignedRailTangent(
+            facingTangent,
+            currentFacingTangent,
+            ResolveReferenceFacing());
+        base.ApplyPlacedRailSample(rail, distanceAlongPath, railPoint, resolvedFacingTangent);
 
         Physics.SyncTransforms();
     }
@@ -381,12 +385,16 @@ public class RailHandcar : Train
         Vector2 railPoint,
         Vector2 facingTangent)
     {
-        if (!base.TryApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent))
+        Vector2 resolvedFacingTangent = ResolveAlignedRailTangent(
+            facingTangent,
+            currentFacingTangent,
+            ResolveReferenceFacing());
+        if (!base.TryApplyRailPose(rail, distanceAlongPath, railPoint, resolvedFacingTangent))
         {
             return false;
         }
 
-        SyncRailFacingTangent(facingTangent, true);
+        SyncRailFacingTangent(resolvedFacingTangent, true);
         return true;
     }
 
@@ -1020,7 +1028,10 @@ public class RailHandcar : Train
                     0f,
                     pathLength);
                 traveledDistance += remainingDistance;
-                if (!TryCreateRailSampleAtDistance(currentSample.Rail, targetDistance, out targetSample))
+                if (!TryCreateRailSampleAtDistance(
+                        currentSample.Rail,
+                        targetDistance,
+                        out targetSample))
                 {
                     return false;
                 }
@@ -1030,7 +1041,10 @@ public class RailHandcar : Train
             }
 
             float endpointDistance = directionSign > 0f ? pathLength : 0f;
-            if (!TryCreateRailSampleAtDistance(currentSample.Rail, endpointDistance, out RailSample endpointSample))
+            if (!TryCreateRailSampleAtDistance(
+                    currentSample.Rail,
+                    endpointDistance,
+                    out RailSample endpointSample))
             {
                 return false;
             }
@@ -4505,7 +4519,10 @@ public class RailHandcar : Train
                 startSample.Sample.DistanceAlongPath,
                 endSample.Sample.DistanceAlongPath,
                 t);
-            return TryCreateRailSampleAtDistance(startSample.Sample.Rail, railDistance, out sample);
+            return TryCreateRailSampleAtDistance(
+                startSample.Sample.Rail,
+                railDistance,
+                out sample);
         }
 
         float connectionDistance = Vector2.Distance(startSample.Sample.Point, endSample.Sample.Point);
@@ -4990,7 +5007,11 @@ public class RailHandcar : Train
                 continue;
             }
 
-            float inputDot = Mathf.Abs(Vector2.Dot(inputDirection, tangent));
+            Vector2 alignedTangent = ResolveAlignedRailTangent(
+                tangent,
+                inputDirection,
+                currentSample.Tangent);
+            float inputDot = Mathf.Abs(Vector2.Dot(inputDirection, alignedTangent));
             if (inputDot < branchSwitchMinInputDot)
             {
                 continue;
@@ -4999,7 +5020,7 @@ public class RailHandcar : Train
             float progress = ResolveRailLookAheadProgress(
                 rail,
                 distanceAlongPath,
-                tangent,
+                alignedTangent,
                 currentSample.Point,
                 inputDirection,
                 branchLookAheadDistance);
@@ -5119,11 +5140,15 @@ public class RailHandcar : Train
             return false;
         }
 
-        float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, tangent));
+        Vector2 alignedTangent = ResolveAlignedRailTangent(
+            tangent,
+            exitDirection,
+            endpointSample.Tangent);
+        float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, alignedTangent));
         float progress = ResolveRailLookAheadProgress(
             preferredRail,
             distanceAlongPath,
-            tangent,
+            alignedTangent,
             endpointSample.Point,
             exitDirection,
             railConnectionLookAhead);
@@ -5226,11 +5251,15 @@ public class RailHandcar : Train
                 continue;
             }
 
-            float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, tangent));
+            Vector2 alignedTangent = ResolveAlignedRailTangent(
+                tangent,
+                exitDirection,
+                endpointSample.Tangent);
+            float directionScore = Mathf.Abs(Vector2.Dot(exitDirection, alignedTangent));
             float progress = ResolveRailLookAheadProgress(
                 rail,
                 distanceAlongPath,
-                tangent,
+                alignedTangent,
                 endpointSample.Point,
                 exitDirection,
                 railConnectionLookAhead);
@@ -5507,6 +5536,20 @@ public class RailHandcar : Train
             ResolveReferenceFacing());
     }
 
+    private Vector2 ResolveAlignedRailTangent(
+        Vector2 railTangent,
+        Vector2 referenceDirection,
+        Vector2 fallbackDirection)
+    {
+        Vector2 resolvedFallbackDirection = fallbackDirection.sqrMagnitude > 0.0001f
+            ? fallbackDirection
+            : ResolveReferenceFacing();
+        return ResolveFacingTangentWithFallback(
+            railTangent,
+            referenceDirection,
+            resolvedFallbackDirection);
+    }
+
     private static Vector2 ResolveFollowerFacingTangent(
         Vector2 railTangent,
         Vector2 previousFacing,
@@ -5638,6 +5681,10 @@ public class RailHandcar : Train
                 : Vector2.up;
         }
 
+        facingTangent = ResolveAlignedRailTangent(
+            facingTangent,
+            currentFacingTangent,
+            ResolveReferenceFacing());
         facingTangent.Normalize();
         Quaternion targetRotation = Quaternion.LookRotation(
             new Vector3(facingTangent.x, 0f, facingTangent.y),

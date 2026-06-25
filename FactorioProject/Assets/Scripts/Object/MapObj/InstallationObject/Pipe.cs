@@ -242,7 +242,12 @@ public class Pipe : InstallationObject
         out int fluidItemId,
         out float temperatureCelsius)
     {
-        return TryGetStoredFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius);
+        if (TryGetStoredFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius))
+        {
+            return true;
+        }
+
+        return TryGetSourceFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius);
     }
 
     private bool TryGetStoredFluidItemIdAtCoordinate(Vector2Int coordinate, out int fluidItemId)
@@ -286,6 +291,52 @@ public class Pipe : InstallationObject
         fluidItemId = bodyStorage.StoredFluidItemId;
         temperatureCelsius = bodyStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
         return true;
+    }
+
+    private bool TryGetSourceFluidInfoAtCoordinate(
+        Vector2Int coordinate,
+        out int fluidItemId,
+        out float temperatureCelsius)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+
+        if (TryResolvePumpSourceAtCoordinate(coordinate, out Pump pump)
+            && pump != null
+            && pump.TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
+            && outputItemId >= 0
+            && litersPerSecond > 0.0001f)
+        {
+            fluidItemId = outputItemId;
+            temperatureCelsius = pump.GetStoredFluidTemperatureCelsius(outputItemId);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolvePumpSourceAtCoordinate(Vector2Int coordinate, out Pump pump)
+    {
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out pump)
+            && pump != null
+            && pump.gameObject.activeInHierarchy)
+        {
+            return true;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.MapObject is Pump directPump
+            && directPump.gameObject.activeInHierarchy)
+        {
+            pump = directPump;
+            return true;
+        }
+
+        pump = null;
+        return false;
     }
 
     private bool CanDisplayStoredFluidAtCoordinate(InstallationObject storage, Vector2Int coordinate)
