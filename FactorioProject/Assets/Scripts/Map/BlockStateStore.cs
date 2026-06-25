@@ -39,6 +39,7 @@ public partial class BlockStateStore : MonoBehaviour
         public bool hasSteamTrainBurnEnergyState;
         public float steamTrainStoredBurnEnergy;
         public float steamTrainBurnEnergyGaugeCapacity;
+        public string stationName = string.Empty;
 
         public InstallationSaveState Clone()
         {
@@ -76,7 +77,8 @@ public partial class BlockStateStore : MonoBehaviour
                 trainRailFacingTangent = trainRailFacingTangent,
                 hasSteamTrainBurnEnergyState = hasSteamTrainBurnEnergyState,
                 steamTrainStoredBurnEnergy = steamTrainStoredBurnEnergy,
-                steamTrainBurnEnergyGaugeCapacity = steamTrainBurnEnergyGaugeCapacity
+                steamTrainBurnEnergyGaugeCapacity = steamTrainBurnEnergyGaugeCapacity,
+                stationName = stationName
             };
         }
     }
@@ -417,6 +419,20 @@ public partial class BlockStateStore : MonoBehaviour
     public List<Vector2Int> GetSavedInstallationStorageKeys()
     {
         return new List<Vector2Int>(savedInstallationStates.Keys);
+    }
+
+    public List<InstallationSaveState> GetInstallationStatesSnapshot()
+    {
+        List<InstallationSaveState> snapshot = new List<InstallationSaveState>(savedInstallationStates.Count);
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        {
+            if (pair.Value != null)
+            {
+                snapshot.Add(pair.Value.Clone());
+            }
+        }
+
+        return snapshot;
     }
 
     public int GetInstallationItemCounts(Dictionary<int, int> countsByItemId)
@@ -832,6 +848,11 @@ public partial class BlockStateStore : MonoBehaviour
                 out state.steamTrainStoredBurnEnergy,
                 out state.steamTrainBurnEnergyGaugeCapacity);
             state.hasSteamTrainBurnEnergyState = true;
+        }
+
+        if (installationObject is Trainstation trainStation)
+        {
+            state.stationName = trainStation.StoredStationName;
         }
 
         if (installationObject is InputOutputModule inputOutputModule)

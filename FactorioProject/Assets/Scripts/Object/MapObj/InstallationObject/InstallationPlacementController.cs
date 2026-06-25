@@ -714,7 +714,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TryHandleModeCancelInput()
     {
-        if (!Input.GetKeyDown(KeyCode.Escape))
+        if (GameManager.TextInputFocused || !Input.GetKeyDown(KeyCode.Escape))
         {
             return false;
         }

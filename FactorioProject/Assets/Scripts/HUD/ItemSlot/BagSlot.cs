@@ -607,6 +607,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         RefreshPickupPreview();
         HandleHeldSlotInput();
 
+        if (GameManager.TextInputFocused)
+        {
+            return;
+        }
+
         if (Input.GetKeyDown(KeyCode.H))
         {
             TryHandleHandShortcut();
@@ -4019,6 +4024,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     protected bool IsItemDropLocked()
     {
-        return GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
+        return GameManager.TextInputFocused
+               || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked);
     }
 }

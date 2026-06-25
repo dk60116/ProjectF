@@ -531,7 +531,8 @@ public class RailHandcar : Train
         Vector2 currentFacing,
         RailSample dockSample,
         float signedPathDelta,
-        float deltaTime)
+        float deltaTime,
+        bool preserveCoastTravelDirection = false)
     {
         float remainingDistance = Mathf.Abs(signedPathDelta);
         if (remainingDistance <= ResolveDockCompleteDistance())
@@ -573,6 +574,11 @@ public class RailHandcar : Train
                 Vector2.zero,
                 false))
         {
+            if (preserveCoastTravelDirection)
+            {
+                lastRailTravelDirection = previousLastRailTravelDirection;
+            }
+
             return true;
         }
 

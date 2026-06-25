@@ -962,6 +962,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
             if (TryInstantiateSavedInstallation(savedState, out InstallationObject restoredInstallation))
             {
+                if (restoredInstallation is Trainstation restoredTrainStation)
+                {
+                    EnsureTrainStationNameAssigned(restoredTrainStation);
+                    savedState.stationName = restoredTrainStation.StoredStationName;
+                }
+
                 resourceStateStore.RegisterLiveInstallation(restoredInstallation, savedState);
             }
         }
@@ -1150,6 +1156,11 @@ public partial class TerrainGenerator : MonoBehaviour
             steamTrain.ApplyBurnEnergyState(
                 savedState.steamTrainStoredBurnEnergy,
                 savedState.steamTrainBurnEnergyGaugeCapacity);
+        }
+
+        if (restoredInstallation is Trainstation restoredTrainStation)
+        {
+            restoredTrainStation.ApplyStationName(savedState.stationName);
         }
 
         if (savedState.robotArmState != null && restoredInstallation is RobotArm robotArm)

@@ -547,7 +547,8 @@ public class PlayerController : MonoBehaviour
 
     private bool IsTemporaryDropFocusBlockedByMode()
     {
-        if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
+        if (GameManager.TextInputFocused
+            || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked))
         {
             return true;
         }
@@ -570,7 +571,8 @@ public class PlayerController : MonoBehaviour
         player?.UpdateDropExitGate(transform.position);
 
         GameManager gameManager = GameManager.Instance;
-        bool isInteractionLocked = gameManager != null && gameManager.PlayerInteractionLocked;
+        bool isInteractionLocked = GameManager.TextInputFocused
+                                   || (gameManager != null && gameManager.PlayerInteractionLocked);
         bool isKeyboardMoveLocked = gameManager != null && gameManager.FreeCamera;
 
         Vector2 input = Vector2.zero;
@@ -670,7 +672,8 @@ public class PlayerController : MonoBehaviour
 
         SnapRootToGroundY();
 
-        if (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked)
+        if (GameManager.TextInputFocused
+            || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked))
         {
             pendingMoveDirection = Vector3.zero;
             currentConveyorCarryVelocity = Vector3.zero;
@@ -3469,7 +3472,8 @@ public class PlayerController : MonoBehaviour
     private void RefreshMouseMapObjectFocus()
     {
         GameManager gameManager = GameManager.Instance;
-        bool isInteractionLocked = gameManager != null && gameManager.PlayerInteractionLocked;
+        bool isInteractionLocked = GameManager.TextInputFocused
+                                   || (gameManager != null && gameManager.PlayerInteractionLocked);
         if (mouseFocusRefreshFrame == Time.frameCount
             && mouseFocusRefreshInteractionLocked == isInteractionLocked)
         {

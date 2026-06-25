@@ -200,6 +200,8 @@ public class PlayerHUD : BagSlot
         ResolveDoorInteractionButton();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
+        ResolveTrainStationFilter();
+        ResolveTrainFilter();
         ResolveMapPaper();
         ResolveObjectInfoPanel();
         EnsureHudButtonHoverTweens();
@@ -232,17 +234,19 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        if (IsFilterPanelActive())
         {
             if (itemFilterUiOpenedFrame == Time.frameCount)
             {
                 return;
             }
 
-            bool isPointerOverFilterUi = IsPointerOverItemFilterUiArea(pointerPosition);
+            bool isPointerOverFilterUi = IsPointerOverItemFilterUiArea(pointerPosition)
+                                         || IsPointerOverItemFilterButtonArea(pointerPosition)
+                                         || IsPointerOverInteractionButtonArea(pointerPosition);
             if (!isPointerOverFilterUi)
             {
-                itemFilterUI.gameObject.SetActive(false);
+                HideFilterPanelsImmediate();
                 itemFilterUiOpenedFrame = -1;
             }
             else
@@ -769,6 +773,42 @@ public class PlayerHUD : BagSlot
             if (filterUiTransform != null)
             {
                 itemFilterUI = filterUiTransform.GetComponent<FilterSelectUI>();
+            }
+        }
+    }
+
+    private void ResolveTrainStationFilter()
+    {
+        if (trainStationFilter != null)
+        {
+            return;
+        }
+
+        trainStationFilter = GetComponentInChildren<TrainStationFilter>(true);
+        if (trainStationFilter == null)
+        {
+            Transform trainStationFilterTransform = FindDescendantByName(transform, "TrainStationFilter");
+            if (trainStationFilterTransform != null)
+            {
+                trainStationFilter = trainStationFilterTransform.GetComponent<TrainStationFilter>();
+            }
+        }
+    }
+
+    private void ResolveTrainFilter()
+    {
+        if (trainFilter != null)
+        {
+            return;
+        }
+
+        trainFilter = GetComponentInChildren<TrainFilter>(true);
+        if (trainFilter == null)
+        {
+            Transform trainFilterTransform = FindDescendantByName(transform, "TrainFilter");
+            if (trainFilterTransform != null)
+            {
+                trainFilter = trainFilterTransform.GetComponent<TrainFilter>();
             }
         }
     }
@@ -2069,6 +2109,11 @@ public class PlayerHUD : BagSlot
             {
                 isVisible = true;
             }
+
+            if (!isVisible && TryGetFocusedSteamTrain(playerController, out _))
+            {
+                isVisible = true;
+            }
         }
 
         if (!isVisible
@@ -2079,14 +2124,22 @@ public class PlayerHUD : BagSlot
             isVisible = true;
         }
 
+        if (!isVisible
+            && trainFilter != null
+            && trainFilter.gameObject.activeSelf
+            && trainFilter.TryGetBoundTarget(out _))
+        {
+            isVisible = true;
+        }
+
         if (ItemFilterButton.gameObject.activeSelf != isVisible)
         {
             ItemFilterButton.gameObject.SetActive(isVisible);
         }
 
-        if (!isVisible && itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        if (!isVisible && IsItemFilterButtonPanelActive())
         {
-            itemFilterUI.gameObject.SetActive(false);
+            HideItemFilterButtonPanelsImmediate();
             itemFilterUiOpenedFrame = -1;
         }
     }
@@ -2319,9 +2372,54 @@ public class PlayerHUD : BagSlot
 
     private void HideItemFilterUIImmediate()
     {
+        HideFilterPanelsImmediate();
+    }
+
+    private bool IsFilterPanelActive()
+    {
+        if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        {
+            return true;
+        }
+
+        if (trainFilter != null && trainFilter.gameObject.activeSelf)
+        {
+            return true;
+        }
+
+        return trainStationFilter != null && trainStationFilter.gameObject.activeSelf;
+    }
+
+    private void HideFilterPanelsImmediate()
+    {
+        HideItemFilterButtonPanelsImmediate();
+
+        if (trainStationFilter != null && trainStationFilter.gameObject.activeSelf)
+        {
+            trainStationFilter.gameObject.SetActive(false);
+        }
+    }
+
+    private bool IsItemFilterButtonPanelActive()
+    {
+        if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+        {
+            return true;
+        }
+
+        return trainFilter != null && trainFilter.gameObject.activeSelf;
+    }
+
+    private void HideItemFilterButtonPanelsImmediate()
+    {
         if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
         {
             itemFilterUI.gameObject.SetActive(false);
+        }
+
+        if (trainFilter != null && trainFilter.gameObject.activeSelf)
+        {
+            trainFilter.gameObject.SetActive(false);
         }
     }
 
@@ -2358,6 +2456,13 @@ public class PlayerHUD : BagSlot
 
         if (currentInteractionMapObject != null)
         {
+            if (TryResolveTrainStation(currentInteractionMapObject, out Trainstation trainStation))
+            {
+                ShowTrainStationFilter(trainStation);
+                UpdateInteractionButtonState();
+                return;
+            }
+
             if (currentInteractionMapObject is Vehicle vehicle)
             {
                 Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
@@ -2378,11 +2483,62 @@ public class PlayerHUD : BagSlot
         }
     }
 
+    private void ShowTrainStationFilter(Trainstation trainStation)
+    {
+        if (trainStation == null)
+        {
+            return;
+        }
+
+        ResolveTrainStationFilter();
+        if (trainStationFilter == null)
+        {
+            return;
+        }
+
+        if (trainStationFilter.gameObject.activeSelf
+            && trainStationFilter.TryGetBoundTarget(out Trainstation boundStation)
+            && boundStation == trainStation)
+        {
+            trainStationFilter.gameObject.SetActive(false);
+            itemFilterUiOpenedFrame = -1;
+            return;
+        }
+
+        HideItemFilterButtonPanelsImmediate();
+        trainStationFilter.Bind(trainStation);
+        trainStationFilter.gameObject.SetActive(true);
+        itemFilterUiOpenedFrame = Time.frameCount;
+    }
+
+    private static bool TryResolveTrainStation(MapObject mapObject, out Trainstation trainStation)
+    {
+        trainStation = mapObject as Trainstation;
+        if (trainStation != null)
+        {
+            return trainStation.gameObject.activeInHierarchy;
+        }
+
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        trainStation = mapObject.GetComponent<Trainstation>();
+        if (trainStation == null)
+        {
+            trainStation = mapObject.GetComponentInChildren<Trainstation>(true);
+        }
+
+        return trainStation != null && trainStation.gameObject.activeInHierarchy;
+    }
+
     private void HandleInteractionButtonKeyboardInput()
     {
         if (!Input.GetKeyDown(KeyCode.Space)
             || GameManager.Instance == null
             || GameManager.Instance.PlayerInteractionLocked
+            || GameManager.TextInputFocused
             || IsPlacementOrMapEditModeActive())
         {
             return;
@@ -2419,6 +2575,33 @@ public class PlayerHUD : BagSlot
 
     private void HandleItemFilterButtonClicked()
     {
+        bool trainFilterActive = trainFilter != null && trainFilter.gameObject.activeSelf;
+        if (trainFilterActive)
+        {
+            HideItemFilterButtonPanelsImmediate();
+            itemFilterUiOpenedFrame = -1;
+            return;
+        }
+
+        PlayerController playerController = ResolvePlayerController();
+        if (TryGetFocusedSteamTrain(playerController, out SteamTrain steamTrain))
+        {
+            if (trainFilter == null)
+            {
+                return;
+            }
+
+            if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
+            {
+                itemFilterUI.gameObject.SetActive(false);
+            }
+
+            trainFilter.Bind(steamTrain);
+            trainFilter.gameObject.SetActive(true);
+            itemFilterUiOpenedFrame = Time.frameCount;
+            return;
+        }
+
         if (itemFilterUI == null)
         {
             return;
@@ -2427,17 +2610,42 @@ public class PlayerHUD : BagSlot
         bool shouldOpen = !itemFilterUI.gameObject.activeSelf;
         if (shouldOpen)
         {
-            PlayerController playerController = ResolvePlayerController();
             if (playerController == null || !playerController.TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
             {
                 return;
             }
 
             itemFilterUI.Bind(focusedMapObject);
+            if (trainFilter != null && trainFilter.gameObject.activeSelf)
+            {
+                HideItemFilterButtonPanelsImmediate();
+            }
         }
 
         itemFilterUI.gameObject.SetActive(shouldOpen);
         itemFilterUiOpenedFrame = shouldOpen ? Time.frameCount : -1;
+    }
+
+    private static bool TryGetFocusedSteamTrain(PlayerController playerController, out SteamTrain steamTrain)
+    {
+        steamTrain = null;
+        if (playerController == null || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
+        {
+            return false;
+        }
+
+        steamTrain = focusedMapObject as SteamTrain;
+        if (steamTrain == null)
+        {
+            steamTrain = focusedMapObject.GetComponent<SteamTrain>();
+        }
+
+        if (steamTrain == null)
+        {
+            steamTrain = focusedMapObject.GetComponentInChildren<SteamTrain>(true);
+        }
+
+        return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
     }
 
     private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
@@ -2695,6 +2903,16 @@ public class PlayerHUD : BagSlot
                 return true;
             }
 
+            if (trainFilter != null && hitObject.transform.IsChildOf(trainFilter.transform))
+            {
+                return true;
+            }
+
+            if (trainStationFilter != null && hitObject.transform.IsChildOf(trainStationFilter.transform))
+            {
+                return true;
+            }
+
             if (ItemFilterButton != null && hitObject.transform.IsChildOf(ItemFilterButton.transform))
             {
                 return true;
@@ -2702,6 +2920,52 @@ public class PlayerHUD : BagSlot
         }
 
         return false;
+    }
+
+    private bool IsPointerOverItemFilterButtonArea(Vector2 pointerPosition)
+    {
+        if (ItemFilterButton == null || !ItemFilterButton.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        RectTransform rectTransform = ItemFilterButton.transform as RectTransform;
+        if (rectTransform == null)
+        {
+            return false;
+        }
+
+        Canvas canvas = rectTransform.GetComponentInParent<Canvas>();
+        Camera eventCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+        return RectTransformUtility.RectangleContainsScreenPoint(rectTransform, pointerPosition, eventCamera);
+    }
+
+    private bool IsPointerOverInteractionButtonArea(Vector2 pointerPosition)
+    {
+        return IsPointerOverInteractionButtonArea(InteractionButton, pointerPosition)
+               || IsPointerOverInteractionButtonArea(DoorInteractionButton, pointerPosition);
+    }
+
+    private static bool IsPointerOverInteractionButtonArea(InteractionButton interactionButton, Vector2 pointerPosition)
+    {
+        if (interactionButton == null || !interactionButton.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        RectTransform rectTransform = interactionButton.transform as RectTransform;
+        if (rectTransform == null)
+        {
+            return false;
+        }
+
+        Canvas canvas = rectTransform.GetComponentInParent<Canvas>();
+        Camera eventCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+        return RectTransformUtility.RectangleContainsScreenPoint(rectTransform, pointerPosition, eventCamera);
     }
 
     private bool IsPointerOverObjectInfoBlockingUi(Vector2 pointerPosition)
@@ -2737,6 +3001,16 @@ public class PlayerHUD : BagSlot
             }
 
             if (itemFilterUI != null && hitObject.transform.IsChildOf(itemFilterUI.transform))
+            {
+                return true;
+            }
+
+            if (trainFilter != null && hitObject.transform.IsChildOf(trainFilter.transform))
+            {
+                return true;
+            }
+
+            if (trainStationFilter != null && hitObject.transform.IsChildOf(trainStationFilter.transform))
             {
                 return true;
             }

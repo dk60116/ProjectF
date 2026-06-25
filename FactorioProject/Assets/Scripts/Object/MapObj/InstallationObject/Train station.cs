@@ -5,10 +5,42 @@ public class Trainstation : InstallationObject
 {
     [SerializeField]
     private Sprite stationMarkerIcon;
+    [SerializeField]
+    private string stationName = string.Empty;
 
     private readonly List<InstallationObject> railCoordinateSearchScratch = new List<InstallationObject>(4);
 
     public Sprite StationMarkerIcon => stationMarkerIcon;
+    public string StationName => HasAssignedStationName ? StoredStationName : ResolveDefaultStationName();
+    public string StoredStationName => NormalizeStationName(stationName);
+    public bool HasAssignedStationName => !string.IsNullOrWhiteSpace(stationName);
+
+    public void SetStationName(string value)
+    {
+        string normalizedName = NormalizeStationName(value);
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain != null)
+        {
+            normalizedName = terrain.ResolveUniqueTrainStationName(this, normalizedName);
+        }
+        else if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            normalizedName = ResolveDefaultStationName();
+        }
+
+        if (StoredStationName == normalizedName)
+        {
+            return;
+        }
+
+        stationName = normalizedName;
+        PersistStationName();
+    }
+
+    public void ApplyStationName(string value)
+    {
+        stationName = NormalizeStationName(value);
+    }
 
     public bool TryGetRailCoordinate(out Vector2Int railCoordinate)
     {
@@ -100,6 +132,39 @@ public class Trainstation : InstallationObject
 
         railCoordinateSearchScratch.Clear();
         return hasRail;
+    }
+
+    private string ResolveDefaultStationName()
+    {
+        ItemDefinition definition = BoundItemDefinition != null
+            ? BoundItemDefinition
+            : InputOutputModule.ResolveItemDefinition(ResolveItemId());
+        if (definition != null && !string.IsNullOrWhiteSpace(definition.itemName))
+        {
+            return definition.itemName;
+        }
+
+        if (definition != null && !string.IsNullOrWhiteSpace(definition.name))
+        {
+            return definition.name;
+        }
+
+        return gameObject != null ? gameObject.name : name;
+    }
+
+    private static string NormalizeStationName(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+    }
+
+    private void PersistStationName()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        TerrainGenerator.ResolveActive()?.SaveRuntimeInstallationState(this);
     }
 
 #if UNITY_EDITOR

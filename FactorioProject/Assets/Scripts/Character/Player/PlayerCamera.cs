@@ -207,6 +207,11 @@ public class PlayerCamera : MonoBehaviour
 
     private void HandleFreeCameraInput()
     {
+        if (GameManager.TextInputFocused)
+        {
+            return;
+        }
+
         float deltaTime = Mathf.Max(0f, Time.unscaledDeltaTime);
         if (Input.GetMouseButton(1))
         {
@@ -278,6 +283,11 @@ public class PlayerCamera : MonoBehaviour
 
     private void HandleZoomInput()
     {
+        if (GameManager.TextInputFocused)
+        {
+            return;
+        }
+
         float zoomDelta = 0f;
         bool useOrthographicZoom = cachedCamera != null && cachedCamera.orthographic;
 

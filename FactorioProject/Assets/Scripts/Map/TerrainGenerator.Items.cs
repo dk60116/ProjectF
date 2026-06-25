@@ -795,6 +795,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         EnsureResourceStateStore();
+        if (installationObject is Trainstation trainStation)
+        {
+            EnsureTrainStationNameAssigned(trainStation);
+        }
+
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
         WakeRobotArmsAroundInstallation(installationObject);
@@ -850,6 +855,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         EnsureResourceStateStore();
+        if (installationObject is Trainstation trainStation)
+        {
+            EnsureTrainStationNameAssigned(trainStation);
+        }
+
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
         WakeRobotArmsAroundInstallation(installationObject);

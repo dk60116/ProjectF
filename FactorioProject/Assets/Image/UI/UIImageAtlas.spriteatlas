@@ -58,6 +58,7 @@ SpriteAtlas:
     - 007d509387447b443a65381bf19b3bb4: 21300000
     - 06b84cb3d4c5a3c4cb3d19f2a2e2ad71: 21300000
     - 7720e005806f85b418062ee10ace0761: 21300000
+    - f82f488623f9b524aba6289bf1177ed5: 21300000
     - 4022dda644b694f48ac27a7551dcdb50: 21300000
     - 39e009b731267ad429d62ed1ad782ceb: 21300000
     - c4ff3d087eed94b4489b53527fd275f9: 21300000
@@ -82,6 +83,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 007d509387447b443a65381bf19b3bb4, type: 3}
   - {fileID: 21300000, guid: 06b84cb3d4c5a3c4cb3d19f2a2e2ad71, type: 3}
   - {fileID: 21300000, guid: 7720e005806f85b418062ee10ace0761, type: 3}
+  - {fileID: 21300000, guid: f82f488623f9b524aba6289bf1177ed5, type: 3}
   - {fileID: 21300000, guid: 4022dda644b694f48ac27a7551dcdb50, type: 3}
   - {fileID: 21300000, guid: 39e009b731267ad429d62ed1ad782ceb, type: 3}
   - {fileID: 21300000, guid: c4ff3d087eed94b4489b53527fd275f9, type: 3}
@@ -105,6 +107,7 @@ SpriteAtlas:
   - Area
   - Arrow
   - MapFocus
+  - Arrow
   - WoodBox_Circle
   - JoyStick_BG
   - WoodBox_Circle_Dark

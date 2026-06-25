@@ -1627,6 +1627,25 @@ public partial class TerrainGenerator : MonoBehaviour
         return resourceStateStore.GetInstallationItemCounts(countsByItemId);
     }
 
+    public void SaveRuntimeInstallationState(InstallationObject installationObject)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || installationObject == null
+            || installationObject.ExcludeFromTerrainPersistence)
+        {
+            return;
+        }
+
+        if (installationObject is Trainstation trainStation)
+        {
+            EnsureTrainStationNameAssigned(trainStation);
+        }
+
+        resourceStateStore.SaveInstallation(installationObject);
+        resourceStateStore.RegisterLiveInstallation(installationObject);
+    }
+
     public TerrainSaveData CaptureTerrainSaveState()
     {
         return new TerrainSaveData

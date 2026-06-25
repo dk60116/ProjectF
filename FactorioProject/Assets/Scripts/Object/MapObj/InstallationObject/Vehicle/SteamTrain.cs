@@ -18,6 +18,7 @@ public class SteamTrain : RailHandcar
     private const float WaterUseRatePerSecond = 0.8f;
     private const int WaterPipeNetworkSearchMaxNodes = 128;
     private const float WaterPipeDockRailCoordinateSampleMaxDistance = 1.25f;
+    private const float WaterPipeDockFacingDotEpsilon = 0.05f;
     private static readonly Vector2Int[] CardinalDirections =
     {
         Vector2Int.up,
@@ -44,6 +45,12 @@ public class SteamTrain : RailHandcar
     private bool waterPipeAnimating;
     private bool waterPipeTransferReady;
     private Vector2Int activeWaterPipeDirectionFromTrainToPipe;
+    private bool waterPipeDockLockActive;
+    private Railload lockedWaterPipeDockRail;
+    private float lockedWaterPipeDockDistanceAlongPath;
+    private Vector2 lockedWaterPipeDockFacing;
+    private Vector2Int lockedWaterPipeDockDirectionFromTrainToPipe;
+    private Vector2Int lockedWaterPipeDockCoordinate;
     private readonly List<PortableObject> burnEnergyPortableMoveBuffer = new List<PortableObject>();
     private readonly Queue<Vector2Int> waterPipeSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> waterPipeSearchVisited = new HashSet<Vector2Int>();
@@ -287,11 +294,13 @@ public class SteamTrain : RailHandcar
         if (deltaTime <= 0f
             || currentSample.Rail == null
             || !HasFluidStorageSpace
-            || !TryFindWaterPipeDockSample(
+            || !TryResolveWaterPipeDockSample(
                 currentSample,
+                currentFacing,
                 out RailSample dockSample,
                 out float signedPathDelta,
-                out Vector2Int directionFromTrainToPipe))
+                out Vector2Int directionFromTrainToPipe,
+                out Vector2 dockFacing))
         {
             RequestWaterPipeRetract();
             return false;
@@ -303,10 +312,11 @@ public class SteamTrain : RailHandcar
 
         if (TryApplyDockingToSample(
             currentSample,
-            currentFacing,
+            dockFacing,
             dockSample,
             signedPathDelta,
-            deltaTime))
+            deltaTime,
+            true))
         {
             return true;
         }
@@ -578,15 +588,158 @@ public class SteamTrain : RailHandcar
         return true;
     }
 
-    private bool TryFindWaterPipeDockSample(
+    private bool TryResolveWaterPipeDockSample(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        out RailSample dockSample,
+        out float signedPathDelta,
+        out Vector2Int directionFromTrainToPipe,
+        out Vector2 dockFacing)
+    {
+        if (TryGetLockedWaterPipeDockSample(
+                currentSample,
+                out dockSample,
+                out signedPathDelta,
+                out directionFromTrainToPipe,
+                out dockFacing))
+        {
+            return true;
+        }
+
+        if (!TryFindWaterPipeDockSample(
+                currentSample,
+                out dockSample,
+                out signedPathDelta,
+                out directionFromTrainToPipe,
+                out Vector2Int pipeCoordinate))
+        {
+            return false;
+        }
+
+        LockWaterPipeDock(dockSample, currentFacing, directionFromTrainToPipe, pipeCoordinate);
+        dockFacing = lockedWaterPipeDockFacing;
+        return true;
+    }
+
+    private bool TryGetLockedWaterPipeDockSample(
         RailSample currentSample,
         out RailSample dockSample,
         out float signedPathDelta,
-        out Vector2Int directionFromTrainToPipe)
+        out Vector2Int directionFromTrainToPipe,
+        out Vector2 dockFacing)
     {
         dockSample = default;
         signedPathDelta = 0f;
         directionFromTrainToPipe = Vector2Int.zero;
+        dockFacing = Vector2.zero;
+
+        if (!waterPipeDockLockActive)
+        {
+            return false;
+        }
+
+        if (currentSample.Rail == null
+            || currentSample.Rail != lockedWaterPipeDockRail
+            || !TryValidateLockedWaterPipeDock()
+            || !lockedWaterPipeDockRail.TrySampleRenderedPath(
+                lockedWaterPipeDockDistanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent))
+        {
+            ClearWaterPipeDockLock();
+            return false;
+        }
+
+        signedPathDelta = lockedWaterPipeDockDistanceAlongPath - currentSample.DistanceAlongPath;
+        float captureDistance = ResolveDockCaptureDistance();
+        float captureSqrDistance = captureDistance * captureDistance;
+        if (Mathf.Abs(signedPathDelta) > captureDistance
+            || (pathPoint - currentSample.Point).sqrMagnitude > captureSqrDistance)
+        {
+            ClearWaterPipeDockLock();
+            return false;
+        }
+
+        dockSample.Rail = lockedWaterPipeDockRail;
+        dockSample.DistanceAlongPath = lockedWaterPipeDockDistanceAlongPath;
+        dockSample.Point = pathPoint;
+        dockSample.Tangent = tangent;
+        dockSample.SqrDistance = (pathPoint - currentSample.Point).sqrMagnitude;
+        directionFromTrainToPipe = lockedWaterPipeDockDirectionFromTrainToPipe;
+        dockFacing = lockedWaterPipeDockFacing;
+        return true;
+    }
+
+    private bool TryValidateLockedWaterPipeDock()
+    {
+        return lockedWaterPipeDockDirectionFromTrainToPipe != Vector2Int.zero
+               && TryGetActivePipeAtCoordinate(
+                   lockedWaterPipeDockCoordinate,
+                   out Pipe pipe,
+                   out Quaternion pipeRotation)
+               && pipe.HasConnectionTowards(pipeRotation, -lockedWaterPipeDockDirectionFromTrainToPipe);
+    }
+
+    private void LockWaterPipeDock(
+        RailSample dockSample,
+        Vector2 currentFacing,
+        Vector2Int directionFromTrainToPipe,
+        Vector2Int pipeCoordinate)
+    {
+        waterPipeDockLockActive = true;
+        lockedWaterPipeDockRail = dockSample.Rail;
+        lockedWaterPipeDockDistanceAlongPath = dockSample.DistanceAlongPath;
+        lockedWaterPipeDockFacing = ResolveWaterPipeDockFacing(dockSample, currentFacing);
+        lockedWaterPipeDockDirectionFromTrainToPipe = directionFromTrainToPipe;
+        lockedWaterPipeDockCoordinate = pipeCoordinate;
+    }
+
+    private Vector2 ResolveWaterPipeDockFacing(RailSample dockSample, Vector2 currentFacing)
+    {
+        Vector2 railFacing = dockSample.Tangent;
+        if (railFacing.sqrMagnitude <= 0.0001f)
+        {
+            return currentFacing.sqrMagnitude > 0.0001f
+                ? currentFacing.normalized
+                : Vector2.up;
+        }
+
+        railFacing.Normalize();
+        if (currentFacing.sqrMagnitude <= 0.0001f)
+        {
+            return railFacing;
+        }
+
+        float dot = Vector2.Dot(railFacing, currentFacing.normalized);
+        if (dot < -WaterPipeDockFacingDotEpsilon)
+        {
+            railFacing = -railFacing;
+        }
+
+        return railFacing;
+    }
+
+    private void ClearWaterPipeDockLock()
+    {
+        waterPipeDockLockActive = false;
+        lockedWaterPipeDockRail = null;
+        lockedWaterPipeDockDistanceAlongPath = 0f;
+        lockedWaterPipeDockFacing = Vector2.zero;
+        lockedWaterPipeDockDirectionFromTrainToPipe = Vector2Int.zero;
+        lockedWaterPipeDockCoordinate = Vector2Int.zero;
+    }
+
+    private bool TryFindWaterPipeDockSample(
+        RailSample currentSample,
+        out RailSample dockSample,
+        out float signedPathDelta,
+        out Vector2Int directionFromTrainToPipe,
+        out Vector2Int pipeCoordinate)
+    {
+        dockSample = default;
+        signedPathDelta = 0f;
+        directionFromTrainToPipe = Vector2Int.zero;
+        pipeCoordinate = Vector2Int.zero;
         if (currentSample.Rail == null)
         {
             return false;
@@ -611,8 +764,8 @@ public class SteamTrain : RailHandcar
         {
             for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
             {
-                Vector2Int pipeCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!TryGetActivePipeAtCoordinate(pipeCoordinate, out Pipe pipe, out Quaternion pipeRotation))
+                Vector2Int candidatePipeCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!TryGetActivePipeAtCoordinate(candidatePipeCoordinate, out Pipe pipe, out Quaternion pipeRotation))
                 {
                     continue;
                 }
@@ -627,7 +780,7 @@ public class SteamTrain : RailHandcar
                         continue;
                     }
 
-                    Vector2Int trainCoordinate = pipeCoordinate + directionFromPipeToTrain;
+                    Vector2Int trainCoordinate = candidatePipeCoordinate + directionFromPipeToTrain;
                     if (!TryFindWaterPipeRailDockSample(
                             trainCoordinate,
                             currentSample.Rail,
@@ -647,7 +800,7 @@ public class SteamTrain : RailHandcar
 
                     if (!hasCheckedWaterSource)
                     {
-                        hasWaterSource = WaterPipeNetworkHasWaterSource(pipeCoordinate, waterItemId);
+                        hasWaterSource = WaterPipeNetworkHasWaterSource(candidatePipeCoordinate, waterItemId);
                         hasCheckedWaterSource = true;
                     }
 
@@ -663,6 +816,7 @@ public class SteamTrain : RailHandcar
                     dockSample = candidateSample;
                     signedPathDelta = candidatePathDelta;
                     directionFromTrainToPipe = -directionFromPipeToTrain;
+                    pipeCoordinate = candidatePipeCoordinate;
                     found = true;
                 }
             }
@@ -912,9 +1066,11 @@ public class SteamTrain : RailHandcar
     {
         if (waterPipe == null)
         {
+            ClearWaterPipeDockLock();
             return;
         }
 
+        ClearWaterPipeDockLock();
         CaptureWaterPipeDefaults();
         waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
         waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
@@ -931,9 +1087,11 @@ public class SteamTrain : RailHandcar
     {
         if (waterPipe == null)
         {
+            ClearWaterPipeDockLock();
             return;
         }
 
+        ClearWaterPipeDockLock();
         CaptureWaterPipeDefaults();
         waterPipe.localPosition = waterPipeDefaultLocalPosition;
         waterPipe.localRotation = waterPipeDefaultLocalRotation;

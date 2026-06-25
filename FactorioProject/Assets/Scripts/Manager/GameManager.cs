@@ -8,12 +8,15 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using TMPro;
 using Unity.Profiling;
 using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Profiling;
 using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
+using UnityEngine.UI;
 
 public class GameManager : MonoBehaviour
 {
@@ -76,6 +79,7 @@ public class GameManager : MonoBehaviour
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
     public bool PlayerInteractionLocked => InstallationPlacementActive || MapEditActive;
+    public static bool TextInputFocused => IsTextInputFocused();
 
     private void Awake()
     {
@@ -110,11 +114,12 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Alpha0))
+        bool textInputFocused = IsTextInputFocused();
+        if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha0))
             Time.timeScale = 0.5f;
-        else if (Input.GetKeyDown(KeyCode.Alpha1))
+        else if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha1))
             Time.timeScale = 1f;
-        else if (Input.GetKeyDown(KeyCode.Alpha2))
+        else if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha2))
             Time.timeScale = 2f;
 
         SyncConveyorSlotDotRuntimeVisibility();
@@ -178,6 +183,29 @@ public class GameManager : MonoBehaviour
     public bool FreeCamera => freeCamera;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
+
+    public static bool IsTextInputFocused()
+    {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null || eventSystem.currentSelectedGameObject == null)
+        {
+            return false;
+        }
+
+        GameObject selectedObject = eventSystem.currentSelectedGameObject;
+        TMP_InputField tmpInputField = selectedObject.GetComponent<TMP_InputField>()
+                                       ?? selectedObject.GetComponentInParent<TMP_InputField>();
+        if (tmpInputField != null && tmpInputField.isActiveAndEnabled)
+        {
+            return tmpInputField.isFocused || selectedObject.transform.IsChildOf(tmpInputField.transform);
+        }
+
+        InputField inputField = selectedObject.GetComponent<InputField>()
+                                ?? selectedObject.GetComponentInParent<InputField>();
+        return inputField != null
+               && inputField.isActiveAndEnabled
+               && (inputField.isFocused || selectedObject.transform.IsChildOf(inputField.transform));
+    }
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
     public int RuntimeItemGiveServerPort => runtimeItemGiveServerPort;
 

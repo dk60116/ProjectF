@@ -271,7 +271,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   stationName: 
   stationColor: {r: 0, g: 0, b: 0, a: 0}
-  nameInputField: {fileID: 0}
+  nameInputField: {fileID: 6209054292882955494}
   colorSelect: {fileID: 4153523074994733249}
 --- !u!114 &1509172076615492820
 MonoBehaviour:
