@@ -4,123 +4,10 @@ using UnityEngine;
 
 public class InstallationBackgroundSimulator : MonoBehaviour
 {
-    private const int InputAreaCenterStackStateSentinel = -1000000001;
-    private const int ConveyorStackStateSentinel = -1000000002;
-    private const int FloorStackStateSentinel = -1000000003;
-
     [SerializeField, Min(1)]
     private int maxCraftIterationsPerSimulation = 256;
 
     private BlockStateStore cachedStateStore;
-
-    private sealed class SavedBlockInventory
-    {
-        public readonly List<int> floorItems = new List<int>();
-        public readonly List<int> centerItems = new List<int>();
-        public readonly List<int> conveyorLaneItems = new List<int>();
-        public bool hasConveyorStack;
-
-        public static SavedBlockInventory FromSerialized(IReadOnlyList<int> itemIds)
-        {
-            SavedBlockInventory inventory = new SavedBlockInventory();
-            if (itemIds == null)
-            {
-                return inventory;
-            }
-
-            for (int i = 0; i < itemIds.Count; i++)
-            {
-                int itemId = itemIds[i];
-                if (itemId == FloorStackStateSentinel)
-                {
-                    if (i + 1 >= itemIds.Count)
-                    {
-                        break;
-                    }
-
-                    int stackCount = Mathf.Max(0, itemIds[++i]);
-                    for (int stackIndex = 0; stackIndex < stackCount && i + 1 < itemIds.Count; stackIndex++)
-                    {
-                        int stackItemCount = Mathf.Max(0, itemIds[++i]);
-                        for (int objectIndex = 0; objectIndex < stackItemCount && i + 1 < itemIds.Count; objectIndex++)
-                        {
-                            int stackItemId = itemIds[++i];
-                            if (stackItemId >= 0)
-                            {
-                                inventory.floorItems.Add(stackItemId);
-                            }
-                        }
-                    }
-
-                    continue;
-                }
-
-                if (itemId == InputAreaCenterStackStateSentinel)
-                {
-                    if (i + 1 >= itemIds.Count)
-                    {
-                        break;
-                    }
-
-                    int centerCount = Mathf.Max(0, itemIds[++i]);
-                    for (int centerIndex = 0; centerIndex < centerCount && i + 1 < itemIds.Count; centerIndex++)
-                    {
-                        inventory.centerItems.Add(itemIds[++i]);
-                    }
-
-                    continue;
-                }
-
-                if (itemId == ConveyorStackStateSentinel)
-                {
-                    if (i + 1 >= itemIds.Count)
-                    {
-                        break;
-                    }
-
-                    inventory.hasConveyorStack = true;
-                    int laneCount = Mathf.Max(0, itemIds[++i]);
-                    for (int laneIndex = 0; laneIndex < laneCount && i + 1 < itemIds.Count; laneIndex++)
-                    {
-                        inventory.conveyorLaneItems.Add(itemIds[++i]);
-                    }
-
-                    continue;
-                }
-
-                if (itemId < 0)
-                {
-                    continue;
-                }
-
-                inventory.floorItems.Add(itemId);
-            }
-
-            return inventory;
-        }
-
-        public List<int> ToSerialized()
-        {
-            List<int> itemIds = new List<int>(floorItems.Count + centerItems.Count + conveyorLaneItems.Count + 4);
-            itemIds.AddRange(floorItems);
-
-            if (hasConveyorStack)
-            {
-                itemIds.Add(ConveyorStackStateSentinel);
-                itemIds.Add(conveyorLaneItems.Count);
-                itemIds.AddRange(conveyorLaneItems);
-            }
-
-            if (centerItems.Count > 0)
-            {
-                itemIds.Add(InputAreaCenterStackStateSentinel);
-                itemIds.Add(centerItems.Count);
-                itemIds.AddRange(centerItems);
-            }
-
-            return itemIds;
-        }
-    }
 
     private enum BackgroundRobotArmPickupSource
     {
@@ -633,10 +520,12 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         switch (candidate.source)
         {
             case BackgroundRobotArmPickupSource.Floor:
-                return TryTakeSavedFloorItem(stateStore, candidate.coordinate, exactItemFilter, out pickedItemId);
+                return stateStore != null
+                       && stateStore.TryTakeSavedFloorItem(candidate.coordinate, exactItemFilter, out pickedItemId);
             case BackgroundRobotArmPickupSource.Box:
             case BackgroundRobotArmPickupSource.InputArea:
-                return TryTakeSavedCenterTopItem(stateStore, candidate.coordinate, exactItemFilter, out pickedItemId);
+                return stateStore != null
+                       && stateStore.TryTakeSavedCenterTopItem(candidate.coordinate, exactItemFilter, out pickedItemId);
             case BackgroundRobotArmPickupSource.Conveyor:
                 return stateStore != null
                        && stateStore.TryTakeSavedConveyorItem(
@@ -667,8 +556,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         Predicate<int> itemFilter = itemId => SavedInstallationAcceptsItem(installationState, itemId);
         bool hasCandidate = false;
 
-        SavedBlockInventory inventory = LoadBlockInventory(stateStore, pickupCoordinate);
-        if (TryPeekSavedFloorItem(inventory, itemFilter, out int floorItemId))
+        if (stateStore.TryPeekSavedFloorItem(pickupCoordinate, itemFilter, out int floorItemId))
         {
             TryChooseBackgroundRobotArmPickupCandidate(
                 new BackgroundRobotArmPickupCandidate
@@ -684,7 +572,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
 
         bool hasBox = TryResolveSavedBoxAtCoordinate(stateStore, pickupCoordinate, out _, out _);
-        if (hasBox && TryPeekSavedCenterTopItem(inventory, itemFilter, out int boxItemId))
+        if (hasBox && stateStore.TryPeekSavedCenterTopItem(pickupCoordinate, itemFilter, out int boxItemId))
         {
             TryChooseBackgroundRobotArmPickupCandidate(
                 new BackgroundRobotArmPickupCandidate
@@ -719,7 +607,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 ref hasCandidate);
         }
 
-        if (!hasBox && TryPeekSavedCenterTopItem(inventory, itemFilter, out int inputAreaItemId))
+        if (!hasBox && stateStore.TryPeekSavedCenterTopItem(pickupCoordinate, itemFilter, out int inputAreaItemId))
         {
             TryChooseBackgroundRobotArmPickupCandidate(
                 new BackgroundRobotArmPickupCandidate
@@ -833,10 +721,10 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         int capacity = ResolveBlockCenterCapacity(stateStore, dropCoordinate, 10);
         if (mutate)
         {
-            return AddCenterItems(stateStore, dropCoordinate, itemId, 1, capacity);
+            return stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
         }
 
-        return CanAddCenterItems(LoadBlockInventory(stateStore, dropCoordinate), itemId, 1, capacity);
+        return stateStore.CanAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
     }
 
     private static bool CanAddSavedBoxItem(
@@ -852,7 +740,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
 
         int capacity = boxDefinition != null && boxDefinition.capacity > 0 ? boxDefinition.capacity : 10;
-        return CanAddCenterItems(LoadBlockInventory(stateStore, coordinate), itemId, 1, capacity);
+        return stateStore != null && stateStore.CanAddSavedCenterItems(coordinate, itemId, 1, capacity);
     }
 
     private static bool TryAddSavedBoxItem(
@@ -868,7 +756,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         }
 
         int capacity = boxDefinition != null && boxDefinition.capacity > 0 ? boxDefinition.capacity : 10;
-        return AddCenterItems(stateStore, coordinate, itemId, 1, capacity);
+        return stateStore != null && stateStore.TryAddSavedCenterItems(coordinate, itemId, 1, capacity);
     }
 
     private static bool CanPlaceSavedSingleLineDrop(BlockStateStore stateStore, Vector2Int coordinate)
@@ -876,88 +764,6 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return CoordinateAcceptsInputAreaObject(coordinate)
                || stateStore == null
                || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out _);
-    }
-
-    private static bool TryPeekSavedFloorItem(
-        SavedBlockInventory inventory,
-        Predicate<int> itemFilter,
-        out int itemId)
-    {
-        itemId = -1;
-        int itemIndex = FindSavedFloorItemIndex(inventory, itemFilter);
-        if (itemIndex < 0)
-        {
-            return false;
-        }
-
-        itemId = inventory.floorItems[itemIndex];
-        return true;
-    }
-
-    private static bool TryTakeSavedFloorItem(
-        BlockStateStore stateStore,
-        Vector2Int coordinate,
-        Predicate<int> itemFilter,
-        out int itemId)
-    {
-        itemId = -1;
-        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
-        int itemIndex = FindSavedFloorItemIndex(inventory, itemFilter);
-        if (itemIndex < 0)
-        {
-            return false;
-        }
-
-        itemId = inventory.floorItems[itemIndex];
-        inventory.floorItems.RemoveAt(itemIndex);
-        SaveBlockInventory(stateStore, coordinate, inventory);
-        return true;
-    }
-
-    private static int FindSavedFloorItemIndex(SavedBlockInventory inventory, Predicate<int> itemFilter)
-    {
-        if (inventory == null || inventory.floorItems.Count <= 0)
-        {
-            return -1;
-        }
-
-        for (int i = inventory.floorItems.Count - 1; i >= 0; i--)
-        {
-            int itemId = inventory.floorItems[i];
-            if (itemId >= 0 && (itemFilter == null || itemFilter(itemId)))
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    private static bool TryPeekSavedCenterTopItem(
-        SavedBlockInventory inventory,
-        Predicate<int> itemFilter,
-        out int itemId)
-    {
-        itemId = GetCenterTopItemId(inventory);
-        return itemId >= 0 && (itemFilter == null || itemFilter(itemId));
-    }
-
-    private static bool TryTakeSavedCenterTopItem(
-        BlockStateStore stateStore,
-        Vector2Int coordinate,
-        Predicate<int> itemFilter,
-        out int itemId)
-    {
-        itemId = -1;
-        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
-        if (!TryPeekSavedCenterTopItem(inventory, itemFilter, out itemId))
-        {
-            return false;
-        }
-
-        inventory.centerItems.RemoveAt(inventory.centerItems.Count - 1);
-        SaveBlockInventory(stateStore, coordinate, inventory);
-        return true;
     }
 
     private static bool TryResolveRobotArmInteractionCoordinate(
@@ -1704,14 +1510,14 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                     continue;
                 }
 
-                SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
                 int blockCapacity = ResolveBlockCenterCapacity(stateStore, coordinate, templateModule.RuntimeAreaMaxObjects);
-                if (!CanAddCenterItems(inventory, outputItemId, outputCount, blockCapacity))
+                if (stateStore == null
+                    || !stateStore.CanAddSavedCenterItems(coordinate, outputItemId, outputCount, blockCapacity))
                 {
                     continue;
                 }
 
-                if (requireExistingStack && GetCenterTopItemId(inventory) != outputItemId)
+                if (requireExistingStack && GetCenterTopItemId(stateStore, coordinate) != outputItemId)
                 {
                     continue;
                 }
@@ -2021,37 +1827,12 @@ public class InstallationBackgroundSimulator : MonoBehaviour
 
     private static int GetCenterItemCount(BlockStateStore stateStore, Vector2Int coordinate, int itemId = -1)
     {
-        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
-        if (itemId < 0)
-        {
-            return inventory.centerItems.Count;
-        }
-
-        int count = 0;
-        for (int i = 0; i < inventory.centerItems.Count; i++)
-        {
-            if (inventory.centerItems[i] == itemId)
-            {
-                count++;
-            }
-        }
-
-        return count;
+        return stateStore != null ? stateStore.GetSavedCenterItemCount(coordinate, itemId) : 0;
     }
 
     private static int GetCenterTopItemId(BlockStateStore stateStore, Vector2Int coordinate)
     {
-        return GetCenterTopItemId(LoadBlockInventory(stateStore, coordinate));
-    }
-
-    private static int GetCenterTopItemId(SavedBlockInventory inventory)
-    {
-        if (inventory == null || inventory.centerItems.Count <= 0)
-        {
-            return -1;
-        }
-
-        return inventory.centerItems[inventory.centerItems.Count - 1];
+        return stateStore != null ? stateStore.GetSavedCenterTopItemId(coordinate) : -1;
     }
 
     private static int ResolveBlockCenterCapacity(BlockStateStore stateStore, Vector2Int coordinate, int defaultCapacity)
@@ -2086,89 +1867,14 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return true;
     }
 
-    private static bool CanAddCenterItems(SavedBlockInventory inventory, int itemId, int count, int capacity)
-    {
-        if (inventory == null || count <= 0)
-        {
-            return false;
-        }
-
-        if (inventory.centerItems.Count > 0 && inventory.centerItems[0] != itemId)
-        {
-            return false;
-        }
-
-        return Mathf.Max(1, capacity) - inventory.centerItems.Count >= count;
-    }
-
     private static bool AddCenterItems(BlockStateStore stateStore, Vector2Int coordinate, int itemId, int count, int capacity)
     {
-        if (count <= 0)
-        {
-            return true;
-        }
-
-        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
-        if (!CanAddCenterItems(inventory, itemId, count, capacity))
-        {
-            return false;
-        }
-
-        for (int i = 0; i < count; i++)
-        {
-            inventory.centerItems.Add(itemId);
-        }
-
-        SaveBlockInventory(stateStore, coordinate, inventory);
-        return true;
+        return stateStore != null && stateStore.TryAddSavedCenterItems(coordinate, itemId, count, capacity);
     }
 
     private static int RemoveCenterItems(BlockStateStore stateStore, Vector2Int coordinate, int itemId, int count)
     {
-        if (count <= 0)
-        {
-            return 0;
-        }
-
-        SavedBlockInventory inventory = LoadBlockInventory(stateStore, coordinate);
-        int removed = 0;
-        for (int i = inventory.centerItems.Count - 1; i >= 0 && removed < count; i--)
-        {
-            if (itemId >= 0 && inventory.centerItems[i] != itemId)
-            {
-                continue;
-            }
-
-            inventory.centerItems.RemoveAt(i);
-            removed++;
-        }
-
-        if (removed > 0)
-        {
-            SaveBlockInventory(stateStore, coordinate, inventory);
-        }
-
-        return removed;
-    }
-
-    private static SavedBlockInventory LoadBlockInventory(BlockStateStore stateStore, Vector2Int coordinate)
-    {
-        if (stateStore != null && stateStore.TryGetFloorObjectsCopy(coordinate, out List<int> itemIds))
-        {
-            return SavedBlockInventory.FromSerialized(itemIds);
-        }
-
-        return new SavedBlockInventory();
-    }
-
-    private static void SaveBlockInventory(BlockStateStore stateStore, Vector2Int coordinate, SavedBlockInventory inventory)
-    {
-        if (stateStore == null)
-        {
-            return;
-        }
-
-        stateStore.SetFloorObjects(coordinate, inventory != null ? inventory.ToSerialized() : null);
+        return stateStore != null ? stateStore.RemoveSavedCenterItems(coordinate, itemId, count) : 0;
     }
 
     private static bool TryResolveTemplateModule(int itemId, out ItemDefinition installedDefinition, out InputOutputModule templateModule)

@@ -203,15 +203,16 @@ public class ItemInfoDescription : MonoBehaviour
         if (railHandcar is SteamTrain steamTrain)
         {
             SetSteamTrainBurnEnergyGauge(steamTrain);
-            SetRailHandcarSpeedGauge(workGauge, workFill, workText, railHandcar);
+            SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
+            SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, railHandcar);
+            SetFluidStorageDefaultItemSlot(0, steamTrain);
         }
         else
         {
             SetRailHandcarSpeedGauge(railHandcar);
             SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+            SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
         }
-
-        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
     }
 
     public void ShowInstallationObject(InstallationObject installationObject, Resource underlyingResource = null)
@@ -560,11 +561,14 @@ public class ItemInfoDescription : MonoBehaviour
             if (liveGaugeRailHandcar is SteamTrain steamTrain)
             {
                 SetSteamTrainBurnEnergyGauge(steamTrain);
-                SetRailHandcarSpeedGauge(workGauge, workFill, workText, liveGaugeRailHandcar);
+                SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
+                SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, liveGaugeRailHandcar);
+                SetFluidStorageDefaultItemSlot(0, steamTrain);
             }
             else
             {
                 SetRailHandcarSpeedGauge(liveGaugeRailHandcar);
+                SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
             }
 
             return;
@@ -697,6 +701,31 @@ public class ItemInfoDescription : MonoBehaviour
         {
             energyText.text =
                 $"{FormatGaugeNumber(storedEnergy, true)} / {FormatGaugeNumber(gaugeCapacity, true)} ({FormatGaugeNumber(steamTrain.ObjectInfoBurnEnergyUseRatePerSecond, true)} / s)";
+        }
+    }
+
+    private void SetSteamTrainWaterGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        SteamTrain steamTrain)
+    {
+        float storedLiters = steamTrain != null ? steamTrain.ObjectInfoStoredWaterLiters : 0f;
+        float capacityLiters = steamTrain != null ? steamTrain.ObjectInfoWaterCapacityLiters : 0f;
+        SetGauge(
+            root,
+            fill,
+            text,
+            true,
+            steamTrain != null ? steamTrain.ObjectInfoWaterGaugeFillAmount : 0f,
+            ResolveFluidGaugeFillColor(steamTrain),
+            storedLiters,
+            capacityLiters,
+            true);
+        if (text != null && steamTrain != null)
+        {
+            text.text =
+                $"{FormatGaugeNumber(storedLiters, true)} L / {FormatGaugeNumber(capacityLiters, true)} L ({FormatLitersPerSecond(steamTrain.ObjectInfoWaterUseRatePerSecond)})";
         }
     }
 
@@ -857,7 +886,13 @@ public class ItemInfoDescription : MonoBehaviour
 
         float storedLiters = installationObject.StoredFluidLiters;
         float capacityLiters = installationObject.FluidStorageCapacityLiters;
-        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(installationObject.StoredFluidItemId);
+        int fluidItemId = installationObject.StoredFluidItemId;
+        if (fluidItemId < 0 && installationObject is SteamTrain steamTrain)
+        {
+            fluidItemId = steamTrain.ObjectInfoWaterItemId;
+        }
+
+        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(fluidItemId);
         string displayName = ResolveFluidStorageDisplayName(installationObject, fluidItemSet);
         slot.SetCustomDisplay(
             fluidItemSet.id,
@@ -1422,6 +1457,11 @@ public class ItemInfoDescription : MonoBehaviour
             && TryResolveItemSetByName(itemManager, SteamFluidItemName, out ItemManager.ItemSet steamItemSet))
         {
             return steamItemSet.id;
+        }
+
+        if (installationObject is SteamTrain steamTrain)
+        {
+            return steamTrain.ObjectInfoWaterItemId;
         }
 
         return -1;

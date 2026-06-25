@@ -14,7 +14,8 @@ public class ProductionMachine : InputOutputModule
     private readonly List<CraftingTreeRuntime.IngredientEntry> resolvedProductionIngredients =
         new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<Block> resolvedProductionInputBlocks = new List<Block>();
-    private readonly HashSet<Vector2Int> resolvedProductionInputCoordinates = new HashSet<Vector2Int>();
+    private readonly List<Vector2Int> resolvedProductionInputCoordinates = new List<Vector2Int>();
+    private readonly HashSet<Vector2Int> resolvedProductionInputCoordinateSet = new HashSet<Vector2Int>();
     private readonly HashSet<int> productionIngredientItemIds = new HashSet<int>();
 
     protected override void OnEnable()
@@ -309,7 +310,7 @@ public class ProductionMachine : InputOutputModule
             return;
         }
 
-        if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+        if (!CanResolveOutputTarget(outputItemId, outputCount))
         {
             return;
         }
@@ -323,9 +324,8 @@ public class ProductionMachine : InputOutputModule
         for (int i = 0; i < resolvedProductionIngredients.Count; i++)
         {
             CraftingTreeRuntime.IngredientEntry ingredient = resolvedProductionIngredients[i];
-            Block inputBlock = resolvedProductionInputBlocks[i];
-            if (inputBlock == null
-                || inputBlock.ConsumeInputAreaCenterObjectsAnimated(
+            if (ConsumeRuntimeInputAreaCenterObjects(
+                    resolvedProductionInputCoordinates[i],
                     ingredient.itemId,
                     ingredient.count,
                     consumeTargetWorldPosition,
@@ -398,7 +398,7 @@ public class ProductionMachine : InputOutputModule
             return missingInputArea ? "No input area" : "No input item";
         }
 
-        if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+        if (!CanResolveOutputTarget(outputItemId, outputCount))
         {
             return "Output full";
         }
@@ -568,13 +568,14 @@ public class ProductionMachine : InputOutputModule
     {
         resolvedProductionInputBlocks.Clear();
         resolvedProductionInputCoordinates.Clear();
+        resolvedProductionInputCoordinateSet.Clear();
         if (ingredients == null || ingredients.Count <= 0)
         {
             return false;
         }
 
         ISet<Vector2Int> excludedCoordinates = ingredients.Count > 1
-            ? resolvedProductionInputCoordinates
+            ? resolvedProductionInputCoordinateSet
             : null;
         for (int i = 0; i < ingredients.Count; i++)
         {
@@ -591,6 +592,7 @@ public class ProductionMachine : InputOutputModule
 
             resolvedProductionInputBlocks.Add(inputBlock);
             resolvedProductionInputCoordinates.Add(inputCoordinate);
+            resolvedProductionInputCoordinateSet.Add(inputCoordinate);
         }
 
         return resolvedProductionInputBlocks.Count == ingredients.Count;

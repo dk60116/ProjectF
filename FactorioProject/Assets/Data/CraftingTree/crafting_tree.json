@@ -371,7 +371,7 @@
             "itemId": 21,
             "itemName": "Gear",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Gear.asset",
-            "outputCount": 2,
+            "outputCount": 1,
             "ingredients": [
                 {
                     "itemId": 16,
@@ -699,7 +699,7 @@
                     "itemId": 28,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_27_Pipe.asset",
-                    "count": 4
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -1656,7 +1656,7 @@
             "itemId": 21,
             "itemName": "Gear",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Gear.asset",
-            "outputCount": 2,
+            "outputCount": 1,
             "ingredients": [
                 {
                     "itemId": 16,
@@ -1984,7 +1984,7 @@
                     "itemId": 28,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_27_Pipe.asset",
-                    "count": 4
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [
@@ -2941,7 +2941,7 @@
             "itemId": 21,
             "itemName": "Gear",
             "definitionAssetPath": "Assets/Data/Items/Item_20_Gear.asset",
-            "outputCount": 2,
+            "outputCount": 1,
             "ingredients": [
                 {
                     "itemId": 16,
@@ -3269,7 +3269,7 @@
                     "itemId": 28,
                     "itemName": "Pipe",
                     "definitionAssetPath": "Assets/Data/Items/Item_27_Pipe.asset",
-                    "count": 4
+                    "count": 3
                 }
             ],
             "craftingMapObjects": [

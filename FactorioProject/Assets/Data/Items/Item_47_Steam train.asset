@@ -24,8 +24,8 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   capacity: 10
-  storesFluid: 0
-  fluidStorageLiters: 0
+  storesFluid: 1
+  fluidStorageLiters: 100
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   energyType: 0
   energyAmount: 0

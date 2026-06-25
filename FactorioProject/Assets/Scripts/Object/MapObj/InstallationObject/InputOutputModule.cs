@@ -121,6 +121,20 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         }
     }
 
+    protected readonly struct RuntimeAreaOutputTarget
+    {
+        public readonly Block block;
+        public readonly Vector2Int coordinate;
+        public readonly bool useSavedCenterStack;
+
+        public RuntimeAreaOutputTarget(Block block, Vector2Int coordinate, bool useSavedCenterStack)
+        {
+            this.block = block;
+            this.coordinate = coordinate;
+            this.useSavedCenterStack = useSavedCenterStack;
+        }
+    }
+
     [System.Serializable]
     public struct PersistentInputItemAreaState
     {
@@ -246,6 +260,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
     private int activeOutputCount;
 
     private TerrainGenerator cachedTerrain;
+    private BlockStateStore cachedBlockStateStore;
     private ItemDefinition cachedInstalledDefinition;
     private int cachedInstalledDefinitionId = int.MinValue;
     private DefaultGauge activeEnergyGauge;
@@ -390,6 +405,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         ExpandRuntimeInputItemAreasForAdditionalItemIds();
         RegisterRuntimeAreaCoordinates();
         cachedTerrain = null;
+        cachedBlockStateStore = null;
         WakeRuntimeUpdate();
     }
 
@@ -492,6 +508,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         activeOutputItemId = state.activeOutputItemId;
         activeOutputCount = Mathf.Max(0, state.activeOutputCount);
         cachedTerrain = null;
+        cachedBlockStateStore = null;
         WakeRuntimeUpdate();
     }
 
@@ -520,6 +537,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         activeOutputItemId = -1;
         activeOutputCount = 0;
         cachedTerrain = null;
+        cachedBlockStateStore = null;
         cachedInstalledDefinition = null;
         cachedInstalledDefinitionId = int.MinValue;
         base.PrepareForPool();
@@ -1368,13 +1386,12 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!TryGetLoadedBlock(inputArea.coordinate, out Block candidateBlock)
-                || candidateBlock == null
-                || candidateBlock.GetInputAreaCenterItemCount(itemId) < requiredCount)
+            if (GetRuntimeInputAreaCenterItemCount(inputArea.coordinate, itemId) < requiredCount)
             {
                 continue;
             }
 
+            TryGetLoadedBlock(inputArea.coordinate, out Block candidateBlock);
             block = candidateBlock;
             coordinate = inputArea.coordinate;
             return true;
@@ -3066,21 +3083,19 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
 
             hasFilterAllowedRecipe = true;
 
-            if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea)
-                || !TryGetLoadedBlock(inputArea.coordinate, out Block inputBlock)
-                || inputBlock == null)
+            if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea))
             {
                 blockedByInputArea = true;
                 continue;
             }
 
-            if (inputBlock.GetInputAreaCenterItemCount(inputItemId) < inputCount)
+            if (GetRuntimeInputAreaCenterItemCount(inputArea.coordinate, inputItemId) < inputCount)
             {
                 blockedByInputItem = true;
                 continue;
             }
 
-            if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+            if (!CanResolveOutputTarget(outputItemId, outputCount))
             {
                 blockedByOutput = true;
                 continue;
@@ -3569,12 +3584,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
-            {
-                continue;
-            }
-
-            if (!block.TryGetInstalledItemAreaCapacity(out int blockCapacity))
+            if (!TryResolveRuntimeBlockCenterCapacity(coordinate, out int blockCapacity))
             {
                 continue;
             }
@@ -3586,6 +3596,44 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         return hasInstalledCapacity
             ? Mathf.Max(1, installedCapacityTotal)
             : RuntimeAreaMaxObjects;
+    }
+
+    private int ResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, int defaultCapacity)
+    {
+        return TryResolveRuntimeBlockCenterCapacity(coordinate, out int capacity)
+            ? Mathf.Max(1, capacity)
+            : Mathf.Max(1, defaultCapacity);
+    }
+
+    private bool TryResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, out int capacity)
+    {
+        capacity = 0;
+        if (TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.TryGetInstalledItemAreaCapacity(out capacity))
+        {
+            capacity = Mathf.Max(1, capacity);
+            return true;
+        }
+
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        if (stateStore == null
+            || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
+            || !stateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState))
+        {
+            return false;
+        }
+
+        ItemDefinition installedDefinition = ResolveItemDefinition(installationState.itemId);
+        if (installedDefinition == null
+            || !(installedDefinition.mapObject is InstallationObject installationObject)
+            || (installationObject.MapFilter & InstallationMapFilter.ItemArea) == 0)
+        {
+            return false;
+        }
+
+        capacity = installedDefinition.capacity > 0 ? installedDefinition.capacity : RuntimeAreaMaxObjects;
+        return true;
     }
 
     public bool HasAvailableOutputItem(int itemId)
@@ -4050,17 +4098,12 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!TryGetLoadedBlock(inputArea.coordinate, out Block inputBlock) || inputBlock == null)
+            if (GetRuntimeInputAreaCenterItemCount(inputArea.coordinate, inputItemId) < inputCount)
             {
                 continue;
             }
 
-            if (inputBlock.GetInputAreaCenterItemCount(inputItemId) < inputCount)
-            {
-                continue;
-            }
-
-            if (!TryResolveOutputBlock(outputItemId, outputCount, out _))
+            if (!CanResolveOutputTarget(outputItemId, outputCount))
             {
                 continue;
             }
@@ -4070,7 +4113,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (inputBlock.ConsumeInputAreaCenterObjectsAnimated(
+            if (ConsumeRuntimeInputAreaCenterObjects(
+                    inputArea.coordinate,
                     inputItemId,
                     inputCount,
                     ResolveConsumeTargetWorldPosition(),
@@ -4137,12 +4181,20 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
 
     protected bool TryEmitOutputItems(int outputItemId, int outputCount, Vector3 startWorldPosition)
     {
-        if (!TryResolveOutputBlock(outputItemId, outputCount, out Block outputBlock) || outputBlock == null)
+        if (!TryResolveOutputTarget(outputItemId, outputCount, out RuntimeAreaOutputTarget outputTarget))
         {
             return false;
         }
 
-        return TryEmitOutputItemsToBlock(outputBlock, outputItemId, outputCount, startWorldPosition);
+        if (outputTarget.useSavedCenterStack)
+        {
+            BlockStateStore stateStore = ResolveBlockStateStore();
+            int capacity = ResolveRuntimeBlockCenterCapacity(outputTarget.coordinate, RuntimeAreaMaxObjects);
+            return stateStore != null
+                   && stateStore.TryAddSavedCenterItems(outputTarget.coordinate, outputItemId, outputCount, capacity);
+        }
+
+        return TryEmitOutputItemsToBlock(outputTarget.block, outputItemId, outputCount, startWorldPosition);
     }
 
     protected bool TryEmitOutputItemsToBlock(Block outputBlock, int outputItemId, int outputCount, Vector3 startWorldPosition)
@@ -4294,12 +4346,8 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
 
         for (int i = 0; i < runtimeInputEnergyCoordinates.Count; i++)
         {
-            if (!TryGetLoadedBlock(runtimeInputEnergyCoordinates[i], out Block block) || block == null)
-            {
-                continue;
-            }
-
-            int energyItemId = block.GetInputAreaCenterItemId();
+            Vector2Int coordinate = runtimeInputEnergyCoordinates[i];
+            int energyItemId = GetRuntimeAreaTopItemId(coordinate);
             if (energyItemId < 0)
             {
                 continue;
@@ -4313,10 +4361,12 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!block.TryConsumeOneInputAreaCenterObjectAnimated(
+            if (ConsumeRuntimeInputAreaCenterObjects(
+                    coordinate,
                     energyItemId,
+                    1,
                     ResolveConsumeTargetWorldPosition(),
-                    out int consumedItemId) || consumedItemId != energyItemId)
+                    0f) != 1)
             {
                 continue;
             }
@@ -4331,6 +4381,25 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
     protected bool TryResolveOutputBlock(int outputItemId, int outputCount, out Block targetBlock)
     {
         targetBlock = null;
+        if (!TryResolveOutputTarget(outputItemId, outputCount, out RuntimeAreaOutputTarget target)
+            || target.useSavedCenterStack
+            || target.block == null)
+        {
+            return false;
+        }
+
+        targetBlock = target.block;
+        return true;
+    }
+
+    protected bool CanResolveOutputTarget(int outputItemId, int outputCount)
+    {
+        return TryResolveOutputTarget(outputItemId, outputCount, out _);
+    }
+
+    protected bool TryResolveOutputTarget(int outputItemId, int outputCount, out RuntimeAreaOutputTarget target)
+    {
+        target = default;
         if (outputItemId < 0
             || outputCount <= 0
             || runtimeOutputCoordinates.Count <= 0
@@ -4349,27 +4418,55 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
             bool requireExistingCenterStack = pass == 0;
             for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
             {
-                if (!TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block) || block == null)
+                Vector2Int coordinate = runtimeOutputCoordinates[i];
+                if (!CanAddRuntimeCenterItems(coordinate, outputItemId, outputCount, out Block block, out bool useSavedCenterStack))
                 {
                     continue;
                 }
 
-                if (block.Type != Block.BlockType.Ground || !block.CanAddInputAreaCenterObjects(outputCount, outputItemId))
+                if (requireExistingCenterStack && GetRuntimeAreaTopItemId(coordinate) != outputItemId)
                 {
                     continue;
                 }
 
-                if (requireExistingCenterStack && !block.HasInputAreaCenterItem(outputItemId))
-                {
-                    continue;
-                }
-
-                targetBlock = block;
+                target = new RuntimeAreaOutputTarget(block, coordinate, useSavedCenterStack);
                 return true;
             }
         }
 
         return false;
+    }
+
+    private bool CanAddRuntimeCenterItems(
+        Vector2Int coordinate,
+        int itemId,
+        int count,
+        out Block block,
+        out bool useSavedCenterStack)
+    {
+        block = null;
+        useSavedCenterStack = false;
+        if (itemId < 0 || count <= 0)
+        {
+            return false;
+        }
+
+        if (!TryResolveRuntimeAreaBlock(coordinate, out block, out useSavedCenterStack))
+        {
+            return false;
+        }
+
+        if (useSavedCenterStack)
+        {
+            BlockStateStore stateStore = ResolveBlockStateStore();
+            int capacity = ResolveRuntimeBlockCenterCapacity(coordinate, RuntimeAreaMaxObjects);
+            return stateStore != null
+                   && stateStore.CanAddSavedCenterItems(coordinate, itemId, count, capacity);
+        }
+
+        return block != null
+               && block.Type == Block.BlockType.Ground
+               && block.CanAddInputAreaCenterObjects(count, itemId);
     }
 
     private int GetRuntimeAreaObjectCount(IReadOnlyList<Vector2Int> coordinates, int itemId = -1)
@@ -4389,12 +4486,22 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
+            if (!TryResolveRuntimeAreaBlock(coordinate, out Block block, out bool useSavedCenterStack))
             {
                 continue;
             }
 
-            count += block.GetInputAreaCenterItemCount(itemId);
+            if (useSavedCenterStack)
+            {
+                BlockStateStore stateStore = ResolveBlockStateStore();
+                count += stateStore != null ? stateStore.GetSavedCenterItemCount(coordinate, itemId) : 0;
+                continue;
+            }
+
+            if (block != null && block.Type == Block.BlockType.Ground)
+            {
+                count += block.GetInputAreaCenterItemCount(itemId);
+            }
         }
 
         return count;
@@ -4416,12 +4523,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
-            {
-                continue;
-            }
-
-            int itemId = block.GetInputAreaCenterItemId();
+            int itemId = GetRuntimeAreaTopItemId(coordinate);
             if (itemId >= 0)
             {
                 return itemId;
@@ -4429,6 +4531,24 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         }
 
         return -1;
+    }
+
+    private int GetRuntimeAreaTopItemId(Vector2Int coordinate)
+    {
+        if (!TryResolveRuntimeAreaBlock(coordinate, out Block block, out bool useSavedCenterStack))
+        {
+            return -1;
+        }
+
+        if (useSavedCenterStack)
+        {
+            BlockStateStore stateStore = ResolveBlockStateStore();
+            return stateStore != null ? stateStore.GetSavedCenterTopItemId(coordinate) : -1;
+        }
+
+        return block != null && block.Type == Block.BlockType.Ground
+            ? block.GetInputAreaCenterItemId()
+            : -1;
     }
 
     private int GetRuntimeAreaEnergyAmount(
@@ -4450,12 +4570,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            if (!TryGetLoadedBlock(coordinate, out Block block) || block == null || block.Type != Block.BlockType.Ground)
-            {
-                continue;
-            }
-
-            int itemId = block.GetInputAreaCenterItemId();
+            int itemId = GetRuntimeAreaTopItemId(coordinate);
             if (itemId < 0)
             {
                 continue;
@@ -4469,7 +4584,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
                 continue;
             }
 
-            int itemCount = block.GetInputAreaCenterItemCount(itemId);
+            int itemCount = GetRuntimeInputAreaCenterItemCount(coordinate, itemId);
             totalEnergy += Mathf.Max(0, itemCount) * energyDefinition.energyAmount;
         }
 
@@ -4537,6 +4652,65 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         return terrain != null && terrain.TryGetLoadedBlock(coordinate, out block);
     }
 
+    private bool TryResolveRuntimeAreaBlock(
+        Vector2Int coordinate,
+        out Block block,
+        out bool useSavedCenterStack)
+    {
+        block = null;
+        TerrainGenerator terrain = ResolveTerrain();
+        bool hasLoadedBlock = terrain != null && terrain.TryGetLoadedBlock(coordinate, out block) && block != null;
+        useSavedCenterStack = !hasLoadedBlock
+                              || (terrain != null && terrain.IsFloorObjectCoordinateVirtualized(coordinate));
+        return hasLoadedBlock || useSavedCenterStack;
+    }
+
+    protected int GetRuntimeInputAreaCenterItemCount(Vector2Int coordinate, int itemId = -1)
+    {
+        if (!TryResolveRuntimeAreaBlock(coordinate, out Block block, out bool useSavedCenterStack))
+        {
+            return 0;
+        }
+
+        if (useSavedCenterStack)
+        {
+            BlockStateStore stateStore = ResolveBlockStateStore();
+            return stateStore != null ? stateStore.GetSavedCenterItemCount(coordinate, itemId) : 0;
+        }
+
+        return block != null && block.Type == Block.BlockType.Ground
+            ? block.GetInputAreaCenterItemCount(itemId)
+            : 0;
+    }
+
+    protected int ConsumeRuntimeInputAreaCenterObjects(
+        Vector2Int coordinate,
+        int itemId,
+        int count,
+        Vector3 consumeTargetWorldPosition,
+        float moveInterval)
+    {
+        if (itemId < 0 || count <= 0)
+        {
+            return 0;
+        }
+
+        if (!TryResolveRuntimeAreaBlock(coordinate, out Block block, out bool useSavedCenterStack))
+        {
+            return 0;
+        }
+
+        if (useSavedCenterStack)
+        {
+            BlockStateStore stateStore = ResolveBlockStateStore();
+            return stateStore != null ? stateStore.RemoveSavedCenterItems(coordinate, itemId, count) : 0;
+        }
+
+        return block != null
+            ? block.ConsumeInputAreaCenterObjectsAnimated(itemId, count, consumeTargetWorldPosition, moveInterval)
+            : 0;
+    }
+
     private TerrainGenerator ResolveTerrain()
     {
         if (cachedTerrain != null)
@@ -4551,6 +4725,18 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
         }
 
         return cachedTerrain;
+    }
+
+    private BlockStateStore ResolveBlockStateStore()
+    {
+        if (cachedBlockStateStore != null)
+        {
+            return cachedBlockStateStore;
+        }
+
+        TerrainGenerator terrain = ResolveTerrain();
+        cachedBlockStateStore = terrain != null ? terrain.GetComponent<BlockStateStore>() : null;
+        return cachedBlockStateStore;
     }
 
     protected ItemDefinition ResolveInstalledDefinition()
@@ -4645,12 +4831,7 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
 
         for (int i = 0; i < runtimeInputEnergyCoordinates.Count; i++)
         {
-            if (!TryGetLoadedBlock(runtimeInputEnergyCoordinates[i], out Block block) || block == null)
-            {
-                continue;
-            }
-
-            int energyItemId = block.GetInputAreaCenterItemId();
+            int energyItemId = GetRuntimeAreaTopItemId(runtimeInputEnergyCoordinates[i]);
             if (energyItemId < 0)
             {
                 continue;

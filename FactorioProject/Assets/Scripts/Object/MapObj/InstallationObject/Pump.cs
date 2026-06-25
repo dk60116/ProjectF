@@ -4,7 +4,7 @@ using UnityEngine;
 public class Pump : InputOutputModule
 {
     private const string DefaultWaterItemName = "Water";
-    private const int DefaultWaterItemId = 4;
+    private const int DefaultWaterItemId = 6;
     private const int MaxWaterEmitAttemptsPerTick = 32;
     private static readonly Vector2Int[] CardinalDirections =
     {
@@ -27,6 +27,7 @@ public class Pump : InputOutputModule
     private readonly Queue<Vector2Int> fluidSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> fluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<InstallationObject> fluidSearchStorageCandidates = new HashSet<InstallationObject>();
+    private readonly List<InstallationObject> fluidStorageBodySearchScratch = new List<InstallationObject>(4);
 
     public InstallationFacingDirection LocalPipeConnectionDirection => localPipeConnectionDirection;
     public float WaterLitersPerSecond => Mathf.Max(0f, waterLitersPerSecond);
@@ -206,14 +207,9 @@ public class Pump : InputOutputModule
             bool hasPipe = TryGetPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
             bool hasFluidStorageBody = TryResolveFluidStorageBodyAtCoordinate(
                 coordinate,
+                waterItemId,
                 false,
                 out InstallationObject fluidStorage);
-            if (hasFluidStorageBody
-                && !CanResolveFluidStorageCandidate(fluidStorage, waterItemId, false))
-            {
-                hasFluidStorageBody = false;
-                fluidStorage = null;
-            }
 
             if (!hasFluidStorageBody && hasPipe)
             {
@@ -302,10 +298,16 @@ public class Pump : InputOutputModule
             return true;
         }
 
-        if (TryResolveFluidStorageBodyAtCoordinate(coordinate, false, out storage)
-            && CanResolveFluidStorageCandidate(storage, fluidItemId, false))
+        if (TryResolveFluidStorageBodyAtCoordinate(coordinate, fluidItemId, false, out storage))
         {
-            canContinueRoute = true;
+            if (storage is SteamTrain steamTrain
+                && !steamTrain.CanAcceptWaterFromPipeDirection(-directionToPrevious, fluidItemId, false))
+            {
+                storage = null;
+                return false;
+            }
+
+            canContinueRoute = storage is not SteamTrain;
             return true;
         }
 
@@ -406,6 +408,15 @@ public class Pump : InputOutputModule
         }
 
         storage = null;
+        if (TryResolveActiveFluidStorageBodyAtCoordinate(
+                coordinate,
+                fluidItemId,
+                requireStorageSpace,
+                out storage))
+        {
+            return true;
+        }
+
         if (!TryGetLoadedBlock(coordinate, out Block block)
             || block == null
             || !(block.MapObject is InstallationObject installationObject)
@@ -436,6 +447,7 @@ public class Pump : InputOutputModule
 
     private bool TryResolveFluidStorageBodyAtCoordinate(
         Vector2Int coordinate,
+        int fluidItemId,
         bool requireStorageSpace,
         out InstallationObject storage)
     {
@@ -449,13 +461,57 @@ public class Pump : InputOutputModule
             || !installationObject.gameObject.activeInHierarchy
             || !installationObject.CanStoreFluid
             || (requireStorageSpace && !installationObject.HasFluidStorageSpace)
-            || !ContainsRuntimeOccupiedCoordinate(installationObject, coordinate))
+            || !ContainsRuntimeOccupiedCoordinate(installationObject, coordinate)
+            || !CanResolveFluidStorageCandidate(installationObject, fluidItemId, requireStorageSpace))
         {
-            return false;
+            return TryResolveActiveFluidStorageBodyAtCoordinate(
+                coordinate,
+                fluidItemId,
+                requireStorageSpace,
+                out storage);
         }
 
         storage = installationObject;
         return true;
+    }
+
+    private bool TryResolveActiveFluidStorageBodyAtCoordinate(
+        Vector2Int coordinate,
+        int fluidItemId,
+        bool requireStorageSpace,
+        out InstallationObject storage)
+    {
+        storage = null;
+        fluidStorageBodySearchScratch.Clear();
+        if (!InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+                coordinate,
+                fluidStorageBodySearchScratch))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < fluidStorageBodySearchScratch.Count; i++)
+        {
+            InstallationObject candidate = fluidStorageBodySearchScratch[i];
+            if (candidate == null
+                || candidate == this
+                || candidate is Pipe
+                || candidate is Pump
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.CanStoreFluid
+                || (requireStorageSpace && !candidate.HasFluidStorageSpace)
+                || !CanResolveFluidStorageCandidate(candidate, fluidItemId, requireStorageSpace))
+            {
+                continue;
+            }
+
+            storage = candidate;
+            fluidStorageBodySearchScratch.Clear();
+            return true;
+        }
+
+        fluidStorageBodySearchScratch.Clear();
+        return false;
     }
 
     private static bool ContainsRuntimeOccupiedCoordinate(InstallationObject installationObject, Vector2Int coordinate)
@@ -481,15 +537,25 @@ public class Pump : InputOutputModule
 
     private int ResolveWaterItemId()
     {
-        if (waterDefinition != null && waterDefinition.id >= 0)
+        int waterItemId = ResolveWaterItemId(waterDefinition, fallbackWaterItemId);
+        if (waterDefinition == null || waterDefinition.id != waterItemId)
         {
-            return waterDefinition.id;
+            waterDefinition = ResolveWaterDefinitionFromManager();
+        }
+
+        return waterItemId;
+    }
+
+    public static int ResolveWaterItemId(ItemDefinition preferredDefinition, int fallbackWaterItemId = DefaultWaterItemId)
+    {
+        if (preferredDefinition != null && preferredDefinition.id >= 0)
+        {
+            return preferredDefinition.id;
         }
 
         ItemDefinition resolvedDefinition = ResolveWaterDefinitionFromManager();
         if (resolvedDefinition != null && resolvedDefinition.id >= 0)
         {
-            waterDefinition = resolvedDefinition;
             return resolvedDefinition.id;
         }
 
@@ -500,27 +566,7 @@ public class Pump : InputOutputModule
     {
         ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
         List<ItemDefinition> definitions = itemManager != null ? itemManager.ItemDefinitions : null;
-        if (definitions == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            if (string.Equals(definition.itemName, DefaultWaterItemName, System.StringComparison.OrdinalIgnoreCase)
-                || string.Equals(definition.name, DefaultWaterItemName, System.StringComparison.OrdinalIgnoreCase))
-            {
-                return definition;
-            }
-        }
-
-        return null;
+        return ItemDefinitionLookup.ResolveByStableName(definitions, DefaultWaterItemName);
     }
 
     private static bool TryResolveDirection(

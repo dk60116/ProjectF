@@ -51,6 +51,7 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox hideBeltsCheckBox = new CheckBox();
     private readonly CheckBox showRailLineCheckBox = new CheckBox();
     private readonly CheckBox showDirectionsCheckBox = new CheckBox();
+    private readonly CheckBox freeCameraCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
     private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
     private readonly Button applyCameraSizeButton = new Button();
@@ -373,6 +374,13 @@ internal sealed class EditorToolForm : Form
                 showDirectionsCheckBox.Checked,
                 "ShowDirection");
 
+        StyleDebugCheckBox(freeCameraCheckBox, "FreeCamera");
+        freeCameraCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "freeCamera",
+                freeCameraCheckBox.Checked,
+                "FreeCamera");
+
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
@@ -380,6 +388,7 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(hideBeltsCheckBox);
         debugTogglePanel.Controls.Add(showRailLineCheckBox);
         debugTogglePanel.Controls.Add(showDirectionsCheckBox);
+        debugTogglePanel.Controls.Add(freeCameraCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 5);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
@@ -753,7 +762,7 @@ internal sealed class EditorToolForm : Form
             try
             {
                 using Image icon = Image.FromFile(iconPath);
-                e.Graphics.DrawImage(icon, iconRect);
+                DrawImagePreserveAspect(e.Graphics, icon, iconRect);
             }
             catch (IOException)
             {
@@ -768,6 +777,27 @@ internal sealed class EditorToolForm : Form
         using Brush brush = new SolidBrush(textColor);
         e.Graphics.DrawString(item.DisplayText, e.Font ?? Font, brush, bounds.Left + 34, bounds.Top + 5);
         e.DrawFocusRectangle();
+    }
+
+    private static void DrawImagePreserveAspect(Graphics graphics, Image image, Rectangle bounds)
+    {
+        if (graphics == null || image == null || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        float scale = Math.Min(
+            bounds.Width / (float)image.Width,
+            bounds.Height / (float)image.Height);
+        int width = Math.Max(1, (int)Math.Round(image.Width * scale));
+        int height = Math.Max(1, (int)Math.Round(image.Height * scale));
+        Rectangle target = new Rectangle(
+            bounds.Left + ((bounds.Width - width) / 2),
+            bounds.Top + ((bounds.Height - height) / 2),
+            width,
+            height);
+
+        graphics.DrawImage(image, target);
     }
 
     private async Task SendGiveAsync()
@@ -975,6 +1005,11 @@ internal sealed class EditorToolForm : Form
         if (TryReadProtocolBool(response, "showBeltDirections", out bool showBeltDirections))
         {
             ApplyRuntimeCheckBoxState(showDirectionsCheckBox, showBeltDirections);
+        }
+
+        if (TryReadProtocolBool(response, "freeCamera", out bool freeCamera))
+        {
+            ApplyRuntimeCheckBoxState(freeCameraCheckBox, freeCamera);
         }
 
         if (TryReadProtocolFloat(response, "cameraMinSize", out float cameraMinSize)
@@ -1306,6 +1341,7 @@ internal sealed class EditorToolForm : Form
         hideBeltsCheckBox.Enabled = !busy;
         showRailLineCheckBox.Enabled = !busy;
         showDirectionsCheckBox.Enabled = !busy;
+        freeCameraCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;
         cameraMaxSizeInput.Enabled = !busy;
         applyCameraSizeButton.Enabled = !busy;

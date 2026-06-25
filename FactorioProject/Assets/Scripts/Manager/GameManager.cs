@@ -44,6 +44,8 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private bool showDirections;
     [SerializeField]
+    private bool freeCamera;
+    [SerializeField]
     private bool mapObjectTickProfilingEnabled;
     [SerializeField, Min(1)]
     private int mapObjectTickProfilingMaxRows = 64;
@@ -65,6 +67,8 @@ public class GameManager : MonoBehaviour
     private bool lastRuntimeShowRailLine;
     private bool beltDirectionRuntimeStateInitialized;
     private bool lastRuntimeShowBeltDirections;
+    private bool freeCameraRuntimeStateInitialized;
+    private bool lastRuntimeFreeCamera;
     private bool mapObjectTickProfilingRuntimeStateInitialized;
     private bool lastRuntimeMapObjectTickProfilingEnabled;
     private RailLineDebugRenderer railLineDebugRenderer;
@@ -120,6 +124,7 @@ public class GameManager : MonoBehaviour
         SyncBeltRenderingRuntimeVisibility();
         SyncRailLineRuntimeVisibility();
         SyncBeltDirectionRuntimeVisibility();
+        SyncFreeCameraRuntimeState();
         SyncMapObjectTickProfilingRuntimeState();
     }
 
@@ -134,6 +139,7 @@ public class GameManager : MonoBehaviour
             SyncBeltRenderingRuntimeVisibility(true);
             SyncRailLineRuntimeVisibility(true);
             SyncBeltDirectionRuntimeVisibility(true);
+            SyncFreeCameraRuntimeState(true);
             SyncMapObjectTickProfilingRuntimeState(true);
         }
     }
@@ -151,6 +157,7 @@ public class GameManager : MonoBehaviour
         SyncBeltItemRenderingRuntimeVisibility(true);
         SyncBeltRenderingRuntimeVisibility(true);
         SyncRailLineRuntimeVisibility(true);
+        SyncFreeCameraRuntimeState(true);
     }
 
     public UIManager UIManager => uiManager;
@@ -168,6 +175,7 @@ public class GameManager : MonoBehaviour
     public bool ShowRailLine => showRailLine;
     public bool ShowDirections => showDirections;
     public bool ShowBeltDirections => ShowDirections;
+    public bool FreeCamera => freeCamera;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
     public bool RuntimeItemGiveServerEnabled => runtimeItemGiveServerEnabled;
@@ -250,6 +258,12 @@ public class GameManager : MonoBehaviour
     {
         showDirections = show;
         SyncBeltDirectionRuntimeVisibility(true);
+    }
+
+    public void SetFreeCamera(bool enabled)
+    {
+        freeCamera = enabled;
+        SyncFreeCameraRuntimeState(true);
     }
 
     public void SetMapObjectTickProfilingEnabled(bool enabled)
@@ -419,6 +433,31 @@ public class GameManager : MonoBehaviour
         beltDirectionRuntimeStateInitialized = true;
         lastRuntimeShowBeltDirections = showDirections;
         TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
+    }
+
+    private void SyncFreeCameraRuntimeState(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && freeCameraRuntimeStateInitialized
+            && lastRuntimeFreeCamera == freeCamera)
+        {
+            return;
+        }
+
+        PlayerCamera playerCamera = FindObjectOfType<PlayerCamera>();
+        if (playerCamera == null)
+        {
+            return;
+        }
+
+        freeCameraRuntimeStateInitialized = true;
+        lastRuntimeFreeCamera = freeCamera;
+        playerCamera.SetFreeCameraEnabled(freeCamera);
     }
 
     private void SyncMapObjectTickProfilingRuntimeState(bool force = false)
@@ -2056,6 +2095,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildSaveSlotsExtraTokens(saveManager, false, allowStaleCache),
             BuildCameraSizeExtraTokens(playerCamera),
             BuildSeedExtraTokens(terrain),
+            BuildFreeCameraExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance));
     }
 
@@ -2078,6 +2118,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return terrain != null
             ? $"seed={terrain.CurrentSeed.ToString(CultureInfo.InvariantCulture)}"
             : string.Empty;
+    }
+
+    private static string BuildFreeCameraExtraTokens(GameManager gameManager)
+    {
+        return gameManager != null
+            ? $"freeCamera={(gameManager.FreeCamera ? 1 : 0)}"
+            : "freeCamera=0";
     }
 
     private static string BuildMapObjectTickProfilingExtraTokens(GameManager gameManager)
@@ -2149,7 +2196,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 && now - cachedStatusWorldStatsTime < StatusWorldStatsRefreshInterval))
         {
             installedObjectTotal = cachedInstalledObjectTotal;
-            conveyorItemTotal = cachedConveyorItemTotal;
+            conveyorItemTotal = terrain != null
+                ? terrain.GetConveyorItemCount()
+                : cachedConveyorItemTotal;
+            cachedConveyorItemTotal = conveyorItemTotal;
             installationTypeCounts = cachedInstallationTypeCounts;
             return;
         }
@@ -3492,6 +3542,22 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         {
             gameManager.SetShowDirections(value);
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showDirections={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "freeCamera", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "freeCam", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "freeCamear", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetFreeCamera(value);
+            return ToolResult.Success(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $"freeCamera={(value ? 1 : 0)}",
+                BuildFreeCameraExtraTokens(gameManager));
         }
 
         if (string.Equals(toggleName, "mapObjectTickProfiling", StringComparison.OrdinalIgnoreCase)

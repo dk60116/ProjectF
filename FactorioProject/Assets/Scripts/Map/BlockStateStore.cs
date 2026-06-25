@@ -500,6 +500,26 @@ public partial class BlockStateStore : MonoBehaviour
         return savedInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out storageKey);
     }
 
+    public void CollectSavedInstallationAnchorsNearCoordinate(Vector2Int worldCoordinate, ICollection<Vector2Int> storageKeys)
+    {
+        if (storageKeys == null || savedInstallationStates.Count <= 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        {
+            Vector2Int storageKey = pair.Key;
+            if (liveInstallationStates.ContainsKey(storageKey)
+                || !SavedInstallationStateInteractsWithCoordinate(pair.Value, worldCoordinate))
+            {
+                continue;
+            }
+
+            storageKeys.Add(storageKey);
+        }
+    }
+
     public List<Vector2Int> GetLiveInstallationStorageKeys()
     {
         return new List<Vector2Int>(liveInstallationStates.Keys);
@@ -1224,6 +1244,88 @@ public partial class BlockStateStore : MonoBehaviour
 
         state.hasStorageKey = true;
         state.storageKey = storageKey;
+    }
+
+    private static bool SavedInstallationStateInteractsWithCoordinate(
+        InstallationSaveState state,
+        Vector2Int coordinate)
+    {
+        if (state == null)
+        {
+            return false;
+        }
+
+        if (IsAnyCoordinateNear(state.occupiedCoordinates, coordinate, 1))
+        {
+            return true;
+        }
+
+        InputOutputModule.PersistentState inputOutputState = state.inputOutputState;
+        if (inputOutputState == null)
+        {
+            return false;
+        }
+
+        if (ContainsCoordinate(inputOutputState.inputEnergyCoordinates, coordinate)
+            || ContainsCoordinate(inputOutputState.outputCoordinates, coordinate)
+            || ContainsCoordinate(inputOutputState.pipeInputCoordinates, coordinate)
+            || ContainsCoordinate(inputOutputState.gridCoordinates, coordinate)
+            || ContainsCoordinate(inputOutputState.focusCoordinates, coordinate))
+        {
+            return true;
+        }
+
+        if (inputOutputState.inputItemAreas != null)
+        {
+            for (int i = 0; i < inputOutputState.inputItemAreas.Count; i++)
+            {
+                if (inputOutputState.inputItemAreas[i].coordinate == coordinate)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsCoordinate(IReadOnlyList<Vector2Int> coordinates, Vector2Int coordinate)
+    {
+        if (coordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (coordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAnyCoordinateNear(IReadOnlyList<Vector2Int> coordinates, Vector2Int coordinate, int radius)
+    {
+        if (coordinates == null)
+        {
+            return false;
+        }
+
+        int clampedRadius = Mathf.Max(0, radius);
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            Vector2Int candidate = coordinates[i];
+            if (Mathf.Abs(candidate.x - coordinate.x) <= clampedRadius
+                && Mathf.Abs(candidate.y - coordinate.y) <= clampedRadius)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool InstallationStatesCanShareStorageKey(

@@ -4,6 +4,7 @@ public class PlayerCamera : MonoBehaviour
 {
     private static readonly Quaternion FixedRotation = Quaternion.Euler(45f, 45f, 0f);
     private static readonly Vector3 FixedForward = FixedRotation * Vector3.forward;
+    private const float MinFreeCameraLookSensitivity = 1.5f;
 
     [SerializeField]
     private Transform target;
@@ -41,6 +42,16 @@ public class PlayerCamera : MonoBehaviour
     [SerializeField, Min(0f)]
     private float orthographicPinchZoomSpeed = 0.01f;
 
+    [Header("Free Camera")]
+    [SerializeField, Min(0f)]
+    private float freeCameraMoveSpeed = 12f;
+
+    [SerializeField, Min(1f)]
+    private float freeCameraFastMoveMultiplier = 4f;
+
+    [SerializeField, Min(0f)]
+    private float freeCameraLookSensitivity = 2.4f;
+
     private Transform focusTarget;
     private Camera cachedCamera;
     private float followDistance;
@@ -50,9 +61,17 @@ public class PlayerCamera : MonoBehaviour
     private float orthographicZoomVelocity;
     private bool hasInitializedDistance;
     private bool hasInitializedOrthographicSize;
+    private bool freeCameraEnabled;
+    private bool hasSavedFreeCameraProjection;
+    private bool savedCameraOrthographic;
+    private float savedCameraFieldOfView;
+    private float savedCameraOrthographicSize;
+    private float freeCameraYaw;
+    private float freeCameraPitch;
 
     public float MinimumOrthographicSize => minOrthographicSize;
     public float MaximumOrthographicSize => maxOrthographicSize;
+    public bool FreeCameraEnabled => freeCameraEnabled;
 
     public void SetOrthographicSizeRange(float minimumSize, float maximumSize)
     {
@@ -61,8 +80,33 @@ public class PlayerCamera : MonoBehaviour
         ClampOrthographicZoomState();
     }
 
+    public void SetFreeCameraEnabled(bool enabled)
+    {
+        EnsureCameraCached();
+        if (freeCameraEnabled == enabled)
+        {
+            ApplyFreeCameraProjectionState();
+            return;
+        }
+
+        freeCameraEnabled = enabled;
+        if (freeCameraEnabled)
+        {
+            CaptureFreeCameraProjectionState();
+            Vector3 eulerAngles = transform.rotation.eulerAngles;
+            freeCameraYaw = eulerAngles.y;
+            freeCameraPitch = NormalizePitchAngle(eulerAngles.x);
+            ApplyFreeCameraProjectionState();
+            return;
+        }
+
+        RestoreFreeCameraProjectionState();
+        hasInitializedDistance = false;
+    }
+
     private void Start()
     {
+        NormalizeZoomSettings();
         cachedCamera = GetComponent<Camera>();
         ConfigureCameraForStableTerrainEdges();
         ResolveTarget();
@@ -70,6 +114,14 @@ public class PlayerCamera : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (freeCameraEnabled)
+        {
+            EnsureCameraCached();
+            ApplyFreeCameraProjectionState();
+            HandleFreeCameraInput();
+            return;
+        }
+
         if (target == null)
         {
             ResolveTarget();
@@ -103,6 +155,115 @@ public class PlayerCamera : MonoBehaviour
 
         transform.rotation = FixedRotation;
         transform.position = focusPoint - FixedForward * followDistance;
+    }
+
+    private void CaptureFreeCameraProjectionState()
+    {
+        if (cachedCamera == null || hasSavedFreeCameraProjection)
+        {
+            return;
+        }
+
+        savedCameraOrthographic = cachedCamera.orthographic;
+        savedCameraFieldOfView = cachedCamera.fieldOfView;
+        savedCameraOrthographicSize = cachedCamera.orthographicSize;
+        hasSavedFreeCameraProjection = true;
+    }
+
+    private void ApplyFreeCameraProjectionState()
+    {
+        if (!freeCameraEnabled || cachedCamera == null)
+        {
+            return;
+        }
+
+        if (!hasSavedFreeCameraProjection)
+        {
+            CaptureFreeCameraProjectionState();
+        }
+
+        cachedCamera.orthographic = false;
+    }
+
+    private void RestoreFreeCameraProjectionState()
+    {
+        if (cachedCamera == null || !hasSavedFreeCameraProjection)
+        {
+            hasSavedFreeCameraProjection = false;
+            return;
+        }
+
+        cachedCamera.orthographic = savedCameraOrthographic;
+        cachedCamera.fieldOfView = savedCameraFieldOfView;
+        if (savedCameraOrthographic)
+        {
+            cachedCamera.orthographicSize = ClampOrthographicSize(savedCameraOrthographicSize);
+            targetOrthographicSize = cachedCamera.orthographicSize;
+            hasInitializedOrthographicSize = true;
+        }
+
+        hasSavedFreeCameraProjection = false;
+    }
+
+    private void HandleFreeCameraInput()
+    {
+        float deltaTime = Mathf.Max(0f, Time.unscaledDeltaTime);
+        if (Input.GetMouseButton(1))
+        {
+            freeCameraYaw += Input.GetAxisRaw("Mouse X") * freeCameraLookSensitivity;
+            freeCameraPitch -= Input.GetAxisRaw("Mouse Y") * freeCameraLookSensitivity;
+            freeCameraPitch = Mathf.Clamp(freeCameraPitch, -89f, 89f);
+            transform.rotation = Quaternion.Euler(freeCameraPitch, freeCameraYaw, 0f);
+        }
+
+        Vector3 moveDirection = Vector3.zero;
+        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
+        {
+            moveDirection += transform.forward;
+        }
+
+        if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))
+        {
+            moveDirection -= transform.forward;
+        }
+
+        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+        {
+            moveDirection += transform.right;
+        }
+
+        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+        {
+            moveDirection -= transform.right;
+        }
+
+        if (Input.GetKey(KeyCode.E) || Input.GetKey(KeyCode.PageUp))
+        {
+            moveDirection += Vector3.up;
+        }
+
+        if (Input.GetKey(KeyCode.Q) || Input.GetKey(KeyCode.PageDown))
+        {
+            moveDirection -= Vector3.up;
+        }
+
+        if (moveDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        float speed = Mathf.Max(0f, freeCameraMoveSpeed);
+        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+        {
+            speed *= Mathf.Max(1f, freeCameraFastMoveMultiplier);
+        }
+
+        transform.position += moveDirection.normalized * speed * deltaTime;
+    }
+
+    private static float NormalizePitchAngle(float angle)
+    {
+        return angle > 180f ? angle - 360f : angle;
     }
 
     private void ResolveTarget()
@@ -262,6 +423,9 @@ public class PlayerCamera : MonoBehaviour
         maxOrthographicSize = Mathf.Max(minOrthographicSize, maxOrthographicSize);
         orthographicMouseWheelZoomSpeed = Mathf.Max(0f, orthographicMouseWheelZoomSpeed);
         orthographicPinchZoomSpeed = Mathf.Max(0f, orthographicPinchZoomSpeed);
+        freeCameraMoveSpeed = Mathf.Max(0f, freeCameraMoveSpeed);
+        freeCameraFastMoveMultiplier = Mathf.Max(1f, freeCameraFastMoveMultiplier);
+        freeCameraLookSensitivity = Mathf.Max(MinFreeCameraLookSensitivity, freeCameraLookSensitivity);
     }
 
     private void ClampOrthographicZoomState()

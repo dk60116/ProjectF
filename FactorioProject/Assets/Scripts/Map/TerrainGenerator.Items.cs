@@ -629,6 +629,72 @@ public partial class TerrainGenerator : MonoBehaviour
         return false;
     }
 
+    public bool IsConveyorItemCoordinateVirtualized(Vector2Int coordinate)
+    {
+        return virtualizeConveyorItems && virtualizedConveyorItemCoordinates.Contains(coordinate);
+    }
+
+    public bool IsFloorObjectCoordinateVirtualized(Vector2Int coordinate)
+    {
+        return virtualizedFloorObjectCoordinates.Contains(coordinate);
+    }
+
+    public bool HasSavedConveyorItemAtLane(Vector2Int coordinate, int laneIndex)
+    {
+        if (!virtualizeConveyorItems
+            || laneIndex < 0
+            || resourceStateStore == null
+            || !resourceStateStore.HasSavedConveyorItemAtLane(coordinate, laneIndex))
+        {
+            return false;
+        }
+
+        TryRefreshLiveConveyorItemsForSavedChange(coordinate);
+        return resourceStateStore != null
+               && resourceStateStore.HasSavedConveyorItemAtLane(coordinate, laneIndex);
+    }
+
+    public bool ShouldRouteLoadedConveyorDestinationToBackground(Vector2Int coordinate, Block block)
+    {
+        return virtualizeConveyorItems
+               && block != null
+               && block.IsRuntimeConveyor
+               && !IsWithinConveyorItemLiveArea(coordinate);
+    }
+
+    public bool CanUseVirtualConveyorItemHandoffDestination(Vector2Int coordinate, Block block)
+    {
+        if (block == null)
+        {
+            return true;
+        }
+
+        return ShouldRouteLoadedConveyorDestinationToBackground(coordinate, block);
+    }
+
+    public bool CanBackgroundConveyorMoveIntoCoordinate(Vector2Int coordinate, int laneIndex)
+    {
+        if (!virtualizeConveyorItems
+            || !loadedBlocks.TryGetValue(coordinate, out Block block)
+            || block == null)
+        {
+            return true;
+        }
+
+        if (!block.IsRuntimeConveyor)
+        {
+            return false;
+        }
+
+        if (IsWithinConveyorItemLiveArea(coordinate))
+        {
+            return block.CanAcceptRuntimeConveyorItemAtLane(laneIndex);
+        }
+
+        return block.GetRuntimeConveyorItemCount() <= 0
+               || block.CanAcceptRuntimeConveyorItemAtLane(laneIndex);
+    }
+
     public bool CanHandoffConveyorItemToVirtualConveyor(
         Vector2Int sourceCoordinate,
         Vector2Int flowDirection,
@@ -640,18 +706,27 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Vector2Int destinationCoordinate = sourceCoordinate + flowDirection;
-        if (TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
-            && loadedDestinationBlock != null)
+        bool hasLoadedDestination = TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
+            && loadedDestinationBlock != null;
+        if (hasLoadedDestination
+            && !CanUseVirtualConveyorItemHandoffDestination(destinationCoordinate, loadedDestinationBlock))
         {
             return false;
         }
 
         EnsureResourceStateStore();
-        return resourceStateStore != null
-            && resourceStateStore.CanAcceptVirtualConveyorItemHandoff(
+        if (resourceStateStore == null
+            || !resourceStateStore.CanAcceptVirtualConveyorItemHandoff(
                 sourceCoordinate,
                 flowDirection,
-                sourceColumnOrdinal);
+                sourceColumnOrdinal,
+                out int destinationLaneIndex))
+        {
+            return false;
+        }
+
+        return !hasLoadedDestination
+               || loadedDestinationBlock.CanAcceptRuntimeConveyorItemAtLane(destinationLaneIndex);
     }
 
     public bool TryHandoffConveyorItemToVirtualConveyor(
@@ -669,21 +744,47 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
-            && loadedDestinationBlock != null)
+        bool hasLoadedDestination = TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
+            && loadedDestinationBlock != null;
+        if (hasLoadedDestination
+            && !CanUseVirtualConveyorItemHandoffDestination(destinationCoordinate, loadedDestinationBlock))
         {
             return false;
         }
 
         EnsureResourceStateStore();
-        return resourceStateStore != null
-            && resourceStateStore.TryHandoffConveyorItemToVirtualConveyor(
+        if (resourceStateStore == null
+            || !resourceStateStore.CanAcceptVirtualConveyorItemHandoff(
                 sourceCoordinate,
                 flowDirection,
                 sourceColumnOrdinal,
-                laneState,
-                out destinationCoordinate,
-                out destinationLaneIndex);
+                out int resolvedDestinationLaneIndex)
+            || (hasLoadedDestination
+                && !loadedDestinationBlock.CanAcceptRuntimeConveyorItemAtLane(resolvedDestinationLaneIndex)))
+        {
+            return false;
+        }
+
+        if (hasLoadedDestination
+            && loadedDestinationBlock.GetRuntimeConveyorItemCount() > 0
+            && !TryVirtualizeLoadedConveyorItems(loadedDestinationBlock))
+        {
+            return false;
+        }
+
+        bool handedOff = resourceStateStore.TryHandoffConveyorItemToVirtualConveyor(
+            sourceCoordinate,
+            flowDirection,
+            sourceColumnOrdinal,
+            laneState,
+            out destinationCoordinate,
+            out destinationLaneIndex);
+        if (handedOff && hasLoadedDestination)
+        {
+            MarkLoadedConveyorItemBlockVirtual(destinationCoordinate);
+        }
+
+        return handedOff;
     }
 
     public void RegisterLiveInstallationObject(InstallationObject installationObject)

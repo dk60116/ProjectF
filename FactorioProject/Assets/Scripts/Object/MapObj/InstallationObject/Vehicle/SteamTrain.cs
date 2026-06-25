@@ -3,10 +3,28 @@ using UnityEngine;
 
 public class SteamTrain : RailHandcar
 {
+    [SerializeField]
+    private Transform waterPipe;
+    [SerializeField, Min(0f)]
+    private float waterPipeExtendDistance = 0.3f;
+    [SerializeField, Min(0.01f)]
+    private float waterPipeInterpolationSpeed = 8f;
+
     private const float MovementParticleMinDistanceSqr = 0.000001f;
     private const float BurnEnergyEpsilon = 0.0001f;
+    private const float WaterEpsilon = 0.0001f;
     private const float BurnEnergyDrivingSpeedThreshold = 0.0001f;
     private const float RearFreightCarMinBehindDistance = 0.01f;
+    private const float WaterUseRatePerSecond = 0.8f;
+    private const int WaterPipeNetworkSearchMaxNodes = 128;
+    private const float WaterPipeDockRailCoordinateSampleMaxDistance = 1.25f;
+    private static readonly Vector2Int[] CardinalDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
 
     private Vector3 lastMovementParticlePosition;
     private bool hasLastMovementParticlePosition;
@@ -15,7 +33,20 @@ public class SteamTrain : RailHandcar
     private float burnEnergyGaugeCapacity;
     private float pendingBurnEnergyCost;
     private int pendingBurnEnergyFrame = -1;
+    private float pendingWaterCost;
+    private int pendingWaterFrame = -1;
+    private Vector3 waterPipeDefaultLocalPosition;
+    private Quaternion waterPipeDefaultLocalRotation = Quaternion.identity;
+    private Vector3 waterPipeTargetLocalPosition;
+    private Quaternion waterPipeTargetLocalRotation = Quaternion.identity;
+    private bool waterPipeDefaultsCaptured;
+    private bool waterPipeTargetActive;
+    private bool waterPipeAnimating;
+    private bool waterPipeTransferReady;
+    private Vector2Int activeWaterPipeDirectionFromTrainToPipe;
     private readonly List<PortableObject> burnEnergyPortableMoveBuffer = new List<PortableObject>();
+    private readonly Queue<Vector2Int> waterPipeSearchQueue = new Queue<Vector2Int>(32);
+    private readonly HashSet<Vector2Int> waterPipeSearchVisited = new HashSet<Vector2Int>();
 
     public float ObjectInfoStoredBurnEnergy => Mathf.Max(0f, storedBurnEnergy);
     public float ObjectInfoBurnEnergyGaugeCapacity => Mathf.Max(0f, burnEnergyGaugeCapacity, storedBurnEnergy);
@@ -39,6 +70,60 @@ public class SteamTrain : RailHandcar
                 : 0f;
         }
     }
+    public float ObjectInfoStoredWaterLiters => Mathf.Max(0f, StoredFluidLiters);
+    public float ObjectInfoWaterCapacityLiters => Mathf.Max(0f, FluidStorageCapacityLiters);
+    public float ObjectInfoWaterGaugeFillAmount
+    {
+        get
+        {
+            float capacityLiters = ObjectInfoWaterCapacityLiters;
+            return capacityLiters > WaterEpsilon
+                ? Mathf.Clamp01(ObjectInfoStoredWaterLiters / capacityLiters)
+                : 0f;
+        }
+    }
+    public float ObjectInfoWaterUseRatePerSecond => WaterUseRatePerSecond;
+    public int ObjectInfoWaterItemId
+    {
+        get
+        {
+            int storedFluidItemId = StoredFluidItemId;
+            return storedFluidItemId >= 0
+                ? storedFluidItemId
+                : ResolveWaterItemId();
+        }
+    }
+
+    public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
+    {
+        int waterItemId = ResolveWaterItemId();
+        if (fluidItemId >= 0 && (waterItemId < 0 || fluidItemId != waterItemId))
+        {
+            return false;
+        }
+
+        return base.CanAcceptFluidItem(fluidItemId, requestedLiters);
+    }
+
+    public bool CanAcceptWaterFromPipeDirection(
+        Vector2Int directionFromPipeToTrain,
+        int fluidItemId,
+        bool requireStorageSpace)
+    {
+        if (directionFromPipeToTrain == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        Vector2Int directionFromTrainToPipe = -directionFromPipeToTrain;
+        int waterItemId = ResolveWaterItemId();
+        return waterPipeTargetActive
+               && waterPipeTransferReady
+               && activeWaterPipeDirectionFromTrainToPipe == directionFromTrainToPipe
+               && waterItemId >= 0
+               && fluidItemId == waterItemId
+               && CanAcceptFluidItem(fluidItemId, requireStorageSpace ? 0.0001f : 0f);
+    }
 
     protected override bool CanConnectToTrainAtOffset(
         Train other,
@@ -53,6 +138,8 @@ public class SteamTrain : RailHandcar
     {
         base.OnEnable();
         ResetMovementParticleState();
+        CaptureWaterPipeDefaults();
+        ResetWaterPipeImmediate(false);
     }
 
     protected override void OnDisable()
@@ -61,6 +148,8 @@ public class SteamTrain : RailHandcar
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
         ClearPendingBurnEnergyCost();
+        ClearPendingWaterCost();
+        ResetWaterPipeImmediate(false);
         base.OnDisable();
     }
 
@@ -70,8 +159,10 @@ public class SteamTrain : RailHandcar
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
         ClearPendingBurnEnergyCost();
+        ClearPendingWaterCost();
         storedBurnEnergy = 0f;
         burnEnergyGaugeCapacity = 0f;
+        ResetWaterPipeImmediate(false);
         base.PrepareForPool();
     }
 
@@ -87,6 +178,21 @@ public class SteamTrain : RailHandcar
         Player mountedPlayer)
     {
         ClearPendingBurnEnergyCost();
+        ClearPendingWaterCost();
+
+        if (worldMoveDirection.sqrMagnitude > 0.0001f)
+        {
+            RequestWaterPipeRetract();
+        }
+
+        if (RequiresWater(worldMoveDirection, deltaTime, out float waterCost)
+            && !TryEnsureWaterAvailable(waterCost))
+        {
+            StopMovementParticle(false);
+            base.HandleMountedInput(Vector3.zero, moveSpeed, deltaTime);
+            return;
+        }
+
         if (RequiresPoweredBurnEnergy(worldMoveDirection, deltaTime, out float burnEnergyCost)
             && !TryEnsureBurnEnergyAvailable(burnEnergyCost, mountedPlayer))
         {
@@ -101,6 +207,12 @@ public class SteamTrain : RailHandcar
             pendingBurnEnergyFrame = Time.frameCount;
         }
 
+        if (waterCost > WaterEpsilon)
+        {
+            pendingWaterCost = waterCost;
+            pendingWaterFrame = Time.frameCount;
+        }
+
         lastDrivenInputFrame = Time.frameCount;
         base.HandleMountedInput(worldMoveDirection, moveSpeed, deltaTime);
     }
@@ -113,13 +225,15 @@ public class SteamTrain : RailHandcar
             lastMovementParticlePosition = currentPosition;
             hasLastMovementParticlePosition = true;
             StopMovementParticle(false);
+            UpdateWaterPipeVisual(Time.deltaTime);
             return;
         }
 
         bool isDrivenThisFrame = lastDrivenInputFrame == Time.frameCount;
-        bool isDrivenAndMoving = isDrivenThisFrame
-                                 && GetPlanarDistanceSqr(lastMovementParticlePosition, currentPosition)
-                                 > MovementParticleMinDistanceSqr;
+        bool hasMovedSinceLastFrame =
+            GetPlanarDistanceSqr(lastMovementParticlePosition, currentPosition)
+            > MovementParticleMinDistanceSqr;
+        bool isDrivenAndMoving = isDrivenThisFrame && hasMovedSinceLastFrame;
         if (isDrivenThisFrame
             && pendingBurnEnergyFrame == Time.frameCount
             && CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
@@ -127,8 +241,29 @@ public class SteamTrain : RailHandcar
             SpendStoredBurnEnergy(pendingBurnEnergyCost);
         }
 
+        if (isDrivenThisFrame
+            && pendingWaterFrame == Time.frameCount
+            && CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
+        {
+            SpendStoredWater(pendingWaterCost);
+        }
+
+        if (waterPipeTargetActive
+            && waterPipeTransferReady
+            && hasMovedSinceLastFrame)
+        {
+            RequestWaterPipeRetract();
+        }
+
+        if (!HasFluidStorageSpace)
+        {
+            RequestWaterPipeRetract();
+        }
+
         ClearPendingBurnEnergyCost();
+        ClearPendingWaterCost();
         SetMovementParticleActive(isDrivenAndMoving);
+        UpdateWaterPipeVisual(Time.deltaTime);
         lastMovementParticlePosition = currentPosition;
     }
 
@@ -142,6 +277,42 @@ public class SteamTrain : RailHandcar
     {
         storedBurnEnergy = Mathf.Max(0f, storedEnergy);
         burnEnergyGaugeCapacity = Mathf.Max(0f, gaugeCapacity, storedBurnEnergy);
+    }
+
+    protected override bool TryApplyCustomIdleDocking(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        float deltaTime)
+    {
+        if (deltaTime <= 0f
+            || currentSample.Rail == null
+            || !HasFluidStorageSpace
+            || !TryFindWaterPipeDockSample(
+                currentSample,
+                out RailSample dockSample,
+                out float signedPathDelta,
+                out Vector2Int directionFromTrainToPipe))
+        {
+            RequestWaterPipeRetract();
+            return false;
+        }
+
+        SetWaterPipeDockTarget(
+            directionFromTrainToPipe,
+            Mathf.Abs(signedPathDelta) <= ResolveDockCompleteDistance());
+
+        if (TryApplyDockingToSample(
+            currentSample,
+            currentFacing,
+            dockSample,
+            signedPathDelta,
+            deltaTime))
+        {
+            return true;
+        }
+
+        RequestWaterPipeRetract();
+        return false;
     }
 
     private bool RequiresPoweredBurnEnergy(Vector3 worldMoveDirection, float deltaTime, out float burnEnergyCost)
@@ -158,6 +329,31 @@ public class SteamTrain : RailHandcar
         float burnEnergyPerSecond = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
         burnEnergyCost = burnEnergyPerSecond * Mathf.Max(0f, deltaTime);
         return burnEnergyCost > BurnEnergyEpsilon;
+    }
+
+    private bool RequiresWater(Vector3 worldMoveDirection, float deltaTime, out float waterCost)
+    {
+        waterCost = 0f;
+        if (worldMoveDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float waterLitersPerSecond = ObjectInfoWaterUseRatePerSecond;
+        waterCost = waterLitersPerSecond * Mathf.Max(0f, deltaTime);
+        return waterCost > WaterEpsilon;
+    }
+
+    private bool TryEnsureWaterAvailable(float requiredLiters)
+    {
+        requiredLiters = Mathf.Max(0f, requiredLiters);
+        if (requiredLiters <= WaterEpsilon)
+        {
+            return true;
+        }
+
+        int waterItemId = ResolveWaterItemId();
+        return waterItemId >= 0 && CanProvideFluidItem(waterItemId, requiredLiters);
     }
 
     private bool TryEnsureBurnEnergyAvailable(float requiredEnergy, Player mountedPlayer)
@@ -182,6 +378,11 @@ public class SteamTrain : RailHandcar
         return BoundItemDefinition != null
             ? BoundItemDefinition
             : InputOutputModule.ResolveItemDefinition(ResolveItemId());
+    }
+
+    private int ResolveWaterItemId()
+    {
+        return Pump.ResolveWaterItemId(null);
     }
 
     private bool TryConsumeOneBurnEnergyItem(Player mountedPlayer, out int gainedEnergy)
@@ -377,6 +578,232 @@ public class SteamTrain : RailHandcar
         return true;
     }
 
+    private bool TryFindWaterPipeDockSample(
+        RailSample currentSample,
+        out RailSample dockSample,
+        out float signedPathDelta,
+        out Vector2Int directionFromTrainToPipe)
+    {
+        dockSample = default;
+        signedPathDelta = 0f;
+        directionFromTrainToPipe = Vector2Int.zero;
+        if (currentSample.Rail == null)
+        {
+            return false;
+        }
+
+        int waterItemId = ResolveWaterItemId();
+        if (waterItemId < 0)
+        {
+            return false;
+        }
+
+        float captureDistance = ResolveDockCaptureDistance();
+        float captureSqrDistance = captureDistance * captureDistance;
+        float bestScore = float.MaxValue;
+        bool found = false;
+        int searchCells = Mathf.CeilToInt(ResolveDockSearchRadius());
+        Vector2Int centerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(currentSample.Point.x),
+            Mathf.RoundToInt(currentSample.Point.y));
+
+        for (int offsetY = -searchCells; offsetY <= searchCells; offsetY++)
+        {
+            for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
+            {
+                Vector2Int pipeCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!TryGetActivePipeAtCoordinate(pipeCoordinate, out Pipe pipe, out Quaternion pipeRotation))
+                {
+                    continue;
+                }
+
+                bool hasCheckedWaterSource = false;
+                bool hasWaterSource = false;
+                for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
+                {
+                    Vector2Int directionFromPipeToTrain = CardinalDirections[directionIndex];
+                    if (!pipe.HasConnectionTowards(pipeRotation, directionFromPipeToTrain))
+                    {
+                        continue;
+                    }
+
+                    Vector2Int trainCoordinate = pipeCoordinate + directionFromPipeToTrain;
+                    if (!TryFindWaterPipeRailDockSample(
+                            trainCoordinate,
+                            currentSample.Rail,
+                            out RailSample candidateSample))
+                    {
+                        continue;
+                    }
+
+                    float candidatePathDelta = candidateSample.DistanceAlongPath - currentSample.DistanceAlongPath;
+                    float candidatePathDistance = Mathf.Abs(candidatePathDelta);
+                    float candidateSqrDistance = (candidateSample.Point - currentSample.Point).sqrMagnitude;
+                    if (candidatePathDistance > captureDistance
+                        || candidateSqrDistance > captureSqrDistance)
+                    {
+                        continue;
+                    }
+
+                    if (!hasCheckedWaterSource)
+                    {
+                        hasWaterSource = WaterPipeNetworkHasWaterSource(pipeCoordinate, waterItemId);
+                        hasCheckedWaterSource = true;
+                    }
+
+                    float score = candidatePathDistance
+                                  + candidateSqrDistance * 0.25f
+                                  + (hasWaterSource ? 0f : 0.1f);
+                    if (score >= bestScore)
+                    {
+                        continue;
+                    }
+
+                    bestScore = score;
+                    dockSample = candidateSample;
+                    signedPathDelta = candidatePathDelta;
+                    directionFromTrainToPipe = -directionFromPipeToTrain;
+                    found = true;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    private bool TryFindWaterPipeRailDockSample(
+        Vector2Int railCoordinate,
+        Railload currentRail,
+        out RailSample dockSample)
+    {
+        dockSample = default;
+        if (currentRail == null)
+        {
+            return false;
+        }
+
+        Vector2 railPoint = new Vector2(railCoordinate.x, railCoordinate.y);
+        float maxSqrDistance = WaterPipeDockRailCoordinateSampleMaxDistance
+                               * WaterPipeDockRailCoordinateSampleMaxDistance;
+        if (!currentRail.TryFindNearestRenderedPathSample(
+                railPoint,
+                out float distanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent,
+                out float sqrDistance)
+            || sqrDistance > maxSqrDistance)
+        {
+            return false;
+        }
+
+        dockSample.Rail = currentRail;
+        dockSample.DistanceAlongPath = distanceAlongPath;
+        dockSample.Point = pathPoint;
+        dockSample.Tangent = tangent;
+        dockSample.SqrDistance = sqrDistance;
+        return true;
+    }
+
+    private bool WaterPipeNetworkHasWaterSource(Vector2Int startCoordinate, int waterItemId)
+    {
+        waterPipeSearchQueue.Clear();
+        waterPipeSearchVisited.Clear();
+        EnqueueWaterPipeSearchCoordinate(startCoordinate);
+
+        int searchedNodeCount = 0;
+        while (waterPipeSearchQueue.Count > 0
+               && searchedNodeCount < WaterPipeNetworkSearchMaxNodes)
+        {
+            Vector2Int coordinate = waterPipeSearchQueue.Dequeue();
+            searchedNodeCount++;
+
+            if (!TryGetActivePipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation))
+            {
+                continue;
+            }
+
+            for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int direction = CardinalDirections[directionIndex];
+                if (!pipe.HasConnectionTowards(pipeRotation, direction))
+                {
+                    continue;
+                }
+
+                Vector2Int nextCoordinate = coordinate + direction;
+                if (TryGetWaterSourceAtCoordinate(
+                        nextCoordinate,
+                        -direction,
+                        waterItemId))
+                {
+                    waterPipeSearchQueue.Clear();
+                    waterPipeSearchVisited.Clear();
+                    return true;
+                }
+
+                if (TryGetActivePipeAtCoordinate(
+                        nextCoordinate,
+                        out Pipe nextPipe,
+                        out Quaternion nextPipeRotation)
+                    && nextPipe.HasConnectionTowards(nextPipeRotation, -direction))
+                {
+                    EnqueueWaterPipeSearchCoordinate(nextCoordinate);
+                }
+            }
+        }
+
+        waterPipeSearchQueue.Clear();
+        waterPipeSearchVisited.Clear();
+        return false;
+    }
+
+    private void EnqueueWaterPipeSearchCoordinate(Vector2Int coordinate)
+    {
+        if (waterPipeSearchVisited.Add(coordinate))
+        {
+            waterPipeSearchQueue.Enqueue(coordinate);
+        }
+    }
+
+    private bool TryGetWaterSourceAtCoordinate(
+        Vector2Int coordinate,
+        Vector2Int directionToPipe,
+        int waterItemId)
+    {
+        if (!InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump pump)
+            || pump == null
+            || !pump.gameObject.activeInHierarchy
+            || !pump.HasPipeConnectionTowards(pump.transform.rotation, directionToPipe)
+            || !pump.TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond))
+        {
+            return false;
+        }
+
+        return outputItemId == waterItemId && litersPerSecond > WaterEpsilon;
+    }
+
+    private bool TryGetActivePipeAtCoordinate(
+        Vector2Int coordinate,
+        out Pipe pipe,
+        out Quaternion pipeRotation)
+    {
+        pipe = null;
+        pipeRotation = Quaternion.identity;
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain == null
+            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
+            || block == null
+            || block.MapObject is not Pipe candidatePipe
+            || !candidatePipe.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        pipe = candidatePipe;
+        pipeRotation = candidatePipe.transform.rotation;
+        return true;
+    }
+
     private bool IsUsableBurnEnergyItem(int itemId)
     {
         return TryResolveBurnEnergyAmount(itemId, out _);
@@ -409,6 +836,156 @@ public class SteamTrain : RailHandcar
         {
             storedBurnEnergy = 0f;
             burnEnergyGaugeCapacity = 0f;
+        }
+    }
+
+    private void SpendStoredWater(float cost)
+    {
+        if (cost <= WaterEpsilon)
+        {
+            return;
+        }
+
+        int waterItemId = ResolveWaterItemId();
+        if (waterItemId < 0 || !CanProvideFluidItem(waterItemId, cost))
+        {
+            return;
+        }
+
+        TryConsumeFluidLiters(waterItemId, cost, out _);
+    }
+
+    private void CaptureWaterPipeDefaults()
+    {
+        if (waterPipe == null || waterPipeDefaultsCaptured)
+        {
+            return;
+        }
+
+        waterPipeDefaultLocalPosition = waterPipe.localPosition;
+        waterPipeDefaultLocalRotation = waterPipe.localRotation;
+        waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
+        waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
+        waterPipeDefaultsCaptured = true;
+    }
+
+    private void SetWaterPipeDockTarget(Vector2Int directionFromTrainToPipe, bool transferReady)
+    {
+        if (waterPipe == null || directionFromTrainToPipe == Vector2Int.zero)
+        {
+            return;
+        }
+
+        CaptureWaterPipeDefaults();
+        Vector3 worldDirection = new Vector3(directionFromTrainToPipe.x, 0f, directionFromTrainToPipe.y);
+        if (worldDirection.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        worldDirection.Normalize();
+        Vector3 localDirection = transform.InverseTransformDirection(worldDirection);
+        localDirection.y = 0f;
+        if (localDirection.sqrMagnitude <= 0.0001f)
+        {
+            localDirection = Vector3.forward;
+        }
+
+        localDirection.Normalize();
+        waterPipeTargetLocalPosition =
+            waterPipeDefaultLocalPosition + localDirection * Mathf.Max(0f, waterPipeExtendDistance);
+        waterPipeTargetLocalRotation =
+            Quaternion.Inverse(transform.rotation)
+            * Quaternion.LookRotation(worldDirection, Vector3.up)
+            * Quaternion.Euler(0f, 90f, 0f);
+        waterPipeTargetActive = true;
+        waterPipeTransferReady = transferReady;
+        activeWaterPipeDirectionFromTrainToPipe = directionFromTrainToPipe;
+        waterPipeAnimating = true;
+        if (!waterPipe.gameObject.activeSelf)
+        {
+            waterPipe.gameObject.SetActive(true);
+        }
+    }
+
+    private void RequestWaterPipeRetract()
+    {
+        if (waterPipe == null)
+        {
+            return;
+        }
+
+        CaptureWaterPipeDefaults();
+        waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
+        waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
+        waterPipeTargetActive = false;
+        waterPipeTransferReady = false;
+        activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
+        if (waterPipe.gameObject.activeSelf)
+        {
+            waterPipeAnimating = true;
+        }
+    }
+
+    private void ResetWaterPipeImmediate(bool active)
+    {
+        if (waterPipe == null)
+        {
+            return;
+        }
+
+        CaptureWaterPipeDefaults();
+        waterPipe.localPosition = waterPipeDefaultLocalPosition;
+        waterPipe.localRotation = waterPipeDefaultLocalRotation;
+        waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
+        waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
+        waterPipeTargetActive = active;
+        waterPipeTransferReady = false;
+        activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
+        waterPipeAnimating = false;
+        if (waterPipe.gameObject.activeSelf != active)
+        {
+            waterPipe.gameObject.SetActive(active);
+        }
+    }
+
+    private void UpdateWaterPipeVisual(float deltaTime)
+    {
+        if (waterPipe == null || !waterPipeAnimating)
+        {
+            return;
+        }
+
+        CaptureWaterPipeDefaults();
+        if (!waterPipe.gameObject.activeSelf)
+        {
+            waterPipe.gameObject.SetActive(true);
+        }
+
+        float interpolation = deltaTime > 0f
+            ? 1f - Mathf.Exp(-Mathf.Max(0.01f, waterPipeInterpolationSpeed) * deltaTime)
+            : 1f;
+        waterPipe.localPosition = Vector3.Lerp(
+            waterPipe.localPosition,
+            waterPipeTargetLocalPosition,
+            interpolation);
+        waterPipe.localRotation = Quaternion.Slerp(
+            waterPipe.localRotation,
+            waterPipeTargetLocalRotation,
+            interpolation);
+
+        if ((waterPipe.localPosition - waterPipeTargetLocalPosition).sqrMagnitude > 0.000001f
+            || Quaternion.Angle(waterPipe.localRotation, waterPipeTargetLocalRotation) > 0.1f)
+        {
+            return;
+        }
+
+        waterPipe.localPosition = waterPipeTargetLocalPosition;
+        waterPipe.localRotation = waterPipeTargetLocalRotation;
+        waterPipeAnimating = false;
+        if (!waterPipeTargetActive && waterPipe.gameObject.activeSelf)
+        {
+            waterPipe.gameObject.SetActive(false);
         }
     }
 
@@ -529,6 +1106,12 @@ public class SteamTrain : RailHandcar
     {
         pendingBurnEnergyCost = 0f;
         pendingBurnEnergyFrame = -1;
+    }
+
+    private void ClearPendingWaterCost()
+    {
+        pendingWaterCost = 0f;
+        pendingWaterFrame = -1;
     }
 
     private void ResetMovementParticleState()

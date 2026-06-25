@@ -17692,46 +17692,68 @@ public class InstallationPlacementController : MonoBehaviour
             int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
                 previewToIgnore,
                 baseQuarterTurns + offset);
-            for (int i = 0; i < placements.Count; i++)
+            for (int priorityPass = 0; priorityPass < 2; priorityPass++)
             {
-                InputOutputModule.RectGridBlockPlacement placement = placements[i];
-                if (placement.blockType == InputOutputModule.RectGridBlockType.None
-                    || placement.x < 0
-                    || placement.x >= rectGridWidth
-                    || placement.y < 0
-                    || placement.y >= rectGridHeight)
+                for (int i = 0; i < placements.Count; i++)
                 {
-                    continue;
-                }
+                    InputOutputModule.RectGridBlockPlacement placement = placements[i];
+                    if (!ShouldEvaluateSimpleRectGridTargetPlacement(
+                            placement,
+                            rectGridWidth,
+                            rectGridHeight,
+                            priorityPass))
+                    {
+                        continue;
+                    }
 
-                Vector2Int localOffset = new Vector2Int(
-                    placement.x - objectAnchorCell.x,
-                    placement.y - objectAnchorCell.y);
-                Vector2Int candidateAnchorCoordinate =
-                    clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
-                if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
-                    || candidateAnchorBlock == null
-                    || !CanPlaceSimpleRectGridAtAnchorFast(
-                        terrain,
-                        candidateAnchorCoordinate,
-                        footprintSource,
-                        candidateQuarterTurns,
-                        previewToIgnore,
-                        placements,
-                        rectGridWidth,
-                        rectGridHeight,
-                        objectAnchorCell))
-                {
-                    continue;
-                }
+                    Vector2Int localOffset = new Vector2Int(
+                        placement.x - objectAnchorCell.x,
+                        placement.y - objectAnchorCell.y);
+                    Vector2Int candidateAnchorCoordinate =
+                        clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
+                    if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
+                        || candidateAnchorBlock == null
+                        || !CanPlaceSimpleRectGridAtAnchorFast(
+                            terrain,
+                            candidateAnchorCoordinate,
+                            footprintSource,
+                            candidateQuarterTurns,
+                            previewToIgnore,
+                            placements,
+                            rectGridWidth,
+                            rectGridHeight,
+                            objectAnchorCell))
+                    {
+                        continue;
+                    }
 
-                anchorBlock = candidateAnchorBlock;
-                resolvedQuarterTurns = candidateQuarterTurns;
-                return true;
+                    anchorBlock = candidateAnchorBlock;
+                    resolvedQuarterTurns = candidateQuarterTurns;
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    private static bool ShouldEvaluateSimpleRectGridTargetPlacement(
+        InputOutputModule.RectGridBlockPlacement placement,
+        int rectGridWidth,
+        int rectGridHeight,
+        int priorityPass)
+    {
+        if (placement.blockType == InputOutputModule.RectGridBlockType.None
+            || placement.x < 0
+            || placement.x >= rectGridWidth
+            || placement.y < 0
+            || placement.y >= rectGridHeight)
+        {
+            return false;
+        }
+
+        bool isObjectPlacement = placement.blockType == InputOutputModule.RectGridBlockType.Object;
+        return priorityPass == 0 ? isObjectPlacement : !isObjectPlacement;
     }
 
     private bool CanPlaceSimpleRectGridAtAnchorFast(

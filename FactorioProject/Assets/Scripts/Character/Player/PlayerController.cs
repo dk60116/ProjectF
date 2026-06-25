@@ -569,7 +569,9 @@ public class PlayerController : MonoBehaviour
 
         player?.UpdateDropExitGate(transform.position);
 
-        bool isInteractionLocked = GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
+        GameManager gameManager = GameManager.Instance;
+        bool isInteractionLocked = gameManager != null && gameManager.PlayerInteractionLocked;
+        bool isKeyboardMoveLocked = gameManager != null && gameManager.FreeCamera;
 
         Vector2 input = Vector2.zero;
 
@@ -588,7 +590,7 @@ public class PlayerController : MonoBehaviour
             input = joystick.InputDirection;
         }
 
-        if (!isInteractionLocked)
+        if (!isInteractionLocked && !isKeyboardMoveLocked)
         {
             input = Vector2.ClampMagnitude(input + GetKeyboardMoveInput(), 1f);
         }
@@ -3466,7 +3468,8 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshMouseMapObjectFocus()
     {
-        bool isInteractionLocked = GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
+        GameManager gameManager = GameManager.Instance;
+        bool isInteractionLocked = gameManager != null && gameManager.PlayerInteractionLocked;
         if (mouseFocusRefreshFrame == Time.frameCount
             && mouseFocusRefreshInteractionLocked == isInteractionLocked)
         {

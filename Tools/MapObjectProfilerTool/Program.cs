@@ -26,6 +26,8 @@ internal sealed class ProfilerForm : Form
     private const string DefaultHost = "127.0.0.1";
     private const int DefaultPort = 50877;
     private const int TimeoutMilliseconds = 5000;
+    private const int GeneratedBeltIconCacheKey = int.MinValue;
+    private const int GeneratedEmptyIconCacheKey = int.MinValue + 1;
 
     private readonly TextBox hostTextBox = new TextBox();
     private readonly NumericUpDown portInput = new NumericUpDown();
@@ -487,7 +489,7 @@ internal sealed class ProfilerForm : Form
         {
             ProfileRow row = profileRows[i];
             rowsGrid.Rows.Add(
-                ResolveIcon(row.ItemId)!,
+                ResolveRowIcon(row) ?? ResolveEmptyIcon(),
                 row.Rank,
                 ResolveRowDisplayName(row),
                 row.Type,
@@ -533,7 +535,7 @@ internal sealed class ProfilerForm : Form
             int y = inner.Top + i * rowHeight;
             Rectangle rowRect = new Rectangle(inner.Left, y, inner.Width, rowHeight - 2);
             Rectangle iconRect = new Rectangle(rowRect.Left, rowRect.Top + 3, 26, 26);
-            Image? icon = ResolveIcon(row.ItemId);
+            Image? icon = ResolveRowIcon(row);
             if (icon != null)
             {
                 e.Graphics.DrawImage(icon, iconRect);
@@ -596,6 +598,17 @@ internal sealed class ProfilerForm : Form
 
     private string ResolveRowDisplayName(ProfileRow row)
     {
+        string displayName = ResolveRowBaseDisplayName(row);
+        if (TryResolveRowDisplayCount(row, out double count))
+        {
+            return $"{displayName} [{FormatRowDisplayCount(count)}]";
+        }
+
+        return displayName;
+    }
+
+    private string ResolveRowBaseDisplayName(ProfileRow row)
+    {
         if (!string.IsNullOrWhiteSpace(row.ItemName))
         {
             return row.ItemName;
@@ -603,6 +616,166 @@ internal sealed class ProfilerForm : Form
 
         ItemCatalogEntry? catalogEntry = FindCatalogEntry(row.ItemId);
         return catalogEntry != null ? catalogEntry.DisplayName : row.Type;
+    }
+
+    private bool TryResolveRowDisplayCount(ProfileRow row, out double count)
+    {
+        count = 0.0;
+        if (lastSnapshot != null && TryResolveBeltRowDisplayCount(row, lastSnapshot, out count))
+        {
+            return true;
+        }
+
+        if (row.ActiveCount > 0)
+        {
+            count = row.ActiveCount;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveBeltRowDisplayCount(ProfileRow row, ProfileSnapshot snapshot, out double count)
+    {
+        count = 0.0;
+        string type = row.Type ?? string.Empty;
+        string itemName = row.ItemName ?? string.Empty;
+
+        if (string.Equals(type, "ActiveConveyor", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(itemName, "Active Belt Tick"))
+        {
+            count = snapshot.ActiveBeltTicks;
+            return true;
+        }
+
+        if (string.Equals(type, "BackgroundConveyor", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(itemName, "Background Belt Tick"))
+        {
+            count = snapshot.BackgroundConveyorSavedBlocks;
+            return true;
+        }
+
+        if (string.Equals(type, "ConveyorDataMotion", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(itemName, "Belt Data Motion"))
+        {
+            count = snapshot.ActiveBeltDataMotions;
+            return true;
+        }
+
+        if (string.Equals(type, "ConveyorVisual", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(itemName, "Belt Visual Tick"))
+        {
+            count = snapshot.ActiveBeltVisualTicks;
+            return true;
+        }
+
+        if (string.Equals(type, "PortableItemRenderer", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(itemName, "Conveyor Item"))
+        {
+            if (TryGetRuntimeCounterSum(
+                    snapshot,
+                    "ConveyorItemRender",
+                    "DynamicInstances",
+                    "StaticInstances",
+                    out count))
+            {
+                return true;
+            }
+
+            return TryGetRuntimeCounterNumber(snapshot, "Conveyor", "LoadedConveyorItems", out count)
+                || TryGetRuntimeCounterNumber(snapshot, "Conveyor", "ItemVisualBlocks", out count);
+        }
+
+        if (string.Equals(type, "VirtualConveyorBeltRenderer", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(itemName, "Virtual Belt"))
+        {
+            return TryGetRuntimeCounterNumber(snapshot, "Virtualization", "VirtualBeltRegistered", out count)
+                || TryGetRuntimeCounterNumber(snapshot, "World", "LoadedConveyorBelts", out count);
+        }
+
+        if (IsBeltRelatedRow(row))
+        {
+            return TryGetRuntimeCounterNumber(snapshot, "Conveyor", "ActiveConveyors", out count)
+                || TryGetRuntimeCounterNumber(snapshot, "World", "LoadedConveyorBelts", out count);
+        }
+
+        return false;
+    }
+
+    private static string FormatRowDisplayCount(double count)
+    {
+        double rounded = Math.Round(count);
+        if (Math.Abs(count - rounded) < 0.001)
+        {
+            return rounded.ToString("N0", CultureInfo.InvariantCulture);
+        }
+
+        return count.ToString("0.#", CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryGetRuntimeCounterNumber(ProfileSnapshot snapshot, string group, string name, out double value)
+    {
+        value = 0.0;
+        if (snapshot.RuntimeCounters == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < snapshot.RuntimeCounters.Count; i++)
+        {
+            RuntimeCounter counter = snapshot.RuntimeCounters[i];
+            if (counter == null
+                || !string.Equals(counter.Group, group, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(counter.Name, name, StringComparison.OrdinalIgnoreCase)
+                || !double.TryParse(counter.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetRuntimeCounterSum(
+        ProfileSnapshot snapshot,
+        string group,
+        string firstName,
+        string secondName,
+        out double value)
+    {
+        bool hasFirst = TryGetRuntimeCounterNumber(snapshot, group, firstName, out double firstValue);
+        bool hasSecond = TryGetRuntimeCounterNumber(snapshot, group, secondName, out double secondValue);
+        value = firstValue + secondValue;
+        return hasFirst || hasSecond;
+    }
+
+    private static bool IsBeltRelatedRow(ProfileRow row)
+    {
+        return row != null
+               && (ContainsOrdinalIgnoreCase(row.Kind, "Belt")
+                   || ContainsOrdinalIgnoreCase(row.Type, "Belt")
+                   || ContainsOrdinalIgnoreCase(row.Type, "Conveyor")
+                   || ContainsOrdinalIgnoreCase(row.ItemName, "Belt")
+                   || ContainsOrdinalIgnoreCase(row.ItemName, "Conveyor"));
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(string? value, string pattern)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+               && value.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private Image? ResolveRowIcon(ProfileRow row)
+    {
+        Image? itemIcon = ResolveIcon(row.ItemId);
+        if (itemIcon != null)
+        {
+            return itemIcon;
+        }
+
+        return IsBeltRelatedRow(row) ? ResolveBeltIcon() : null;
     }
 
     private Image? ResolveIcon(int itemId)
@@ -647,6 +820,102 @@ internal sealed class ProfilerForm : Form
         }
 
         return null;
+    }
+
+    private Image? ResolveBeltIcon()
+    {
+        ItemCatalogEntry? beltItem = FindBeltCatalogEntry();
+        if (beltItem != null)
+        {
+            Image? catalogIcon = ResolveIcon(beltItem.Id);
+            if (catalogIcon != null)
+            {
+                return catalogIcon;
+            }
+        }
+
+        if (iconCache.TryGetValue(GeneratedBeltIconCacheKey, out Image? generatedIcon))
+        {
+            return generatedIcon;
+        }
+
+        Image fallbackIcon = CreateGeneratedBeltIcon();
+        iconCache[GeneratedBeltIconCacheKey] = fallbackIcon;
+        return fallbackIcon;
+    }
+
+    private Image ResolveEmptyIcon()
+    {
+        if (iconCache.TryGetValue(GeneratedEmptyIconCacheKey, out Image? cachedIcon))
+        {
+            return cachedIcon;
+        }
+
+        Image emptyIcon = new Bitmap(1, 1);
+        iconCache[GeneratedEmptyIconCacheKey] = emptyIcon;
+        return emptyIcon;
+    }
+
+    private ItemCatalogEntry? FindBeltCatalogEntry()
+    {
+        ItemCatalogEntry? fallback = null;
+        for (int i = 0; i < catalogItems.Count; i++)
+        {
+            ItemCatalogEntry item = catalogItems[i];
+            string displayName = item.DisplayName;
+            if (ContainsOrdinalIgnoreCase(displayName, "Conveyor belt"))
+            {
+                return item;
+            }
+
+            if (fallback == null && ContainsOrdinalIgnoreCase(displayName, "Belt"))
+            {
+                fallback = item;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static Image CreateGeneratedBeltIcon()
+    {
+        Bitmap bitmap = new Bitmap(32, 32);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.Clear(Color.Transparent);
+
+        Rectangle beltRect = new Rectangle(3, 8, 26, 16);
+        using GraphicsPath beltPath = CreateRoundedRectanglePath(beltRect, 5);
+        using SolidBrush beltBrush = new SolidBrush(Color.FromArgb(68, 76, 79));
+        using Pen edgePen = new Pen(Color.FromArgb(157, 167, 169), 1.2f);
+        graphics.FillPath(beltBrush, beltPath);
+        graphics.DrawPath(edgePen, beltPath);
+
+        using Pen railPen = new Pen(Color.FromArgb(36, 42, 45), 2f);
+        graphics.DrawLine(railPen, beltRect.Left + 3, beltRect.Top + 4, beltRect.Right - 3, beltRect.Top + 4);
+        graphics.DrawLine(railPen, beltRect.Left + 3, beltRect.Bottom - 4, beltRect.Right - 3, beltRect.Bottom - 4);
+
+        using SolidBrush accentBrush = new SolidBrush(Color.FromArgb(235, 189, 92));
+        graphics.FillPolygon(accentBrush, new[]
+        {
+            new Point(12, 11),
+            new Point(21, 16),
+            new Point(12, 21)
+        });
+
+        return bitmap;
+    }
+
+    private static GraphicsPath CreateRoundedRectanglePath(Rectangle rect, int radius)
+    {
+        GraphicsPath path = new GraphicsPath();
+        int diameter = Math.Max(1, radius * 2);
+        path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     private void LoadCatalog()

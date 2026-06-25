@@ -50,7 +50,10 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         Box,
         FreightCar,
         Conveyor,
-        InputArea
+        InputArea,
+        SavedFloor,
+        SavedConveyor,
+        SavedInputArea
     }
 
     [System.Serializable]
@@ -107,6 +110,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     private int heldItemId = -1;
 
     private TerrainGenerator cachedTerrainGenerator;
+    private BlockStateStore cachedBlockStateStore;
     private float pickupTimer;
     private float dropRetryTimer;
     private float actionTurnTimer;
@@ -623,7 +627,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
-        return !HasNearbyRuntimeInteractionTarget();
+        return !CanPickupOneItem() && !HasNearbyRuntimeInteractionTarget();
     }
 
     private bool ShouldRuntimeSleepWithHeldItem()
@@ -644,18 +648,14 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return false;
         }
 
-        if (!terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock)
-            || dropBlock == null)
-        {
-            return true;
-        }
-
-        if (IsConveyorBeltMapObject(dropBlock.MapObject))
+        if (terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock)
+            && dropBlock != null
+            && IsConveyorBeltMapObject(dropBlock.MapObject))
         {
             return false;
         }
 
-        return !CanPlaceHeldItem(dropBlock, dropCoordinate);
+        return !CanPlaceHeldItem();
     }
 
     private bool HasNearbyRuntimeInteractionTarget()
@@ -1308,6 +1308,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                 out BoxObject boxObject,
                 out FreightCar freightCar,
                 out RobotArmPickupSource pickupSource,
+                out Vector2Int pickupCoordinate,
                 out Vector3 referenceWorldPosition,
                 out pickupWorldPosition))
         {
@@ -1335,6 +1336,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
                     out pickedItemId);
             case RobotArmPickupSource.InputArea:
                 return TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId);
+            case RobotArmPickupSource.SavedFloor:
+                return TryTakeSavedFloorItem(pickupCoordinate, out pickedItemId);
+            case RobotArmPickupSource.SavedConveyor:
+                return TryTakeSavedConveyorItem(pickupCoordinate, referenceWorldPosition, out pickedItemId);
+            case RobotArmPickupSource.SavedInputArea:
+                return TryTakeSavedInputAreaItem(pickupCoordinate, out pickedItemId);
             default:
                 return false;
         }
@@ -1342,7 +1349,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool CanPickupOneItem()
     {
-        return TryResolvePickupCandidate(out _, out _, out _, out _, out _, out _);
+        return TryResolvePickupCandidate(out _, out _, out _, out _, out _, out _, out _);
     }
 
     private bool TryResolvePickupCandidate(
@@ -1350,6 +1357,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         out BoxObject boxObject,
         out FreightCar freightCar,
         out RobotArmPickupSource pickupSource,
+        out Vector2Int pickupCoordinate,
         out Vector3 referenceWorldPosition,
         out Vector3 pickupWorldPosition)
     {
@@ -1357,29 +1365,32 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         boxObject = null;
         freightCar = null;
         pickupSource = RobotArmPickupSource.None;
+        pickupCoordinate = default;
         referenceWorldPosition = GetHandWorldPosition();
         pickupWorldPosition = referenceWorldPosition;
 
-        if (!TryResolvePickupCoordinate(out Vector2Int pickupCoordinate))
+        if (!TryResolvePickupCoordinate(out pickupCoordinate))
         {
             return false;
         }
 
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out pickupBlock) || pickupBlock == null)
+        if (terrainGenerator == null)
         {
             return false;
         }
 
+        bool hasLoadedPickupBlock = terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out pickupBlock) && pickupBlock != null;
         Vector3 conveyorReferenceWorldPosition = GetPickupReferencePosition(pickupBlock, pickupCoordinate);
         float bestDistanceSqr = float.MaxValue;
 
-        if (pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out Vector3 candidateWorldPosition))
+        if (hasLoadedPickupBlock
+            && pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out Vector3 candidateWorldPosition))
         {
             TryChoosePickupSource(RobotArmPickupSource.Floor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
-        if (TryGetBoxObject(pickupBlock, out BoxObject candidateBoxObject))
+        if (hasLoadedPickupBlock && TryGetBoxObject(pickupBlock, out BoxObject candidateBoxObject))
         {
             boxObject = candidateBoxObject;
             if (candidateBoxObject.TryGetContainedObjectTopItemId(out int containedItemId)
@@ -1390,7 +1401,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             }
         }
 
-        if (TryGetFreightCarObject(pickupBlock, pickupCoordinate, out FreightCar candidateFreightCar))
+        if (hasLoadedPickupBlock && TryGetFreightCarObject(pickupBlock, pickupCoordinate, out FreightCar candidateFreightCar))
         {
             freightCar = candidateFreightCar;
             if (candidateFreightCar.TryGetTopItem(referenceWorldPosition, AcceptsPickupItem, out _, out candidateWorldPosition))
@@ -1411,14 +1422,27 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
-        int inputAreaItemId = pickupBlock.GetInputAreaCenterItemId();
-        if (AcceptsPickupItem(inputAreaItemId)
-            && pickupBlock.TryGetInputAreaCenterTopWorldPosition(-1, out candidateWorldPosition))
+        if (hasLoadedPickupBlock)
         {
-            TryChoosePickupSource(RobotArmPickupSource.InputArea, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
+            int inputAreaItemId = pickupBlock.GetInputAreaCenterItemId();
+            if (AcceptsPickupItem(inputAreaItemId)
+                && pickupBlock.TryGetInputAreaCenterTopWorldPosition(-1, out candidateWorldPosition))
+            {
+                TryChoosePickupSource(RobotArmPickupSource.InputArea, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
+            }
         }
 
-        if (pickupSource == RobotArmPickupSource.Conveyor)
+        TryResolveSavedPickupCandidate(
+            terrainGenerator,
+            pickupCoordinate,
+            hasLoadedPickupBlock,
+            conveyorReferenceWorldPosition,
+            ref pickupSource,
+            ref bestDistanceSqr,
+            ref pickupWorldPosition);
+
+        if (pickupSource == RobotArmPickupSource.Conveyor
+            || pickupSource == RobotArmPickupSource.SavedConveyor)
         {
             referenceWorldPosition = conveyorReferenceWorldPosition;
         }
@@ -1474,6 +1498,95 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         }
 
         return conveyorPickupBlock != null;
+    }
+
+    private void TryResolveSavedPickupCandidate(
+        TerrainGenerator terrainGenerator,
+        Vector2Int pickupCoordinate,
+        bool hasLoadedPickupBlock,
+        Vector3 conveyorReferenceWorldPosition,
+        ref RobotArmPickupSource pickupSource,
+        ref float bestDistanceSqr,
+        ref Vector3 pickupWorldPosition)
+    {
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        if (stateStore == null)
+        {
+            return;
+        }
+
+        Vector3 referenceWorldPosition = GetHandWorldPosition();
+        Vector3 savedWorldPosition = GetSavedCoordinateWorldPosition(pickupCoordinate);
+
+        if (ShouldUseSavedFloorAreaCoordinate(terrainGenerator, pickupCoordinate, hasLoadedPickupBlock))
+        {
+            if (stateStore.TryPeekSavedFloorItem(pickupCoordinate, AcceptsPickupItem, out _))
+            {
+                TryChoosePickupSource(
+                    RobotArmPickupSource.SavedFloor,
+                    savedWorldPosition,
+                    referenceWorldPosition,
+                    ref pickupSource,
+                    ref bestDistanceSqr,
+                    ref pickupWorldPosition);
+            }
+
+            if (stateStore.TryPeekSavedCenterTopItem(pickupCoordinate, AcceptsPickupItem, out _))
+            {
+                TryChoosePickupSource(
+                    RobotArmPickupSource.SavedInputArea,
+                    savedWorldPosition,
+                    referenceWorldPosition,
+                    ref pickupSource,
+                    ref bestDistanceSqr,
+                    ref pickupWorldPosition);
+            }
+        }
+
+        if (ShouldUseSavedConveyorCoordinate(terrainGenerator, pickupCoordinate, hasLoadedPickupBlock)
+            && stateStore.TryPeekSavedConveyorItem(
+                pickupCoordinate,
+                AcceptsPickupItem,
+                conveyorReferenceWorldPosition,
+                out _,
+                out Vector3 conveyorWorldPosition))
+        {
+            TryChoosePickupSource(
+                RobotArmPickupSource.SavedConveyor,
+                conveyorWorldPosition,
+                referenceWorldPosition,
+                ref pickupSource,
+                ref bestDistanceSqr,
+                ref pickupWorldPosition);
+        }
+    }
+
+    private bool TryTakeSavedFloorItem(Vector2Int pickupCoordinate, out int pickedItemId)
+    {
+        pickedItemId = -1;
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        return stateStore != null
+               && stateStore.TryTakeSavedFloorItem(pickupCoordinate, AcceptsPickupItem, out pickedItemId);
+    }
+
+    private bool TryTakeSavedConveyorItem(Vector2Int pickupCoordinate, Vector3 referenceWorldPosition, out int pickedItemId)
+    {
+        pickedItemId = -1;
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        return stateStore != null
+               && stateStore.TryTakeSavedConveyorItem(
+                   pickupCoordinate,
+                   AcceptsPickupItem,
+                   referenceWorldPosition,
+                   out pickedItemId);
+    }
+
+    private bool TryTakeSavedInputAreaItem(Vector2Int pickupCoordinate, out int pickedItemId)
+    {
+        pickedItemId = -1;
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        return stateStore != null
+               && stateStore.TryTakeSavedCenterTopItem(pickupCoordinate, AcceptsPickupItem, out pickedItemId);
     }
 
     private static void TryChoosePickupSource(
@@ -1577,12 +1690,27 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool TryPlaceHeldItem()
     {
-        if (heldItemId < 0 || !TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
+        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
         {
             return false;
         }
 
         int itemId = heldItemId;
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        Block dropBlock = null;
+        bool hasLoadedDropBlock = terrainGenerator != null
+                                  && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
+                                  && dropBlock != null;
+        if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, hasLoadedDropBlock))
+        {
+            return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, itemId, true);
+        }
+
+        if (!hasLoadedDropBlock)
+        {
+            return false;
+        }
+
         Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
         Vector3 dropStartWorldPosition = GetHandRestWorldPosition();
         if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
@@ -1635,7 +1763,22 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
     private bool CanPlaceHeldItem()
     {
-        if (heldItemId < 0 || !TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
+        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        Block dropBlock = null;
+        bool hasLoadedDropBlock = terrainGenerator != null
+                                  && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
+                                  && dropBlock != null;
+        if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, hasLoadedDropBlock))
+        {
+            return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, heldItemId, false);
+        }
+
+        if (!hasLoadedDropBlock)
         {
             return false;
         }
@@ -1671,6 +1814,44 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         return CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
                && dropBlock.CanAddInputAreaCenterObjects(1, itemId);
+    }
+
+    private bool TryPlaceHeldItemInSavedCoordinate(Vector2Int dropCoordinate, int itemId, bool mutate)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        if (stateStore == null)
+        {
+            return false;
+        }
+
+        Vector3 referenceWorldPosition = GetSavedCoordinateWorldPosition(dropCoordinate);
+        if (mutate)
+        {
+            if (stateStore.TryAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition))
+            {
+                return true;
+            }
+        }
+        else if (stateStore.CanAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition))
+        {
+            return true;
+        }
+
+        if (!CanPlaceSavedSingleLineDrop(stateStore, dropCoordinate)
+            || !InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(dropCoordinate, itemId))
+        {
+            return false;
+        }
+
+        int capacity = ResolveSavedCenterCapacity(stateStore, dropCoordinate, 10);
+        return mutate
+            ? stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity)
+            : stateStore.CanAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
     }
 
     private bool TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock)
@@ -1791,6 +1972,47 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return cachedTerrainGenerator;
     }
 
+    private BlockStateStore ResolveBlockStateStore()
+    {
+        if (cachedBlockStateStore != null)
+        {
+            return cachedBlockStateStore;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        cachedBlockStateStore = terrainGenerator != null ? terrainGenerator.GetComponent<BlockStateStore>() : null;
+        return cachedBlockStateStore;
+    }
+
+    private static bool ShouldUseSavedFloorAreaCoordinate(
+        TerrainGenerator terrainGenerator,
+        Vector2Int coordinate,
+        bool hasLoadedBlock)
+    {
+        return !hasLoadedBlock
+               || (terrainGenerator != null && terrainGenerator.IsFloorObjectCoordinateVirtualized(coordinate));
+    }
+
+    private static bool ShouldUseSavedConveyorCoordinate(
+        TerrainGenerator terrainGenerator,
+        Vector2Int coordinate,
+        bool hasLoadedBlock)
+    {
+        return !hasLoadedBlock
+               || (terrainGenerator != null && terrainGenerator.IsConveyorItemCoordinateVirtualized(coordinate));
+    }
+
+    private static bool ShouldUseSavedDropCoordinate(
+        TerrainGenerator terrainGenerator,
+        Vector2Int coordinate,
+        bool hasLoadedBlock)
+    {
+        return !hasLoadedBlock
+               || (terrainGenerator != null
+                   && (terrainGenerator.IsConveyorItemCoordinateVirtualized(coordinate)
+                       || terrainGenerator.IsFloorObjectCoordinateVirtualized(coordinate)));
+    }
+
     private static Vector3 GetPickupReferencePosition(Block pickupBlock, Vector2Int pickupCoordinate)
     {
         if (pickupBlock != null)
@@ -1811,6 +2033,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return GetPickupReferencePosition(dropBlock, dropCoordinate);
     }
 
+    private static Vector3 GetSavedCoordinateWorldPosition(Vector2Int coordinate)
+    {
+        return new Vector3(coordinate.x, 0.2f, coordinate.y);
+    }
+
     private static bool CoordinateAcceptsInputAreaObject(Vector2Int coordinate)
     {
         return InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
@@ -1827,6 +2054,33 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return CoordinateAcceptsInputAreaObject(coordinate)
                || dropBlock.MapObject == null
                || IsOreMapObject(dropBlock.MapObject);
+    }
+
+    private static bool CanPlaceSavedSingleLineDrop(BlockStateStore stateStore, Vector2Int coordinate)
+    {
+        return CoordinateAcceptsInputAreaObject(coordinate)
+               || stateStore == null
+               || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out _);
+    }
+
+    private static int ResolveSavedCenterCapacity(BlockStateStore stateStore, Vector2Int coordinate, int defaultCapacity)
+    {
+        if (stateStore == null
+            || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
+            || !stateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState))
+        {
+            return Mathf.Max(1, defaultCapacity);
+        }
+
+        ItemDefinition installedDefinition = InputOutputModule.ResolveItemDefinition(installationState.itemId);
+        if (installedDefinition == null
+            || !(installedDefinition.mapObject is InstallationObject installationObject)
+            || (installationObject.MapFilter & InstallationMapFilter.ItemArea) == 0)
+        {
+            return Mathf.Max(1, defaultCapacity);
+        }
+
+        return installedDefinition.capacity > 0 ? installedDefinition.capacity : Mathf.Max(1, defaultCapacity);
     }
 
     private static bool HasBlockingDropMapObject(Block dropBlock)

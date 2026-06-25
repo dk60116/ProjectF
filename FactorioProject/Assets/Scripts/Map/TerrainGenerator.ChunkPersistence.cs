@@ -318,6 +318,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     }
 
                     virtualizedFloorObjectCoordinates.Remove(block.Coordinate);
+                    virtualizedConveyorItemCoordinates.Remove(block.Coordinate);
                 }
             }
 
@@ -1394,6 +1395,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 {
                     loadedBlocks[block.Coordinate] = block;
                     EnqueueFloorObjectVirtualizationCoordinate(block.Coordinate);
+                    EnqueueConveyorItemResidencyCoordinate(block.Coordinate);
                 }
             }
 

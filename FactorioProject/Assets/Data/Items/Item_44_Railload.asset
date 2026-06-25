@@ -17,7 +17,7 @@ MonoBehaviour:
   mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
-  icon: {fileID: 21300000, guid: 9752cfc4014843b41be1065fbf6c05ab, type: 3}
+  icon: {fileID: 21300000, guid: 752ba3d8beb147145985e69296991c6c, type: 3}
   interactionButtonList: []
   size: 0
   itemFilter: 0

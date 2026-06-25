@@ -287,7 +287,7 @@ public class RailHandcar : Train
             1f);
     }
 
-    private struct RailSample
+    protected struct RailSample
     {
         public Railload Rail;
         public float DistanceAlongPath;
@@ -443,7 +443,7 @@ public class RailHandcar : Train
         float signedSpeed = UpdateVehicleSignedSpeed(inputAxis, deltaTime, effectiveMaxSpeed);
         if (Mathf.Abs(signedSpeed) <= 0.0001f)
         {
-            if (!hasInput && TryApplyStationDocking(currentSample, currentFacing, deltaTime))
+            if (!hasInput && TryApplyIdleDocking(currentSample, currentFacing, deltaTime))
             {
                 return;
             }
@@ -457,7 +457,7 @@ public class RailHandcar : Train
                            * Mathf.Max(0f, deltaTime);
         if (Mathf.Abs(signedStep) <= 0.0001f)
         {
-            if (!hasInput && TryApplyStationDocking(currentSample, currentFacing, deltaTime))
+            if (!hasInput && TryApplyIdleDocking(currentSample, currentFacing, deltaTime))
             {
                 return;
             }
@@ -482,6 +482,27 @@ public class RailHandcar : Train
         }
     }
 
+    private bool TryApplyIdleDocking(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        float deltaTime)
+    {
+        if (TryApplyStationDocking(currentSample, currentFacing, deltaTime))
+        {
+            return true;
+        }
+
+        return TryApplyCustomIdleDocking(currentSample, currentFacing, deltaTime);
+    }
+
+    protected virtual bool TryApplyCustomIdleDocking(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        float deltaTime)
+    {
+        return false;
+    }
+
     private bool TryApplyStationDocking(
         RailSample currentSample,
         Vector2 currentFacing,
@@ -497,8 +518,23 @@ public class RailHandcar : Train
             return false;
         }
 
+        return TryApplyDockingToSample(
+            currentSample,
+            currentFacing,
+            dockSample,
+            signedPathDelta,
+            deltaTime);
+    }
+
+    protected bool TryApplyDockingToSample(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        RailSample dockSample,
+        float signedPathDelta,
+        float deltaTime)
+    {
         float remainingDistance = Mathf.Abs(signedPathDelta);
-        if (remainingDistance <= Mathf.Max(0.001f, stationDockCompleteDistance))
+        if (remainingDistance <= ResolveDockCompleteDistance())
         {
             ApplyRailPose(dockSample, currentFacing, deltaTime, true);
             return true;
@@ -542,6 +578,31 @@ public class RailHandcar : Train
 
         lastRailTravelDirection = previousLastRailTravelDirection;
         return false;
+    }
+
+    protected float ResolveDockSearchRadius()
+    {
+        return Mathf.Max(0.05f, stationDockSearchRadius);
+    }
+
+    protected float ResolveDockCaptureDistance()
+    {
+        return Mathf.Max(
+            Mathf.Max(0.05f, stationDockCaptureDistance),
+            ResolveDockCompleteDistance());
+    }
+
+    protected float ResolveDockCompleteDistance()
+    {
+        return Mathf.Max(0.001f, stationDockCompleteDistance);
+    }
+
+    protected bool TryFindRailDockSampleAtCoordinate(
+        Vector2Int railCoordinate,
+        Railload currentRail,
+        out RailSample dockSample)
+    {
+        return TryFindStationRailDockSample(railCoordinate, currentRail, out dockSample);
     }
 
     private bool TryFindStationDockSample(

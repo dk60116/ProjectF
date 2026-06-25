@@ -163,7 +163,7 @@ public class MiningMachine : InputOutputModule
             return false;
         }
 
-        if (!TryResolveOutputBlock(ActiveOutputItemId, ActiveOutputCount, out Block outputBlock) || outputBlock == null)
+        if (!CanResolveOutputTarget(ActiveOutputItemId, ActiveOutputCount))
         {
             return false;
         }
@@ -195,7 +195,7 @@ public class MiningMachine : InputOutputModule
             return false;
         }
 
-        if (!TryEmitOutputItemsToBlock(outputBlock, harvestedItemId, harvestedCount, startWorldPosition))
+        if (!TryEmitOutputItems(harvestedItemId, harvestedCount, startWorldPosition))
         {
             ClearActiveMiningResourceSelection();
             ClearActiveCraft();
@@ -323,7 +323,7 @@ public class MiningMachine : InputOutputModule
                 continue;
             }
 
-            if (requireOutputBlock && !TryResolveOutputBlock(candidateOutputItemId, candidateOutputCount, out _))
+            if (requireOutputBlock && !CanResolveOutputTarget(candidateOutputItemId, candidateOutputCount))
             {
                 continue;
             }
