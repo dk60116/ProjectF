@@ -14,12 +14,13 @@ public partial class TerrainGenerator
         List<BlockStateStore.InstallationSaveState> states = resourceStateStore != null
             ? resourceStateStore.GetInstallationStatesSnapshot()
             : new List<BlockStateStore.InstallationSaveState>();
-        HashSet<string> usedNames = CollectUsedTrainStationNames(states, station);
+        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
+        HashSet<string> usedNames = CollectUsedTrainStationNames(states, liveStations, station);
 
         string normalizedName = string.IsNullOrWhiteSpace(requestedName) ? string.Empty : requestedName.Trim();
         if (string.IsNullOrWhiteSpace(normalizedName))
         {
-            return GenerateAutomaticTrainStationName(station, states, usedNames);
+            return GenerateAutomaticTrainStationName(station, states, liveStations, usedNames);
         }
 
         if (!usedNames.Contains(normalizedName))
@@ -54,6 +55,72 @@ public partial class TerrainGenerator
         return normalizedName;
     }
 
+    public void CollectTrainStationNamesOnSameRailLine(Train train, List<string> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        if (train == null)
+        {
+            return;
+        }
+
+        EnsureResourceStateStore();
+        List<BlockStateStore.InstallationSaveState> states = resourceStateStore != null
+            ? resourceStateStore.GetInstallationStatesSnapshot()
+            : new List<BlockStateStore.InstallationSaveState>();
+        TrainStationRailNetwork railNetwork = BuildTrainStationRailNetwork(states);
+        int targetComponent = FindTrainRailComponent(train, railNetwork);
+        if (targetComponent < 0)
+        {
+            return;
+        }
+
+        HashSet<string> addedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
+        for (int i = 0; i < liveStations.Length; i++)
+        {
+            Trainstation station = liveStations[i];
+            if (station == null
+                || FindStationRailComponent(station, railNetwork) != targetComponent)
+            {
+                continue;
+            }
+
+            if (!station.HasAssignedStationName)
+            {
+                EnsureTrainStationNameAssigned(station);
+            }
+
+            string stationName = station.StationName;
+            if (string.IsNullOrWhiteSpace(stationName) || !addedNames.Add(stationName))
+            {
+                continue;
+            }
+
+            results.Add(stationName);
+        }
+
+        for (int i = 0; i < states.Count; i++)
+        {
+            BlockStateStore.InstallationSaveState state = states[i];
+            if (!IsTrainStationState(state)
+                || string.IsNullOrWhiteSpace(state.stationName)
+                || FindStationRailComponent(state, railNetwork) != targetComponent
+                || !addedNames.Add(state.stationName.Trim()))
+            {
+                continue;
+            }
+
+            results.Add(state.stationName.Trim());
+        }
+
+        results.Sort(System.StringComparer.OrdinalIgnoreCase);
+    }
+
     private void EnsureTrainStationNameAssigned(Trainstation station)
     {
         if (station == null)
@@ -61,19 +128,57 @@ public partial class TerrainGenerator
             return;
         }
 
-        string requestedName = station.HasAssignedStationName ? station.StoredStationName : string.Empty;
+        string requestedName = station.HasAssignedStationName && !IsAutomaticStationName(station.StoredStationName)
+            ? station.StoredStationName
+            : string.Empty;
         station.ApplyStationName(ResolveUniqueTrainStationName(station, requestedName));
+    }
+
+    private void RefreshAutomaticTrainStationNames()
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
+        for (int i = 0; i < liveStations.Length; i++)
+        {
+            Trainstation station = liveStations[i];
+            if (station == null)
+            {
+                continue;
+            }
+
+            bool shouldAutoAssign = !station.HasAssignedStationName || IsAutomaticStationName(station.StoredStationName);
+            if (!shouldAutoAssign)
+            {
+                continue;
+            }
+
+            string resolvedName = ResolveUniqueTrainStationName(station, string.Empty);
+            if (string.Equals(station.StoredStationName, resolvedName, System.StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            station.ApplyStationName(resolvedName);
+            resourceStateStore.SaveInstallation(station);
+            resourceStateStore.RegisterLiveInstallation(station);
+        }
     }
 
     private string GenerateAutomaticTrainStationName(
         Trainstation station,
         List<BlockStateStore.InstallationSaveState> states,
+        IReadOnlyList<Trainstation> liveStations,
         HashSet<string> usedNames)
     {
         TrainStationRailNetwork railNetwork = BuildTrainStationRailNetwork(states);
         int targetComponent = FindStationRailComponent(station, railNetwork);
-        string label = ResolveTrainStationRailSetLabel(targetComponent, states, railNetwork, station);
-        HashSet<int> usedNumbers = CollectUsedTrainStationNumbers(label, targetComponent, states, railNetwork, station);
+        string label = ResolveTrainStationRailSetLabel(targetComponent, states, liveStations, railNetwork, station);
+        HashSet<int> usedNumbers = CollectUsedTrainStationNumbers(label, targetComponent, states, liveStations, railNetwork, station);
 
         for (int number = 1; number < int.MaxValue; number++)
         {
@@ -90,6 +195,7 @@ public partial class TerrainGenerator
     private string ResolveTrainStationRailSetLabel(
         int targetComponent,
         List<BlockStateStore.InstallationSaveState> states,
+        IReadOnlyList<Trainstation> liveStations,
         TrainStationRailNetwork railNetwork,
         Trainstation excludedStation)
     {
@@ -108,6 +214,26 @@ public partial class TerrainGenerator
 
             usedLabels.Add(label);
             int stationComponent = FindStationRailComponent(state, railNetwork);
+            if (stationComponent == targetComponent
+                && (componentLabel == null || string.CompareOrdinal(label, componentLabel) < 0))
+            {
+                componentLabel = label;
+            }
+        }
+
+        for (int i = 0; i < liveStations.Count; i++)
+        {
+            Trainstation liveStation = liveStations[i];
+            if (liveStation == null
+                || liveStation == excludedStation
+                || !liveStation.HasAssignedStationName
+                || !TryParseAutomaticStationName(liveStation.StoredStationName, out string label, out _))
+            {
+                continue;
+            }
+
+            usedLabels.Add(label);
+            int stationComponent = FindStationRailComponent(liveStation, railNetwork);
             if (stationComponent == targetComponent
                 && (componentLabel == null || string.CompareOrdinal(label, componentLabel) < 0))
             {
@@ -136,6 +262,7 @@ public partial class TerrainGenerator
         string targetLabel,
         int targetComponent,
         List<BlockStateStore.InstallationSaveState> states,
+        IReadOnlyList<Trainstation> liveStations,
         TrainStationRailNetwork railNetwork,
         Trainstation excludedStation)
     {
@@ -155,11 +282,28 @@ public partial class TerrainGenerator
             usedNumbers.Add(number);
         }
 
+        for (int i = 0; i < liveStations.Count; i++)
+        {
+            Trainstation liveStation = liveStations[i];
+            if (liveStation == null
+                || liveStation == excludedStation
+                || !liveStation.HasAssignedStationName
+                || !TryParseAutomaticStationName(liveStation.StoredStationName, out string label, out int number)
+                || !string.Equals(label, targetLabel, System.StringComparison.OrdinalIgnoreCase)
+                || FindStationRailComponent(liveStation, railNetwork) != targetComponent)
+            {
+                continue;
+            }
+
+            usedNumbers.Add(number);
+        }
+
         return usedNumbers;
     }
 
     private HashSet<string> CollectUsedTrainStationNames(
         List<BlockStateStore.InstallationSaveState> states,
+        IReadOnlyList<Trainstation> liveStations,
         Trainstation excludedStation)
     {
         HashSet<string> usedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
@@ -176,8 +320,7 @@ public partial class TerrainGenerator
             usedNames.Add(state.stationName.Trim());
         }
 
-        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
-        for (int i = 0; i < liveStations.Length; i++)
+        for (int i = 0; i < liveStations.Count; i++)
         {
             Trainstation liveStation = liveStations[i];
             if (liveStation == null
@@ -197,6 +340,17 @@ public partial class TerrainGenerator
         List<BlockStateStore.InstallationSaveState> states)
     {
         TrainStationRailNetwork railNetwork = new TrainStationRailNetwork();
+        Railload[] liveRails = FindObjectsOfType<Railload>(false);
+        for (int i = 0; i < liveRails.Length; i++)
+        {
+            if (!TryBuildRailSegment(liveRails[i], out TrainStationRailSegment segment))
+            {
+                continue;
+            }
+
+            railNetwork.Segments.Add(segment);
+        }
+
         for (int i = 0; i < states.Count; i++)
         {
             BlockStateStore.InstallationSaveState state = states[i];
@@ -213,6 +367,37 @@ public partial class TerrainGenerator
     }
 
     private static bool TryBuildRailSegment(
+        Railload rail,
+        out TrainStationRailSegment segment)
+    {
+        segment = null;
+        if (rail == null
+            || !rail.isActiveAndEnabled
+            || !rail.TryGetPlacementRuntime(out _, out _))
+        {
+            return false;
+        }
+
+        List<Vector2> points = rail.CopyVisualPathPoints();
+        if (points == null || points.Count < 2)
+        {
+            return false;
+        }
+
+        segment = new TrainStationRailSegment
+        {
+            Points = points,
+            OccupiedCoordinates = rail.RuntimeOccupiedCoordinates,
+            ComponentIndex = -1
+        };
+        return RailConnectionUtility.TryResolveConnectionEndpoints(
+            segment.Points,
+            segment.OccupiedCoordinates,
+            out segment.StartPoint,
+            out segment.EndPoint);
+    }
+
+    private static bool TryBuildRailSegment(
         BlockStateStore.InstallationSaveState state,
         out TrainStationRailSegment segment)
     {
@@ -224,18 +409,20 @@ public partial class TerrainGenerator
 
         segment = new TrainStationRailSegment
         {
-            State = state,
             Points = new List<Vector2>(state.railVisualPathPoints),
+            OccupiedCoordinates = state.occupiedCoordinates,
             ComponentIndex = -1
         };
-        segment.StartPoint = segment.Points[0];
-        segment.EndPoint = segment.Points[segment.Points.Count - 1];
-        return true;
+        return RailConnectionUtility.TryResolveConnectionEndpoints(
+            segment.Points,
+            segment.OccupiedCoordinates,
+            out segment.StartPoint,
+            out segment.EndPoint);
     }
 
     private static void AssignRailComponents(TrainStationRailNetwork railNetwork)
     {
-        float maxSqrDistance = Railload.ConnectionEndpointSnapMaxDistance * Railload.ConnectionEndpointSnapMaxDistance;
+        float maxSqrDistance = RailLineDebugRenderer.RailGroupConnectionDistance * RailLineDebugRenderer.RailGroupConnectionDistance;
         Queue<int> queue = new Queue<int>();
         int componentIndex = 0;
 
@@ -274,24 +461,18 @@ public partial class TerrainGenerator
         TrainStationRailSegment right,
         float maxSqrDistance)
     {
-        return IsEndpointNearRailSegment(left.StartPoint, right, maxSqrDistance)
-               || IsEndpointNearRailSegment(left.EndPoint, right, maxSqrDistance)
-               || IsEndpointNearRailSegment(right.StartPoint, left, maxSqrDistance)
-               || IsEndpointNearRailSegment(right.EndPoint, left, maxSqrDistance);
-    }
-
-    private static bool IsEndpointNearRailSegment(
-        Vector2 endpoint,
-        TrainStationRailSegment railSegment,
-        float maxSqrDistance)
-    {
-        if ((endpoint - railSegment.StartPoint).sqrMagnitude <= maxSqrDistance
-            || (endpoint - railSegment.EndPoint).sqrMagnitude <= maxSqrDistance)
-        {
-            return true;
-        }
-
-        return GetPolylineSqrDistance(endpoint, railSegment.Points) <= maxSqrDistance;
+        return left != null
+               && right != null
+               && RailConnectionUtility.AreConnected(
+                   left.OccupiedCoordinates,
+                   left.Points,
+                   left.StartPoint,
+                   left.EndPoint,
+                   right.OccupiedCoordinates,
+                   right.Points,
+                   right.StartPoint,
+                   right.EndPoint,
+                   maxSqrDistance);
     }
 
     private static int FindStationRailComponent(
@@ -318,6 +499,31 @@ public partial class TerrainGenerator
         return FindRailComponentAtCoordinate(railCoordinate, railNetwork);
     }
 
+    private static int FindTrainRailComponent(
+        Train train,
+        TrainStationRailNetwork railNetwork)
+    {
+        if (train == null
+            || !train.TryGetCurrentRailPose(out Railload rail, out _, out Vector2 pathPoint, out _))
+        {
+            return -1;
+        }
+
+        if (rail != null && rail.RuntimeOccupiedCoordinates != null)
+        {
+            for (int i = 0; i < rail.RuntimeOccupiedCoordinates.Count; i++)
+            {
+                int component = FindRailComponentAtCoordinate(rail.RuntimeOccupiedCoordinates[i], railNetwork);
+                if (component >= 0)
+                {
+                    return component;
+                }
+            }
+        }
+
+        return FindRailComponentAtPoint(pathPoint, railNetwork);
+    }
+
     private static int FindRailComponentAtCoordinate(
         Vector2Int railCoordinate,
         TrainStationRailNetwork railNetwork)
@@ -325,13 +531,19 @@ public partial class TerrainGenerator
         for (int i = 0; i < railNetwork.Segments.Count; i++)
         {
             TrainStationRailSegment segment = railNetwork.Segments[i];
-            if (StateContainsCoordinate(segment.State, railCoordinate))
+            if (SegmentContainsCoordinate(segment, railCoordinate))
             {
                 return segment.ComponentIndex;
             }
         }
 
-        Vector2 railPoint = new Vector2(railCoordinate.x, railCoordinate.y);
+        return FindRailComponentAtPoint(new Vector2(railCoordinate.x, railCoordinate.y), railNetwork);
+    }
+
+    private static int FindRailComponentAtPoint(
+        Vector2 railPoint,
+        TrainStationRailNetwork railNetwork)
+    {
         float bestSqrDistance = TrainStationRailCoordinateSnapDistance * TrainStationRailCoordinateSnapDistance;
         int bestComponent = -1;
         for (int i = 0; i < railNetwork.Segments.Count; i++)
@@ -408,7 +620,7 @@ public partial class TerrainGenerator
     {
         for (int i = 0; i < railNetwork.Segments.Count; i++)
         {
-            if (StateContainsCoordinate(railNetwork.Segments[i].State, coordinate))
+            if (SegmentContainsCoordinate(railNetwork.Segments[i], coordinate))
             {
                 return true;
             }
@@ -417,18 +629,18 @@ public partial class TerrainGenerator
         return false;
     }
 
-    private static bool StateContainsCoordinate(
-        BlockStateStore.InstallationSaveState state,
+    private static bool SegmentContainsCoordinate(
+        TrainStationRailSegment segment,
         Vector2Int coordinate)
     {
-        if (state?.occupiedCoordinates == null)
+        if (segment?.OccupiedCoordinates == null)
         {
             return false;
         }
 
-        for (int i = 0; i < state.occupiedCoordinates.Count; i++)
+        for (int i = 0; i < segment.OccupiedCoordinates.Count; i++)
         {
-            if (state.occupiedCoordinates[i] == coordinate)
+            if (segment.OccupiedCoordinates[i] == coordinate)
             {
                 return true;
             }
@@ -548,6 +760,11 @@ public partial class TerrainGenerator
         return number > 0;
     }
 
+    private static bool IsAutomaticStationName(string name)
+    {
+        return TryParseAutomaticStationName(name, out _, out _);
+    }
+
     private static string FormatAutomaticStationName(string label, int number)
     {
         return $"Station {label.ToUpperInvariant()} - {Mathf.Max(1, number)}";
@@ -575,8 +792,8 @@ public partial class TerrainGenerator
 
     private sealed class TrainStationRailSegment
     {
-        public BlockStateStore.InstallationSaveState State;
         public List<Vector2> Points;
+        public IReadOnlyList<Vector2Int> OccupiedCoordinates;
         public Vector2 StartPoint;
         public Vector2 EndPoint;
         public int ComponentIndex;

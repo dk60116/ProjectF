@@ -153,6 +153,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is Trainstation trainstation)
+        {
+            ShowTrainstationInfo(trainstation, underlyingResource);
+            return;
+        }
+
         if (mapObject is InputOutputModule inputOutputModule)
         {
             ShowInputOutputModuleInfo(inputOutputModule, underlyingResource);
@@ -399,6 +405,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowRailHandcar(railHandcar, underlyingResource);
+    }
+
+    private void ShowTrainstationInfo(Trainstation trainstation, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowTrainstation(trainstation, underlyingResource);
     }
 
     private void ShowInputOutputModuleInfo(InputOutputModule inputOutputModule, Resource underlyingResource)

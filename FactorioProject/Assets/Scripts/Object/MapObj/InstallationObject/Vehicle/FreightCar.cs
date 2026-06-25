@@ -50,7 +50,8 @@ public class FreightCar : Train
         Vector2 railPoint,
         Vector2 facingTangent,
         float deltaTime,
-        bool smoothRotation)
+        bool smoothRotation,
+        bool preserveSuppliedFacing = false)
     {
         if (rail == null || facingTangent.sqrMagnitude <= 0.0001f)
         {
@@ -58,7 +59,9 @@ public class FreightCar : Train
         }
 
         facingTangent.Normalize();
-        Vector2 visualFacingTangent = ResolveVisualFacingTangent(facingTangent);
+        Vector2 visualFacingTangent = preserveSuppliedFacing
+            ? facingTangent
+            : ResolveVisualFacingTangent(facingTangent);
         Quaternion targetRotation = Quaternion.LookRotation(
             new Vector3(visualFacingTangent.x, 0f, visualFacingTangent.y),
             Vector3.up);

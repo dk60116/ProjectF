@@ -803,6 +803,10 @@ public partial class TerrainGenerator : MonoBehaviour
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
         WakeRobotArmsAroundInstallation(installationObject);
+        if (installationObject is Trainstation || installationObject is Railload)
+        {
+            RefreshAutomaticTrainStationNames();
+        }
     }
 
     public InstallationObject CreateInstallationObject(MapObject sourcePrefab, Transform parent = null)
@@ -863,6 +867,10 @@ public partial class TerrainGenerator : MonoBehaviour
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
         WakeRobotArmsAroundInstallation(installationObject);
+        if (installationObject is Trainstation || installationObject is Railload)
+        {
+            RefreshAutomaticTrainStationNames();
+        }
     }
 
     private static void WakeRobotArmsAroundInstallation(InstallationObject installationObject)

@@ -228,12 +228,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
 
         if (heldItemId >= 0)
         {
-            if (!TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock))
+            if (!TryResolveDropCoordinate(out _))
             {
                 return "No output area";
             }
 
-            if (!CanPlaceHeldItem(dropBlock, dropCoordinate))
+            if (!CanPlaceHeldItem())
             {
                 return "Output full";
             }
@@ -254,13 +254,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
             return "Working";
         }
 
-        if (!TryResolvePickupCoordinate(out Vector2Int pickupCoordinate))
-        {
-            return "No input area";
-        }
-
-        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        if (terrainGenerator == null || !terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out Block pickupBlock) || pickupBlock == null)
+        if (!TryResolvePickupCoordinate(out _))
         {
             return "No input area";
         }
@@ -1852,20 +1846,6 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
         return mutate
             ? stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity)
             : stateStore.CanAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
-    }
-
-    private bool TryResolveLoadedDropBlock(out Vector2Int dropCoordinate, out Block dropBlock)
-    {
-        dropBlock = null;
-        if (!TryResolveDropCoordinate(out dropCoordinate))
-        {
-            return false;
-        }
-
-        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        return terrainGenerator != null
-               && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
-               && dropBlock != null;
     }
 
     private bool TryResolvePickupCoordinate(out Vector2Int pickupCoordinate)

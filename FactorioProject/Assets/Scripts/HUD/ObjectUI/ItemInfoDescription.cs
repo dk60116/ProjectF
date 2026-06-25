@@ -221,6 +221,14 @@ public class ItemInfoDescription : MonoBehaviour
         SetFluidStorageDefaultItemSlot(0, installationObject);
     }
 
+    public void ShowTrainstation(Trainstation trainStation, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        string stationName = trainStation != null ? trainStation.StationName : string.Empty;
+        SetDefaultText(defaultStatusLineIndex, $"Station: {stationName}", !string.IsNullOrWhiteSpace(stationName));
+        SetDefaultSign(defaultStatusLineIndex, false, Color.white);
+    }
+
     public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)
     {
         MiningMachine miningMachine = module as MiningMachine;

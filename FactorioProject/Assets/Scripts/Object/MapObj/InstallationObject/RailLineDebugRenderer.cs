@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 public sealed class RailLineDebugRenderer : MonoBehaviour
 {
-    private const float DefaultConnectionDistance = 0.22f;
+    public const float RailGroupConnectionDistance = RailConnectionUtility.ConnectionDistance;
     private const float DefaultSampleSpacing = 0.2f;
     private const float DefaultLineWidth = 0.035f;
     private const float DefaultLineYOffset = 0.18f;
@@ -30,7 +30,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private static readonly Color BlockedCartDirectionColor = Color.black;
 
     [SerializeField, Min(0.01f)]
-    private float connectionDistance = DefaultConnectionDistance;
+    private float connectionDistance = RailGroupConnectionDistance;
     [SerializeField, Min(0.05f)]
     private float sampleSpacing = DefaultSampleSpacing;
     [SerializeField, Min(0.005f)]
@@ -149,7 +149,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         int rendererIndex = 0;
         int componentIndex = 0;
-        float maxConnectionSqrDistance = connectionDistance * connectionDistance;
+        float effectiveConnectionDistance = Mathf.Max(connectionDistance, RailGroupConnectionDistance);
+        float maxConnectionSqrDistance = effectiveConnectionDistance * effectiveConnectionDistance;
         for (int railIndex = 0; railIndex < rails.Count; railIndex++)
         {
             RailInfo rail = rails[railIndex];
@@ -200,6 +201,15 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
             int sampleCount = Mathf.Clamp(Mathf.CeilToInt(length / sampleSpacing) + 1, 2, 256);
             RailInfo info = new RailInfo(rail, sampleCount);
+            if (!RailConnectionUtility.TryResolveConnectionEndpoints(
+                    rail.RuntimeVisualPathPoints,
+                    rail.RuntimeOccupiedCoordinates,
+                    out info.ConnectionStartPoint,
+                    out info.ConnectionEndPoint))
+            {
+                continue;
+            }
+
             if (!rail.TryGetRenderedEndpointSample(true, out _, out info.StartPoint, out _)
                 || !rail.TryGetRenderedEndpointSample(false, out _, out info.EndPoint, out _))
             {
@@ -249,27 +259,18 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
     private static bool AreRailsConnected(RailInfo a, RailInfo b, float maxConnectionSqrDistance)
     {
-        return IsEndpointNearRail(a.StartPoint, b, maxConnectionSqrDistance)
-               || IsEndpointNearRail(a.EndPoint, b, maxConnectionSqrDistance)
-               || IsEndpointNearRail(b.StartPoint, a, maxConnectionSqrDistance)
-               || IsEndpointNearRail(b.EndPoint, a, maxConnectionSqrDistance);
-    }
-
-    private static bool IsEndpointNearRail(Vector2 endpoint, RailInfo rail, float maxConnectionSqrDistance)
-    {
-        if ((endpoint - rail.StartPoint).sqrMagnitude <= maxConnectionSqrDistance
-            || (endpoint - rail.EndPoint).sqrMagnitude <= maxConnectionSqrDistance)
-        {
-            return true;
-        }
-
-        return rail.Rail.TryFindNearestRenderedPathSample(
-                   endpoint,
-                   out _,
-                   out _,
-                   out _,
-                   out float sqrDistance)
-               && sqrDistance <= maxConnectionSqrDistance;
+        return a != null
+               && b != null
+               && RailConnectionUtility.AreConnected(
+                   a.Rail != null ? a.Rail.RuntimeOccupiedCoordinates : null,
+                   a.Rail != null ? a.Rail.RuntimeVisualPathPoints : null,
+                   a.ConnectionStartPoint,
+                   a.ConnectionEndPoint,
+                   b.Rail != null ? b.Rail.RuntimeOccupiedCoordinates : null,
+                   b.Rail != null ? b.Rail.RuntimeVisualPathPoints : null,
+                   b.ConnectionStartPoint,
+                   b.ConnectionEndPoint,
+                   maxConnectionSqrDistance);
     }
 
     private void ApplyRailLine(LineRenderer lineRenderer, RailInfo rail, Color color)
@@ -498,6 +499,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         public Railload Rail { get; }
         public Vector2 StartPoint;
         public Vector2 EndPoint;
+        public Vector2 ConnectionStartPoint;
+        public Vector2 ConnectionEndPoint;
         public Vector2[] Points { get; }
         public int ComponentIndex;
     }

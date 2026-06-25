@@ -1644,6 +1644,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
         resourceStateStore.SaveInstallation(installationObject);
         resourceStateStore.RegisterLiveInstallation(installationObject);
+        if (installationObject is Trainstation || installationObject is Railload)
+        {
+            RefreshAutomaticTrainStationNames();
+        }
     }
 
     public TerrainSaveData CaptureTerrainSaveState()
