@@ -24,7 +24,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private const float DefaultPowerMarkerYOffset = 1.35f;
     private const float DefaultPowerMarkerSize = 0.8f;
     private const float DefaultPowerMarkerLineWidth = 0.07f;
-    private const float RouteGraphNodeMergeDistance = 0.12f;
 
     private static readonly Color[] GroupPalette =
     {
@@ -90,7 +89,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private readonly List<RailHandcar> activeHandcarScratch = new List<RailHandcar>(4);
     private readonly Queue<int> componentQueue = new Queue<int>();
     private readonly List<RouteHighlightSegment> routeHighlightSegmentScratch = new List<RouteHighlightSegment>(32);
-    private readonly List<Trainstation> routeStationScratch = new List<Trainstation>(8);
+    private readonly List<SteamTrain.AutoDriveDebugRouteSegment> autoDriveRouteSegmentScratch =
+        new List<SteamTrain.AutoDriveDebugRouteSegment>(32);
 
     private Transform debugRoot;
     private Material lineMaterial;
@@ -98,8 +98,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private bool isDirty = true;
     private float nextCartArrowRefreshTime;
     private int lastRouteSelectionTrainInstanceId;
-    private string lastRouteSelectionTargetA = string.Empty;
-    private string lastRouteSelectionTargetB = string.Empty;
+    private string lastRouteSelectionCurrentTarget = string.Empty;
+    private string lastRouteSelectionNextTarget = string.Empty;
     private int lastRouteSelectionVersion = -1;
 
     public void SetVisible(bool visible)
@@ -178,6 +178,12 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         if (Time.unscaledTime >= nextCartArrowRefreshTime)
         {
+            if (ShouldRefreshSelectedAutoDriveRoute())
+            {
+                Rebuild();
+                return;
+            }
+
             RefreshCartDirectionArrows();
             RefreshAutoDrivePowerSourceMarker();
         }
@@ -426,7 +432,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         if (!TryCollectSelectedRouteSegments(routeHighlightSegmentScratch))
         {
             DisableRouteHighlightRenderers();
-            routeStationScratch.Clear();
             return;
         }
 
@@ -438,7 +443,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         }
 
         DisableRouteHighlightRenderers(rendererIndex);
-        routeStationScratch.Clear();
     }
 
     private bool TryCollectSelectedRouteSegments(List<RouteHighlightSegment> result)
@@ -446,577 +450,55 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         if (result == null
             || !TrainFilter.TryGetActiveRouteSelection(
                 out SteamTrain boundTrain,
-                out string targetAStationName,
-                out string targetBStationName)
+                out _,
+                out _)
             || boundTrain == null
-            || string.IsNullOrWhiteSpace(targetAStationName)
-            || string.IsNullOrWhiteSpace(targetBStationName))
+            || !boundTrain.TryGetAutoDriveDebugRouteSegments(autoDriveRouteSegmentScratch))
         {
             return false;
         }
 
-        routeStationScratch.Clear();
-        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
-        for (int i = 0; i < liveStations.Length; i++)
-        {
-            Trainstation station = liveStations[i];
-            if (station == null || !station.gameObject.activeInHierarchy)
-            {
-                continue;
-            }
-
-            string stationName = station.StationName;
-            if (string.Equals(stationName, targetAStationName, System.StringComparison.OrdinalIgnoreCase)
-                || string.Equals(stationName, targetBStationName, System.StringComparison.OrdinalIgnoreCase))
-            {
-                routeStationScratch.Add(station);
-            }
-        }
-
-        if (!TryFindStationRouteEndpoint(targetAStationName, out RouteEndpoint startEndpoint)
-            || !TryFindStationRouteEndpoint(targetBStationName, out RouteEndpoint endEndpoint))
-        {
-            return false;
-        }
-
-        return TryBuildRouteFromConnectionGraph(startEndpoint, endEndpoint, result);
-    }
-
-    private bool TryFindStationRouteEndpoint(string stationName, out RouteEndpoint endpoint)
-    {
-        endpoint = default;
-        if (string.IsNullOrWhiteSpace(stationName))
-        {
-            return false;
-        }
-
-        float bestSqrDistance = RailGroupConnectionDistance * RailGroupConnectionDistance;
-        bool found = false;
-        for (int i = 0; i < routeStationScratch.Count; i++)
-        {
-            Trainstation station = routeStationScratch[i];
-            if (station == null
-                || !string.Equals(station.StationName, stationName, System.StringComparison.OrdinalIgnoreCase)
-                || !station.TryGetRailCoordinate(out Vector2Int railCoordinate))
-            {
-                continue;
-            }
-
-            Vector2 stationPoint = new Vector2(railCoordinate.x, railCoordinate.y);
-            for (int railInfoIndex = 0; railInfoIndex < rails.Count; railInfoIndex++)
-            {
-                RailInfo rail = rails[railInfoIndex];
-                if (rail == null
-                    || rail.Rail == null
-                    || !rail.Rail.TryFindNearestRenderedPathSample(
-                        stationPoint,
-                        out float distanceAlongPath,
-                        out Vector2 pathPoint,
-                        out _,
-                        out float sqrDistance)
-                    || sqrDistance > bestSqrDistance)
-                {
-                    continue;
-                }
-
-                bestSqrDistance = sqrDistance;
-                endpoint = new RouteEndpoint(railInfoIndex, distanceAlongPath, pathPoint);
-                found = true;
-            }
-        }
-
-        return found;
-    }
-
-    private bool TryBuildRouteFromConnectionGraph(
-        RouteEndpoint startEndpoint,
-        RouteEndpoint endEndpoint,
-        List<RouteHighlightSegment> result)
-    {
         result.Clear();
-
-        List<RouteGraphNode> graphNodes = new List<RouteGraphNode>(Mathf.Max(4, rails.Count + 2));
-        Dictionary<int, List<RouteGraphNodeRef>> railRefsByRail = new Dictionary<int, List<RouteGraphNodeRef>>();
-        int startNodeIndex = GetOrCreateRouteGraphNode(graphNodes, startEndpoint.Point, true, false);
-        AddRouteGraphNodeRef(graphNodes, railRefsByRail, startNodeIndex, startEndpoint.RailIndex, startEndpoint.DistanceAlongPath);
-        int endNodeIndex = GetOrCreateRouteGraphNode(graphNodes, endEndpoint.Point, false, true);
-        AddRouteGraphNodeRef(graphNodes, railRefsByRail, endNodeIndex, endEndpoint.RailIndex, endEndpoint.DistanceAlongPath);
-
-        float effectiveConnectionDistance = Mathf.Max(connectionDistance, RailGroupConnectionDistance);
-        float maxConnectionSqrDistance = effectiveConnectionDistance * effectiveConnectionDistance;
-        for (int leftRailIndex = 0; leftRailIndex < rails.Count; leftRailIndex++)
+        for (int i = 0; i < autoDriveRouteSegmentScratch.Count; i++)
         {
-            for (int rightRailIndex = leftRailIndex + 1; rightRailIndex < rails.Count; rightRailIndex++)
+            SteamTrain.AutoDriveDebugRouteSegment segment = autoDriveRouteSegmentScratch[i];
+            if (segment.Rail == null
+                || !TryFindRailInfoIndex(segment.Rail, out int railIndex))
             {
-                if (!TryResolveRouteConnectionBetweenRails(
-                        leftRailIndex,
-                        rightRailIndex,
-                        maxConnectionSqrDistance,
-                        out RouteConnection connection))
-                {
-                    continue;
-                }
-
-                int nodeIndex = GetOrCreateRouteGraphNode(graphNodes, connection.Point, false, false);
-                AddRouteGraphNodeRef(graphNodes, railRefsByRail, nodeIndex, connection.LeftRailIndex, connection.LeftDistanceAlongPath);
-                AddRouteGraphNodeRef(graphNodes, railRefsByRail, nodeIndex, connection.RightRailIndex, connection.RightDistanceAlongPath);
+                continue;
             }
+
+            AppendRouteHighlightSegment(
+                result,
+                railIndex,
+                segment.StartDistance,
+                segment.EndDistance);
         }
 
-        if (!TryBuildRouteGraphAdjacency(graphNodes.Count, railRefsByRail, out List<RouteGraphEdge>[] adjacency))
-        {
-            return false;
-        }
-
-        return TryFindRouteGraphPath(adjacency, startNodeIndex, endNodeIndex, result);
+        return result.Count > 0;
     }
 
-    private bool TryResolveRouteConnectionBetweenRails(
-        int leftRailIndex,
-        int rightRailIndex,
-        float maxConnectionSqrDistance,
-        out RouteConnection connection)
+    private bool TryFindRailInfoIndex(Railload rail, out int railIndex)
     {
-        connection = default;
-        if (leftRailIndex < 0
-            || rightRailIndex < 0
-            || leftRailIndex >= rails.Count
-            || rightRailIndex >= rails.Count)
-        {
-            return false;
-        }
-
-        RailInfo leftRail = rails[leftRailIndex];
-        RailInfo rightRail = rails[rightRailIndex];
-        if (leftRail == null
-            || rightRail == null
-            || leftRail.Rail == null
-            || rightRail.Rail == null)
-        {
-            return false;
-        }
-
-        bool found = false;
-        float bestScore = float.PositiveInfinity;
-        ConsiderRouteEndpointConnectionCandidate(
-            leftRailIndex,
-            rightRailIndex,
-            leftRail.StartPoint,
-            maxConnectionSqrDistance,
-            ref found,
-            ref bestScore,
-            ref connection);
-        ConsiderRouteEndpointConnectionCandidate(
-            leftRailIndex,
-            rightRailIndex,
-            leftRail.EndPoint,
-            maxConnectionSqrDistance,
-            ref found,
-            ref bestScore,
-            ref connection);
-        ConsiderRouteEndpointConnectionCandidate(
-            leftRailIndex,
-            rightRailIndex,
-            rightRail.StartPoint,
-            maxConnectionSqrDistance,
-            ref found,
-            ref bestScore,
-            ref connection);
-        ConsiderRouteEndpointConnectionCandidate(
-            leftRailIndex,
-            rightRailIndex,
-            rightRail.EndPoint,
-            maxConnectionSqrDistance,
-            ref found,
-            ref bestScore,
-            ref connection);
-
-        IReadOnlyList<Vector2Int> leftCoordinates = leftRail.Rail.RuntimeOccupiedCoordinates;
-        IReadOnlyList<Vector2Int> rightCoordinates = rightRail.Rail.RuntimeOccupiedCoordinates;
-        if (leftCoordinates != null && rightCoordinates != null)
-        {
-            for (int leftCoordinateIndex = 0; leftCoordinateIndex < leftCoordinates.Count; leftCoordinateIndex++)
-            {
-                for (int rightCoordinateIndex = 0; rightCoordinateIndex < rightCoordinates.Count; rightCoordinateIndex++)
-                {
-                    if (leftCoordinates[leftCoordinateIndex] != rightCoordinates[rightCoordinateIndex])
-                    {
-                        continue;
-                    }
-
-                    Vector2 sharedPoint = new Vector2(
-                        leftCoordinates[leftCoordinateIndex].x,
-                        leftCoordinates[leftCoordinateIndex].y);
-                    ConsiderRouteConnectionCandidate(
-                        leftRailIndex,
-                        rightRailIndex,
-                        sharedPoint,
-                        maxConnectionSqrDistance,
-                        ref found,
-                        ref bestScore,
-                        ref connection);
-                }
-            }
-        }
-
-        return found;
-    }
-
-    private void ConsiderRouteConnectionCandidate(
-        int leftRailIndex,
-        int rightRailIndex,
-        Vector2 candidatePoint,
-        float maxConnectionSqrDistance,
-        ref bool found,
-        ref float bestScore,
-        ref RouteConnection bestConnection)
-    {
-        RailInfo leftRail = rails[leftRailIndex];
-        RailInfo rightRail = rails[rightRailIndex];
-        if (leftRail == null
-            || rightRail == null
-            || leftRail.Rail == null
-            || rightRail.Rail == null
-            || !leftRail.Rail.TryFindNearestRenderedPathSample(
-                candidatePoint,
-                out float leftDistanceAlongPath,
-                out Vector2 leftPathPoint,
-                out _,
-                out float leftSqrDistance)
-            || !rightRail.Rail.TryFindNearestRenderedPathSample(
-                candidatePoint,
-                out float rightDistanceAlongPath,
-                out Vector2 rightPathPoint,
-                out _,
-                out float rightSqrDistance)
-            || leftSqrDistance > maxConnectionSqrDistance
-            || rightSqrDistance > maxConnectionSqrDistance)
-        {
-            return;
-        }
-
-        float score = leftSqrDistance + rightSqrDistance;
-        if (found && score >= bestScore)
-        {
-            return;
-        }
-
-        found = true;
-        bestScore = score;
-        bestConnection = new RouteConnection(
-            leftRailIndex,
-            leftDistanceAlongPath,
-            rightRailIndex,
-            rightDistanceAlongPath,
-            (leftPathPoint + rightPathPoint) * 0.5f);
-    }
-
-    private void ConsiderRouteEndpointConnectionCandidate(
-        int leftRailIndex,
-        int rightRailIndex,
-        Vector2 candidatePoint,
-        float maxConnectionSqrDistance,
-        ref bool found,
-        ref float bestScore,
-        ref RouteConnection bestConnection)
-    {
-        RailInfo leftRail = rails[leftRailIndex];
-        RailInfo rightRail = rails[rightRailIndex];
-        if (leftRail == null
-            || rightRail == null
-            || leftRail.Rail == null
-            || rightRail.Rail == null
-            || !leftRail.Rail.TryFindNearestRenderedPathSample(
-                candidatePoint,
-                out float leftDistanceAlongPath,
-                out Vector2 leftPathPoint,
-                out _,
-                out float leftSqrDistance)
-            || !rightRail.Rail.TryFindNearestRenderedPathSample(
-                candidatePoint,
-                out float rightDistanceAlongPath,
-                out Vector2 rightPathPoint,
-                out _,
-                out float rightSqrDistance)
-            || leftSqrDistance > maxConnectionSqrDistance
-            || rightSqrDistance > maxConnectionSqrDistance
-            || !IsNearRailEndpoint(leftRail, leftDistanceAlongPath)
-            || !IsNearRailEndpoint(rightRail, rightDistanceAlongPath))
-        {
-            return;
-        }
-
-        float score = leftSqrDistance + rightSqrDistance;
-        if (found && score >= bestScore)
-        {
-            return;
-        }
-
-        found = true;
-        bestScore = score;
-        bestConnection = new RouteConnection(
-            leftRailIndex,
-            leftDistanceAlongPath,
-            rightRailIndex,
-            rightDistanceAlongPath,
-            (leftPathPoint + rightPathPoint) * 0.5f);
-    }
-
-    private bool IsNearRailEndpoint(RailInfo rail, float distanceAlongPath)
-    {
+        railIndex = -1;
         if (rail == null)
         {
             return false;
         }
 
-        float endpointTolerance = Mathf.Max(0.15f, sampleSpacing * 1.5f);
-        return distanceAlongPath <= endpointTolerance
-               || Mathf.Abs(rail.Length - distanceAlongPath) <= endpointTolerance;
-    }
-
-    private int GetOrCreateRouteGraphNode(
-        List<RouteGraphNode> graphNodes,
-        Vector2 point,
-        bool isStart,
-        bool isEnd)
-    {
-        if (graphNodes == null)
+        for (int i = 0; i < rails.Count; i++)
         {
-            return -1;
-        }
-
-        float maxNodeMergeSqrDistance = RouteGraphNodeMergeDistance * RouteGraphNodeMergeDistance;
-        for (int i = 0; i < graphNodes.Count; i++)
-        {
-            if ((graphNodes[i].Point - point).sqrMagnitude > maxNodeMergeSqrDistance)
+            RailInfo railInfo = rails[i];
+            if (railInfo?.Rail != rail)
             {
                 continue;
             }
 
-            graphNodes[i].IsStart |= isStart;
-            graphNodes[i].IsEnd |= isEnd;
-            return i;
-        }
-
-        graphNodes.Add(new RouteGraphNode(point, isStart, isEnd));
-        return graphNodes.Count - 1;
-    }
-
-    private static void AddRouteGraphNodeRef(
-        List<RouteGraphNode> graphNodes,
-        Dictionary<int, List<RouteGraphNodeRef>> railRefsByRail,
-        int nodeIndex,
-        int railIndex,
-        float distanceAlongPath)
-    {
-        if (graphNodes == null
-            || railRefsByRail == null
-            || nodeIndex < 0
-            || nodeIndex >= graphNodes.Count
-            || railIndex < 0)
-        {
-            return;
-        }
-
-        RouteGraphNode node = graphNodes[nodeIndex];
-        float clampedDistance = Mathf.Max(0f, distanceAlongPath);
-        for (int i = 0; i < node.RailRefs.Count; i++)
-        {
-            RouteGraphRailRef existingRef = node.RailRefs[i];
-            if (existingRef.RailIndex == railIndex
-                && Mathf.Abs(existingRef.DistanceAlongPath - clampedDistance) <= 0.01f)
-            {
-                return;
-            }
-        }
-
-        node.RailRefs.Add(new RouteGraphRailRef(railIndex, clampedDistance));
-        if (!railRefsByRail.TryGetValue(railIndex, out List<RouteGraphNodeRef> railRefs))
-        {
-            railRefs = new List<RouteGraphNodeRef>(4);
-            railRefsByRail.Add(railIndex, railRefs);
-        }
-
-        railRefs.Add(new RouteGraphNodeRef(nodeIndex, clampedDistance));
-    }
-
-    private bool TryBuildRouteGraphAdjacency(
-        int nodeCount,
-        Dictionary<int, List<RouteGraphNodeRef>> railRefsByRail,
-        out List<RouteGraphEdge>[] adjacency)
-    {
-        adjacency = null;
-        if (nodeCount <= 0)
-        {
-            return false;
-        }
-
-        adjacency = new List<RouteGraphEdge>[nodeCount];
-        for (int nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
-        {
-            adjacency[nodeIndex] = new List<RouteGraphEdge>(4);
-        }
-
-        if (railRefsByRail == null || railRefsByRail.Count <= 0)
-        {
+            railIndex = i;
             return true;
         }
 
-        foreach (KeyValuePair<int, List<RouteGraphNodeRef>> pair in railRefsByRail)
-        {
-            List<RouteGraphNodeRef> refs = pair.Value;
-            if (refs == null || refs.Count <= 1)
-            {
-                continue;
-            }
-
-            refs.Sort((left, right) => left.DistanceAlongPath.CompareTo(right.DistanceAlongPath));
-            for (int refIndex = 1; refIndex < refs.Count; refIndex++)
-            {
-                RouteGraphNodeRef previousRef = refs[refIndex - 1];
-                RouteGraphNodeRef currentRef = refs[refIndex];
-                if (previousRef.NodeIndex == currentRef.NodeIndex)
-                {
-                    continue;
-                }
-
-                float segmentLength = Mathf.Abs(currentRef.DistanceAlongPath - previousRef.DistanceAlongPath);
-                if (segmentLength <= 0.0001f)
-                {
-                    continue;
-                }
-
-                adjacency[previousRef.NodeIndex].Add(
-                    new RouteGraphEdge(
-                        currentRef.NodeIndex,
-                        pair.Key,
-                        previousRef.DistanceAlongPath,
-                        currentRef.DistanceAlongPath,
-                        segmentLength));
-                adjacency[currentRef.NodeIndex].Add(
-                    new RouteGraphEdge(
-                        previousRef.NodeIndex,
-                        pair.Key,
-                        currentRef.DistanceAlongPath,
-                        previousRef.DistanceAlongPath,
-                        segmentLength));
-            }
-        }
-
-        return true;
-    }
-
-    private bool TryFindRouteGraphPath(
-        List<RouteGraphEdge>[] adjacency,
-        int startNodeIndex,
-        int endNodeIndex,
-        List<RouteHighlightSegment> result)
-    {
-        if (adjacency == null
-            || result == null
-            || startNodeIndex < 0
-            || endNodeIndex < 0
-            || startNodeIndex >= adjacency.Length
-            || endNodeIndex >= adjacency.Length)
-        {
-            return false;
-        }
-
-        int nodeCount = adjacency.Length;
-        float[] distances = new float[nodeCount];
-        int[] previousNodes = new int[nodeCount];
-        RouteGraphEdge[] previousEdges = new RouteGraphEdge[nodeCount];
-        bool[] visited = new bool[nodeCount];
-        for (int i = 0; i < nodeCount; i++)
-        {
-            distances[i] = float.PositiveInfinity;
-            previousNodes[i] = -1;
-        }
-
-        distances[startNodeIndex] = 0f;
-        for (int step = 0; step < nodeCount; step++)
-        {
-            int currentNodeIndex = -1;
-            float currentDistance = float.PositiveInfinity;
-            for (int i = 0; i < nodeCount; i++)
-            {
-                if (visited[i] || distances[i] >= currentDistance)
-                {
-                    continue;
-                }
-
-                currentDistance = distances[i];
-                currentNodeIndex = i;
-            }
-
-            if (currentNodeIndex < 0)
-            {
-                break;
-            }
-
-            if (currentNodeIndex == endNodeIndex)
-            {
-                break;
-            }
-
-            visited[currentNodeIndex] = true;
-            List<RouteGraphEdge> edges = adjacency[currentNodeIndex];
-            for (int edgeIndex = 0; edgeIndex < edges.Count; edgeIndex++)
-            {
-                RouteGraphEdge edge = edges[edgeIndex];
-                if (visited[edge.ToNodeIndex])
-                {
-                    continue;
-                }
-
-                float candidateDistance = currentDistance + Mathf.Max(0.01f, edge.Cost);
-                if (candidateDistance >= distances[edge.ToNodeIndex])
-                {
-                    continue;
-                }
-
-                distances[edge.ToNodeIndex] = candidateDistance;
-                previousNodes[edge.ToNodeIndex] = currentNodeIndex;
-                previousEdges[edge.ToNodeIndex] = edge;
-            }
-        }
-
-        if (float.IsPositiveInfinity(distances[endNodeIndex]))
-        {
-            return false;
-        }
-
-        List<RouteHighlightSegment> reversedSegments = new List<RouteHighlightSegment>(16);
-        for (int currentNodeIndex = endNodeIndex;
-             currentNodeIndex != startNodeIndex;
-             currentNodeIndex = previousNodes[currentNodeIndex])
-        {
-            int previousNodeIndex = previousNodes[currentNodeIndex];
-            if (previousNodeIndex < 0)
-            {
-                reversedSegments.Clear();
-                return false;
-            }
-
-            RouteGraphEdge edge = previousEdges[currentNodeIndex];
-            AppendRouteHighlightSegment(
-                reversedSegments,
-                edge.RailIndex,
-                edge.StartDistanceAlongPath,
-                edge.EndDistanceAlongPath);
-        }
-
-        result.Clear();
-        for (int i = reversedSegments.Count - 1; i >= 0; i--)
-        {
-            AppendRouteHighlightSegment(
-                result,
-                reversedSegments[i].RailIndex,
-                reversedSegments[i].StartDistance,
-                reversedSegments[i].EndDistance);
-        }
-
-        return result.Count > 0;
+        return false;
     }
 
     private static void AppendRouteHighlightSegment(
@@ -1096,39 +578,57 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     {
         CaptureRouteSelectionState(
             out int currentTrainInstanceId,
-            out string currentTargetAStationName,
-            out string currentTargetBStationName);
+            out string currentTargetStationName,
+            out string currentNextTargetStationName);
         return currentTrainInstanceId != lastRouteSelectionTrainInstanceId
-               || !string.Equals(currentTargetAStationName, lastRouteSelectionTargetA, System.StringComparison.OrdinalIgnoreCase)
-               || !string.Equals(currentTargetBStationName, lastRouteSelectionTargetB, System.StringComparison.OrdinalIgnoreCase);
+               || !string.Equals(
+                   currentTargetStationName,
+                   lastRouteSelectionCurrentTarget,
+                   System.StringComparison.OrdinalIgnoreCase)
+               || !string.Equals(
+                   currentNextTargetStationName,
+                   lastRouteSelectionNextTarget,
+                   System.StringComparison.OrdinalIgnoreCase);
     }
 
     private void CacheRouteSelectionState()
     {
         CaptureRouteSelectionState(
             out lastRouteSelectionTrainInstanceId,
-            out lastRouteSelectionTargetA,
-            out lastRouteSelectionTargetB);
+            out lastRouteSelectionCurrentTarget,
+            out lastRouteSelectionNextTarget);
     }
 
     private static void CaptureRouteSelectionState(
         out int trainInstanceId,
-        out string targetAStationName,
-        out string targetBStationName)
+        out string currentTargetStationName,
+        out string nextTargetStationName)
     {
         trainInstanceId = 0;
-        targetAStationName = string.Empty;
-        targetBStationName = string.Empty;
+        currentTargetStationName = string.Empty;
+        nextTargetStationName = string.Empty;
         if (!TrainFilter.TryGetActiveRouteSelection(
                 out SteamTrain train,
-                out targetAStationName,
-                out targetBStationName)
+                out _,
+                out _)
             || train == null)
         {
             return;
         }
 
         trainInstanceId = train.GetInstanceID();
+        currentTargetStationName = train.CurrentAutoDriveTargetStationName;
+        nextTargetStationName = train.CurrentAutoDriveNextTargetStationName;
+    }
+
+    private static bool ShouldRefreshSelectedAutoDriveRoute()
+    {
+        return TrainFilter.TryGetActiveRouteSelection(
+                   out SteamTrain train,
+                   out _,
+                   out _)
+               && train != null
+               && train.AutoDriveEnabled;
     }
 
     private void RefreshCartDirectionArrows()
@@ -1481,20 +981,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return Color.HSVToRGB(hue, 0.75f, 1f);
     }
 
-    private readonly struct RouteEndpoint
-    {
-        public RouteEndpoint(int railIndex, float distanceAlongPath, Vector2 point)
-        {
-            RailIndex = railIndex;
-            DistanceAlongPath = distanceAlongPath;
-            Point = point;
-        }
-
-        public int RailIndex { get; }
-        public float DistanceAlongPath { get; }
-        public Vector2 Point { get; }
-    }
-
     private readonly struct RouteHighlightSegment
     {
         public RouteHighlightSegment(int railIndex, float startDistance, float endDistance)
@@ -1507,91 +993,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         public int RailIndex { get; }
         public float StartDistance { get; }
         public float EndDistance { get; }
-    }
-
-    private readonly struct RouteConnection
-    {
-        public RouteConnection(
-            int leftRailIndex,
-            float leftDistanceAlongPath,
-            int rightRailIndex,
-            float rightDistanceAlongPath,
-            Vector2 point)
-        {
-            LeftRailIndex = leftRailIndex;
-            LeftDistanceAlongPath = leftDistanceAlongPath;
-            RightRailIndex = rightRailIndex;
-            RightDistanceAlongPath = rightDistanceAlongPath;
-            Point = point;
-        }
-
-        public int LeftRailIndex { get; }
-        public float LeftDistanceAlongPath { get; }
-        public int RightRailIndex { get; }
-        public float RightDistanceAlongPath { get; }
-        public Vector2 Point { get; }
-    }
-
-    private sealed class RouteGraphNode
-    {
-        public RouteGraphNode(Vector2 point, bool isStart, bool isEnd)
-        {
-            Point = point;
-            IsStart = isStart;
-            IsEnd = isEnd;
-        }
-
-        public Vector2 Point { get; }
-        public bool IsStart { get; set; }
-        public bool IsEnd { get; set; }
-        public List<RouteGraphRailRef> RailRefs { get; } = new List<RouteGraphRailRef>(4);
-    }
-
-    private readonly struct RouteGraphRailRef
-    {
-        public RouteGraphRailRef(int railIndex, float distanceAlongPath)
-        {
-            RailIndex = railIndex;
-            DistanceAlongPath = distanceAlongPath;
-        }
-
-        public int RailIndex { get; }
-        public float DistanceAlongPath { get; }
-    }
-
-    private readonly struct RouteGraphNodeRef
-    {
-        public RouteGraphNodeRef(int nodeIndex, float distanceAlongPath)
-        {
-            NodeIndex = nodeIndex;
-            DistanceAlongPath = distanceAlongPath;
-        }
-
-        public int NodeIndex { get; }
-        public float DistanceAlongPath { get; }
-    }
-
-    private readonly struct RouteGraphEdge
-    {
-        public RouteGraphEdge(
-            int toNodeIndex,
-            int railIndex,
-            float startDistanceAlongPath,
-            float endDistanceAlongPath,
-            float cost)
-        {
-            ToNodeIndex = toNodeIndex;
-            RailIndex = railIndex;
-            StartDistanceAlongPath = startDistanceAlongPath;
-            EndDistanceAlongPath = endDistanceAlongPath;
-            Cost = cost;
-        }
-
-        public int ToNodeIndex { get; }
-        public int RailIndex { get; }
-        public float StartDistanceAlongPath { get; }
-        public float EndDistanceAlongPath { get; }
-        public float Cost { get; }
     }
 
     private sealed class RailInfo

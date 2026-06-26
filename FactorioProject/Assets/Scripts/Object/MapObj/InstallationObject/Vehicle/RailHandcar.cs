@@ -4977,9 +4977,7 @@ public class RailHandcar : Train
                 preferredRail,
                 maxBranchSqrDistance,
                 branchLookAheadDistance,
-                out RailSample preferredBranchSample,
-                out float preferredScore)
-            && preferredScore + BranchSwitchCurrentScoreTolerance >= currentScore)
+                out RailSample preferredBranchSample))
         {
             branchSample = preferredBranchSample;
             railCandidateScratch.Clear();
@@ -5067,11 +5065,9 @@ public class RailHandcar : Train
         Railload preferredRail,
         float maxBranchSqrDistance,
         float branchLookAheadDistance,
-        out RailSample branchSample,
-        out float branchScore)
+        out RailSample branchSample)
     {
         branchSample = default;
-        branchScore = float.MinValue;
         if (preferredRail == null
             || preferredRail == currentSample.Rail
             || !TryFindBranchRailSampleNearPoint(
@@ -5090,8 +5086,7 @@ public class RailHandcar : Train
             tangent,
             inputDirection,
             currentSample.Tangent);
-        float inputDot = Mathf.Abs(Vector2.Dot(inputDirection, alignedTangent));
-        if (inputDot < branchSwitchMinInputDot)
+        if (alignedTangent.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
@@ -5101,14 +5096,13 @@ public class RailHandcar : Train
             distanceAlongPath,
             alignedTangent,
             currentSample.Point,
-            inputDirection,
+            alignedTangent,
             branchLookAheadDistance);
         if (progress <= BranchInternalProgressMin)
         {
             return false;
         }
 
-        branchScore = ResolveBranchSelectionScore(inputDot, progress, sqrDistance);
         branchSample = new RailSample
         {
             Rail = preferredRail,
