@@ -97,6 +97,10 @@ public class RailHandcar : Train
     private Train consistPathLeader;
     private Vector2 consistPathTravelDirection;
     private float consistPathEndDistance;
+    public Train CurrentRailDebugPowerSourceTrain =>
+        consistPathLeader != null && consistPathLeader.gameObject.activeInHierarchy
+            ? consistPathLeader
+            : this;
 
     public static void CollectActiveRuntimeHandcars(ICollection<RailHandcar> results)
     {
@@ -483,6 +487,13 @@ public class RailHandcar : Train
         float signedStep = signedSpeed
                            * Mathf.Max(0.01f, railMoveSpeedMultiplier)
                            * Mathf.Max(0f, deltaTime);
+        signedStep = AdjustDrivenSignedStep(
+            currentSample,
+            currentFacing,
+            hasInput,
+            inputDirection,
+            deltaTime,
+            signedStep);
         if (Mathf.Abs(signedStep) <= 0.0001f)
         {
             if (!hasInput && TryApplyIdleDocking(currentSample, currentFacing, deltaTime))
@@ -508,6 +519,17 @@ public class RailHandcar : Train
             ClearLockedBranchRail();
             ResetVehicleMotion();
         }
+    }
+
+    protected virtual float AdjustDrivenSignedStep(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        bool hasInput,
+        Vector2 inputDirection,
+        float deltaTime,
+        float signedStep)
+    {
+        return signedStep;
     }
 
     private bool TryApplyIdleDocking(
@@ -629,6 +651,36 @@ public class RailHandcar : Train
     protected float ResolveDockCompleteDistance()
     {
         return Mathf.Max(0.001f, stationDockCompleteDistance);
+    }
+
+    public bool TryGetRailDockDistanceAtCoordinate(
+        Vector2Int railCoordinate,
+        out float remainingDistance)
+    {
+        if (!TryGetRailDockDeltaAtCoordinate(railCoordinate, out float signedPathDelta))
+        {
+            remainingDistance = 0f;
+            return false;
+        }
+
+        remainingDistance = Mathf.Abs(signedPathDelta);
+        return true;
+    }
+
+    public bool TryGetRailDockDeltaAtCoordinate(
+        Vector2Int railCoordinate,
+        out float signedPathDelta)
+    {
+        signedPathDelta = 0f;
+        if (!TryGetCurrentRailPose(out Railload currentRail, out float currentDistanceAlongPath, out _, out _)
+            || currentRail == null
+            || !TryFindRailDockSampleAtCoordinate(railCoordinate, currentRail, out RailSample dockSample))
+        {
+            return false;
+        }
+
+        signedPathDelta = dockSample.DistanceAlongPath - currentDistanceAlongPath;
+        return true;
     }
 
     protected bool TryFindRailDockSampleAtCoordinate(
@@ -4918,6 +4970,23 @@ public class RailHandcar : Train
             branchLookAheadDistance);
         float currentScore = ResolveBranchSelectionScore(currentInputDot, currentProgress, 0f);
 
+        if (TryGetPreferredBranchRail(currentSample, inputDirection, out Railload preferredRail)
+            && TryFindPreferredBranchRailSample(
+                currentSample,
+                inputDirection,
+                preferredRail,
+                maxBranchSqrDistance,
+                branchLookAheadDistance,
+                out RailSample preferredBranchSample,
+                out float preferredScore)
+            && preferredScore + BranchSwitchCurrentScoreTolerance >= currentScore)
+        {
+            branchSample = preferredBranchSample;
+            railCandidateScratch.Clear();
+            railSearchScratch.Clear();
+            return true;
+        }
+
         railCandidateScratch.Clear();
         AddRailCandidates(currentSample.Point);
         AddRailCandidates(currentSample.Point + inputDirection * branchSwitchLookAhead);
@@ -4981,6 +5050,74 @@ public class RailHandcar : Train
         railCandidateScratch.Clear();
         railSearchScratch.Clear();
         return found && bestScore + BranchSwitchCurrentScoreTolerance >= currentScore;
+    }
+
+    protected virtual bool TryGetPreferredBranchRail(
+        RailSample currentSample,
+        Vector2 inputDirection,
+        out Railload preferredRail)
+    {
+        preferredRail = null;
+        return false;
+    }
+
+    private bool TryFindPreferredBranchRailSample(
+        RailSample currentSample,
+        Vector2 inputDirection,
+        Railload preferredRail,
+        float maxBranchSqrDistance,
+        float branchLookAheadDistance,
+        out RailSample branchSample,
+        out float branchScore)
+    {
+        branchSample = default;
+        branchScore = float.MinValue;
+        if (preferredRail == null
+            || preferredRail == currentSample.Rail
+            || !TryFindBranchRailSampleNearPoint(
+                preferredRail,
+                currentSample,
+                out float distanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent,
+                out float sqrDistance)
+            || sqrDistance > maxBranchSqrDistance)
+        {
+            return false;
+        }
+
+        Vector2 alignedTangent = ResolveAlignedRailTangent(
+            tangent,
+            inputDirection,
+            currentSample.Tangent);
+        float inputDot = Mathf.Abs(Vector2.Dot(inputDirection, alignedTangent));
+        if (inputDot < branchSwitchMinInputDot)
+        {
+            return false;
+        }
+
+        float progress = ResolveRailLookAheadProgress(
+            preferredRail,
+            distanceAlongPath,
+            alignedTangent,
+            currentSample.Point,
+            inputDirection,
+            branchLookAheadDistance);
+        if (progress <= BranchInternalProgressMin)
+        {
+            return false;
+        }
+
+        branchScore = ResolveBranchSelectionScore(inputDot, progress, sqrDistance);
+        branchSample = new RailSample
+        {
+            Rail = preferredRail,
+            DistanceAlongPath = distanceAlongPath,
+            Point = pathPoint,
+            Tangent = tangent,
+            SqrDistance = sqrDistance
+        };
+        return true;
     }
 
     private float ResolveBranchLookAheadDistance()
