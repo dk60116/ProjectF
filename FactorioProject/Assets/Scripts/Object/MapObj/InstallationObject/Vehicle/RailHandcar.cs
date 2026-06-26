@@ -4189,9 +4189,7 @@ public class RailHandcar : Train
             float actualFollowOffset = Mathf.Max(
                 0f,
                 leaderPathDistance - actualConsistDistanceScratch[i]);
-            float targetFollowOffset = Mathf.Max(
-                0f,
-                Mathf.Min(actualFollowOffset, desiredFollowOffset));
+            float targetFollowOffset = Mathf.Max(0f, desiredFollowOffset);
             if (i == 0)
             {
                 railMove.FollowOffset = 0f;
@@ -4208,12 +4206,10 @@ public class RailHandcar : Train
             {
                 railMove.FollowOffset = Mathf.Max(
                     0f,
-                    Mathf.Min(
-                        actualFollowOffset,
-                        Mathf.MoveTowards(
-                            railMove.FollowOffset,
-                            targetFollowOffset,
-                            Mathf.Max(0f, maxFollowOffsetChange))));
+                    Mathf.MoveTowards(
+                        railMove.FollowOffset,
+                        targetFollowOffset,
+                        Mathf.Max(0f, maxFollowOffsetChange)));
             }
 
             connectedTrainRailMoveScratch[i] = railMove;
