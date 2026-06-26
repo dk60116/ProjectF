@@ -39,6 +39,11 @@ public partial class BlockStateStore : MonoBehaviour
         public bool hasSteamTrainBurnEnergyState;
         public float steamTrainStoredBurnEnergy;
         public float steamTrainBurnEnergyGaugeCapacity;
+        public bool steamTrainAutoDriveEnabled;
+        public string steamTrainTargetAStationName = string.Empty;
+        public string steamTrainTargetBStationName = string.Empty;
+        public int steamTrainFuelFilter;
+        public int steamTrainFreightFilter;
         public string stationName = string.Empty;
 
         public InstallationSaveState Clone()
@@ -78,6 +83,11 @@ public partial class BlockStateStore : MonoBehaviour
                 hasSteamTrainBurnEnergyState = hasSteamTrainBurnEnergyState,
                 steamTrainStoredBurnEnergy = steamTrainStoredBurnEnergy,
                 steamTrainBurnEnergyGaugeCapacity = steamTrainBurnEnergyGaugeCapacity,
+                steamTrainAutoDriveEnabled = steamTrainAutoDriveEnabled,
+                steamTrainTargetAStationName = steamTrainTargetAStationName,
+                steamTrainTargetBStationName = steamTrainTargetBStationName,
+                steamTrainFuelFilter = steamTrainFuelFilter,
+                steamTrainFreightFilter = steamTrainFreightFilter,
                 stationName = stationName
             };
         }
@@ -848,6 +858,14 @@ public partial class BlockStateStore : MonoBehaviour
                 out state.steamTrainStoredBurnEnergy,
                 out state.steamTrainBurnEnergyGaugeCapacity);
             state.hasSteamTrainBurnEnergyState = true;
+            steamTrain.CaptureAutoDriveState(
+                out state.steamTrainAutoDriveEnabled,
+                out state.steamTrainTargetAStationName,
+                out state.steamTrainTargetBStationName,
+                out SteamTrain.AutoDriveFuelFilter fuelFilter,
+                out SteamTrain.AutoDriveFreightFilter freightFilter);
+            state.steamTrainFuelFilter = (int)fuelFilter;
+            state.steamTrainFreightFilter = (int)freightFilter;
         }
 
         if (installationObject is Trainstation trainStation)

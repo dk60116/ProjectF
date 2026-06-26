@@ -236,6 +236,65 @@ public class FreightCar : Train
         return boxObject != null;
     }
 
+    public void GetAutoDriveStorageSummary(
+        out int storedItemCount,
+        out int storageCapacity,
+        out bool hasStorage)
+    {
+        EnsureItemPointStacks();
+        EnsureBoxPointBoxes();
+
+        storedItemCount = 0;
+        storageCapacity = 0;
+        hasStorage = false;
+
+        int stackCapacity = Mathf.Max(1, maxItemsPerPoint);
+        if (itemPointList != null)
+        {
+            for (int i = 0; i < itemPointList.Count; i++)
+            {
+                Transform itemPoint = itemPointList[i];
+                if (itemPoint == null)
+                {
+                    continue;
+                }
+
+                hasStorage = true;
+                storageCapacity += stackCapacity;
+                if (i < itemPointStacks.Count && itemPointStacks[i] != null)
+                {
+                    CleanupItemStack(itemPointStacks[i]);
+                    storedItemCount += itemPointStacks[i].Count;
+                }
+            }
+        }
+
+        if (boxPointList == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < boxPointList.Count; i++)
+        {
+            Transform boxPoint = boxPointList[i];
+            if (boxPoint == null)
+            {
+                continue;
+            }
+
+            hasStorage = true;
+            CleanupBoxPointSlot(i);
+            BoxObject attachedBox = i < boxPointBoxes.Count ? boxPointBoxes[i] : null;
+            if (attachedBox != null
+                && attachedBox.gameObject.activeInHierarchy
+                && attachedBox.TryGetObjectInfoItem(out _, out int itemCount, out int capacity))
+            {
+                storedItemCount += Mathf.Max(0, itemCount);
+                storageCapacity += Mathf.Max(0, capacity);
+            }
+        }
+    }
+
     public bool TryAttachBoxObject(BoxObject boxObject, Vector3 referenceWorldPosition)
     {
         if (boxObject == null

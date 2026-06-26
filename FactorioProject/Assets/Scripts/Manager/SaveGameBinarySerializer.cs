@@ -282,6 +282,12 @@ public static class SaveGameBinarySerializer
             writer.Write(state.steamTrainStoredBurnEnergy);
             writer.Write(state.steamTrainBurnEnergyGaugeCapacity);
         }
+
+        writer.Write(state.steamTrainAutoDriveEnabled);
+        writer.Write(state.steamTrainTargetAStationName ?? string.Empty);
+        writer.Write(state.steamTrainTargetBStationName ?? string.Empty);
+        writer.Write(state.steamTrainFuelFilter);
+        writer.Write(state.steamTrainFreightFilter);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
@@ -369,6 +375,15 @@ public static class SaveGameBinarySerializer
                 state.steamTrainStoredBurnEnergy = reader.ReadSingle();
                 state.steamTrainBurnEnergyGaugeCapacity = reader.ReadSingle();
             }
+        }
+
+        if (version >= 18)
+        {
+            state.steamTrainAutoDriveEnabled = reader.ReadBoolean();
+            state.steamTrainTargetAStationName = reader.ReadString();
+            state.steamTrainTargetBStationName = reader.ReadString();
+            state.steamTrainFuelFilter = reader.ReadInt32();
+            state.steamTrainFreightFilter = reader.ReadInt32();
         }
 
         return state;

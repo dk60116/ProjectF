@@ -127,19 +127,23 @@ public class RailHandcar : Train
     protected override void OnDisable()
     {
         ActiveRuntimeHandcars.Remove(this);
-        lastRailTravelDirection = Vector2.zero;
-        ClearLockedBranchRail();
-        ClearCurrentMovementLoadTracking();
+        ResetRailPlacementState();
         base.OnDisable();
     }
 
     public override void PrepareForPool()
     {
         ActiveRuntimeHandcars.Remove(this);
+        ResetRailPlacementState();
+        base.PrepareForPool();
+    }
+
+    public void ResetRailPlacementState()
+    {
+        currentFacingTangent = Vector2.zero;
         lastRailTravelDirection = Vector2.zero;
         ClearLockedBranchRail();
         ClearCurrentMovementLoadTracking();
-        base.PrepareForPool();
     }
 
     private void BeginCurrentMovementLoadTracking()

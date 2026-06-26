@@ -206,6 +206,7 @@ public class ItemInfoDescription : MonoBehaviour
             SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
             SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, railHandcar);
             SetFluidStorageDefaultItemSlot(0, steamTrain);
+            SetSteamTrainAutoDriveStatus(steamTrain);
         }
         else
         {
@@ -227,6 +228,50 @@ public class ItemInfoDescription : MonoBehaviour
         string stationName = trainStation != null ? trainStation.StationName : string.Empty;
         SetDefaultText(defaultStatusLineIndex, $"Station: {stationName}", !string.IsNullOrWhiteSpace(stationName));
         SetDefaultSign(defaultStatusLineIndex, false, Color.white);
+    }
+
+    private void SetSteamTrainAutoDriveStatus(SteamTrain steamTrain)
+    {
+        if (steamTrain == null)
+        {
+            return;
+        }
+
+        string statusText = steamTrain.CurrentAutoDriveStatusText;
+        SetDefaultText(defaultStatusLineIndex, statusText, !string.IsNullOrWhiteSpace(statusText));
+        SetDefaultSign(defaultStatusLineIndex, false, Color.white);
+
+        int targetLineIndex = defaultStatusLineIndex + 1;
+        string targetText = ResolveSteamTrainAutoDriveTargetText(steamTrain);
+        SetDefaultText(targetLineIndex, targetText, !string.IsNullOrWhiteSpace(targetText));
+        SetDefaultSign(targetLineIndex, false, Color.white);
+    }
+
+    private static string ResolveSteamTrainAutoDriveTargetText(SteamTrain steamTrain)
+    {
+        if (steamTrain == null || !steamTrain.AutoDriveEnabled)
+        {
+            return string.Empty;
+        }
+
+        string targetA = steamTrain.AutoDriveTargetAStationName;
+        string targetB = steamTrain.AutoDriveTargetBStationName;
+        if (!string.IsNullOrWhiteSpace(targetA) && !string.IsNullOrWhiteSpace(targetB))
+        {
+            return $"Route: {targetA} <-> {targetB}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetA))
+        {
+            return $"Target: {targetA}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetB))
+        {
+            return $"Target: {targetB}";
+        }
+
+        return "Target: None";
     }
 
     public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)

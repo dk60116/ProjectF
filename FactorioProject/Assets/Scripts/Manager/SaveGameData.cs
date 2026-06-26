@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 17;
+    public const int CurrentVersion = 18;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

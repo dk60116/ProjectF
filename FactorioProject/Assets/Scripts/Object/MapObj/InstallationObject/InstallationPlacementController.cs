@@ -11454,6 +11454,11 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        if (train is RailHandcar railHandcar)
+        {
+            railHandcar.ResetRailPlacementState();
+        }
+
         train.ApplyPlacedRailSample(
             railSample.Rail,
             railSample.DistanceAlongPath,
@@ -11601,6 +11606,11 @@ public class InstallationPlacementController : MonoBehaviour
         if (facing.sqrMagnitude <= 0.0001f)
         {
             return;
+        }
+
+        if (train is RailHandcar railHandcar)
+        {
+            railHandcar.ResetRailPlacementState();
         }
 
         train.ApplyPlacedRailSample(
