@@ -402,6 +402,21 @@ public class RailHandcar : Train
         return true;
     }
 
+    public bool TryApplyExplicitRailPose(
+        Railload rail,
+        float distanceAlongPath,
+        Vector2 railPoint,
+        Vector2 facingTangent)
+    {
+        if (!base.TryApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent))
+        {
+            return false;
+        }
+
+        SyncRailFacingTangent(facingTangent, true);
+        return true;
+    }
+
     public override void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
     {
         BeginCurrentMovementLoadTracking();
@@ -1311,7 +1326,6 @@ public class RailHandcar : Train
     {
         if (keepCurrentOrder)
         {
-            ApplyRememberedConsistFollowOffsets();
             return;
         }
 
@@ -3852,7 +3866,6 @@ public class RailHandcar : Train
             return InitializeConsistPathTape(travelDirection);
         }
 
-        ApplyRememberedConsistFollowOffsets();
         RailSample leaderStartSample = connectedTrainRailMoveScratch[0].StartSample;
         if (consistPathTape.Count <= 0)
         {
@@ -4330,21 +4343,6 @@ public class RailHandcar : Train
         {
             consistPathTrainOrder.Add(connectedTrainRailMoveScratch[i].Train);
             consistPathFollowOffsets.Add(connectedTrainRailMoveScratch[i].FollowOffset);
-        }
-    }
-
-    private void ApplyRememberedConsistFollowOffsets()
-    {
-        if (consistPathFollowOffsets.Count != connectedTrainRailMoveScratch.Count)
-        {
-            return;
-        }
-
-        for (int i = 0; i < connectedTrainRailMoveScratch.Count; i++)
-        {
-            ConnectedTrainRailMove railMove = connectedTrainRailMoveScratch[i];
-            railMove.FollowOffset = consistPathFollowOffsets[i];
-            connectedTrainRailMoveScratch[i] = railMove;
         }
     }
 

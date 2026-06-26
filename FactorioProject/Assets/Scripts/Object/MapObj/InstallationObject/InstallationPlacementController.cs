@@ -5323,7 +5323,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (!steamTrain.TryApplyRailPose(rail, distanceAlongPath, pathPoint, -tangent))
+        if (!steamTrain.TryApplyExplicitRailPose(rail, distanceAlongPath, pathPoint, -tangent))
         {
             return false;
         }

@@ -49,6 +49,8 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     private bool freeCamera;
     [SerializeField]
+    private bool freeTrain;
+    [SerializeField]
     private bool mapObjectTickProfilingEnabled;
     [SerializeField, Min(1)]
     private int mapObjectTickProfilingMaxRows = 64;
@@ -181,6 +183,7 @@ public class GameManager : MonoBehaviour
     public bool ShowDirections => showDirections;
     public bool ShowBeltDirections => ShowDirections;
     public bool FreeCamera => freeCamera;
+    public bool FreeTrain => freeTrain;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
 
@@ -292,6 +295,11 @@ public class GameManager : MonoBehaviour
     {
         freeCamera = enabled;
         SyncFreeCameraRuntimeState(true);
+    }
+
+    public void SetFreeTrain(bool enabled)
+    {
+        freeTrain = enabled;
     }
 
     public void SetMapObjectTickProfilingEnabled(bool enabled)
@@ -2124,6 +2132,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildCameraSizeExtraTokens(playerCamera),
             BuildSeedExtraTokens(terrain),
             BuildFreeCameraExtraTokens(GameManager.Instance),
+            BuildFreeTrainExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance));
     }
 
@@ -2153,6 +2162,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return gameManager != null
             ? $"freeCamera={(gameManager.FreeCamera ? 1 : 0)}"
             : "freeCamera=0";
+    }
+
+    private static string BuildFreeTrainExtraTokens(GameManager gameManager)
+    {
+        return gameManager != null
+            ? $"freeTrain={(gameManager.FreeTrain ? 1 : 0)}"
+            : "freeTrain=0";
     }
 
     private static string BuildMapObjectTickProfilingExtraTokens(GameManager gameManager)
@@ -3586,6 +3602,21 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 0,
                 $"freeCamera={(value ? 1 : 0)}",
                 BuildFreeCameraExtraTokens(gameManager));
+        }
+
+        if (string.Equals(toggleName, "freeTrain", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "trainFree", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetFreeTrain(value);
+            return ToolResult.Success(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $"freeTrain={(value ? 1 : 0)}",
+                BuildFreeTrainExtraTokens(gameManager));
         }
 
         if (string.Equals(toggleName, "mapObjectTickProfiling", StringComparison.OrdinalIgnoreCase)

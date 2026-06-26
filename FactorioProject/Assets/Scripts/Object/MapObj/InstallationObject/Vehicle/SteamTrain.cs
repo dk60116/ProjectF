@@ -507,6 +507,11 @@ public class SteamTrain : RailHandcar
     private bool RequiresPoweredBurnEnergy(Vector3 worldMoveDirection, float deltaTime, out float burnEnergyCost)
     {
         burnEnergyCost = 0f;
+        if (IsFreeTrainEnabled())
+        {
+            return false;
+        }
+
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
             || installedDefinition.useEnergyType != ItemDefinition.EnergyType.Burn
@@ -523,6 +528,11 @@ public class SteamTrain : RailHandcar
     private bool RequiresWater(Vector3 worldMoveDirection, float deltaTime, out float waterCost)
     {
         waterCost = 0f;
+        if (IsFreeTrainEnabled())
+        {
+            return false;
+        }
+
         if (worldMoveDirection.sqrMagnitude <= 0.0001f)
         {
             return false;
@@ -572,6 +582,11 @@ public class SteamTrain : RailHandcar
     private int ResolveWaterItemId()
     {
         return Pump.ResolveWaterItemId(null);
+    }
+
+    private static bool IsFreeTrainEnabled()
+    {
+        return GameManager.Instance != null && GameManager.Instance.FreeTrain;
     }
 
     private bool TryConsumeOneBurnEnergyItem(Player mountedPlayer, out int gainedEnergy)
