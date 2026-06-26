@@ -1698,24 +1698,12 @@ public class RailHandcar : Train
                 continue;
             }
 
-            bool isConnectedConsist = connectedTrainRailMoveScratch.Count > 1;
-            Vector2 consistFacingReference = isConnectedConsist
-                ? ResolveConnectedConsistFacingReference(drivenFacing, routeLeaderTravelDirection)
-                : travelDirection;
             Vector2 facingFallback = railMove.Train == drivenTrain
                 ? drivenFacing
-                : railMove.StartFacingTangent;
-            Vector2 facingTangent = isConnectedConsist
-                ? ResolveConnectedTrainFacingTangent(
-                    railMove,
-                    consistFacingReference,
-                    facingFallback)
-                : railMove.Train == drivenTrain
-                    ? ResolveDrivenTrainFacingTangent(railMove, drivenFacing)
-                    : ResolveFollowerFacingTangent(
-                        railMove.TargetSample.Tangent,
-                        railMove.StartFacingTangent,
-                        consistFacingReference);
+                : routeLeaderTravelDirection;
+            Vector2 facingTangent = ResolveTrainFacingFromOwnOrientation(
+                railMove,
+                facingFallback);
             ApplyConnectedTrainRailPose(railMove.Train, railMove.TargetSample, facingTangent, deltaTime);
             RotateConnectedTrainWheels(
                 railMove.Train,
@@ -2912,74 +2900,22 @@ public class RailHandcar : Train
         return true;
     }
 
-    private Vector2 ResolveDrivenTrainFacingTangent(
+    private static Vector2 ResolveTrainFacingFromOwnOrientation(
         ConnectedTrainRailMove railMove,
-        Vector2 drivenFacing)
-    {
-        if ((railMove.TargetSample.Point - railMove.StartSample.Point).sqrMagnitude
-            <= ConsistPathSampleDistanceEpsilon * ConsistPathSampleDistanceEpsilon)
-        {
-            return drivenFacing.sqrMagnitude > 0.0001f
-                ? drivenFacing.normalized
-                : ResolveFacingTangent(railMove.TargetSample.Tangent, railMove.StartFacingTangent);
-        }
-
-        return ResolveFacingTangent(railMove.TargetSample.Tangent, drivenFacing);
-    }
-
-    private Vector2 ResolveConnectedConsistFacingReference(
-        Vector2 drivenFacing,
-        Vector2 fallbackDirection)
-    {
-        if (drivenFacing.sqrMagnitude > 0.0001f)
-        {
-            return drivenFacing.normalized;
-        }
-
-        if (connectedTrainRailMoveScratch.Count > 0)
-        {
-            Vector2 leaderFacing = connectedTrainRailMoveScratch[0].StartFacingTangent;
-            if (leaderFacing.sqrMagnitude > 0.0001f)
-            {
-                return leaderFacing.normalized;
-            }
-        }
-
-        return fallbackDirection.sqrMagnitude > 0.0001f
-            ? fallbackDirection.normalized
-            : Vector2.up;
-    }
-
-    private Vector2 ResolveConnectedTrainFacingTangent(
-        ConnectedTrainRailMove railMove,
-        Vector2 consistFacingReference,
         Vector2 fallbackFacing)
     {
-        Vector2 railTangent = railMove.TargetSample.Tangent;
-        if (railTangent.sqrMagnitude <= 0.0001f)
+        Vector2 referenceFacing = railMove.StartFacingTangent.sqrMagnitude > 0.0001f
+            ? railMove.StartFacingTangent
+            : fallbackFacing;
+        if (referenceFacing.sqrMagnitude <= 0.0001f)
         {
-            if (fallbackFacing.sqrMagnitude > 0.0001f)
-            {
-                return fallbackFacing.normalized;
-            }
-
-            return consistFacingReference.sqrMagnitude > 0.0001f
-                ? consistFacingReference.normalized
-                : Vector2.up;
+            referenceFacing = railMove.TargetSample.Tangent;
         }
 
-        railTangent.Normalize();
-        if (TryResolveTangentReferenceSign(railTangent, consistFacingReference, out float referenceSign))
-        {
-            return railTangent * referenceSign;
-        }
-
-        if (TryResolveTangentReferenceSign(railTangent, fallbackFacing, out float fallbackSign))
-        {
-            return railTangent * fallbackSign;
-        }
-
-        return ResolveFacingTangentWithFallback(railTangent, consistFacingReference, fallbackFacing);
+        return ResolveFollowerFacingTangent(
+            railMove.TargetSample.Tangent,
+            railMove.StartFacingTangent,
+            referenceFacing);
     }
 
     private Vector2 ResolveRouteLeaderTravelDirection(Train drivenTrain, Vector2 fallbackDirection)
