@@ -2104,13 +2104,12 @@ public class PlayerHUD : BagSlot
             && GameManager.Instance.Player != null
             && !GameManager.Instance.PlayerInteractionLocked)
         {
-            PlayerController playerController = ResolvePlayerController();
-            if (playerController != null && playerController.TryGetFocusedItemFilterMapObject(out _))
+            if (TryGetFocusedItemFilterMapObject(out _))
             {
                 isVisible = true;
             }
 
-            if (!isVisible && TryGetFocusedSteamTrain(playerController, out _))
+            if (!isVisible && TryGetFocusedSteamTrain(out _))
             {
                 isVisible = true;
             }
@@ -2583,8 +2582,7 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        PlayerController playerController = ResolvePlayerController();
-        if (TryGetFocusedSteamTrain(playerController, out SteamTrain steamTrain))
+        if (TryGetFocusedSteamTrain(out SteamTrain steamTrain))
         {
             if (trainFilter == null)
             {
@@ -2610,7 +2608,7 @@ public class PlayerHUD : BagSlot
         bool shouldOpen = !itemFilterUI.gameObject.activeSelf;
         if (shouldOpen)
         {
-            if (playerController == null || !playerController.TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
+            if (!TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
             {
                 return;
             }
@@ -2626,10 +2624,10 @@ public class PlayerHUD : BagSlot
         itemFilterUiOpenedFrame = shouldOpen ? Time.frameCount : -1;
     }
 
-    private static bool TryGetFocusedSteamTrain(PlayerController playerController, out SteamTrain steamTrain)
+    private bool TryGetFocusedSteamTrain(out SteamTrain steamTrain)
     {
         steamTrain = null;
-        if (playerController == null || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
+        if (!TryGetFocusedMapObject(out MapObject focusedMapObject))
         {
             return false;
         }
@@ -2646,6 +2644,25 @@ public class PlayerHUD : BagSlot
         }
 
         return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
+    }
+
+    private bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
+    {
+        focusedMapObject = null;
+        PlayerController playerController = ResolvePlayerController();
+        if (playerController != null
+            && playerController.TryGetFocusedItemFilterMapObject(out focusedMapObject))
+        {
+            return true;
+        }
+
+        if (!TryGetObjectInfoFocusedMapObject(out MapObject infoFocusedMapObject))
+        {
+            return false;
+        }
+
+        focusedMapObject = infoFocusedMapObject;
+        return true;
     }
 
     private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
@@ -2688,12 +2705,34 @@ public class PlayerHUD : BagSlot
     {
         focusedMapObject = null;
         PlayerController playerController = ResolvePlayerController();
-        if (playerController == null)
+        if (playerController != null
+            && playerController.TryGetFocusedMapObject(out focusedMapObject))
+        {
+            return true;
+        }
+
+        return TryGetObjectInfoFocusedMapObject(out focusedMapObject);
+    }
+
+    private bool TryGetObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    {
+        focusedMapObject = null;
+        if (currentObjectInfoTarget == null
+            || !currentObjectInfoTarget.gameObject.activeInHierarchy)
         {
             return false;
         }
 
-        return playerController.TryGetFocusedMapObject(out focusedMapObject);
+        ResolveObjectInfoPanel();
+        if (objectInfoPanel == null
+            || !objectInfoPanel.gameObject.activeSelf
+            || !objectInfoPanel.IsBoundTo(currentObjectInfoTarget))
+        {
+            return false;
+        }
+
+        focusedMapObject = currentObjectInfoTarget;
+        return true;
     }
 
     private PlayerController ResolvePlayerController()

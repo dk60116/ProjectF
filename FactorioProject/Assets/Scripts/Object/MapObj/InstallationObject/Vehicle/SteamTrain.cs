@@ -199,19 +199,41 @@ public class SteamTrain : RailHandcar
         }
 
         result.Clear();
-        if (!TryResolveAutoDriveTargets(
-                out Trainstation targetStation,
-                out string targetStationName,
-                out _)
-            || !TryEnsureAutoDriveRoute(targetStation, targetStationName, 0f)
-            || autoDriveRouteSegments.Count <= 0)
+        List<AutoDriveRoutePlanner.RouteSegment> debugRouteSegments =
+            new List<AutoDriveRoutePlanner.RouteSegment>(32);
+        bool builtRoute = false;
+        string targetAStationName = AutoDriveTargetAStationName;
+        string targetBStationName = AutoDriveTargetBStationName;
+        if (!string.IsNullOrWhiteSpace(targetAStationName)
+            && !string.IsNullOrWhiteSpace(targetBStationName)
+            && AutoDriveRoutePlanner.TryFindStationByName(targetAStationName, out Trainstation startStation)
+            && AutoDriveRoutePlanner.TryFindStationByName(targetBStationName, out Trainstation destinationStation))
+        {
+            builtRoute = AutoDriveRoutePlanner.TryBuildRoute(
+                startStation,
+                destinationStation,
+                debugRouteSegments);
+        }
+        else if (TryResolveAutoDriveTargets(
+                     out Trainstation targetStation,
+                     out _,
+                     out _)
+                 && ResolveAutoDriveRouteReferenceTrain() is RailHandcar routeReferenceTrain)
+        {
+            builtRoute = AutoDriveRoutePlanner.TryBuildRoute(
+                routeReferenceTrain,
+                targetStation,
+                debugRouteSegments);
+        }
+
+        if (!builtRoute || debugRouteSegments.Count <= 0)
         {
             return false;
         }
 
-        for (int i = 0; i < autoDriveRouteSegments.Count; i++)
+        for (int i = 0; i < debugRouteSegments.Count; i++)
         {
-            AutoDriveRoutePlanner.RouteSegment segment = autoDriveRouteSegments[i];
+            AutoDriveRoutePlanner.RouteSegment segment = debugRouteSegments[i];
             if (segment.Rail == null)
             {
                 continue;
@@ -2637,6 +2659,25 @@ public class SteamTrain : RailHandcar
             }
 
             RouteEndpoint startEndpoint = new RouteEndpoint(startRailIndex, currentDistanceAlongPath, currentPathPoint);
+            return TryBuildRouteFromConnectionGraph(rails, startEndpoint, endEndpoint, result);
+        }
+
+        public static bool TryBuildRoute(Trainstation startStation, Trainstation destinationStation, List<RouteSegment> result)
+        {
+            result?.Clear();
+            if (startStation == null || destinationStation == null)
+            {
+                return false;
+            }
+
+            List<RailInfo> rails = CollectRails();
+            if (rails.Count <= 0
+                || !TryFindStationRouteEndpoint(rails, startStation, out RouteEndpoint startEndpoint)
+                || !TryFindStationRouteEndpoint(rails, destinationStation, out RouteEndpoint endEndpoint))
+            {
+                return false;
+            }
+
             return TryBuildRouteFromConnectionGraph(rails, startEndpoint, endEndpoint, result);
         }
 
