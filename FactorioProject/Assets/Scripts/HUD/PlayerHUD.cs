@@ -2031,6 +2031,7 @@ public class PlayerHUD : BagSlot
         objectInfoPanel.Bind(target);
         nextObjectInfoPanelRefreshTime = Time.unscaledTime + Mathf.Max(0.02f, objectInfoPanelRefreshInterval);
         SetObjectInfoSupplyRangeVisual(target, !openedByYellowFocus);
+        TrainFilter.MarkRouteSelectionDirty();
     }
 
     private void ClearObjectInfoPanelState()
@@ -2043,6 +2044,8 @@ public class PlayerHUD : BagSlot
         {
             objectInfoPanel.Clear();
         }
+
+        TrainFilter.MarkRouteSelectionDirty();
     }
 
     private void SetObjectInfoSupplyRangeVisual(MapObject target, bool requested)
@@ -2714,7 +2717,7 @@ public class PlayerHUD : BagSlot
         return TryGetObjectInfoFocusedMapObject(out focusedMapObject);
     }
 
-    private bool TryGetObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    public bool TryGetObjectInfoFocusedMapObject(out MapObject focusedMapObject)
     {
         focusedMapObject = null;
         if (currentObjectInfoTarget == null

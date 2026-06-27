@@ -468,7 +468,12 @@ public class TrainFilter : MonoBehaviour
 
         if (!playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
         {
-            return false;
+            PlayerHUD playerHud = UIManager.Instance != null ? UIManager.Instance.PlayerHUD : null;
+            if (playerHud == null
+                || !playerHud.TryGetObjectInfoFocusedMapObject(out focusedMapObject))
+            {
+                return false;
+            }
         }
 
         train = focusedMapObject as SteamTrain;
@@ -480,7 +485,7 @@ public class TrainFilter : MonoBehaviour
         return train != null && train.gameObject.activeInHierarchy;
     }
 
-    private static void MarkRouteSelectionDirty()
+    public static void MarkRouteSelectionDirty()
     {
         routeSelectionVersion++;
         if (GameManager.Instance != null
