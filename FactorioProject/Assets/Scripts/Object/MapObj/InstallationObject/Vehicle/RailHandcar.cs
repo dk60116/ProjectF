@@ -5149,9 +5149,27 @@ public class RailHandcar : Train
             return 0f;
         }
 
-        float tangentDot = Vector2.Dot(inputDirection.normalized, tangent);
-        if (Mathf.Abs(tangentDot) <= 0.0001f
+        Vector2 normalizedInputDirection = inputDirection.normalized;
+        Vector2 pathDistanceTangent = tangent;
+        if (rail.TrySampleRenderedPath(
+                Mathf.Max(0f, distanceAlongPath),
+                out _,
+                out Vector2 sampledPathTangent)
+            && sampledPathTangent.sqrMagnitude > 0.0001f)
+        {
+            // Use the rail's stored path direction so reversed placements still advance
+            // along the correct distance axis when we evaluate a branch candidate.
+            pathDistanceTangent = sampledPathTangent;
+        }
+
+        if (pathDistanceTangent.sqrMagnitude <= 0.0001f
             || !rail.TryGetRenderedPathLength(out float pathLength))
+        {
+            return 0f;
+        }
+
+        float tangentDot = Vector2.Dot(normalizedInputDirection, pathDistanceTangent.normalized);
+        if (Mathf.Abs(tangentDot) <= 0.0001f)
         {
             return 0f;
         }
@@ -5166,7 +5184,7 @@ public class RailHandcar : Train
             return 0f;
         }
 
-        return Mathf.Max(0f, Vector2.Dot(futurePoint - originPoint, inputDirection.normalized));
+        return Mathf.Max(0f, Vector2.Dot(futurePoint - originPoint, normalizedInputDirection));
     }
 
     private static float ResolveBranchSelectionScore(float inputDot, float progress, float sqrDistance)

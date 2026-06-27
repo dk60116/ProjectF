@@ -609,26 +609,29 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         nextTargetStationName = string.Empty;
         if (!TrainFilter.TryGetActiveRouteSelection(
                 out SteamTrain train,
-                out _,
-                out _)
+                out string targetAStationName,
+                out string targetBStationName)
             || train == null)
         {
             return;
         }
 
         trainInstanceId = train.GetInstanceID();
-        currentTargetStationName = train.CurrentAutoDriveTargetStationName;
-        nextTargetStationName = train.CurrentAutoDriveNextTargetStationName;
+        currentTargetStationName = targetAStationName ?? string.Empty;
+        nextTargetStationName = targetBStationName ?? string.Empty;
     }
 
     private static bool ShouldRefreshSelectedAutoDriveRoute()
     {
         return TrainFilter.TryGetActiveRouteSelection(
                    out SteamTrain train,
-                   out _,
-                   out _)
+                   out string targetAStationName,
+                   out string targetBStationName)
                && train != null
-               && train.AutoDriveEnabled;
+               && train.gameObject.activeInHierarchy
+               && train.TryGetPlacementRuntime(out _, out _)
+               && (!string.IsNullOrWhiteSpace(targetAStationName)
+                   || !string.IsNullOrWhiteSpace(targetBStationName));
     }
 
     private void RefreshCartDirectionArrows()

@@ -199,8 +199,7 @@ public class SteamTrain : RailHandcar
         }
 
         result.Clear();
-        if (!autoDriveEnabled
-            || !TryResolveAutoDriveTargets(
+        if (!TryResolveAutoDriveTargets(
                 out Trainstation targetStation,
                 out string targetStationName,
                 out _)
