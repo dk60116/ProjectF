@@ -105,9 +105,6 @@ public class TrainFilter : MonoBehaviour
 
     public void Refresh()
     {
-        string previousTargetAStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetA));
-        string previousTargetBStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetB));
-
         if (trainIcon != null)
         {
             Sprite icon = ResolveTrainIcon(boundTrain);
@@ -118,14 +115,6 @@ public class TrainFilter : MonoBehaviour
         RefreshAutoDriveToggle();
         RefreshStationTargetDropdowns();
         RefreshFilterDropdowns();
-
-        if (isActiveAndEnabled
-            && (!string.Equals(previousTargetAStationName, NormalizeStationSelection(ResolveSelectedOptionText(targetA)), System.StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(previousTargetBStationName, NormalizeStationSelection(ResolveSelectedOptionText(targetB)), System.StringComparison.OrdinalIgnoreCase)))
-        {
-            ApplyCurrentFilterStateToBoundTrain();
-            MarkRouteSelectionDirty();
-        }
     }
 
     private static Sprite ResolveTrainIcon(SteamTrain train)
@@ -177,6 +166,12 @@ public class TrainFilter : MonoBehaviour
         }
 
         string previouslySelectedStationName = ResolvePreferredStationName(dropdown);
+        if (!string.IsNullOrWhiteSpace(previouslySelectedStationName)
+            && ResolveOptionIndex(previouslySelectedStationName, stationNameScratch) < 0)
+        {
+            stationNameScratch.Add(previouslySelectedStationName);
+        }
+
         stationOptionScratch.Clear();
         for (int i = 0; i < stationNameScratch.Count; i++)
         {
@@ -304,7 +299,8 @@ public class TrainFilter : MonoBehaviour
         if (filterOptionScratch.Count > 0)
         {
             dropdown.AddOptions(filterOptionScratch);
-            dropdown.SetValueWithoutNotify(ResolveOptionIndex(previouslySelectedOption, options));
+            int optionIndex = ResolveOptionIndex(previouslySelectedOption, options);
+            dropdown.SetValueWithoutNotify(optionIndex >= 0 ? optionIndex : 0);
         }
 
         dropdown.RefreshShownValue();
@@ -312,7 +308,8 @@ public class TrainFilter : MonoBehaviour
 
     private int ResolveStationOptionIndex(string stationName)
     {
-        return ResolveOptionIndex(stationName, stationNameScratch);
+        int optionIndex = ResolveOptionIndex(stationName, stationNameScratch);
+        return optionIndex >= 0 ? optionIndex : 0;
     }
 
     private static int ResolveOptionIndex(string optionText, IReadOnlyList<string> options)
@@ -330,7 +327,7 @@ public class TrainFilter : MonoBehaviour
             }
         }
 
-        return 0;
+        return -1;
     }
 
     private static string ResolveSelectedOptionText(TMP_Dropdown dropdown)

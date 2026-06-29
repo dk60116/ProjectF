@@ -24,6 +24,9 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private const float DefaultPowerMarkerYOffset = 1.35f;
     private const float DefaultPowerMarkerSize = 0.8f;
     private const float DefaultPowerMarkerLineWidth = 0.07f;
+    private const float DefaultTargetStationMarkerYOffset = 1.6f;
+    private const float DefaultTargetStationMarkerSize = 1.05f;
+    private const float DefaultTargetStationMarkerLineWidth = 0.085f;
 
     private static readonly Color[] GroupPalette =
     {
@@ -40,6 +43,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private static readonly Color BlockedCartDirectionColor = Color.black;
     private static readonly Color RouteHighlightColor = new Color(1.00f, 1.00f, 1.00f, 0.98f);
     private static readonly Color PowerSourceMarkerColor = new Color(1.00f, 0.35f, 0.10f, 1f);
+    private static readonly Color TargetStationMarkerColor = new Color(0.20f, 1.00f, 0.55f, 1f);
 
     [SerializeField, Min(0.01f)]
     private float connectionDistance = RailGroupConnectionDistance;
@@ -79,6 +83,12 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private float powerMarkerSize = DefaultPowerMarkerSize;
     [SerializeField, Min(0.005f)]
     private float powerMarkerLineWidth = DefaultPowerMarkerLineWidth;
+    [SerializeField]
+    private float targetStationMarkerYOffset = DefaultTargetStationMarkerYOffset;
+    [SerializeField, Min(0.05f)]
+    private float targetStationMarkerSize = DefaultTargetStationMarkerSize;
+    [SerializeField, Min(0.005f)]
+    private float targetStationMarkerLineWidth = DefaultTargetStationMarkerLineWidth;
 
     private readonly List<RailInfo> rails = new List<RailInfo>();
     private readonly List<LineRenderer> lineRenderers = new List<LineRenderer>();
@@ -86,6 +96,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private readonly List<LineRenderer> railArrowRenderers = new List<LineRenderer>();
     private readonly List<LineRenderer> cartArrowRenderers = new List<LineRenderer>();
     private readonly List<LineRenderer> powerMarkerRenderers = new List<LineRenderer>();
+    private readonly List<LineRenderer> targetStationMarkerRenderers = new List<LineRenderer>();
     private readonly List<RailHandcar> activeHandcarScratch = new List<RailHandcar>(4);
     private readonly Queue<int> componentQueue = new Queue<int>();
     private readonly List<RouteHighlightSegment> routeHighlightSegmentScratch = new List<RouteHighlightSegment>(32);
@@ -186,6 +197,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
             RefreshCartDirectionArrows();
             RefreshAutoDrivePowerSourceMarker();
+            RefreshSelectedTargetStationMarker();
         }
     }
 
@@ -245,6 +257,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         RefreshCartDirectionArrows();
         RefreshAutoDrivePowerSourceMarker();
+        RefreshSelectedTargetStationMarker();
         isDirty = false;
         nextCartArrowRefreshTime = Time.unscaledTime + refreshInterval;
         CacheRouteSelectionState();
@@ -733,6 +746,47 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         DisablePowerMarkerRenderers(rendererIndex);
     }
 
+    private void RefreshSelectedTargetStationMarker()
+    {
+        EnsureDebugRoot();
+        EnsureLineMaterial();
+        if (!TryGetSelectedAutoDriveTargetStation(out Trainstation targetStation))
+        {
+            DisableTargetStationMarkerRenderers();
+            return;
+        }
+
+        Vector3 center = targetStation.transform.position + Vector3.up * targetStationMarkerYOffset;
+        float radius = Mathf.Max(0.05f, targetStationMarkerSize) * 0.5f;
+        float diagonalRadius = radius * 0.72f;
+        int rendererIndex = 0;
+        ApplyArrowSegment(
+            EnsureTargetStationMarkerRenderer(rendererIndex++),
+            center + new Vector3(-radius, 0f, 0f),
+            center + new Vector3(radius, 0f, 0f),
+            TargetStationMarkerColor,
+            targetStationMarkerLineWidth);
+        ApplyArrowSegment(
+            EnsureTargetStationMarkerRenderer(rendererIndex++),
+            center + new Vector3(0f, 0f, -radius),
+            center + new Vector3(0f, 0f, radius),
+            TargetStationMarkerColor,
+            targetStationMarkerLineWidth);
+        ApplyArrowSegment(
+            EnsureTargetStationMarkerRenderer(rendererIndex++),
+            center + new Vector3(-diagonalRadius, 0f, -diagonalRadius),
+            center + new Vector3(diagonalRadius, 0f, diagonalRadius),
+            TargetStationMarkerColor,
+            targetStationMarkerLineWidth);
+        ApplyArrowSegment(
+            EnsureTargetStationMarkerRenderer(rendererIndex++),
+            center + new Vector3(-diagonalRadius, 0f, diagonalRadius),
+            center + new Vector3(diagonalRadius, 0f, -diagonalRadius),
+            TargetStationMarkerColor,
+            targetStationMarkerLineWidth);
+        DisableTargetStationMarkerRenderers(rendererIndex);
+    }
+
     private static bool TryGetSelectedAutoDrivePowerSourceTrain(out Train powerSourceTrain)
     {
         powerSourceTrain = null;
@@ -750,6 +804,25 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return powerSourceTrain != null
                && powerSourceTrain.gameObject.activeInHierarchy
                && powerSourceTrain.TryGetPlacementRuntime(out _, out _);
+    }
+
+    private static bool TryGetSelectedAutoDriveTargetStation(out Trainstation targetStation)
+    {
+        targetStation = null;
+        if (!TrainFilter.TryGetActiveRouteSelection(
+                out SteamTrain train,
+                out _,
+                out _)
+            || train == null
+            || !train.AutoDriveEnabled
+            || !train.TryGetCurrentAutoDriveTargetStation(out targetStation)
+            || targetStation == null)
+        {
+            return false;
+        }
+
+        return targetStation.gameObject.activeInHierarchy
+               && targetStation.TryGetPlacementRuntime(out _, out _);
     }
 
     private void ApplyArrowSegment(
@@ -852,6 +925,30 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return powerMarkerRenderers[index];
     }
 
+    private LineRenderer EnsureTargetStationMarkerRenderer(int index)
+    {
+        EnsureDebugRoot();
+        while (targetStationMarkerRenderers.Count <= index)
+        {
+            GameObject lineObject = new GameObject("Rail_AutoDrive_Target_Station_Debug");
+            lineObject.transform.SetParent(debugRoot, false);
+
+            LineRenderer lineRenderer = lineObject.AddComponent<LineRenderer>();
+            lineRenderer.useWorldSpace = true;
+            lineRenderer.loop = false;
+            lineRenderer.numCapVertices = 2;
+            lineRenderer.numCornerVertices = 2;
+            lineRenderer.alignment = LineAlignment.View;
+            lineRenderer.textureMode = LineTextureMode.Stretch;
+            lineRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            lineRenderer.receiveShadows = false;
+            lineRenderer.sortingOrder = 6503;
+            targetStationMarkerRenderers.Add(lineRenderer);
+        }
+
+        return targetStationMarkerRenderers[index];
+    }
+
     private LineRenderer EnsureRouteHighlightRenderer(int index)
     {
         EnsureDebugRoot();
@@ -890,6 +987,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         DisableCartArrowRenderers();
         DisableRailArrowRenderers();
         DisablePowerMarkerRenderers();
+        DisableTargetStationMarkerRenderers();
     }
 
     private void DisableRouteHighlightRenderers(int startIndex = 0)
@@ -932,6 +1030,17 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             if (powerMarkerRenderers[i] != null)
             {
                 powerMarkerRenderers[i].enabled = false;
+            }
+        }
+    }
+
+    private void DisableTargetStationMarkerRenderers(int startIndex = 0)
+    {
+        for (int i = Mathf.Max(0, startIndex); i < targetStationMarkerRenderers.Count; i++)
+        {
+            if (targetStationMarkerRenderers[i] != null)
+            {
+                targetStationMarkerRenderers[i].enabled = false;
             }
         }
     }

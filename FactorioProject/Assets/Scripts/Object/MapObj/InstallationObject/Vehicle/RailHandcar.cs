@@ -653,6 +653,23 @@ public class RailHandcar : Train
         return Mathf.Max(0.001f, stationDockCompleteDistance);
     }
 
+    public bool TryGetPreferredRouteTravelDirection(out Vector2 direction)
+    {
+        direction = ResolveCoastTravelDirection();
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        direction.Normalize();
+        return true;
+    }
+
+    public float GetBranchPreviewDistance()
+    {
+        return ResolveBranchLookAheadDistance();
+    }
+
     public bool TryGetRailDockDistanceAtCoordinate(
         Vector2Int railCoordinate,
         out float remainingDistance)
@@ -3655,18 +3672,14 @@ public class RailHandcar : Train
 
             exitDirection.Normalize();
             RailSample connectedSample = default;
-            bool foundConnectedSample = frontMove.StartSample.Rail != currentSample.Rail
-                                        && TryFindPreferredConnectedRailSample(
-                                            endpointSample,
-                                            exitDirection,
-                                            currentSample.Rail,
-                                            frontMove.StartSample.Rail,
-                                            out connectedSample);
-            if (!foundConnectedSample
-                && !TryFindConnectedRailSample(
+            Railload preferredConnectedRail = frontMove.StartSample.Rail != currentSample.Rail
+                ? frontMove.StartSample.Rail
+                : null;
+            if (!TryFindConnectedRailSample(
                     endpointSample,
                     exitDirection,
                     currentSample.Rail,
+                    preferredConnectedRail,
                     out connectedSample))
             {
                 return false;
@@ -5059,6 +5072,16 @@ public class RailHandcar : Train
         return false;
     }
 
+    protected virtual bool TryGetPreferredConnectedRail(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        out Railload preferredRail)
+    {
+        preferredRail = null;
+        return false;
+    }
+
     private bool TryFindPreferredBranchRailSample(
         RailSample currentSample,
         Vector2 inputDirection,
@@ -5254,7 +5277,39 @@ public class RailHandcar : Train
         Railload excludedRail,
         out RailSample connectedSample)
     {
+        Railload preferredRail = null;
+        TryGetPreferredConnectedRail(
+            endpointSample,
+            exitDirection,
+            excludedRail,
+            out preferredRail);
+        return TryFindConnectedRailSample(
+            endpointSample,
+            exitDirection,
+            excludedRail,
+            preferredRail,
+            out connectedSample);
+    }
+
+    private bool TryFindConnectedRailSample(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        Railload preferredRail,
+        out RailSample connectedSample)
+    {
         connectedSample = default;
+        if (preferredRail != null
+            && TryFindPreferredConnectedRailSample(
+                endpointSample,
+                exitDirection,
+                excludedRail,
+                preferredRail,
+                out connectedSample))
+        {
+            return true;
+        }
+
         if (!TryCollectConnectedRailSamples(
                 endpointSample,
                 exitDirection,
