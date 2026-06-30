@@ -125,9 +125,14 @@ public class SteamTrain : RailHandcar
     private readonly List<AutoDriveRoutePlanner.RouteSegment> autoDriveRouteSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
     private readonly List<AutoDriveRoutePlanner.RouteSegment> autoDriveFixedRouteSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
     private readonly List<AutoDriveRoutePlanner.RouteSegment> autoDriveRouteScratchSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
+    private readonly List<AutoDriveRoutePlanner.RouteSegment> autoDriveRouteReferenceScratchSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
+    private readonly List<Train> autoDriveConnectedTrainScratch = new List<Train>(8);
     private readonly Queue<Vector2Int> waterPipeSearchQueue = new Queue<Vector2Int>(32);
+    private readonly Queue<Train> autoDriveConnectedTrainQueue = new Queue<Train>(8);
     private readonly HashSet<Vector2Int> waterPipeSearchVisited = new HashSet<Vector2Int>();
+    private readonly HashSet<Train> autoDriveConnectedTrainVisited = new HashSet<Train>();
     private string autoDriveRouteTargetStationName = string.Empty;
+    private string autoDriveCachedRouteReferenceTargetStationName = string.Empty;
     private int autoDriveRouteReferenceTrainInstanceId;
     private int autoDriveRouteSegmentCursor;
     private string autoDriveLastArrivedStationName = string.Empty;
@@ -136,6 +141,7 @@ public class SteamTrain : RailHandcar
     private string autoDriveResolvedTargetStationName = string.Empty;
     private string autoDriveResolvedNextStationName = string.Empty;
     private Trainstation autoDriveResolvedTargetStation;
+    private RailHandcar autoDriveCachedRouteReferenceTrain;
     private float autoDriveRouteRefreshTimer;
     private float autoDriveStationWaitTimer;
 
@@ -234,7 +240,7 @@ public class SteamTrain : RailHandcar
                          out Trainstation targetStation,
                          out _,
                          out _)
-                     && ResolveAutoDriveRouteReferenceTrain() is RailHandcar routeReferenceTrain)
+                     && ResolveAutoDriveRouteReferenceTrain(targetStation) is RailHandcar routeReferenceTrain)
             {
                 builtRoute = AutoDriveRoutePlanner.TryBuildRoute(
                     routeReferenceTrain,
@@ -428,7 +434,9 @@ public class SteamTrain : RailHandcar
         float deltaTime,
         Player mountedPlayer)
     {
-        RailHandcar drivenTrain = ResolveAutoDriveRouteReferenceTrain();
+        RailHandcar drivenTrain = ResolveAutoDriveRouteReferenceTrain(
+            autoDriveResolvedTargetStation,
+            autoDriveResolvedTargetStationName);
         if (!autoDriveEnabled
             || drivenTrain == null
             || drivenTrain == this
@@ -1281,7 +1289,10 @@ public class SteamTrain : RailHandcar
     {
         autoDriveRouteSegments.Clear();
         autoDriveRouteScratchSegments.Clear();
+        autoDriveRouteReferenceScratchSegments.Clear();
         autoDriveRouteTargetStationName = string.Empty;
+        autoDriveCachedRouteReferenceTargetStationName = string.Empty;
+        autoDriveCachedRouteReferenceTrain = null;
         autoDriveRouteReferenceTrainInstanceId = 0;
         autoDriveRouteSegmentCursor = 0;
         autoDriveLastArrivedStationName = string.Empty;
@@ -1741,7 +1752,9 @@ public class SteamTrain : RailHandcar
         out float routeLength)
     {
         routeLength = float.PositiveInfinity;
-        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain();
+        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(
+            station,
+            targetStationName);
         if (routeReferenceTrain == null)
         {
             return false;
@@ -1887,7 +1900,9 @@ public class SteamTrain : RailHandcar
 
     private bool TryEnsureAutoDriveRoute(Trainstation targetStation, string targetStationName, float deltaTime)
     {
-        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain();
+        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(
+            targetStation,
+            targetStationName);
         bool hasFixedRoute = TryEnsureAutoDriveFixedRoute();
         autoDriveRouteRefreshTimer = Mathf.Max(0f, autoDriveRouteRefreshTimer - Mathf.Max(0f, deltaTime));
         if (targetStation != null
@@ -1948,7 +1963,7 @@ public class SteamTrain : RailHandcar
         out float signedPathDelta)
     {
         signedPathDelta = 0f;
-        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain();
+        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(targetStation);
         return targetStation != null
                && routeReferenceTrain != null
                && targetStation.TryGetRailCoordinate(out Vector2Int railCoordinate)
@@ -1999,7 +2014,9 @@ public class SteamTrain : RailHandcar
     private bool TryResolveAutoDriveRouteMoveDirection(out Vector3 moveDirection)
     {
         moveDirection = Vector3.zero;
-        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain();
+        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(
+            autoDriveResolvedTargetStation,
+            autoDriveRouteTargetStationName);
         if (autoDriveRouteSegments.Count <= 0
             || routeReferenceTrain == null
             || !routeReferenceTrain.TryGetCurrentRailPose(
@@ -2360,15 +2377,252 @@ public class SteamTrain : RailHandcar
 
     private RailHandcar ResolveAutoDriveRouteReferenceTrain()
     {
+        return ResolveAutoDriveRouteReferenceTrain(
+            autoDriveResolvedTargetStation,
+            autoDriveResolvedTargetStationName);
+    }
+
+    private RailHandcar ResolveAutoDriveRouteReferenceTrain(Trainstation targetStation)
+    {
+        return ResolveAutoDriveRouteReferenceTrain(
+            targetStation,
+            targetStation != null ? targetStation.StationName : string.Empty);
+    }
+
+    private RailHandcar ResolveAutoDriveRouteReferenceTrain(
+        Trainstation targetStation,
+        string targetStationName)
+    {
+        CollectAutoDriveConnectedTrains();
+        if (TryGetCachedAutoDriveRouteReferenceTrain(targetStationName, out RailHandcar cachedTrain))
+        {
+            return cachedTrain;
+        }
+
+        if (TryResolveAutoDriveClosestEndpointTrain(
+                targetStation,
+                targetStationName,
+                out RailHandcar endpointTrain))
+        {
+            CacheAutoDriveRouteReferenceTrain(targetStationName, endpointTrain);
+            return endpointTrain;
+        }
+
+        RailHandcar fallbackRouteReferenceTrain = ResolveFallbackAutoDriveRouteReferenceTrain();
+        CacheAutoDriveRouteReferenceTrain(targetStationName, fallbackRouteReferenceTrain);
+        return fallbackRouteReferenceTrain;
+    }
+
+    private RailHandcar ResolveFallbackAutoDriveRouteReferenceTrain()
+    {
         RailHandcar routeReferenceTrain = CurrentRailDebugPowerSourceTrain as RailHandcar;
-        if (routeReferenceTrain != null
-            && routeReferenceTrain.gameObject.activeInHierarchy
-            && routeReferenceTrain.TryGetPlacementRuntime(out _, out _))
+        if (IsValidAutoDriveRouteReferenceTrain(routeReferenceTrain))
         {
             return routeReferenceTrain;
         }
 
-        return this;
+        return IsValidAutoDriveRouteReferenceTrain(this) ? this : null;
+    }
+
+    private bool TryResolveAutoDriveClosestEndpointTrain(
+        Trainstation targetStation,
+        string targetStationName,
+        out RailHandcar routeReferenceTrain)
+    {
+        routeReferenceTrain = null;
+        if (targetStation == null)
+        {
+            return false;
+        }
+
+        RailHandcar fallbackReferenceTrain = ResolveFallbackAutoDriveRouteReferenceTrain();
+        if (TryResolveAutoDriveClosestRouteReferenceTrain(
+                targetStation,
+                targetStationName,
+                endpointOnly: true,
+                fallbackReferenceTrain,
+                out routeReferenceTrain))
+        {
+            return true;
+        }
+
+        // Keep auto-drive usable even when a consist endpoint is not drivable.
+        return TryResolveAutoDriveClosestRouteReferenceTrain(
+            targetStation,
+            targetStationName,
+            endpointOnly: false,
+            fallbackReferenceTrain,
+            out routeReferenceTrain);
+    }
+
+    private bool TryGetCachedAutoDriveRouteReferenceTrain(
+        string targetStationName,
+        out RailHandcar routeReferenceTrain)
+    {
+        routeReferenceTrain = autoDriveCachedRouteReferenceTrain;
+        return !string.IsNullOrWhiteSpace(targetStationName)
+               && string.Equals(
+                   autoDriveCachedRouteReferenceTargetStationName,
+                   targetStationName,
+                   System.StringComparison.OrdinalIgnoreCase)
+               && IsValidAutoDriveRouteReferenceTrain(routeReferenceTrain)
+               && autoDriveConnectedTrainVisited.Contains(routeReferenceTrain);
+    }
+
+    private void CacheAutoDriveRouteReferenceTrain(
+        string targetStationName,
+        RailHandcar routeReferenceTrain)
+    {
+        autoDriveCachedRouteReferenceTargetStationName = targetStationName ?? string.Empty;
+        autoDriveCachedRouteReferenceTrain = routeReferenceTrain;
+    }
+
+    private bool TryResolveAutoDriveClosestRouteReferenceTrain(
+        Trainstation targetStation,
+        string targetStationName,
+        bool endpointOnly,
+        RailHandcar fallbackReferenceTrain,
+        out RailHandcar routeReferenceTrain)
+    {
+        routeReferenceTrain = null;
+        float bestRouteLength = float.PositiveInfinity;
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (!TryGetAutoDriveRouteReferenceCandidate(
+                    autoDriveConnectedTrainScratch[i],
+                    endpointOnly,
+                    out RailHandcar candidate)
+                || !TryBuildRouteLengthForReferenceCandidate(
+                    candidate,
+                    targetStation,
+                    targetStationName,
+                    out float candidateRouteLength))
+            {
+                continue;
+            }
+
+            if (candidateRouteLength + 0.0001f < bestRouteLength
+                || (Mathf.Abs(candidateRouteLength - bestRouteLength) <= 0.0001f
+                    && routeReferenceTrain != fallbackReferenceTrain
+                    && candidate == fallbackReferenceTrain))
+            {
+                bestRouteLength = candidateRouteLength;
+                routeReferenceTrain = candidate;
+            }
+        }
+
+        return routeReferenceTrain != null;
+    }
+
+    private bool TryGetAutoDriveRouteReferenceCandidate(
+        Train train,
+        bool endpointOnly,
+        out RailHandcar candidate)
+    {
+        candidate = train as RailHandcar;
+        if (!IsValidAutoDriveRouteReferenceTrain(candidate))
+        {
+            return false;
+        }
+
+        return !endpointOnly || CountConnectedTrainsWithinAutoDriveGroup(train) <= 1;
+    }
+
+    private bool TryBuildRouteLengthForReferenceCandidate(
+        RailHandcar candidate,
+        Trainstation targetStation,
+        string targetStationName,
+        out float routeLength)
+    {
+        routeLength = float.PositiveInfinity;
+        if (!IsValidAutoDriveRouteReferenceTrain(candidate) || targetStation == null)
+        {
+            return false;
+        }
+
+        autoDriveRouteReferenceScratchSegments.Clear();
+        bool hasFixedRoute = TryEnsureAutoDriveFixedRoute();
+        bool builtRoute = hasFixedRoute
+            ? TryBuildActiveRouteFromFixedRoute(
+                candidate,
+                targetStationName,
+                autoDriveRouteReferenceScratchSegments)
+            : AutoDriveRoutePlanner.TryBuildRoute(
+                candidate,
+                targetStation,
+                autoDriveRouteReferenceScratchSegments);
+        if (!builtRoute)
+        {
+            autoDriveRouteReferenceScratchSegments.Clear();
+            return false;
+        }
+
+        routeLength = AutoDriveRoutePlanner.GetRouteLength(autoDriveRouteReferenceScratchSegments);
+        autoDriveRouteReferenceScratchSegments.Clear();
+        return !float.IsPositiveInfinity(routeLength);
+    }
+
+    private void CollectAutoDriveConnectedTrains()
+    {
+        autoDriveConnectedTrainScratch.Clear();
+        autoDriveConnectedTrainVisited.Clear();
+        autoDriveConnectedTrainQueue.Clear();
+        if (!IsValidAutoDriveRouteReferenceTrain(this))
+        {
+            return;
+        }
+
+        autoDriveConnectedTrainQueue.Enqueue(this);
+        autoDriveConnectedTrainVisited.Add(this);
+        while (autoDriveConnectedTrainQueue.Count > 0)
+        {
+            Train currentTrain = autoDriveConnectedTrainQueue.Dequeue();
+            if (currentTrain == null || !currentTrain.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            autoDriveConnectedTrainScratch.Add(currentTrain);
+            foreach (Train connectedTrain in currentTrain.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !autoDriveConnectedTrainVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                autoDriveConnectedTrainQueue.Enqueue(connectedTrain);
+            }
+        }
+    }
+
+    private int CountConnectedTrainsWithinAutoDriveGroup(Train train)
+    {
+        if (train == null)
+        {
+            return 0;
+        }
+
+        int connectedCount = 0;
+        foreach (Train connectedTrain in train.ConnectedTrains)
+        {
+            if (connectedTrain != null
+                && connectedTrain.gameObject.activeInHierarchy
+                && autoDriveConnectedTrainVisited.Contains(connectedTrain))
+            {
+                connectedCount++;
+            }
+        }
+
+        return connectedCount;
+    }
+
+    private static bool IsValidAutoDriveRouteReferenceTrain(RailHandcar candidate)
+    {
+        return candidate != null
+               && candidate.gameObject.activeInHierarchy
+               && candidate.TryGetPlacementRuntime(out _, out _);
     }
 
     private bool HasAutoDriveRouteReferenceChanged(RailHandcar routeReferenceTrain)
