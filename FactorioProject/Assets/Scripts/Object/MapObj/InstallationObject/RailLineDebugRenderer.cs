@@ -462,11 +462,15 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     {
         if (result == null
             || !TrainFilter.TryGetActiveRouteSelection(
-                out SteamTrain boundTrain,
                 out _,
-                out _)
-            || boundTrain == null
-            || !boundTrain.TryGetAutoDriveDebugRouteSegments(autoDriveRouteSegmentScratch))
+                out string startStationName,
+                out string destinationStationName)
+            || string.IsNullOrWhiteSpace(startStationName)
+            || string.IsNullOrWhiteSpace(destinationStationName)
+            || !SteamTrain.TryBuildDebugRouteBetweenStations(
+                startStationName,
+                destinationStationName,
+                autoDriveRouteSegmentScratch))
         {
             return false;
         }
@@ -643,8 +647,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
                && train != null
                && train.gameObject.activeInHierarchy
                && train.TryGetPlacementRuntime(out _, out _)
-               && (!string.IsNullOrWhiteSpace(targetAStationName)
-                   || !string.IsNullOrWhiteSpace(targetBStationName));
+               && !string.IsNullOrWhiteSpace(targetAStationName)
+               && !string.IsNullOrWhiteSpace(targetBStationName);
     }
 
     private void RefreshCartDirectionArrows()

@@ -20,6 +20,9 @@ public class TrainFilter : MonoBehaviour
     };
 
     private static TrainFilter activeVisibleFilter;
+    private static SteamTrain lastSelectedTrain;
+    private static string lastSelectedTargetAStationName = string.Empty;
+    private static string lastSelectedTargetBStationName = string.Empty;
     private static int routeSelectionVersion;
 
     [SerializeField]
@@ -43,11 +46,13 @@ public class TrainFilter : MonoBehaviour
         activeVisibleFilter = this;
         BindDropdownListeners();
         Refresh();
+        CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
     }
 
     private void OnDisable()
     {
+        CacheCurrentRouteSelection();
         UnbindDropdownListeners();
         if (activeVisibleFilter == this)
         {
@@ -60,6 +65,7 @@ public class TrainFilter : MonoBehaviour
     {
         boundTrain = steamTrain;
         Refresh();
+        CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
     }
 
@@ -78,17 +84,26 @@ public class TrainFilter : MonoBehaviour
         targetAStationName = string.Empty;
         targetBStationName = string.Empty;
 
-        if (activeVisibleFilter == null
-            || !activeVisibleFilter.gameObject.activeInHierarchy
-            || !activeVisibleFilter.TryGetBoundTarget(out train))
+        if (activeVisibleFilter != null
+            && activeVisibleFilter.gameObject.activeInHierarchy
+            && activeVisibleFilter.TryGetBoundTarget(out train))
+        {
+            targetAStationName = NormalizeStationSelection(
+                ResolveSelectedOptionText(activeVisibleFilter.targetA));
+            targetBStationName = NormalizeStationSelection(
+                ResolveSelectedOptionText(activeVisibleFilter.targetB));
+            return true;
+        }
+
+        if (lastSelectedTrain == null
+            || !lastSelectedTrain.gameObject.activeInHierarchy)
         {
             return false;
         }
 
-        targetAStationName = NormalizeStationSelection(
-            ResolveSelectedOptionText(activeVisibleFilter.targetA));
-        targetBStationName = NormalizeStationSelection(
-            ResolveSelectedOptionText(activeVisibleFilter.targetB));
+        train = lastSelectedTrain;
+        targetAStationName = lastSelectedTargetAStationName;
+        targetBStationName = lastSelectedTargetBStationName;
         return true;
     }
 
@@ -271,12 +286,33 @@ public class TrainFilter : MonoBehaviour
 
     private void HandleFilterChanged(bool _)
     {
+        CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
     }
 
     private void HandleDropdownChanged(int _)
     {
+        CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
+    }
+
+    private void CacheCurrentRouteSelection()
+    {
+        if (!TryGetBoundTarget(out SteamTrain train))
+        {
+            if (boundTrain == null)
+            {
+                lastSelectedTrain = null;
+                lastSelectedTargetAStationName = string.Empty;
+                lastSelectedTargetBStationName = string.Empty;
+            }
+
+            return;
+        }
+
+        lastSelectedTrain = train;
+        lastSelectedTargetAStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetA));
+        lastSelectedTargetBStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetB));
     }
 
     private int ResolveStationOptionIndex(string stationName)

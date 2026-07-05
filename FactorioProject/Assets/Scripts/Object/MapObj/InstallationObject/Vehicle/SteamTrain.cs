@@ -3,6 +3,9 @@ using UnityEngine;
 
 public class SteamTrain : RailHandcar
 {
+    private static readonly List<AutoDriveRoutePlanner.RouteSegment> SharedDebugRouteSegmentScratch =
+        new List<AutoDriveRoutePlanner.RouteSegment>(32);
+
     public readonly struct AutoDriveDebugRouteSegment
     {
         public AutoDriveDebugRouteSegment(Railload rail, float startDistance, float endDistance)
@@ -198,6 +201,62 @@ public class SteamTrain : RailHandcar
     {
         result?.Clear();
         return false;
+    }
+
+    public static bool TryBuildDebugRouteBetweenStations(
+        string startStationName,
+        string destinationStationName,
+        List<AutoDriveDebugRouteSegment> result)
+    {
+        result?.Clear();
+        if (string.IsNullOrWhiteSpace(startStationName)
+            || string.IsNullOrWhiteSpace(destinationStationName)
+            || !AutoDriveRoutePlanner.TryFindStationByName(startStationName.Trim(), out Trainstation startStation)
+            || !AutoDriveRoutePlanner.TryFindStationByName(destinationStationName.Trim(), out Trainstation destinationStation))
+        {
+            return false;
+        }
+
+        return TryBuildDebugRouteBetweenStations(startStation, destinationStation, result);
+    }
+
+    public static bool TryBuildDebugRouteBetweenStations(
+        Trainstation startStation,
+        Trainstation destinationStation,
+        List<AutoDriveDebugRouteSegment> result)
+    {
+        result?.Clear();
+        if (result == null
+            || startStation == null
+            || destinationStation == null)
+        {
+            return false;
+        }
+
+        SharedDebugRouteSegmentScratch.Clear();
+        if (!AutoDriveRoutePlanner.TryBuildRoute(
+                startStation,
+                destinationStation,
+                SharedDebugRouteSegmentScratch))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < SharedDebugRouteSegmentScratch.Count; i++)
+        {
+            AutoDriveRoutePlanner.RouteSegment segment = SharedDebugRouteSegmentScratch[i];
+            if (segment.Rail == null || segment.Length <= 0.0001f)
+            {
+                continue;
+            }
+
+            result.Add(new AutoDriveDebugRouteSegment(
+                segment.Rail,
+                segment.StartDistance,
+                segment.EndDistance));
+        }
+
+        return result.Count > 0;
     }
 
     public bool TryGetCurrentAutoDriveTargetStation(out Trainstation station)
