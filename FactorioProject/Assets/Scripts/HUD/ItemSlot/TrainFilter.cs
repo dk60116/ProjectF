@@ -36,6 +36,8 @@ public class TrainFilter : MonoBehaviour
     private readonly List<TMP_Dropdown.OptionData> stationOptionScratch = new List<TMP_Dropdown.OptionData>(8);
     private readonly List<TMP_Dropdown.OptionData> filterOptionScratch = new List<TMP_Dropdown.OptionData>(4);
 
+    public static int RouteSelectionVersion => routeSelectionVersion;
+
     private void OnEnable()
     {
         activeVisibleFilter = this;
@@ -61,8 +63,6 @@ public class TrainFilter : MonoBehaviour
         MarkRouteSelectionDirty();
     }
 
-    public static int RouteSelectionVersion => routeSelectionVersion;
-
     public bool TryGetBoundTarget(out SteamTrain train)
     {
         train = boundTrain;
@@ -78,29 +78,18 @@ public class TrainFilter : MonoBehaviour
         targetAStationName = string.Empty;
         targetBStationName = string.Empty;
 
-        if (activeVisibleFilter != null
-            && activeVisibleFilter.gameObject.activeInHierarchy
-            && activeVisibleFilter.TryGetBoundTarget(out train))
-        {
-            targetAStationName = NormalizeStationSelection(ResolveSelectedOptionText(activeVisibleFilter.targetA));
-            targetBStationName = NormalizeStationSelection(ResolveSelectedOptionText(activeVisibleFilter.targetB));
-            if (!string.IsNullOrWhiteSpace(targetAStationName)
-                || !string.IsNullOrWhiteSpace(targetBStationName))
-            {
-                return true;
-            }
-        }
-
-        if (!TryResolveCurrentRouteDisplayTrain(out train)
-            || train == null)
+        if (activeVisibleFilter == null
+            || !activeVisibleFilter.gameObject.activeInHierarchy
+            || !activeVisibleFilter.TryGetBoundTarget(out train))
         {
             return false;
         }
 
-        targetAStationName = train.AutoDriveTargetAStationName;
-        targetBStationName = train.AutoDriveTargetBStationName;
-        return !string.IsNullOrWhiteSpace(targetAStationName)
-               || !string.IsNullOrWhiteSpace(targetBStationName);
+        targetAStationName = NormalizeStationSelection(
+            ResolveSelectedOptionText(activeVisibleFilter.targetA));
+        targetBStationName = NormalizeStationSelection(
+            ResolveSelectedOptionText(activeVisibleFilter.targetB));
+        return true;
     }
 
     public void Refresh()
@@ -117,25 +106,15 @@ public class TrainFilter : MonoBehaviour
         RefreshFilterDropdowns();
     }
 
-    private static Sprite ResolveTrainIcon(SteamTrain train)
+    private void RefreshAutoDriveToggle()
     {
-        if (train == null)
+        if (autoDriaveToggle == null)
         {
-            return null;
+            return;
         }
 
-        ItemDefinition definition = train.BoundItemDefinition != null
-            ? train.BoundItemDefinition
-            : InputOutputModule.ResolveItemDefinition(train.ResolveItemId());
-        if (definition != null && definition.icon != null)
-        {
-            return definition.icon;
-        }
-
-        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
-        return itemManager != null && itemManager.TryGetItemSetById(train.ResolveItemId(), out ItemManager.ItemSet itemSet)
-            ? itemSet.icon
-            : null;
+        EnsureControlVisible(autoDriaveToggle);
+        autoDriaveToggle.interactable = true;
     }
 
     private void RefreshStationTargetDropdowns()
@@ -143,7 +122,7 @@ public class TrainFilter : MonoBehaviour
         stationNameScratch.Clear();
 
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
-        if (terrain != null)
+        if (terrain != null && boundTrain != null)
         {
             terrain.CollectTrainStationNamesOnSameRailLine(boundTrain, stationNameScratch);
         }
@@ -165,6 +144,9 @@ public class TrainFilter : MonoBehaviour
             return;
         }
 
+        EnsureControlVisible(dropdown);
+        dropdown.interactable = true;
+
         string previouslySelectedStationName = ResolvePreferredStationName(dropdown);
         if (!string.IsNullOrWhiteSpace(previouslySelectedStationName)
             && ResolveOptionIndex(previouslySelectedStationName, stationNameScratch) < 0)
@@ -183,6 +165,45 @@ public class TrainFilter : MonoBehaviour
         {
             dropdown.AddOptions(stationOptionScratch);
             dropdown.SetValueWithoutNotify(ResolveStationOptionIndex(previouslySelectedStationName));
+        }
+
+        dropdown.RefreshShownValue();
+    }
+
+    private void RefreshFilterDropdowns()
+    {
+        RefreshFixedOptionDropdown(fuel, FuelOptions);
+        RefreshFixedOptionDropdown(freight, FreightOptions);
+    }
+
+    private void RefreshFixedOptionDropdown(
+        TMP_Dropdown dropdown,
+        IReadOnlyList<string> options)
+    {
+        if (dropdown == null)
+        {
+            return;
+        }
+
+        EnsureControlVisible(dropdown);
+        dropdown.interactable = true;
+
+        string previouslySelectedOption = ResolveSelectedOptionText(dropdown);
+        filterOptionScratch.Clear();
+        if (options != null)
+        {
+            for (int i = 0; i < options.Count; i++)
+            {
+                filterOptionScratch.Add(new TMP_Dropdown.OptionData(options[i]));
+            }
+        }
+
+        dropdown.ClearOptions();
+        if (filterOptionScratch.Count > 0)
+        {
+            dropdown.AddOptions(filterOptionScratch);
+            int optionIndex = ResolveOptionIndex(previouslySelectedOption, options);
+            dropdown.SetValueWithoutNotify(optionIndex >= 0 ? optionIndex : 0);
         }
 
         dropdown.RefreshShownValue();
@@ -213,8 +234,8 @@ public class TrainFilter : MonoBehaviour
             return;
         }
 
-        toggle.onValueChanged.RemoveListener(HandleAutoDriveToggleChanged);
-        toggle.onValueChanged.AddListener(HandleAutoDriveToggleChanged);
+        toggle.onValueChanged.RemoveListener(HandleFilterChanged);
+        toggle.onValueChanged.AddListener(HandleFilterChanged);
     }
 
     private void UnbindToggleListener(Toggle toggle)
@@ -224,7 +245,7 @@ public class TrainFilter : MonoBehaviour
             return;
         }
 
-        toggle.onValueChanged.RemoveListener(HandleAutoDriveToggleChanged);
+        toggle.onValueChanged.RemoveListener(HandleFilterChanged);
     }
 
     private void BindDropdownListener(TMP_Dropdown dropdown)
@@ -234,8 +255,8 @@ public class TrainFilter : MonoBehaviour
             return;
         }
 
-        dropdown.onValueChanged.RemoveListener(HandleRouteDropdownChanged);
-        dropdown.onValueChanged.AddListener(HandleRouteDropdownChanged);
+        dropdown.onValueChanged.RemoveListener(HandleDropdownChanged);
+        dropdown.onValueChanged.AddListener(HandleDropdownChanged);
     }
 
     private void UnbindDropdownListener(TMP_Dropdown dropdown)
@@ -245,71 +266,43 @@ public class TrainFilter : MonoBehaviour
             return;
         }
 
-        dropdown.onValueChanged.RemoveListener(HandleRouteDropdownChanged);
+        dropdown.onValueChanged.RemoveListener(HandleDropdownChanged);
     }
 
-    private void HandleRouteDropdownChanged(int _)
+    private void HandleFilterChanged(bool _)
     {
-        ApplyCurrentFilterStateToBoundTrain();
         MarkRouteSelectionDirty();
     }
 
-    private void HandleAutoDriveToggleChanged(bool _)
+    private void HandleDropdownChanged(int _)
     {
-        ApplyCurrentFilterStateToBoundTrain();
         MarkRouteSelectionDirty();
-    }
-
-    private void RefreshFilterDropdowns()
-    {
-        string selectedFuelOption = boundTrain != null
-            ? ResolveFuelOption(boundTrain.AutoDriveFuelMode)
-            : ResolveSelectedOptionText(fuel);
-        string selectedFreightOption = boundTrain != null
-            ? ResolveFreightOption(boundTrain.AutoDriveFreightMode)
-            : ResolveSelectedOptionText(freight);
-
-        RefreshFixedOptionDropdown(fuel, FuelOptions, selectedFuelOption);
-        RefreshFixedOptionDropdown(freight, FreightOptions, selectedFreightOption);
-    }
-
-    private void RefreshFixedOptionDropdown(
-        TMP_Dropdown dropdown,
-        IReadOnlyList<string> options,
-        string preferredOption = null)
-    {
-        if (dropdown == null)
-        {
-            return;
-        }
-
-        string previouslySelectedOption = !string.IsNullOrWhiteSpace(preferredOption)
-            ? preferredOption
-            : ResolveSelectedOptionText(dropdown);
-        filterOptionScratch.Clear();
-        if (options != null)
-        {
-            for (int i = 0; i < options.Count; i++)
-            {
-                filterOptionScratch.Add(new TMP_Dropdown.OptionData(options[i]));
-            }
-        }
-
-        dropdown.ClearOptions();
-        if (filterOptionScratch.Count > 0)
-        {
-            dropdown.AddOptions(filterOptionScratch);
-            int optionIndex = ResolveOptionIndex(previouslySelectedOption, options);
-            dropdown.SetValueWithoutNotify(optionIndex >= 0 ? optionIndex : 0);
-        }
-
-        dropdown.RefreshShownValue();
     }
 
     private int ResolveStationOptionIndex(string stationName)
     {
         int optionIndex = ResolveOptionIndex(stationName, stationNameScratch);
         return optionIndex >= 0 ? optionIndex : 0;
+    }
+
+    private string ResolvePreferredStationName(TMP_Dropdown dropdown)
+    {
+        string selectedStationName = ResolveSelectedOptionText(dropdown);
+        if (!string.IsNullOrWhiteSpace(selectedStationName)
+            && !string.Equals(selectedStationName, NoneOption, System.StringComparison.OrdinalIgnoreCase))
+        {
+            return selectedStationName;
+        }
+
+        return string.Empty;
+    }
+
+    private static void EnsureControlVisible(Component component)
+    {
+        if (component != null && !component.gameObject.activeSelf)
+        {
+            component.gameObject.SetActive(true);
+        }
     }
 
     private static int ResolveOptionIndex(string optionText, IReadOnlyList<string> options)
@@ -344,54 +337,6 @@ public class TrainFilter : MonoBehaviour
         return option != null ? option.text : string.Empty;
     }
 
-    private string ResolvePreferredStationName(TMP_Dropdown dropdown)
-    {
-        if (boundTrain != null)
-        {
-            string storedStationName = dropdown == targetB
-                ? boundTrain.AutoDriveTargetBStationName
-                : boundTrain.AutoDriveTargetAStationName;
-            if (!string.IsNullOrWhiteSpace(storedStationName))
-            {
-                return storedStationName;
-            }
-        }
-
-        string selectedStationName = ResolveSelectedOptionText(dropdown);
-        if (!string.IsNullOrWhiteSpace(selectedStationName)
-            && !string.Equals(selectedStationName, NoneOption, System.StringComparison.OrdinalIgnoreCase))
-        {
-            return selectedStationName;
-        }
-
-        return string.Empty;
-    }
-
-    private void RefreshAutoDriveToggle()
-    {
-        if (autoDriaveToggle == null)
-        {
-            return;
-        }
-
-        autoDriaveToggle.SetIsOnWithoutNotify(boundTrain != null && boundTrain.AutoDriveEnabled);
-    }
-
-    private void ApplyCurrentFilterStateToBoundTrain()
-    {
-        if (boundTrain == null)
-        {
-            return;
-        }
-
-        boundTrain.ApplyAutoDriveFilterState(
-            autoDriaveToggle != null && autoDriaveToggle.isOn,
-            NormalizeStationSelection(ResolveSelectedOptionText(targetA)),
-            NormalizeStationSelection(ResolveSelectedOptionText(targetB)),
-            ResolveFuelFilter(ResolveSelectedOptionText(fuel)),
-            ResolveFreightFilter(ResolveSelectedOptionText(freight)));
-    }
-
     private static string NormalizeStationSelection(string stationName)
     {
         return string.IsNullOrWhiteSpace(stationName)
@@ -400,86 +345,25 @@ public class TrainFilter : MonoBehaviour
             : stationName.Trim();
     }
 
-    private static string ResolveFuelOption(SteamTrain.AutoDriveFuelFilter filter)
+    private static Sprite ResolveTrainIcon(SteamTrain train)
     {
-        return filter == SteamTrain.AutoDriveFuelFilter.Full ? FuelOptions[1] : FuelOptions[0];
-    }
-
-    private static string ResolveFreightOption(SteamTrain.AutoDriveFreightFilter filter)
-    {
-        return filter switch
+        if (train == null)
         {
-            SteamTrain.AutoDriveFreightFilter.Full => FreightOptions[1],
-            SteamTrain.AutoDriveFreightFilter.Empty => FreightOptions[2],
-            _ => FreightOptions[0]
-        };
-    }
-
-    private static SteamTrain.AutoDriveFuelFilter ResolveFuelFilter(string optionText)
-    {
-        return string.Equals(optionText, FuelOptions[1], System.StringComparison.OrdinalIgnoreCase)
-            ? SteamTrain.AutoDriveFuelFilter.Full
-            : SteamTrain.AutoDriveFuelFilter.Free;
-    }
-
-    private static SteamTrain.AutoDriveFreightFilter ResolveFreightFilter(string optionText)
-    {
-        if (string.Equals(optionText, FreightOptions[1], System.StringComparison.OrdinalIgnoreCase))
-        {
-            return SteamTrain.AutoDriveFreightFilter.Full;
+            return null;
         }
 
-        return string.Equals(optionText, FreightOptions[2], System.StringComparison.OrdinalIgnoreCase)
-            ? SteamTrain.AutoDriveFreightFilter.Empty
-            : SteamTrain.AutoDriveFreightFilter.Free;
-    }
-
-    private static bool TryResolveCurrentRouteDisplayTrain(out SteamTrain train)
-    {
-        train = null;
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        if (player == null)
+        ItemDefinition definition = train.BoundItemDefinition != null
+            ? train.BoundItemDefinition
+            : InputOutputModule.ResolveItemDefinition(train.ResolveItemId());
+        if (definition != null && definition.icon != null)
         {
-            return false;
+            return definition.icon;
         }
 
-        PlayerController playerController = player.GetComponent<PlayerController>();
-        if (playerController == null)
-        {
-            return false;
-        }
-
-        if (playerController.TryGetMountedVehicleState(out Vehicle mountedVehicle, out _))
-        {
-            train = mountedVehicle as SteamTrain;
-            if (train == null && mountedVehicle != null)
-            {
-                train = mountedVehicle.GetComponent<SteamTrain>();
-            }
-
-            if (train != null && train.gameObject.activeInHierarchy)
-            {
-                return true;
-            }
-        }
-
-        if (!playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
-        {
-            PlayerHUD playerHud = UIManager.Instance != null ? UIManager.Instance.PlayerHUD : null;
-            if (playerHud == null
-                || !playerHud.TryGetObjectInfoFocusedMapObject(out focusedMapObject))
-            {
-                return false;
-            }
-        }
-
-        train = focusedMapObject as SteamTrain;
-        if (train == null && focusedMapObject != null)
-        {
-            train = focusedMapObject.GetComponent<SteamTrain>();
-        }
-
-        return train != null && train.gameObject.activeInHierarchy;
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        return itemManager != null && itemManager.TryGetItemSetById(train.ResolveItemId(), out ItemManager.ItemSet itemSet)
+            ? itemSet.icon
+            : null;
     }
 
     public static void MarkRouteSelectionDirty()

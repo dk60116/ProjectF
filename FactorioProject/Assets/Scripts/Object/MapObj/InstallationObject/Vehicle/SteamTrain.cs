@@ -17,20 +17,20 @@ public class SteamTrain : RailHandcar
         public float EndDistance { get; }
     }
 
-    public enum AutoDriveFuelFilter
+    private enum AutoDriveFuelFilter
     {
         Free = 0,
         Full = 1
     }
 
-    public enum AutoDriveFreightFilter
+    private enum AutoDriveFreightFilter
     {
         Free = 0,
         Full = 1,
         Empty = 2
     }
 
-    public enum AutoDriveStatus
+    private enum AutoDriveStatus
     {
         Idle = 0,
         NoTarget = 1,
@@ -80,7 +80,6 @@ public class SteamTrain : RailHandcar
     private const float AutoDriveDockSnapDistance = 0.05f;
     private const float AutoDriveDockApproachMinInputMagnitude = 0.12f;
     private const float AutoDriveWaitDurationSeconds = 5f;
-    private const float AutoDriveSpeedBlockedThreshold = 0.02f;
     private static readonly Vector2Int[] CardinalDirections =
     {
         Vector2Int.up,
@@ -169,18 +168,10 @@ public class SteamTrain : RailHandcar
     }
     public float ObjectInfoStoredWaterLiters => Mathf.Max(0f, StoredFluidLiters);
     public float ObjectInfoWaterCapacityLiters => Mathf.Max(0f, FluidStorageCapacityLiters);
-    public bool AutoDriveEnabled => autoDriveEnabled;
-    public string AutoDriveTargetAStationName => autoDriveTargetAStationName;
-    public string AutoDriveTargetBStationName => autoDriveTargetBStationName;
-    public AutoDriveFuelFilter AutoDriveFuelMode => autoDriveFuelFilter;
-    public AutoDriveFreightFilter AutoDriveFreightMode => autoDriveFreightFilter;
-    public AutoDriveStatus CurrentAutoDriveStatus => autoDriveStatus;
-    public string CurrentAutoDriveTargetStationName => autoDriveCurrentTargetStationName;
-    public string CurrentAutoDriveNextTargetStationName => autoDriveNextTargetStationName;
-    public bool HasAnyAutoDriveTarget =>
+    public bool AutoDriveEnabled => false;
+    private bool HasAnyAutoDriveTarget =>
         !string.IsNullOrWhiteSpace(autoDriveTargetAStationName)
         || !string.IsNullOrWhiteSpace(autoDriveTargetBStationName);
-    public string CurrentAutoDriveStatusText => ResolveAutoDriveStatusText();
     public float ObjectInfoWaterGaugeFillAmount
     {
         get
@@ -205,98 +196,14 @@ public class SteamTrain : RailHandcar
 
     public bool TryGetAutoDriveDebugRouteSegments(List<AutoDriveDebugRouteSegment> result)
     {
-        if (result == null)
-        {
-            return false;
-        }
-
-        result.Clear();
-        List<AutoDriveRoutePlanner.RouteSegment> debugRouteSegments = null;
-        if (TryEnsureAutoDriveFixedRoute())
-        {
-            debugRouteSegments = autoDriveFixedRouteSegments;
-        }
-        else if (autoDriveRouteSegments.Count > 0)
-        {
-            debugRouteSegments = autoDriveRouteSegments;
-        }
-        else
-        {
-            debugRouteSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
-            bool builtRoute = false;
-            string targetAStationName = AutoDriveTargetAStationName;
-            string targetBStationName = AutoDriveTargetBStationName;
-            if (!string.IsNullOrWhiteSpace(targetAStationName)
-                && !string.IsNullOrWhiteSpace(targetBStationName)
-                && AutoDriveRoutePlanner.TryFindStationByName(targetAStationName, out Trainstation startStation)
-                && AutoDriveRoutePlanner.TryFindStationByName(targetBStationName, out Trainstation destinationStation))
-            {
-                builtRoute = AutoDriveRoutePlanner.TryBuildRoute(
-                    startStation,
-                    destinationStation,
-                    debugRouteSegments);
-            }
-            else if (TryResolveAutoDriveTargets(
-                         out Trainstation targetStation,
-                         out _,
-                         out _)
-                     && ResolveAutoDriveRouteReferenceTrain(targetStation) is RailHandcar routeReferenceTrain)
-            {
-                builtRoute = AutoDriveRoutePlanner.TryBuildRoute(
-                    routeReferenceTrain,
-                    targetStation,
-                    debugRouteSegments);
-            }
-
-            if (!builtRoute || debugRouteSegments.Count <= 0)
-            {
-                return false;
-            }
-        }
-
-        for (int i = 0; i < debugRouteSegments.Count; i++)
-        {
-            AutoDriveRoutePlanner.RouteSegment segment = debugRouteSegments[i];
-            if (segment.Rail == null)
-            {
-                continue;
-            }
-
-            result.Add(new AutoDriveDebugRouteSegment(
-                segment.Rail,
-                segment.StartDistance,
-                segment.EndDistance));
-        }
-
-        return result.Count > 0;
+        result?.Clear();
+        return false;
     }
 
     public bool TryGetCurrentAutoDriveTargetStation(out Trainstation station)
     {
         station = null;
-        if (!autoDriveEnabled)
-        {
-            return false;
-        }
-
-        if (autoDriveResolvedTargetStation != null
-            && autoDriveResolvedTargetStation.gameObject.activeInHierarchy
-            && autoDriveResolvedTargetStation.TryGetPlacementRuntime(out _, out _))
-        {
-            station = autoDriveResolvedTargetStation;
-            return true;
-        }
-
-        if (!TryResolveAutoDriveTargets(out Trainstation targetStation, out _, out _)
-            || targetStation == null
-            || !targetStation.gameObject.activeInHierarchy
-            || !targetStation.TryGetPlacementRuntime(out _, out _))
-        {
-            return false;
-        }
-
-        station = targetStation;
-        return true;
+        return false;
     }
 
     public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
@@ -367,22 +274,8 @@ public class SteamTrain : RailHandcar
         ClearPendingWaterCost();
         storedBurnEnergy = 0f;
         burnEnergyGaugeCapacity = 0f;
-        ResetAutoDriveState();
         ResetWaterPipeImmediate(false);
         base.PrepareForPool();
-    }
-
-    private void Update()
-    {
-        if (!Application.isPlaying
-            || !gameObject.activeInHierarchy
-            || !autoDriveEnabled
-            || IsMountedByPlayer())
-        {
-            return;
-        }
-
-        HandleMountedInput(Vector3.zero, 0f, Time.deltaTime, null);
     }
 
     public override void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
@@ -398,65 +291,11 @@ public class SteamTrain : RailHandcar
     {
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
-
-        Vector3 resolvedMoveDirection = autoDriveEnabled
-            ? ResolveAutoDriveMoveDirection(deltaTime)
-            : worldMoveDirection;
-
-        if (autoDriveEnabled
-            && TryHandleAutoDriveWithReferenceTrain(
-                resolvedMoveDirection,
-                moveSpeed,
-                deltaTime,
-                mountedPlayer))
-        {
-            return;
-        }
-
-        DriveMotionOutcome motionOutcome = HandleResolvedDriveMotion(
-            resolvedMoveDirection,
+        HandleResolvedDriveMotion(
+            worldMoveDirection,
             moveSpeed,
             deltaTime,
             mountedPlayer);
-
-        if (RequiresWater(resolvedMoveDirection, deltaTime, out float waterCost)
-            || !autoDriveEnabled)
-        {
-            return;
-        }
-
-        UpdateAutoDrivePostMoveStatus(this, resolvedMoveDirection, deltaTime, motionOutcome);
-    }
-
-    private bool TryHandleAutoDriveWithReferenceTrain(
-        Vector3 resolvedMoveDirection,
-        float moveSpeed,
-        float deltaTime,
-        Player mountedPlayer)
-    {
-        RailHandcar drivenTrain = ResolveAutoDriveRouteReferenceTrain(
-            autoDriveResolvedTargetStation,
-            autoDriveResolvedTargetStationName);
-        if (!autoDriveEnabled
-            || drivenTrain == null
-            || drivenTrain == this
-            || drivenTrain is not SteamTrain drivenSteamTrain
-            || drivenSteamTrain.autoDriveEnabled)
-        {
-            return false;
-        }
-
-        DriveMotionOutcome motionOutcome = drivenSteamTrain.HandleResolvedDriveMotion(
-            resolvedMoveDirection,
-            moveSpeed,
-            deltaTime,
-            mountedPlayer);
-        UpdateAutoDrivePostMoveStatus(
-            drivenSteamTrain,
-            resolvedMoveDirection,
-            deltaTime,
-            motionOutcome);
-        return true;
     }
 
     private DriveMotionOutcome HandleResolvedDriveMotion(
@@ -501,43 +340,6 @@ public class SteamTrain : RailHandcar
         lastDrivenInputFrame = Time.frameCount;
         base.HandleMountedInput(resolvedMoveDirection, moveSpeed, deltaTime);
         return DriveMotionOutcome.Applied;
-    }
-
-    private void UpdateAutoDrivePostMoveStatus(
-        RailHandcar drivenTrain,
-        Vector3 resolvedMoveDirection,
-        float deltaTime,
-        DriveMotionOutcome motionOutcome)
-    {
-        if (!autoDriveEnabled)
-        {
-            return;
-        }
-
-        if (motionOutcome == DriveMotionOutcome.BlockedByFuel)
-        {
-            SetAutoDriveStatus(
-                AutoDriveStatus.WaitingForFuel,
-                autoDriveResolvedTargetStationName,
-                autoDriveResolvedNextStationName);
-            return;
-        }
-
-        if (TryFinalizeAutoDriveArrival(deltaTime))
-        {
-            return;
-        }
-
-        RailHandcar resolvedDrivenTrain = drivenTrain != null ? drivenTrain : this;
-        if (resolvedMoveDirection.sqrMagnitude > 0.0001f
-            && resolvedDrivenTrain.CurrentVehicleSpeed <= AutoDriveSpeedBlockedThreshold
-            && autoDriveStatus == AutoDriveStatus.Moving)
-        {
-            SetAutoDriveStatus(
-                AutoDriveStatus.WaitingForClearTrack,
-                autoDriveResolvedTargetStationName,
-                autoDriveResolvedNextStationName);
-        }
     }
 
     private void LateUpdate()
@@ -600,68 +402,6 @@ public class SteamTrain : RailHandcar
     {
         storedBurnEnergy = Mathf.Max(0f, storedEnergy);
         burnEnergyGaugeCapacity = Mathf.Max(0f, gaugeCapacity, storedBurnEnergy);
-    }
-
-    public void ApplyAutoDriveFilterState(
-        bool enabled,
-        string targetAStationName,
-        string targetBStationName,
-        AutoDriveFuelFilter fuelFilter,
-        AutoDriveFreightFilter freightFilter)
-    {
-        bool settingsChanged = autoDriveEnabled != enabled
-                               || !string.Equals(autoDriveTargetAStationName, NormalizeAutoDriveStationName(targetAStationName), System.StringComparison.OrdinalIgnoreCase)
-                               || !string.Equals(autoDriveTargetBStationName, NormalizeAutoDriveStationName(targetBStationName), System.StringComparison.OrdinalIgnoreCase)
-                               || autoDriveFuelFilter != fuelFilter
-                               || autoDriveFreightFilter != freightFilter;
-        autoDriveEnabled = enabled;
-        autoDriveTargetAStationName = NormalizeAutoDriveStationName(targetAStationName);
-        autoDriveTargetBStationName = NormalizeAutoDriveStationName(targetBStationName);
-        autoDriveFuelFilter = fuelFilter;
-        autoDriveFreightFilter = freightFilter;
-
-        if (settingsChanged)
-        {
-            ResetAutoDriveRuntimeState();
-        }
-
-        if (!autoDriveEnabled)
-        {
-            SetAutoDriveStatus(AutoDriveStatus.Idle, string.Empty, string.Empty);
-        }
-        else if (!HasAnyAutoDriveTarget)
-        {
-            SetAutoDriveStatus(AutoDriveStatus.NoTarget, string.Empty, string.Empty);
-        }
-    }
-
-    public void CaptureAutoDriveState(
-        out bool enabled,
-        out string targetAStationName,
-        out string targetBStationName,
-        out AutoDriveFuelFilter fuelFilter,
-        out AutoDriveFreightFilter freightFilter)
-    {
-        enabled = autoDriveEnabled;
-        targetAStationName = autoDriveTargetAStationName ?? string.Empty;
-        targetBStationName = autoDriveTargetBStationName ?? string.Empty;
-        fuelFilter = autoDriveFuelFilter;
-        freightFilter = autoDriveFreightFilter;
-    }
-
-    public void ApplyAutoDrivePersistentState(
-        bool enabled,
-        string targetAStationName,
-        string targetBStationName,
-        int fuelFilter,
-        int freightFilter)
-    {
-        ApplyAutoDriveFilterState(
-            enabled,
-            targetAStationName,
-            targetBStationName,
-            (AutoDriveFuelFilter)Mathf.Clamp(fuelFilter, 0, 1),
-            (AutoDriveFreightFilter)Mathf.Clamp(freightFilter, 0, 2));
     }
 
     protected override bool TryApplyCustomIdleDocking(
