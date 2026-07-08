@@ -21,6 +21,7 @@ public class TrainFilter : MonoBehaviour
 
     private static TrainFilter activeVisibleFilter;
     private static SteamTrain lastSelectedTrain;
+    private static SteamTrain focusedRouteTrain;
     private static string lastSelectedTargetAStationName = string.Empty;
     private static string lastSelectedTargetBStationName = string.Empty;
     private static int routeSelectionVersion;
@@ -88,6 +89,12 @@ public class TrainFilter : MonoBehaviour
             && activeVisibleFilter.gameObject.activeInHierarchy
             && activeVisibleFilter.TryGetBoundTarget(out train))
         {
+            if (!IsRouteSelectionFocused(train))
+            {
+                train = null;
+                return false;
+            }
+
             targetAStationName = NormalizeStationSelection(
                 ResolveSelectedOptionText(activeVisibleFilter.targetA));
             targetBStationName = NormalizeStationSelection(
@@ -96,7 +103,8 @@ public class TrainFilter : MonoBehaviour
         }
 
         if (lastSelectedTrain == null
-            || !lastSelectedTrain.gameObject.activeInHierarchy)
+            || !lastSelectedTrain.gameObject.activeInHierarchy
+            || !IsRouteSelectionFocused(lastSelectedTrain))
         {
             return false;
         }
@@ -105,6 +113,22 @@ public class TrainFilter : MonoBehaviour
         targetAStationName = lastSelectedTargetAStationName;
         targetBStationName = lastSelectedTargetBStationName;
         return true;
+    }
+
+    public static void SetFocusedRouteTrain(SteamTrain steamTrain)
+    {
+        if (steamTrain != null && !steamTrain.gameObject.activeInHierarchy)
+        {
+            steamTrain = null;
+        }
+
+        if (focusedRouteTrain == steamTrain)
+        {
+            return;
+        }
+
+        focusedRouteTrain = steamTrain;
+        MarkRouteSelectionDirty();
     }
 
     public void Refresh()
@@ -313,6 +337,26 @@ public class TrainFilter : MonoBehaviour
         lastSelectedTrain = train;
         lastSelectedTargetAStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetA));
         lastSelectedTargetBStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetB));
+    }
+
+    private static bool IsRouteSelectionFocused(SteamTrain train)
+    {
+        if (train == null || !train.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        if (activeVisibleFilter != null
+            && activeVisibleFilter.gameObject.activeInHierarchy
+            && activeVisibleFilter.TryGetBoundTarget(out SteamTrain activeTrain)
+            && activeTrain == train)
+        {
+            return true;
+        }
+
+        return focusedRouteTrain == train
+               && focusedRouteTrain != null
+               && focusedRouteTrain.gameObject.activeInHierarchy;
     }
 
     private int ResolveStationOptionIndex(string stationName)

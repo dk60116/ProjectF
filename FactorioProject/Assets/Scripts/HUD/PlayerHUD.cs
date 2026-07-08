@@ -178,6 +178,7 @@ public class PlayerHUD : BagSlot
         isBagRefreshQueued = false;
         queuedBagRefreshFrame = -1;
         pendingBagRefreshAfterCraftingVisibilityChange = false;
+        TrainFilter.SetFocusedRouteTrain(null);
         ClearObjectInfoPanelState();
     }
 
@@ -217,6 +218,7 @@ public class PlayerHUD : BagSlot
         ProcessQueuedBagRefresh();
         UpdateInteractionButtonState();
         UpdateObjectInfoPanelState();
+        UpdateTrainRouteFocusState();
         HandleInteractionButtonKeyboardInput();
         UpdateItemFilterButtonState();
         UpdateInventoryEditLockState();
@@ -2647,6 +2649,14 @@ public class PlayerHUD : BagSlot
         }
 
         return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
+    }
+
+    private void UpdateTrainRouteFocusState()
+    {
+        TrainFilter.SetFocusedRouteTrain(
+            TryGetFocusedSteamTrain(out SteamTrain steamTrain)
+                ? steamTrain
+                : null);
     }
 
     private bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)

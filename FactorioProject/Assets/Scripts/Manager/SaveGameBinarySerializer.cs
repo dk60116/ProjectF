@@ -8,6 +8,13 @@ using UnityEngine;
 public static class SaveGameBinarySerializer
 {
     private const string Magic = "PF_SAVE";
+    private const int MaxSerializedListCount = 1000000;
+
+    private enum SaveReadCompatibilityMode
+    {
+        Current = 0,
+        LegacyV18AutoDriveInstallationFields = 1
+    }
 
     public static void WriteToFile(string path, SaveGameData data)
     {
@@ -47,23 +54,109 @@ public static class SaveGameBinarySerializer
             return null;
         }
 
+        byte[] payload;
         using (FileStream fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
-        using (BinaryReader reader = new BinaryReader(gzipStream, Encoding.UTF8))
+        using (MemoryStream memoryStream = new MemoryStream())
         {
-            string magic = reader.ReadString();
-            if (!string.Equals(magic, Magic, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("Unsupported save file format.");
-            }
+            gzipStream.CopyTo(memoryStream);
+            payload = memoryStream.ToArray();
+        }
 
-            int version = reader.ReadInt32();
-            if (version <= 0 || version > SaveGameData.CurrentVersion)
-            {
-                throw new InvalidDataException($"Unsupported save version: {version}");
-            }
+        if (TryReadFromPayload(
+                payload,
+                SaveReadCompatibilityMode.Current,
+                out SaveGameData data,
+                out Exception currentException))
+        {
+            return data;
+        }
 
-            return ReadSaveGameData(reader, version);
+        if (TryPeekSaveVersion(payload, out int version)
+            && version == 18
+            && TryReadFromPayload(
+                payload,
+                SaveReadCompatibilityMode.LegacyV18AutoDriveInstallationFields,
+                out data,
+                out _))
+        {
+            return data;
+        }
+
+        throw currentException;
+    }
+
+    private static bool TryReadFromPayload(
+        byte[] payload,
+        SaveReadCompatibilityMode compatibilityMode,
+        out SaveGameData data,
+        out Exception exception)
+    {
+        data = null;
+        exception = null;
+
+        try
+        {
+            using (MemoryStream memoryStream = new MemoryStream(payload, false))
+            using (BinaryReader reader = new BinaryReader(memoryStream, Encoding.UTF8))
+            {
+                string magic = reader.ReadString();
+                if (!string.Equals(magic, Magic, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException("Unsupported save file format.");
+                }
+
+                int version = reader.ReadInt32();
+                if (version <= 0 || version > SaveGameData.CurrentVersion)
+                {
+                    throw new InvalidDataException($"Unsupported save version: {version}");
+                }
+
+                data = ReadSaveGameData(reader, version, compatibilityMode);
+                if (memoryStream.Position != memoryStream.Length)
+                {
+                    throw new InvalidDataException(
+                        $"Save file contains {memoryStream.Length - memoryStream.Position} unread bytes.");
+                }
+
+                return true;
+            }
+        }
+        catch (Exception readException)
+        {
+            exception = readException;
+            data = null;
+            return false;
+        }
+    }
+
+    private static bool TryPeekSaveVersion(byte[] payload, out int version)
+    {
+        version = 0;
+        if (payload == null || payload.Length <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using (MemoryStream memoryStream = new MemoryStream(payload, false))
+            using (BinaryReader reader = new BinaryReader(memoryStream, Encoding.UTF8))
+            {
+                string magic = reader.ReadString();
+                if (!string.Equals(magic, Magic, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                version = reader.ReadInt32();
+                return true;
+            }
+        }
+        catch
+        {
+            version = 0;
+            return false;
         }
     }
 
@@ -77,7 +170,10 @@ public static class SaveGameBinarySerializer
         WritePlayer(writer, data.player);
     }
 
-    private static SaveGameData ReadSaveGameData(BinaryReader reader, int fileVersion)
+    private static SaveGameData ReadSaveGameData(
+        BinaryReader reader,
+        int fileVersion,
+        SaveReadCompatibilityMode compatibilityMode)
     {
         SaveGameData data = new SaveGameData
         {
@@ -89,7 +185,7 @@ public static class SaveGameBinarySerializer
             ? ReadList(reader, () => ReadItemCatalogEntry(reader))
             : new List<SaveItemCatalogEntry>();
         data.terrain = ReadTerrain(reader, fileVersion);
-        data.map = ReadMap(reader, fileVersion);
+        data.map = ReadMap(reader, fileVersion, compatibilityMode);
         data.player = ReadPlayer(reader, fileVersion);
         return data;
     }
@@ -154,13 +250,16 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.conveyorItems, WriteConveyorBlockEntry);
     }
 
-    private static MapSaveData ReadMap(BinaryReader reader, int version)
+    private static MapSaveData ReadMap(
+        BinaryReader reader,
+        int version,
+        SaveReadCompatibilityMode compatibilityMode)
     {
         return new MapSaveData
         {
             resources = ReadList(reader, () => ReadResourceEntry(reader)),
             floorObjects = ReadList(reader, () => ReadFloorObjectEntry(reader)),
-            installations = ReadList(reader, () => ReadInstallationEntry(reader, version)),
+            installations = ReadList(reader, () => ReadInstallationEntry(reader, version, compatibilityMode)),
             conveyorItems = ReadList(reader, () => ReadConveyorBlockEntry(reader))
         };
     }
@@ -217,11 +316,14 @@ public static class SaveGameBinarySerializer
         WriteInstallationState(writer, entry?.state);
     }
 
-    private static InstallationSaveEntry ReadInstallationEntry(BinaryReader reader, int version)
+    private static InstallationSaveEntry ReadInstallationEntry(
+        BinaryReader reader,
+        int version,
+        SaveReadCompatibilityMode compatibilityMode)
     {
         return new InstallationSaveEntry
         {
-            state = ReadInstallationState(reader, version)
+            state = ReadInstallationState(reader, version, compatibilityMode)
         };
     }
 
@@ -284,7 +386,10 @@ public static class SaveGameBinarySerializer
         }
     }
 
-    private static BlockStateStore.InstallationSaveState ReadInstallationState(BinaryReader reader, int version)
+    private static BlockStateStore.InstallationSaveState ReadInstallationState(
+        BinaryReader reader,
+        int version,
+        SaveReadCompatibilityMode compatibilityMode)
     {
         if (!reader.ReadBoolean())
         {
@@ -371,7 +476,8 @@ public static class SaveGameBinarySerializer
             }
         }
 
-        if (version >= 18)
+        if (version == 18
+            && compatibilityMode == SaveReadCompatibilityMode.LegacyV18AutoDriveInstallationFields)
         {
             reader.ReadBoolean();
             reader.ReadString();
@@ -798,7 +904,16 @@ public static class SaveGameBinarySerializer
 
     private static List<T> ReadList<T>(BinaryReader reader, Func<T> read)
     {
-        int count = Mathf.Max(0, reader.ReadInt32());
+        int count = reader.ReadInt32();
+        if (count < 0)
+        {
+            count = 0;
+        }
+        else if (count > MaxSerializedListCount)
+        {
+            throw new InvalidDataException($"Serialized list count is too large: {count}");
+        }
+
         List<T> values = new List<T>(count);
         for (int i = 0; i < count; i++)
         {
