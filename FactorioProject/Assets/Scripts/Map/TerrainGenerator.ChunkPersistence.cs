@@ -1158,6 +1158,19 @@ public partial class TerrainGenerator : MonoBehaviour
                 savedState.steamTrainBurnEnergyGaugeCapacity);
         }
 
+        if (restoredInstallation is SteamTrain restoredSteamTrain)
+        {
+            restoredSteamTrain.ApplyAutoDriveState(
+                savedState.steamTrainAutoDriveEnabled,
+                savedState.steamTrainAutoDriveTargetAStationName,
+                savedState.steamTrainAutoDriveTargetBStationName,
+                savedState.steamTrainAutoDriveFuelFilter,
+                savedState.steamTrainAutoDriveFreightFilter,
+                savedState.steamTrainAutoDriveRouteTargetStationName,
+                savedState.steamTrainAutoDriveLastArrivedStationName,
+                savedState.steamTrainAutoDriveStationWaitTimer);
+        }
+
         if (restoredInstallation is Trainstation restoredTrainStation)
         {
             restoredTrainStation.ApplyStationName(savedState.stationName);

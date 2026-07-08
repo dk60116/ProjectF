@@ -39,6 +39,14 @@ public partial class BlockStateStore : MonoBehaviour
         public bool hasSteamTrainBurnEnergyState;
         public float steamTrainStoredBurnEnergy;
         public float steamTrainBurnEnergyGaugeCapacity;
+        public bool steamTrainAutoDriveEnabled;
+        public string steamTrainAutoDriveTargetAStationName = string.Empty;
+        public string steamTrainAutoDriveTargetBStationName = string.Empty;
+        public int steamTrainAutoDriveFuelFilter;
+        public int steamTrainAutoDriveFreightFilter;
+        public string steamTrainAutoDriveRouteTargetStationName = string.Empty;
+        public string steamTrainAutoDriveLastArrivedStationName = string.Empty;
+        public float steamTrainAutoDriveStationWaitTimer;
         public string stationName = string.Empty;
 
         public InstallationSaveState Clone()
@@ -78,6 +86,14 @@ public partial class BlockStateStore : MonoBehaviour
                 hasSteamTrainBurnEnergyState = hasSteamTrainBurnEnergyState,
                 steamTrainStoredBurnEnergy = steamTrainStoredBurnEnergy,
                 steamTrainBurnEnergyGaugeCapacity = steamTrainBurnEnergyGaugeCapacity,
+                steamTrainAutoDriveEnabled = steamTrainAutoDriveEnabled,
+                steamTrainAutoDriveTargetAStationName = steamTrainAutoDriveTargetAStationName,
+                steamTrainAutoDriveTargetBStationName = steamTrainAutoDriveTargetBStationName,
+                steamTrainAutoDriveFuelFilter = steamTrainAutoDriveFuelFilter,
+                steamTrainAutoDriveFreightFilter = steamTrainAutoDriveFreightFilter,
+                steamTrainAutoDriveRouteTargetStationName = steamTrainAutoDriveRouteTargetStationName,
+                steamTrainAutoDriveLastArrivedStationName = steamTrainAutoDriveLastArrivedStationName,
+                steamTrainAutoDriveStationWaitTimer = steamTrainAutoDriveStationWaitTimer,
                 stationName = stationName
             };
         }
@@ -847,6 +863,15 @@ public partial class BlockStateStore : MonoBehaviour
             steamTrain.CaptureBurnEnergyState(
                 out state.steamTrainStoredBurnEnergy,
                 out state.steamTrainBurnEnergyGaugeCapacity);
+            steamTrain.CaptureAutoDriveState(
+                out state.steamTrainAutoDriveEnabled,
+                out state.steamTrainAutoDriveTargetAStationName,
+                out state.steamTrainAutoDriveTargetBStationName,
+                out state.steamTrainAutoDriveFuelFilter,
+                out state.steamTrainAutoDriveFreightFilter,
+                out state.steamTrainAutoDriveRouteTargetStationName,
+                out state.steamTrainAutoDriveLastArrivedStationName,
+                out state.steamTrainAutoDriveStationWaitTimer);
             state.hasSteamTrainBurnEnergyState = true;
         }
 

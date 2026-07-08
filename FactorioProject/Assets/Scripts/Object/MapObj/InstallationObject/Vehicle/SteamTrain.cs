@@ -42,10 +42,9 @@ public class SteamTrain : RailHandcar
         Docking = 4,
         WaitingAtStation = 5,
         WaitingForFuel = 6,
-        WaitingForFreight = 7,
-        WaitingForPath = 8,
-        WaitingForClearTrack = 9,
-        Arrived = 10
+        WaitingForPath = 7,
+        WaitingForClearTrack = 8,
+        Arrived = 9
     }
 
     private enum DriveMotionOutcome
@@ -81,7 +80,8 @@ public class SteamTrain : RailHandcar
     private const float AutoDrivePreferredBranchSelectionDistance =
         AutoDriveLookAheadDistance + AutoDriveRouteSegmentTolerance;
     private const float AutoDriveDockSnapDistance = 0.05f;
-    private const float AutoDriveDockApproachMinInputMagnitude = 0.12f;
+    // Keep this above RailHandcar's input dead zone so auto-drive docking creep still moves.
+    private const float AutoDriveDockApproachMinInputMagnitude = 0.18f;
     private const float AutoDriveWaitDurationSeconds = 5f;
     private static readonly Vector2Int[] CardinalDirections =
     {
@@ -146,6 +146,7 @@ public class SteamTrain : RailHandcar
     private RailHandcar autoDriveCachedRouteReferenceTrain;
     private float autoDriveRouteRefreshTimer;
     private float autoDriveStationWaitTimer;
+    private int autoDriveTickFrame = -1;
 
     public float ObjectInfoStoredBurnEnergy => Mathf.Max(0f, storedBurnEnergy);
     public float ObjectInfoBurnEnergyGaugeCapacity => Mathf.Max(0f, burnEnergyGaugeCapacity, storedBurnEnergy);
@@ -171,7 +172,12 @@ public class SteamTrain : RailHandcar
     }
     public float ObjectInfoStoredWaterLiters => Mathf.Max(0f, StoredFluidLiters);
     public float ObjectInfoWaterCapacityLiters => Mathf.Max(0f, FluidStorageCapacityLiters);
-    public bool AutoDriveEnabled => false;
+    public bool AutoDriveEnabled => autoDriveEnabled;
+    public string AutoDriveTargetAStationName => autoDriveTargetAStationName;
+    public string AutoDriveTargetBStationName => autoDriveTargetBStationName;
+    public string AutoDriveFuelFilterName => autoDriveFuelFilter.ToString();
+    public string AutoDriveFreightFilterName => autoDriveFreightFilter.ToString();
+    public string AutoDriveStatusText => ResolveAutoDriveStatusText();
     private bool HasAnyAutoDriveTarget =>
         !string.IsNullOrWhiteSpace(autoDriveTargetAStationName)
         || !string.IsNullOrWhiteSpace(autoDriveTargetBStationName);
@@ -200,7 +206,37 @@ public class SteamTrain : RailHandcar
     public bool TryGetAutoDriveDebugRouteSegments(List<AutoDriveDebugRouteSegment> result)
     {
         result?.Clear();
-        return false;
+        if (result == null || !autoDriveEnabled)
+        {
+            return false;
+        }
+
+        List<AutoDriveRoutePlanner.RouteSegment> sourceSegments = autoDriveRouteSegments;
+        if (sourceSegments.Count <= 0)
+        {
+            if (!TryEnsureAutoDriveFixedRoute())
+            {
+                return false;
+            }
+
+            sourceSegments = autoDriveFixedRouteSegments;
+        }
+
+        for (int i = 0; i < sourceSegments.Count; i++)
+        {
+            AutoDriveRoutePlanner.RouteSegment segment = sourceSegments[i];
+            if (segment.Rail == null || segment.Length <= 0.0001f)
+            {
+                continue;
+            }
+
+            result.Add(new AutoDriveDebugRouteSegment(
+                segment.Rail,
+                segment.StartDistance,
+                segment.EndDistance));
+        }
+
+        return result.Count > 0;
     }
 
     public static bool TryBuildDebugRouteBetweenStations(
@@ -261,8 +297,15 @@ public class SteamTrain : RailHandcar
 
     public bool TryGetCurrentAutoDriveTargetStation(out Trainstation station)
     {
+        station = autoDriveResolvedTargetStation;
+        if (station != null && station.gameObject.activeInHierarchy)
+        {
+            return true;
+        }
+
         station = null;
-        return false;
+        return !string.IsNullOrWhiteSpace(autoDriveResolvedTargetStationName)
+               && AutoDriveRoutePlanner.TryFindStationByName(autoDriveResolvedTargetStationName, out station);
     }
 
     public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
@@ -318,6 +361,7 @@ public class SteamTrain : RailHandcar
         StopMovementParticle(true);
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
+        autoDriveTickFrame = -1;
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
         ResetWaterPipeImmediate(false);
@@ -333,6 +377,8 @@ public class SteamTrain : RailHandcar
         ClearPendingWaterCost();
         storedBurnEnergy = 0f;
         burnEnergyGaugeCapacity = 0f;
+        autoDriveTickFrame = -1;
+        ResetAutoDriveState();
         ResetWaterPipeImmediate(false);
         base.PrepareForPool();
     }
@@ -350,11 +396,55 @@ public class SteamTrain : RailHandcar
     {
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
+        if (autoDriveEnabled)
+        {
+            TickAutoDrive(deltaTime, mountedPlayer);
+            return;
+        }
+
         HandleResolvedDriveMotion(
             worldMoveDirection,
             moveSpeed,
             deltaTime,
             mountedPlayer);
+    }
+
+    private void Update()
+    {
+        TickAutoDrive(Time.deltaTime, null);
+    }
+
+    private void TickAutoDrive(float deltaTime, Player mountedPlayer)
+    {
+        if (!autoDriveEnabled || autoDriveTickFrame == Time.frameCount)
+        {
+            return;
+        }
+
+        autoDriveTickFrame = Time.frameCount;
+        ClearPendingBurnEnergyCost();
+        ClearPendingWaterCost();
+        if (!HasCompleteAutoDriveTargets())
+        {
+            autoDriveEnabled = false;
+            ResetAutoDriveRuntimeState();
+            SetAutoDriveStatus(AutoDriveStatus.NoTarget, string.Empty, string.Empty);
+            PersistAutoDriveState();
+            return;
+        }
+
+        Vector3 moveDirection = ResolveAutoDriveMoveDirection(deltaTime);
+        DriveMotionOutcome outcome = HandleResolvedDriveMotion(moveDirection, 0f, deltaTime, mountedPlayer);
+        if (outcome == DriveMotionOutcome.BlockedByFuel)
+        {
+            SetAutoDriveStatus(
+                AutoDriveStatus.WaitingForFuel,
+                autoDriveResolvedTargetStationName,
+                autoDriveResolvedNextStationName);
+            return;
+        }
+
+        TryFinalizeAutoDriveArrival(deltaTime);
     }
 
     private DriveMotionOutcome HandleResolvedDriveMotion(
@@ -461,6 +551,91 @@ public class SteamTrain : RailHandcar
     {
         storedBurnEnergy = Mathf.Max(0f, storedEnergy);
         burnEnergyGaugeCapacity = Mathf.Max(0f, gaugeCapacity, storedBurnEnergy);
+    }
+
+    public void ApplyAutoDriveSettings(
+        bool enabled,
+        string targetAStationName,
+        string targetBStationName,
+        string fuelFilterName,
+        string freightFilterName)
+    {
+        string normalizedTargetA = NormalizeAutoDriveStationName(targetAStationName);
+        string normalizedTargetB = NormalizeAutoDriveStationName(targetBStationName);
+        AutoDriveFuelFilter normalizedFuelFilter = ParseAutoDriveFuelFilter(fuelFilterName);
+        AutoDriveFreightFilter normalizedFreightFilter = ParseAutoDriveFreightFilter(freightFilterName);
+        bool normalizedEnabled = enabled && HasCompleteAutoDriveTargets(normalizedTargetA, normalizedTargetB);
+
+        bool changed =
+            autoDriveEnabled != normalizedEnabled
+            || !string.Equals(autoDriveTargetAStationName, normalizedTargetA, System.StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(autoDriveTargetBStationName, normalizedTargetB, System.StringComparison.OrdinalIgnoreCase)
+            || autoDriveFuelFilter != normalizedFuelFilter
+            || autoDriveFreightFilter != normalizedFreightFilter;
+
+        autoDriveEnabled = normalizedEnabled;
+        autoDriveTargetAStationName = normalizedTargetA;
+        autoDriveTargetBStationName = normalizedTargetB;
+        autoDriveFuelFilter = normalizedFuelFilter;
+        autoDriveFreightFilter = normalizedFreightFilter;
+        if (!changed)
+        {
+            return;
+        }
+
+        ResetAutoDriveRuntimeState();
+        SetAutoDriveStatus(autoDriveEnabled ? AutoDriveStatus.Planning : AutoDriveStatus.Idle, string.Empty, string.Empty);
+        PersistAutoDriveState();
+    }
+
+    public void CaptureAutoDriveState(
+        out bool enabled,
+        out string targetAStationName,
+        out string targetBStationName,
+        out int fuelFilter,
+        out int freightFilter,
+        out string routeTargetStationName,
+        out string lastArrivedStationName,
+        out float stationWaitTimer)
+    {
+        enabled = autoDriveEnabled;
+        targetAStationName = autoDriveTargetAStationName;
+        targetBStationName = autoDriveTargetBStationName;
+        fuelFilter = (int)autoDriveFuelFilter;
+        freightFilter = (int)autoDriveFreightFilter;
+        routeTargetStationName = !string.IsNullOrWhiteSpace(autoDriveRouteTargetStationName)
+            ? autoDriveRouteTargetStationName
+            : autoDriveResolvedTargetStationName;
+        lastArrivedStationName = autoDriveLastArrivedStationName;
+        stationWaitTimer = Mathf.Max(0f, autoDriveStationWaitTimer);
+    }
+
+    public void ApplyAutoDriveState(
+        bool enabled,
+        string targetAStationName,
+        string targetBStationName,
+        int fuelFilter,
+        int freightFilter,
+        string routeTargetStationName,
+        string lastArrivedStationName,
+        float stationWaitTimer)
+    {
+        autoDriveTargetAStationName = NormalizeAutoDriveStationName(targetAStationName);
+        autoDriveTargetBStationName = NormalizeAutoDriveStationName(targetBStationName);
+        autoDriveFuelFilter = ClampAutoDriveFuelFilter(fuelFilter);
+        autoDriveFreightFilter = ClampAutoDriveFreightFilter(freightFilter);
+        autoDriveEnabled = enabled && HasCompleteAutoDriveTargets();
+
+        ResetAutoDriveRuntimeState();
+        autoDriveRouteTargetStationName = NormalizeAutoDriveStationName(routeTargetStationName);
+        autoDriveLastArrivedStationName = NormalizeAutoDriveStationName(lastArrivedStationName);
+        autoDriveStationWaitTimer = Mathf.Max(0f, stationWaitTimer);
+        SetAutoDriveStatus(
+            autoDriveEnabled
+                ? (autoDriveStationWaitTimer > 0f ? AutoDriveStatus.WaitingAtStation : AutoDriveStatus.Planning)
+                : AutoDriveStatus.Idle,
+            autoDriveStationWaitTimer > 0f ? autoDriveLastArrivedStationName : autoDriveRouteTargetStationName,
+            autoDriveStationWaitTimer > 0f ? autoDriveRouteTargetStationName : string.Empty);
     }
 
     protected override bool TryApplyCustomIdleDocking(
@@ -1332,7 +1507,6 @@ public class SteamTrain : RailHandcar
             AutoDriveStatus.Docking => $"AutoDrive: Docking{targetSuffix}",
             AutoDriveStatus.WaitingAtStation => $"AutoDrive: Waiting{targetSuffix}",
             AutoDriveStatus.WaitingForFuel => $"AutoDrive: Waiting Fuel{targetSuffix}",
-            AutoDriveStatus.WaitingForFreight => $"AutoDrive: Waiting Freight{targetSuffix}",
             AutoDriveStatus.WaitingForPath => $"AutoDrive: No Path{targetSuffix}",
             AutoDriveStatus.WaitingForClearTrack => $"AutoDrive: Track Busy{targetSuffix}",
             AutoDriveStatus.Arrived => $"AutoDrive: Arrived{targetSuffix}",
@@ -1345,6 +1519,62 @@ public class SteamTrain : RailHandcar
         return string.IsNullOrWhiteSpace(stationName)
             ? string.Empty
             : stationName.Trim();
+    }
+
+    private bool HasCompleteAutoDriveTargets()
+    {
+        return HasCompleteAutoDriveTargets(autoDriveTargetAStationName, autoDriveTargetBStationName);
+    }
+
+    private static bool HasCompleteAutoDriveTargets(string targetAStationName, string targetBStationName)
+    {
+        return !string.IsNullOrWhiteSpace(targetAStationName)
+               && !string.IsNullOrWhiteSpace(targetBStationName)
+               && !string.Equals(
+                   targetAStationName,
+                   targetBStationName,
+                   System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static AutoDriveFuelFilter ParseAutoDriveFuelFilter(string filterName)
+    {
+        return System.Enum.TryParse(filterName, true, out AutoDriveFuelFilter filter)
+            ? filter
+            : AutoDriveFuelFilter.Free;
+    }
+
+    private static AutoDriveFreightFilter ParseAutoDriveFreightFilter(string filterName)
+    {
+        return System.Enum.TryParse(filterName, true, out AutoDriveFreightFilter filter)
+            ? filter
+            : AutoDriveFreightFilter.Free;
+    }
+
+    private static AutoDriveFuelFilter ClampAutoDriveFuelFilter(int filter)
+    {
+        return filter == (int)AutoDriveFuelFilter.Full
+            ? AutoDriveFuelFilter.Full
+            : AutoDriveFuelFilter.Free;
+    }
+
+    private static AutoDriveFreightFilter ClampAutoDriveFreightFilter(int filter)
+    {
+        return filter switch
+        {
+            (int)AutoDriveFreightFilter.Full => AutoDriveFreightFilter.Full,
+            (int)AutoDriveFreightFilter.Empty => AutoDriveFreightFilter.Empty,
+            _ => AutoDriveFreightFilter.Free
+        };
+    }
+
+    private void PersistAutoDriveState()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        TerrainGenerator.ResolveActive()?.SaveRuntimeInstallationState(this);
     }
 
     private Vector3 ResolveAutoDriveMoveDirection(float deltaTime)
@@ -1373,8 +1603,9 @@ public class SteamTrain : RailHandcar
         bool hasDockDistance = TryGetAutoDriveTargetDockDistance(
             targetStation,
             out float remainingDockDistance);
-        if (hasDockDistance && remainingDockDistance <= ResolveDockCompleteDistance())
+        if (hasDockDistance && remainingDockDistance <= ResolveAutoDriveArrivalSnapDistance())
         {
+            TrySnapAutoDriveToTargetDock(targetStation);
             HandleAutoDriveArrived(targetStationName, nextTargetStationName);
             return Vector3.zero;
         }
@@ -1386,11 +1617,6 @@ public class SteamTrain : RailHandcar
                 AutoDriveStatus.WaitingAtStation,
                 autoDriveLastArrivedStationName,
                 targetStationName);
-            return Vector3.zero;
-        }
-
-        if (!TrySatisfyAutoDriveFilters(targetStationName, nextTargetStationName))
-        {
             return Vector3.zero;
         }
 
@@ -1581,16 +1807,10 @@ public class SteamTrain : RailHandcar
         return true;
     }
 
-    private bool TryIsDockedAtTargetStation(Trainstation targetStation, out bool inDockCaptureRange)
+    private bool IsWithinAutoDriveArrivalSnapDistance(Trainstation targetStation)
     {
-        inDockCaptureRange = false;
-        if (!TryGetAutoDriveTargetDockDistance(targetStation, out float remainingDistance))
-        {
-            return false;
-        }
-
-        inDockCaptureRange = remainingDistance <= ResolveAutoDriveDockApproachDistance();
-        return remainingDistance <= ResolveDockCompleteDistance();
+        return TryGetAutoDriveTargetDockDistance(targetStation, out float remainingDistance)
+               && remainingDistance <= ResolveAutoDriveArrivalSnapDistance();
     }
 
     private void HandleAutoDriveArrived(string currentStationName, string nextTargetStationName)
@@ -1611,90 +1831,34 @@ public class SteamTrain : RailHandcar
             nextTargetStationName);
     }
 
-    private bool TrySatisfyAutoDriveFilters(string currentTargetStationName, string nextTargetStationName)
+    private bool TrySnapAutoDriveToTargetDock(Trainstation targetStation)
     {
-        if (!TryEvaluateFuelFilterSatisfied())
-        {
-            SetAutoDriveStatus(AutoDriveStatus.WaitingForFuel, currentTargetStationName, nextTargetStationName);
-            return false;
-        }
-
-        if (!TryEvaluateFreightFilterSatisfied())
-        {
-            SetAutoDriveStatus(AutoDriveStatus.WaitingForFreight, currentTargetStationName, nextTargetStationName);
-            return false;
-        }
-
-        return true;
-    }
-
-    private bool TryEvaluateFuelFilterSatisfied()
-    {
-        if (!TryGetRearFreightCar(out FreightCar rearFreightCar))
+        if (targetStation == null
+            || !targetStation.TryGetRailCoordinate(out Vector2Int railCoordinate)
+            || !TryGetCurrentRailPose(
+                out Railload currentRail,
+                out _,
+                out _,
+                out Vector2 currentTangent)
+            || currentRail == null
+            || !TryFindRailDockSampleAtCoordinate(railCoordinate, currentRail, out RailSample dockSample))
         {
             return false;
         }
 
-        rearFreightCar.GetAutoDriveStorageSummary(out int itemCount, out int capacity, out bool hasStorage);
-        if (!hasStorage || capacity <= 0)
+        Vector2 facingTangent = currentTangent.sqrMagnitude > 0.0001f
+            ? currentTangent
+            : dockSample.Tangent;
+        if (facingTangent.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
 
-        return autoDriveFuelFilter == AutoDriveFuelFilter.Full
-            ? itemCount >= capacity
-            : itemCount < capacity;
-    }
-
-    private bool TryEvaluateFreightFilterSatisfied()
-    {
-        CollectConnectedFreightCars(out int totalItemCount, out int totalCapacity, out bool hasStorage);
-        if (!hasStorage || totalCapacity <= 0)
-        {
-            return false;
-        }
-
-        return autoDriveFreightFilter switch
-        {
-            AutoDriveFreightFilter.Full => totalItemCount >= totalCapacity,
-            AutoDriveFreightFilter.Empty => totalItemCount <= 0,
-            _ => totalItemCount < totalCapacity
-        };
-    }
-
-    private void CollectConnectedFreightCars(out int totalItemCount, out int totalCapacity, out bool hasStorage)
-    {
-        totalItemCount = 0;
-        totalCapacity = 0;
-        hasStorage = false;
-
-        Queue<Train> queue = new Queue<Train>(8);
-        HashSet<Train> visited = new HashSet<Train>();
-        queue.Enqueue(this);
-        visited.Add(this);
-        while (queue.Count > 0)
-        {
-            Train train = queue.Dequeue();
-            if (train is FreightCar freightCar)
-            {
-                freightCar.GetAutoDriveStorageSummary(out int itemCount, out int capacity, out bool freightHasStorage);
-                totalItemCount += Mathf.Max(0, itemCount);
-                totalCapacity += Mathf.Max(0, capacity);
-                hasStorage |= freightHasStorage;
-            }
-
-            foreach (Train connectedTrain in train.ConnectedTrains)
-            {
-                if (connectedTrain == null
-                    || !connectedTrain.gameObject.activeInHierarchy
-                    || !visited.Add(connectedTrain))
-                {
-                    continue;
-                }
-
-                queue.Enqueue(connectedTrain);
-            }
-        }
+        return TryApplyExplicitRailPose(
+            dockSample.Rail,
+            dockSample.DistanceAlongPath,
+            dockSample.Point,
+            facingTangent);
     }
 
     private bool TryEnsureAutoDriveRoute(Trainstation targetStation, string targetStationName, float deltaTime)
@@ -1771,6 +1935,81 @@ public class SteamTrain : RailHandcar
                    out signedPathDelta);
     }
 
+    private bool TryGetAutoDriveTargetDockPathDelta(
+        Trainstation targetStation,
+        out float signedPathDelta,
+        out Vector2 dockTravelDirection)
+    {
+        signedPathDelta = 0f;
+        dockTravelDirection = Vector2.zero;
+        RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(targetStation);
+        if (targetStation == null
+            || routeReferenceTrain == null
+            || !targetStation.TryGetRailCoordinate(out Vector2Int railCoordinate)
+            || !routeReferenceTrain.TryGetRailDockDeltaAtCoordinate(
+                railCoordinate,
+                out signedPathDelta)
+            || !routeReferenceTrain.TryGetCurrentRailPose(
+                out Railload currentRail,
+                out float currentDistanceAlongPath,
+                out _,
+                out Vector2 fallbackTangent)
+            || currentRail == null)
+        {
+            return false;
+        }
+
+        Vector2 pathTangent = Vector2.zero;
+        if (!currentRail.TrySampleRenderedPath(
+                currentDistanceAlongPath,
+                out _,
+                out pathTangent)
+            || pathTangent.sqrMagnitude <= 0.0001f)
+        {
+            pathTangent = fallbackTangent;
+        }
+
+        if (pathTangent.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        pathTangent.Normalize();
+        dockTravelDirection = signedPathDelta >= 0f
+            ? pathTangent
+            : -pathTangent;
+        return true;
+    }
+
+    private static bool TryResolveAutoDriveDockSignedStep(
+        Vector2 currentFacing,
+        Vector2 dockTravelDirection,
+        float remainingDistance,
+        float requestedSignedStep,
+        out float dockSignedStep)
+    {
+        dockSignedStep = 0f;
+        if (currentFacing.sqrMagnitude <= 0.0001f
+            || dockTravelDirection.sqrMagnitude <= 0.0001f
+            || remainingDistance <= 0.0001f
+            || Mathf.Abs(requestedSignedStep) <= 0.0001f)
+        {
+            return false;
+        }
+
+        float facingDot = Vector2.Dot(
+            currentFacing.normalized,
+            dockTravelDirection.normalized);
+        if (Mathf.Abs(facingDot) <= 0.0001f)
+        {
+            return false;
+        }
+
+        dockSignedStep = Mathf.Sign(facingDot)
+                         * Mathf.Min(Mathf.Abs(requestedSignedStep), remainingDistance);
+        return true;
+    }
+
     private bool TryApplyAutoDriveDockApproachSpeed(
         ref Vector3 moveDirection,
         float remainingDistance)
@@ -1783,7 +2022,7 @@ public class SteamTrain : RailHandcar
         float effectiveMaxSpeed = Mathf.Max(0.01f, EffectiveVehicleMaxSpeed);
         float distanceUntilComplete = Mathf.Max(
             0f,
-            remainingDistance - ResolveDockCompleteDistance());
+            remainingDistance - ResolveAutoDriveArrivalSnapDistance());
         float desiredSpeed = Mathf.Sqrt(
             2f
             * Mathf.Max(0.01f, VehicleDecelerationPerSecond)
@@ -1791,7 +2030,7 @@ public class SteamTrain : RailHandcar
         desiredSpeed = Mathf.Min(effectiveMaxSpeed, desiredSpeed);
 
         float inputMagnitude = desiredSpeed / effectiveMaxSpeed;
-        if (remainingDistance > ResolveDockCaptureDistance())
+        if (remainingDistance > ResolveDockCompleteDistance())
         {
             inputMagnitude = Mathf.Max(
                 AutoDriveDockApproachMinInputMagnitude,
@@ -1825,6 +2064,11 @@ public class SteamTrain : RailHandcar
                 out _))
         {
             return false;
+        }
+
+        if (TryResolveAutoDriveDockMoveDirection(out moveDirection))
+        {
+            return true;
         }
 
         ReconcileAutoDriveRouteCursor(currentRail, currentDistanceAlongPath);
@@ -1908,6 +2152,35 @@ public class SteamTrain : RailHandcar
         return true;
     }
 
+    private bool TryResolveAutoDriveDockMoveDirection(out Vector3 moveDirection)
+    {
+        moveDirection = Vector3.zero;
+        if (autoDriveResolvedTargetStation == null
+            || !TryGetAutoDriveTargetDockPathDelta(
+                autoDriveResolvedTargetStation,
+                out float signedDockDelta,
+                out Vector2 dockDirection))
+        {
+            return false;
+        }
+
+        float remainingDistance = Mathf.Abs(signedDockDelta);
+        if (remainingDistance <= ResolveDockCompleteDistance()
+            || remainingDistance > ResolveAutoDriveDockApproachDistance())
+        {
+            return false;
+        }
+
+        if (dockDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        dockDirection.Normalize();
+        moveDirection = new Vector3(dockDirection.x, 0f, dockDirection.y);
+        return true;
+    }
+
     protected override float AdjustDrivenSignedStep(
         RailSample currentSample,
         Vector2 currentFacing,
@@ -1920,27 +2193,33 @@ public class SteamTrain : RailHandcar
             || !hasInput
             || Mathf.Abs(signedStep) <= 0.0001f
             || autoDriveResolvedTargetStation == null
-            || !TryGetAutoDriveTargetDockDelta(
+            || !TryGetAutoDriveTargetDockPathDelta(
                 autoDriveResolvedTargetStation,
-                out float signedDockDelta))
+                out float signedDockDelta,
+                out Vector2 dockDirection))
         {
             return signedStep;
         }
 
         float remainingDistance = Mathf.Abs(signedDockDelta);
+        float arrivalSnapDistance = ResolveAutoDriveArrivalSnapDistance();
         if (remainingDistance > ResolveAutoDriveDockApproachDistance()
             || remainingDistance <= ResolveDockCompleteDistance())
         {
             return signedStep;
         }
 
-        if (remainingDistance <= AutoDriveDockSnapDistance
-            || signedDockDelta * signedStep <= 0f)
+        if (!TryResolveAutoDriveDockSignedStep(
+                currentFacing,
+                dockDirection,
+                remainingDistance,
+                signedStep,
+                out float dockSignedStep))
         {
-            return signedDockDelta;
+            return signedStep;
         }
 
-        return Mathf.Sign(signedDockDelta) * Mathf.Min(Mathf.Abs(signedStep), remainingDistance);
+        return dockSignedStep;
     }
 
     protected override bool TryGetPreferredBranchRail(
@@ -1957,18 +2236,13 @@ public class SteamTrain : RailHandcar
         }
 
         ReconcileAutoDriveRouteCursor(currentSample.Rail, currentSample.DistanceAlongPath);
-        int currentSegmentIndex = Mathf.Clamp(
-            autoDriveRouteSegmentCursor,
-            0,
-            autoDriveRouteSegments.Count - 1);
-        if (currentSegmentIndex < 0 || currentSegmentIndex + 1 >= autoDriveRouteSegments.Count)
-        {
-            return false;
-        }
-
-        AutoDriveRoutePlanner.RouteSegment currentSegment = autoDriveRouteSegments[currentSegmentIndex];
-        AutoDriveRoutePlanner.RouteSegment nextSegment = autoDriveRouteSegments[currentSegmentIndex + 1];
-        if (nextSegment.Rail == null || nextSegment.Rail == currentSegment.Rail)
+        if (!TryResolveNextAutoDriveRouteSegment(
+                currentSample.Rail,
+                currentSample.DistanceAlongPath,
+                null,
+                out AutoDriveRoutePlanner.RouteSegment currentSegment,
+                out _,
+                out AutoDriveRoutePlanner.RouteSegment nextSegment))
         {
             return false;
         }
@@ -1983,7 +2257,7 @@ public class SteamTrain : RailHandcar
         }
 
         preferredRail = nextSegment.Rail;
-        return true;
+        return preferredRail != null;
     }
 
     protected override bool TryGetPreferredConnectedRail(
@@ -2001,33 +2275,277 @@ public class SteamTrain : RailHandcar
         }
 
         ReconcileAutoDriveRouteCursor(endpointSample.Rail, endpointSample.DistanceAlongPath);
-        int currentSegmentIndex = Mathf.Clamp(
-            autoDriveRouteSegmentCursor,
-            0,
-            autoDriveRouteSegments.Count - 1);
-        if (currentSegmentIndex < 0 || currentSegmentIndex + 1 >= autoDriveRouteSegments.Count)
-        {
-            return false;
-        }
-
-        AutoDriveRoutePlanner.RouteSegment currentSegment = autoDriveRouteSegments[currentSegmentIndex];
-        AutoDriveRoutePlanner.RouteSegment nextSegment = autoDriveRouteSegments[currentSegmentIndex + 1];
-        if (nextSegment.Rail == null
-            || nextSegment.Rail == excludedRail
-            || nextSegment.Rail == currentSegment.Rail)
-        {
-            return false;
-        }
-
-        if (ResolveAutoDriveRemainingSegmentDistance(
-                currentSegment,
-                ClampDistanceAlongSegment(currentSegment, endpointSample.DistanceAlongPath)) > AutoDriveRouteSegmentTolerance * 2f)
+        if (!TryResolveNextAutoDriveRouteSegment(
+                endpointSample.Rail,
+                endpointSample.DistanceAlongPath,
+                excludedRail,
+                out _,
+                out _,
+                out AutoDriveRoutePlanner.RouteSegment nextSegment))
         {
             return false;
         }
 
         preferredRail = nextSegment.Rail;
+        return preferredRail != null;
+    }
+
+    protected override bool TryGetPreferredConnectedRailEntrySample(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        out RailSample connectedSample)
+    {
+        connectedSample = default;
+        if (!autoDriveEnabled
+            || autoDriveRouteSegments.Count <= 0
+            || endpointSample.Rail == null)
+        {
+            return false;
+        }
+
+        ReconcileAutoDriveRouteCursor(endpointSample.Rail, endpointSample.DistanceAlongPath);
+        return TryResolveNextAutoDriveRouteSegment(
+                   endpointSample.Rail,
+                   endpointSample.DistanceAlongPath,
+                   excludedRail,
+                   out _,
+                   out _,
+                   out AutoDriveRoutePlanner.RouteSegment nextSegment)
+               && TryCreateAutoDriveConnectedRailEntrySample(
+                   endpointSample,
+                   nextSegment,
+                   out connectedSample);
+    }
+
+    private bool TryResolveNextAutoDriveRouteSegment(
+        Railload currentRail,
+        float currentDistanceAlongPath,
+        Railload excludedRail,
+        out AutoDriveRoutePlanner.RouteSegment currentSegment,
+        out int currentSegmentIndex,
+        out AutoDriveRoutePlanner.RouteSegment nextSegment)
+    {
+        currentSegment = default;
+        currentSegmentIndex = -1;
+        nextSegment = default;
+        if (currentRail == null
+            || autoDriveRouteSegments.Count <= 0
+            || !TryFindBestAutoDriveRouteSegmentIndex(
+                currentRail,
+                currentDistanceAlongPath,
+                out currentSegmentIndex))
+        {
+            return false;
+        }
+
+        currentSegment = autoDriveRouteSegments[currentSegmentIndex];
+        for (int nextSegmentIndex = currentSegmentIndex + 1;
+             nextSegmentIndex < autoDriveRouteSegments.Count;
+             nextSegmentIndex++)
+        {
+            AutoDriveRoutePlanner.RouteSegment candidateSegment = autoDriveRouteSegments[nextSegmentIndex];
+            Railload candidateRail = candidateSegment.Rail;
+            if (candidateRail == null
+                || candidateRail == currentRail
+                || candidateRail == excludedRail)
+            {
+                continue;
+            }
+
+            nextSegment = candidateSegment;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryFindBestAutoDriveRouteSegmentIndex(
+        Railload rail,
+        float distanceAlongPath,
+        out int segmentIndex)
+    {
+        segmentIndex = -1;
+        if (rail == null || autoDriveRouteSegments.Count <= 0)
+        {
+            return false;
+        }
+
+        int cursor = Mathf.Clamp(
+            autoDriveRouteSegmentCursor,
+            0,
+            autoDriveRouteSegments.Count - 1);
+        float bestScore = float.PositiveInfinity;
+        for (int i = 0; i < autoDriveRouteSegments.Count; i++)
+        {
+            AutoDriveRoutePlanner.RouteSegment segment = autoDriveRouteSegments[i];
+            if (segment.Rail != rail)
+            {
+                continue;
+            }
+
+            float score = ResolveAutoDriveRouteSegmentDistanceScore(segment, distanceAlongPath)
+                          + Mathf.Abs(i - cursor) * 0.05f;
+            if (score >= bestScore)
+            {
+                continue;
+            }
+
+            bestScore = score;
+            segmentIndex = i;
+        }
+
+        return segmentIndex >= 0;
+    }
+
+    private static float ResolveAutoDriveRouteSegmentDistanceScore(
+        AutoDriveRoutePlanner.RouteSegment segment,
+        float distanceAlongPath)
+    {
+        float minDistance =
+            Mathf.Min(segment.StartDistance, segment.EndDistance) - AutoDriveRouteSegmentTolerance;
+        float maxDistance =
+            Mathf.Max(segment.StartDistance, segment.EndDistance) + AutoDriveRouteSegmentTolerance;
+        if (distanceAlongPath < minDistance)
+        {
+            return minDistance - distanceAlongPath;
+        }
+
+        if (distanceAlongPath > maxDistance)
+        {
+            return distanceAlongPath - maxDistance;
+        }
+
+        return 0f;
+    }
+
+    private bool TryCreateAutoDriveConnectedRailEntrySample(
+        RailSample endpointSample,
+        AutoDriveRoutePlanner.RouteSegment nextSegment,
+        out RailSample connectedSample)
+    {
+        connectedSample = default;
+        Railload nextRail = nextSegment.Rail;
+        if (nextRail == null)
+        {
+            return false;
+        }
+
+        float maxConnectionDistance = ResolveRailConnectionMaxDistance();
+        float maxConnectionSqrDistance = maxConnectionDistance * maxConnectionDistance;
+        if (nextRail.TrySampleRenderedPath(
+                nextSegment.StartDistance,
+                out Vector2 pathPoint,
+                out Vector2 tangent))
+        {
+            float sqrDistance = (pathPoint - endpointSample.Point).sqrMagnitude;
+            if (sqrDistance <= maxConnectionSqrDistance)
+            {
+                connectedSample.Rail = nextRail;
+                connectedSample.DistanceAlongPath = nextSegment.StartDistance;
+                connectedSample.Point = pathPoint;
+                connectedSample.Tangent = tangent;
+                connectedSample.SqrDistance = sqrDistance;
+                return true;
+            }
+        }
+
+        if (!nextRail.TryFindNearestRenderedPathSample(
+                endpointSample.Point,
+                out float nearestDistanceAlongPath,
+                out Vector2 nearestPoint,
+                out Vector2 nearestTangent,
+                out float nearestSqrDistance)
+            || nearestSqrDistance > maxConnectionSqrDistance
+            || !IsDistanceWithinAutoDriveRouteSegment(
+                nextSegment,
+                nearestDistanceAlongPath,
+                AutoDriveRouteSegmentTolerance))
+        {
+            return false;
+        }
+
+        connectedSample.Rail = nextRail;
+        connectedSample.DistanceAlongPath = nearestDistanceAlongPath;
+        connectedSample.Point = nearestPoint;
+        connectedSample.Tangent = nearestTangent;
+        connectedSample.SqrDistance = nearestSqrDistance;
         return true;
+    }
+
+    protected override bool ShouldAllowRestrictedBranchRailCandidate(
+        RailSample currentSample,
+        Vector2 inputDirection,
+        Railload candidateRail)
+    {
+        if (!autoDriveEnabled
+            || candidateRail == null
+            || currentSample.Rail == null
+            || candidateRail == currentSample.Rail)
+        {
+            return false;
+        }
+
+        ReconcileAutoDriveRouteCursor(currentSample.Rail, currentSample.DistanceAlongPath);
+        if (!TryResolveNextAutoDriveRouteSegment(
+                currentSample.Rail,
+                currentSample.DistanceAlongPath,
+                null,
+                out AutoDriveRoutePlanner.RouteSegment currentSegment,
+                out _,
+                out AutoDriveRoutePlanner.RouteSegment nextSegment)
+            || nextSegment.Rail != candidateRail)
+        {
+            return false;
+        }
+
+        float remainingDistance = ResolveAutoDriveRemainingSegmentDistance(
+            currentSegment,
+            ClampDistanceAlongSegment(currentSegment, currentSample.DistanceAlongPath));
+        return remainingDistance <= ResolveAutoDriveBranchPreviewDistance(ResolveAutoDriveRouteReferenceTrain());
+    }
+
+    protected override bool ShouldAllowRestrictedConnectedRailCandidate(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail,
+        RailSample candidateSample)
+    {
+        if (!autoDriveEnabled
+            || endpointSample.Rail == null
+            || candidateSample.Rail == null)
+        {
+            return false;
+        }
+
+        ReconcileAutoDriveRouteCursor(endpointSample.Rail, endpointSample.DistanceAlongPath);
+        return TryResolveNextAutoDriveRouteSegment(
+                   endpointSample.Rail,
+                   endpointSample.DistanceAlongPath,
+                   excludedRail,
+                   out _,
+                   out _,
+                   out AutoDriveRoutePlanner.RouteSegment nextSegment)
+               && candidateSample.Rail == nextSegment.Rail
+               && IsDistanceWithinAutoDriveRouteSegment(
+                   nextSegment,
+                   candidateSample.DistanceAlongPath,
+                   AutoDriveRouteSegmentTolerance);
+    }
+
+    protected override bool ShouldRestrictBranchRailSelection(
+        RailSample currentSample,
+        Vector2 inputDirection)
+    {
+        return autoDriveEnabled && autoDriveRouteSegments.Count > 0;
+    }
+
+    protected override bool ShouldRestrictConnectedRailSelection(
+        RailSample endpointSample,
+        Vector2 exitDirection,
+        Railload excludedRail)
+    {
+        return autoDriveEnabled && autoDriveRouteSegments.Count > 0;
     }
 
     private float ResolveAutoDriveBranchPreviewDistance(RailHandcar routeReferenceTrain)
@@ -2041,6 +2559,14 @@ public class SteamTrain : RailHandcar
         return Mathf.Max(
             routeThreshold,
             routeReferenceTrain.GetBranchPreviewDistance());
+    }
+
+    protected override float ResolveRailConnectionMaxDistance()
+    {
+        float baseDistance = base.ResolveRailConnectionMaxDistance();
+        return autoDriveEnabled
+            ? Mathf.Max(baseDistance, RailConnectionUtility.ConnectionDistance)
+            : baseDistance;
     }
 
     private void ReconcileAutoDriveRouteCursor(
@@ -2146,10 +2672,21 @@ public class SteamTrain : RailHandcar
             return false;
         }
 
+        return IsDistanceWithinAutoDriveRouteSegment(
+            segment,
+            distanceAlongPath,
+            AutoDriveRouteSegmentTolerance);
+    }
+
+    private static bool IsDistanceWithinAutoDriveRouteSegment(
+        AutoDriveRoutePlanner.RouteSegment segment,
+        float distanceAlongPath,
+        float tolerance)
+    {
         float minDistance =
-            Mathf.Min(segment.StartDistance, segment.EndDistance) - AutoDriveRouteSegmentTolerance;
+            Mathf.Min(segment.StartDistance, segment.EndDistance) - Mathf.Max(0f, tolerance);
         float maxDistance =
-            Mathf.Max(segment.StartDistance, segment.EndDistance) + AutoDriveRouteSegmentTolerance;
+            Mathf.Max(segment.StartDistance, segment.EndDistance) + Mathf.Max(0f, tolerance);
         return distanceAlongPath >= minDistance && distanceAlongPath <= maxDistance;
     }
 
@@ -2437,7 +2974,12 @@ public class SteamTrain : RailHandcar
             / (2f * Mathf.Max(0.01f, VehicleDecelerationPerSecond));
         return Mathf.Max(
             ResolveDockCaptureDistance(),
-            stoppingDistance + ResolveDockCompleteDistance());
+            stoppingDistance + ResolveAutoDriveArrivalSnapDistance());
+    }
+
+    private float ResolveAutoDriveArrivalSnapDistance()
+    {
+        return Mathf.Max(AutoDriveDockSnapDistance, ResolveDockCompleteDistance());
     }
 
     private static float ResolveAutoDriveRemainingSegmentDistance(
@@ -2459,10 +3001,15 @@ public class SteamTrain : RailHandcar
 
     private bool TryFinalizeAutoDriveArrival(float deltaTime)
     {
-        return deltaTime >= 0f
-               && autoDriveResolvedTargetStation != null
-               && TryIsDockedAtTargetStation(autoDriveResolvedTargetStation, out _)
-               && FinalizeAutoDriveArrivalFromCurrentTarget();
+        if (deltaTime < 0f
+            || autoDriveResolvedTargetStation == null
+            || !IsWithinAutoDriveArrivalSnapDistance(autoDriveResolvedTargetStation))
+        {
+            return false;
+        }
+
+        TrySnapAutoDriveToTargetDock(autoDriveResolvedTargetStation);
+        return FinalizeAutoDriveArrivalFromCurrentTarget();
     }
 
     private bool FinalizeAutoDriveArrivalFromCurrentTarget()
@@ -2983,7 +3530,7 @@ public class SteamTrain : RailHandcar
     {
         private const float RouteNodeMergeDistance = 0.12f;
         private const float RouteEndpointSnapDistance = 0.75f;
-        private const float RouteRailConnectionSnapDistance = 0.1f;
+        private const float RouteRailConnectionSnapDistance = RailConnectionUtility.ConnectionDistance;
         private const float RouteRailConnectionMinTangentDot = 0.2f;
         private const float RouteStartReversePenalty = 1000f;
         private const float RouteStartReverseDotThreshold = -0.1f;

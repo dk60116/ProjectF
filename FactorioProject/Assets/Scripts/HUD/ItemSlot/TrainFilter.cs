@@ -140,9 +140,9 @@ public class TrainFilter : MonoBehaviour
             trainIcon.enabled = icon != null;
         }
 
-        RefreshAutoDriveToggle();
         RefreshStationTargetDropdowns();
         RefreshFilterDropdowns();
+        RefreshAutoDriveToggle();
     }
 
     private void RefreshAutoDriveToggle()
@@ -153,7 +153,12 @@ public class TrainFilter : MonoBehaviour
         }
 
         EnsureControlVisible(autoDriaveToggle);
-        autoDriaveToggle.interactable = true;
+        bool hasCompleteStationSelection = HasCompleteStationSelection();
+        autoDriaveToggle.SetIsOnWithoutNotify(
+            boundTrain != null
+            && boundTrain.AutoDriveEnabled
+            && hasCompleteStationSelection);
+        autoDriaveToggle.interactable = boundTrain != null && hasCompleteStationSelection;
     }
 
     private void RefreshStationTargetDropdowns()
@@ -227,7 +232,7 @@ public class TrainFilter : MonoBehaviour
         EnsureControlVisible(dropdown);
         dropdown.interactable = true;
 
-        string previouslySelectedOption = ResolveSelectedOptionText(dropdown);
+        string previouslySelectedOption = ResolvePreferredFilterOption(dropdown);
         filterOptionScratch.Clear();
         if (options != null)
         {
@@ -310,12 +315,16 @@ public class TrainFilter : MonoBehaviour
 
     private void HandleFilterChanged(bool _)
     {
+        ApplyCurrentSettingsToBoundTrain();
+        RefreshAutoDriveToggle();
         CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
     }
 
     private void HandleDropdownChanged(int _)
     {
+        ApplyCurrentSettingsToBoundTrain();
+        RefreshAutoDriveToggle();
         CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
     }
@@ -367,6 +376,12 @@ public class TrainFilter : MonoBehaviour
 
     private string ResolvePreferredStationName(TMP_Dropdown dropdown)
     {
+        string trainStationName = ResolveBoundTrainStationName(dropdown);
+        if (!string.IsNullOrWhiteSpace(trainStationName))
+        {
+            return trainStationName;
+        }
+
         string selectedStationName = ResolveSelectedOptionText(dropdown);
         if (!string.IsNullOrWhiteSpace(selectedStationName)
             && !string.Equals(selectedStationName, NoneOption, System.StringComparison.OrdinalIgnoreCase))
@@ -375,6 +390,86 @@ public class TrainFilter : MonoBehaviour
         }
 
         return string.Empty;
+    }
+
+    private string ResolveBoundTrainStationName(TMP_Dropdown dropdown)
+    {
+        if (boundTrain == null)
+        {
+            return string.Empty;
+        }
+
+        if (dropdown == targetA)
+        {
+            return NormalizeStationSelection(boundTrain.AutoDriveTargetAStationName);
+        }
+
+        if (dropdown == targetB)
+        {
+            return NormalizeStationSelection(boundTrain.AutoDriveTargetBStationName);
+        }
+
+        return string.Empty;
+    }
+
+    private string ResolvePreferredFilterOption(TMP_Dropdown dropdown)
+    {
+        if (boundTrain != null)
+        {
+            if (dropdown == fuel)
+            {
+                return boundTrain.AutoDriveFuelFilterName;
+            }
+
+            if (dropdown == freight)
+            {
+                return boundTrain.AutoDriveFreightFilterName;
+            }
+        }
+
+        return ResolveSelectedOptionText(dropdown);
+    }
+
+    private void ApplyCurrentSettingsToBoundTrain()
+    {
+        if (!TryGetBoundTarget(out SteamTrain train))
+        {
+            return;
+        }
+
+        string targetAStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetA));
+        string targetBStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetB));
+        bool canEnableAutoDrive = HasCompleteStationSelection(targetAStationName, targetBStationName);
+        bool enabled = autoDriaveToggle != null && autoDriaveToggle.isOn && canEnableAutoDrive;
+        train.ApplyAutoDriveSettings(
+            enabled,
+            targetAStationName,
+            targetBStationName,
+            ResolveSelectedOptionText(fuel),
+            ResolveSelectedOptionText(freight));
+
+        if (autoDriaveToggle != null)
+        {
+            autoDriaveToggle.SetIsOnWithoutNotify(train.AutoDriveEnabled);
+            autoDriaveToggle.interactable = canEnableAutoDrive;
+        }
+    }
+
+    private bool HasCompleteStationSelection()
+    {
+        return HasCompleteStationSelection(
+            NormalizeStationSelection(ResolveSelectedOptionText(targetA)),
+            NormalizeStationSelection(ResolveSelectedOptionText(targetB)));
+    }
+
+    private static bool HasCompleteStationSelection(string targetAStationName, string targetBStationName)
+    {
+        return !string.IsNullOrWhiteSpace(targetAStationName)
+               && !string.IsNullOrWhiteSpace(targetBStationName)
+               && !string.Equals(
+                   targetAStationName,
+                   targetBStationName,
+                   System.StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsureControlVisible(Component component)

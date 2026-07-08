@@ -384,6 +384,16 @@ public static class SaveGameBinarySerializer
             writer.Write(state.steamTrainStoredBurnEnergy);
             writer.Write(state.steamTrainBurnEnergyGaugeCapacity);
         }
+
+        writer.Write(state.stationName ?? string.Empty);
+        writer.Write(state.steamTrainAutoDriveEnabled);
+        writer.Write(state.steamTrainAutoDriveTargetAStationName ?? string.Empty);
+        writer.Write(state.steamTrainAutoDriveTargetBStationName ?? string.Empty);
+        writer.Write(state.steamTrainAutoDriveFuelFilter);
+        writer.Write(state.steamTrainAutoDriveFreightFilter);
+        writer.Write(state.steamTrainAutoDriveRouteTargetStationName ?? string.Empty);
+        writer.Write(state.steamTrainAutoDriveLastArrivedStationName ?? string.Empty);
+        writer.Write(state.steamTrainAutoDriveStationWaitTimer);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -484,6 +494,19 @@ public static class SaveGameBinarySerializer
             reader.ReadString();
             reader.ReadInt32();
             reader.ReadInt32();
+        }
+
+        if (version >= 20)
+        {
+            state.stationName = reader.ReadString();
+            state.steamTrainAutoDriveEnabled = reader.ReadBoolean();
+            state.steamTrainAutoDriveTargetAStationName = reader.ReadString();
+            state.steamTrainAutoDriveTargetBStationName = reader.ReadString();
+            state.steamTrainAutoDriveFuelFilter = reader.ReadInt32();
+            state.steamTrainAutoDriveFreightFilter = reader.ReadInt32();
+            state.steamTrainAutoDriveRouteTargetStationName = reader.ReadString();
+            state.steamTrainAutoDriveLastArrivedStationName = reader.ReadString();
+            state.steamTrainAutoDriveStationWaitTimer = reader.ReadSingle();
         }
 
         return state;
