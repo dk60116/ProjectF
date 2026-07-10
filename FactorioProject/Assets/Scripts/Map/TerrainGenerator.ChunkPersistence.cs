@@ -1190,10 +1190,20 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (restoredInstallation is Railload restoredRailload)
         {
+            if (savedState.railRequiredItemCount > 0)
+            {
+                restoredRailload.ConfigureRequiredItemCount(savedState.railRequiredItemCount);
+            }
+
             restoredRailload.ConfigureVisualPath(
                 savedState.railVisualPathPoints,
                 savedState.railVisualPathExtendsStart,
                 savedState.railVisualPathExtendsEnd);
+
+            if (savedState.railRequiredItemCount <= 0)
+            {
+                restoredRailload.ConfigureRequiredItemCount(restoredRailload.RequiredItemCount);
+            }
         }
 
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);

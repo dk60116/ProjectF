@@ -339,6 +339,7 @@ public class InstallationPlacementController : MonoBehaviour
         public int originalQuarterTurns;
         public Quaternion originalRotation = Quaternion.identity;
         public int originalConveyorVariantKind = -1;
+        public int originalRailRequiredItemCount;
         public List<Vector2Int> originalOccupiedCoordinates = new List<Vector2Int>();
         public List<Vector2Int> originalStateCoordinates = new List<Vector2Int>();
         public List<AreaAttachedBoxState> attachedAreaBoxes = new List<AreaAttachedBoxState>();
@@ -3208,9 +3209,7 @@ public class InstallationPlacementController : MonoBehaviour
             DetachInstallationForEditing(editSession);
         }
 
-        int itemId = editSession?.definition != null
-            ? editSession.definition.id
-            : editSession?.originalInstallation != null ? editSession.originalInstallation.ResolveItemId() : -1;
+        int itemId = ResolvePackedInstallationItemId(editSession);
         int packedConveyorVariantKind = wasEditingInstallation && activeInstallPreview != null
             ? GetInstallationVariantKind(activeInstallPreview)
             : editSession.originalConveyorVariantKind;
@@ -3246,14 +3245,31 @@ public class InstallationPlacementController : MonoBehaviour
         if (editSession?.originalInstallation is Railload
             || editSession?.definition?.mapObject is Railload)
         {
-            int railItemCount = Railload.ResolveRequiredItemCount(editSession.originalOccupiedCoordinates);
-            if (railItemCount > 0)
-            {
-                return railItemCount;
-            }
+            return Mathf.Max(1, editSession.originalRailRequiredItemCount);
         }
 
         return 1;
+    }
+
+    private static int ResolvePackedInstallationItemId(InstallationEditSession editSession)
+    {
+        if (editSession?.originalInstallation is Railload
+            || editSession?.definition?.mapObject is Railload)
+        {
+            IReadOnlyList<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
+            ItemDefinition railDefinition =
+                ItemDefinitionLookup.ResolveInstallationByStableName(definitions, "Railload");
+            if (railDefinition != null && railDefinition.id >= 0)
+            {
+                return railDefinition.id;
+            }
+        }
+
+        return editSession?.definition != null
+            ? editSession.definition.id
+            : editSession?.originalInstallation != null
+                ? editSession.originalInstallation.ResolveItemId()
+                : -1;
     }
 
     private bool TryUndoPackedInstallation()
@@ -3935,6 +3951,9 @@ public class InstallationPlacementController : MonoBehaviour
             originalQuarterTurns = resolvedQuarterTurns,
             originalRotation = installationObject.transform.rotation,
             originalConveyorVariantKind = GetInstallationVariantKind(installationObject),
+            originalRailRequiredItemCount = installationObject is Railload railload
+                ? railload.RequiredItemCount
+                : 0,
             originalOccupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
         };
         editSession.originalStateCoordinates = GetInstallationEditStateCoordinates(

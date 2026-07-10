@@ -47,12 +47,16 @@ public class Railload : InstallationObject
     private readonly List<int> sleeperTriangles = new List<int>(192);
     private readonly List<Vector3> railCenterPath = new List<Vector3>(64);
     private readonly List<Vector2> renderedPathSamples = new List<Vector2>(64);
+    private float renderedPathLength;
+    private bool renderedPathCacheDirty = true;
     [SerializeField, HideInInspector]
     private List<Vector2> runtimeVisualPathPoints = new List<Vector2>(64);
     [SerializeField, HideInInspector]
     private bool runtimeVisualPathExtendsStart = true;
     [SerializeField, HideInInspector]
     private bool runtimeVisualPathExtendsEnd = true;
+    [SerializeField, HideInInspector, Min(0)]
+    private int runtimeRequiredItemCount;
 
     protected override void OnEnable()
     {
@@ -72,19 +76,41 @@ public class Railload : InstallationObject
         runtimeVisualPathPoints?.Clear();
         runtimeVisualPathExtendsStart = true;
         runtimeVisualPathExtendsEnd = true;
+        runtimeRequiredItemCount = 0;
+        InvalidateRenderedPathCache();
         ClearRailVisual();
-    }
-
-    public override void PrepareForPool()
-    {
-        base.PrepareForPool();
-        runtimeVisualPathExtendsStart = true;
-        runtimeVisualPathExtendsEnd = true;
     }
 
     public IReadOnlyList<Vector2> RuntimeVisualPathPoints => runtimeVisualPathPoints;
     public bool RuntimeVisualPathExtendsStart => runtimeVisualPathExtendsStart;
     public bool RuntimeVisualPathExtendsEnd => runtimeVisualPathExtendsEnd;
+    public int RequiredItemCount
+    {
+        get
+        {
+            if (runtimeRequiredItemCount > 0)
+            {
+                return runtimeRequiredItemCount;
+            }
+
+            int visualPathItemCount = RailloadInstallationController.ResolveRequiredItemCountFromVisualPath(
+                runtimeVisualPathPoints,
+                runtimeVisualPathExtendsStart,
+                runtimeVisualPathExtendsEnd);
+            if (visualPathItemCount > 0)
+            {
+                return visualPathItemCount;
+            }
+
+            int occupiedPathItemCount = ResolveRequiredItemCount(RuntimeOccupiedCoordinates);
+            return occupiedPathItemCount > 0 ? occupiedPathItemCount : 1;
+        }
+    }
+
+    public void ConfigureRequiredItemCount(int requiredItemCount)
+    {
+        runtimeRequiredItemCount = Mathf.Max(0, requiredItemCount);
+    }
 
     public void ConfigureVisualPath(IReadOnlyList<Vector2> visualPathPoints)
     {
@@ -136,7 +162,7 @@ public class Railload : InstallationObject
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
 
-        return TryBuildRenderedPathSamples(renderedPathSamples)
+        return TryEnsureRenderedPathSamples()
             && TryFindNearestPointAndTangentOnPath(
                 renderedPathSamples,
                 point,
@@ -157,7 +183,7 @@ public class Railload : InstallationObject
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
 
-        if (!TryBuildRenderedPathSamples(renderedPathSamples))
+        if (!TryEnsureRenderedPathSamples())
         {
             return false;
         }
@@ -178,23 +204,28 @@ public class Railload : InstallationObject
     {
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
-        if (!TryBuildRenderedPathSamples(renderedPathSamples))
+        if (!TryEnsureRenderedPathSamples())
         {
             return false;
         }
 
-        return TrySamplePathAtDistance(renderedPathSamples, distanceAlongPath, out pathPoint, out tangent);
+        return TrySamplePathAtDistance(
+            renderedPathSamples,
+            renderedPathLength,
+            distanceAlongPath,
+            out pathPoint,
+            out tangent);
     }
 
     public bool TryGetRenderedPathLength(out float length)
     {
         length = 0f;
-        if (!TryBuildRenderedPathSamples(renderedPathSamples))
+        if (!TryEnsureRenderedPathSamples())
         {
             return false;
         }
 
-        length = CalculatePathLength(renderedPathSamples);
+        length = renderedPathLength;
         return length > 0.0001f;
     }
 
@@ -207,7 +238,7 @@ public class Railload : InstallationObject
         distanceAlongPath = 0f;
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
-        if (!TryBuildRenderedPathSamples(renderedPathSamples)
+        if (!TryEnsureRenderedPathSamples()
             || renderedPathSamples.Count < 2)
         {
             return false;
@@ -222,7 +253,7 @@ public class Railload : InstallationObject
         else
         {
             int lastIndex = renderedPathSamples.Count - 1;
-            distanceAlongPath = CalculatePathLength(renderedPathSamples);
+            distanceAlongPath = renderedPathLength;
             pathPoint = renderedPathSamples[lastIndex];
             tangent = renderedPathSamples[lastIndex] - renderedPathSamples[lastIndex - 1];
         }
@@ -265,6 +296,7 @@ public class Railload : InstallationObject
 
     public void RefreshRailVisual()
     {
+        InvalidateRenderedPathCache();
         EnsureRailMesh();
         railVertices.Clear();
         railTriangles.Clear();
@@ -513,26 +545,35 @@ public class Railload : InstallationObject
         ExtendPathEndpointsToCellEdges(pathPoints, extendStartEndpoint, extendEndEndpoint);
     }
 
-    private bool TryBuildRenderedPathSamples(List<Vector2> pathPoints)
+    private void InvalidateRenderedPathCache()
     {
-        if (pathPoints == null)
+        renderedPathCacheDirty = true;
+        renderedPathLength = 0f;
+    }
+
+    private bool TryEnsureRenderedPathSamples()
+    {
+        if (!renderedPathCacheDirty)
         {
-            return false;
+            return renderedPathSamples.Count >= 2;
         }
 
-        pathPoints.Clear();
+        renderedPathCacheDirty = false;
+        renderedPathLength = 0f;
+        renderedPathSamples.Clear();
         if (runtimeVisualPathPoints != null && runtimeVisualPathPoints.Count >= 2)
         {
             for (int i = 0; i < runtimeVisualPathPoints.Count; i++)
             {
-                AddVisualPathPoint(pathPoints, runtimeVisualPathPoints[i]);
+                AddVisualPathPoint(renderedPathSamples, runtimeVisualPathPoints[i]);
             }
 
             ExtendPathEndpointsToCellEdges2D(
-                pathPoints,
+                renderedPathSamples,
                 runtimeVisualPathExtendsStart,
                 runtimeVisualPathExtendsEnd);
-            return pathPoints.Count >= 2;
+            renderedPathLength = CalculatePathLength(renderedPathSamples);
+            return renderedPathSamples.Count >= 2;
         }
 
         IReadOnlyList<Vector2Int> coordinates = RuntimeOccupiedCoordinates;
@@ -547,13 +588,14 @@ public class Railload : InstallationObject
         {
             Vector3 localPoint = railCenterPath[i];
             AddVisualPathPoint(
-                pathPoints,
+                renderedPathSamples,
                 new Vector2(
                     localPoint.x + RuntimeAnchorCoordinate.x,
                     localPoint.z + RuntimeAnchorCoordinate.y));
         }
 
-        return pathPoints.Count >= 2;
+        renderedPathLength = CalculatePathLength(renderedPathSamples);
+        return renderedPathSamples.Count >= 2;
     }
 
     private static void ExtendPathEndpointsToCellEdges2D(
@@ -1039,6 +1081,7 @@ public class Railload : InstallationObject
 
     private static bool TrySamplePathAtDistance(
         IReadOnlyList<Vector2> pathPoints,
+        float pathLength,
         float distanceAlongPath,
         out Vector2 pathPoint,
         out Vector2 tangent)
@@ -1050,7 +1093,7 @@ public class Railload : InstallationObject
             return false;
         }
 
-        float targetDistance = Mathf.Clamp(distanceAlongPath, 0f, CalculatePathLength(pathPoints));
+        float targetDistance = Mathf.Clamp(distanceAlongPath, 0f, Mathf.Max(0f, pathLength));
         float walkedDistance = 0f;
         for (int i = 0; i + 1 < pathPoints.Count; i++)
         {

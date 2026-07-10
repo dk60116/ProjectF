@@ -5,6 +5,7 @@ public class SteamTrain : RailHandcar
 {
     private static readonly List<AutoDriveRoutePlanner.RouteSegment> SharedDebugRouteSegmentScratch =
         new List<AutoDriveRoutePlanner.RouteSegment>(32);
+    private static ulong nextAutoDriveControllerRevision;
 
     public readonly struct AutoDriveDebugRouteSegment
     {
@@ -151,6 +152,7 @@ public class SteamTrain : RailHandcar
     private float autoDriveRouteRefreshTimer;
     private float autoDriveStationWaitTimer;
     private int autoDriveTickFrame = -1;
+    private ulong autoDriveControllerRevision;
 
     public float ObjectInfoStoredBurnEnergy => Mathf.Max(0f, storedBurnEnergy);
     public float ObjectInfoBurnEnergyGaugeCapacity => Mathf.Max(0f, burnEnergyGaugeCapacity, storedBurnEnergy);
@@ -420,7 +422,9 @@ public class SteamTrain : RailHandcar
 
     private void TickAutoDrive(float deltaTime, Player mountedPlayer)
     {
-        if (!autoDriveEnabled || autoDriveTickFrame == Time.frameCount)
+        if (!autoDriveEnabled
+            || autoDriveTickFrame == Time.frameCount
+            || !IsPrimaryAutoDriveControllerForConsist())
         {
             return;
         }
@@ -431,6 +435,7 @@ public class SteamTrain : RailHandcar
         if (!HasCompleteAutoDriveTargets())
         {
             autoDriveEnabled = false;
+            autoDriveControllerRevision = 0;
             ResetAutoDriveRuntimeState();
             SetAutoDriveStatus(AutoDriveStatus.NoTarget, string.Empty, string.Empty);
             PersistAutoDriveState();
@@ -582,6 +587,18 @@ public class SteamTrain : RailHandcar
         autoDriveTargetBStationName = normalizedTargetB;
         autoDriveFuelFilter = normalizedFuelFilter;
         autoDriveFreightFilter = normalizedFreightFilter;
+        if (autoDriveEnabled)
+        {
+            if (changed || autoDriveControllerRevision == 0)
+            {
+                ClaimAutoDriveControl();
+            }
+        }
+        else
+        {
+            autoDriveControllerRevision = 0;
+        }
+
         if (!changed)
         {
             return;
@@ -629,6 +646,14 @@ public class SteamTrain : RailHandcar
         autoDriveFuelFilter = ClampAutoDriveFuelFilter(fuelFilter);
         autoDriveFreightFilter = ClampAutoDriveFreightFilter(freightFilter);
         autoDriveEnabled = enabled && HasCompleteAutoDriveTargets();
+        if (autoDriveEnabled)
+        {
+            ClaimAutoDriveControl();
+        }
+        else
+        {
+            autoDriveControllerRevision = 0;
+        }
 
         ResetAutoDriveRuntimeState();
         autoDriveRouteTargetStationName = NormalizeAutoDriveStationName(routeTargetStationName);
@@ -1255,12 +1280,58 @@ public class SteamTrain : RailHandcar
     private void ResetAutoDriveState()
     {
         autoDriveEnabled = false;
+        autoDriveControllerRevision = 0;
         autoDriveTargetAStationName = string.Empty;
         autoDriveTargetBStationName = string.Empty;
         autoDriveFuelFilter = AutoDriveFuelFilter.Free;
         autoDriveFreightFilter = AutoDriveFreightFilter.Free;
         ResetAutoDriveRuntimeState();
         SetAutoDriveStatus(AutoDriveStatus.Idle, string.Empty, string.Empty);
+    }
+
+    private void ClaimAutoDriveControl()
+    {
+        nextAutoDriveControllerRevision++;
+        if (nextAutoDriveControllerRevision == 0)
+        {
+            nextAutoDriveControllerRevision = 1;
+        }
+
+        autoDriveControllerRevision = nextAutoDriveControllerRevision;
+    }
+
+    private bool IsPrimaryAutoDriveControllerForConsist()
+    {
+        CollectAutoDriveConnectedTrains();
+        SteamTrain controller = this;
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            SteamTrain candidate = autoDriveConnectedTrainScratch[i] as SteamTrain;
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            if (candidate != this && candidate.lastDrivenInputFrame == Time.frameCount)
+            {
+                return false;
+            }
+
+            if (!candidate.autoDriveEnabled
+                || !candidate.HasCompleteAutoDriveTargets())
+            {
+                continue;
+            }
+
+            if (candidate.autoDriveControllerRevision > controller.autoDriveControllerRevision
+                || (candidate.autoDriveControllerRevision == controller.autoDriveControllerRevision
+                    && candidate.GetInstanceID() < controller.GetInstanceID()))
+            {
+                controller = candidate;
+            }
+        }
+
+        return controller == this;
     }
 
     private void ResetAutoDriveRuntimeState()
@@ -1493,6 +1564,26 @@ public class SteamTrain : RailHandcar
         string currentTargetStationName,
         string nextTargetStationName)
     {
+#if UNITY_EDITOR
+        string normalizedCurrentTarget = NormalizeAutoDriveStationName(currentTargetStationName);
+        string normalizedNextTarget = NormalizeAutoDriveStationName(nextTargetStationName);
+        if (autoDriveStatus != status
+            || !string.Equals(
+                autoDriveCurrentTargetStationName,
+                normalizedCurrentTarget,
+                System.StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                autoDriveNextTargetStationName,
+                normalizedNextTarget,
+                System.StringComparison.OrdinalIgnoreCase))
+        {
+            Debug.Log(
+                $"[AutoDriveState] train={name} state={autoDriveStatus}->{status} "
+                + $"target='{normalizedCurrentTarget}' next='{normalizedNextTarget}' "
+                + $"enabled={autoDriveEnabled} position={transform.position}",
+                this);
+        }
+#endif
         autoDriveStatus = status;
         autoDriveCurrentTargetStationName = NormalizeAutoDriveStationName(currentTargetStationName);
         autoDriveNextTargetStationName = NormalizeAutoDriveStationName(nextTargetStationName);

@@ -70,6 +70,12 @@ public class ObjectInfoPanel : MonoBehaviour
         ResolveReferences();
         Resource underlyingResource = ResolveUnderlyingResource(boundObject);
         RefreshFocusedInfoPanels(boundObject, underlyingResource);
+        if (boundObject is RailHandcar)
+        {
+            // Rail gauges and fluid values are updated by ItemInfoDescription itself.
+            return;
+        }
+
         RefreshInfoLine(boundObject, underlyingResource);
         RefreshInfoLineRectTransformThrottled();
     }

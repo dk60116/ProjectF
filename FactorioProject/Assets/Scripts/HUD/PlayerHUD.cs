@@ -1814,7 +1814,7 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (TryGetFocusedFenceDoor(out FenceDoor focusedFenceDoor))
+        if (TryGetNearbyInteractionFenceDoor(out FenceDoor focusedFenceDoor))
         {
             currentInteractionBoxObject = null;
             currentInteractionDoorObject = focusedFenceDoor;
@@ -1824,22 +1824,21 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        MapObject focusedMapObject = null;
-        if (TryGetFocusedMapObject(out focusedMapObject) && focusedMapObject is Vehicle)
+        if (TryGetNearbyInteractionVehicle(out Vehicle nearbyVehicle))
         {
-            Sprite vehicleIcon = ResolveInteractionIcon(focusedMapObject, 0);
+            Sprite vehicleIcon = ResolveInteractionIcon(nearbyVehicle, 0);
             if (vehicleIcon != null)
             {
                 currentInteractionBoxObject = null;
                 currentInteractionDoorObject = null;
                 currentInteractionResource = null;
-                currentInteractionMapObject = focusedMapObject;
+                currentInteractionMapObject = nearbyVehicle;
                 SetActiveInteractionButton(InteractionButton, vehicleIcon);
                 return;
             }
         }
 
-        if (TryGetFocusedResource(out Resource focusedResource))
+        if (TryGetNearbyInteractionResource(out Resource focusedResource))
         {
             Sprite resourceIcon = ResolveInteractionIcon(focusedResource);
             if (resourceIcon != null)
@@ -1853,7 +1852,10 @@ public class PlayerHUD : BagSlot
             }
         }
 
-        if (focusedMapObject != null || TryGetFocusedMapObject(out focusedMapObject))
+        if (TryGetFocusedMapObject(out MapObject focusedMapObject)
+            && !(focusedMapObject is Vehicle)
+            && !(focusedMapObject is Resource)
+            && !(focusedMapObject is FenceDoor))
         {
             Sprite mapObjectIcon = ResolveInteractionIcon(focusedMapObject, 0);
             if (mapObjectIcon != null)
@@ -2443,6 +2445,14 @@ public class PlayerHUD : BagSlot
 
         if (currentInteractionDoorObject != null)
         {
+            PlayerController playerController = ResolvePlayerController();
+            if (playerController == null
+                || !playerController.IsWithinInteractionRange(currentInteractionDoorObject))
+            {
+                UpdateInteractionButtonState();
+                return;
+            }
+
             currentInteractionDoorObject.ToggleOpenState(ResolveCurrentPlayerInteractionPosition());
             UpdateInteractionButtonState();
             return;
@@ -2453,7 +2463,7 @@ public class PlayerHUD : BagSlot
             PlayerController playerController = GameManager.Instance != null && GameManager.Instance.Player != null
                 ? GameManager.Instance.Player.GetComponent<PlayerController>()
                 : null;
-            playerController?.RequestFocusedResourceHarvest(currentInteractionResource);
+            playerController?.RequestResourceHarvest(currentInteractionResource);
             UpdateInteractionButtonState();
             return;
         }
@@ -2477,7 +2487,8 @@ public class PlayerHUD : BagSlot
                 {
                     playerController.TryDismountFromVehicle();
                 }
-                else
+                else if (playerController != null
+                         && playerController.IsWithinInteractionRange(vehicle))
                 {
                     vehicle.TryDockPlayer(currentPlayer);
                 }
@@ -2690,28 +2701,40 @@ public class PlayerHUD : BagSlot
         return playerController.TryGetFocusedBoxObject(out focusedBoxObject);
     }
 
-    private bool TryGetFocusedFenceDoor(out FenceDoor focusedFenceDoor)
+    private bool TryGetNearbyInteractionFenceDoor(out FenceDoor fenceDoor)
     {
-        focusedFenceDoor = null;
+        fenceDoor = null;
         PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
         {
             return false;
         }
 
-        return playerController.TryGetFocusedFenceDoor(out focusedFenceDoor);
+        return playerController.TryGetNearbyInteractionFenceDoor(out fenceDoor);
     }
 
-    private bool TryGetFocusedResource(out Resource focusedResource)
+    private bool TryGetNearbyInteractionVehicle(out Vehicle vehicle)
     {
-        focusedResource = null;
+        vehicle = null;
         PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
         {
             return false;
         }
 
-        return playerController.TryGetFocusedResource(out focusedResource);
+        return playerController.TryGetNearbyInteractionVehicle(out vehicle);
+    }
+
+    private bool TryGetNearbyInteractionResource(out Resource resource)
+    {
+        resource = null;
+        PlayerController playerController = ResolvePlayerController();
+        if (playerController == null)
+        {
+            return false;
+        }
+
+        return playerController.TryGetNearbyInteractionResource(out resource);
     }
 
     private bool TryGetFocusedMapObject(out MapObject focusedMapObject)

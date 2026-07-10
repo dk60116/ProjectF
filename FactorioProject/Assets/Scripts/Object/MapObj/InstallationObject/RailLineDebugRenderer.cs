@@ -98,6 +98,10 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private readonly List<LineRenderer> powerMarkerRenderers = new List<LineRenderer>();
     private readonly List<LineRenderer> targetStationMarkerRenderers = new List<LineRenderer>();
     private readonly List<RailHandcar> activeHandcarScratch = new List<RailHandcar>(4);
+    private readonly List<SteamTrain> selectedPowerTrainScratch = new List<SteamTrain>(4);
+    private readonly List<Trainstation> selectedTargetStationScratch = new List<Trainstation>(4);
+    private readonly Queue<Train> selectedTrainQueue = new Queue<Train>(8);
+    private readonly HashSet<Train> selectedTrainVisited = new HashSet<Train>();
     private readonly Queue<int> componentQueue = new Queue<int>();
     private readonly List<RouteHighlightSegment> routeHighlightSegmentScratch = new List<RouteHighlightSegment>(32);
     private readonly List<SteamTrain.AutoDriveDebugRouteSegment> autoDriveRouteSegmentScratch =
@@ -714,15 +718,61 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     {
         EnsureDebugRoot();
         EnsureLineMaterial();
-        if (!TryGetSelectedAutoDrivePowerSourceTrain(out Train powerSourceTrain))
+        if (!TryCollectSelectedAutoDrivePowerSourceTrains(selectedPowerTrainScratch))
         {
             DisablePowerMarkerRenderers();
             return;
         }
 
-        Vector3 center = powerSourceTrain.transform.position + Vector3.up * powerMarkerYOffset;
         float radius = Mathf.Max(0.05f, powerMarkerSize) * 0.5f;
         int rendererIndex = 0;
+        for (int i = 0; i < selectedPowerTrainScratch.Count; i++)
+        {
+            SteamTrain powerSourceTrain = selectedPowerTrainScratch[i];
+            if (powerSourceTrain == null)
+            {
+                continue;
+            }
+
+            Vector3 center = powerSourceTrain.transform.position + Vector3.up * powerMarkerYOffset;
+            rendererIndex = ApplyPowerMarkerCross(rendererIndex, center, radius);
+        }
+
+        DisablePowerMarkerRenderers(rendererIndex);
+        selectedPowerTrainScratch.Clear();
+    }
+
+    private void RefreshSelectedTargetStationMarker()
+    {
+        EnsureDebugRoot();
+        EnsureLineMaterial();
+        if (!TryCollectSelectedAutoDriveTargetStations(selectedTargetStationScratch))
+        {
+            DisableTargetStationMarkerRenderers();
+            return;
+        }
+
+        float radius = Mathf.Max(0.05f, targetStationMarkerSize) * 0.5f;
+        float diagonalRadius = radius * 0.72f;
+        int rendererIndex = 0;
+        for (int i = 0; i < selectedTargetStationScratch.Count; i++)
+        {
+            Trainstation targetStation = selectedTargetStationScratch[i];
+            if (targetStation == null)
+            {
+                continue;
+            }
+
+            Vector3 center = targetStation.transform.position + Vector3.up * targetStationMarkerYOffset;
+            rendererIndex = ApplyTargetStationMarkerCross(rendererIndex, center, radius, diagonalRadius);
+        }
+
+        DisableTargetStationMarkerRenderers(rendererIndex);
+        selectedTargetStationScratch.Clear();
+    }
+
+    private int ApplyPowerMarkerCross(int rendererIndex, Vector3 center, float radius)
+    {
         ApplyArrowSegment(
             EnsurePowerMarkerRenderer(rendererIndex++),
             center + new Vector3(-radius, 0f, 0f),
@@ -747,23 +797,15 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             center + new Vector3(radius * 0.7f, 0f, -radius * 0.7f),
             PowerSourceMarkerColor,
             powerMarkerLineWidth);
-        DisablePowerMarkerRenderers(rendererIndex);
+        return rendererIndex;
     }
 
-    private void RefreshSelectedTargetStationMarker()
+    private int ApplyTargetStationMarkerCross(
+        int rendererIndex,
+        Vector3 center,
+        float radius,
+        float diagonalRadius)
     {
-        EnsureDebugRoot();
-        EnsureLineMaterial();
-        if (!TryGetSelectedAutoDriveTargetStation(out Trainstation targetStation))
-        {
-            DisableTargetStationMarkerRenderers();
-            return;
-        }
-
-        Vector3 center = targetStation.transform.position + Vector3.up * targetStationMarkerYOffset;
-        float radius = Mathf.Max(0.05f, targetStationMarkerSize) * 0.5f;
-        float diagonalRadius = radius * 0.72f;
-        int rendererIndex = 0;
         ApplyArrowSegment(
             EnsureTargetStationMarkerRenderer(rendererIndex++),
             center + new Vector3(-radius, 0f, 0f),
@@ -788,45 +830,149 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             center + new Vector3(diagonalRadius, 0f, -diagonalRadius),
             TargetStationMarkerColor,
             targetStationMarkerLineWidth);
-        DisableTargetStationMarkerRenderers(rendererIndex);
+        return rendererIndex;
     }
 
-    private static bool TryGetSelectedAutoDrivePowerSourceTrain(out Train powerSourceTrain)
+    private bool TryCollectSelectedAutoDrivePowerSourceTrains(List<SteamTrain> results)
     {
-        powerSourceTrain = null;
-        if (!TrainFilter.TryGetActiveRouteSelection(
-                out SteamTrain train,
-                out _,
-                out _)
-            || train == null
-            || !train.AutoDriveEnabled)
+        if (results == null)
         {
             return false;
         }
 
-        powerSourceTrain = train.CurrentRailDebugPowerSourceTrain;
-        return powerSourceTrain != null
-               && powerSourceTrain.gameObject.activeInHierarchy
-               && powerSourceTrain.TryGetPlacementRuntime(out _, out _);
-    }
-
-    private static bool TryGetSelectedAutoDriveTargetStation(out Trainstation targetStation)
-    {
-        targetStation = null;
+        results.Clear();
         if (!TrainFilter.TryGetActiveRouteSelection(
-                out SteamTrain train,
-                out _,
-                out _)
-            || train == null
-            || !train.AutoDriveEnabled
-            || !train.TryGetCurrentAutoDriveTargetStation(out targetStation)
-            || targetStation == null)
+                out SteamTrain selectedTrain,
+                out string targetAStationName,
+                out string targetBStationName)
+            || selectedTrain == null
+            || !selectedTrain.gameObject.activeInHierarchy
+            || !selectedTrain.TryGetPlacementRuntime(out _, out _)
+            || string.IsNullOrWhiteSpace(targetAStationName)
+            || string.IsNullOrWhiteSpace(targetBStationName))
         {
             return false;
         }
 
-        return targetStation.gameObject.activeInHierarchy
-               && targetStation.TryGetPlacementRuntime(out _, out _);
+        CollectMatchingAutoDrivePowerTrains(
+            selectedTrain,
+            targetAStationName,
+            targetBStationName,
+            results);
+        return results.Count > 0;
+    }
+
+    private bool TryCollectSelectedAutoDriveTargetStations(List<Trainstation> results)
+    {
+        if (results == null)
+        {
+            return false;
+        }
+
+        results.Clear();
+        if (!TryCollectSelectedAutoDrivePowerSourceTrains(selectedPowerTrainScratch))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedPowerTrainScratch.Count; i++)
+        {
+            SteamTrain powerTrain = selectedPowerTrainScratch[i];
+            if (powerTrain == null
+                || !powerTrain.TryGetCurrentAutoDriveTargetStation(out Trainstation targetStation)
+                || targetStation == null
+                || !targetStation.gameObject.activeInHierarchy
+                || !targetStation.TryGetPlacementRuntime(out _, out _))
+            {
+                continue;
+            }
+
+            AddUniqueTargetStation(results, targetStation);
+        }
+
+        selectedPowerTrainScratch.Clear();
+        return results.Count > 0;
+    }
+
+    private void CollectMatchingAutoDrivePowerTrains(
+        SteamTrain selectedTrain,
+        string targetAStationName,
+        string targetBStationName,
+        List<SteamTrain> results)
+    {
+        selectedTrainQueue.Clear();
+        selectedTrainVisited.Clear();
+        selectedTrainQueue.Enqueue(selectedTrain);
+        selectedTrainVisited.Add(selectedTrain);
+
+        while (selectedTrainQueue.Count > 0)
+        {
+            Train currentTrain = selectedTrainQueue.Dequeue();
+            if (currentTrain == null || !currentTrain.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (currentTrain is SteamTrain steamTrain
+                && steamTrain.AutoDriveEnabled
+                && steamTrain.TryGetPlacementRuntime(out _, out _)
+                && HasMatchingAutoDriveTargets(steamTrain, targetAStationName, targetBStationName))
+            {
+                results.Add(steamTrain);
+            }
+
+            foreach (Train connectedTrain in currentTrain.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !selectedTrainVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                selectedTrainQueue.Enqueue(connectedTrain);
+            }
+        }
+
+        selectedTrainQueue.Clear();
+        selectedTrainVisited.Clear();
+    }
+
+    private static bool HasMatchingAutoDriveTargets(
+        SteamTrain train,
+        string targetAStationName,
+        string targetBStationName)
+    {
+        if (train == null)
+        {
+            return false;
+        }
+
+        bool directMatch =
+            IsSameStationName(train.AutoDriveTargetAStationName, targetAStationName)
+            && IsSameStationName(train.AutoDriveTargetBStationName, targetBStationName);
+        bool reverseMatch =
+            IsSameStationName(train.AutoDriveTargetAStationName, targetBStationName)
+            && IsSameStationName(train.AutoDriveTargetBStationName, targetAStationName);
+        return directMatch || reverseMatch;
+    }
+
+    private static bool IsSameStationName(string first, string second)
+    {
+        return string.Equals(first, second, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AddUniqueTargetStation(List<Trainstation> results, Trainstation station)
+    {
+        for (int i = 0; i < results.Count; i++)
+        {
+            if (results[i] == station)
+            {
+                return;
+            }
+        }
+
+        results.Add(station);
     }
 
     private void ApplyArrowSegment(

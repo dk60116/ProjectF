@@ -22,6 +22,8 @@ public class TrainFilter : MonoBehaviour
     private static TrainFilter activeVisibleFilter;
     private static SteamTrain lastSelectedTrain;
     private static SteamTrain focusedRouteTrain;
+    private static readonly Queue<Train> routeFocusQueue = new Queue<Train>(8);
+    private static readonly HashSet<Train> routeFocusVisited = new HashSet<Train>();
     private static string lastSelectedTargetAStationName = string.Empty;
     private static string lastSelectedTargetBStationName = string.Empty;
     private static int routeSelectionVersion;
@@ -363,9 +365,59 @@ public class TrainFilter : MonoBehaviour
             return true;
         }
 
-        return focusedRouteTrain == train
-               && focusedRouteTrain != null
-               && focusedRouteTrain.gameObject.activeInHierarchy;
+        return focusedRouteTrain != null
+               && focusedRouteTrain.gameObject.activeInHierarchy
+               && AreRouteTrainsConnected(train, focusedRouteTrain);
+    }
+
+    private static bool AreRouteTrainsConnected(SteamTrain first, SteamTrain second)
+    {
+        if (first == null || second == null)
+        {
+            return false;
+        }
+
+        if (first == second)
+        {
+            return true;
+        }
+
+        routeFocusQueue.Clear();
+        routeFocusVisited.Clear();
+        routeFocusQueue.Enqueue(first);
+        routeFocusVisited.Add(first);
+
+        while (routeFocusQueue.Count > 0)
+        {
+            Train currentTrain = routeFocusQueue.Dequeue();
+            if (currentTrain == null || !currentTrain.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            foreach (Train connectedTrain in currentTrain.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !routeFocusVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                if (connectedTrain == second)
+                {
+                    routeFocusQueue.Clear();
+                    routeFocusVisited.Clear();
+                    return true;
+                }
+
+                routeFocusQueue.Enqueue(connectedTrain);
+            }
+        }
+
+        routeFocusQueue.Clear();
+        routeFocusVisited.Clear();
+        return false;
     }
 
     private int ResolveStationOptionIndex(string stationName)

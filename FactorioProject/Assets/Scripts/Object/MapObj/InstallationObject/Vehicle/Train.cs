@@ -30,6 +30,12 @@ public class Train : Vehicle
     private float currentRailDistance;
     private Vector2 currentRailPoint;
     private Vector2 currentRailTangent;
+    private Railload currentRailConnectionTargetRail;
+    private float currentRailConnectionTargetDistance;
+    private Vector2 currentRailConnectionTargetPoint;
+    private Vector2 currentRailConnectionTargetTangent;
+    private float currentRailConnectionPathDistance;
+    private float currentRailConnectionProgress;
     private readonly HashSet<Train> connectedTrains = new HashSet<Train>();
 
     public float ConnectionCenterDistance => Mathf.Max(
@@ -85,23 +91,24 @@ public class Train : Vehicle
 
     public override void PrepareForPool()
     {
-        ClearTrainConnections();
         ActiveRuntimeTrains.Remove(this);
-        currentRail = null;
-        currentRailDistance = 0f;
-        currentRailPoint = Vector2.zero;
-        currentRailTangent = Vector2.zero;
         base.PrepareForPool();
     }
 
     protected override void OnPlacementRuntimeCleared()
     {
         ClearTrainConnections();
+        ClearCurrentRailSample();
+        base.OnPlacementRuntimeCleared();
+    }
+
+    private void ClearCurrentRailSample()
+    {
         currentRail = null;
         currentRailDistance = 0f;
         currentRailPoint = Vector2.zero;
         currentRailTangent = Vector2.zero;
-        base.OnPlacementRuntimeCleared();
+        ClearCurrentRailConnectionTransition();
     }
 
     public bool ConnectTo(Train other)
@@ -391,6 +398,56 @@ public class Train : Vehicle
         currentRailDistance = Mathf.Max(0f, distanceAlongPath);
         currentRailPoint = point;
         currentRailTangent = tangent;
+        ClearCurrentRailConnectionTransition();
+    }
+
+    internal void ConfigureCurrentRailConnectionTransition(
+        Railload targetRail,
+        float targetDistanceAlongPath,
+        Vector2 targetPoint,
+        Vector2 targetTangent,
+        float connectionPathDistance,
+        float connectionProgress)
+    {
+        if (targetRail == null || connectionPathDistance <= 0f)
+        {
+            ClearCurrentRailConnectionTransition();
+            return;
+        }
+
+        currentRailConnectionTargetRail = targetRail;
+        currentRailConnectionTargetDistance = Mathf.Max(0f, targetDistanceAlongPath);
+        currentRailConnectionTargetPoint = targetPoint;
+        currentRailConnectionTargetTangent = targetTangent;
+        currentRailConnectionPathDistance = connectionPathDistance;
+        currentRailConnectionProgress = Mathf.Clamp(connectionProgress, 0f, connectionPathDistance);
+    }
+
+    internal bool TryGetCurrentRailConnectionTransition(
+        out Railload targetRail,
+        out float targetDistanceAlongPath,
+        out Vector2 targetPoint,
+        out Vector2 targetTangent,
+        out float connectionPathDistance,
+        out float connectionProgress)
+    {
+        targetRail = currentRailConnectionTargetRail;
+        targetDistanceAlongPath = currentRailConnectionTargetDistance;
+        targetPoint = currentRailConnectionTargetPoint;
+        targetTangent = currentRailConnectionTargetTangent;
+        connectionPathDistance = currentRailConnectionPathDistance;
+        connectionProgress = currentRailConnectionProgress;
+        return targetRail != null && connectionPathDistance > 0f;
+    }
+
+    internal void ClearCurrentRailConnectionTransition()
+    {
+        currentRailConnectionTargetRail = null;
+        currentRailConnectionTargetDistance = 0f;
+        currentRailConnectionTargetPoint = Vector2.zero;
+        currentRailConnectionTargetTangent = Vector2.zero;
+        currentRailConnectionPathDistance = 0f;
+        currentRailConnectionProgress = 0f;
     }
 
     protected void RefreshRuntimeCoordinate(Vector3 worldPosition)

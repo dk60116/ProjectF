@@ -683,12 +683,8 @@ public class ItemInfoDescription : MonoBehaviour
             ElectricGaugeFillColor,
             currentSpeed,
             maxSpeed,
-            true);
-        if (text != null)
-        {
-            text.text =
-                $"{FormatMetersPerSecond(currentSpeed)} m/s / {FormatMetersPerSecond(maxSpeed)} m/s";
-        }
+            true,
+            $"{FormatMetersPerSecond(currentSpeed)} m/s / {FormatMetersPerSecond(maxSpeed)} m/s");
     }
 
     private void SetSteamTrainBurnEnergyGauge(SteamTrain steamTrain)
@@ -704,12 +700,10 @@ public class ItemInfoDescription : MonoBehaviour
             BurnEnergyGaugeFillColor,
             storedEnergy,
             gaugeCapacity,
-            true);
-        if (energyText != null && steamTrain != null)
-        {
-            energyText.text =
-                $"{FormatGaugeNumber(storedEnergy, true)} / {FormatGaugeNumber(gaugeCapacity, true)} ({FormatGaugeNumber(steamTrain.ObjectInfoBurnEnergyUseRatePerSecond, true)} / s)";
-        }
+            true,
+            steamTrain != null
+                ? $"{FormatGaugeNumber(storedEnergy, true)} / {FormatGaugeNumber(gaugeCapacity, true)} ({FormatGaugeNumber(steamTrain.ObjectInfoBurnEnergyUseRatePerSecond, true)} / s)"
+                : string.Empty);
     }
 
     private void SetSteamTrainWaterGauge(
@@ -729,12 +723,10 @@ public class ItemInfoDescription : MonoBehaviour
             ResolveFluidGaugeFillColor(steamTrain),
             storedLiters,
             capacityLiters,
-            true);
-        if (text != null && steamTrain != null)
-        {
-            text.text =
-                $"{FormatGaugeNumber(storedLiters, true)} L / {FormatGaugeNumber(capacityLiters, true)} L ({FormatLitersPerSecond(steamTrain.ObjectInfoWaterUseRatePerSecond)})";
-        }
+            true,
+            steamTrain != null
+                ? $"{FormatGaugeNumber(storedLiters, true)} L / {FormatGaugeNumber(capacityLiters, true)} L ({FormatLitersPerSecond(steamTrain.ObjectInfoWaterUseRatePerSecond)})"
+                : string.Empty);
     }
 
     private void RefreshUtilityPoleGaugeTarget(UtilityPole utilityPole)
@@ -1499,7 +1491,7 @@ public class ItemInfoDescription : MonoBehaviour
 
     private static string FormatTemperatureCelsius(float value)
     {
-        return $"{Mathf.RoundToInt(Mathf.Max(0f, value))}\u2103";
+        return $"{Mathf.RoundToInt(Mathf.Max(0f, value))} C";
     }
 
     private static bool TryResolveItemSetByName(ItemManager itemManager, string itemName, out ItemManager.ItemSet itemSet)
@@ -1852,6 +1844,20 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    private static void SetTextIfChanged(TextMeshProUGUI target, string value)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        string resolvedValue = value ?? string.Empty;
+        if (target.text != resolvedValue)
+        {
+            target.text = resolvedValue;
+        }
+    }
+
     private static T GetListItem<T>(List<T> list, int index) where T : class
     {
         return list != null && index >= 0 && index < list.Count ? list[index] : null;
@@ -1866,7 +1872,8 @@ public class ItemInfoDescription : MonoBehaviour
         Color fillColor,
         float currentValue,
         float maxValue,
-        bool alwaysShowOneDecimal = false)
+        bool alwaysShowOneDecimal = false,
+        string textOverride = null)
     {
         bool wasActive = root != null ? root.activeSelf : fill != null && fill.gameObject.activeInHierarchy;
         SetActiveIfNeeded(root, active);
@@ -1874,7 +1881,7 @@ public class ItemInfoDescription : MonoBehaviour
         {
             float targetFillAmount = active ? Mathf.Clamp01(fillAmount) : 0f;
             ApplyGaugeFill(fill, targetFillAmount, !active || !wasActive, active);
-            if (active)
+            if (active && fill.color != fillColor)
             {
                 fill.color = fillColor;
             }
@@ -1882,7 +1889,11 @@ public class ItemInfoDescription : MonoBehaviour
 
         if (text != null)
         {
-            text.text = active ? FormatGaugeValue(currentValue, maxValue, alwaysShowOneDecimal) : string.Empty;
+            SetTextIfChanged(
+                text,
+                active
+                    ? textOverride ?? FormatGaugeValue(currentValue, maxValue, alwaysShowOneDecimal)
+                    : string.Empty);
         }
     }
 
@@ -1910,7 +1921,6 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         GaugeFillTargets[fill] = targetFillAmount;
-        UpdateGaugeFill(fill);
     }
 
     private static void UpdateGaugeFill(Image fill)

@@ -18,6 +18,7 @@ public partial class BlockStateStore : MonoBehaviour
         public List<Vector2> railVisualPathPoints = new List<Vector2>();
         public bool railVisualPathExtendsStart = true;
         public bool railVisualPathExtendsEnd = true;
+        public int railRequiredItemCount;
         public InputOutputModule.PersistentState inputOutputState;
         public RobotArm.PersistentState robotArmState;
         public long lastBackgroundSimulationTicks;
@@ -65,6 +66,7 @@ public partial class BlockStateStore : MonoBehaviour
                 railVisualPathPoints = new List<Vector2>(railVisualPathPoints ?? new List<Vector2>()),
                 railVisualPathExtendsStart = railVisualPathExtendsStart,
                 railVisualPathExtendsEnd = railVisualPathExtendsEnd,
+                railRequiredItemCount = railRequiredItemCount,
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
                 robotArmState = robotArmState != null ? robotArmState.Clone() : null,
                 lastBackgroundSimulationTicks = lastBackgroundSimulationTicks,
@@ -835,6 +837,7 @@ public partial class BlockStateStore : MonoBehaviour
             state.railVisualPathPoints = railload.CopyVisualPathPoints();
             state.railVisualPathExtendsStart = railload.RuntimeVisualPathExtendsStart;
             state.railVisualPathExtendsEnd = railload.RuntimeVisualPathExtendsEnd;
+            state.railRequiredItemCount = railload.RequiredItemCount;
         }
 
         if (installationObject is Train train)

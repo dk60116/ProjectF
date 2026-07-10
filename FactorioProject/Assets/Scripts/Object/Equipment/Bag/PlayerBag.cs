@@ -1579,6 +1579,7 @@ public class PlayerBag : MonoBehaviour
             }
         }
 
+        TryMergeDuplicateItemStacks();
         NotifyChanged();
     }
 

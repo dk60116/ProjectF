@@ -185,6 +185,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
         railload.transform.SetPositionAndRotation(
             placementController.GetInstalledObjectWorldPosition(anchorCoordinate, railloadPrefab, 0),
             Quaternion.identity);
+        railload.ConfigureRequiredItemCount(currentPlan.requiredItemCount);
         railload.ConfigurePlacementRuntime(anchorCoordinate, 0, occupiedCoordinates, placementSequence);
         railload.ConfigureVisualPath(visualPathPoints, currentPlan.extendStartEndpoint, currentPlan.extendEndEndpoint);
 
@@ -335,6 +336,28 @@ public sealed class RailloadInstallationController : MonoBehaviour
         {
             plan.occupiedCoordinates.AddRange(plan.pathCoordinates);
         }
+    }
+
+    internal static int ResolveRequiredItemCountFromVisualPath(
+        IReadOnlyList<Vector2> visualPathPoints,
+        bool extendStartEndpoint,
+        bool extendEndEndpoint)
+    {
+        if (visualPathPoints == null || visualPathPoints.Count <= 0)
+        {
+            return 0;
+        }
+
+        List<Vector2> renderedCenterPath = new List<Vector2>(visualPathPoints.Count);
+        BuildRenderedVisualPath(
+            visualPathPoints,
+            extendStartEndpoint,
+            extendEndEndpoint,
+            renderedCenterPath);
+
+        List<Vector2Int> pathCoordinates = new List<Vector2Int>(renderedCenterPath.Count);
+        AddCoordinatesTraversedByPath(pathCoordinates, renderedCenterPath, null);
+        return Railload.ResolveRequiredItemCount(pathCoordinates);
     }
 
     private static void BuildRenderedVisualPath(

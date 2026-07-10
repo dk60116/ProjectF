@@ -345,6 +345,7 @@ public static class SaveGameBinarySerializer
         WriteVector2List(writer, state.railVisualPathPoints);
         writer.Write(state.railVisualPathExtendsStart);
         writer.Write(state.railVisualPathExtendsEnd);
+        writer.Write(state.railRequiredItemCount);
         WriteInputOutputState(writer, state.inputOutputState);
         WriteRobotArmState(writer, state.robotArmState);
         writer.Write(state.lastBackgroundSimulationTicks);
@@ -418,6 +419,7 @@ public static class SaveGameBinarySerializer
             railVisualPathPoints = version >= 10 ? ReadVector2List(reader) : new List<Vector2>(),
             railVisualPathExtendsStart = version >= 11 ? reader.ReadBoolean() : true,
             railVisualPathExtendsEnd = version >= 11 ? reader.ReadBoolean() : true,
+            railRequiredItemCount = version >= 21 ? reader.ReadInt32() : 0,
             inputOutputState = ReadInputOutputState(reader, version),
             robotArmState = version >= 3 ? ReadRobotArmState(reader) : null,
             lastBackgroundSimulationTicks = reader.ReadInt64()

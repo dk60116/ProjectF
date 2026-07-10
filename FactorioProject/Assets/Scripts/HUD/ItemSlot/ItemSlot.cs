@@ -166,8 +166,16 @@ public class ItemSlot : MonoBehaviour
         bool hasIcon = displayIcon != null;
         if (icon != null)
         {
-            icon.sprite = displayIcon;
-            icon.enabled = hasIcon;
+            if (icon.sprite != displayIcon)
+            {
+                icon.sprite = displayIcon;
+            }
+
+            if (icon.enabled != hasIcon)
+            {
+                icon.enabled = hasIcon;
+            }
+
             if (icon.gameObject.activeSelf != hasIcon)
             {
                 icon.gameObject.SetActive(hasIcon);
@@ -177,7 +185,12 @@ public class ItemSlot : MonoBehaviour
         bool hasCountText = !string.IsNullOrWhiteSpace(countText);
         if (count != null)
         {
-            count.text = hasCountText ? countText : string.Empty;
+            string resolvedCountText = hasCountText ? countText : string.Empty;
+            if (count.text != resolvedCountText)
+            {
+                count.text = resolvedCountText;
+            }
+
             if (count.gameObject.activeSelf != hasCountText)
             {
                 count.gameObject.SetActive(hasCountText);
@@ -440,7 +453,11 @@ public class ItemSlot : MonoBehaviour
         string normalizedName = hasItem && !string.IsNullOrWhiteSpace(displayName)
             ? displayName
             : string.Empty;
-        itemName.text = normalizedName;
+        if (itemName.text != normalizedName)
+        {
+            itemName.text = normalizedName;
+        }
+
         bool showName = !string.IsNullOrEmpty(normalizedName);
         if (itemName.gameObject.activeSelf != showName)
         {
