@@ -116,6 +116,7 @@ public class Railload : InstallationObject
         runtimeVisualPathExtendsStart = extendStartEndpoint;
         runtimeVisualPathExtendsEnd = extendEndEndpoint;
         RefreshRailVisual();
+        base.OnPlacementRuntimeChanged();
     }
 
     public List<Vector2> CopyVisualPathPoints()

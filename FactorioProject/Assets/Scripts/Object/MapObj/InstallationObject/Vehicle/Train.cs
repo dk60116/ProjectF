@@ -8,6 +8,7 @@ public class Train : Vehicle
     private const float TrainLoadSpeedReductionPerMass = 0.01f;
     private const float MinTrainLoadSpeedMultiplier = 0.01f;
     private const float ConnectionSideEpsilon = 0.01f;
+    private const float StoredRailPointDeviationSqr = 0.000001f;
 
     private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
 
@@ -27,6 +28,7 @@ public class Train : Vehicle
     private Rigidbody cachedTrainRigidbody;
     private Railload currentRail;
     private float currentRailDistance;
+    private Vector2 currentRailPoint;
     private Vector2 currentRailTangent;
     private readonly HashSet<Train> connectedTrains = new HashSet<Train>();
 
@@ -87,6 +89,7 @@ public class Train : Vehicle
         ActiveRuntimeTrains.Remove(this);
         currentRail = null;
         currentRailDistance = 0f;
+        currentRailPoint = Vector2.zero;
         currentRailTangent = Vector2.zero;
         base.PrepareForPool();
     }
@@ -96,6 +99,7 @@ public class Train : Vehicle
         ClearTrainConnections();
         currentRail = null;
         currentRailDistance = 0f;
+        currentRailPoint = Vector2.zero;
         currentRailTangent = Vector2.zero;
         base.OnPlacementRuntimeCleared();
     }
@@ -319,7 +323,7 @@ public class Train : Vehicle
         }
 
         transform.SetPositionAndRotation(position, rotation);
-        SetCurrentRailSample(rail, distanceAlongPath, facingTangent);
+        SetCurrentRailSample(rail, distanceAlongPath, railPoint, facingTangent);
         RefreshRuntimeCoordinate(position);
         return true;
     }
@@ -358,12 +362,18 @@ public class Train : Vehicle
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
         if (currentRail == null
-            || !currentRail.TrySampleRenderedPath(currentRailDistance, out pathPoint, out tangent))
+            || !currentRail.TrySampleRenderedPath(currentRailDistance, out Vector2 sampledPoint, out tangent))
         {
             return false;
         }
 
-        if (currentRailTangent.sqrMagnitude > 0.0001f
+        pathPoint = currentRailPoint;
+        if ((currentRailPoint - sampledPoint).sqrMagnitude > StoredRailPointDeviationSqr
+            && currentRailTangent.sqrMagnitude > 0.0001f)
+        {
+            tangent = currentRailTangent;
+        }
+        else if (currentRailTangent.sqrMagnitude > 0.0001f
             && tangent.sqrMagnitude > 0.0001f
             && Vector2.Dot(tangent, currentRailTangent.normalized) < 0f)
         {
@@ -375,10 +385,11 @@ public class Train : Vehicle
         return true;
     }
 
-    protected void SetCurrentRailSample(Railload rail, float distanceAlongPath, Vector2 tangent)
+    protected void SetCurrentRailSample(Railload rail, float distanceAlongPath, Vector2 point, Vector2 tangent)
     {
         currentRail = rail;
         currentRailDistance = Mathf.Max(0f, distanceAlongPath);
+        currentRailPoint = point;
         currentRailTangent = tangent;
     }
 

@@ -34,12 +34,20 @@ public class Trainstation : InstallationObject
         }
 
         stationName = normalizedName;
+        base.OnPlacementRuntimeChanged();
         PersistStationName();
     }
 
     public void ApplyStationName(string value)
     {
-        stationName = NormalizeStationName(value);
+        string normalizedName = NormalizeStationName(value);
+        if (StoredStationName == normalizedName)
+        {
+            return;
+        }
+
+        stationName = normalizedName;
+        base.OnPlacementRuntimeChanged();
     }
 
     public bool TryGetRailCoordinate(out Vector2Int railCoordinate)
