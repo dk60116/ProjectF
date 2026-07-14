@@ -193,12 +193,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         if (Time.unscaledTime >= nextCartArrowRefreshTime)
         {
-            if (ShouldRefreshSelectedAutoDriveRoute())
-            {
-                Rebuild();
-                return;
-            }
-
             RefreshCartDirectionArrows();
             RefreshAutoDrivePowerSourceMarker();
             RefreshSelectedTargetStationMarker();
@@ -640,19 +634,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         trainInstanceId = train.GetInstanceID();
         currentTargetStationName = targetAStationName ?? string.Empty;
         nextTargetStationName = targetBStationName ?? string.Empty;
-    }
-
-    private static bool ShouldRefreshSelectedAutoDriveRoute()
-    {
-        return TrainFilter.TryGetActiveRouteSelection(
-                   out SteamTrain train,
-                   out string targetAStationName,
-                   out string targetBStationName)
-               && train != null
-               && train.gameObject.activeInHierarchy
-               && train.TryGetPlacementRuntime(out _, out _)
-               && !string.IsNullOrWhiteSpace(targetAStationName)
-               && !string.IsNullOrWhiteSpace(targetBStationName);
     }
 
     private void RefreshCartDirectionArrows()

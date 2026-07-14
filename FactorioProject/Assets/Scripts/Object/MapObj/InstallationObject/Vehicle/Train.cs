@@ -11,6 +11,7 @@ public class Train : Vehicle
     private const float StoredRailPointDeviationSqr = 0.000001f;
 
     private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
+    private static ulong connectionGraphRevision;
 
     [SerializeField, Min(0.05f)]
     private float trainConnectionCenterDistance = 0.9f;
@@ -50,6 +51,7 @@ public class Train : Vehicle
         MinTrainLoadSpeedMultiplier,
         1f);
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
+    public static ulong ConnectionGraphRevision => connectionGraphRevision;
 
     public void RotateTrainWheelsByDistance(float signedDistance)
     {
@@ -120,6 +122,11 @@ public class Train : Vehicle
 
         bool changed = connectedTrains.Add(other);
         changed |= other.connectedTrains.Add(this);
+        if (changed)
+        {
+            IncrementConnectionGraphRevision();
+        }
+
         return changed;
     }
 
@@ -130,8 +137,12 @@ public class Train : Vehicle
             return;
         }
 
-        connectedTrains.Remove(other);
-        other.connectedTrains.Remove(this);
+        bool changed = connectedTrains.Remove(other);
+        changed |= other.connectedTrains.Remove(this);
+        if (changed)
+        {
+            IncrementConnectionGraphRevision();
+        }
     }
 
     public void ClearTrainConnections()
@@ -149,6 +160,18 @@ public class Train : Vehicle
         }
 
         connectedTrains.Clear();
+    }
+
+    private static void IncrementConnectionGraphRevision()
+    {
+        unchecked
+        {
+            connectionGraphRevision++;
+            if (connectionGraphRevision == 0)
+            {
+                connectionGraphRevision = 1;
+            }
+        }
     }
 
     public bool CanConnectTo(Train other)

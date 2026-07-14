@@ -47,6 +47,7 @@ public class Railload : InstallationObject
     private readonly List<int> sleeperTriangles = new List<int>(192);
     private readonly List<Vector3> railCenterPath = new List<Vector3>(64);
     private readonly List<Vector2> renderedPathSamples = new List<Vector2>(64);
+    private readonly List<float> renderedPathCumulativeDistances = new List<float>(64);
     private float renderedPathLength;
     private bool renderedPathCacheDirty = true;
     [SerializeField, HideInInspector]
@@ -190,6 +191,7 @@ public class Railload : InstallationObject
 
         return TryFindNearestSampleOnPath(
             renderedPathSamples,
+            renderedPathCumulativeDistances,
             point,
             out distanceAlongPath,
             out pathPoint,
@@ -211,6 +213,7 @@ public class Railload : InstallationObject
 
         return TrySamplePathAtDistance(
             renderedPathSamples,
+            renderedPathCumulativeDistances,
             renderedPathLength,
             distanceAlongPath,
             out pathPoint,
@@ -561,6 +564,7 @@ public class Railload : InstallationObject
         renderedPathCacheDirty = false;
         renderedPathLength = 0f;
         renderedPathSamples.Clear();
+        renderedPathCumulativeDistances.Clear();
         if (runtimeVisualPathPoints != null && runtimeVisualPathPoints.Count >= 2)
         {
             for (int i = 0; i < runtimeVisualPathPoints.Count; i++)
@@ -572,7 +576,7 @@ public class Railload : InstallationObject
                 renderedPathSamples,
                 runtimeVisualPathExtendsStart,
                 runtimeVisualPathExtendsEnd);
-            renderedPathLength = CalculatePathLength(renderedPathSamples);
+            RebuildRenderedPathDistanceCache();
             return renderedPathSamples.Count >= 2;
         }
 
@@ -594,8 +598,27 @@ public class Railload : InstallationObject
                     localPoint.z + RuntimeAnchorCoordinate.y));
         }
 
-        renderedPathLength = CalculatePathLength(renderedPathSamples);
+        RebuildRenderedPathDistanceCache();
         return renderedPathSamples.Count >= 2;
+    }
+
+    private void RebuildRenderedPathDistanceCache()
+    {
+        renderedPathCumulativeDistances.Clear();
+        renderedPathLength = 0f;
+        if (renderedPathSamples.Count <= 0)
+        {
+            return;
+        }
+
+        renderedPathCumulativeDistances.Add(0f);
+        for (int i = 1; i < renderedPathSamples.Count; i++)
+        {
+            renderedPathLength += Vector2.Distance(
+                renderedPathSamples[i - 1],
+                renderedPathSamples[i]);
+            renderedPathCumulativeDistances.Add(renderedPathLength);
+        }
     }
 
     private static void ExtendPathEndpointsToCellEdges2D(
@@ -1035,6 +1058,7 @@ public class Railload : InstallationObject
 
     private static bool TryFindNearestSampleOnPath(
         IReadOnlyList<Vector2> pathPoints,
+        IReadOnlyList<float> cumulativeDistances,
         Vector2 point,
         out float distanceAlongPath,
         out Vector2 pathPoint,
@@ -1045,13 +1069,15 @@ public class Railload : InstallationObject
         pathPoint = point;
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
-        if (pathPoints == null || pathPoints.Count < 2)
+        if (pathPoints == null
+            || cumulativeDistances == null
+            || pathPoints.Count < 2
+            || cumulativeDistances.Count != pathPoints.Count)
         {
             return false;
         }
 
         bool found = false;
-        float walkedDistance = 0f;
         for (int i = 0; i + 1 < pathPoints.Count; i++)
         {
             Vector2 segment = pathPoints[i + 1] - pathPoints[i];
@@ -1066,14 +1092,12 @@ public class Railload : InstallationObject
             float candidateSqrDistance = (point - candidatePoint).sqrMagnitude;
             if (candidateSqrDistance < sqrDistance)
             {
-                distanceAlongPath = walkedDistance + segmentLength * t;
+                distanceAlongPath = cumulativeDistances[i] + segmentLength * t;
                 pathPoint = candidatePoint;
                 tangent = segment / segmentLength;
                 sqrDistance = candidateSqrDistance;
                 found = true;
             }
-
-            walkedDistance += segmentLength;
         }
 
         return found;
@@ -1081,6 +1105,7 @@ public class Railload : InstallationObject
 
     private static bool TrySamplePathAtDistance(
         IReadOnlyList<Vector2> pathPoints,
+        IReadOnlyList<float> cumulativeDistances,
         float pathLength,
         float distanceAlongPath,
         out Vector2 pathPoint,
@@ -1088,50 +1113,66 @@ public class Railload : InstallationObject
     {
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
-        if (pathPoints == null || pathPoints.Count < 2)
+        if (pathPoints == null
+            || cumulativeDistances == null
+            || pathPoints.Count < 2
+            || cumulativeDistances.Count != pathPoints.Count)
         {
             return false;
         }
 
         float targetDistance = Mathf.Clamp(distanceAlongPath, 0f, Mathf.Max(0f, pathLength));
-        float walkedDistance = 0f;
-        for (int i = 0; i + 1 < pathPoints.Count; i++)
+        int endIndex = FindCumulativeDistanceLowerBound(cumulativeDistances, targetDistance);
+        endIndex = Mathf.Clamp(endIndex, 1, pathPoints.Count - 1);
+        int startIndex = endIndex - 1;
+        float segmentLength = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
+        while (segmentLength <= 0.0001f && endIndex > 1)
         {
-            Vector2 segment = pathPoints[i + 1] - pathPoints[i];
-            float segmentLength = segment.magnitude;
-            if (segmentLength <= 0.0001f)
-            {
-                continue;
-            }
-
-            if (walkedDistance + segmentLength >= targetDistance || i + 2 >= pathPoints.Count)
-            {
-                float t = Mathf.Clamp01((targetDistance - walkedDistance) / segmentLength);
-                pathPoint = Vector2.Lerp(pathPoints[i], pathPoints[i + 1], t);
-                tangent = segment / segmentLength;
-                return true;
-            }
-
-            walkedDistance += segmentLength;
+            endIndex--;
+            startIndex--;
+            segmentLength = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
         }
 
-        return false;
+        while (segmentLength <= 0.0001f && endIndex + 1 < pathPoints.Count)
+        {
+            startIndex = endIndex;
+            endIndex++;
+            segmentLength = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
+        }
+
+        if (segmentLength <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector2 segment = pathPoints[endIndex] - pathPoints[startIndex];
+        float t = Mathf.Clamp01(
+            (targetDistance - cumulativeDistances[startIndex]) / segmentLength);
+        pathPoint = Vector2.Lerp(pathPoints[startIndex], pathPoints[endIndex], t);
+        tangent = segment / segmentLength;
+        return true;
     }
 
-    private static float CalculatePathLength(IReadOnlyList<Vector2> pathPoints)
+    private static int FindCumulativeDistanceLowerBound(
+        IReadOnlyList<float> cumulativeDistances,
+        float targetDistance)
     {
-        float length = 0f;
-        if (pathPoints == null)
+        int low = 0;
+        int high = cumulativeDistances.Count;
+        while (low < high)
         {
-            return length;
+            int middle = low + ((high - low) >> 1);
+            if (cumulativeDistances[middle] < targetDistance)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
         }
 
-        for (int i = 0; i + 1 < pathPoints.Count; i++)
-        {
-            length += (pathPoints[i + 1] - pathPoints[i]).magnitude;
-        }
-
-        return length;
+        return low;
     }
 
     private static bool TryFindNearestPointAndTangentOnCoordinatePath(

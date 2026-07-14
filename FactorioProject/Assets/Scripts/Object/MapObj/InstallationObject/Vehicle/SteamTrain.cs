@@ -153,6 +153,8 @@ public class SteamTrain : RailHandcar
     private float autoDriveStationWaitTimer;
     private int autoDriveTickFrame = -1;
     private ulong autoDriveControllerRevision;
+    private ulong autoDriveConnectedTrainGraphRevision;
+    private bool autoDriveConnectedTrainCacheValid;
 
     public float ObjectInfoStoredBurnEnergy => Mathf.Max(0f, storedBurnEnergy);
     public float ObjectInfoBurnEnergyGaugeCapacity => Mathf.Max(0f, burnEnergyGaugeCapacity, storedBurnEnergy);
@@ -357,6 +359,7 @@ public class SteamTrain : RailHandcar
     protected override void OnEnable()
     {
         base.OnEnable();
+        InvalidateAutoDriveConnectedTrainCache();
         ResetMovementParticleState();
         CaptureWaterPipeDefaults();
         ResetWaterPipeImmediate(false);
@@ -364,6 +367,7 @@ public class SteamTrain : RailHandcar
 
     protected override void OnDisable()
     {
+        InvalidateAutoDriveConnectedTrainCache();
         StopMovementParticle(true);
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
@@ -3362,9 +3366,18 @@ public class SteamTrain : RailHandcar
 
     private void CollectAutoDriveConnectedTrains()
     {
+        ulong graphRevision = Train.ConnectionGraphRevision;
+        if (autoDriveConnectedTrainCacheValid
+            && autoDriveConnectedTrainGraphRevision == graphRevision)
+        {
+            return;
+        }
+
         autoDriveConnectedTrainScratch.Clear();
         autoDriveConnectedTrainVisited.Clear();
         autoDriveConnectedTrainQueue.Clear();
+        autoDriveConnectedTrainGraphRevision = graphRevision;
+        autoDriveConnectedTrainCacheValid = true;
         if (!IsValidAutoDriveRouteReferenceTrain(this))
         {
             return;
@@ -3393,6 +3406,15 @@ public class SteamTrain : RailHandcar
                 autoDriveConnectedTrainQueue.Enqueue(connectedTrain);
             }
         }
+    }
+
+    private void InvalidateAutoDriveConnectedTrainCache()
+    {
+        autoDriveConnectedTrainScratch.Clear();
+        autoDriveConnectedTrainVisited.Clear();
+        autoDriveConnectedTrainQueue.Clear();
+        autoDriveConnectedTrainGraphRevision = 0;
+        autoDriveConnectedTrainCacheValid = false;
     }
 
     private int CountConnectedTrainsWithinAutoDriveGroup(Train train)
