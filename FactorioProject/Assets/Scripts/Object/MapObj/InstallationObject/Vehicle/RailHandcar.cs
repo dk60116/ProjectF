@@ -6080,7 +6080,7 @@ public class RailHandcar : Train
         }
 
         inputDirection.Normalize();
-        float maxBranchSnapDistance = Mathf.Min(branchSwitchMaxDistance, ResolveRailConnectionMaxDistance());
+        float maxBranchSnapDistance = Mathf.Min(branchSwitchMaxDistance, ResolveBranchSwitchMaxDistance());
         float branchLookAheadDistance = ResolveBranchLookAheadDistance();
 
         float maxBranchSqrDistance = maxBranchSnapDistance * maxBranchSnapDistance;
@@ -6726,11 +6726,23 @@ public class RailHandcar : Train
         return found;
     }
 
-    protected virtual float ResolveRailConnectionMaxDistance()
+    private float ResolveConfiguredRailConnectionMaxDistance()
     {
         return Mathf.Max(
             Mathf.Max(MinRailConnectionMaxDistance, railConnectionMaxDistance),
             railSnapMaxDistance * 0.2f);
+    }
+
+    protected virtual float ResolveRailConnectionMaxDistance()
+    {
+        return ResolveConfiguredRailConnectionMaxDistance();
+    }
+
+    protected virtual float ResolveBranchSwitchMaxDistance()
+    {
+        // Branch switching replaces the current rail sample immediately. Keep its
+        // snap range independent from any wider endpoint-connection search range.
+        return ResolveConfiguredRailConnectionMaxDistance();
     }
 
     private float ResolveInternalConnectionMaxDistance()
