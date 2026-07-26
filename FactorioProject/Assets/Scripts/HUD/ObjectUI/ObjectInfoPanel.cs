@@ -17,8 +17,8 @@ public class ObjectInfoPanel : MonoBehaviour
     [SerializeField]
     private ItemInfoDescription infoLine;
 
-    private MapObject boundObject;
-    private MapObject focusedPanelMapObject;
+    private Component boundTarget;
+    private Component focusedPanelTarget;
     private Resource focusedPanelUnderlyingResource;
     private bool referencesResolved;
     private float nextLayoutRefreshTime;
@@ -35,25 +35,27 @@ public class ObjectInfoPanel : MonoBehaviour
         ResolveReferences();
     }
 
-    public void Bind(MapObject mapObject)
+    public void Bind(Component target)
     {
         ResolveReferences();
-        if (mapObject == null)
+        if (!(target is MapObject) && !(target is Animal))
         {
             Clear();
             return;
         }
 
-        boundObject = mapObject;
+        boundTarget = target;
         if (!gameObject.activeSelf)
         {
             gameObject.SetActive(true);
         }
 
-        Resource underlyingResource = ResolveUnderlyingResource(mapObject);
-        RefreshFocusedInfoPanels(mapObject, underlyingResource);
+        Resource underlyingResource = target is MapObject mapObject
+            ? ResolveUnderlyingResource(mapObject)
+            : null;
+        RefreshFocusedInfoPanels(target, underlyingResource);
 
-        RefreshInfoLine(mapObject, underlyingResource);
+        RefreshInfoLine(target, underlyingResource);
 
         RefreshInfoLineRectTransformImmediate();
         nextLayoutRefreshTime = Time.unscaledTime + LayoutRefreshInterval;
@@ -61,28 +63,30 @@ public class ObjectInfoPanel : MonoBehaviour
 
     public void Refresh()
     {
-        if (boundObject == null)
+        if (boundTarget == null)
         {
             Clear();
             return;
         }
 
         ResolveReferences();
-        Resource underlyingResource = ResolveUnderlyingResource(boundObject);
-        RefreshFocusedInfoPanels(boundObject, underlyingResource);
-        if (boundObject is RailHandcar)
+        Resource underlyingResource = boundTarget is MapObject mapObject
+            ? ResolveUnderlyingResource(mapObject)
+            : null;
+        RefreshFocusedInfoPanels(boundTarget, underlyingResource);
+        if (boundTarget is RailHandcar)
         {
             // Rail gauges and fluid values are updated by ItemInfoDescription itself.
             return;
         }
 
-        RefreshInfoLine(boundObject, underlyingResource);
+        RefreshInfoLine(boundTarget, underlyingResource);
         RefreshInfoLineRectTransformThrottled();
     }
 
     public void Clear()
     {
-        boundObject = null;
+        boundTarget = null;
         nextLayoutRefreshTime = 0f;
         ResolveReferences();
         ClearFocusedInfoPanels();
@@ -93,9 +97,9 @@ public class ObjectInfoPanel : MonoBehaviour
         }
     }
 
-    public bool IsBoundTo(MapObject mapObject)
+    public bool IsBoundTo(Component target)
     {
-        return boundObject == mapObject;
+        return boundTarget == target;
     }
 
     private void ResolveReferences()
@@ -115,8 +119,15 @@ public class ObjectInfoPanel : MonoBehaviour
         referencesResolved = true;
     }
 
-    private void RefreshInfoLine(MapObject mapObject, Resource underlyingResource)
+    private void RefreshInfoLine(Component target, Resource underlyingResource)
     {
+        if (target is Animal animal)
+        {
+            ShowAnimalInfo(animal);
+            return;
+        }
+
+        MapObject mapObject = target as MapObject;
         if (mapObject is Resource resource)
         {
             ShowResourceInfo(resource);
@@ -180,24 +191,37 @@ public class ObjectInfoPanel : MonoBehaviour
         CloseInfoLine();
     }
 
-    private void RefreshFocusedInfoPanels(MapObject mapObject, Resource underlyingResource)
+    private void RefreshFocusedInfoPanels(Component target, Resource underlyingResource)
     {
-        if (focusedPanelMapObject == mapObject
+        if (focusedPanelTarget == target
             && focusedPanelUnderlyingResource == underlyingResource)
         {
             return;
         }
 
         ClearFocusedInfoPanels();
+        if (target is Animal animal)
+        {
+            SetFocusedInfoPanelAnimal(animal);
+            focusedPanelTarget = animal;
+            return;
+        }
+
+        MapObject mapObject = target as MapObject;
+        if (mapObject == null)
+        {
+            return;
+        }
+
         SetFocusedInfoPanelItem(1, underlyingResource, underlyingResource != null);
         SetFocusedInfoPanelItem(0, mapObject, true);
-        focusedPanelMapObject = mapObject;
+        focusedPanelTarget = mapObject;
         focusedPanelUnderlyingResource = underlyingResource;
     }
 
     private void ClearFocusedInfoPanels()
     {
-        focusedPanelMapObject = null;
+        focusedPanelTarget = null;
         focusedPanelUnderlyingResource = null;
 
         int count = Mathf.Max(
@@ -234,6 +258,28 @@ public class ObjectInfoPanel : MonoBehaviour
         {
             slot.Clear();
         }
+    }
+
+    private void SetFocusedInfoPanelAnimal(Animal animal)
+    {
+        SetFocusedInfoPanelVisible(0, true);
+        ItemSlot slot = GetListItem(focusedObjectSlots, 0);
+        if (slot == null)
+        {
+            return;
+        }
+
+        AnimalDefinition definition = animal != null ? animal.Definition : null;
+        Sprite icon = definition != null ? definition.AdultIcon : null;
+        if (icon == null && definition != null)
+        {
+            icon = definition.ChildIcon;
+        }
+
+        string displayName = definition != null && !string.IsNullOrWhiteSpace(definition.AnimalName)
+            ? definition.AnimalName
+            : (animal != null ? animal.gameObject.name.Replace("(Clone)", string.Empty).Trim() : string.Empty);
+        slot.SetCustomDisplay(icon, displayName, string.Empty);
     }
 
     private void SetFocusedInfoPanelVisible(int index, bool visible)
@@ -306,6 +352,21 @@ public class ObjectInfoPanel : MonoBehaviour
                 AddUnique(focusedInfoPanels, slot.gameObject);
             }
         }
+    }
+
+    private void ShowAnimalInfo(Animal animal)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowAnimal(animal);
     }
 
     private void ShowResourceInfo(Resource resource)

@@ -177,7 +177,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Flatcar
-  objId: 48
+  objId: 51
   itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

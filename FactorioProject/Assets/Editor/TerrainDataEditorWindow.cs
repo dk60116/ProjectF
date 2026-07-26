@@ -149,6 +149,14 @@ public class TerrainDataEditorWindow : EditorWindow
         "oreScaleAtResourceCount"
     };
 
+    private static readonly string[] AnimalGenerationPropertyPaths =
+    {
+        "generateAnimals",
+        "animalDensity",
+        "animalHerdSpreadRadius",
+        "showAnimalSpawnGizmos"
+    };
+
     private static readonly string[] StartAreaPropertyPaths =
     {
         "startLakeRadiusRange",
@@ -233,6 +241,18 @@ public class TerrainDataEditorWindow : EditorWindow
         DrawPropertySection(serializedGenerator, "Tree Resources", "treeResources");
         DrawPropertySection(serializedGenerator, "Reed Resources", "reedResources");
         DrawPropertySection(serializedGenerator, "Resource Generation", ResourceGenerationPropertyPaths);
+        DrawPropertySection(serializedGenerator, "Animal Generation", AnimalGenerationPropertyPaths);
+        EditorGUILayout.LabelField(
+            "Effective Animal Density",
+            generator.EffectiveAnimalDensity.ToString("0.########"));
+        if (GUILayout.Button("Apply Animal Settings to Loaded Chunks", GUILayout.Height(24f)))
+        {
+            serializedGenerator.ApplyModifiedProperties();
+            RunGeneratorAction(
+                generator,
+                "Rebuild Loaded Terrain Animals",
+                terrain => terrain.RebuildLoadedAnimals());
+        }
 
         if (EditorGUI.EndChangeCheck())
         {

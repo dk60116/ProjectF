@@ -1661,9 +1661,9 @@ public class MeshTransformEditorWindow : EditorWindow
             return UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
         }
 
-        if (UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset != null)
+        if (UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null)
         {
-            return UnityEngine.Rendering.GraphicsSettings.renderPipelineAsset;
+            return UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline;
         }
 
         return QualitySettings.renderPipeline;

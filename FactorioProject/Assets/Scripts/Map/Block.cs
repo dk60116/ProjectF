@@ -2825,13 +2825,21 @@ public class Block : BaseObject
                     out beltItemLineDebugColor)
                 : TryGetBeltItemLineDebugColor(laneIndex, out beltItemLineDebugColor);
 
-            results.Add(new VirtualConveyorItemRenderData(
+            VirtualConveyorItemRenderData renderData = new VirtualConveyorItemRenderData(
                 itemId,
-                Matrix4x4.TRS(position, rotation, Vector3.one),
+                position,
+                rotation,
                 gameObject.layer,
                 useSleepAwakeDarkTint,
                 useBeltItemLineDebugColor,
-                beltItemLineDebugColor));
+                beltItemLineDebugColor);
+            if (!useDynamicFastPath)
+            {
+                renderData = renderData.WithResolvedMatrix(
+                    Matrix4x4.TRS(position, rotation, Vector3.one));
+            }
+
+            results.Add(renderData);
         }
     }
 

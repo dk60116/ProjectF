@@ -959,6 +959,7 @@ public partial class TerrainGenerator : MonoBehaviour
         waterSurfaceGlintScale = Mathf.Max(0.01f, waterSurfaceGlintScale);
         waterSurfaceGlintFlowSpeed = Mathf.Max(0f, waterSurfaceGlintFlowSpeed);
         NormalizeResourceGenerationSettings();
+        NormalizeAnimalGenerationSettings();
         InvalidateTerrainGenerationCaches();
 #if UNITY_EDITOR
         PopulateGeneratedSurfaceBlendEditorDefaults();
@@ -1022,6 +1023,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
+        NormalizeAnimalGenerationSettings();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
@@ -1247,13 +1249,25 @@ public partial class TerrainGenerator : MonoBehaviour
 
         backgroundConveyorDirtyCoordinates.Clear();
         backgroundConveyorOccupancyChangedCoordinates.Clear();
+        bool profileBackgroundConveyor = MapObjectTickProfiler.IsEnabled;
+        long phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
         resourceStateStore.SimulateSavedConveyorItems(
             BackgroundConveyorSimulationPassesPerTick,
             backgroundConveyorDirtyCoordinates,
             occupancyChangedCoordinates: backgroundConveyorOccupancyChangedCoordinates);
+        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Simulate", phaseStartTimestamp);
+
+        phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
         QueueSavedInstallationsNearBackgroundConveyorChanges();
+        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Wake Installations", phaseStartTimestamp);
+
+        phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
         RefreshConveyorItemResidencyAfterBackgroundConveyorChanges();
+        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Refresh Residency", phaseStartTimestamp);
+
+        phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
         WakeLoadedConveyorsNearBackgroundConveyorChanges();
+        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Wake Loaded", phaseStartTimestamp);
         if (resourceStateStore.LastBackgroundConveyorBudgetHit > 0)
         {
             nextBackgroundConveyorSimulationTime = Time.time + BackgroundConveyorBudgetContinuationInterval;
@@ -1261,6 +1275,23 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ScheduleNextBackgroundConveyorSimulation();
+    }
+
+    private static void EndBackgroundConveyorProfilePhase(
+        bool profile,
+        string itemName,
+        long startTimestamp)
+    {
+        if (!profile)
+        {
+            return;
+        }
+
+        MapObjectTickProfiler.EndNamedSample(
+            "Runtime",
+            "BackgroundConveyor",
+            itemName,
+            startTimestamp);
     }
 
     private void TickBackgroundInstallations()
@@ -1322,7 +1353,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         backgroundInstallationWakeScratch.Clear();
-        resourceStateStore.CollectSavedInstallationAnchorsNearCoordinate(
+        resourceStateStore.CollectBackgroundInstallationAnchorsNearCoordinate(
             coordinate,
             backgroundInstallationWakeScratch);
 
@@ -1395,7 +1426,8 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (!TryGetLoadedBlock(coordinate, out Block block)
                 || block == null
-                || !block.IsRuntimeConveyor)
+                || !block.IsRuntimeConveyor
+                || ShouldRouteLoadedConveyorDestinationToBackground(coordinate, block))
             {
                 continue;
             }
@@ -1663,14 +1695,14 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         EnsureResourceStateStore();
         MapSaveData mapSaveData = new MapSaveData();
-        if (resourceStateStore == null)
+        if (resourceStateStore != null)
         {
-            return mapSaveData;
+            FlushLoadedRuntimeStateToStore();
+            resourceStateStore.CaptureSaveState(mapSaveData);
+            CaptureLoadedConveyorItemSaveStates(mapSaveData);
         }
 
-        FlushLoadedRuntimeStateToStore();
-        resourceStateStore.CaptureSaveState(mapSaveData);
-        CaptureLoadedConveyorItemSaveStates(mapSaveData);
+        CaptureAnimalSaveStates(mapSaveData);
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         return mapSaveData;
     }
@@ -1679,6 +1711,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
+        NormalizeAnimalGenerationSettings();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
@@ -1700,6 +1733,7 @@ public partial class TerrainGenerator : MonoBehaviour
         InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks(false, true);
+        ApplyAnimalSaveStates(mapSaveData);
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
 
@@ -2391,11 +2425,13 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
+        NormalizeAnimalGenerationSettings();
         EnsureResourceStateStore();
         InitializeSeedForGeneration();
         InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks(false, true);
+        ClearAnimalPersistentState();
         resourceStateStore?.ClearStates();
 
         currentCenterChunk = GetCenterChunkCoordinate();
@@ -2413,6 +2449,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
+        NormalizeAnimalGenerationSettings();
         EnsureResourceStateStore();
         InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
@@ -2616,6 +2653,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (loadedChunks.TryGetValue(chunkCoordinate, out Transform existingChunk))
         {
             SaveChunkResourceStates(existingChunk);
+            ForgetAnimalRuntimeIds(existingChunk);
             RemoveChunkBlocksFromLookup(existingChunk);
             ReleaseChunkBlocksToPool(existingChunk);
             DestroyChunkObject(existingChunk.gameObject);
@@ -2709,6 +2747,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Block[] chunkBlocks = GetDirectChunkBlocks(chunkObject.transform);
+        SpawnAnimalsForChunk(chunkCoordinate, chunkObject.transform, chunkBlocks);
         RefreshChunkBlockRuntimeViews(chunkBlocks);
         ApplyStoredConveyorItemSaveStates(chunkBlocks);
 
@@ -2864,6 +2903,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
     {
+        if (preserveRuntimeState)
+        {
+            RefreshAnimalOverridesFromRuntime();
+        }
+
         if (releaseLiveInstallations)
         {
             ReleaseLiveInstallationsForReload();
@@ -2901,6 +2945,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         loadedChunks.Clear();
         loadedBlocks.Clear();
+        ClearAnimalRuntimeTracking();
         ClearConveyorRuntimeState();
         backgroundInstallationSimulationQueue.Clear();
         queuedBackgroundInstallationAnchors.Clear();

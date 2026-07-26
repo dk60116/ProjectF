@@ -1,0 +1,58 @@
+{
+    "format": "ProjectF.AnimalData",
+    "version": 3,
+    "animals": [
+        {
+            "id": 0,
+            "animalName": "Cattle Female",
+            "spawnAge": 7,
+            "minHerdSize": 2,
+            "maxHerdSize": 6,
+            "spawnWeight": 5,
+            "hierarchyPath": "Cattle/Female",
+            "definitionAssetPath": "Assets/Animals/Cattle/Female/Animal_000_Cattle_Female.asset",
+            "prefabAssetPath": "Assets/AnimalObject/Cow/Cattle_Female.prefab",
+            "adultIconAssetPath": "Assets/Animals/Cattle/Female/Cattle_Female_Icon.png",
+            "childIconAssetPath": "Assets/Animals/Cattle/Female/Cattle_Female_Child_Icon.png"
+        },
+        {
+            "id": 1,
+            "animalName": "Cattle Male",
+            "spawnAge": 7,
+            "minHerdSize": 2,
+            "maxHerdSize": 6,
+            "spawnWeight": 5,
+            "hierarchyPath": "Cattle/Male",
+            "definitionAssetPath": "Assets/Animals/Cattle/Male/Animal_001_Cattle_Male.asset",
+            "prefabAssetPath": "Assets/AnimalObject/Cow/Cattle_Male.prefab",
+            "adultIconAssetPath": "Assets/Animals/Cattle/Male/Cattle_Male_Icon.png",
+            "childIconAssetPath": "Assets/Animals/Cattle/Male/Cattle_Male_Child_Icon.png"
+        },
+        {
+            "id": 2,
+            "animalName": "Pig Female",
+            "spawnAge": 7,
+            "minHerdSize": 2,
+            "maxHerdSize": 6,
+            "spawnWeight": 5,
+            "hierarchyPath": "Pig/Female",
+            "definitionAssetPath": "Assets/Animals/Pig/Female/Animal_002_Pig_Female.asset",
+            "prefabAssetPath": "Assets/AnimalObject/Pig/Pig_Female.prefab",
+            "adultIconAssetPath": "Assets/Animals/Pig/Female/Pig_Female_Icon.png",
+            "childIconAssetPath": "Assets/Animals/Pig/Female/Pig_Female_Child_Icon.png"
+        },
+        {
+            "id": 3,
+            "animalName": "Pig Male",
+            "spawnAge": 7,
+            "minHerdSize": 2,
+            "maxHerdSize": 6,
+            "spawnWeight": 5,
+            "hierarchyPath": "Pig/Male",
+            "definitionAssetPath": "Assets/Animals/Pig/Male/Animal_003_Pig_Male.asset",
+            "prefabAssetPath": "Assets/AnimalObject/Pig/Pig_Male.prefab",
+            "adultIconAssetPath": "Assets/Animals/Pig/Male/Pig_Male_Icon.png",
+            "childIconAssetPath": "Assets/Animals/Pig/Male/Pig_Male_Child_Icon.png"
+        }
+    ]
+}

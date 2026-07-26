@@ -53,6 +53,16 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
         ResolveDependencies();
     }
 
+    private void OnDestroy()
+    {
+        batches.Dispose();
+    }
+
+    private void OnDisable()
+    {
+        batches.SuspendRendering();
+    }
+
     private void LateUpdate()
     {
         ResolveDependencies();

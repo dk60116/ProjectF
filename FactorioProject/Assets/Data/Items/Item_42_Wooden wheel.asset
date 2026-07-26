@@ -12,12 +12,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_42_Wooden wheel
   m_EditorClassIdentifier: 
-  itemName: Wooden wheel
-  id: 43
+  itemName: Paper
+  id: 42
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
-  icon: {fileID: 21300000, guid: f136658b228f0364fa95a9b0c49490bf, type: 3}
+  icon: {fileID: 21300000, guid: 13ea70929caf4234a9304c64fe310ecd, type: 3}
   interactionButtonList: []
   size: 0
   itemFilter: 0

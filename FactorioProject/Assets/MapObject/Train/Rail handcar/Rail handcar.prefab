@@ -229,8 +229,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Rail handcar
-  objId: 46
-  itemDefinition: {fileID: 11400000, guid: 9524753a56ea05540be3c118174151dd, type: 2}
+  objId: 53
+  itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1

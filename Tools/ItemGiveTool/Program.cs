@@ -24,6 +24,9 @@ internal sealed class EditorToolForm : Form
     private const string DefaultHost = "127.0.0.1";
     private const int DefaultPort = 50877;
     private const int TimeoutMilliseconds = 5000;
+    private const int ConveyorStressTestTimeoutMilliseconds = 35000;
+    private const int ConveyorStressTestCount = 1000;
+    private const int ConveyorItemStressTestCount = 500;
     private const int SaveSlotCount = 10;
 
     private readonly List<ItemCatalogEntry> allItems = new List<ItemCatalogEntry>();
@@ -220,11 +223,11 @@ internal sealed class EditorToolForm : Form
         StyleSecondaryButton(pingButton, "연결 확인");
         pingButton.Click += async (_, _) => await SendPingAsync();
 
-        StyleSecondaryButton(conveyorLineButton, "컨베이어 채우기 100개");
+        StyleSecondaryButton(conveyorLineButton, "컨베이어 강제 1,000개");
         conveyorLineButton.Width = 190;
         conveyorLineButton.Click += async (_, _) => await SendConveyorLineAsync();
 
-        StyleSecondaryButton(conveyorItemFillButton, "컨베이어 아이템 50개");
+        StyleSecondaryButton(conveyorItemFillButton, "컨베이어 아이템 500개");
         conveyorItemFillButton.Width = 190;
         conveyorItemFillButton.Click += async (_, _) => await SendConveyorItemFillAsync();
 
@@ -814,19 +817,19 @@ internal sealed class EditorToolForm : Form
 
     private async Task SendConveyorLineAsync()
     {
-        const int conveyorCount = 100;
         await SendCommandAsync(
-            $"beltline auto {conveyorCount}",
-            $"Conveyor fill auto, count={conveyorCount}");
+            $"beltstress {ConveyorStressTestCount}",
+            $"Conveyor fill auto, count={ConveyorStressTestCount}",
+            timeoutMilliseconds: ConveyorStressTestTimeoutMilliseconds);
         await RefreshStatusAsync();
     }
 
     private async Task SendConveyorItemFillAsync()
     {
-        const int conveyorItemCount = 50;
         await SendCommandAsync(
-            $"beltitems {conveyorItemCount}",
-            $"Conveyor item fill random, count={conveyorItemCount}");
+            $"beltitems {ConveyorItemStressTestCount}",
+            $"Conveyor item fill random, count={ConveyorItemStressTestCount}",
+            timeoutMilliseconds: ConveyorStressTestTimeoutMilliseconds);
         await RefreshStatusAsync();
     }
 
@@ -1197,14 +1200,18 @@ internal sealed class EditorToolForm : Form
         }
     }
 
-    private async Task SendCommandAsync(string command, string displayName, bool applyResponseSelectedSlot = false)
+    private async Task SendCommandAsync(
+        string command,
+        string displayName,
+        bool applyResponseSelectedSlot = false,
+        int timeoutMilliseconds = TimeoutMilliseconds)
     {
         SetBusy(true, $"{displayName} 전송 중...");
         try
         {
             string host = string.IsNullOrWhiteSpace(hostTextBox.Text) ? DefaultHost : hostTextBox.Text.Trim();
             int port = Decimal.ToInt32(portInput.Value);
-            string response = await SendProtocolLineAsync(host, port, command);
+            string response = await SendProtocolLineAsync(host, port, command, timeoutMilliseconds);
             AppendLog($"> {command}");
             AppendLog(response);
             UpdateSaveSlotsFromResponse(response, applyResponseSelectedSlot);
@@ -1223,13 +1230,17 @@ internal sealed class EditorToolForm : Form
         }
     }
 
-    private static async Task<string> SendProtocolLineAsync(string host, int port, string command)
+    private static async Task<string> SendProtocolLineAsync(
+        string host,
+        int port,
+        string command,
+        int timeoutMilliseconds = TimeoutMilliseconds)
     {
         using TcpClient client = new TcpClient();
-        await client.ConnectAsync(host, port).WaitAsync(TimeSpan.FromMilliseconds(TimeoutMilliseconds));
+        await client.ConnectAsync(host, port).WaitAsync(TimeSpan.FromMilliseconds(timeoutMilliseconds));
 
-        client.ReceiveTimeout = TimeoutMilliseconds;
-        client.SendTimeout = TimeoutMilliseconds;
+        client.ReceiveTimeout = timeoutMilliseconds;
+        client.SendTimeout = timeoutMilliseconds;
 
         await using NetworkStream stream = client.GetStream();
         await using StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true)
@@ -1239,7 +1250,7 @@ internal sealed class EditorToolForm : Form
         using StreamReader reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true);
 
         await writer.WriteLineAsync(command);
-        string? response = await reader.ReadLineAsync().WaitAsync(TimeSpan.FromMilliseconds(TimeoutMilliseconds));
+        string? response = await reader.ReadLineAsync().WaitAsync(TimeSpan.FromMilliseconds(timeoutMilliseconds));
         return string.IsNullOrWhiteSpace(response) ? "error no response from game" : response;
     }
 

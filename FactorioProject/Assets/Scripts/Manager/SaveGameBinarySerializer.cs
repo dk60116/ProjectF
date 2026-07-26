@@ -248,6 +248,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.floorObjects, WriteFloorObjectEntry);
         WriteList(writer, map.installations, WriteInstallationEntry);
         WriteList(writer, map.conveyorItems, WriteConveyorBlockEntry);
+        WriteList(writer, map.animals, WriteAnimalEntry);
     }
 
     private static MapSaveData ReadMap(
@@ -255,12 +256,45 @@ public static class SaveGameBinarySerializer
         int version,
         SaveReadCompatibilityMode compatibilityMode)
     {
-        return new MapSaveData
+        MapSaveData map = new MapSaveData
         {
             resources = ReadList(reader, () => ReadResourceEntry(reader)),
             floorObjects = ReadList(reader, () => ReadFloorObjectEntry(reader)),
             installations = ReadList(reader, () => ReadInstallationEntry(reader, version, compatibilityMode)),
             conveyorItems = ReadList(reader, () => ReadConveyorBlockEntry(reader))
+        };
+
+        if (version >= 22)
+        {
+            map.animals = ReadList(reader, () => ReadAnimalEntry(reader));
+        }
+
+        return map;
+    }
+
+    private static void WriteAnimalEntry(BinaryWriter writer, AnimalSaveEntry entry)
+    {
+        entry ??= new AnimalSaveEntry();
+        writer.Write(entry.deterministicId);
+        writer.Write(entry.definitionId);
+        WriteVector3(writer, entry.position);
+        WriteQuaternion(writer, entry.rotation);
+        writer.Write(entry.age);
+        writer.Write(entry.baseScale);
+        writer.Write(entry.removed);
+    }
+
+    private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader)
+    {
+        return new AnimalSaveEntry
+        {
+            deterministicId = reader.ReadInt64(),
+            definitionId = reader.ReadInt32(),
+            position = ReadVector3(reader),
+            rotation = ReadQuaternion(reader),
+            age = reader.ReadSingle(),
+            baseScale = reader.ReadSingle(),
+            removed = reader.ReadBoolean()
         };
     }
 

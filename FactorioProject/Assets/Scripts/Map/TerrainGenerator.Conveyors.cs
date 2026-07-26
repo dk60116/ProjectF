@@ -4403,10 +4403,13 @@ public partial class TerrainGenerator : MonoBehaviour
 
         PortableItemRenderer itemRenderer = portableItemRenderer;
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "ItemBatchCellSize", itemRenderer != null ? itemRenderer.VirtualConveyorItemBatchCellSize : 0f);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableBrgBatches", itemRenderer != null ? itemRenderer.PortableObjectBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticBrgBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticInstances", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticDrawCalls", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicBrgBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicInstances", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicDrawCalls", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "ActiveRenderBlocks", itemRenderer != null ? itemRenderer.ActiveVirtualConveyorRenderBlockCount : 0);
@@ -4428,6 +4431,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicKeyRebuilds", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorKeyRebuilds : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMatrixUpdates", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMatrixUpdates : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMatrixRebuilds", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMatrixRebuilds : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicTransformJobItems", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorTransformJobItems : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicTransformJobScheduled", itemRenderer != null && itemRenderer.DynamicVirtualConveyorTransformJobScheduled ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullBoundsSize", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullBoundsSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullBoundsHeight", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullBoundsHeight : 0f);
 
@@ -4605,6 +4610,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltSourceHiddenObjects", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewObjectCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEffectiveBatchCellSize", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.EffectiveBatchCellSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltBrgBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveEntryCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDedicatedTopEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.DedicatedBeltTopEntryCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltInstances", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveInstanceCount : 0);

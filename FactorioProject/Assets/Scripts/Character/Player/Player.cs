@@ -384,7 +384,7 @@ public class Player : Character
         {
             rigidbody.position = rootPosition;
             rigidbody.rotation = saveData.rotation;
-            rigidbody.velocity = Vector3.zero;
+            rigidbody.linearVelocity = Vector3.zero;
             rigidbody.angularVelocity = Vector3.zero;
         }
 

@@ -45,7 +45,7 @@ public readonly struct VirtualConveyorBeltRenderData
 public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 {
     private static readonly ProfilerMarker RenderBatchesMarker = new ProfilerMarker("VirtualConveyorBeltRenderer.RenderBatches");
-    private const float DefaultMergedBatchCellSize = 64f;
+    private const float DefaultMergedBatchCellSize = 16f;
 
     [SerializeField, Min(1f)]
     private float batchCellSize = 8f;
@@ -67,6 +67,8 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     public int ActiveBatchCount => batches.ActiveBatchCount;
     public int ActiveInstanceCount => batches.ActiveMatrixCount;
     public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
+    public int ActiveBatchRendererGroupBatchCount =>
+        batches.ActiveBatchRendererGroupBatchCount;
     public float EffectiveBatchCellSize => Mathf.Max(batchCellSize, ResolveMinimumMergedBatchCellSize());
     public bool NativeSourceSuppressionEnabled => suppressNativeSourceRenderers;
     public bool NativeSourceObjectHidingEnabled => suppressNativeSourceRenderers && hideNativeSourceObjects;
@@ -252,6 +254,17 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         hideNativeSourceObjects = true;
     }
 
+    private void OnDestroy()
+    {
+        Clear();
+        batches.Dispose();
+    }
+
+    private void OnDisable()
+    {
+        batches.SuspendRendering();
+    }
+
     public void Register(ConveyorBelt conveyorBelt)
     {
         if (!Application.isPlaying || conveyorBelt == null)
@@ -335,8 +348,14 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             return;
         }
 
-        if (batches.ActiveBatchCount == 0 || IsBeltRenderingHidden())
+        if (batches.ActiveBatchCount == 0)
         {
+            return;
+        }
+
+        if (IsBeltRenderingHidden())
+        {
+            batches.SuspendRendering();
             return;
         }
 

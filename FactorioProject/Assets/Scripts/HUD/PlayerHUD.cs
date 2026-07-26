@@ -88,7 +88,7 @@ public class PlayerHUD : BagSlot
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
     private MapObject currentInteractionMapObject;
-    private MapObject currentObjectInfoTarget;
+    private Component currentObjectInfoTarget;
     private UtilityPole currentObjectInfoSupplyRangePole;
     private MapObject lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
@@ -1922,6 +1922,7 @@ public class PlayerHUD : BagSlot
         ResolveObjectInfoPanel();
         if (objectInfoPanel == null)
         {
+            SetFocusedAnimalOutline(currentObjectInfoTarget, false);
             currentObjectInfoTarget = null;
             SetObjectInfoSupplyRangeVisual(null, false);
             return;
@@ -1941,6 +1942,13 @@ public class PlayerHUD : BagSlot
             if (IsPointerOverObjectInfoBlockingUi(pointerPosition))
             {
                 RefreshCurrentObjectInfoPanelTarget();
+                return;
+            }
+
+            if (playerController != null
+                && playerController.TryGetMouseFocusedAnimal(out Animal mouseFocusedAnimal))
+            {
+                BindObjectInfoPanel(mouseFocusedAnimal, false);
                 return;
             }
 
@@ -2022,7 +2030,7 @@ public class PlayerHUD : BagSlot
         BindObjectInfoPanel(currentObjectInfoTarget, currentObjectInfoOpenedByYellowFocus);
     }
 
-    private void BindObjectInfoPanel(MapObject target, bool openedByYellowFocus)
+    private void BindObjectInfoPanel(Component target, bool openedByYellowFocus)
     {
         if (target == null || objectInfoPanel == null)
         {
@@ -2030,17 +2038,24 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        currentObjectInfoTarget = target;
+        if (currentObjectInfoTarget != target)
+        {
+            SetFocusedAnimalOutline(currentObjectInfoTarget, false);
+            currentObjectInfoTarget = target;
+            SetFocusedAnimalOutline(currentObjectInfoTarget, true);
+        }
+
         currentObjectInfoOpenedByYellowFocus = openedByYellowFocus;
         objectInfoPanel.Bind(target);
         nextObjectInfoPanelRefreshTime = Time.unscaledTime + Mathf.Max(0.02f, objectInfoPanelRefreshInterval);
-        SetObjectInfoSupplyRangeVisual(target, !openedByYellowFocus);
+        SetObjectInfoSupplyRangeVisual(target as MapObject, !openedByYellowFocus);
         TrainFilter.MarkRouteSelectionDirty();
     }
 
     private void ClearObjectInfoPanelState()
     {
         SetObjectInfoSupplyRangeVisual(null, false);
+        SetFocusedAnimalOutline(currentObjectInfoTarget, false);
         currentObjectInfoTarget = null;
         currentObjectInfoOpenedByYellowFocus = false;
         nextObjectInfoPanelRefreshTime = 0f;
@@ -2050,6 +2065,14 @@ public class PlayerHUD : BagSlot
         }
 
         TrainFilter.MarkRouteSelectionDirty();
+    }
+
+    private static void SetFocusedAnimalOutline(Component target, bool visible)
+    {
+        if (target is Animal animal)
+        {
+            animal.SetFocusedOutline(visible);
+        }
     }
 
     private void SetObjectInfoSupplyRangeVisual(MapObject target, bool requested)
@@ -2120,22 +2143,6 @@ public class PlayerHUD : BagSlot
             {
                 isVisible = true;
             }
-        }
-
-        if (!isVisible
-            && itemFilterUI != null
-            && itemFilterUI.gameObject.activeSelf
-            && itemFilterUI.TryGetBoundTarget(out _))
-        {
-            isVisible = true;
-        }
-
-        if (!isVisible
-            && trainFilter != null
-            && trainFilter.gameObject.activeSelf
-            && trainFilter.TryGetBoundTarget(out _))
-        {
-            isVisible = true;
         }
 
         if (ItemFilterButton.gameObject.activeSelf != isVisible)
@@ -2643,7 +2650,9 @@ public class PlayerHUD : BagSlot
     private bool TryGetFocusedSteamTrain(out SteamTrain steamTrain)
     {
         steamTrain = null;
-        if (!TryGetFocusedMapObject(out MapObject focusedMapObject))
+        PlayerController playerController = ResolvePlayerController();
+        if (playerController == null
+            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
         {
             return false;
         }
@@ -2680,13 +2689,7 @@ public class PlayerHUD : BagSlot
             return true;
         }
 
-        if (!TryGetObjectInfoFocusedMapObject(out MapObject infoFocusedMapObject))
-        {
-            return false;
-        }
-
-        focusedMapObject = infoFocusedMapObject;
-        return true;
+        return false;
     }
 
     private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
@@ -2767,8 +2770,8 @@ public class PlayerHUD : BagSlot
             return false;
         }
 
-        focusedMapObject = currentObjectInfoTarget;
-        return true;
+        focusedMapObject = currentObjectInfoTarget as MapObject;
+        return focusedMapObject != null;
     }
 
     private PlayerController ResolvePlayerController()

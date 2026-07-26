@@ -125,6 +125,16 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
         }
     }
 
+    private void OnDisable()
+    {
+        batches.SuspendRendering();
+    }
+
+    private void OnDestroy()
+    {
+        batches.Dispose();
+    }
+
     private void CompactRegisteredRobotArms()
     {
         for (int i = registeredRobotArms.Count - 1; i >= 0; i--)

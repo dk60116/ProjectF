@@ -95,6 +95,23 @@ public class ItemInfoDescription : MonoBehaviour
         SetResourceReservesLine(0, reserves);
     }
 
+    public void ShowAnimal(Animal animal)
+    {
+        Clear();
+        if (animal == null)
+        {
+            return;
+        }
+
+        SetDefaultText(0, $"Gender: {animal.Gender}", true);
+        SetDefaultSign(0, false, Color.white);
+        SetDefaultText(
+            1,
+            $"Age: {animal.Age.ToString("0.#", CultureInfo.InvariantCulture)}",
+            true);
+        SetDefaultSign(1, false, Color.white);
+    }
+
     public void ShowConveyorBelt(ConveyorBelt conveyorBelt, Resource underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);

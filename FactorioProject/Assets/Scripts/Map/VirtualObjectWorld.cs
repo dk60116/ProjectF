@@ -440,6 +440,8 @@ public sealed class VirtualObjectWorld : MonoBehaviour
             floorStackRecordByCoordinate,
             coordinate,
             VirtualObjectKind.ItemStack);
+        bool keepsCoordinateMapping = record.occupiedCoordinates.Count == 1
+            && record.occupiedCoordinates[0] == coordinate;
 
         record.residency = residency;
         record.anchorCoordinate = coordinate;
@@ -450,8 +452,17 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.count = itemCount;
         record.itemStack = itemStack;
         record.liveInstanceId = 0;
-        ReplaceOccupiedCoordinates(record, coordinate);
-        StoreRecord(record);
+        if (keepsCoordinateMapping)
+        {
+            recordsById[record.id.Value] = record;
+            version++;
+        }
+        else
+        {
+            ReplaceOccupiedCoordinates(record, coordinate);
+            StoreRecord(record);
+        }
+
         return record.id;
     }
 
@@ -653,8 +664,40 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         }
 
         index.Remove(key);
-        RemoveCoordinateMappings(recordId);
+        if (recordsById.TryGetValue(recordId, out VirtualObjectRecord record) && record != null)
+        {
+            RemoveCoordinateMappings(record);
+        }
+        else
+        {
+            RemoveCoordinateMappings(recordId);
+        }
+
         recordsById.Remove(recordId);
         version++;
+    }
+
+    private void RemoveCoordinateMappings(VirtualObjectRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        int recordId = record.id.Value;
+        for (int i = 0; i < record.occupiedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = record.occupiedCoordinates[i];
+            if (!recordIdsByCoordinate.TryGetValue(coordinate, out List<int> recordIds))
+            {
+                continue;
+            }
+
+            recordIds.Remove(recordId);
+            if (recordIds.Count <= 0)
+            {
+                recordIdsByCoordinate.Remove(coordinate);
+            }
+        }
     }
 }

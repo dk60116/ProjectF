@@ -1,0 +1,177 @@
+fileFormatVersion: 2
+guid: 8f77946bca012d640855d738ed2c7e25
+ModelImporter:
+  serializedVersion: 21300
+  internalIDToNameTable:
+  - first:
+      74: -7917063501034230708
+    second: GoatArmature|19Ship_Bite
+  - first:
+      74: -6738503238766401900
+    second: GoatArmature|19Ship_Death
+  - first:
+      74: -7001178965332053097
+    second: GoatArmature|19Ship_Eating
+  - first:
+      74: -8204399334891716943
+    second: GoatArmature|19Ship_Galop
+  - first:
+      74: -1653389588537749562
+    second: GoatArmature|19Ship_GetHit1
+  - first:
+      74: 7630275057248837908
+    second: GoatArmature|19Ship_GetHit2
+  - first:
+      74: 6344603655171164176
+    second: GoatArmature|19Ship_Idlle
+  - first:
+      74: -8522262083190311599
+    second: GoatArmature|19Ship_IdlleToLay
+  - first:
+      74: -740480365076676250
+    second: GoatArmature|19Ship_Jump
+  - first:
+      74: 1817017283665073899
+    second: GoatArmature|19Ship_Kick
+  - first:
+      74: 9175081745203857354
+    second: GoatArmature|19Ship_KickAndTurn
+  - first:
+      74: -1468294129272265356
+    second: GoatArmature|19Ship_LayToIdle
+  - first:
+      74: 3462219789728726641
+    second: GoatArmature|19Ship_LookAround
+  - first:
+      74: -4079924946536427649
+    second: GoatArmature|19Ship_Prancing
+  - first:
+      74: 807165077799958106
+    second: GoatArmature|19Ship_Roll
+  - first:
+      74: -6604157691149669537
+    second: GoatArmature|19Ship_Run
+  - first:
+      74: 5500357051509108277
+    second: GoatArmature|19Ship_Sleep
+  - first:
+      74: -3011038391689143842
+    second: GoatArmature|19Ship_Sweem
+  - first:
+      74: -4009799668514437954
+    second: GoatArmature|19Ship_Walk
+  - first:
+      74: -7326215423068161944
+    second: GoatArmature|19Ship_WalkLeftMask
+  - first:
+      74: -1035698843277872483
+    second: GoatArmature|19Ship_WalkRightMask
+  - first:
+      74: -4324890478358469182
+    second: GoatArmature|19Shipt_Butting
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: DinosAll
+    second: {fileID: 2100000, guid: 23963ef57becee54f8cd5c792cf11b6e, type: 2}
+  materials:
+    materialImportMode: 2
+    materialName: 0
+    materialSearch: 1
+    materialLocation: 1
+  animations:
+    legacyGenerateAnimations: 4
+    bakeSimulation: 0
+    resampleCurves: 1
+    optimizeGameObjects: 0
+    removeConstantScaleCurves: 1
+    motionNodeName: 
+    rigImportErrors: 
+    rigImportWarnings: 
+    animationImportErrors: 
+    animationImportWarnings: 
+    animationRetargetingWarnings: 
+    animationDoRetargetingWarnings: 0
+    importAnimatedCustomProperties: 0
+    importConstraints: 0
+    animationCompression: 1
+    animationRotationError: 0.5
+    animationPositionError: 0.5
+    animationScaleError: 0.5
+    animationWrapMode: 0
+    extraExposedTransformPaths: []
+    extraUserProperties: []
+    clipAnimations: []
+    isReadable: 0
+  meshes:
+    lODScreenPercentages: []
+    globalScale: 1
+    meshCompression: 0
+    addColliders: 0
+    useSRGBMaterialColor: 1
+    sortHierarchyByName: 1
+    importVisibility: 1
+    importBlendShapes: 1
+    importCameras: 1
+    importLights: 1
+    nodeNameCollisionStrategy: 1
+    fileIdsGeneration: 2
+    swapUVChannels: 0
+    generateSecondaryUV: 0
+    useFileUnits: 1
+    keepQuads: 0
+    weldVertices: 1
+    bakeAxisConversion: 0
+    preserveHierarchy: 0
+    skinWeightsMode: 0
+    maxBonesPerVertex: 4
+    minBoneWeight: 0.001
+    optimizeBones: 1
+    meshOptimizationFlags: -1
+    indexFormat: 0
+    secondaryUVAngleDistortion: 8
+    secondaryUVAreaDistortion: 15.000001
+    secondaryUVHardAngle: 88
+    secondaryUVMarginMethod: 1
+    secondaryUVMinLightmapResolution: 40
+    secondaryUVMinObjectScale: 1
+    secondaryUVPackMargin: 4
+    useFileScale: 1
+  tangentSpace:
+    normalSmoothAngle: 60
+    normalImportMode: 0
+    tangentImportMode: 3
+    normalCalculationMode: 4
+    legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes: 0
+    blendShapeNormalImportMode: 1
+    normalSmoothingSource: 0
+  referencedClips: []
+  importAnimation: 1
+  humanDescription:
+    serializedVersion: 3
+    human: []
+    skeleton: []
+    armTwist: 0.5
+    foreArmTwist: 0.5
+    upperLegTwist: 0.5
+    legTwist: 0.5
+    armStretch: 0.05
+    legStretch: 0.05
+    feetSpacing: 0
+    globalScale: 1
+    rootMotionBoneName: 
+    hasTranslationDoF: 0
+    hasExtraRoot: 0
+    skeletonHasParents: 1
+  lastHumanDescriptionAvatarSource: {fileID: 9000000, guid: 113b7798487eb88458c59a6c149d27d4, type: 3}
+  autoGenerateAvatarMappingIfUnspecified: 1
+  animationType: 2
+  humanoidOversampling: 1
+  avatarSetup: 2
+  addHumanoidExtraRootOnlyWhenUsingAvatar: 1
+  remapMaterialsIfMaterialImportModeIsNone: 0
+  additionalBone: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

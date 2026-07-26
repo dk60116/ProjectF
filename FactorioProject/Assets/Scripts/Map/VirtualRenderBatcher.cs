@@ -156,6 +156,7 @@ public sealed class VirtualRenderBatchCollection
     private readonly Dictionary<VirtualRenderBatchKey, BatchRenderCache> batchesByKey = new Dictionary<VirtualRenderBatchKey, BatchRenderCache>();
     private readonly List<VirtualRenderBatchKey> activeBatchKeys = new List<VirtualRenderBatchKey>();
     private readonly Plane[] renderFrustumPlanes = new Plane[6];
+    private VirtualRenderBatchRendererGroupBackend batchRendererGroupBackend;
 
     public int ActiveBatchCount => activeBatchKeys.Count;
 
@@ -191,7 +192,10 @@ public sealed class VirtualRenderBatchCollection
                 int matrixCount = batchCache.Matrices.Count;
                 if (matrixCount > 0)
                 {
-                    total += Mathf.CeilToInt(matrixCount / (float)MaxInstancesPerDraw);
+                    total += batchRendererGroupBackend != null
+                        && batchRendererGroupBackend.IsRendering(activeBatchKeys[i])
+                        ? 1
+                        : Mathf.CeilToInt(matrixCount / (float)MaxInstancesPerDraw);
                 }
             }
 
@@ -199,8 +203,14 @@ public sealed class VirtualRenderBatchCollection
         }
     }
 
+    public int ActiveBatchRendererGroupBatchCount =>
+        batchRendererGroupBackend != null
+            ? batchRendererGroupBackend.ActiveBatchCount
+            : 0;
+
     public void Clear()
     {
+        DisposeBatchRendererGroupBackend();
         batchesByKey.Clear();
         activeBatchKeys.Clear();
     }
@@ -215,10 +225,12 @@ public sealed class VirtualRenderBatchCollection
                 batchCache.Matrices.Clear();
                 batchCache.Owners.Clear();
                 batchCache.ClearBounds();
+                batchCache.MarkDataDirty();
             }
         }
 
         activeBatchKeys.Clear();
+        batchRendererGroupBackend?.DeactivateAll();
     }
 
     public void AddMatrix(VirtualRenderBatchKey key, Matrix4x4 matrix)
@@ -231,6 +243,7 @@ public sealed class VirtualRenderBatchCollection
 
         batchCache.Matrices.Add(matrix);
         AddMatrixBounds(key, batchCache, matrix);
+        batchCache.MarkDataDirty();
     }
 
     public void AddOwnedMatrix(
@@ -256,6 +269,7 @@ public sealed class VirtualRenderBatchCollection
         batchCache.Matrices.Add(matrix);
         batchCache.Owners.Add(new MatrixOwner(owner, entryIndex));
         AddMatrixBounds(key, batchCache, matrix);
+        batchCache.MarkDataDirty();
     }
 
     public bool TryUpdateOwnedMatrix(
@@ -280,6 +294,7 @@ public sealed class VirtualRenderBatchCollection
 
         batchCache.Matrices[entry.MatrixIndex] = matrix;
         batchCache.MarkBoundsDirty();
+        batchCache.MarkDataDirty();
         return true;
     }
 
@@ -300,14 +315,40 @@ public sealed class VirtualRenderBatchCollection
 
     public void RenderBatches(Camera renderCamera = null)
     {
-        if (activeBatchKeys.Count <= 0)
-        {
-            return;
-        }
-
         if (renderCamera == null)
         {
             renderCamera = Camera.main;
+        }
+
+        VirtualRenderBatchRendererGroupBackend backend = ResolveBatchRendererGroupBackend();
+        backend?.BeginSync();
+
+        bool hasLegacyBatches = false;
+        for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
+        {
+            VirtualRenderBatchKey key = activeBatchKeys[batchIndex];
+            if (!batchesByKey.TryGetValue(key, out BatchRenderCache batchCache)
+                || batchCache.Matrices.Count <= 0)
+            {
+                continue;
+            }
+
+            Bounds worldBounds = ResolveWorldBounds(key, batchCache);
+            if (backend == null
+                || !backend.TrySyncBatch(
+                    key,
+                    batchCache.Matrices,
+                    worldBounds,
+                    batchCache.DataVersion))
+            {
+                hasLegacyBatches = true;
+            }
+        }
+
+        backend?.EndSync();
+        if (!hasLegacyBatches)
+        {
+            return;
         }
 
         bool canFrustumCull = renderCamera != null;
@@ -320,6 +361,11 @@ public sealed class VirtualRenderBatchCollection
         {
             VirtualRenderBatchKey key = activeBatchKeys[batchIndex];
             if (!batchesByKey.TryGetValue(key, out BatchRenderCache batchCache) || batchCache.Matrices.Count <= 0)
+            {
+                continue;
+            }
+
+            if (backend != null && backend.IsRendering(key))
             {
                 continue;
             }
@@ -420,8 +466,10 @@ public sealed class VirtualRenderBatchCollection
 
         batchCache.Matrices.RemoveAt(lastIndex);
         batchCache.Owners.RemoveAt(lastIndex);
+        batchCache.MarkDataDirty();
         if (batchCache.Matrices.Count == 0)
         {
+            batchRendererGroupBackend?.Deactivate(entry.BatchKey);
             batchesByKey.Remove(entry.BatchKey);
             activeBatchKeys.Remove(entry.BatchKey);
         }
@@ -429,6 +477,40 @@ public sealed class VirtualRenderBatchCollection
         {
             batchCache.MarkBoundsDirty();
         }
+    }
+
+    public void Dispose()
+    {
+        DisposeBatchRendererGroupBackend();
+    }
+
+    public void SuspendRendering()
+    {
+        batchRendererGroupBackend?.DeactivateAll();
+    }
+
+    private VirtualRenderBatchRendererGroupBackend ResolveBatchRendererGroupBackend()
+    {
+        if (!VirtualRenderBatchRendererGroupBackend.IsSupported)
+        {
+            DisposeBatchRendererGroupBackend();
+            return null;
+        }
+
+        if (batchRendererGroupBackend == null)
+        {
+            batchRendererGroupBackend = new VirtualRenderBatchRendererGroupBackend();
+        }
+
+        return batchRendererGroupBackend.IsAvailable
+            ? batchRendererGroupBackend
+            : null;
+    }
+
+    private void DisposeBatchRendererGroupBackend()
+    {
+        batchRendererGroupBackend?.Dispose();
+        batchRendererGroupBackend = null;
     }
 
     private MaterialPropertyBlock ResolveBatchPropertyBlock(VirtualRenderBatchKey key, BatchRenderCache batchCache)
@@ -544,6 +626,7 @@ public sealed class VirtualRenderBatchCollection
         public Bounds WorldBounds;
         public bool HasBounds;
         public bool BoundsDirty;
+        public int DataVersion;
 
         public void EncapsulateBounds(Bounds bounds)
         {
@@ -567,6 +650,14 @@ public sealed class VirtualRenderBatchCollection
         public void MarkBoundsDirty()
         {
             BoundsDirty = true;
+        }
+
+        public void MarkDataDirty()
+        {
+            unchecked
+            {
+                DataVersion++;
+            }
         }
     }
 

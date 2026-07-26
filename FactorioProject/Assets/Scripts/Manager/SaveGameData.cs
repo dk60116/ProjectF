@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 21;
+    public const int CurrentVersion = 22;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -36,6 +36,19 @@ public sealed class MapSaveData
     public List<FloorObjectSaveEntry> floorObjects = new List<FloorObjectSaveEntry>();
     public List<InstallationSaveEntry> installations = new List<InstallationSaveEntry>();
     public List<ConveyorItemBlockSaveEntry> conveyorItems = new List<ConveyorItemBlockSaveEntry>();
+    public List<AnimalSaveEntry> animals = new List<AnimalSaveEntry>();
+}
+
+[Serializable]
+public sealed class AnimalSaveEntry
+{
+    public long deterministicId;
+    public int definitionId = -1;
+    public Vector3 position;
+    public Quaternion rotation = Quaternion.identity;
+    public float age = 10f;
+    public float baseScale = 1f;
+    public bool removed;
 }
 
 [Serializable]

@@ -114,6 +114,7 @@ public class PlayerController : MonoBehaviour
     private Block temporaryDropFocusBlock;
     private float temporaryDropFocusUntilTime;
     private MapObject currentMouseFocusedMapObject;
+    private Animal currentMouseFocusedAnimal;
     private Camera cachedMouseFocusCamera;
     private int mouseFocusRefreshFrame = -1;
     private bool mouseFocusRefreshInteractionLocked;
@@ -228,6 +229,7 @@ public class PlayerController : MonoBehaviour
         pendingFacingDirection = Vector3.zero;
         ClearTemporaryDropFocus();
         SetFocusedBlocks(null);
+        SetMouseFocusedAnimal(null);
         SetMouseFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         currentMouseFocusedBlocks.Clear();
@@ -442,7 +444,7 @@ public class PlayerController : MonoBehaviour
         {
             cachedRigidbody.position = exitPosition;
             cachedRigidbody.rotation = exitRotation;
-            cachedRigidbody.velocity = Vector3.zero;
+            cachedRigidbody.linearVelocity = Vector3.zero;
             cachedRigidbody.angularVelocity = Vector3.zero;
         }
 
@@ -560,7 +562,7 @@ public class PlayerController : MonoBehaviour
         {
             cachedRigidbody.position = targetPosition;
             cachedRigidbody.rotation = targetRotation;
-            cachedRigidbody.velocity = Vector3.zero;
+            cachedRigidbody.linearVelocity = Vector3.zero;
             cachedRigidbody.angularVelocity = Vector3.zero;
         }
 
@@ -654,6 +656,7 @@ public class PlayerController : MonoBehaviour
 
         if (isInteractionLocked)
         {
+            SetMouseFocusedAnimal(null);
             SetMouseFocusedBlocks(null);
             HandleInstallationPlacementLock();
             wasInstallationPlacementActive = true;
@@ -1169,11 +1172,11 @@ public class PlayerController : MonoBehaviour
             transform.position = ClampRootPositionToGroundY(transformPositionWithRigidbody);
         }
 
-        Vector3 velocity = cachedRigidbody.velocity;
+        Vector3 velocity = cachedRigidbody.linearVelocity;
         if (Mathf.Abs(velocity.y) > PlayerRootYEpsilon)
         {
             velocity.y = 0f;
-            cachedRigidbody.velocity = velocity;
+            cachedRigidbody.linearVelocity = velocity;
         }
     }
 
@@ -2396,6 +2399,14 @@ public class PlayerController : MonoBehaviour
                && focusedMapObject.AllowsFocus;
     }
 
+    public bool TryGetMouseFocusedAnimal(out Animal focusedAnimal)
+    {
+        RefreshMouseMapObjectFocus();
+        focusedAnimal = currentMouseFocusedAnimal;
+        return focusedAnimal != null
+               && focusedAnimal.gameObject.activeInHierarchy;
+    }
+
     public bool RequestResourceHarvest(Resource resource)
     {
         if (resource == null
@@ -3605,19 +3616,33 @@ public class PlayerController : MonoBehaviour
 
         if (isInteractionLocked)
         {
+            SetMouseFocusedAnimal(null);
             SetMouseFocusedBlocks(null);
             return;
         }
 
         if (MountedVehicle != null)
         {
+            RefreshMouseAnimalFocus();
             RefreshMountedPinnedMouseFocus();
             return;
         }
 
         Vector2 pointerPosition = Input.mousePosition;
         if (IsPointerOverMouseFocusBlockingUi(pointerPosition)
-            || !TryResolveMouseFocusedMapObject(pointerPosition, out MapObject mapObject, out Block fallbackBlock))
+            || !TryResolveMouseFocusTargets(
+                pointerPosition,
+                out Animal animal,
+                out MapObject mapObject,
+                out Block fallbackBlock))
+        {
+            SetMouseFocusedAnimal(null);
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        SetMouseFocusedAnimal(animal);
+        if (animal != null)
         {
             SetMouseFocusedBlocks(null);
             return;
@@ -3631,6 +3656,23 @@ public class PlayerController : MonoBehaviour
         }
 
         SetMouseFocusedBlocks(mouseFocusBlocks, mapObject);
+    }
+
+    private void RefreshMouseAnimalFocus()
+    {
+        Vector2 pointerPosition = Input.mousePosition;
+        if (IsPointerOverMouseFocusBlockingUi(pointerPosition)
+            || !TryResolveMouseFocusTargets(
+                pointerPosition,
+                out Animal animal,
+                out _,
+                out _))
+        {
+            SetMouseFocusedAnimal(null);
+            return;
+        }
+
+        SetMouseFocusedAnimal(animal);
     }
 
     private void RefreshMountedPinnedMouseFocus()
@@ -3664,6 +3706,28 @@ public class PlayerController : MonoBehaviour
 
     private bool TryResolveMouseFocusedMapObject(Vector2 pointerPosition, out MapObject mapObject, out Block fallbackBlock)
     {
+        if (!TryResolveMouseFocusTargets(
+                pointerPosition,
+                out Animal animal,
+                out mapObject,
+                out fallbackBlock)
+            || animal != null)
+        {
+            mapObject = null;
+            fallbackBlock = null;
+            return false;
+        }
+
+        return mapObject != null;
+    }
+
+    private bool TryResolveMouseFocusTargets(
+        Vector2 pointerPosition,
+        out Animal animal,
+        out MapObject mapObject,
+        out Block fallbackBlock)
+    {
+        animal = null;
         mapObject = null;
         fallbackBlock = null;
 
@@ -3676,6 +3740,8 @@ public class PlayerController : MonoBehaviour
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
         float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
         int hitCount = RaycastMouseFocus(ray, Mathf.Max(0f, maxDistance));
+        Animal closestAnimal = null;
+        float closestAnimalDistance = float.MaxValue;
         MapObject closestCandidate = null;
         float closestDistance = float.MaxValue;
         for (int i = 0; i < hitCount; i++)
@@ -3687,6 +3753,15 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
+            Animal animalCandidate = hitCollider.GetComponentInParent<Animal>();
+            if (animalCandidate != null
+                && animalCandidate.gameObject.activeInHierarchy
+                && hit.distance < closestAnimalDistance)
+            {
+                closestAnimal = animalCandidate;
+                closestAnimalDistance = hit.distance;
+            }
+
             MapObject candidate = hitCollider.GetComponentInParent<MapObject>();
             if (!IsValidMouseFocusMapObject(candidate))
             {
@@ -3695,6 +3770,12 @@ public class PlayerController : MonoBehaviour
 
             closestCandidate = candidate;
             closestDistance = hit.distance;
+        }
+
+        if (closestAnimal != null && closestAnimalDistance <= closestDistance)
+        {
+            animal = closestAnimal;
+            return true;
         }
 
         if (closestCandidate != null)
@@ -3730,6 +3811,25 @@ public class PlayerController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private void SetMouseFocusedAnimal(Animal nextAnimal)
+    {
+        if (currentMouseFocusedAnimal == nextAnimal)
+        {
+            return;
+        }
+
+        if (currentMouseFocusedAnimal != null)
+        {
+            currentMouseFocusedAnimal.SetHoverOutline(false);
+        }
+
+        currentMouseFocusedAnimal = nextAnimal;
+        if (currentMouseFocusedAnimal != null)
+        {
+            currentMouseFocusedAnimal.SetHoverOutline(true);
+        }
     }
 
     private Camera ResolveMouseFocusCamera()

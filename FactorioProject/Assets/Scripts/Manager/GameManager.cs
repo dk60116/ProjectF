@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using ProjectF.Diagnostics;
 using TMPro;
 using Unity.Profiling;
 using Unity.Profiling.LowLevel.Unsafe;
@@ -545,12 +546,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     public const int DefaultPort = 50877;
     private const int MaxItemsPerRequest = 1000;
     private const int ConveyorLineDefaultCount = 100;
-    private const int MaxConveyorsPerRequest = 100;
+    private const int ConveyorStressDefaultCount = 1000;
+    private const int MaxConveyorsPerRequest = 1000;
     private const int ConveyorItemFillDefaultCount = 50;
     private const int MaxConveyorItemsPerRequest = 500;
     private const int ConveyorLineFillSearchLimit = 4096;
     private const float ConveyorItemFillSearchRadius = 32f;
-    private const int RequestTimeoutMilliseconds = 5000;
+    private const int RequestTimeoutMilliseconds = 30000;
     private const int MaxRequestsPerFrame = 4;
     private const int MaxRequestsPerFrameDuringChunkStreaming = 1;
     private const float StatusWorldStatsRefreshInterval = 1f;
@@ -782,8 +784,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.CreateConveyorLine:
                 request.Result = CreateConveyorLine(request.ItemId, request.Count);
                 break;
+            case ToolCommand.CreateConveyorStressTest:
+                request.Result = CreateConveyorStressTest(request.Count);
+                break;
             case ToolCommand.FillConveyorItems:
                 request.Result = FillRandomConveyorItems(request.Count);
+                break;
+            case ToolCommand.CheckConveyors:
+                request.Result = CheckConveyors();
                 break;
             case ToolCommand.SaveSlot:
                 request.Result = SaveSlot(request.SlotIndex);
@@ -994,6 +1002,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts.Length == 1
+            && (string.Equals(parts[0], "beltcheck", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "conveyorcheck", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "beltaudit", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.CheckConveyors;
+            itemId = 0;
+            count = 0;
+            return true;
+        }
+
         if (parts.Length >= 1
             && (string.Equals(parts[0], "perf", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(parts[0], "profile", StringComparison.OrdinalIgnoreCase)
@@ -1159,6 +1178,30 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         if (parts.Length >= 1
+            && (string.Equals(parts[0], "beltstress", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "conveyorstress", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.CreateConveyorStressTest;
+            itemId = -1;
+            count = ConveyorStressDefaultCount;
+
+            if (parts.Length >= 2 && (!int.TryParse(parts[1], out count) || count <= 0))
+            {
+                error = "count must be a positive integer";
+                return false;
+            }
+
+            if (parts.Length > 2)
+            {
+                error = "usage: beltstress [count]";
+                return false;
+            }
+
+            count = Math.Min(Math.Max(count, 1), MaxConveyorsPerRequest);
+            return true;
+        }
+
+        if (parts.Length >= 1
             && (string.Equals(parts[0], "beltline", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(parts[0], "conveyorline", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1220,7 +1263,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltline [auto|itemId] [count] | beltitems [count] | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -2474,37 +2517,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         for (int i = 0; i < placementPlans.Count; i++)
         {
-            ConveyorPlacementPlan plan = placementPlans[i];
-            if (plan == null
-                || !terrain.TryGetLoadedBlock(plan.Coordinate, out Block anchorBlock)
-                || anchorBlock == null
-                || !placementController.CanPlaceInstalledObjectAt(
-                    plan.Coordinate,
-                    plan.SourcePrefab,
-                    plan.QuarterTurns,
-                    null,
-                    true))
+            if (!TryPlaceConveyorPlan(terrain, placementController, placementPlans[i]))
             {
                 break;
             }
-
-            InstallationObject installedInstallation = terrain.CreateInstallationObject(plan.SourcePrefab, terrain.transform);
-            if (installedInstallation == null)
-            {
-                break;
-            }
-
-            MapObject installedObject = installedInstallation;
-            installedObject.transform.SetPositionAndRotation(
-                placementController.GetInstalledObjectWorldPosition(plan.Coordinate, plan.SourcePrefab, plan.QuarterTurns),
-                placementController.GetInstalledObjectRotation(plan.SourcePrefab, plan.QuarterTurns));
-            if (!placementController.BindInstalledObjectToFootprintBlocks(installedObject, plan.Coordinate, plan.QuarterTurns))
-            {
-                anchorBlock.SetMapObject(installedObject);
-            }
-
-            placementController.ConfigureInstalledObjectRuntime(installedObject, plan.Coordinate, plan.QuarterTurns);
-            terrain.RegisterLiveInstallationObject(installedInstallation);
 
             placedCount++;
         }
@@ -2525,6 +2541,176 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             0,
             $"beltline placed={placedCount} start={startCoordinate.x},{startCoordinate.y} mode=fill dir={preferredOutputDirection.x},{preferredOutputDirection.y}");
+    }
+
+    private ToolResult CreateConveyorStressTest(int count)
+    {
+        GameManager gameManager = GameManager.Instance;
+        Player player = gameManager != null ? gameManager.Player : FindObjectOfType<Player>();
+        if (player == null)
+        {
+            return ToolResult.Error(-1, count, "player not found");
+        }
+
+        ItemManager itemManager = gameManager != null ? gameManager.ItemManger : FindObjectOfType<ItemManager>();
+        if (itemManager == null)
+        {
+            return ToolResult.Error(-1, count, "item manager not found");
+        }
+
+        if (!TryResolveConveyorDefinition(itemManager, -1, out ConveyorBelt conveyorPrototype, out int itemId))
+        {
+            return ToolResult.Error(-1, count, "automatic conveyor definition not found");
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(itemId, count, "terrain not found");
+        }
+
+        InstallationPlacementController placementController = FindObjectOfType<InstallationPlacementController>();
+        if (placementController == null)
+        {
+            return ToolResult.Error(itemId, count, "installation placement controller not found");
+        }
+
+        Transform playerFacingTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
+        Vector2Int outputDirection = ResolveCardinalGridDirection(playerFacingTransform.forward);
+        Vector2Int playerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(player.transform.position.x),
+            Mathf.RoundToInt(player.transform.position.z));
+        if (!TryResolveConveyorPlacementVariant(
+                placementController,
+                conveyorPrototype,
+                NegateGridDirection(outputDirection),
+                outputDirection,
+                out MapObject sourcePrefab,
+                out int quarterTurns))
+        {
+            return ToolResult.Error(itemId, count, "straight conveyor variant not found");
+        }
+
+        int searchLimit = ResolveConveyorStressSearchLimit(terrain, playerCoordinate);
+        List<Vector2Int> coordinates = BuildConveyorLineSpiralCoordinates(
+            playerCoordinate,
+            outputDirection,
+            searchLimit);
+        ConveyorPlacementPlan plan = new ConveyorPlacementPlan
+        {
+            SourcePrefab = sourcePrefab,
+            QuarterTurns = quarterTurns,
+            InputDirection = NegateGridDirection(outputDirection),
+            OutputDirection = outputDirection
+        };
+
+        int placedCount = 0;
+        int blockedCount = 0;
+        for (int i = 0; i < coordinates.Count && placedCount < count; i++)
+        {
+            plan.Coordinate = coordinates[i];
+            if (TryPlaceConveyorPlan(terrain, placementController, plan))
+            {
+                placedCount++;
+            }
+            else
+            {
+                blockedCount++;
+            }
+        }
+
+        if (placedCount != count)
+        {
+            return ToolResult.Error(
+                itemId,
+                count,
+                $"beltstress incomplete placed={placedCount} requested={count} blocked={blockedCount} searched={coordinates.Count}");
+        }
+
+        return ToolResult.Success(
+            itemId,
+            count,
+            placedCount,
+            0,
+            0,
+            0,
+            $"beltstress placed={placedCount} blocked={blockedCount} searched={coordinates.Count}");
+    }
+
+    private static int ResolveConveyorStressSearchLimit(
+        TerrainGenerator terrain,
+        Vector2Int centerCoordinate)
+    {
+        if (terrain == null
+            || !terrain.TryGetLoadedBlockBounds(
+                out Vector2Int minimumCoordinate,
+                out Vector2Int maximumCoordinate))
+        {
+            return ConveyorLineFillSearchLimit;
+        }
+
+        long radius = Math.Max(
+            Math.Max(
+                Math.Abs((long)minimumCoordinate.x - centerCoordinate.x),
+                Math.Abs((long)maximumCoordinate.x - centerCoordinate.x)),
+            Math.Max(
+                Math.Abs((long)minimumCoordinate.y - centerCoordinate.y),
+                Math.Abs((long)maximumCoordinate.y - centerCoordinate.y)));
+        long diameter = (radius * 2L) + 1L;
+        long coordinateCount = (diameter * diameter) - 1L;
+        return (int)Math.Min(
+            int.MaxValue,
+            Math.Max(ConveyorLineFillSearchLimit, coordinateCount));
+    }
+
+    private static bool TryPlaceConveyorPlan(
+        TerrainGenerator terrain,
+        InstallationPlacementController placementController,
+        ConveyorPlacementPlan plan)
+    {
+        if (terrain == null
+            || placementController == null
+            || plan == null
+            || !terrain.TryGetLoadedBlock(plan.Coordinate, out Block anchorBlock)
+            || anchorBlock == null
+            || !placementController.CanPlaceInstalledObjectAt(
+                plan.Coordinate,
+                plan.SourcePrefab,
+                plan.QuarterTurns,
+                null,
+                true))
+        {
+            return false;
+        }
+
+        InstallationObject installedInstallation =
+            terrain.CreateInstallationObject(plan.SourcePrefab, terrain.transform);
+        if (installedInstallation == null)
+        {
+            return false;
+        }
+
+        MapObject installedObject = installedInstallation;
+        installedObject.transform.SetPositionAndRotation(
+            placementController.GetInstalledObjectWorldPosition(
+                plan.Coordinate,
+                plan.SourcePrefab,
+                plan.QuarterTurns),
+            placementController.GetInstalledObjectRotation(plan.SourcePrefab, plan.QuarterTurns));
+        if (!placementController.BindInstalledObjectToFootprintBlocks(
+                installedObject,
+                plan.Coordinate,
+                plan.QuarterTurns))
+        {
+            anchorBlock.SetMapObject(installedObject);
+        }
+
+        placementController.ConfigureInstalledObjectRuntime(
+            installedObject,
+            plan.Coordinate,
+            plan.QuarterTurns);
+        terrain.RegisterLiveInstallationObject(installedInstallation);
+        return true;
     }
 
     private ToolResult FillRandomConveyorItems(int count)
@@ -2615,6 +2801,32 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             0,
             $"beltitems placed={placedCount} candidates={candidates.Count}");
+    }
+
+    private static ToolResult CheckConveyors()
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(0, 0, "terrain not found");
+        }
+
+        ConveyorDiagnosticReport report = ConveyorRuntimeDiagnostics.Run(terrain);
+        string extraTokens = report.BuildProtocolTokens();
+        if (!report.IsHealthy)
+        {
+            string firstIssue = string.IsNullOrEmpty(report.FirstIssue) ? "unknown" : report.FirstIssue;
+            return ToolResult.Error(
+                0,
+                0,
+                $"beltcheck failed first={firstIssue}",
+                extraTokens);
+        }
+
+        string message = report.WarningCount > 0
+            ? $"beltcheck healthy warnings={report.WarningCount} first={report.FirstIssue}"
+            : "beltcheck healthy";
+        return ToolResult.Success(0, 0, 0, 0, 0, 0, message, extraTokens);
     }
 
     private static void CollectNearbyConveyorItemFillCandidates(
@@ -3080,6 +3292,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return coordinates;
         }
 
+        HashSet<Vector2Int> uniqueCoordinates = new HashSet<Vector2Int>();
         Vector2Int forwardDirection = preferredOutputDirection == Vector2Int.zero
             ? Vector2Int.up
             : preferredOutputDirection;
@@ -3093,7 +3306,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         };
 
         Vector2Int coordinate = centerCoordinate + forwardDirection;
-        AddUniqueConveyorSpiralCoordinate(coordinates, centerCoordinate, coordinate, limit);
+        AddUniqueConveyorSpiralCoordinate(
+            coordinates,
+            uniqueCoordinates,
+            centerCoordinate,
+            coordinate,
+            limit);
 
         int directionIndex = 0;
         int segmentLength = 1;
@@ -3105,7 +3323,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             for (int step = 0; step < segmentLength && coordinates.Count < limit; step++)
             {
                 coordinate += stepDirection;
-                AddUniqueConveyorSpiralCoordinate(coordinates, centerCoordinate, coordinate, limit);
+                AddUniqueConveyorSpiralCoordinate(
+                    coordinates,
+                    uniqueCoordinates,
+                    centerCoordinate,
+                    coordinate,
+                    limit);
             }
 
             directionIndex = (directionIndex + 1) % spiralDirections.Length;
@@ -3128,21 +3351,18 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private static void AddUniqueConveyorSpiralCoordinate(
         List<Vector2Int> coordinates,
+        HashSet<Vector2Int> uniqueCoordinates,
         Vector2Int centerCoordinate,
         Vector2Int coordinate,
         int limit)
     {
-        if (coordinates == null || coordinates.Count >= limit || coordinate == centerCoordinate)
+        if (coordinates == null
+            || uniqueCoordinates == null
+            || coordinates.Count >= limit
+            || coordinate == centerCoordinate
+            || !uniqueCoordinates.Add(coordinate))
         {
             return;
-        }
-
-        for (int i = 0; i < coordinates.Count; i++)
-        {
-            if (coordinates[i] == coordinate)
-            {
-                return;
-            }
         }
 
         coordinates.Add(coordinate);
@@ -3774,7 +3994,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         SetCameraSizeRange,
         SetSeed,
         CreateConveyorLine,
+        CreateConveyorStressTest,
         FillConveyorItems,
+        CheckConveyors,
         SaveSlot,
         LoadSlot,
         ResetMap,

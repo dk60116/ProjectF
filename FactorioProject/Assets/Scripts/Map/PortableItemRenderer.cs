@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ProjectF.Rendering;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,26 +8,99 @@ public readonly struct VirtualConveyorItemRenderData
 {
     public VirtualConveyorItemRenderData(
         int itemId,
-        Matrix4x4 matrix,
+        Vector3 position,
+        Quaternion rotation,
         int layer,
         bool useSleepAwakeDarkTint,
         bool useBeltItemLineDebugColor = false,
         Color32 beltItemLineDebugColor = default)
+        : this(
+            itemId,
+            position,
+            rotation,
+            default,
+            layer,
+            useSleepAwakeDarkTint,
+            useBeltItemLineDebugColor,
+            beltItemLineDebugColor,
+            false,
+            0,
+            0)
+    {
+    }
+
+    private VirtualConveyorItemRenderData(
+        int itemId,
+        Vector3 position,
+        Quaternion rotation,
+        Matrix4x4 matrix,
+        int layer,
+        bool useSleepAwakeDarkTint,
+        bool useBeltItemLineDebugColor,
+        Color32 beltItemLineDebugColor,
+        bool hasResolvedBatchCell,
+        int batchCellX,
+        int batchCellZ)
     {
         ItemId = itemId;
+        Position = position;
+        Rotation = rotation;
         Matrix = matrix;
         Layer = layer;
         UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
         UseBeltItemLineDebugColor = useBeltItemLineDebugColor;
         BeltItemLineDebugColor = useBeltItemLineDebugColor ? beltItemLineDebugColor : (Color32)Color.white;
+        HasResolvedBatchCell = hasResolvedBatchCell;
+        BatchCellX = batchCellX;
+        BatchCellZ = batchCellZ;
     }
 
     public readonly int ItemId;
+    public readonly Vector3 Position;
+    public readonly Quaternion Rotation;
     public readonly Matrix4x4 Matrix;
     public readonly int Layer;
     public readonly bool UseSleepAwakeDarkTint;
     public readonly bool UseBeltItemLineDebugColor;
     public readonly Color32 BeltItemLineDebugColor;
+    public readonly bool HasResolvedBatchCell;
+    public readonly int BatchCellX;
+    public readonly int BatchCellZ;
+
+    public VirtualConveyorItemRenderData WithResolvedTransform(
+        Matrix4x4 matrix,
+        int batchCellX,
+        int batchCellZ)
+    {
+        return new VirtualConveyorItemRenderData(
+            ItemId,
+            Position,
+            Rotation,
+            matrix,
+            Layer,
+            UseSleepAwakeDarkTint,
+            UseBeltItemLineDebugColor,
+            BeltItemLineDebugColor,
+            true,
+            batchCellX,
+            batchCellZ);
+    }
+
+    public VirtualConveyorItemRenderData WithResolvedMatrix(Matrix4x4 matrix)
+    {
+        return new VirtualConveyorItemRenderData(
+            ItemId,
+            Position,
+            Rotation,
+            matrix,
+            Layer,
+            UseSleepAwakeDarkTint,
+            UseBeltItemLineDebugColor,
+            BeltItemLineDebugColor,
+            false,
+            0,
+            0);
+    }
 }
 
 [DisallowMultipleComponent]
@@ -61,6 +135,13 @@ public sealed class PortableItemRenderer : MonoBehaviour
     [SerializeField, Min(0f)]
     private float dynamicVirtualConveyorCullCameraRotateThreshold = 0.5f;
 
+    [Header("Burst Jobs")]
+    [SerializeField]
+    private bool useBurstTransformJobs = true;
+
+    [SerializeField, Min(1)]
+    private int minimumBurstTransformJobItemCount = 128;
+
     private readonly HashSet<PortableObject> registeredPortableObjects = new HashSet<PortableObject>();
     private readonly VirtualRenderBatchCollection portableObjectBatches = new VirtualRenderBatchCollection();
     private readonly List<PortableObject> portableObjectCleanupBuffer = new List<PortableObject>();
@@ -73,6 +154,10 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private readonly List<Block> dirtyVirtualConveyorRenderBlocks = new List<Block>(256);
     private readonly List<VirtualConveyorItemRenderData> scratchVirtualConveyorRenderItems =
         new List<VirtualConveyorItemRenderData>(8);
+    private readonly List<VirtualConveyorItemRenderData> dynamicVirtualConveyorRenderItems =
+        new List<VirtualConveyorItemRenderData>(2048);
+    private readonly List<DynamicBlockRenderWork> dynamicVirtualConveyorRenderWorkItems =
+        new List<DynamicBlockRenderWork>(512);
     private readonly Plane[] dynamicVirtualConveyorRenderFrustumPlanes = new Plane[6];
     private readonly VirtualRenderBatchCollection virtualConveyorBatches = new VirtualRenderBatchCollection();
     private readonly VirtualRenderBatchCollection dynamicVirtualConveyorBatches = new VirtualRenderBatchCollection();
@@ -84,6 +169,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private readonly Dictionary<int, ItemRenderAsset> renderAssetsByItemId = new Dictionary<int, ItemRenderAsset>();
     private readonly List<Block> staleVirtualConveyorCacheBlocks = new List<Block>(64);
     private readonly List<Block> staleDynamicVirtualConveyorCacheBlocks = new List<Block>(64);
+    private readonly ConveyorItemTransformJobProcessor conveyorItemTransformJobProcessor =
+        new ConveyorItemTransformJobProcessor();
 
     private TerrainGenerator terrainGenerator;
     private ItemManager itemManager;
@@ -104,6 +191,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private int lastDynamicVirtualConveyorMatrixRebuilds;
     private int lastDynamicVirtualConveyorCullCacheRefreshes;
     private int lastDynamicVirtualConveyorCullCachedBlocks;
+    private int lastDynamicVirtualConveyorTransformJobItems;
+    private bool lastDynamicVirtualConveyorTransformJobScheduled;
     private int cachedDynamicVirtualConveyorCullBlockSetVersion = int.MinValue;
     private int cachedDynamicVirtualConveyorCullCandidateBlocks;
     private int cachedDynamicVirtualConveyorCullLayerSkippedBlocks;
@@ -120,12 +209,18 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private bool cachedDynamicVirtualConveyorCullCameraOrthographic;
 
     public int RegisteredPortableObjectCount => registeredPortableObjects.Count;
+    public int PortableObjectBatchRendererGroupBatchCount =>
+        portableObjectBatches.ActiveBatchRendererGroupBatchCount;
     public int StaticVirtualConveyorItemBatchCount => virtualConveyorBatches.ActiveBatchCount;
     public int StaticVirtualConveyorItemInstanceCount => virtualConveyorBatches.ActiveMatrixCount;
     public int StaticVirtualConveyorItemDrawCallCount => virtualConveyorBatches.EstimatedDrawCallCount;
+    public int StaticVirtualConveyorItemBatchRendererGroupBatchCount =>
+        virtualConveyorBatches.ActiveBatchRendererGroupBatchCount;
     public int DynamicVirtualConveyorItemBatchCount => dynamicVirtualConveyorBatches.ActiveBatchCount;
     public int DynamicVirtualConveyorItemInstanceCount => dynamicVirtualConveyorBatches.ActiveMatrixCount;
     public int DynamicVirtualConveyorItemDrawCallCount => dynamicVirtualConveyorBatches.EstimatedDrawCallCount;
+    public int DynamicVirtualConveyorItemBatchRendererGroupBatchCount =>
+        dynamicVirtualConveyorBatches.ActiveBatchRendererGroupBatchCount;
     public int ActiveVirtualConveyorRenderBlockCount => activeVirtualConveyorRenderBlocks.Count;
     public int DynamicVirtualConveyorRenderBlockCount => activeDynamicVirtualConveyorRenderBlocks.Count;
     public int DirtyVirtualConveyorRenderBlockCount => dirtyVirtualConveyorRenderBlocks.Count;
@@ -145,6 +240,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
     public int DynamicVirtualConveyorMatrixRebuilds => lastDynamicVirtualConveyorMatrixRebuilds;
     public int DynamicVirtualConveyorCullCacheRefreshes => lastDynamicVirtualConveyorCullCacheRefreshes;
     public int DynamicVirtualConveyorCullCachedBlocks => lastDynamicVirtualConveyorCullCachedBlocks;
+    public int DynamicVirtualConveyorTransformJobItems => lastDynamicVirtualConveyorTransformJobItems;
+    public bool DynamicVirtualConveyorTransformJobScheduled => lastDynamicVirtualConveyorTransformJobScheduled;
     public float VirtualConveyorItemBatchCellSize => virtualConveyorItemBatchCellSize;
     public float DynamicVirtualConveyorCullBoundsSize => dynamicVirtualConveyorItemCullBoundsSize;
     public float DynamicVirtualConveyorCullBoundsHeight => dynamicVirtualConveyorItemCullBoundsHeight;
@@ -205,6 +302,21 @@ public sealed class PortableItemRenderer : MonoBehaviour
     private void Awake()
     {
         ResolveDependencies();
+    }
+
+    private void OnDestroy()
+    {
+        conveyorItemTransformJobProcessor.Dispose();
+        portableObjectBatches.Dispose();
+        virtualConveyorBatches.Dispose();
+        dynamicVirtualConveyorBatches.Dispose();
+    }
+
+    private void OnDisable()
+    {
+        portableObjectBatches.SuspendRendering();
+        virtualConveyorBatches.SuspendRendering();
+        dynamicVirtualConveyorBatches.SuspendRendering();
     }
 
     private void LateUpdate()
@@ -870,6 +982,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
         bool profileBreakdown = MapObjectTickProfiler.IsEnabled;
         ResetDynamicVirtualConveyorRenderCounters();
         lastDynamicVirtualConveyorCullSourceBlocks = activeDynamicVirtualConveyorRenderBlocks.Count;
+        dynamicVirtualConveyorRenderItems.Clear();
+        dynamicVirtualConveyorRenderWorkItems.Clear();
 
         if (activeDynamicVirtualConveyorRenderBlocks.Count <= 0)
         {
@@ -889,6 +1003,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
         long cullTicks = 0L;
         long cacheTicks = 0L;
         long appendDataTicks = 0L;
+        long buildMatrixTicks = 0L;
         long syncMatrixTicks = 0L;
         long trimCacheTicks = 0L;
 
@@ -954,25 +1069,47 @@ public sealed class PortableItemRenderer : MonoBehaviour
             cacheTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
 
             phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
-            scratchVirtualConveyorRenderItems.Clear();
-            block.AppendDynamicVirtualConveyorItemRenderData(scratchVirtualConveyorRenderItems);
+            int firstItemIndex = dynamicVirtualConveyorRenderItems.Count;
+            block.AppendDynamicVirtualConveyorItemRenderData(dynamicVirtualConveyorRenderItems);
+            dynamicVirtualConveyorRenderWorkItems.Add(new DynamicBlockRenderWork(
+                blockCache,
+                firstItemIndex,
+                dynamicVirtualConveyorRenderItems.Count - firstItemIndex));
             appendDataTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+        }
 
+        phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+        lastDynamicVirtualConveyorTransformJobItems = dynamicVirtualConveyorRenderItems.Count;
+        lastDynamicVirtualConveyorTransformJobScheduled =
+            conveyorItemTransformJobProcessor.BuildMatrices(
+                dynamicVirtualConveyorRenderItems,
+                useBurstTransformJobs,
+                minimumBurstTransformJobItemCount,
+                virtualConveyorItemBatchCellSize);
+        buildMatrixTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+
+        for (int i = 0; i < dynamicVirtualConveyorRenderWorkItems.Count; i++)
+        {
+            DynamicBlockRenderWork workItem = dynamicVirtualConveyorRenderWorkItems[i];
             phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             lastDynamicVirtualConveyorRenderedItems += SyncDynamicVirtualConveyorBlockRenderItems(
-                blockCache,
-                scratchVirtualConveyorRenderItems);
+                workItem.BlockCache,
+                dynamicVirtualConveyorRenderItems,
+                workItem.FirstItemIndex,
+                workItem.ItemCount);
             syncMatrixTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
 
             phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
-            blockCache.isValid = true;
+            workItem.BlockCache.isValid = true;
             trimCacheTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
         }
 
-        scratchVirtualConveyorRenderItems.Clear();
+        dynamicVirtualConveyorRenderItems.Clear();
+        dynamicVirtualConveyorRenderWorkItems.Clear();
         EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic Cull", cullTicks);
         EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic Cache", cacheTicks);
         EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic AppendData", appendDataTicks);
+        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic BuildMatrices", buildMatrixTicks);
         EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic SyncMatrix", syncMatrixTicks);
         EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic TrimCache", trimCacheTicks);
     }
@@ -1121,19 +1258,28 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private int SyncDynamicVirtualConveyorBlockRenderItems(
         DynamicBlockRenderCache blockCache,
-        List<VirtualConveyorItemRenderData> renderItems)
+        List<VirtualConveyorItemRenderData> renderItems,
+        int firstItemIndex,
+        int itemCount)
     {
-        if (blockCache == null || renderItems == null)
+        if (blockCache == null
+            || renderItems == null
+            || firstItemIndex < 0
+            || itemCount < 0
+            || firstItemIndex + itemCount > renderItems.Count)
         {
             return 0;
         }
 
-        int itemCount = renderItems.Count;
         if (!blockCache.isValid
             || blockCache.batchEntries.Count != itemCount
             || blockCache.itemKeyCaches.Count != itemCount)
         {
-            return RebuildDynamicVirtualConveyorBlockRenderItems(blockCache, renderItems);
+            return RebuildDynamicVirtualConveyorBlockRenderItems(
+                blockCache,
+                renderItems,
+                firstItemIndex,
+                itemCount);
         }
 
         for (int itemIndex = 0; itemIndex < itemCount; itemIndex++)
@@ -1141,9 +1287,13 @@ public sealed class PortableItemRenderer : MonoBehaviour
             if (!TryUpdateDynamicVirtualConveyorRenderItem(
                     blockCache,
                     itemIndex,
-                    renderItems[itemIndex]))
+                    renderItems[firstItemIndex + itemIndex]))
             {
-                return RebuildDynamicVirtualConveyorBlockRenderItems(blockCache, renderItems);
+                return RebuildDynamicVirtualConveyorBlockRenderItems(
+                    blockCache,
+                    renderItems,
+                    firstItemIndex,
+                    itemCount);
             }
         }
 
@@ -1175,20 +1325,22 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private int RebuildDynamicVirtualConveyorBlockRenderItems(
         DynamicBlockRenderCache blockCache,
-        List<VirtualConveyorItemRenderData> renderItems)
+        List<VirtualConveyorItemRenderData> renderItems,
+        int firstItemIndex,
+        int itemCount)
     {
         RemoveDynamicVirtualConveyorBlockBatchEntries(blockCache);
         blockCache.itemKeyCaches.Clear();
         lastDynamicVirtualConveyorMatrixRebuilds++;
 
         int renderedItems = 0;
-        int itemCount = renderItems != null ? renderItems.Count : 0;
         for (int itemIndex = 0; itemIndex < itemCount; itemIndex++)
         {
+            VirtualConveyorItemRenderData renderData = renderItems[firstItemIndex + itemIndex];
             if (!TryGetDynamicVirtualConveyorBatchKey(
                     blockCache,
                     itemIndex,
-                    renderItems[itemIndex],
+                    renderData,
                     out VirtualRenderBatchKey key))
             {
                 continue;
@@ -1198,7 +1350,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
                 blockCache,
                 blockCache.batchEntries,
                 key,
-                renderItems[itemIndex].Matrix);
+                renderData.Matrix);
             renderedItems++;
         }
 
@@ -1221,9 +1373,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
             return false;
         }
 
-        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
-        int cellX = GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize);
-        int cellZ = GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize);
+        ResolveBatchCell(renderData, out int cellX, out int cellZ);
         DynamicItemRenderKeyCache itemKeyCache = blockCache.itemKeyCaches[itemIndex];
         if (!itemKeyCache.Matches(renderData, cellX, cellZ))
         {
@@ -1249,9 +1399,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
             return TryCreateVirtualConveyorBatchKey(renderData, out key);
         }
 
-        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
-        int cellX = GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize);
-        int cellZ = GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize);
+        ResolveBatchCell(renderData, out int cellX, out int cellZ);
 
         while (blockCache.itemKeyCaches.Count <= itemIndex)
         {
@@ -1283,11 +1431,11 @@ public sealed class PortableItemRenderer : MonoBehaviour
         VirtualConveyorItemRenderData renderData,
         out VirtualRenderBatchKey key)
     {
-        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
+        ResolveBatchCell(renderData, out int cellX, out int cellZ);
         return TryCreateVirtualConveyorBatchKey(
             renderData,
-            GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize),
-            GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize),
+            cellX,
+            cellZ,
             out key);
     }
 
@@ -1338,6 +1486,23 @@ public sealed class PortableItemRenderer : MonoBehaviour
         return new Vector3(matrix.m03, matrix.m13, matrix.m23);
     }
 
+    private void ResolveBatchCell(
+        VirtualConveyorItemRenderData renderData,
+        out int cellX,
+        out int cellZ)
+    {
+        if (renderData.HasResolvedBatchCell)
+        {
+            cellX = renderData.BatchCellX;
+            cellZ = renderData.BatchCellZ;
+            return;
+        }
+
+        Vector3 worldPosition = ExtractWorldPosition(renderData.Matrix);
+        cellX = GetBatchCell(worldPosition.x, virtualConveyorItemBatchCellSize);
+        cellZ = GetBatchCell(worldPosition.z, virtualConveyorItemBatchCellSize);
+    }
+
     private static int GetBatchCell(float worldCoordinate, float cellSize)
     {
         return Mathf.FloorToInt(worldCoordinate / Mathf.Max(1f, cellSize));
@@ -1366,6 +1531,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
         lastDynamicVirtualConveyorMatrixRebuilds = 0;
         lastDynamicVirtualConveyorCullCacheRefreshes = 0;
         lastDynamicVirtualConveyorCullCachedBlocks = 0;
+        lastDynamicVirtualConveyorTransformJobItems = 0;
+        lastDynamicVirtualConveyorTransformJobScheduled = false;
     }
 
     private void AddDynamicVirtualConveyorCullSkip(DynamicVirtualConveyorCullResult cullResult)
@@ -1430,6 +1597,23 @@ public sealed class PortableItemRenderer : MonoBehaviour
             entry.MatrixIndex = matrixIndex;
             batchEntries[entryIndex] = entry;
         }
+    }
+
+    private readonly struct DynamicBlockRenderWork
+    {
+        public DynamicBlockRenderWork(
+            DynamicBlockRenderCache blockCache,
+            int firstItemIndex,
+            int itemCount)
+        {
+            BlockCache = blockCache;
+            FirstItemIndex = firstItemIndex;
+            ItemCount = itemCount;
+        }
+
+        public readonly DynamicBlockRenderCache BlockCache;
+        public readonly int FirstItemIndex;
+        public readonly int ItemCount;
     }
 
     private readonly struct DynamicItemRenderKeyCache

@@ -227,6 +227,7 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, int> savedResourceItemIds = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, FloorObjectSaveState> savedFloorObjectStates = new Dictionary<Vector2Int, FloorObjectSaveState>();
     private readonly Dictionary<Vector2Int, InstallationSaveState> savedInstallationStates = new Dictionary<Vector2Int, InstallationSaveState>();
+    private readonly HashSet<Vector2Int> savedBackgroundInstallationStorageKeys = new HashSet<Vector2Int>();
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<Vector2Int, LiveInstallationRecord> liveInstallationStates = new Dictionary<Vector2Int, LiveInstallationRecord>();
     private readonly Dictionary<Vector2Int, Vector2Int> liveInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
@@ -534,18 +535,18 @@ public partial class BlockStateStore : MonoBehaviour
         return savedInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out storageKey);
     }
 
-    public void CollectSavedInstallationAnchorsNearCoordinate(Vector2Int worldCoordinate, ICollection<Vector2Int> storageKeys)
+    public void CollectBackgroundInstallationAnchorsNearCoordinate(Vector2Int worldCoordinate, ICollection<Vector2Int> storageKeys)
     {
-        if (storageKeys == null || savedInstallationStates.Count <= 0)
+        if (storageKeys == null || savedBackgroundInstallationStorageKeys.Count <= 0)
         {
             return;
         }
 
-        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
+        foreach (Vector2Int storageKey in savedBackgroundInstallationStorageKeys)
         {
-            Vector2Int storageKey = pair.Key;
             if (liveInstallationStates.ContainsKey(storageKey)
-                || !SavedInstallationStateInteractsWithCoordinate(pair.Value, worldCoordinate))
+                || !savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState state)
+                || !SavedInstallationStateInteractsWithCoordinate(state, worldCoordinate))
             {
                 continue;
             }
@@ -587,6 +588,7 @@ public partial class BlockStateStore : MonoBehaviour
             AdjustSavedInstallationCount(savedState, -1);
             UnregisterSavedCoordinateMappings(savedState, storageKey);
             savedInstallationStates.Remove(storageKey);
+            savedBackgroundInstallationStorageKeys.Remove(storageKey);
         }
 
         UnregisterLiveInstallation(storageKey);
@@ -621,6 +623,7 @@ public partial class BlockStateStore : MonoBehaviour
         InvalidateConveyorSchedule();
         ClearPendingConveyorFloorSyncs();
         savedInstallationStates.Clear();
+        savedBackgroundInstallationStorageKeys.Clear();
         savedInstallationCountsByItemId.Clear();
         savedInstallationItemTotal = 0;
         savedInstallationAnchorsByCoordinate.Clear();
@@ -1070,6 +1073,15 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         savedInstallationStates[storageKey] = storedState;
+        if (RequiresBackgroundInstallationWake(storedState))
+        {
+            savedBackgroundInstallationStorageKeys.Add(storageKey);
+        }
+        else
+        {
+            savedBackgroundInstallationStorageKeys.Remove(storageKey);
+        }
+
         AdjustSavedInstallationCount(storedState, 1);
         RegisterSavedCoordinateMappings(storedState, storageKey);
         ResolveVirtualObjectWorld()?.UpsertInstallation(storedState);
@@ -1112,8 +1124,14 @@ public partial class BlockStateStore : MonoBehaviour
             AdjustSavedInstallationCount(duplicateState, -1);
             UnregisterSavedCoordinateMappings(duplicateState, duplicateKey);
             savedInstallationStates.Remove(duplicateKey);
+            savedBackgroundInstallationStorageKeys.Remove(duplicateKey);
             world?.RemoveInstallation(duplicateKey);
         }
+    }
+
+    private static bool RequiresBackgroundInstallationWake(InstallationSaveState state)
+    {
+        return state != null && (state.robotArmState != null || state.inputOutputState != null);
     }
 
     private void RemoveLiveInstallationRecordsForSamePlacement(

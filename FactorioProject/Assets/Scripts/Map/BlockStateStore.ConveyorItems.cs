@@ -961,6 +961,7 @@ public partial class BlockStateStore
         out int slowRetryCandidateCount,
         out bool dueCandidateBudgetHit)
     {
+        long profileStartTimestamp = collectProfileCounters ? MapObjectTickProfiler.BeginSample() : 0L;
         conveyorSimulationActiveLaneKeys.Clear();
         conveyorSimulationNextActiveLaneKeys.Clear();
         conveyorSimulationNextActiveLaneKeySet.Clear();
@@ -1016,6 +1017,14 @@ public partial class BlockStateStore
         candidateCount = conveyorSimulationActiveLaneKeys.Count;
         readyHeapSize = conveyorReadyLaneHeap.Count;
         skippedNotReadyCount = Mathf.Max(0, conveyorScheduleStates.Count);
+        if (collectProfileCounters)
+        {
+            MapObjectTickProfiler.EndNamedSample(
+                "Runtime",
+                "BackgroundConveyor",
+                "Background Belt Prepare",
+                profileStartTimestamp);
+        }
     }
 
     private void RebuildConveyorSchedule(long nowTicks)
@@ -2223,6 +2232,8 @@ public partial class BlockStateStore
 
     private void ProcessPendingConveyorFloorSyncs(ICollection<Vector2Int> dirtyCoordinates, bool flushAll)
     {
+        bool profile = MapObjectTickProfiler.IsEnabled;
+        long profileStartTimestamp = profile ? MapObjectTickProfiler.BeginSample() : 0L;
         int floorSyncBudget = flushAll ? int.MaxValue : ConveyorBackgroundMaxFloorSyncsPerTick;
         int floorSyncCount = 0;
         while (floorSyncCount < floorSyncBudget && conveyorSimulationFloorSyncQueue.Count > 0)
@@ -2241,6 +2252,15 @@ public partial class BlockStateStore
         if (conveyorSimulationFloorSyncQueue.Count > 0)
         {
             lastBackgroundConveyorBudgetHit = 1;
+        }
+
+        if (profile)
+        {
+            MapObjectTickProfiler.EndNamedSample(
+                "Runtime",
+                "BackgroundConveyor",
+                "Background Belt Floor Sync",
+                profileStartTimestamp);
         }
     }
 

@@ -11675,7 +11675,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             trainRigidbody.position = position;
             trainRigidbody.rotation = rotation;
-            trainRigidbody.velocity = Vector3.zero;
+            trainRigidbody.linearVelocity = Vector3.zero;
             trainRigidbody.angularVelocity = Vector3.zero;
         }
 

@@ -1,0 +1,1 @@
+To use materil "All" in URP, just change chder to "URP lit".

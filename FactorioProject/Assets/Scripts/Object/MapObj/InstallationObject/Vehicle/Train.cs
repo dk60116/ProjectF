@@ -348,7 +348,7 @@ public class Train : Vehicle
         {
             cachedTrainRigidbody.position = position;
             cachedTrainRigidbody.rotation = rotation;
-            cachedTrainRigidbody.velocity = Vector3.zero;
+            cachedTrainRigidbody.linearVelocity = Vector3.zero;
             cachedTrainRigidbody.angularVelocity = Vector3.zero;
         }
 

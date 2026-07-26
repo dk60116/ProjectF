@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Train station
-  objId: 42
+  objId: 41
   itemDefinition: {fileID: 11400000, guid: 2cbd885291664af429fdc0ef3784d40d, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -74,6 +74,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   stationMarkerIcon: {fileID: 21300000, guid: 4959be828dbb4ec4885ab2547cf2781b, type: 3}
+  stationName: 
 --- !u!135 &1961300251161699582
 SphereCollider:
   m_ObjectHideFlags: 0

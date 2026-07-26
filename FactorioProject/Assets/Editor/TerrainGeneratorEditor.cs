@@ -54,6 +54,46 @@ public class TerrainGeneratorEditor : Editor
 
         EditorGUILayout.Space();
 
+        EditorGUILayout.LabelField("Animal Test Harness", EditorStyles.boldLabel);
+        if (GUILayout.Button("Sync Animal Definitions"))
+        {
+            TerrainGenerator generator = (TerrainGenerator)target;
+            Undo.RegisterCompleteObjectUndo(generator, "Sync Animal Definitions");
+            generator.SyncAnimalDefinitionsFromAssets();
+            serializedObject.Update();
+            EditorSceneManager.MarkSceneDirty(generator.gameObject.scene);
+        }
+
+        if (GUILayout.Button("Rebuild Loaded Animals"))
+        {
+            TerrainGenerator generator = (TerrainGenerator)target;
+            generator.RebuildLoadedAnimals();
+            EditorSceneManager.MarkSceneDirty(generator.gameObject.scene);
+        }
+
+        if (GUILayout.Button("Remove Non-Interacted Animals"))
+        {
+            TerrainGenerator generator = (TerrainGenerator)target;
+            int removedCount = generator.RemoveNonInteractedAnimalsFromLoadedChunks();
+            Debug.Log($"Removed {removedCount} non-interacted terrain animals.", generator);
+            EditorSceneManager.MarkSceneDirty(generator.gameObject.scene);
+        }
+
+        if (GUILayout.Button("Clear Loaded Animal Views"))
+        {
+            TerrainGenerator generator = (TerrainGenerator)target;
+            int removedCount = generator.ClearLoadedAnimalViews();
+            Debug.Log($"Cleared {removedCount} loaded terrain animal views.", generator);
+            EditorSceneManager.MarkSceneDirty(generator.gameObject.scene);
+        }
+
+        if (GUILayout.Button("Log Animal Spawn Stats"))
+        {
+            ((TerrainGenerator)target).LogAnimalSpawnStats();
+        }
+
+        EditorGUILayout.Space();
+
         if (GUILayout.Button("Open Terrain Editor"))
         {
             TerrainDataEditorWindow.ShowWindow();
