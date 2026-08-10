@@ -8,7 +8,9 @@ using UnityEditor;
 
 public static class CraftingTreeRuntime
 {
-    private const int CurrentCraftingTreeFileVersion = 4;
+    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int ItemNameCraftingTreeFileVersion = 5;
+    private const int ItemIdCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
     private const int OutputCountCraftingTreeFileVersion = 2;
     private const int LegacyCraftingTreeFileVersion = 1;
@@ -136,18 +138,26 @@ public static class CraftingTreeRuntime
             using (BinaryReader reader = new BinaryReader(stream))
             {
                 int version = reader.ReadInt32();
-                if (version != LegacyCraftingTreeFileVersion && version != CurrentCraftingTreeFileVersion)
+                if (version < LegacyCraftingTreeFileVersion || version > CurrentCraftingTreeFileVersion)
                 {
                     Debug.LogWarning($"CraftingTreeRuntime: Unsupported version {version}.");
                     loaded = true;
                     return;
                 }
 
+                Dictionary<string, int> itemIdsByName = null;
+                if (version >= ItemNameCraftingTreeFileVersion
+                    && !TryBuildItemIdLookup(out itemIdsByName))
+                {
+                    loadAttempted = false;
+                    return;
+                }
+
                 int itemCount = reader.ReadInt32();
                 for (int i = 0; i < itemCount; i++)
                 {
-                    int itemId = reader.ReadInt32();
-                    List<int> requiredCraftingMapObjectIds = ReadCraftingMapObjectRuntimeIds(reader, version);
+                    int itemId = ReadItemId(reader, version, itemIdsByName);
+                    List<int> requiredCraftingMapObjectIds = ReadCraftingMapObjectRuntimeIds(reader, version, itemIdsByName);
                     int outputCount = version >= OutputCountCraftingTreeFileVersion
                         ? Mathf.Max(1, reader.ReadInt32())
                         : 1;
@@ -166,7 +176,7 @@ public static class CraftingTreeRuntime
                     List<IngredientEntry> ingredientList = null;
                     for (int j = 0; j < ingredientCount; j++)
                     {
-                        int ingredientId = reader.ReadInt32();
+                        int ingredientId = ReadItemId(reader, version, itemIdsByName);
                         int ingredientCountValue = reader.ReadInt32();
 
                         if (itemId < 0 || ingredientId < 0)
@@ -240,7 +250,10 @@ public static class CraftingTreeRuntime
         }
     }
 
-    private static List<int> ReadCraftingMapObjectRuntimeIds(BinaryReader reader, int version)
+    private static List<int> ReadCraftingMapObjectRuntimeIds(
+        BinaryReader reader,
+        int version,
+        Dictionary<string, int> itemIdsByName)
     {
         List<int> results = null;
         if (reader == null)
@@ -248,7 +261,21 @@ public static class CraftingTreeRuntime
             return results;
         }
 
-        if (version >= CurrentCraftingTreeFileVersion)
+        if (version >= ItemNameCraftingTreeFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                results = AppendRuntimeMapObjectId(
+                    results,
+                    ResolveItemId(reader.ReadString(), itemIdsByName),
+                    mapObjectCount);
+            }
+
+            return results;
+        }
+
+        if (version >= ItemIdCraftingTreeFileVersion)
         {
             int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
             for (int i = 0; i < mapObjectCount; i++)
@@ -278,14 +305,102 @@ public static class CraftingTreeRuntime
             int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
             for (int i = 0; i < mapObjectCount; i++)
             {
-                AppendRuntimeMapObjectId(results, ResolveRuntimeMapObjectIdFromGuid(reader.ReadString()), mapObjectCount);
+                results = AppendRuntimeMapObjectId(
+                    results,
+                    ResolveRuntimeMapObjectIdFromGuid(reader.ReadString()),
+                    mapObjectCount);
             }
 
             return results;
         }
 
-        AppendRuntimeMapObjectId(results, ResolveRuntimeMapObjectIdFromGuid(reader.ReadString()), 1);
+        results = AppendRuntimeMapObjectId(results, ResolveRuntimeMapObjectIdFromGuid(reader.ReadString()), 1);
         return results;
+    }
+
+    private static int ReadItemId(BinaryReader reader, int version, Dictionary<string, int> itemIdsByName)
+    {
+        return version >= ItemNameCraftingTreeFileVersion
+            ? ResolveItemId(reader.ReadString(), itemIdsByName)
+            : reader.ReadInt32();
+    }
+
+    private static int ResolveItemId(string itemName, Dictionary<string, int> itemIdsByName)
+    {
+        if (itemIdsByName != null
+            && !string.IsNullOrWhiteSpace(itemName)
+            && itemIdsByName.TryGetValue(itemName.Trim(), out int itemId))
+        {
+            return itemId;
+        }
+
+        Debug.LogWarning($"CraftingTreeRuntime: ItemDefinition '{itemName}' was not found.");
+        return -1;
+    }
+
+    private static bool TryBuildItemIdLookup(out Dictionary<string, int> itemIdsByName)
+    {
+        itemIdsByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : UnityEngine.Object.FindAnyObjectByType<ItemManager>();
+        if (itemManager == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<ItemDefinition> definitions = itemManager.ItemDefinitions;
+        if (definitions != null)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition == null || definition.id < 0)
+                {
+                    continue;
+                }
+
+                AddItemName(
+                    itemIdsByName,
+                    ItemDefinitionLookup.GetPersistenceName(definition, definitions),
+                    definition.id);
+            }
+        }
+
+        if (itemIdsByName.Count == 0)
+        {
+            IReadOnlyList<ItemManager.ItemSet> itemSets = itemManager.ItemSets;
+            if (itemSets != null)
+            {
+                for (int i = 0; i < itemSets.Count; i++)
+                {
+                    AddItemName(itemIdsByName, itemSets[i].name, itemSets[i].id);
+                }
+            }
+        }
+
+        return itemIdsByName.Count > 0;
+    }
+
+    private static void AddItemName(Dictionary<string, int> itemIdsByName, string itemName, int itemId)
+    {
+        if (itemIdsByName == null || string.IsNullOrWhiteSpace(itemName) || itemId < 0)
+        {
+            return;
+        }
+
+        string normalizedName = itemName.Trim();
+        if (itemIdsByName.TryGetValue(normalizedName, out int existingId))
+        {
+            if (existingId != itemId)
+            {
+                Debug.LogError($"CraftingTreeRuntime: duplicate item name '{normalizedName}' ({existingId}, {itemId}).");
+            }
+
+            return;
+        }
+
+        itemIdsByName.Add(normalizedName, itemId);
     }
 
     private static List<int> AppendRuntimeMapObjectId(List<int> results, int runtimeId, int capacityHint)

@@ -658,6 +658,7 @@ public class InstallationObject : MapObject
 
     protected virtual void OnEnable()
     {
+        RefreshItemLight();
         ActiveInstances.Add(this);
         RegisterRuntimeCoordinateIndex(this);
         globalMaxFocusActivationRadiusDirty = true;

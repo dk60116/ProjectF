@@ -47,6 +47,14 @@ public class MeshTransformEditorWindow : EditorWindow
         AxisZ
     }
 
+    private enum PivotPreset
+    {
+        Origin,
+        Bottom,
+        Center,
+        Top
+    }
+
     private enum PreviewSceneGizmoHit
     {
         None,
@@ -244,42 +252,59 @@ public class MeshTransformEditorWindow : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            if (GUILayout.Button("Origin", GUILayout.Height(PresetButtonHeight)))
+            DrawPivotPresetButton("원점", PivotPreset.Origin);
+            DrawPivotPresetButton("바닥", PivotPreset.Bottom);
+            DrawPivotPresetButton("중앙", PivotPreset.Center);
+            DrawPivotPresetButton("위", PivotPreset.Top);
+        }
+    }
+
+    private void DrawPivotPresetButton(string label, PivotPreset preset)
+    {
+        if (GUILayout.Button(label, GUILayout.Height(PresetButtonHeight)))
+        {
+            ApplyPivotPreset(preset);
+        }
+    }
+
+    private void ApplyPivotPreset(PivotPreset preset)
+    {
+        Vector3 nextPivotPosition;
+        if (preset == PivotPreset.Origin)
+        {
+            nextPivotPosition = Vector3.zero;
+        }
+        else
+        {
+            if (!TryGetSourceBounds(out Bounds bounds))
             {
-                pivotPosition = Vector3.zero;
-                previewDirty = true;
+                return;
             }
 
-            if (GUILayout.Button("Center", GUILayout.Height(PresetButtonHeight)))
+            switch (preset)
             {
-                if (TryGetSourceBounds(out Bounds bounds))
-                {
-                    pivotPosition = bounds.center;
-                }
-
-                previewDirty = true;
-            }
-
-            if (GUILayout.Button("Bottom", GUILayout.Height(PresetButtonHeight)))
-            {
-                if (TryGetSourceBounds(out Bounds bounds))
-                {
-                    pivotPosition = new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
-                }
-
-                previewDirty = true;
-            }
-
-            if (GUILayout.Button("Top", GUILayout.Height(PresetButtonHeight)))
-            {
-                if (TryGetSourceBounds(out Bounds bounds))
-                {
-                    pivotPosition = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z);
-                }
-
-                previewDirty = true;
+                case PivotPreset.Bottom:
+                    nextPivotPosition = new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
+                    break;
+                case PivotPreset.Top:
+                    nextPivotPosition = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z);
+                    break;
+                default:
+                    nextPivotPosition = bounds.center;
+                    break;
             }
         }
+
+        if (pivotPosition == nextPivotPosition)
+        {
+            return;
+        }
+
+        Undo.RecordObject(this, "Set Mesh Transform Pivot Preset");
+        pivotPosition = nextPivotPosition;
+        previewDirty = true;
+        EditorUtility.SetDirty(this);
+        Repaint();
     }
 
     private void DrawOptionsSection()

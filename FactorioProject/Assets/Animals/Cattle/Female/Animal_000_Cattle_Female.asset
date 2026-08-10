@@ -18,6 +18,45 @@ MonoBehaviour:
   minHerdSize: 2
   maxHerdSize: 6
   spawnWeight: 5
+  maxHealth: 100
+  dropItems:
+  - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+    minAmount: 1
+    maxAmount: 3
+    dropChance: 1
   animalPrefab: {fileID: 6074222046392736189, guid: a64177c54513ae744acbb2e8e4cfe377, type: 3}
   adultIcon: {fileID: 21300000, guid: f715c08f2799d984096afaa775bf5792, type: 3}
   childIcon: {fileID: 21300000, guid: 6b16238b4b8331e4fae57a4eab66b8f6, type: 3}
+  aiSettings:
+    herdAreaRadius: 15
+    separationRadius: 1.25
+    separationWeight: 1.5
+    cohesionWeight: 0.65
+    moveSpeed: 1.25
+    turnSpeed: 220
+    obstacleProbeDistance: 1.5
+    arrivalDistance: 0.35
+    fleeSafeDistance: 12
+    nearbyThreatRadius: 8
+    fleeSpeedMultiplier: 1.5
+    youngSpeedMultiplier: 0.4
+    maleSpeedMultiplier: 0.55
+    femaleSpeedMultiplier: 0.5
+    youngWanderWeightMultiplier: 1.35
+    youngRestWeightMultiplier: 1.25
+    idleWeight: 2
+    lookAroundWeight: 2
+    wanderWeight: 4
+    grazeWeight: 3
+    drinkWeight: 1
+    restWeight: 1.5
+    idleDuration: {x: 2, y: 6}
+    lookAroundDuration: {x: 2, y: 5}
+    wanderDuration: {x: 4, y: 10}
+    grazeDuration: {x: 4, y: 8}
+    drinkDuration: {x: 3, y: 6}
+    restDuration: {x: 6, y: 14}

@@ -74,6 +74,8 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half _RippleSpeedB;
             CBUFFER_END
 
+            #include "TerrainWaterLighting.hlsl"
+
             float StationaryWaveHeight(float2 worldXZ, float time)
             {
                 float2 waveA = float2(0.82, 0.57);
@@ -147,6 +149,7 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half lightFacing = saturate(dot(normalWS, lightDirectionWS) * 0.35h + 0.65h);
                 half shadowAttenuation = mainLight.shadowAttenuation * mainLight.distanceAttenuation;
                 half3 color = baseColor * lerp(0.78h, 1.05h, lightFacing * shadowAttenuation);
+                color *= GetWorldWaterBrightness();
                 color = MixFog(color, input.fogFactor);
 
                 return half4(color, _BaseColor.a);

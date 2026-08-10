@@ -15,6 +15,11 @@ public class PlayerBag : MonoBehaviour
     private readonly List<int> visualPreservedStackCounts = new List<int>();
     private bool initialized;
     private bool usesExternalStack;
+    private int retainedSlotIndex = -1;
+    private int retainedItemId = -1;
+    private int retainedMinimumCount;
+    private PortableObject hiddenRetainedObject;
+    private int hiddenRetainedObjectIndex = -1;
 
     private void Awake()
     {
@@ -249,7 +254,10 @@ public class PlayerBag : MonoBehaviour
         }
 
         EnsureVisualPreservedStackCounts();
-        int count = CountContiguousActiveObjects(stack);
+        bool hasHiddenRetainedObject = HasHiddenRetainedObject(0, stack);
+        int count = hasHiddenRetainedObject
+            ? CountActiveObjects(stack) + 1
+            : CountContiguousActiveObjects(stack);
         int preservedCount = Mathf.Clamp(GetVisualPreservedStackCount(0), 0, count);
         visualPreservedStackCounts[0] = preservedCount;
         currentStack[0] = Mathf.Clamp(count - preservedCount, 0, stack.stack.Count);
@@ -484,6 +492,9 @@ public class PlayerBag : MonoBehaviour
         PortableStack stack = portableStack[index];
         int maxCount = stack != null && stack.stack != null ? stack.stack.Count : 0;
         int clamped = Mathf.Clamp(count, 0, maxCount);
+        clamped = Mathf.Max(
+            clamped,
+            GetRetainedMinimumCount(index, GetSlotItemId(index)));
         bool countChanged = currentStack[index] != clamped;
         currentStack[index] = clamped;
         ClampVisualPreservedStackCount(index);
@@ -526,6 +537,11 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
+        if (WouldViolateRetainedMinimum(index, itemId, clamped))
+        {
+            return false;
+        }
+
         bool changed = currentStack[index] != clamped;
         currentStack[index] = clamped;
         if (index < visualPreservedStackCounts.Count && visualPreservedStackCounts[index] != 0)
@@ -542,7 +558,8 @@ public class PlayerBag : MonoBehaviour
                 continue;
             }
 
-            bool shouldBeActive = objectIndex < clamped;
+            bool shouldBeActive = objectIndex < clamped
+                                  && portableObject != hiddenRetainedObject;
             if (shouldBeActive)
             {
                 if (portableObject.ItemId != itemId)
@@ -786,7 +803,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         int occupiedCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
-        if (occupiedCount <= 0)
+        if (occupiedCount <= GetRetainedMinimumCount(index, GetSlotItemId(index)))
         {
             return false;
         }
@@ -848,24 +865,13 @@ public class PlayerBag : MonoBehaviour
         }
 
         objectId = GetSlotItemId(index);
-        removedCount = occupiedCount;
-
-        for (int i = 0; i < occupiedCount; i++)
+        int removableCount = occupiedCount - GetRetainedMinimumCount(index, objectId);
+        removedCount = RemoveItemsFromSlot(index, removableCount);
+        if (removedCount <= 0)
         {
-            PortableObject portableObject = stack.stack[i];
-            if (portableObject != null)
-            {
-                portableObject.gameObject.SetActive(false);
-            }
+            return false;
         }
 
-        currentStack[index] = 0;
-        if (index < visualPreservedStackCounts.Count)
-        {
-            visualPreservedStackCounts[index] = 0;
-        }
-
-        SynchronizeSlotObjectActivity(index);
         TryMergeDuplicateItemStacks();
         NotifyChanged();
         return objectId >= 0 && removedCount > 0;
@@ -995,7 +1001,13 @@ public class PlayerBag : MonoBehaviour
             return 0;
         }
 
-        int removeCount = Mathf.Clamp(count, 0, occupiedCount);
+        int removableCount = occupiedCount
+                             - GetRetainedMinimumCount(index, GetSlotItemId(index));
+        int removeCount = Mathf.Clamp(count, 0, Mathf.Max(0, removableCount));
+        if (removeCount <= 0)
+        {
+            return 0;
+        }
         if (preserveVisuals)
         {
             int activeCount = CountContiguousActiveObjects(stack);
@@ -1107,7 +1119,9 @@ public class PlayerBag : MonoBehaviour
 
         int sourceCount = Mathf.Clamp(currentStack[sourceIndex], 0, sourceStack.stack.Count);
         int targetCount = Mathf.Clamp(currentStack[targetIndex], 0, targetStack.stack.Count);
-        if (sourceCount < moveCount || targetCount + moveCount > targetStack.stack.Count)
+        if (sourceCount < moveCount
+            || GetSlotRemovableCount(sourceIndex) < moveCount
+            || targetCount + moveCount > targetStack.stack.Count)
         {
             return false;
         }
@@ -1586,6 +1600,7 @@ public class PlayerBag : MonoBehaviour
     private void ClearAllSlots(bool notify = true)
     {
         EnsureInitialized();
+        ResetRetainedSlotState(false);
         reservedObjects.Clear();
         if (portableStack == null || currentStack == null)
         {
@@ -1687,6 +1702,170 @@ public class PlayerBag : MonoBehaviour
         }
 
         return Mathf.Max(0, currentStack[index]);
+    }
+
+    public bool SetSlotMinimumRetainedCount(
+        int index,
+        int itemId,
+        int minimumCount)
+    {
+        EnsureInitialized();
+        int resolvedMinimum = Mathf.Max(0, minimumCount);
+        if (resolvedMinimum <= 0)
+        {
+            ClearSlotMinimumRetainedCount(index);
+            return true;
+        }
+
+        if (index < 0
+            || itemId < 0
+            || GetSlotItemId(index) != itemId
+            || GetSlotCount(index) < resolvedMinimum)
+        {
+            return false;
+        }
+
+        if (retainedMinimumCount > 0
+            && (retainedSlotIndex != index || retainedItemId != itemId))
+        {
+            ResetRetainedSlotState(true);
+        }
+
+        retainedSlotIndex = index;
+        retainedItemId = itemId;
+        retainedMinimumCount = resolvedMinimum;
+        return true;
+    }
+
+    public bool TryHideRetainedSlotObject(int index, int itemId)
+    {
+        EnsureInitialized();
+        if (index != retainedSlotIndex
+            || itemId != retainedItemId
+            || retainedMinimumCount <= 0
+            || portableStack == null
+            || currentStack == null
+            || index < 0
+            || index >= portableStack.Count
+            || index >= currentStack.Count)
+        {
+            return false;
+        }
+
+        PortableStack stack = portableStack[index];
+        int objectIndex = retainedMinimumCount - 1;
+        if (stack == null
+            || stack.stack == null
+            || objectIndex < 0
+            || objectIndex >= currentStack[index]
+            || objectIndex >= stack.stack.Count)
+        {
+            return false;
+        }
+
+        PortableObject portableObject = stack.stack[objectIndex];
+        if (portableObject == null || portableObject.ItemId != itemId)
+        {
+            return false;
+        }
+
+        if (hiddenRetainedObject != null && hiddenRetainedObject != portableObject)
+        {
+            ResetHiddenRetainedObject(true);
+        }
+
+        hiddenRetainedObject = portableObject;
+        hiddenRetainedObjectIndex = objectIndex;
+        if (portableObject.gameObject.activeSelf)
+        {
+            portableObject.gameObject.SetActive(false);
+            NotifyChanged();
+        }
+
+        return true;
+    }
+
+    public void ClearSlotMinimumRetainedCount(int index, bool restoreHiddenObject = true)
+    {
+        if (index != retainedSlotIndex)
+        {
+            return;
+        }
+
+        ResetRetainedSlotState(restoreHiddenObject);
+    }
+
+    public int GetSlotRemovableCount(int index)
+    {
+        int currentCount = GetSlotCount(index);
+        int retainedCount = GetRetainedMinimumCount(index, GetSlotItemId(index));
+        return Mathf.Max(0, currentCount - retainedCount);
+    }
+
+    private int GetRetainedMinimumCount(int index, int itemId)
+    {
+        return index == retainedSlotIndex && itemId == retainedItemId
+            ? Mathf.Max(0, retainedMinimumCount)
+            : 0;
+    }
+
+    private bool WouldViolateRetainedMinimum(int index, int itemId, int count)
+    {
+        return index == retainedSlotIndex
+               && retainedMinimumCount > 0
+               && (itemId != retainedItemId || count < retainedMinimumCount);
+    }
+
+    private void ResetRetainedSlotState(bool restoreHiddenObject)
+    {
+        ResetHiddenRetainedObject(restoreHiddenObject);
+        retainedSlotIndex = -1;
+        retainedItemId = -1;
+        retainedMinimumCount = 0;
+    }
+
+    private void ResetHiddenRetainedObject(bool restoreVisibility)
+    {
+        bool restored = restoreVisibility
+                        && hiddenRetainedObject != null
+                        && retainedSlotIndex >= 0
+                        && currentStack != null
+                        && retainedSlotIndex < currentStack.Count
+                        && hiddenRetainedObjectIndex >= 0
+                        && hiddenRetainedObjectIndex < currentStack[retainedSlotIndex]
+                        && hiddenRetainedObject.ItemId == retainedItemId;
+        if (restored && !hiddenRetainedObject.gameObject.activeSelf)
+        {
+            hiddenRetainedObject.gameObject.SetActive(true);
+        }
+
+        hiddenRetainedObject = null;
+        hiddenRetainedObjectIndex = -1;
+        if (restored)
+        {
+            NotifyChanged();
+        }
+    }
+
+    private bool HasHiddenRetainedObject(int index, PortableStack stack)
+    {
+        if (index != retainedSlotIndex
+            || hiddenRetainedObject == null
+            || hiddenRetainedObjectIndex < 0
+            || stack == null
+            || stack.stack == null
+            || hiddenRetainedObjectIndex >= stack.stack.Count
+            || stack.stack[hiddenRetainedObjectIndex] != hiddenRetainedObject)
+        {
+            return false;
+        }
+
+        if (hiddenRetainedObject.gameObject.activeSelf)
+        {
+            hiddenRetainedObject.gameObject.SetActive(false);
+        }
+
+        return true;
     }
 
     public int GetSlotMaxCount(int index)
@@ -1888,6 +2067,26 @@ public class PlayerBag : MonoBehaviour
             }
 
             count++;
+        }
+
+        return count;
+    }
+
+    private static int CountActiveObjects(PortableStack stack)
+    {
+        if (stack == null || stack.stack == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < stack.stack.Count; i++)
+        {
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject != null && portableObject.gameObject.activeSelf)
+            {
+                count++;
+            }
         }
 
         return count;

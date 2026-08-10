@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 
-public class RobotArm : InstallationObject, IMapObjectUpdateTick
+public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWorkStateProvider
 {
     private static readonly int PickTriggerHash = Animator.StringToHash("tPick");
     private static readonly int DropTriggerHash = Animator.StringToHash("tDrop");
@@ -159,6 +159,14 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     public float BackgroundTurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
+    public bool IsWorkingForItemLight
+    {
+        get
+        {
+            ResolveObjectInfoStatus(out bool isWorking);
+            return isWorking;
+        }
+    }
 
     public void SetPreviewRenderingMode(bool enabled)
     {

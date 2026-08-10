@@ -37,6 +37,7 @@ public class MapObject : PropObj
     public MapObjectStatus Status => mapStatus;
     public MultiFocusMode FocusMode => multiFocusMode;
     public bool AllowsFocus => multiFocusMode != MultiFocusMode.None;
+    public virtual bool AllowsAnimalTraversal => false;
     public bool IsItemFilterMaskInitialized => itemFilterMaskInitialized;
     public Vector2Int PlacementCenterCell
     {

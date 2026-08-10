@@ -1,18 +1,19 @@
 using System;
 using System.Collections.Generic;
-using System.Net.NetworkInformation;
 using UnityEngine;
 using UnityEngine.Serialization;
-using UnityEngine.UI;
 
 public class Player : Character
 {
     private static readonly int PickHash = Animator.StringToHash("tPick");
+    private static readonly int ThrowHash = Animator.StringToHash("tThrow");
     private static readonly int CarryHash = Animator.StringToHash("fCarry");
+    private static readonly int MoveAnimationSpeedHash = Animator.StringToHash("fMoveSpeed");
     private const string PickStateName = "Pick";
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
     private const float PlayerRootY = 0f;
+    private const float TorchEnergyEpsilon = 0.0001f;
 
     [Serializable]
     public struct PlayerState
@@ -75,6 +76,34 @@ public class Player : Character
     private Vector2Int dropExitOriginCoord;
     private Vector2Int lastDropTargetCoord;
     private bool hasLastDropTarget;
+
+    [Header("Equips")]
+    [SerializeField]
+    private GameObject knifeObject;
+    [SerializeField]
+    private GameObject axeObject;
+    [SerializeField]
+    private GameObject pickaxeObject;
+    [SerializeField]
+    private GameObject torchObject;
+
+    private PlayerController playerController;
+    private int toggledLightItemId = -1;
+    private ItemDefinition toggledLightDefinition;
+    private bool itemLightToggleRequested;
+    private float activeTorchEnergy;
+    private float activeTorchEnergyCapacity;
+
+    private enum ToolEquipVisual
+    {
+        None,
+        Knife,
+        Axe,
+        Pickaxe
+    }
+
+    private ToolEquipVisual activeToolEquipVisual;
+    private bool torchEquipVisualActive;
 
     private void InitializeHandStack()
     {
@@ -153,6 +182,9 @@ public class Player : Character
 
     protected void Awake()
     {
+        playerController = GetComponent<PlayerController>();
+        ApplyToolEquipVisual(ToolEquipVisual.None, true);
+        ApplyTorchEquipVisual(false, true);
         ApplyBagLevelVisibility();
         RefreshBagUI();
     }
@@ -170,6 +202,256 @@ public class Player : Character
         RefreshBagUI();
     }
 
+    private void LateUpdate()
+    {
+        UpdateActiveTorchEnergy(Time.deltaTime);
+        RefreshEquipVisual();
+    }
+
+    public bool ToggleTorchEquip(int torchItemId)
+    {
+        return ToggleTorchEquip(ResolveItemDefinition(torchItemId));
+    }
+
+    public bool ToggleTorchEquip(ItemDefinition torchDefinition)
+    {
+        return ToggleHeldItemLight(torchDefinition);
+    }
+
+    public bool ToggleHeldItemLight(ItemDefinition itemDefinition)
+    {
+        bool usesTorchEquip = IsTorchDefinition(itemDefinition);
+        if (itemDefinition == null
+            || itemDefinition.id < 0
+            || (!usesTorchEquip && itemDefinition.lightMode != ItemDefinition.ItemLightMode.Toggle))
+        {
+            return false;
+        }
+
+        bool togglingOff = itemLightToggleRequested
+                           && toggledLightItemId == itemDefinition.id;
+        if (togglingOff)
+        {
+            DeactivateHeldItemLight();
+            RefreshEquipVisual();
+            return true;
+        }
+
+        EnsureHandBag();
+        if (handBag == null
+            || handBag.GetSlotCount(0) <= 0
+            || handBag.GetSlotItemId(0) != itemDefinition.id)
+        {
+            return false;
+        }
+
+        if (usesTorchEquip)
+        {
+            float energyCapacity = ItemDefinition.ResolveCompleteEnergyAmount(itemDefinition);
+            float energyRate = ItemDefinition.ResolveUseEnergyRatePerSecond(itemDefinition);
+            if (!IsValidTorchEnergy(energyCapacity)
+                || !IsValidTorchEnergy(energyRate)
+                || !handBag.TryRemoveOneAtSlot(0, out int consumedItemId, false)
+                || consumedItemId != itemDefinition.id)
+            {
+                return false;
+            }
+
+            DeactivateHeldItemLight();
+            itemLightToggleRequested = true;
+            toggledLightItemId = itemDefinition.id;
+            toggledLightDefinition = itemDefinition;
+            activeTorchEnergy = energyCapacity;
+            activeTorchEnergyCapacity = energyCapacity;
+            UpdateCarryState();
+        }
+        else
+        {
+            DeactivateHeldItemLight();
+            itemLightToggleRequested = true;
+            toggledLightItemId = itemDefinition.id;
+            toggledLightDefinition = itemDefinition;
+            SetHeldPortableLightToggled(itemDefinition.id, true);
+        }
+
+        RefreshEquipVisual();
+        return true;
+    }
+
+    public bool TryGetActiveTorchEnergy(
+        out ItemDefinition itemDefinition,
+        out float remainingEnergy,
+        out float energyCapacity)
+    {
+        bool isActive = itemLightToggleRequested
+                        && IsTorchDefinition(toggledLightDefinition)
+                        && IsValidTorchEnergy(activeTorchEnergy)
+                        && IsValidTorchEnergy(activeTorchEnergyCapacity);
+        itemDefinition = isActive ? toggledLightDefinition : null;
+        remainingEnergy = isActive ? activeTorchEnergy : 0f;
+        energyCapacity = isActive ? activeTorchEnergyCapacity : 0f;
+        return isActive;
+    }
+
+    private void UpdateActiveTorchEnergy(float deltaTime)
+    {
+        if (!itemLightToggleRequested || !IsTorchDefinition(toggledLightDefinition))
+        {
+            return;
+        }
+
+        float energyRate = ItemDefinition.ResolveUseEnergyRatePerSecond(toggledLightDefinition);
+        if (!IsValidTorchEnergy(activeTorchEnergy) || !IsValidTorchEnergy(energyRate))
+        {
+            DeactivateHeldItemLight();
+            return;
+        }
+
+        activeTorchEnergy = Mathf.Max(0f, activeTorchEnergy - energyRate * Mathf.Max(0f, deltaTime));
+        if (!IsValidTorchEnergy(activeTorchEnergy))
+        {
+            DeactivateHeldItemLight();
+        }
+    }
+
+    private void DeactivateHeldItemLight()
+    {
+        if (itemLightToggleRequested && !IsTorchDefinition(toggledLightDefinition))
+        {
+            SetHeldPortableLightToggled(toggledLightItemId, false);
+        }
+
+        itemLightToggleRequested = false;
+        toggledLightItemId = -1;
+        toggledLightDefinition = null;
+        activeTorchEnergy = 0f;
+        activeTorchEnergyCapacity = 0f;
+    }
+
+    private void RefreshEquipVisual()
+    {
+        if (playerController == null)
+        {
+            playerController = GetComponent<PlayerController>();
+        }
+
+        if (itemLightToggleRequested
+            && !IsTorchDefinition(toggledLightDefinition)
+            && !IsToggledLightItemStillHeld())
+        {
+            DeactivateHeldItemLight();
+        }
+
+        ToolEquipVisual nextToolEquip = ToolEquipVisual.None;
+        if (playerController != null && playerController.IsAnimalKnifeInteractionActive)
+        {
+            nextToolEquip = ToolEquipVisual.Knife;
+        }
+        else if (playerController != null
+                 && playerController.TryGetActiveResourceHarvestMode(
+                     out Resource.HarvestMode harvestMode))
+        {
+            nextToolEquip = harvestMode switch
+            {
+                Resource.HarvestMode.Logging => ToolEquipVisual.Axe,
+                Resource.HarvestMode.Cut => ToolEquipVisual.Knife,
+                _ => ToolEquipVisual.Pickaxe
+            };
+        }
+
+        ApplyToolEquipVisual(nextToolEquip);
+        ApplyTorchEquipVisual(
+            itemLightToggleRequested && IsTorchDefinition(toggledLightDefinition));
+    }
+
+    private bool IsToggledLightItemStillHeld()
+    {
+        EnsureHandBag();
+        return toggledLightItemId >= 0
+               && handBag != null
+               && handBag.GetSlotCount(0) > 0
+               && handBag.GetSlotItemId(0) == toggledLightItemId;
+    }
+
+    private void ApplyToolEquipVisual(ToolEquipVisual nextEquip, bool force = false)
+    {
+        if (!force && activeToolEquipVisual == nextEquip)
+        {
+            return;
+        }
+
+        SetEquipObjectActive(knifeObject, nextEquip == ToolEquipVisual.Knife);
+        SetEquipObjectActive(axeObject, nextEquip == ToolEquipVisual.Axe);
+        SetEquipObjectActive(pickaxeObject, nextEquip == ToolEquipVisual.Pickaxe);
+        activeToolEquipVisual = nextEquip;
+    }
+
+    private void ApplyTorchEquipVisual(bool active, bool force = false)
+    {
+        if (!force && torchEquipVisualActive == active)
+        {
+            return;
+        }
+
+        SetEquipObjectActive(torchObject, active);
+        ItemLightController.Configure(
+            torchObject,
+            active ? toggledLightDefinition : null,
+            active);
+        torchEquipVisualActive = active;
+    }
+
+    private void SetHeldPortableLightToggled(int itemId, bool active)
+    {
+        if (itemId < 0 || handStack == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject != null && portableObject.ItemId == itemId)
+            {
+                portableObject.SetItemLightToggled(active);
+            }
+        }
+    }
+
+    private static bool IsTorchDefinition(ItemDefinition definition)
+    {
+        return definition != null
+               && string.Equals(
+                   definition.itemName,
+                   "Torch",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsValidTorchEnergy(float value)
+    {
+        return value > TorchEnergyEpsilon
+               && !float.IsNaN(value)
+               && !float.IsInfinity(value);
+    }
+
+    private static ItemDefinition ResolveItemDefinition(int itemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return ItemDefinitionLookup.ResolveById(
+            itemManager != null ? itemManager.ItemDefinitions : null,
+            itemId);
+    }
+
+    private static void SetEquipObjectActive(GameObject equipObject, bool active)
+    {
+        if (equipObject != null && equipObject.activeSelf != active)
+        {
+            equipObject.SetActive(active);
+        }
+    }
+
     public void QueuePickAnimation()
     {
         pendingPickTriggerCount++;
@@ -178,6 +460,26 @@ public class Player : Character
     public void ClearQueuedPickAnimations()
     {
         pendingPickTriggerCount = 0;
+    }
+
+    public bool TriggerThrowAnimation()
+    {
+        if (animator == null)
+        {
+            animator = GetComponentInChildren<Animator>();
+        }
+
+        if (animator == null)
+        {
+            return false;
+        }
+
+        ClearQueuedPickAnimations();
+        animator.SetBool(MoveHash, false);
+        animator.ResetTrigger(PickHash);
+        animator.ResetTrigger(ThrowHash);
+        animator.SetTrigger(ThrowHash);
+        return true;
     }
 
     public void StopImmediateActions()
@@ -190,6 +492,7 @@ public class Player : Character
         }
 
         animator.SetBool(MoveHash, false);
+        animator.ResetTrigger(ThrowHash);
 
         if (IsPickStateActive())
         {
@@ -199,13 +502,16 @@ public class Player : Character
         wasPickStateActiveLastFrame = false;
     }
 
-    public bool UpdateAnimationState(bool shouldRun)
+    public bool UpdateAnimationState(bool shouldRun, float movementAnimationSpeed = 1f)
     {
         if (animator == null)
         {
             return false;
         }
 
+        animator.SetFloat(
+            MoveAnimationSpeedHash,
+            Mathf.Max(0f, movementAnimationSpeed));
         bool isPickActive = IsPickStateActive();
 
         if (shouldRun && isPickActive)
@@ -348,6 +654,15 @@ public class Player : Character
             handBag.CaptureSaveSlots(saveData.handSlots);
         }
 
+        if (TryGetActiveTorchEnergy(
+                out ItemDefinition activeTorchDefinition,
+                out float remainingTorchEnergy,
+                out _))
+        {
+            saveData.activeTorchItemId = activeTorchDefinition.id;
+            saveData.activeTorchRemainingEnergy = remainingTorchEnergy;
+        }
+
         PlayerController playerController = GetComponent<PlayerController>();
         if (playerController != null
             && playerController.TryGetMountedVehicleState(out Vehicle mountedVehicle, out int playerPointIndex)
@@ -357,6 +672,12 @@ public class Player : Character
             saveData.mountedVehiclePlacementSequence = mountedVehicle.RuntimePlacementSequence;
             saveData.mountedVehicleAnchorCoordinate = mountedVehicle.RuntimeAnchorCoordinate;
             saveData.mountedVehiclePlayerPointIndex = playerPointIndex;
+        }
+
+        if (playerController != null
+            && playerController.TryGetNooseLeashedAnimalId(out long leashedAnimalId))
+        {
+            saveData.nooseLeashedAnimalId = leashedAnimalId;
         }
 
         ResolvePlayerHUD()?.CaptureCraftingQueueSaveState(saveData.craftingQueue);
@@ -376,7 +697,13 @@ public class Player : Character
             return;
         }
 
-        GetComponent<PlayerController>()?.ClearInteractionPointSnapForLoad();
+        DeactivateHeldItemLight();
+        ApplyToolEquipVisual(ToolEquipVisual.None);
+        ApplyTorchEquipVisual(false);
+
+        PlayerController playerController = GetComponent<PlayerController>();
+        playerController?.ClearInteractionPointSnapForLoad();
+        playerController?.ClearNooseForLoad();
 
         Vector3 rootPosition = ClampRootPositionToGroundY(saveData.position);
         Rigidbody rigidbody = GetComponent<Rigidbody>();
@@ -444,9 +771,33 @@ public class Player : Character
             handBag.RefreshExternalStackCounts(false);
         }
 
+        RestoreActiveTorch(saveData.activeTorchItemId, saveData.activeTorchRemainingEnergy);
+
         UpdateCarryState();
         RefreshBagUI();
         ResolvePlayerHUD()?.ApplyCraftingQueueSaveState(saveData.craftingQueue);
+    }
+
+    private void RestoreActiveTorch(int itemId, float remainingEnergy)
+    {
+        ItemDefinition definition = ResolveItemDefinition(itemId);
+        float energyCapacity = ItemDefinition.ResolveCompleteEnergyAmount(definition);
+        float energyRate = ItemDefinition.ResolveUseEnergyRatePerSecond(definition);
+        if (!IsTorchDefinition(definition)
+            || !IsValidTorchEnergy(remainingEnergy)
+            || !IsValidTorchEnergy(energyCapacity)
+            || !IsValidTorchEnergy(energyRate))
+        {
+            RefreshEquipVisual();
+            return;
+        }
+
+        itemLightToggleRequested = true;
+        toggledLightItemId = definition.id;
+        toggledLightDefinition = definition;
+        activeTorchEnergyCapacity = energyCapacity;
+        activeTorchEnergy = Mathf.Min(remainingEnergy, energyCapacity);
+        RefreshEquipVisual();
     }
 
     private PlayerHUD ResolvePlayerHUD()
@@ -520,6 +871,29 @@ public class Player : Character
         }
 
         return activeBag.TryAddObject(objectId, out targetPortableObject);
+    }
+
+    public bool TryAddToBagAnimated(int objectId, Vector3 sourceWorldPosition)
+    {
+        if (!TryAddToBag(objectId, out PortableObject targetPortableObject))
+        {
+            return false;
+        }
+
+        if (targetPortableObject == null)
+        {
+            return true;
+        }
+
+        PlayPortableMoveToBag(new PortableMoveData(
+            targetPortableObject,
+            null,
+            targetPortableObject,
+            objectId,
+            sourceWorldPosition,
+            targetPortableObject.transform.position,
+            0f));
+        return true;
     }
 
     public bool TryAddToBagAtSlot(int slotIndex, int objectId, out PortableObject targetPortableObject)
@@ -804,10 +1178,10 @@ public class Player : Character
         }
 
         handBag.RefreshExternalStackCounts(false);
-        int handCount = handBag.GetSlotCount(0);
-        if (handCount <= 0)
+        int movableHandCount = handBag.GetSlotRemovableCount(0);
+        if (movableHandCount <= 0)
         {
-            return true;
+            return false;
         }
 
         int handItemId = handBag.GetSlotItemId(0);
@@ -822,7 +1196,7 @@ public class Player : Character
             return false;
         }
 
-        return activeBag.GetAvailableCapacityForItem(handItemId) >= handCount;
+        return activeBag.GetAvailableCapacityForItem(handItemId) >= movableHandCount;
     }
 
     public bool TryStoreHandItemsInBag()
@@ -834,10 +1208,10 @@ public class Player : Character
         }
 
         handBag.RefreshExternalStackCounts(false);
-        int handCount = handBag.GetSlotCount(0);
-        if (handCount <= 0)
+        int movableHandCount = handBag.GetSlotRemovableCount(0);
+        if (movableHandCount <= 0)
         {
-            return true;
+            return false;
         }
 
         int handItemId = handBag.GetSlotItemId(0);
@@ -854,9 +1228,9 @@ public class Player : Character
 
         List<PortableObject> sourcePortableObjects = new List<PortableObject>();
         handBag.TryGetOccupiedSlotObjects(0, sourcePortableObjects);
-        List<PortableMoveData> pendingMoves = new List<PortableMoveData>(handCount);
+        List<PortableMoveData> pendingMoves = new List<PortableMoveData>(movableHandCount);
 
-        for (int i = 0; i < handCount; i++)
+        for (int i = 0; i < movableHandCount; i++)
         {
             if (!activeBag.TryAddObject(handItemId, out PortableObject bagTargetPortableObject))
             {
@@ -875,6 +1249,7 @@ public class Player : Character
 
             pendingMoves.Add(new PortableMoveData(
                 sourcePortableObject,
+                sourcePortableObject,
                 bagTargetPortableObject,
                 handItemId,
                 startPosition,
@@ -882,7 +1257,7 @@ public class Player : Character
                 i * Mathf.Max(0f, handToBagPortableMoveInterval)));
         }
 
-        handBag.RemoveItems(handItemId, handCount);
+        handBag.RemoveItems(handItemId, movableHandCount);
         handBag.RefreshExternalStackCounts();
         UpdateCarryState();
 
@@ -964,6 +1339,7 @@ public class Player : Character
 
         public PortableMoveData(
             PortableObject template,
+            PortableObject sourcePortableObject,
             PortableObject targetPortableObject,
             int itemId,
             Vector3 startPosition,
@@ -971,7 +1347,7 @@ public class Player : Character
             float delay)
         {
             this.template = template;
-            sourcePortableObject = template;
+            this.sourcePortableObject = sourcePortableObject;
             this.targetPortableObject = targetPortableObject;
             this.itemId = itemId;
             this.startPosition = startPosition;

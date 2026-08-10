@@ -8,7 +8,9 @@ internal static class ProductionMachineRecipeAutoFill
 {
     private const string ProductionMachineMk1Name = "Production machine (Mk1)";
     private const string ProductionMachineMk2Name = "Production machine (MK2)";
-    private const int CurrentCraftingTreeFileVersion = 4;
+    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int ItemNameCraftingTreeFileVersion = 5;
+    private const int ItemIdCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
     private const int OutputCountCraftingTreeFileVersion = 2;
     private const int LegacyCraftingTreeFileVersion = 1;
@@ -168,7 +170,7 @@ internal static class ProductionMachineRecipeAutoFill
     {
         List<RecipeEntry> recipes = new List<RecipeEntry>();
         DefinitionLookup definitionLookup = new DefinitionLookup(definitions);
-        List<CraftingTreeJsonEntry> entries = LoadCraftingTreeEntries();
+        List<CraftingTreeJsonEntry> entries = LoadCraftingTreeEntries(definitions);
         HashSet<int> seenOutputItemIds = new HashSet<int>();
         int allowedIngredientTypes = Mathf.Max(1, maxIngredientTypes);
 
@@ -438,9 +440,9 @@ internal static class ProductionMachineRecipeAutoFill
         }
     }
 
-    private static List<CraftingTreeJsonEntry> LoadCraftingTreeEntries()
+    private static List<CraftingTreeJsonEntry> LoadCraftingTreeEntries(List<ItemDefinition> definitions)
     {
-        if (TryLoadCraftingTreeBytes(out List<CraftingTreeJsonEntry> binaryEntries))
+        if (TryLoadCraftingTreeBytes(definitions, out List<CraftingTreeJsonEntry> binaryEntries))
         {
             return binaryEntries;
         }
@@ -449,7 +451,9 @@ internal static class ProductionMachineRecipeAutoFill
         return GetCraftingTreeEntries(craftingTree);
     }
 
-    private static bool TryLoadCraftingTreeBytes(out List<CraftingTreeJsonEntry> entries)
+    private static bool TryLoadCraftingTreeBytes(
+        List<ItemDefinition> definitions,
+        out List<CraftingTreeJsonEntry> entries)
     {
         entries = new List<CraftingTreeJsonEntry>();
 
@@ -470,7 +474,7 @@ internal static class ProductionMachineRecipeAutoFill
             using (BinaryReader reader = new BinaryReader(stream))
             {
                 int version = reader.ReadInt32();
-                if (version != LegacyCraftingTreeFileVersion && version != CurrentCraftingTreeFileVersion)
+                if (version < LegacyCraftingTreeFileVersion || version > CurrentCraftingTreeFileVersion)
                 {
                     return false;
                 }
@@ -478,12 +482,11 @@ internal static class ProductionMachineRecipeAutoFill
                 int itemCount = Mathf.Max(0, reader.ReadInt32());
                 for (int i = 0; i < itemCount; i++)
                 {
-                    CraftingTreeJsonEntry entry = new CraftingTreeJsonEntry
-                    {
-                        itemId = reader.ReadInt32()
-                    };
+                    CraftingTreeJsonEntry entry = new CraftingTreeJsonEntry();
+                    ReadItemReference(reader, version, definitions, entry);
 
-                    List<CraftingMapObjectJsonEntry> mapObjects = ReadCraftingMapObjectEntries(reader, version);
+                    List<CraftingMapObjectJsonEntry> mapObjects =
+                        ReadCraftingMapObjectEntries(reader, version, definitions);
                     entry.craftingMapObjects.AddRange(mapObjects);
                     entry.requiredMapObjects.AddRange(mapObjects);
 
@@ -494,11 +497,10 @@ internal static class ProductionMachineRecipeAutoFill
                     int ingredientCount = Mathf.Max(0, reader.ReadInt32());
                     for (int ingredientIndex = 0; ingredientIndex < ingredientCount; ingredientIndex++)
                     {
-                        entry.ingredients.Add(new CraftingIngredientJsonEntry
-                        {
-                            itemId = reader.ReadInt32(),
-                            count = Mathf.Max(1, reader.ReadInt32())
-                        });
+                        CraftingIngredientJsonEntry ingredient = new CraftingIngredientJsonEntry();
+                        ReadItemReference(reader, version, definitions, ingredient);
+                        ingredient.count = Mathf.Max(1, reader.ReadInt32());
+                        entry.ingredients.Add(ingredient);
                     }
 
                     entries.Add(entry);
@@ -515,7 +517,10 @@ internal static class ProductionMachineRecipeAutoFill
         }
     }
 
-    private static List<CraftingMapObjectJsonEntry> ReadCraftingMapObjectEntries(BinaryReader reader, int version)
+    private static List<CraftingMapObjectJsonEntry> ReadCraftingMapObjectEntries(
+        BinaryReader reader,
+        int version,
+        List<ItemDefinition> definitions)
     {
         List<CraftingMapObjectJsonEntry> results = new List<CraftingMapObjectJsonEntry>();
         if (reader == null)
@@ -523,7 +528,31 @@ internal static class ProductionMachineRecipeAutoFill
             return results;
         }
 
-        if (version >= CurrentCraftingTreeFileVersion)
+        if (version >= ItemNameCraftingTreeFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                string persistenceName = reader.ReadString();
+                ItemDefinition definition =
+                    ItemDefinitionLookup.ResolveByPersistenceName(definitions, persistenceName);
+                if (definition != null)
+                {
+                    results.Add(new CraftingMapObjectJsonEntry
+                    {
+                        itemId = definition.id,
+                        mapObjectName = GetDefinitionDisplayName(definition),
+                        assetPath = definition.mapObject != null
+                            ? AssetDatabase.GetAssetPath(definition.mapObject.transform.root.gameObject)
+                            : string.Empty
+                    });
+                }
+            }
+
+            return results;
+        }
+
+        if (version >= ItemIdCraftingTreeFileVersion)
         {
             int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
             for (int i = 0; i < mapObjectCount; i++)
@@ -551,6 +580,64 @@ internal static class ProductionMachineRecipeAutoFill
 
         AddGuidMapObjectEntry(results, reader.ReadString());
         return results;
+    }
+
+    private static void ReadItemReference(
+        BinaryReader reader,
+        int version,
+        List<ItemDefinition> definitions,
+        CraftingTreeJsonEntry entry)
+    {
+        if (version < ItemNameCraftingTreeFileVersion)
+        {
+            entry.itemId = reader.ReadInt32();
+            return;
+        }
+
+        ApplyItemReference(
+            ItemDefinitionLookup.ResolveByPersistenceName(definitions, reader.ReadString()),
+            entry);
+    }
+
+    private static void ReadItemReference(
+        BinaryReader reader,
+        int version,
+        List<ItemDefinition> definitions,
+        CraftingIngredientJsonEntry entry)
+    {
+        if (version < ItemNameCraftingTreeFileVersion)
+        {
+            entry.itemId = reader.ReadInt32();
+            return;
+        }
+
+        ApplyItemReference(
+            ItemDefinitionLookup.ResolveByPersistenceName(definitions, reader.ReadString()),
+            entry);
+    }
+
+    private static void ApplyItemReference(ItemDefinition definition, CraftingTreeJsonEntry entry)
+    {
+        if (definition == null || entry == null)
+        {
+            return;
+        }
+
+        entry.itemId = definition.id;
+        entry.itemName = GetDefinitionDisplayName(definition);
+        entry.definitionAssetPath = AssetDatabase.GetAssetPath(definition);
+    }
+
+    private static void ApplyItemReference(ItemDefinition definition, CraftingIngredientJsonEntry entry)
+    {
+        if (definition == null || entry == null)
+        {
+            return;
+        }
+
+        entry.itemId = definition.id;
+        entry.itemName = GetDefinitionDisplayName(definition);
+        entry.definitionAssetPath = AssetDatabase.GetAssetPath(definition);
     }
 
     private static void AddGuidMapObjectEntry(List<CraftingMapObjectJsonEntry> results, string guid)

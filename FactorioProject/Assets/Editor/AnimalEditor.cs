@@ -41,7 +41,6 @@ public sealed class AnimalEditor : Editor
         DrawEditableProperty("DinoAge", "Age");
         DrawEditableProperty("BaseScale", "Base Scale");
         DrawEditableProperty("BabyScale", "Baby Scale");
-        DrawEditableProperty("eyeShapeChangingSpeed", "Eye Shape Speed");
         serializedObject.ApplyModifiedProperties();
 
         EditorGUILayout.Space(8f);

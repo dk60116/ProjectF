@@ -13,12 +13,14 @@ MonoBehaviour:
   m_Name: Item_14_Charcoal
   m_EditorClassIdentifier: 
   itemName: Charcoal
-  id: 14
+  id: 15
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 984c040f3a6583b4b980d2dabf30525a, type: 2}
   portableMat: {fileID: 2100000, guid: 18b6e63bb38afe440a0d47b49fdee14d, type: 2}
   icon: {fileID: 21300000, guid: fea8c20363581a34f8e5c0e8fec58dea, type: 3}
   interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

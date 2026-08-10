@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapObjectUpdateTickInterval
+public class InputOutputModule : InstallationObject,
+    IMapObjectUpdateTick,
+    IMapObjectUpdateTickInterval,
+    IItemLightWorkStateProvider
 {
     private const float DefaultManagedUpdateTickIntervalSeconds = 0.1f;
     protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
@@ -3016,6 +3019,14 @@ public class InputOutputModule : InstallationObject, IMapObjectUpdateTick, IMapO
     public float ObjectInfoCurrentUseEnergy => ResolveObjectInfoCurrentUseEnergy();
     public float ObjectInfoCompleteEnergy => ResolveObjectInfoCompleteEnergy();
     protected float OperationalAnimationSpeedRatio => ResolveOperationalAnimationSpeedRatio();
+    public bool IsWorkingForItemLight
+    {
+        get
+        {
+            ResolveObjectInfoStatus(out bool isWorking);
+            return isWorking;
+        }
+    }
 
     public void GetObjectInfoStatus(out string statusText, out bool isProducing)
     {

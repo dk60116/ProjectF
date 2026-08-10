@@ -12,13 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_51_Railload
   m_EditorClassIdentifier: 
-  itemName: Railload
-  id: 49
-  mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
-  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
-  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
-  icon: {fileID: 21300000, guid: 752ba3d8beb147145985e69296991c6c, type: 3}
+  itemName: Iron wheel
+  id: 58
+  mapObject: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: 3ac5cf3eb7d07b446ae7d941db5f8db4, type: 2}
+  portableMat: {fileID: 2100000, guid: 19ec132cdbe29b048b4ddf833c3f1b5a, type: 2}
+  icon: {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}
   interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

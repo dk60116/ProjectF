@@ -65,7 +65,7 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4909268776646986644, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 42872a1b7ef6da54abf30a525ddd4364, type: 2}
     m_RemovedComponents: []
@@ -111,7 +111,7 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
     - target: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -197,7 +197,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Wooden fence
-  objId: 37
+  objId: 38
   itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

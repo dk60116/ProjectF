@@ -82,7 +82,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Boiler
-  objId: 32
+  objId: 33
   itemDefinition: {fileID: 11400000, guid: 763440cffdd93a948a7d8e73c541f673, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -258,6 +258,11 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -279,9 +284,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1001 &3241712180935853145
 PrefabInstance:
@@ -348,7 +355,7 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: -7511558181221131132, guid: 89fd3b4948497294f859aded1a5cbe06, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 7e77f0dcd6e14e74caa4fd82780587d2, type: 2}
     - target: {fileID: 919132149155446097, guid: 89fd3b4948497294f859aded1a5cbe06, type: 3}
@@ -434,7 +441,7 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: -7511558181221131132, guid: a50e7730ff1621c4b8c96a9943d7110b, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 5e072138b7118fa4eae35a79d5bf0e83, type: 2}
     - target: {fileID: 919132149155446097, guid: a50e7730ff1621c4b8c96a9943d7110b, type: 3}

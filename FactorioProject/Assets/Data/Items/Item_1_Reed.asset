@@ -20,6 +20,8 @@ MonoBehaviour:
   icon: {fileID: 21300000, guid: de1de8772e6bd95418f5e646676e941b, type: 3}
   interactionButtonList:
   - {fileID: 21300000, guid: 06d339dd761e3e64bb04a0f22eb6eed5, type: 3}
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

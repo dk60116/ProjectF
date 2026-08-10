@@ -91,12 +91,17 @@ public class Block : BaseObject
 
     private bool interactionFocusVisible;
     private bool mouseFocusVisible;
+    private bool selectionFocusVisible;
+    private bool temporaryDropFocusVisible;
     private bool interactionFocusUsesArea;
     private bool mouseFocusUsesArea;
+    private bool selectionFocusUsesArea;
     private Vector3 interactionFocusAreaCenter;
     private Vector2 interactionFocusAreaSize = Vector2.one;
     private Vector3 mouseFocusAreaCenter;
     private Vector2 mouseFocusAreaSize = Vector2.one;
+    private Vector3 selectionFocusAreaCenter;
+    private Vector2 selectionFocusAreaSize = Vector2.one;
 
     private readonly List<List<PortableObject>> floorStacks = new List<List<PortableObject>>();
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
@@ -494,6 +499,8 @@ public class Block : BaseObject
         InvalidateConveyorRuntimeCaches();
         SetFocusVisible(false);
         SetMouseFocusVisible(false);
+        SetSelectionFocusVisible(false);
+        SetTemporaryDropFocusVisible(false);
     }
 
     public void SetMapObject(MapObject value)
@@ -624,6 +631,8 @@ public class Block : BaseObject
     {
         SetFocusVisible(false);
         SetMouseFocusVisible(false);
+        SetSelectionFocusVisible(false);
+        SetTemporaryDropFocusVisible(false);
         inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
         ResetFloorObjects();
@@ -754,7 +763,11 @@ public class Block : BaseObject
         }
 
         ConfigureFloorObjectTransform(portableObject, anchor, stack.Count);
-        portableObject.SetItem(objectId);
+        if (!TryInitializePooledPortableObject(portableObject, objectId))
+        {
+            return false;
+        }
+
         portableObject.SetBatchedRendering(true);
         stack.Add(portableObject);
         targetPortableObject = portableObject;
@@ -794,7 +807,11 @@ public class Block : BaseObject
             }
 
             ConfigureFloorObjectTransform(portableObject, anchor, stack.Count);
-            portableObject.SetItem(objectId);
+            if (!TryInitializePooledPortableObject(portableObject, objectId))
+            {
+                continue;
+            }
+
             portableObject.SetBatchedRendering(true);
             stack.Add(portableObject);
             targetPortableObject = portableObject;
@@ -1144,7 +1161,11 @@ public class Block : BaseObject
             return false;
         }
 
-        portableObject.SetItem(objectId);
+        if (!TryInitializePooledPortableObject(portableObject, objectId))
+        {
+            return false;
+        }
+
         portableObject.SetBatchedRendering(false);
         portableObject.transform.SetParent(inputAreaCenterAnchor, true);
         portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
@@ -1369,7 +1390,11 @@ public class Block : BaseObject
                 continue;
             }
 
-            portableObject.SetItem(objectId);
+            if (!TryInitializePooledPortableObject(portableObject, objectId))
+            {
+                continue;
+            }
+
             portableObject.SetBatchedRendering(false);
             portableObject.transform.SetParent(anchor, true);
             portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
@@ -1996,7 +2021,11 @@ public class Block : BaseObject
             return false;
         }
 
-        portableObject.SetItem(objectId);
+        if (!TryInitializePooledPortableObject(portableObject, objectId))
+        {
+            return false;
+        }
+
         portableObject.SetBatchedRendering(false);
         portableObject.transform.SetParent(transform, true);
         portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
@@ -2465,7 +2494,11 @@ public class Block : BaseObject
             return false;
         }
 
-        portableObject.SetItem(objectId);
+        if (!TryInitializePooledPortableObject(portableObject, objectId))
+        {
+            return false;
+        }
+
         ConfigureConveyorObjectTransform(portableObject, laneIndex, anchor);
         ApplyConveyorObjectRenderingMode(portableObject);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
@@ -3465,6 +3498,45 @@ public class Block : BaseObject
         RefreshFocusMarker();
     }
 
+    public void SetTemporaryDropFocusVisible(bool isVisible)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        temporaryDropFocusVisible = isVisible;
+        RefreshFocusMarker();
+    }
+
+    public void SetSelectionFocusVisible(bool isVisible)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        selectionFocusVisible = isVisible;
+        selectionFocusUsesArea = false;
+        RefreshFocusMarker();
+    }
+
+    public void SetSelectionFocusVisible(bool isVisible, Vector3 worldCenter, Vector2 worldSize)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        selectionFocusVisible = isVisible;
+        selectionFocusUsesArea = isVisible;
+        selectionFocusAreaCenter = worldCenter;
+        selectionFocusAreaSize = new Vector2(
+            Mathf.Max(0.01f, worldSize.x),
+            Mathf.Max(0.01f, worldSize.y));
+        RefreshFocusMarker();
+    }
+
     private void RefreshFocusMarker()
     {
         if (focus == null)
@@ -3477,11 +3549,20 @@ public class Block : BaseObject
             return;
         }
 
-        bool isVisible = interactionFocusVisible || mouseFocusVisible;
-        Color focusColor = mouseFocusVisible ? MapFocus.MouseFocusColor : MapFocus.DefaultFocusColor;
+        bool isVisible = interactionFocusVisible
+                         || mouseFocusVisible
+                         || selectionFocusVisible
+                         || temporaryDropFocusVisible;
+        Color focusColor = mouseFocusVisible || selectionFocusVisible
+            ? MapFocus.MouseFocusColor
+            : MapFocus.DefaultFocusColor;
         if (mouseFocusVisible && mouseFocusUsesArea)
         {
             focus.SetAreaVisible(true, focusColor, mouseFocusAreaCenter, mouseFocusAreaSize);
+        }
+        else if (selectionFocusVisible && selectionFocusUsesArea)
+        {
+            focus.SetAreaVisible(true, focusColor, selectionFocusAreaCenter, selectionFocusAreaSize);
         }
         else if (interactionFocusVisible && interactionFocusUsesArea)
         {
@@ -6835,7 +6916,10 @@ public class Block : BaseObject
                 return null;
             }
 
-            portableObject.SetItem(itemId);
+            if (!TryInitializePooledPortableObject(portableObject, itemId))
+            {
+                return null;
+            }
         }
 
         if (!portableObject.CachedGameObject.activeSelf)
@@ -6907,6 +6991,17 @@ public class Block : BaseObject
         floorObject.SetBatchedRendering(false);
         floorObject.transform.SetParent(null, true);
         floorObjectPool.Release(floorObject);
+    }
+
+    private bool TryInitializePooledPortableObject(PortableObject portableObject, int itemId)
+    {
+        if (portableObject != null && portableObject.SetItem(itemId))
+        {
+            return true;
+        }
+
+        ReleaseFloorObject(portableObject);
+        return false;
     }
 
     private void ReleaseFloorObjectToHand(PortableObject floorObject, PortableObject handTarget)
@@ -12859,7 +12954,11 @@ public class Block : BaseObject
             return false;
         }
 
-        portableObject.SetItem(objectId);
+        if (!TryInitializePooledPortableObject(portableObject, objectId))
+        {
+            return false;
+        }
+
         int objectIndex = inputAreaCenterStack.Count;
         inputAreaCenterStack.Add(portableObject);
         NotifyRuntimeItemStackChanged();

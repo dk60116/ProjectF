@@ -1058,6 +1058,21 @@ public partial class TerrainGenerator : MonoBehaviour
 
         int restoreQuarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
         if (placementController != null
+            && placementController.TryResolveFenceLoadPlacement(
+                definition,
+                savedState.anchorCoordinate,
+                restoreQuarterTurns,
+                out MapObject resolvedFencePrefab,
+                out int resolvedFenceQuarterTurns,
+                out int resolvedFenceVariantKind)
+            && resolvedFencePrefab != null)
+        {
+            sourcePrefab = resolvedFencePrefab;
+            restoreQuarterTurns = resolvedFenceQuarterTurns;
+            savedState.quarterTurns = restoreQuarterTurns;
+            savedState.conveyorVariantKind = resolvedFenceVariantKind;
+        }
+        else if (placementController != null
             && placementController.TryResolvePipeLoadPlacement(
                 definition,
                 savedState.anchorCoordinate,

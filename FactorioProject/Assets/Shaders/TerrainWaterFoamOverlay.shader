@@ -61,6 +61,8 @@ Shader "ProjectF/Terrain/WaterFoamOverlay"
                 half _FlowSpeed;
             CBUFFER_END
 
+            #include "TerrainWaterLighting.hlsl"
+
             half StableFoamNoise(float2 value)
             {
                 half waveA = 0.5h + 0.5h * sin(value.x + value.y * 0.37h);
@@ -93,9 +95,15 @@ Shader "ProjectF/Terrain/WaterFoamOverlay"
                 float2 noiseUV = (input.positionWS.xz + float2(_Time.y * _FlowSpeed, -_Time.y * _FlowSpeed * 0.37)) * _NoiseScale;
                 half noise = StableFoamNoise(noiseUV + input.uv.xx * 0.23h);
                 half brokenFoam = lerp(1.0h, lerp(0.82h, 1.08h, noise), _NoiseStrength);
-                half alpha = saturate(edgeFade * _FoamColor.a * brokenFoam);
+                half waterBrightness = GetWorldWaterBrightness();
+                half alpha = saturate(
+                    edgeFade
+                    * _FoamColor.a
+                    * brokenFoam
+                    * lerp(0.45h, 1.0h, waterBrightness));
 
-                half3 color = MixFog(_FoamColor.rgb * input.color.rgb, input.fogFactor);
+                half3 color = _FoamColor.rgb * input.color.rgb * waterBrightness;
+                color = MixFog(color, input.fogFactor);
                 return half4(color, alpha);
             }
             ENDHLSL

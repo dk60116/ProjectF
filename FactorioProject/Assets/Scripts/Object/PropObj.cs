@@ -23,6 +23,8 @@ public class PropObj : BaseObject
         {
             portableObj.SetItem(ResolveItemId());
         }
+
+        RefreshItemLight();
     }
 
     public int ID => ResolveItemId();
@@ -30,6 +32,28 @@ public class PropObj : BaseObject
     public int ResolvedItemId => ResolveItemId();
 
     public ItemDefinition BoundItemDefinition => itemDefinition;
+
+    protected void RefreshItemLight(bool toggled = false)
+    {
+        ItemDefinition definition = itemDefinition;
+        if (definition == null)
+        {
+            ItemManager itemManager = GameManager.Instance != null
+                ? GameManager.Instance.ItemManger
+                : null;
+            definition = ItemDefinitionLookup.ResolveById(
+                itemManager != null ? itemManager.ItemDefinitions : null,
+                ResolveItemId());
+        }
+
+        ItemLightController.Configure(gameObject, definition, toggled);
+    }
+
+    public bool ToggleItemLight()
+    {
+        ItemLightController lightController = GetComponent<ItemLightController>();
+        return lightController != null && lightController.Toggle();
+    }
 
     public int ResolveItemId()
     {

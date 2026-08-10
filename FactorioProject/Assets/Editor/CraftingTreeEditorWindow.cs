@@ -7,7 +7,9 @@ using UnityEngine;
 public class CraftingTreeEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 260f;
-    private const int CurrentCraftingTreeFileVersion = 4;
+    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int ItemNameCraftingTreeFileVersion = 5;
+    private const int ItemIdCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
     private const int OutputCountCraftingTreeFileVersion = 2;
     private const int LegacyCraftingTreeFileVersion = 1;
@@ -20,6 +22,8 @@ public class CraftingTreeEditorWindow : EditorWindow
     private readonly Dictionary<int, List<IngredientEntry>> recipeByItemId = new Dictionary<int, List<IngredientEntry>>();
     private readonly Dictionary<int, List<MapObject>> craftingMapObjectsByItemId = new Dictionary<int, List<MapObject>>();
     private readonly Dictionary<int, int> outputCountByItemId = new Dictionary<int, int>();
+    private readonly List<ItemDefinition> synchronizedDefinitions = new List<ItemDefinition>();
+    private bool definitionCatalogDirty = true;
 
     [Serializable]
     private class CraftingTreeJsonFile
@@ -72,6 +76,79 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
     }
 
+    private sealed class IconSelectionPopupContent<T> : PopupWindowContent
+    {
+        private const float PopupWidth = 320f;
+        private const float RowHeight = 28f;
+        private const float MaximumPopupHeight = 420f;
+        private readonly List<T> entries;
+        private readonly Func<T, bool> isSelected;
+        private readonly Func<T, string> getLabel;
+        private readonly Action<Rect, T> drawIcon;
+        private readonly Action<T> onSelected;
+        private Vector2 scrollPosition;
+
+        public IconSelectionPopupContent(
+            IEnumerable<T> entries,
+            Func<T, bool> isSelected,
+            Func<T, string> getLabel,
+            Action<Rect, T> drawIcon,
+            Action<T> onSelected)
+        {
+            this.entries = entries != null ? new List<T>(entries) : new List<T>();
+            this.isSelected = isSelected;
+            this.getLabel = getLabel;
+            this.drawIcon = drawIcon;
+            this.onSelected = onSelected;
+        }
+
+        public override Vector2 GetWindowSize()
+        {
+            float contentHeight = Mathf.Max(RowHeight, entries.Count * RowHeight + 8f);
+            return new Vector2(PopupWidth, Mathf.Min(MaximumPopupHeight, contentHeight));
+        }
+
+        public override void OnGUI(Rect rect)
+        {
+            Event current = Event.current;
+            if (current != null && current.type == EventType.MouseMove)
+            {
+                editorWindow.Repaint();
+            }
+
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            for (int i = 0; i < entries.Count; i++)
+            {
+                T entry = entries[i];
+                Rect rowRect = GUILayoutUtility.GetRect(1f, RowHeight, GUILayout.ExpandWidth(true));
+                bool selected = isSelected != null && isSelected(entry);
+                bool isHovered = current != null && rowRect.Contains(current.mousePosition);
+                if (selected || isHovered)
+                {
+                    Color rowColor = selected
+                        ? new Color(0.24f, 0.49f, 0.78f, 0.75f)
+                        : new Color(1f, 1f, 1f, 0.08f);
+                    EditorGUI.DrawRect(rowRect, rowColor);
+                }
+
+                Rect iconRect = new Rect(rowRect.x + 5f, rowRect.y + 3f, 22f, 22f);
+                DrawIconBackground(iconRect);
+                drawIcon?.Invoke(iconRect, entry);
+
+                Rect labelRect = new Rect(iconRect.xMax + 7f, rowRect.y, rowRect.width - 38f, RowHeight);
+                GUI.Label(labelRect, getLabel != null ? getLabel(entry) : string.Empty);
+
+                if (GUI.Button(rowRect, GUIContent.none, GUIStyle.none))
+                {
+                    onSelected?.Invoke(entry);
+                    editorWindow.Close();
+                    GUIUtility.ExitGUI();
+                }
+            }
+            EditorGUILayout.EndScrollView();
+        }
+    }
+
     [MenuItem("Window/ProjectF/Crafting Tree")]
     public static void ShowWindow()
     {
@@ -96,6 +173,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 continue;
             }
 
+            window.InvalidateDefinitionCatalog();
             window.LoadCraftingTree();
             window.Repaint();
         }
@@ -103,7 +181,35 @@ public class CraftingTreeEditorWindow : EditorWindow
 
     private void OnEnable()
     {
+        ItemDataEditorWindow.DefinitionCatalog.Changed += HandleDefinitionCatalogChanged;
+        InvalidateDefinitionCatalog();
         LoadCraftingTree();
+    }
+
+    private void OnDisable()
+    {
+        ItemDataEditorWindow.DefinitionCatalog.Changed -= HandleDefinitionCatalogChanged;
+    }
+
+    private void OnProjectChange()
+    {
+        InvalidateDefinitionCatalog();
+        LoadCraftingTree();
+        Repaint();
+    }
+
+    private void OnHierarchyChange()
+    {
+        InvalidateDefinitionCatalog();
+        LoadCraftingTree();
+        Repaint();
+    }
+
+    private void HandleDefinitionCatalogChanged()
+    {
+        InvalidateDefinitionCatalog();
+        LoadCraftingTree();
+        Repaint();
     }
 
     private void OnGUI()
@@ -137,7 +243,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
+        List<ItemDefinition> definitions = GetSynchronizedDefinitions(itemManager);
         if (definitions == null || definitions.Count == 0)
         {
             EditorGUILayout.HelpBox("ItemDefinitions가 비어있습니다.", MessageType.Warning);
@@ -252,7 +358,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
+        List<ItemDefinition> definitions = GetSynchronizedDefinitions(itemManager);
         if (definitions == null || definitions.Count == 0)
         {
             EditorGUILayout.HelpBox("ItemDefinitions가 비어있습니다.", MessageType.Warning);
@@ -340,7 +446,24 @@ public class CraftingTreeEditorWindow : EditorWindow
             Rect iconRect = GUILayoutUtility.GetRect(22f, 22f, GUILayout.ExpandWidth(false));
             DrawIconBackground(iconRect);
             DrawItemIcon(iconRect, currentDefinition);
-            ItemDefinition nextDefinition = DrawDefinitionSelector(iconRect, currentDefinition, definitions);
+            int ingredientIndex = i;
+            ItemDefinition nextDefinition = DrawDefinitionSelector(
+                iconRect,
+                currentDefinition,
+                definitions,
+                selectedDefinition =>
+                {
+                    if (selectedDefinition == null
+                        || ingredientIndex < 0
+                        || ingredientIndex >= recipe.Count)
+                    {
+                        return;
+                    }
+
+                    IngredientEntry currentEntry = recipe[ingredientIndex];
+                    recipe[ingredientIndex] = new IngredientEntry(selectedDefinition.id, currentEntry.count);
+                    Repaint();
+                });
             int newItemId = nextDefinition != null ? nextDefinition.id : entry.itemId;
             int newCount = Mathf.Max(1, EditorGUILayout.IntField(entry.count, GUILayout.Width(60f)));
 
@@ -392,14 +515,26 @@ public class CraftingTreeEditorWindow : EditorWindow
         for (int i = selectedObjects.Count - 1; i >= 0; i--)
         {
             MapObject currentSelection = selectedObjects[i];
-            int currentIndex = FindMapObjectIndex(mapObjects, currentSelection);
 
-            EditorGUI.BeginChangeCheck();
             EditorGUILayout.BeginHorizontal();
             Rect iconRect = GUILayoutUtility.GetRect(22f, 22f, GUILayout.ExpandWidth(false));
             DrawIconBackground(iconRect);
             DrawMapObjectIcon(iconRect, currentSelection);
-            int newIndex = DrawMapObjectPopup(currentIndex, mapObjects, iconRect, out MapObject droppedMapObject);
+            int mapObjectIndex = i;
+            MapObject nextSelection = DrawMapObjectPopup(
+                currentSelection,
+                mapObjects,
+                iconRect,
+                selectedMapObject =>
+                {
+                    if (mapObjectIndex < 0 || mapObjectIndex >= selectedObjects.Count)
+                    {
+                        return;
+                    }
+
+                    selectedObjects[mapObjectIndex] = selectedMapObject;
+                    Repaint();
+                });
             if (GUILayout.Button("X", GUILayout.Width(24f)))
             {
                 selectedObjects.RemoveAt(i);
@@ -408,11 +543,9 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
 
             EditorGUILayout.EndHorizontal();
-            if (EditorGUI.EndChangeCheck())
+            if (nextSelection != currentSelection)
             {
-                selectedObjects[i] = droppedMapObject != null
-                    ? droppedMapObject
-                    : (newIndex > 0 ? mapObjects[newIndex - 1] : null);
+                selectedObjects[i] = nextSelection;
             }
         }
     }
@@ -424,11 +557,11 @@ public class CraftingTreeEditorWindow : EditorWindow
         EnsureParentFolder(path);
         EnsureParentFolder(resourcePath);
 
-        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(FindItemManager());
+        List<ItemDefinition> definitions = GetSynchronizedDefinitions(FindItemManager());
         List<int> itemIds = CollectRecipeItemIds(definitions);
 
-        WriteCraftingTree(path, itemIds);
-        WriteCraftingTree(resourcePath, itemIds);
+        WriteCraftingTree(path, itemIds, definitions);
+        WriteCraftingTree(resourcePath, itemIds, definitions);
 
         AssetDatabase.Refresh();
         CraftingTreeRuntime.ForceReload();
@@ -443,7 +576,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
+        List<ItemDefinition> definitions = GetSynchronizedDefinitions(itemManager);
         string defaultPath = Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
         string exportPath = EditorUtility.SaveFilePanel("Export CraftingTree JSON", Path.GetDirectoryName(defaultPath), Path.GetFileNameWithoutExtension(defaultPath), "json");
         if (string.IsNullOrWhiteSpace(exportPath))
@@ -495,7 +628,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> definitions = GetItemDataOrderedDefinitions(itemManager);
+        List<ItemDefinition> definitions = GetSynchronizedDefinitions(itemManager);
         if (definitions == null || definitions.Count == 0)
         {
             EditorUtility.DisplayDialog("CraftingTree", "ItemDefinitions가 비어 있습니다.", "OK");
@@ -551,7 +684,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         EditorUtility.DisplayDialog("CraftingTree", $"{appliedCount}개 레시피를 불러왔습니다.", "OK");
     }
 
-    private void WriteCraftingTree(string path, List<int> itemIds)
+    private void WriteCraftingTree(string path, List<int> itemIds, List<ItemDefinition> definitions)
     {
         using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write))
         using (BinaryWriter writer = new BinaryWriter(stream))
@@ -562,13 +695,15 @@ public class CraftingTreeEditorWindow : EditorWindow
             for (int i = 0; i < itemIds.Count; i++)
             {
                 int itemId = itemIds[i];
-                writer.Write(itemId);
+                ItemDefinition targetDefinition = FindDefinitionById(definitions, itemId);
+                writer.Write(GetPersistedItemName(targetDefinition, definitions));
 
                 List<int> mapObjectIds = GetMapObjectRuntimeIds(GetCraftingMapObjects(itemId));
                 writer.Write(mapObjectIds.Count);
                 for (int mapObjectIndex = 0; mapObjectIndex < mapObjectIds.Count; mapObjectIndex++)
                 {
-                    writer.Write(mapObjectIds[mapObjectIndex]);
+                    ItemDefinition mapObjectDefinition = FindDefinitionById(definitions, mapObjectIds[mapObjectIndex]);
+                    writer.Write(GetPersistedItemName(mapObjectDefinition, definitions));
                 }
 
                 writer.Write(GetOutputCount(itemId));
@@ -577,7 +712,8 @@ public class CraftingTreeEditorWindow : EditorWindow
                 writer.Write(recipe.Count);
                 for (int j = 0; j < recipe.Count; j++)
                 {
-                    writer.Write(recipe[j].itemId);
+                    ItemDefinition ingredientDefinition = FindDefinitionById(definitions, recipe[j].itemId);
+                    writer.Write(GetPersistedItemName(ingredientDefinition, definitions));
                     writer.Write(recipe[j].count);
                 }
             }
@@ -610,36 +746,47 @@ public class CraftingTreeEditorWindow : EditorWindow
         using (BinaryReader reader = new BinaryReader(stream))
         {
             int version = reader.ReadInt32();
-            if (version != LegacyCraftingTreeFileVersion && version != CurrentCraftingTreeFileVersion)
+            if (version < LegacyCraftingTreeFileVersion || version > CurrentCraftingTreeFileVersion)
             {
                 EditorUtility.DisplayDialog("CraftingTree", $"버전이 맞지 않습니다. (파일: {version})", "OK");
                 return;
             }
 
+            List<ItemDefinition> definitions = GetSynchronizedDefinitions(FindItemManager());
             int itemCount = reader.ReadInt32();
             for (int i = 0; i < itemCount; i++)
             {
-                int itemId = reader.ReadInt32();
-                List<MapObject> mapObjects = ReadCraftingMapObjects(reader, version);
-                if (mapObjects.Count > 0)
+                int itemId = ReadItemId(reader, version, definitions);
+                List<MapObject> mapObjects = ReadCraftingMapObjects(reader, version, definitions);
+                if (itemId >= 0 && mapObjects.Count > 0)
                 {
                     craftingMapObjectsByItemId[itemId] = mapObjects;
                 }
 
-                outputCountByItemId[itemId] = version >= OutputCountCraftingTreeFileVersion
+                int outputCount = version >= OutputCountCraftingTreeFileVersion
                     ? Mathf.Max(1, reader.ReadInt32())
                     : 1;
+                if (itemId >= 0)
+                {
+                    outputCountByItemId[itemId] = outputCount;
+                }
 
                 int ingredientCount = reader.ReadInt32();
                 List<IngredientEntry> recipe = new List<IngredientEntry>(ingredientCount);
                 for (int j = 0; j < ingredientCount; j++)
                 {
-                    int ingredientId = reader.ReadInt32();
+                    int ingredientId = ReadItemId(reader, version, definitions);
                     int count = reader.ReadInt32();
-                    recipe.Add(new IngredientEntry(ingredientId, count));
+                    if (ingredientId >= 0)
+                    {
+                        recipe.Add(new IngredientEntry(ingredientId, count));
+                    }
                 }
 
-                recipeByItemId[itemId] = recipe;
+                if (itemId >= 0)
+                {
+                    recipeByItemId[itemId] = recipe;
+                }
             }
         }
 
@@ -927,11 +1074,23 @@ public class CraftingTreeEditorWindow : EditorWindow
         return results;
     }
 
-    private List<MapObject> ReadCraftingMapObjects(BinaryReader reader, int version)
+    private List<MapObject> ReadCraftingMapObjects(BinaryReader reader, int version, List<ItemDefinition> definitions)
     {
         List<MapObject> results = new List<MapObject>();
 
-        if (version >= CurrentCraftingTreeFileVersion)
+        if (version >= ItemNameCraftingTreeFileVersion)
+        {
+            int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
+            for (int i = 0; i < mapObjectCount; i++)
+            {
+                ItemDefinition definition = FindDefinitionByPersistedName(definitions, reader.ReadString());
+                AppendCraftingMapObject(results, definition != null ? definition.mapObject : null);
+            }
+
+            return results;
+        }
+
+        if (version >= ItemIdCraftingTreeFileVersion)
         {
             int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
             for (int i = 0; i < mapObjectCount; i++)
@@ -955,6 +1114,35 @@ public class CraftingTreeEditorWindow : EditorWindow
 
         AppendCraftingMapObject(results, ResolveMapObjectFromGuid(reader.ReadString()));
         return results;
+    }
+
+    private static int ReadItemId(BinaryReader reader, int version, List<ItemDefinition> definitions)
+    {
+        if (version < ItemNameCraftingTreeFileVersion)
+        {
+            return reader.ReadInt32();
+        }
+
+        ItemDefinition definition = FindDefinitionByPersistedName(definitions, reader.ReadString());
+        return definition != null ? definition.id : -1;
+    }
+
+    private static ItemDefinition FindDefinitionByPersistedName(List<ItemDefinition> definitions, string itemName)
+    {
+        if (definitions == null || string.IsNullOrWhiteSpace(itemName))
+        {
+            return null;
+        }
+
+        string normalizedName = itemName.Trim();
+        ItemDefinition definition = ItemDefinitionLookup.ResolveByPersistenceName(definitions, normalizedName);
+        if (definition != null)
+        {
+            return definition;
+        }
+
+        Debug.LogWarning($"CraftingTree: ItemDefinition '{normalizedName}'을(를) 찾지 못했습니다.");
+        return null;
     }
 
     private static string GetMapObjectGuid(MapObject mapObject)
@@ -1232,65 +1420,24 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
         }
 
-        results.Sort(CompareDefinitionsByItemDataOrder);
-
         return results;
     }
 
-    private static List<ItemDefinition> GetItemDataOrderedDefinitions(ItemManager itemManager)
+    private List<ItemDefinition> GetSynchronizedDefinitions(ItemManager itemManager)
     {
-        return itemManager != null
-            ? GetItemDataOrderedDefinitions(itemManager.ItemDefinitions)
-            : new List<ItemDefinition>();
+        if (!definitionCatalogDirty)
+        {
+            return synchronizedDefinitions;
+        }
+
+        ItemDataEditorWindow.DefinitionCatalog.Fill(synchronizedDefinitions, itemManager);
+        definitionCatalogDirty = false;
+        return synchronizedDefinitions;
     }
 
-    private static List<ItemDefinition> GetItemDataOrderedDefinitions(List<ItemDefinition> definitions)
+    private void InvalidateDefinitionCatalog()
     {
-        List<ItemDefinition> results = new List<ItemDefinition>();
-        if (definitions == null)
-        {
-            return results;
-        }
-
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition != null)
-            {
-                results.Add(definition);
-            }
-        }
-
-        results.Sort(CompareDefinitionsByItemDataOrder);
-        return results;
-    }
-
-    private static int CompareDefinitionsByItemDataOrder(ItemDefinition left, ItemDefinition right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return 0;
-        }
-
-        if (left == null)
-        {
-            return 1;
-        }
-
-        if (right == null)
-        {
-            return -1;
-        }
-
-        int idCompare = left.id.CompareTo(right.id);
-        if (idCompare != 0)
-        {
-            return idCompare;
-        }
-
-        string leftName = GetDefinitionDisplayName(left);
-        string rightName = GetDefinitionDisplayName(right);
-        return string.Compare(leftName, rightName, StringComparison.OrdinalIgnoreCase);
+        definitionCatalogDirty = true;
     }
 
     private static bool MatchesDefinitionSearch(ItemDefinition definition, string searchText)
@@ -1316,26 +1463,39 @@ public class CraftingTreeEditorWindow : EditorWindow
                definition.name.IndexOf(searchText, System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private ItemDefinition DrawDefinitionSelector(Rect iconRect, ItemDefinition currentDefinition, List<ItemDefinition> definitions)
+    private ItemDefinition DrawDefinitionSelector(
+        Rect iconRect,
+        ItemDefinition currentDefinition,
+        List<ItemDefinition> definitions,
+        Action<ItemDefinition> onSelected)
     {
         if (definitions == null || definitions.Count == 0)
         {
             return currentDefinition;
         }
 
-        List<GUIContent> options = BuildDefinitionContents(definitions);
-        int currentIndex = FindDefinitionIndexById(definitions, currentDefinition != null ? currentDefinition.id : -1);
-        if (currentIndex < 0)
+        Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
+        int currentItemId = currentDefinition != null ? currentDefinition.id : -1;
+        GUIContent selectedContent = new GUIContent(
+            $"[{currentItemId}] {GetDefinitionDisplayName(currentDefinition)}",
+            GetItemIcon(currentDefinition));
+        if (EditorGUI.DropdownButton(popupRect, selectedContent, FocusType.Keyboard, EditorStyles.popup))
         {
-            currentIndex = 0;
+            PopupWindow.Show(
+                popupRect,
+                new IconSelectionPopupContent<ItemDefinition>(
+                    definitions,
+                    definition => definition != null && definition.id == currentItemId,
+                    definition =>
+                    {
+                        int itemId = definition != null ? definition.id : -1;
+                        return $"[{itemId}] {GetDefinitionDisplayName(definition)}";
+                    },
+                    DrawItemIcon,
+                    onSelected));
         }
 
-        int safeIndex = Mathf.Clamp(currentIndex, 0, options.Count - 1);
-        Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
-        int nextIndex = EditorGUI.Popup(popupRect, safeIndex, options.ToArray());
-        ItemDefinition nextDefinition = nextIndex >= 0 && nextIndex < definitions.Count
-            ? definitions[nextIndex]
-            : currentDefinition;
+        ItemDefinition nextDefinition = currentDefinition;
 
         Rect dropRect = Rect.MinMaxRect(
             iconRect.xMin,
@@ -1351,57 +1511,43 @@ public class CraftingTreeEditorWindow : EditorWindow
         return nextDefinition;
     }
 
-    private static List<GUIContent> BuildDefinitionContents(List<ItemDefinition> definitions)
-    {
-        List<GUIContent> options = new List<GUIContent>(definitions.Count);
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            string displayName = GetDefinitionDisplayName(definition);
-            int id = definition != null ? definition.id : -1;
-            GUIContent content = new GUIContent($"[{id}] {displayName}", GetItemIcon(definition));
-            options.Add(content);
-        }
-
-        return options;
-    }
-
-    private int DrawMapObjectPopup(
-        int currentIndex,
+    private MapObject DrawMapObjectPopup(
+        MapObject currentSelection,
         List<MapObject> mapObjects,
         Rect iconRect,
-        out MapObject droppedMapObject)
+        Action<MapObject> onSelected)
     {
-        droppedMapObject = null;
-        List<GUIContent> options = BuildMapObjectContents(mapObjects);
-        int safeIndex = Mathf.Clamp(currentIndex, 0, options.Count - 1);
         Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
-        int nextIndex = EditorGUI.Popup(popupRect, safeIndex, options.ToArray());
+        GUIContent selectedContent = new GUIContent(
+            GetMapObjectDisplayName(currentSelection),
+            GetMapObjectIcon(currentSelection));
+        if (EditorGUI.DropdownButton(popupRect, selectedContent, FocusType.Keyboard, EditorStyles.popup))
+        {
+            List<MapObject> options = new List<MapObject>(mapObjects.Count + 1) { null };
+            options.AddRange(mapObjects);
+            PopupWindow.Show(
+                popupRect,
+                new IconSelectionPopupContent<MapObject>(
+                    options,
+                    mapObject => mapObject == currentSelection,
+                    GetMapObjectDisplayName,
+                    DrawMapObjectIcon,
+                    onSelected));
+        }
 
         Rect dropRect = Rect.MinMaxRect(
             iconRect.xMin,
             Mathf.Min(iconRect.yMin, popupRect.yMin),
             popupRect.xMax,
             Mathf.Max(iconRect.yMax, popupRect.yMax));
-        HandleMapObjectDropTarget(dropRect, this, mapObjects, out droppedMapObject);
-
-        return nextIndex;
+        return HandleMapObjectDropTarget(dropRect, this, mapObjects, out MapObject droppedMapObject)
+            ? droppedMapObject
+            : currentSelection;
     }
 
-    private static List<GUIContent> BuildMapObjectContents(List<MapObject> mapObjects)
+    private static string GetMapObjectDisplayName(MapObject mapObject)
     {
-        List<GUIContent> options = new List<GUIContent>(mapObjects.Count + 1);
-        options.Add(new GUIContent("(None)"));
-
-        for (int i = 0; i < mapObjects.Count; i++)
-        {
-            MapObject mapObject = mapObjects[i];
-            string displayName = mapObject != null ? mapObject.gameObject.name : "(Missing)";
-            GUIContent content = new GUIContent(displayName, GetMapObjectIcon(mapObject));
-            options.Add(content);
-        }
-
-        return options;
+        return mapObject != null ? mapObject.gameObject.name : "(None)";
     }
 
     private static bool HandleMapObjectDropTarget(
@@ -1651,24 +1797,6 @@ public class CraftingTreeEditorWindow : EditorWindow
         GUI.color = previousColor;
     }
 
-    private static int FindMapObjectIndex(List<MapObject> mapObjects, MapObject selected)
-    {
-        if (selected == null)
-        {
-            return 0;
-        }
-
-        for (int i = 0; i < mapObjects.Count; i++)
-        {
-            if (mapObjects[i] == selected)
-            {
-                return i + 1;
-            }
-        }
-
-        return 0;
-    }
-
     private static ItemDefinition FindDefinitionById(List<ItemDefinition> definitions, int id)
     {
         if (definitions == null)
@@ -1715,6 +1843,22 @@ public class CraftingTreeEditorWindow : EditorWindow
         }
 
         return string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName;
+    }
+
+    private static string GetPersistedItemName(ItemDefinition definition, List<ItemDefinition> definitions)
+    {
+        if (definition == null)
+        {
+            throw new InvalidDataException("CraftingTree에 저장할 ItemDefinition을 찾지 못했습니다.");
+        }
+
+        string itemName = ItemDefinitionLookup.GetPersistenceName(definition, definitions);
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            throw new InvalidDataException($"ItemDefinition '{definition.name}'의 아이템 이름이 비어 있습니다.");
+        }
+
+        return itemName.Trim();
     }
 
     private static void DrawIconBackground(Rect rect)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 #if UNITY_EDITOR
@@ -6,6 +7,24 @@ using UnityEditor;
 
 public class Animal : MonoBehaviour
 {
+    private const int DeathAnimationState = 6;
+    private const int WakeAnimationState = 17;
+    private const float StandUpCompletionNormalizedTime = 0.95f;
+    private static readonly int SpeedHash = Animator.StringToHash("Speed");
+    private static readonly int IsEatingHash = Animator.StringToHash("IsEating");
+    private static readonly int IsDrinkingHash = Animator.StringToHash("IsDrinking");
+    private static readonly int IsRestingHash = Animator.StringToHash("IsResting");
+    private static readonly int IsFleeingHash = Animator.StringToHash("IsFleeing");
+    private static readonly int StateHash = Animator.StringToHash("State");
+    private static readonly int ResetHash = Animator.StringToHash("Reset");
+    private static readonly int IdleStateHash = Animator.StringToHash("Idle");
+    private static readonly int DeathStateHash = Animator.StringToHash("Death");
+    private static readonly int LieDownStateHash = Animator.StringToHash("IdlleToLay");
+    private static readonly int SleepStateHash = Animator.StringToHash("Sleep");
+    private static readonly int StandUpStateHash = Animator.StringToHash("LayToIdle");
+    private static readonly int BaseColorHash = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorHash = Shader.PropertyToID("_Color");
+
     public enum AnimalGender
     {
         Male,
@@ -32,15 +51,31 @@ public class Animal : MonoBehaviour
     private SkinnedMeshRenderer outlineRenderer;
     private bool hoverOutlineVisible;
     private bool focusedOutlineVisible;
+    private MaterialPropertyBlock herdDebugPropertyBlock;
+    private int animatorParameterMask;
+    private bool animatorParameterCacheInitialized;
+    private float currentHealth;
+    private bool healthInitialized;
+    private bool deathHandled;
+    private AnimalWorldHealthBar worldHealthBar;
+    private List<int> corpseLootItemIds;
+    private int corpseLootIndex;
+    private bool corpseLootInitialized;
+    private bool corpseHarvestStepPrepared;
 
     public GameObject Eye;
     private GameObject eyeLeftGO;
     private GameObject eyeRightGO;
     private SkinnedMeshRenderer eyeLeft;
     private SkinnedMeshRenderer eyeRight;
+    private bool aiAnimationStateInitialized;
+    private bool wakeFromRestRequested;
+    private float lastAIAnimationSpeed;
+    private int lastAIAnimationFlags;
+    private bool detailedVisualsVisible = true;
+    private bool detailedVisualsInitialized;
     [SerializeField] private Transform headBone;
 
-    [SerializeField] private float eyeShapeChangingSpeed = 10f;
     [SerializeField] private Transform dinoTransform;
     [SerializeField] private Transform youngDinoLeftEye;
     [SerializeField] private Transform youngDinoRightEye;
@@ -48,16 +83,26 @@ public class Animal : MonoBehaviour
     [SerializeField] private Transform oldDinoRightEye;
 
     [SerializeField, HideInInspector] private Vector3 adultScale;
-    private int dinoState;
-    private int blendShapeCount;
-    private float[] eyeBlendShapeTargets;
-    private int eyeShape;
     private bool growthInitialized;
 
     public AnimalGender Gender => animalGender;
     public AnimalDefinition Definition => animalDefinition;
     public float Age => DinoAge;
     public float BaseScaleValue => BaseScale;
+    public float MaxHealth => animalDefinition != null
+        ? animalDefinition.MaxHealth
+        : AnimalDefinition.DefaultMaxHealth;
+    public float CurrentHealth
+    {
+        get
+        {
+            EnsureHealthInitialized();
+            return currentHealth;
+        }
+    }
+    public float NormalizedHealth => MaxHealth > 0f ? CurrentHealth / MaxHealth : 0f;
+    public bool IsAlive => CurrentHealth > 0f && !deathHandled;
+    public bool CanHarvestCorpse => !IsAlive && gameObject.activeInHierarchy;
     public bool HasTerrainInteraction
     {
         get
@@ -74,6 +119,379 @@ public class Animal : MonoBehaviour
         {
             instance.MarkInteracted();
         }
+    }
+
+    public void ConfigureHealth(AnimalDefinition definition, AnimalSaveEntry restoredState)
+    {
+        if (definition != null)
+        {
+            animalDefinition = definition;
+        }
+
+        RestoreCorpseLootState(restoredState);
+        currentHealth = restoredState != null && restoredState.hasHealth
+            ? Mathf.Clamp(restoredState.currentHealth, 0f, MaxHealth)
+            : MaxHealth;
+        healthInitialized = true;
+        deathHandled = false;
+        wakeFromRestRequested = false;
+        EnsureWorldHealthBar();
+        if (currentHealth <= 0f)
+        {
+            HandleDeath();
+        }
+    }
+
+    public float TakeDamage(float damage)
+    {
+        return TakeDamageInternal(damage, false, Vector3.zero);
+    }
+
+    public float TakeDamage(float damage, Vector3 threatPosition)
+    {
+        return TakeDamageInternal(damage, true, threatPosition);
+    }
+
+    private float TakeDamageInternal(
+        float damage,
+        bool notifyThreat,
+        Vector3 threatPosition)
+    {
+        EnsureHealthInitialized();
+        if (damage <= 0f || currentHealth <= 0f || deathHandled)
+        {
+            return 0f;
+        }
+
+        float previousHealth = currentHealth;
+        currentHealth = Mathf.Max(0f, currentHealth - damage);
+        MarkTerrainInteraction();
+        if (currentHealth <= 0f)
+        {
+            HandleDeath();
+        }
+        else
+        {
+            if (worldHealthBar != null)
+            {
+                worldHealthBar.Refresh();
+            }
+        }
+
+        if (notifyThreat)
+        {
+            float nearbyRadius = animalDefinition != null
+                ? animalDefinition.AISettings.NearbyThreatRadius
+                : AnimalAISettings.DefaultNearbyThreatRadius;
+            AnimalAIWorld.Instance?.NotifyThreat(
+                threatPosition,
+                transform.position,
+                nearbyRadius);
+        }
+
+        return previousHealth - currentHealth;
+    }
+
+    public float Heal(float amount)
+    {
+        EnsureHealthInitialized();
+        if (amount <= 0f || currentHealth <= 0f || deathHandled)
+        {
+            return 0f;
+        }
+
+        float previousHealth = currentHealth;
+        currentHealth = Mathf.Min(MaxHealth, currentHealth + amount);
+        if (currentHealth > previousHealth)
+        {
+            MarkTerrainInteraction();
+            if (worldHealthBar != null)
+            {
+                worldHealthBar.Refresh();
+            }
+        }
+
+        return currentHealth - previousHealth;
+    }
+
+    public void CaptureHealthSaveState(AnimalSaveEntry entry)
+    {
+        if (entry == null)
+        {
+            return;
+        }
+
+        EnsureHealthInitialized();
+        entry.hasHealth = true;
+        entry.currentHealth = currentHealth;
+        entry.corpseLootInitialized = corpseLootInitialized;
+        entry.corpseRemainingItemIds ??= new List<int>();
+        entry.corpseRemainingItemIds.Clear();
+        for (int i = corpseLootIndex; corpseLootItemIds != null && i < corpseLootItemIds.Count; i++)
+        {
+            entry.corpseRemainingItemIds.Add(corpseLootItemIds[i]);
+        }
+    }
+
+    public bool PrepareCorpseHarvestStep()
+    {
+        if (!CanHarvestCorpse || corpseHarvestStepPrepared)
+        {
+            return false;
+        }
+
+        EnsureCorpseLootInitialized();
+        corpseHarvestStepPrepared = true;
+        return true;
+    }
+
+    public bool TryGetPreparedCorpseLootItem(out int itemId)
+    {
+        itemId = -1;
+        if (!corpseHarvestStepPrepared
+            || corpseLootItemIds == null
+            || corpseLootIndex < 0
+            || corpseLootIndex >= corpseLootItemIds.Count)
+        {
+            return false;
+        }
+
+        itemId = corpseLootItemIds[corpseLootIndex];
+        return itemId >= 0;
+    }
+
+    public ItemDefinition ResolveCorpseLootItemDefinition(int itemId)
+    {
+        IReadOnlyList<AnimalDropEntry> dropItems = animalDefinition != null
+            ? animalDefinition.DropItems
+            : null;
+        for (int i = 0; dropItems != null && i < dropItems.Count; i++)
+        {
+            ItemDefinition definition = dropItems[i]?.ItemDefinition;
+            if (definition != null && definition.id == itemId)
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    public bool CommitPreparedCorpseHarvestStep(bool rewardDelivered)
+    {
+        if (!corpseHarvestStepPrepared || !CanHarvestCorpse)
+        {
+            return false;
+        }
+
+        bool hasReward = corpseLootItemIds != null
+                         && corpseLootIndex >= 0
+                         && corpseLootIndex < corpseLootItemIds.Count;
+        if (hasReward && !rewardDelivered)
+        {
+            return false;
+        }
+
+        corpseHarvestStepPrepared = false;
+        if (hasReward)
+        {
+            corpseLootIndex++;
+        }
+
+        MarkTerrainInteraction();
+        return true;
+    }
+
+    public void CancelPreparedCorpseHarvestStep()
+    {
+        corpseHarvestStepPrepared = false;
+    }
+
+    public bool HasRemainingCorpseLoot =>
+        corpseLootItemIds != null && corpseLootIndex < corpseLootItemIds.Count;
+
+    public Vector3 GetCorpseLootOrigin()
+    {
+        return GetWorldCenter();
+    }
+
+    public Vector3 GetWorldCenter()
+    {
+        if (dinoRenderer == null)
+        {
+            dinoRenderer = FindGrowthRenderer();
+        }
+
+        return dinoRenderer != null ? dinoRenderer.bounds.center : transform.position;
+    }
+
+    private void EnsureHealthInitialized()
+    {
+        if (healthInitialized)
+        {
+            return;
+        }
+
+        currentHealth = MaxHealth;
+        healthInitialized = true;
+        deathHandled = false;
+        EnsureWorldHealthBar();
+    }
+
+    private void EnsureWorldHealthBar()
+    {
+        if (worldHealthBar != null)
+        {
+            worldHealthBar.Refresh();
+            worldHealthBar.SetVisible(focusedOutlineVisible);
+            return;
+        }
+
+        if (dinoRenderer == null)
+        {
+            dinoRenderer = FindGrowthRenderer();
+        }
+
+        worldHealthBar = AnimalWorldHealthBar.Create(this, dinoRenderer);
+        if (worldHealthBar != null)
+        {
+            worldHealthBar.SetVisible(focusedOutlineVisible);
+        }
+    }
+
+    private void HandleDeath()
+    {
+        if (deathHandled)
+        {
+            return;
+        }
+
+        deathHandled = true;
+        AnimalAIController controller = GetComponentInParent<AnimalAIController>();
+        if (controller != null)
+        {
+            controller.StopForDeath();
+        }
+
+        ClearFocusVisuals();
+        EnsureCorpseLootInitialized();
+        PlayDeathAnimation();
+    }
+
+    private void RestoreCorpseLootState(AnimalSaveEntry restoredState)
+    {
+        corpseLootIndex = 0;
+        corpseHarvestStepPrepared = false;
+        corpseLootInitialized = restoredState != null && restoredState.corpseLootInitialized;
+        corpseLootItemIds = null;
+        List<int> restoredItems = restoredState != null
+            ? restoredState.corpseRemainingItemIds
+            : null;
+        if (!corpseLootInitialized || restoredItems == null || restoredItems.Count == 0)
+        {
+            return;
+        }
+
+        corpseLootItemIds = new List<int>(restoredItems.Count);
+        for (int i = 0; i < restoredItems.Count; i++)
+        {
+            if (restoredItems[i] >= 0)
+            {
+                corpseLootItemIds.Add(restoredItems[i]);
+            }
+        }
+    }
+
+    private void EnsureCorpseLootInitialized()
+    {
+        if (corpseLootInitialized)
+        {
+            return;
+        }
+
+        corpseLootInitialized = true;
+        IReadOnlyList<AnimalDropEntry> dropItems = animalDefinition != null
+            ? animalDefinition.DropItems
+            : null;
+        if (dropItems == null || dropItems.Count == 0)
+        {
+            return;
+        }
+
+        System.Random random = new System.Random(BuildCorpseLootSeed());
+        for (int i = 0; i < dropItems.Count; i++)
+        {
+            AnimalDropEntry entry = dropItems[i];
+            ItemDefinition itemDefinition = entry?.ItemDefinition;
+            if (itemDefinition == null
+                || itemDefinition.id < 0
+                || random.NextDouble() >= entry.DropChance)
+            {
+                continue;
+            }
+
+            int minAmount = entry.MinAmount;
+            int maxAmount = entry.MaxAmount;
+            int amount = maxAmount > minAmount
+                ? minAmount + (int)(random.NextDouble() * ((long)maxAmount - minAmount + 1L))
+                : minAmount;
+            if (amount <= 0)
+            {
+                continue;
+            }
+
+            corpseLootItemIds ??= new List<int>(amount);
+            for (int itemIndex = 0; itemIndex < amount; itemIndex++)
+            {
+                corpseLootItemIds.Add(itemDefinition.id);
+            }
+        }
+    }
+
+    private int BuildCorpseLootSeed()
+    {
+        TerrainAnimalInstance instance = GetComponentInParent<TerrainAnimalInstance>();
+        long deterministicId = instance != null ? instance.DeterministicId : GetInstanceID();
+        unchecked
+        {
+            int seed = (int)deterministicId ^ (int)(deterministicId >> 32);
+            seed = (seed * 397) ^ (animalDefinition != null ? animalDefinition.Id : 0);
+            return seed;
+        }
+    }
+
+    private void PlayDeathAnimation()
+    {
+        wakeFromRestRequested = false;
+        if (anim == null)
+        {
+            anim = GetComponent<Animator>();
+        }
+
+        if (anim == null)
+        {
+            return;
+        }
+
+        AnimatorStateInfo currentState = anim.GetCurrentAnimatorStateInfo(0);
+        bool currentStateIsDeath = currentState.shortNameHash == DeathStateHash;
+        bool nextStateIsDeath = anim.IsInTransition(0)
+                                && anim.GetNextAnimatorStateInfo(0).shortNameHash
+                                == DeathStateHash;
+        if (currentStateIsDeath || nextStateIsDeath)
+        {
+            return;
+        }
+
+        bool transitioningToIdle = anim.IsInTransition(0)
+                                   && anim.GetNextAnimatorStateInfo(0).shortNameHash
+                                   == IdleStateHash;
+        if (currentState.shortNameHash != IdleStateHash && !transitioningToIdle)
+        {
+            anim.SetTrigger(ResetHash);
+        }
+
+        anim.SetInteger(StateHash, DeathAnimationState);
     }
 
     private void Reset()
@@ -107,6 +525,12 @@ public class Animal : MonoBehaviour
 
     private void Awake()
     {
+        anim = GetComponent<Animator>();
+        if (anim != null)
+        {
+            anim.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
+        }
+
         eyeLeftGO = Instantiate(Eye, oldDinoLeftEye.position, oldDinoLeftEye.rotation);
         eyeRightGO = Instantiate(Eye, oldDinoRightEye.position, oldDinoRightEye.rotation);
 
@@ -122,113 +546,69 @@ public class Animal : MonoBehaviour
 
         eyeLeft = eyeLeftGO.GetComponent<SkinnedMeshRenderer>();
         eyeRight = eyeRightGO.GetComponent<SkinnedMeshRenderer>();
-        blendShapeCount = eyeLeft.sharedMesh.blendShapeCount;
-        eyeBlendShapeTargets = new float[blendShapeCount];
+        ConfigureSkinnedRenderer(dinoRenderer, true);
+        ConfigureSkinnedRenderer(eyeLeft, false);
+        ConfigureSkinnedRenderer(eyeRight, false);
     }
 
     private void Start()
     {
-        anim = GetComponent<Animator>();
+        if (anim == null)
+        {
+            anim = GetComponent<Animator>();
+        }
+
         InitializeGrowth();
         SetAge(DinoAge);
     }
 
-    private void Update()
+    private static void ConfigureSkinnedRenderer(
+        SkinnedMeshRenderer renderer,
+        bool castsShadows)
     {
-        if (dinoState == 17)
-        {
-            dinoState = 0;
-        }
-
-        if (dinoState < 0)
-        {
-            dinoState = 16;
-        }
-
-        if (Input.GetKeyDown("d") && dinoState < 18)
-        {
-            dinoState++;
-            if (dinoState == 13)
-            {
-                dinoState++;
-            }
-
-            SwitchAnimation(dinoState);
-        }
-
-        if (Input.GetKeyDown("a") && dinoState > 0)
-        {
-            dinoState--;
-            if (dinoState == 13)
-            {
-                dinoState--;
-            }
-
-            SwitchAnimation(dinoState);
-        }
-
-        if (Input.GetKeyDown("e"))
-        {
-            SetAge(DinoAge + 1f);
-        }
-
-        if (Input.GetKeyDown("q"))
-        {
-            SetAge(DinoAge - 1f);
-        }
-
-        if (Input.GetKeyDown("c") && blendShapeCount > 0)
-        {
-            eyeShape++;
-            if (eyeShape >= blendShapeCount)
-            {
-                eyeShape = 0;
-            }
-
-            SwitchEyeShape(eyeShape);
-        }
-
-        if (Input.GetKeyDown("z") && blendShapeCount > 0)
-        {
-            eyeShape--;
-            if (eyeShape < 0)
-            {
-                eyeShape = blendShapeCount - 1;
-            }
-
-            SwitchEyeShape(eyeShape);
-        }
-
-        if (Input.GetKeyDown("1"))
-        {
-            SwitchAnimation(98);
-        }
-
-        if (Input.GetKeyDown("2"))
-        {
-            SwitchAnimation(99);
-        }
-    }
-
-    private void FixedUpdate()
-    {
-        if (eyeLeft == null || eyeRight == null || eyeBlendShapeTargets == null)
+        if (renderer == null)
         {
             return;
         }
 
-        for (int i = 0; i < blendShapeCount; i++)
+        renderer.updateWhenOffscreen = false;
+        renderer.skinnedMotionVectors = false;
+        renderer.allowOcclusionWhenDynamic = true;
+        renderer.quality = SkinQuality.Bone2;
+        renderer.shadowCastingMode = castsShadows
+            ? UnityEngine.Rendering.ShadowCastingMode.On
+            : UnityEngine.Rendering.ShadowCastingMode.Off;
+        renderer.receiveShadows = true;
+        renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+        renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+    }
+
+    public void SetDetailedVisuals(bool visible)
+    {
+        if (detailedVisualsInitialized && detailedVisualsVisible == visible)
         {
-            float leftWeight = eyeLeft.GetBlendShapeWeight(i);
-            float rightWeight = eyeRight.GetBlendShapeWeight(i);
-            float targetWeight = eyeBlendShapeTargets[i];
-            float lerp = Time.fixedDeltaTime * eyeShapeChangingSpeed;
-            eyeLeft.SetBlendShapeWeight(i, Mathf.Lerp(leftWeight, targetWeight, lerp));
-            eyeRight.SetBlendShapeWeight(i, Mathf.Lerp(rightWeight, targetWeight, lerp));
+            return;
+        }
+
+        detailedVisualsInitialized = true;
+        detailedVisualsVisible = visible;
+        if (eyeLeft != null)
+        {
+            eyeLeft.enabled = visible;
+        }
+
+        if (eyeRight != null)
+        {
+            eyeRight.enabled = visible;
         }
     }
 
     private void OnDisable()
+    {
+        ClearFocusVisuals();
+    }
+
+    private void ClearFocusVisuals()
     {
         if (outlineRenderer != null)
         {
@@ -238,6 +618,10 @@ public class Animal : MonoBehaviour
 
         hoverOutlineVisible = false;
         focusedOutlineVisible = false;
+        if (worldHealthBar != null)
+        {
+            worldHealthBar.SetVisible(false);
+        }
     }
 
     public void SetHoverOutline(bool visible)
@@ -270,12 +654,16 @@ public class Animal : MonoBehaviour
             return;
         }
 
+        focusedOutlineVisible = visible;
+        if (worldHealthBar != null)
+        {
+            worldHealthBar.SetVisible(visible);
+        }
         if (!TryResolveOutlineRenderer())
         {
             return;
         }
 
-        focusedOutlineVisible = visible;
         if (visible)
         {
             AnimalScreenSpaceOutline.ShowFocused(outlineRenderer);
@@ -350,6 +738,186 @@ public class Animal : MonoBehaviour
         {
             SetGrowth(DinoAge * 0.1f);
         }
+    }
+
+    public void SetAIAnimation(
+        float speed,
+        bool isEating,
+        bool isDrinking,
+        bool isResting,
+        bool isLookingAround,
+        bool isFleeing)
+    {
+        if (!IsAlive)
+        {
+            PlayDeathAnimation();
+            return;
+        }
+
+        if (anim == null)
+        {
+            anim = GetComponent<Animator>();
+        }
+
+        if (anim == null)
+        {
+            return;
+        }
+
+        // Sleep은 전용 State=17을 거쳐야 LayToIdle로 전환된다. 기상 중 일반 AI 상태가
+        // State=0을 덮어쓰면 Sleep에 남으므로 기상이 끝날 때까지 전용 전환을 유지한다.
+        if (wakeFromRestRequested)
+        {
+            return;
+        }
+
+        int animationFlags = (isEating ? 1 : 0)
+                             | (isDrinking ? 2 : 0)
+                             | (isResting ? 4 : 0)
+                             | (isLookingAround ? 8 : 0)
+                             | (isFleeing ? 16 : 0);
+        if (aiAnimationStateInitialized
+            && Mathf.Abs(lastAIAnimationSpeed - speed) <= 0.001f
+            && lastAIAnimationFlags == animationFlags)
+        {
+            return;
+        }
+
+        aiAnimationStateInitialized = true;
+        lastAIAnimationSpeed = speed;
+        lastAIAnimationFlags = animationFlags;
+
+        EnsureAnimatorParameterCache();
+        SetAnimatorFloatIfAvailable(SpeedHash, speed, 1);
+        SetAnimatorBoolIfAvailable(IsEatingHash, isEating, 2);
+        SetAnimatorBoolIfAvailable(IsDrinkingHash, isDrinking, 4);
+        SetAnimatorBoolIfAvailable(IsRestingHash, isResting, 8);
+        SetAnimatorBoolIfAvailable(IsFleeingHash, isFleeing, 16);
+
+        int legacyState = isFleeing
+            ? 8
+            : speed > 0.01f
+                ? 12
+                : isEating || isDrinking
+                    ? 11
+                    : isResting
+                        ? 16
+                        : isLookingAround
+                            ? 14
+                            : 0;
+        SwitchAnimation(legacyState);
+    }
+
+    public void WakeFromRest()
+    {
+        if (!IsAlive || wakeFromRestRequested)
+        {
+            return;
+        }
+
+        if (anim == null)
+        {
+            anim = GetComponent<Animator>();
+        }
+
+        if (anim == null || !anim.isActiveAndEnabled || !anim.isInitialized)
+        {
+            return;
+        }
+
+        wakeFromRestRequested = true;
+        aiAnimationStateInitialized = false;
+        EnsureAnimatorParameterCache();
+        SetAnimatorFloatIfAvailable(SpeedHash, 0f, 1);
+        SetAnimatorBoolIfAvailable(IsEatingHash, false, 2);
+        SetAnimatorBoolIfAvailable(IsDrinkingHash, false, 4);
+        SetAnimatorBoolIfAvailable(IsRestingHash, false, 8);
+        SetAnimatorBoolIfAvailable(IsFleeingHash, false, 16);
+
+        // 이 애니메이터의 Sleep -> LayToIdle 조건은 Reset이 아니라 State == 17이다.
+        anim.ResetTrigger(ResetHash);
+        anim.SetInteger(StateHash, WakeAnimationState);
+    }
+
+    public bool IsReadyForAIMovement()
+    {
+        if (anim == null)
+        {
+            anim = GetComponent<Animator>();
+        }
+
+        if (anim == null
+            || !anim.isActiveAndEnabled
+            || !anim.isInitialized
+            || anim.layerCount == 0)
+        {
+            return true;
+        }
+
+        AnimatorStateInfo currentState = anim.GetCurrentAnimatorStateInfo(0);
+        if (wakeFromRestRequested)
+        {
+            if (currentState.shortNameHash == StandUpStateHash
+                && currentState.normalizedTime >= StandUpCompletionNormalizedTime
+                && !anim.IsInTransition(0))
+            {
+                wakeFromRestRequested = false;
+                aiAnimationStateInitialized = false;
+                SwitchAnimation(0);
+                return false;
+            }
+
+            bool currentIsWakeAnimation = IsRestAnimationState(currentState.shortNameHash);
+            bool nextIsWakeAnimation = anim.IsInTransition(0)
+                                       && IsRestAnimationState(
+                                           anim.GetNextAnimatorStateInfo(0).shortNameHash);
+            if (currentIsWakeAnimation || nextIsWakeAnimation)
+            {
+                return false;
+            }
+
+            wakeFromRestRequested = false;
+            aiAnimationStateInitialized = false;
+            SwitchAnimation(0);
+        }
+
+        if (IsRestAnimationState(currentState.shortNameHash))
+        {
+            return false;
+        }
+
+        if (!anim.IsInTransition(0))
+        {
+            return true;
+        }
+
+        AnimatorStateInfo nextState = anim.GetNextAnimatorStateInfo(0);
+        return !IsRestAnimationState(nextState.shortNameHash);
+    }
+
+    public void SetHerdDebugColor(Color color, bool visible)
+    {
+        if (dinoRenderer == null)
+        {
+            dinoRenderer = FindGrowthRenderer();
+        }
+
+        if (dinoRenderer == null)
+        {
+            return;
+        }
+
+        if (!visible)
+        {
+            dinoRenderer.SetPropertyBlock(null);
+            return;
+        }
+
+        herdDebugPropertyBlock ??= new MaterialPropertyBlock();
+        herdDebugPropertyBlock.Clear();
+        herdDebugPropertyBlock.SetColor(BaseColorHash, color);
+        herdDebugPropertyBlock.SetColor(ColorHash, color);
+        dinoRenderer.SetPropertyBlock(herdDebugPropertyBlock);
     }
 
     private void OnValidate()
@@ -443,30 +1011,80 @@ public class Animal : MonoBehaviour
             return;
         }
 
-        int currentState = anim.GetInteger("State");
-        if (currentState != 0 && currentState < 97)
-        {
-            anim.SetTrigger("Reset");
-        }
-
-        anim.SetInteger("State", targetState);
-    }
-
-    private void SwitchEyeShape(int targetShape)
-    {
-        if (eyeBlendShapeTargets == null)
+        int currentState = anim.GetInteger(StateHash);
+        if (currentState == targetState)
         {
             return;
         }
 
-        for (int i = 0; i < eyeBlendShapeTargets.Length; i++)
+        if (currentState != 0 && currentState < 97)
         {
-            eyeBlendShapeTargets[i] = 0f;
+            anim.SetTrigger(ResetHash);
         }
 
-        if (targetShape > 0 && targetShape < eyeBlendShapeTargets.Length)
+        anim.SetInteger(StateHash, targetState);
+    }
+
+    private static bool IsRestAnimationState(int stateHash)
+    {
+        return IsRestPoseAnimationState(stateHash)
+               || stateHash == StandUpStateHash;
+    }
+
+    private static bool IsRestPoseAnimationState(int stateHash)
+    {
+        return stateHash == LieDownStateHash || stateHash == SleepStateHash;
+    }
+
+    private void EnsureAnimatorParameterCache()
+    {
+        if (animatorParameterCacheInitialized || anim == null)
         {
-            eyeBlendShapeTargets[targetShape] = 100f;
+            return;
+        }
+
+        animatorParameterCacheInitialized = true;
+        animatorParameterMask = 0;
+        AnimatorControllerParameter[] parameters = anim.parameters;
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            int hash = parameters[i].nameHash;
+            if (hash == SpeedHash)
+            {
+                animatorParameterMask |= 1;
+            }
+            else if (hash == IsEatingHash)
+            {
+                animatorParameterMask |= 2;
+            }
+            else if (hash == IsDrinkingHash)
+            {
+                animatorParameterMask |= 4;
+            }
+            else if (hash == IsRestingHash)
+            {
+                animatorParameterMask |= 8;
+            }
+            else if (hash == IsFleeingHash)
+            {
+                animatorParameterMask |= 16;
+            }
+        }
+    }
+
+    private void SetAnimatorFloatIfAvailable(int parameterHash, float value, int mask)
+    {
+        if ((animatorParameterMask & mask) != 0)
+        {
+            anim.SetFloat(parameterHash, value);
+        }
+    }
+
+    private void SetAnimatorBoolIfAvailable(int parameterHash, bool value, int mask)
+    {
+        if ((animatorParameterMask & mask) != 0)
+        {
+            anim.SetBool(parameterHash, value);
         }
     }
 

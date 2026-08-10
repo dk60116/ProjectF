@@ -27,6 +27,7 @@ public class GameManager : MonoBehaviour
     private ItemManager itemManager;
     private VirtualObjectWorld virtualObjectWorld;
     private VirtualItemStackRenderer virtualItemStackRenderer;
+    private WorldTimeService worldTimeService;
 
     [SerializeField]
     private Player player;
@@ -55,6 +56,10 @@ public class GameManager : MonoBehaviour
     private bool mapObjectTickProfilingEnabled;
     [SerializeField, Min(1)]
     private int mapObjectTickProfilingMaxRows = 64;
+    [SerializeField, Min(1f)]
+    private float animalAIActiveRadius = 60f;
+    [SerializeField]
+    private bool showAnimalHerdAreas;
     [SerializeField]
     private bool runtimeItemGiveServerEnabled = true;
     [SerializeField, Min(1)]
@@ -78,6 +83,8 @@ public class GameManager : MonoBehaviour
     private bool mapObjectTickProfilingRuntimeStateInitialized;
     private bool lastRuntimeMapObjectTickProfilingEnabled;
     private RailLineDebugRenderer railLineDebugRenderer;
+    private AnimalAIWorld animalAIWorld;
+    private AnimalHerdDebugRenderer animalHerdDebugRenderer;
 
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
@@ -99,6 +106,7 @@ public class GameManager : MonoBehaviour
         uiManager = GetComponentInChildren<UIManager>();
         itemManager = GetComponentInChildren<ItemManager>();
         virtualObjectWorld = VirtualObjectWorld.EnsureFor(gameObject);
+        worldTimeService = WorldTimeService.EnsureFor(gameObject);
         virtualItemStackRenderer = GetComponent<VirtualItemStackRenderer>();
         if (virtualItemStackRenderer == null)
         {
@@ -111,6 +119,14 @@ public class GameManager : MonoBehaviour
             railLineDebugRenderer = gameObject.AddComponent<RailLineDebugRenderer>();
         }
 
+        animalAIWorld = AnimalAIWorld.EnsureFor(gameObject);
+        animalHerdDebugRenderer = GetComponent<AnimalHerdDebugRenderer>();
+        if (animalHerdDebugRenderer == null)
+        {
+            animalHerdDebugRenderer = gameObject.AddComponent<AnimalHerdDebugRenderer>();
+        }
+
+        animalHerdDebugRenderer.SetVisible(showAnimalHerdAreas);
         virtualItemStackRenderer.Configure(virtualObjectWorld, itemManager);
         ConfigureRuntimeItemGiveReceiver();
     }
@@ -138,6 +154,7 @@ public class GameManager : MonoBehaviour
 
     private void OnValidate()
     {
+        animalAIActiveRadius = Mathf.Max(1f, animalAIActiveRadius);
         if (Application.isPlaying && Instance == this)
         {
             SyncConveyorSlotDotRuntimeVisibility(true);
@@ -149,6 +166,7 @@ public class GameManager : MonoBehaviour
             SyncBeltDirectionRuntimeVisibility(true);
             SyncFreeCameraRuntimeState(true);
             SyncMapObjectTickProfilingRuntimeState(true);
+            animalHerdDebugRenderer?.SetVisible(showAnimalHerdAreas);
         }
     }
 
@@ -166,12 +184,17 @@ public class GameManager : MonoBehaviour
         SyncBeltRenderingRuntimeVisibility(true);
         SyncRailLineRuntimeVisibility(true);
         SyncFreeCameraRuntimeState(true);
+        animalHerdDebugRenderer?.SetVisible(showAnimalHerdAreas);
+        worldTimeService?.RefreshEnvironmentBindings();
     }
 
     public UIManager UIManager => uiManager;
     public ItemManager ItemManger => itemManager;
     public VirtualObjectWorld VirtualWorld => virtualObjectWorld;
     public VirtualItemStackRenderer VirtualItemRenderer => virtualItemStackRenderer;
+    public WorldTimeService WorldTime => worldTimeService != null
+        ? worldTimeService
+        : WorldTimeService.Active;
 
     public Player Player => player;
     public bool DebugConveyorInstallGridEnds => debugConveyorInstallGridEnds;
@@ -187,6 +210,9 @@ public class GameManager : MonoBehaviour
     public bool FreeTrain => freeTrain;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
+    public float AnimalAIActiveRadius => Mathf.Max(1f, animalAIActiveRadius);
+    public bool ShowAnimalHerdAreas => showAnimalHerdAreas;
+    public AnimalAIWorld AnimalAIWorld => animalAIWorld;
 
     public static bool IsTextInputFocused()
     {
@@ -307,6 +333,43 @@ public class GameManager : MonoBehaviour
     {
         mapObjectTickProfilingEnabled = enabled;
         SyncMapObjectTickProfilingRuntimeState(true);
+    }
+
+    public void SetShowAnimalHerdAreas(bool show)
+    {
+        showAnimalHerdAreas = show;
+        animalHerdDebugRenderer?.SetVisible(show);
+    }
+
+    public void SetAnimalAIPaused(bool paused)
+    {
+        animalAIWorld?.SetPaused(paused);
+    }
+
+    public void SetWorldTimePaused(bool paused)
+    {
+        WorldTime?.SetPaused(paused);
+    }
+
+    public void SetWorldTimeScale(float scale)
+    {
+        WorldTime?.SetTimeScale(scale);
+    }
+
+    public bool TrySetWorldTime(int hour, int minute)
+    {
+        WorldTimeService service = WorldTime;
+        return service != null && service.TrySetTimeOfDay(hour, minute);
+    }
+
+    public void AdvanceWorldTimeToNextSunrise()
+    {
+        WorldTime?.AdvanceToNextSunrise();
+    }
+
+    public void ResetWorldTime()
+    {
+        WorldTime?.ResetToDefault();
     }
 
     private void SyncConveyorSlotDotRuntimeVisibility(bool force = false)
@@ -550,6 +613,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int MaxConveyorsPerRequest = 1000;
     private const int ConveyorItemFillDefaultCount = 50;
     private const int MaxConveyorItemsPerRequest = 500;
+    private const int AnimalStressDefaultCount = 100;
+    private const int MaxAnimalsPerRequest = 2000;
+    private const int AnimalThreatDefaultRadius = 20;
     private const int ConveyorLineFillSearchLimit = 4096;
     private const float ConveyorItemFillSearchRadius = 32f;
     private const int RequestTimeoutMilliseconds = 30000;
@@ -756,8 +822,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             : MaxRequestsPerFrame;
         while (processedCount < maxRequestsThisFrame && TryDequeueRequest(out ToolRequest request))
         {
-            ProcessRequest(request);
-            request.Completion.Set();
+            try
+            {
+                ProcessRequest(request);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+                request.Result = ToolResult.Error(0, 0, "request processing failed");
+            }
+            finally
+            {
+                request.Complete();
+            }
+
             processedCount++;
         }
     }
@@ -771,6 +849,24 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 break;
             case ToolCommand.Status:
                 request.Result = GetStatusResult();
+                break;
+            case ToolCommand.TimeStatus:
+                request.Result = GetWorldTimeStatusResult();
+                break;
+            case ToolCommand.TimeSet:
+                request.Result = SetWorldTime(request.TimeParameters.Hour, request.TimeParameters.Minute);
+                break;
+            case ToolCommand.TimeScale:
+                request.Result = SetWorldTimeScale(request.TimeParameters.Scale);
+                break;
+            case ToolCommand.TimePause:
+                request.Result = SetWorldTimePaused(request.TimeParameters.Paused);
+                break;
+            case ToolCommand.TimeNextSunrise:
+                request.Result = AdvanceWorldTimeToNextSunrise();
+                break;
+            case ToolCommand.TimeCheck:
+                request.Result = CheckWorldTime();
                 break;
             case ToolCommand.SetDebugToggle:
                 request.Result = SetDebugToggle(request.DebugToggleName, request.DebugToggleValue);
@@ -786,6 +882,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 break;
             case ToolCommand.CreateConveyorStressTest:
                 request.Result = CreateConveyorStressTest(request.Count);
+                break;
+            case ToolCommand.CreateAnimalStressTest:
+                request.Result = CreateAnimalStressTest(request.Count);
+                break;
+            case ToolCommand.CreateAnimalCollisionStressTest:
+                request.Result = CreateAnimalCollisionStressTest(request.Count);
+                break;
+            case ToolCommand.ForceAnimalThreat:
+                request.Result = ForceAnimalThreat(request.Count);
                 break;
             case ToolCommand.FillConveyorItems:
                 request.Result = FillRandomConveyorItems(request.Count);
@@ -923,6 +1028,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     out float cameraMaxSize,
                     out int seedValue,
                     out bool randomizeSeed,
+                    out WorldTimeToolParameters timeParameters,
                     out string error))
             {
                 writer.WriteLine($"error {error}");
@@ -939,17 +1045,23 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 cameraMinSize,
                 cameraMaxSize,
                 seedValue,
-                randomizeSeed);
+                randomizeSeed,
+                timeParameters);
             EnqueueRequest(request);
-            if (!request.Completion.Wait(RequestTimeoutMilliseconds))
+            try
             {
-                writer.WriteLine("error timed out waiting for the Unity main thread");
-                request.Completion.Dispose();
-                return;
-            }
+                if (!request.WaitForCompletion(RequestTimeoutMilliseconds))
+                {
+                    writer.WriteLine("error timed out waiting for the Unity main thread");
+                    return;
+                }
 
-            writer.WriteLine(request.Result.ToProtocolLine());
-            request.Completion.Dispose();
+                writer.WriteLine(request.Result.ToProtocolLine());
+            }
+            finally
+            {
+                request.ReleaseWaiter();
+            }
         }
     }
 
@@ -965,6 +1077,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         out float cameraMaxSize,
         out int seedValue,
         out bool randomizeSeed,
+        out WorldTimeToolParameters timeParameters,
         out string error)
     {
         command = ToolCommand.Give;
@@ -977,6 +1090,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         cameraMaxSize = 0f;
         seedValue = 0;
         randomizeSeed = false;
+        timeParameters = default;
         error = string.Empty;
 
         if (string.IsNullOrWhiteSpace(line))
@@ -1000,6 +1114,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             itemId = 0;
             count = 0;
             return true;
+        }
+
+        if (string.Equals(parts[0], "time", StringComparison.OrdinalIgnoreCase))
+        {
+            itemId = 0;
+            count = 0;
+            return TryParseWorldTimeRequest(
+                parts,
+                out command,
+                out timeParameters,
+                out error);
         }
 
         if (parts.Length == 1
@@ -1178,6 +1303,76 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         if (parts.Length >= 1
+            && (string.Equals(parts[0], "animalstress", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "animalspawn", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.CreateAnimalStressTest;
+            itemId = -1;
+            count = AnimalStressDefaultCount;
+
+            if (parts.Length >= 2 && (!int.TryParse(parts[1], out count) || count <= 0))
+            {
+                error = "count must be a positive integer";
+                return false;
+            }
+
+            if (parts.Length > 2)
+            {
+                error = "usage: animalstress [count]";
+                return false;
+            }
+
+            count = Math.Min(Math.Max(count, 1), MaxAnimalsPerRequest);
+            return true;
+        }
+
+        if (parts.Length >= 1
+            && (string.Equals(parts[0], "animalcollision", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "animaljitter", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.CreateAnimalCollisionStressTest;
+            itemId = -1;
+            count = 12;
+
+            if (parts.Length >= 2 && (!int.TryParse(parts[1], out count) || count <= 0))
+            {
+                error = "count must be a positive integer";
+                return false;
+            }
+
+            if (parts.Length > 2)
+            {
+                error = "usage: animalcollision [count]";
+                return false;
+            }
+
+            count = Math.Min(Math.Max(count, 1), MaxAnimalsPerRequest);
+            return true;
+        }
+
+        if (parts.Length >= 1
+            && string.Equals(parts[0], "animalthreat", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.ForceAnimalThreat;
+            itemId = -1;
+            count = AnimalThreatDefaultRadius;
+
+            if (parts.Length >= 2 && (!int.TryParse(parts[1], out count) || count <= 0))
+            {
+                error = "radius must be a positive integer";
+                return false;
+            }
+
+            if (parts.Length > 2)
+            {
+                error = "usage: animalthreat [radius]";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (parts.Length >= 1
             && (string.Equals(parts[0], "beltstress", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(parts[0], "conveyorstress", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1263,7 +1458,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -1281,6 +1476,109 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         count = Math.Min(Math.Max(count, 1), MaxItemsPerRequest);
         return true;
+    }
+
+    private static bool TryParseWorldTimeRequest(
+        string[] parts,
+        out ToolCommand command,
+        out WorldTimeToolParameters parameters,
+        out string error)
+    {
+        command = ToolCommand.TimeStatus;
+        parameters = default;
+        error = string.Empty;
+
+        if (parts.Length == 2
+            && string.Equals(parts[1], "status", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (parts.Length == 2
+            && string.Equals(parts[1], "check", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.TimeCheck;
+            return true;
+        }
+
+        if ((parts.Length == 2
+             && string.Equals(parts[1], "nextsunrise", StringComparison.OrdinalIgnoreCase))
+            || (parts.Length == 3
+                && string.Equals(parts[1], "next", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(parts[2], "sunrise", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.TimeNextSunrise;
+            return true;
+        }
+
+        if (parts.Length == 3
+            && string.Equals(parts[1], "set", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryParseClockText(parts[2], out int hour, out int minute))
+            {
+                error = "time set usage: time set <HH:mm>";
+                return false;
+            }
+
+            command = ToolCommand.TimeSet;
+            parameters = WorldTimeToolParameters.ForTime(hour, minute);
+            return true;
+        }
+
+        if (parts.Length == 3
+            && string.Equals(parts[1], "scale", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryParseProtocolFloat(parts[2], out float scale) || scale <= 0f)
+            {
+                error = "time scale must be a positive number";
+                return false;
+            }
+
+            command = ToolCommand.TimeScale;
+            parameters = WorldTimeToolParameters.ForScale(scale);
+            return true;
+        }
+
+        if (parts.Length == 3
+            && string.Equals(parts[1], "pause", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryParseProtocolBool(parts[2], out bool paused))
+            {
+                error = "time pause value must be true/false or 1/0";
+                return false;
+            }
+
+            command = ToolCommand.TimePause;
+            parameters = WorldTimeToolParameters.ForPause(paused);
+            return true;
+        }
+
+        error = "usage: time status | time set <HH:mm> | time scale <value> | time pause <true|false> | time next sunrise | time check";
+        return false;
+    }
+
+    private static bool TryParseClockText(string value, out int hour, out int minute)
+    {
+        hour = 0;
+        minute = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        int separatorIndex = value.IndexOf(':');
+        if (separatorIndex <= 0
+            || separatorIndex >= value.Length - 1
+            || !int.TryParse(value.Substring(0, separatorIndex), out hour)
+            || !int.TryParse(value.Substring(separatorIndex + 1), out minute))
+        {
+            return false;
+        }
+
+        return hour >= 0
+               && hour < WorldTimeService.HoursPerDay
+               && minute >= 0
+               && minute < WorldTimeService.MinutesPerHour;
     }
 
     private static bool TryParseProtocolBool(string value, out bool result)
@@ -1382,6 +1680,96 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             currentShowRailLine,
             currentShowBeltDirections,
             extraTokens);
+    }
+
+    private ToolResult GetWorldTimeStatusResult()
+    {
+        WorldTimeService worldTime = ResolveWorldTime();
+        return worldTime != null
+            ? ToolResult.Success(0, 0, 0, 0, 0, 0, "time status", BuildWorldTimeExtraTokens(worldTime))
+            : ToolResult.Error(0, 0, "world time service not found");
+    }
+
+    private ToolResult SetWorldTime(int hour, int minute)
+    {
+        WorldTimeService worldTime = ResolveWorldTime();
+        if (worldTime == null)
+        {
+            return ToolResult.Error(0, 0, "world time service not found");
+        }
+
+        if (!worldTime.TrySetTimeOfDay(hour, minute))
+        {
+            return ToolResult.Error(0, 0, "invalid world time");
+        }
+
+        return ToolResult.Success(0, 0, 0, 0, 0, 0, "time set", BuildWorldTimeExtraTokens(worldTime));
+    }
+
+    private ToolResult SetWorldTimeScale(float scale)
+    {
+        WorldTimeService worldTime = ResolveWorldTime();
+        if (worldTime == null)
+        {
+            return ToolResult.Error(0, 0, "world time service not found");
+        }
+
+        worldTime.SetTimeScale(scale);
+        return ToolResult.Success(0, 0, 0, 0, 0, 0, "time scale", BuildWorldTimeExtraTokens(worldTime));
+    }
+
+    private ToolResult SetWorldTimePaused(bool paused)
+    {
+        WorldTimeService worldTime = ResolveWorldTime();
+        if (worldTime == null)
+        {
+            return ToolResult.Error(0, 0, "world time service not found");
+        }
+
+        worldTime.SetPaused(paused);
+        return ToolResult.Success(0, 0, 0, 0, 0, 0, "time pause", BuildWorldTimeExtraTokens(worldTime));
+    }
+
+    private ToolResult AdvanceWorldTimeToNextSunrise()
+    {
+        WorldTimeService worldTime = ResolveWorldTime();
+        if (worldTime == null)
+        {
+            return ToolResult.Error(0, 0, "world time service not found");
+        }
+
+        worldTime.AdvanceToNextSunrise();
+        return ToolResult.Success(0, 0, 0, 0, 0, 0, "next sunrise", BuildWorldTimeExtraTokens(worldTime));
+    }
+
+    private ToolResult CheckWorldTime()
+    {
+        WorldTimeService worldTime = ResolveWorldTime();
+        if (worldTime == null)
+        {
+            return ToolResult.Error(0, 0, "world time service not found", "timeCheckErrors=1");
+        }
+
+        if (!WorldTimeService.RunCalculationSelfCheck(out string firstIssue)
+            || !worldTime.TryValidateState(out firstIssue)
+            || !SaveGameBinarySerializer.RunWorldTimeRoundTripSelfCheck(out firstIssue))
+        {
+            return ToolResult.Error(
+                0,
+                0,
+                $"time check failed first={firstIssue}",
+                BuildExtraTokens("timeCheckErrors=1", BuildWorldTimeExtraTokens(worldTime)));
+        }
+
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "time check healthy",
+            BuildExtraTokens("timeCheckErrors=0", BuildWorldTimeExtraTokens(worldTime)));
     }
 
     private ToolResult GetSaveSlotsResult()
@@ -2176,7 +2564,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildSeedExtraTokens(terrain),
             BuildFreeCameraExtraTokens(GameManager.Instance),
             BuildFreeTrainExtraTokens(GameManager.Instance),
-            BuildMapObjectTickProfilingExtraTokens(GameManager.Instance));
+            BuildAnimalAIExtraTokens(GameManager.Instance),
+            BuildMapObjectTickProfilingExtraTokens(GameManager.Instance),
+            BuildWorldTimeExtraTokens(ResolveWorldTime()));
     }
 
     private static string BuildCameraSizeExtraTokens(PlayerCamera playerCamera)
@@ -2219,6 +2609,30 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return gameManager != null
             ? $"mapObjectTickProfiling={(gameManager.MapObjectTickProfilingEnabled ? 1 : 0)}"
             : "mapObjectTickProfiling=0";
+    }
+
+    private static string BuildWorldTimeExtraTokens(WorldTimeService worldTime)
+    {
+        if (worldTime == null)
+        {
+            return "day=0 time=--:-- timeScale=0 timePaused=1 isDay=0";
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "day={0} time={1:00}:{2:00} timeScale={3:0.###} timePaused={4} isDay={5} year={6} season={7} dayOfSeason={8} latitude={9:0.###} airTemperature={10:0.###} waterTemperature={11:0.###}",
+            worldTime.DayIndex,
+            worldTime.Hour,
+            worldTime.Minute,
+            worldTime.TimeScale,
+            worldTime.Paused ? 1 : 0,
+            worldTime.IsDay ? 1 : 0,
+            worldTime.YearIndex,
+            worldTime.SeasonIndex,
+            worldTime.DayOfSeason,
+            worldTime.LatitudeDegrees,
+            MapClimate.CurrentTemperatureCelsius,
+            MapClimate.CurrentWaterTemperatureCelsius);
     }
 
     private static string BuildExtraTokens(params string[] tokens)
@@ -2268,6 +2682,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         cachedPlayerCamera = FindObjectOfType<PlayerCamera>();
         return cachedPlayerCamera;
+    }
+
+    private static WorldTimeService ResolveWorldTime()
+    {
+        return GameManager.Instance?.WorldTime ?? WorldTimeService.Active;
     }
 
     private void CaptureWorldStats(
@@ -2543,6 +2962,33 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             $"beltline placed={placedCount} start={startCoordinate.x},{startCoordinate.y} mode=fill dir={preferredOutputDirection.x},{preferredOutputDirection.y}");
     }
 
+    private static string BuildAnimalAIExtraTokens(GameManager gameManager)
+    {
+        AnimalAIWorld world = gameManager != null ? gameManager.AnimalAIWorld : null;
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "showAnimalHerdAreas={0} animalAIPaused={1} animalTotal={2} animalAIActive={3} animalAIActiveRadius={4:0.###} animalHerdGroups={5} animalSeparationChecks={6} animalCollisionChecks={7} animalCollisionCellChecks={8} animalColliderRadiusMax={9:0.###} animalPhysicsQueries={10} animalPhysicsHits={11} animalAITicks={12} animalAIDue={13} animalAIDeferred={14} animalAIBudget={15} animalAINear={16} animalAIMid={17} animalAIFar={18}",
+            gameManager != null && gameManager.ShowAnimalHerdAreas ? 1 : 0,
+            world != null && world.Paused ? 1 : 0,
+            world != null ? world.ControllerCount : 0,
+            world != null ? world.CountActiveControllers() : 0,
+            gameManager != null ? gameManager.AnimalAIActiveRadius : 0f,
+            world != null ? world.HerdGroupCount : 0,
+            world != null ? world.SeparationCandidateChecksLastFrame : 0,
+            world != null ? world.AnimalCollisionCandidateChecksLastFrame : 0,
+            world != null ? world.AnimalCollisionCellChecksLastFrame : 0,
+            world != null ? world.MaximumAnimalColliderRadius : 0f,
+            world != null ? world.ObstaclePhysicsQueriesLastFrame : 0,
+            world != null ? world.ObstaclePhysicsHitsLastFrame : 0,
+            world != null ? world.ActiveSimulationTicksLastFrame : 0,
+            world != null ? world.SimulationTickCandidatesLastFrame : 0,
+            world != null ? world.DeferredSimulationTicksLastFrame : 0,
+            world != null ? world.SimulationTickBudgetLastFrame : 0,
+            world != null ? world.NearActiveControllerCount : 0,
+            world != null ? world.MidActiveControllerCount : 0,
+            world != null ? world.FarActiveControllerCount : 0);
+    }
+
     private ToolResult CreateConveyorStressTest(int count)
     {
         GameManager gameManager = GameManager.Instance;
@@ -2635,6 +3081,71 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             0,
             $"beltstress placed={placedCount} blocked={blockedCount} searched={coordinates.Count}");
+    }
+
+    private static ToolResult CreateAnimalStressTest(int count)
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(-1, count, "terrain not found");
+        }
+
+        int created = terrain.CreateAnimalAIStressTest(count);
+        if (created <= 0)
+        {
+            return ToolResult.Error(-1, count, "no animal could be spawned near player");
+        }
+
+        string message = created == count
+            ? $"animalstress spawned={created}"
+            : $"animalstress incomplete spawned={created} requested={count}";
+        return ToolResult.Success(-1, count, created, 0, 0, 0, message);
+    }
+
+    private static ToolResult CreateAnimalCollisionStressTest(int count)
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(-1, count, "terrain not found");
+        }
+
+        int created = terrain.CreateAnimalCollisionStressTest(count);
+        if (created <= 0)
+        {
+            return ToolResult.Error(-1, count, "animal collision harness could not spawn animals");
+        }
+
+        return ToolResult.Success(
+            -1,
+            count,
+            created,
+            0,
+            0,
+            0,
+            $"animalcollision spawned={created} obstacles=4");
+    }
+
+    private static ToolResult ForceAnimalThreat(int radius)
+    {
+        GameManager gameManager = GameManager.Instance;
+        AnimalAIWorld world = gameManager != null ? gameManager.AnimalAIWorld : null;
+        Player player = gameManager != null ? gameManager.Player : null;
+        if (world == null || player == null)
+        {
+            return ToolResult.Error(-1, radius, "animal AI world or player not found");
+        }
+
+        int notified = world.ForceThreatPulse(player.transform.position, Mathf.Max(1f, radius));
+        return ToolResult.Success(
+            -1,
+            radius,
+            notified,
+            0,
+            0,
+            0,
+            $"animalthreat notified={notified} radius={radius}");
     }
 
     private static int ResolveConveyorStressSearchLimit(
@@ -3847,6 +4358,34 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"mapObjectTickProfiling={(value ? 1 : 0)}");
         }
 
+        if (string.Equals(toggleName, "showAnimalHerdAreas", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "animalHerdAreas", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetShowAnimalHerdAreas(value);
+            return ToolResult.Success(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $"showAnimalHerdAreas={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "animalAIPaused", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "pauseAnimalAI", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetAnimalAIPaused(value);
+            return ToolResult.Success(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $"animalAIPaused={(value ? 1 : 0)}");
+        }
+
         return ToolResult.Error(0, 0, $"unknown debug toggle {toggleName}");
     }
 
@@ -3990,11 +4529,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         Give,
         Ping,
         Status,
+        TimeStatus,
+        TimeSet,
+        TimeScale,
+        TimePause,
+        TimeNextSunrise,
+        TimeCheck,
         SetDebugToggle,
         SetCameraSizeRange,
         SetSeed,
         CreateConveyorLine,
         CreateConveyorStressTest,
+        CreateAnimalStressTest,
+        CreateAnimalCollisionStressTest,
+        ForceAnimalThreat,
         FillConveyorItems,
         CheckConveyors,
         SaveSlot,
@@ -4004,8 +4552,43 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         PerfSnapshot
     }
 
+    private readonly struct WorldTimeToolParameters
+    {
+        private WorldTimeToolParameters(int hour, int minute, float scale, bool paused)
+        {
+            Hour = hour;
+            Minute = minute;
+            Scale = scale;
+            Paused = paused;
+        }
+
+        public int Hour { get; }
+        public int Minute { get; }
+        public float Scale { get; }
+        public bool Paused { get; }
+
+        public static WorldTimeToolParameters ForTime(int hour, int minute)
+        {
+            return new WorldTimeToolParameters(hour, minute, 1f, false);
+        }
+
+        public static WorldTimeToolParameters ForScale(float scale)
+        {
+            return new WorldTimeToolParameters(0, 0, scale, false);
+        }
+
+        public static WorldTimeToolParameters ForPause(bool paused)
+        {
+            return new WorldTimeToolParameters(0, 0, 1f, paused);
+        }
+    }
+
     private sealed class ToolRequest
     {
+        private int processingCompleted;
+        private int waiterReleased;
+        private int completionDisposed;
+
         public ToolRequest(
             ToolCommand command,
             int itemId,
@@ -4016,7 +4599,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             float cameraMinSize,
             float cameraMaxSize,
             int seedValue,
-            bool randomizeSeed)
+            bool randomizeSeed,
+            WorldTimeToolParameters timeParameters)
         {
             Command = command;
             ItemId = itemId;
@@ -4028,6 +4612,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             CameraMaxSize = cameraMaxSize;
             SeedValue = seedValue;
             RandomizeSeed = randomizeSeed;
+            TimeParameters = timeParameters;
         }
 
         public ToolCommand Command { get; }
@@ -4040,8 +4625,37 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public float CameraMaxSize { get; }
         public int SeedValue { get; }
         public bool RandomizeSeed { get; }
-        public ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
+        public WorldTimeToolParameters TimeParameters { get; }
+        private ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
         public ToolResult Result { get; set; }
+
+        public bool WaitForCompletion(int timeoutMilliseconds)
+        {
+            return Completion.Wait(timeoutMilliseconds);
+        }
+
+        public void Complete()
+        {
+            Completion.Set();
+            Interlocked.Exchange(ref processingCompleted, 1);
+            TryDisposeCompletion();
+        }
+
+        public void ReleaseWaiter()
+        {
+            Interlocked.Exchange(ref waiterReleased, 1);
+            TryDisposeCompletion();
+        }
+
+        private void TryDisposeCompletion()
+        {
+            if (Volatile.Read(ref processingCompleted) != 0
+                && Volatile.Read(ref waiterReleased) != 0
+                && Interlocked.CompareExchange(ref completionDisposed, 1, 0) == 0)
+            {
+                Completion.Dispose();
+            }
+        }
     }
 
     private readonly struct ToolResult

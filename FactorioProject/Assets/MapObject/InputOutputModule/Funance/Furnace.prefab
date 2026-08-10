@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Funance
-  objId: 13
+  objId: 14
   itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -84,6 +84,10 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 2
+  - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+    count: 1
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
     count: 2
@@ -94,6 +98,10 @@ MonoBehaviour:
   - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}
@@ -231,6 +239,11 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -252,9 +265,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1001 &4332222891219542140
 PrefabInstance:

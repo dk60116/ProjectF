@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEngine;
 
 public sealed class AnimalDataEditorWindow : EditorWindow
@@ -9,24 +10,37 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private const float SidebarWidth = 280f;
     private const float PreviewHeight = 320f;
     private const float ListRowHeight = 28f;
+    private const double DropItemCatalogPollInterval = 0.25d;
 
     private static readonly int[] AnimationStates =
     {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 98, 99
     };
 
-    private static readonly string[] AnimationStateLabels =
+    private static readonly string[] DefaultAnimationStateLabels =
     {
-        "0 - Idle", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
-        "14", "15", "16", "98", "99"
+        "Idle", "Attack", "Get Hit 1", "Jump", "Roll", "Kick Front", "Death", "Get Hit 2",
+        "Gallop", "Prancing", "Swim", "Eating", "Walk", "Look Around", "Run", "Rest (Sleep)",
+        "Enter Water", "Exit Water"
     };
 
     [Serializable]
     private sealed class AnimalJsonFile
     {
         public string format = "ProjectF.AnimalData";
-        public int version = 3;
+        public int version = 8;
         public List<AnimalJsonEntry> animals = new List<AnimalJsonEntry>();
+    }
+
+    [Serializable]
+    private sealed class AnimalDropJsonEntry
+    {
+        public int itemId = -1;
+        public string itemName = string.Empty;
+        public string itemAssetPath = string.Empty;
+        public int minAmount = 1;
+        public int maxAmount = 1;
+        public float dropChance = 1f;
     }
 
     [Serializable]
@@ -38,6 +52,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int minHerdSize = AnimalDefinition.DefaultMinHerdSize;
         public int maxHerdSize = AnimalDefinition.DefaultMaxHerdSize;
         public int spawnWeight = AnimalDefinition.DefaultSpawnWeight;
+        public float maxHealth = AnimalDefinition.DefaultMaxHealth;
+        public AnimalAISettings aiSettings = new AnimalAISettings();
+        public List<AnimalDropJsonEntry> dropItems = new List<AnimalDropJsonEntry>();
         public string hierarchyPath = string.Empty;
         public string definitionAssetPath = string.Empty;
         public string prefabAssetPath = string.Empty;
@@ -54,6 +71,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int minHerdSize;
         public int maxHerdSize;
         public int spawnWeight;
+        public float maxHealth;
+        public AnimalAISettings aiSettings;
+        public List<AnimalDropEntry> dropItems;
         public GameObject prefab;
         public Sprite adultIcon;
         public Sprite childIcon;
@@ -73,6 +93,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             minHerdSize = definition != null ? definition.MinHerdSize : AnimalDefinition.DefaultMinHerdSize;
             maxHerdSize = definition != null ? definition.MaxHerdSize : AnimalDefinition.DefaultMaxHerdSize;
             spawnWeight = definition != null ? definition.SpawnWeight : AnimalDefinition.DefaultSpawnWeight;
+            maxHealth = definition != null ? definition.MaxHealth : AnimalDefinition.DefaultMaxHealth;
+            aiSettings = definition != null && definition.AISettings != null
+                ? definition.AISettings.Clone()
+                : new AnimalAISettings();
+            dropItems = definition != null
+                ? AnimalDropEntry.CloneList(definition.DropItems)
+                : new List<AnimalDropEntry>();
             prefab = definition != null ? definition.AnimalPrefab : null;
             adultIcon = definition != null ? definition.AdultIcon : null;
             childIcon = definition != null ? definition.ChildIcon : null;
@@ -94,13 +121,111 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
     }
 
+    private sealed class DropItemPopupContent : PopupWindowContent
+    {
+        private const float PopupWidth = 340f;
+        private const float MaximumPopupHeight = 420f;
+        private const float RowHeight = 24f;
+        private const float IconSize = 18f;
+
+        private readonly GUIContent[] options;
+        private readonly IReadOnlyList<ItemDefinition> itemDefinitions;
+        private readonly int selectedOptionIndex;
+        private readonly Action<int> selectionCallback;
+        private Vector2 scrollPosition;
+
+        public DropItemPopupContent(
+            GUIContent[] options,
+            IReadOnlyList<ItemDefinition> itemDefinitions,
+            int selectedOptionIndex,
+            Action<int> selectionCallback)
+        {
+            this.options = options;
+            this.itemDefinitions = itemDefinitions;
+            this.selectedOptionIndex = selectedOptionIndex;
+            this.selectionCallback = selectionCallback;
+        }
+
+        public override Vector2 GetWindowSize()
+        {
+            float contentHeight = options.Length * RowHeight + 4f;
+            return new Vector2(
+                PopupWidth,
+                Mathf.Min(MaximumPopupHeight, contentHeight));
+        }
+
+        public override void OnGUI(Rect rect)
+        {
+            Event currentEvent = Event.current;
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            for (int i = 0; i < options.Length; i++)
+            {
+                Rect rowRect = GUILayoutUtility.GetRect(
+                    0f,
+                    RowHeight,
+                    GUILayout.ExpandWidth(true));
+                bool isSelected = i == selectedOptionIndex;
+                bool isHovered = rowRect.Contains(currentEvent.mousePosition);
+                if (Event.current.type == EventType.Repaint
+                    && (isSelected || isHovered))
+                {
+                    Color backgroundColor = isSelected
+                        ? new Color(0.24f, 0.49f, 0.90f, 0.45f)
+                        : new Color(0.5f, 0.5f, 0.5f, 0.20f);
+                    EditorGUI.DrawRect(rowRect, backgroundColor);
+                }
+
+                Sprite icon = ResolveOptionIcon(i);
+                float textOffset = 7f;
+                if (icon != null)
+                {
+                    Rect iconRect = new Rect(
+                        rowRect.x + 5f,
+                        rowRect.y + (rowRect.height - IconSize) * 0.5f,
+                        IconSize,
+                        IconSize);
+                    DrawSprite(iconRect, icon);
+                    textOffset = IconSize + 10f;
+                }
+
+                Rect textRect = new Rect(
+                    rowRect.x + textOffset,
+                    rowRect.y,
+                    rowRect.width - textOffset - 4f,
+                    rowRect.height);
+                EditorGUI.LabelField(textRect, options[i].text);
+
+                if (currentEvent.type == EventType.MouseDown
+                    && currentEvent.button == 0
+                    && rowRect.Contains(currentEvent.mousePosition))
+                {
+                    selectionCallback?.Invoke(i);
+                    editorWindow.Close();
+                    currentEvent.Use();
+                }
+            }
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        private Sprite ResolveOptionIcon(int optionIndex)
+        {
+            return optionIndex > 0 && optionIndex <= itemDefinitions.Count
+                ? itemDefinitions[optionIndex - 1]?.icon
+                : null;
+        }
+    }
+
     private readonly List<AnimalDefinition> definitions = new List<AnimalDefinition>();
     private readonly Dictionary<int, AnimalDraft> drafts = new Dictionary<int, AnimalDraft>();
     private readonly HashSet<string> expandedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly List<AnimalValidationIssue> selectedIssues = new List<AnimalValidationIssue>();
     private readonly List<AnimalDefinition> selectedObjectDefinitions = new List<AnimalDefinition>();
+    private readonly List<ItemDefinition> dropItemDefinitions = new List<ItemDefinition>();
 
     private HierarchyNode hierarchyRoot = new HierarchyNode("Animals", string.Empty);
+    private GUIContent[] dropItemOptions = { new GUIContent("None") };
+    private GUIStyle dropItemPopupWithIconStyle;
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedDefinitionInstanceId;
@@ -116,8 +241,11 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private float previewZoom = 1f;
     private float previewAge = 10f;
     private int previewAnimationIndex;
+    private string[] previewAnimationStateLabels = DefaultAnimationStateLabels;
     private bool previewPlaying;
     private double lastPreviewUpdateTime;
+    private double nextDropItemCatalogPollTime;
+    private int dropItemCatalogSignature = int.MinValue;
 
     [MenuItem("Window/ProjectF/Animal Data")]
     public static void ShowWindow()
@@ -147,6 +275,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     {
         Undo.undoRedoPerformed += HandleUndoRedo;
         EditorApplication.update += HandleEditorUpdate;
+        ItemDataEditorWindow.DefinitionCatalog.Changed +=
+            HandleItemDefinitionCatalogChanged;
         ReloadDefinitions(false);
         lastPreviewUpdateTime = EditorApplication.timeSinceStartup;
     }
@@ -155,7 +285,17 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     {
         Undo.undoRedoPerformed -= HandleUndoRedo;
         EditorApplication.update -= HandleEditorUpdate;
+        ItemDataEditorWindow.DefinitionCatalog.Changed -=
+            HandleItemDefinitionCatalogChanged;
         DisposePreview();
+    }
+
+    private void OnFocus()
+    {
+        if (RefreshDropItemOptions(false))
+        {
+            Repaint();
+        }
     }
 
     private void OnProjectChange()
@@ -168,19 +308,38 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         ReloadDefinitions(true);
     }
 
+    private void HandleItemDefinitionCatalogChanged()
+    {
+        if (RefreshDropItemOptions(false))
+        {
+            Repaint();
+        }
+    }
+
     private void HandleEditorUpdate()
     {
         double currentTime = EditorApplication.timeSinceStartup;
+        bool shouldRepaint = false;
+        if (currentTime >= nextDropItemCatalogPollTime)
+        {
+            nextDropItemCatalogPollTime =
+                currentTime + DropItemCatalogPollInterval;
+            shouldRepaint = RefreshDropItemOptions(false);
+        }
+
         float deltaTime = (float)Math.Min(0.1d, Math.Max(0d, currentTime - lastPreviewUpdateTime));
         lastPreviewUpdateTime = currentTime;
 
-        if (!previewPlaying || previewAnimator == null || !previewAnimator.isInitialized)
+        if (previewPlaying && previewAnimator != null && previewAnimator.isInitialized)
         {
-            return;
+            previewAnimator.Update(deltaTime);
+            shouldRepaint = true;
         }
 
-        previewAnimator.Update(deltaTime);
-        Repaint();
+        if (shouldRepaint)
+        {
+            Repaint();
+        }
     }
 
     private void OnGUI()
@@ -476,6 +635,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
         DrawBasicFields(draft);
         GUILayout.Space(8f);
+        EditorGUILayout.HelpBox(
+            "드롭 아이템은 성별 공통 설정입니다. 왼쪽 계층에서 동물 객체를 선택해 편집하세요.",
+            MessageType.Info);
+        GUILayout.Space(8f);
         DrawPreview(draft);
         GUILayout.Space(8f);
         DrawReadOnlyReferences(draft);
@@ -519,6 +682,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
         DrawObjectSpawnSettings();
+        GUILayout.Space(8f);
+        DrawObjectAISettings();
+        GUILayout.Space(8f);
+        DrawObjectDropItems();
         GUILayout.Space(8f);
         for (int i = 0; i < selectedObjectDefinitions.Count; i++)
         {
@@ -582,6 +749,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         int currentMinHerdSize = firstDraft.minHerdSize;
         int currentMaxHerdSize = firstDraft.maxHerdSize;
         int currentSpawnWeight = firstDraft.spawnWeight;
+        float currentMaxHealth = firstDraft.maxHealth;
         bool hasMixedSettings = false;
         for (int i = 1; i < selectedObjectDefinitions.Count; i++)
         {
@@ -589,7 +757,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             if (draft.spawnAge != currentAge
                 || draft.minHerdSize != currentMinHerdSize
                 || draft.maxHerdSize != currentMaxHerdSize
-                || draft.spawnWeight != currentSpawnWeight)
+                || draft.spawnWeight != currentSpawnWeight
+                || !Mathf.Approximately(draft.maxHealth, currentMaxHealth))
             {
                 hasMixedSettings = true;
                 break;
@@ -616,6 +785,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 Mathf.Clamp(currentSpawnWeight, nextMinHerdSize, nextMaxHerdSize),
                 nextMinHerdSize,
                 nextMaxHerdSize);
+        float nextMaxHealth = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField("Max Health", currentMaxHealth));
         bool settingsChanged = EditorGUI.EndChangeCheck();
         EditorGUI.showMixedValue = false;
 
@@ -628,6 +800,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 draft.minHerdSize = nextMinHerdSize;
                 draft.maxHerdSize = nextMaxHerdSize;
                 draft.spawnWeight = nextSpawnWeight;
+                draft.maxHealth = nextMaxHealth;
                 draft.dirty = true;
             }
         }
@@ -638,6 +811,176 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             "Age Weight를 중심으로 표준편차 2.0의 정규분포를 적용합니다. 나이와 무리 설정은 Female/Male에 함께 적용됩니다.",
             MessageType.Info);
         EditorGUILayout.EndVertical();
+    }
+
+    private void DrawObjectAISettings()
+    {
+        if (selectedObjectDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        AnimalDraft firstDraft = GetDraft(selectedObjectDefinitions[0]);
+        firstDraft.aiSettings ??= new AnimalAISettings();
+        AnimalAISettings current = firstDraft.aiSettings;
+        bool hasMixedSettings = false;
+        for (int i = 1; i < selectedObjectDefinitions.Count; i++)
+        {
+            AnimalAISettings other = GetDraft(selectedObjectDefinitions[i]).aiSettings;
+            if (!AreAISettingsEqual(current, other))
+            {
+                hasMixedSettings = true;
+                break;
+            }
+        }
+
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Species AI Settings", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(
+            "이 객체의 Female/Male 변형에 함께 저장되는 종별 설정입니다.",
+            EditorStyles.miniLabel);
+        EditorGUI.showMixedValue = hasMixedSettings;
+        EditorGUI.BeginChangeCheck();
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Herd Area", EditorStyles.miniBoldLabel);
+        float herdAreaRadius = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Behavior Radius", "무리가 벗어나지 않는 행동 영역의 반경(블록)입니다."),
+                current.HerdAreaRadius));
+        float separationRadius = Mathf.Max(
+            0.1f,
+            EditorGUILayout.FloatField("Separation Radius", current.SeparationRadius));
+        float separationWeight = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField("Separation Weight", current.SeparationWeight));
+        float cohesionWeight = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField("Cohesion Weight", current.CohesionWeight));
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Movement", EditorStyles.miniBoldLabel);
+        float moveSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Move Speed", current.MoveSpeed));
+        float turnSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Turn Speed", current.TurnSpeed));
+        float obstacleProbeDistance = Mathf.Max(
+            0.1f,
+            EditorGUILayout.FloatField("Obstacle Probe", current.ObstacleProbeDistance));
+        float arrivalDistance = Mathf.Max(
+            0.05f,
+            EditorGUILayout.FloatField("Arrival Distance", current.ArrivalDistance));
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Threat Response", EditorStyles.miniBoldLabel);
+        float fleeSafeDistance = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField("Safe Distance", current.FleeSafeDistance));
+        float nearbyThreatRadius = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField("Nearby Reaction Radius", current.NearbyThreatRadius));
+        float fleeSpeedMultiplier = Mathf.Max(
+            0.1f,
+            EditorGUILayout.FloatField("Flee Speed Multiplier", current.FleeSpeedMultiplier));
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Age / Gender Multipliers", EditorStyles.miniBoldLabel);
+        float youngSpeedMultiplier =
+            EditorGUILayout.Slider("Young Speed", current.YoungSpeedMultiplier, 0.1f, 2f);
+        float maleSpeedMultiplier =
+            EditorGUILayout.Slider("Male Speed", current.MaleSpeedMultiplier, 0.1f, 2f);
+        float femaleSpeedMultiplier =
+            EditorGUILayout.Slider("Female Speed", current.FemaleSpeedMultiplier, 0.1f, 2f);
+        float youngWanderWeightMultiplier =
+            EditorGUILayout.Slider("Young Wander Weight", current.YoungWanderWeightMultiplier, 0.1f, 3f);
+        float youngRestWeightMultiplier =
+            EditorGUILayout.Slider("Young Rest Weight", current.YoungRestWeightMultiplier, 0.1f, 3f);
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Behavior Weights", EditorStyles.miniBoldLabel);
+        float idleWeight = Mathf.Max(0f, EditorGUILayout.FloatField("Idle", current.IdleWeight));
+        float lookAroundWeight = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField("Look Around", current.LookAroundWeight));
+        float wanderWeight = Mathf.Max(0f, EditorGUILayout.FloatField("Wander", current.WanderWeight));
+        float grazeWeight = Mathf.Max(0f, EditorGUILayout.FloatField("Graze", current.GrazeWeight));
+        float drinkWeight = Mathf.Max(0f, EditorGUILayout.FloatField("Drink", current.DrinkWeight));
+        float restWeight = Mathf.Max(0f, EditorGUILayout.FloatField("Rest", current.RestWeight));
+
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.LabelField("Behavior Duration (Min / Max Seconds)", EditorStyles.miniBoldLabel);
+        Vector2 idleDuration = EditorGUILayout.Vector2Field("Idle", current.IdleDuration);
+        Vector2 lookAroundDuration =
+            EditorGUILayout.Vector2Field("Look Around", current.LookAroundDuration);
+        Vector2 wanderDuration = EditorGUILayout.Vector2Field("Wander", current.WanderDuration);
+        Vector2 grazeDuration = EditorGUILayout.Vector2Field("Graze", current.GrazeDuration);
+        Vector2 drinkDuration = EditorGUILayout.Vector2Field("Drink", current.DrinkDuration);
+        Vector2 restDuration = EditorGUILayout.Vector2Field("Rest", current.RestDuration);
+
+        bool settingsChanged = EditorGUI.EndChangeCheck();
+        EditorGUI.showMixedValue = false;
+        if (settingsChanged)
+        {
+            AnimalAISettings next = current.Clone();
+            next.HerdAreaRadius = herdAreaRadius;
+            next.SeparationRadius = separationRadius;
+            next.SeparationWeight = separationWeight;
+            next.CohesionWeight = cohesionWeight;
+            next.MoveSpeed = moveSpeed;
+            next.TurnSpeed = turnSpeed;
+            next.ObstacleProbeDistance = obstacleProbeDistance;
+            next.ArrivalDistance = arrivalDistance;
+            next.FleeSafeDistance = fleeSafeDistance;
+            next.NearbyThreatRadius = nearbyThreatRadius;
+            next.FleeSpeedMultiplier = fleeSpeedMultiplier;
+            next.YoungSpeedMultiplier = youngSpeedMultiplier;
+            next.MaleSpeedMultiplier = maleSpeedMultiplier;
+            next.FemaleSpeedMultiplier = femaleSpeedMultiplier;
+            next.YoungWanderWeightMultiplier = youngWanderWeightMultiplier;
+            next.YoungRestWeightMultiplier = youngRestWeightMultiplier;
+            next.IdleWeight = idleWeight;
+            next.LookAroundWeight = lookAroundWeight;
+            next.WanderWeight = wanderWeight;
+            next.GrazeWeight = grazeWeight;
+            next.DrinkWeight = drinkWeight;
+            next.RestWeight = restWeight;
+            next.IdleDuration = idleDuration;
+            next.LookAroundDuration = lookAroundDuration;
+            next.WanderDuration = wanderDuration;
+            next.GrazeDuration = grazeDuration;
+            next.DrinkDuration = drinkDuration;
+            next.RestDuration = restDuration;
+            next.Normalize();
+
+            for (int i = 0; i < selectedObjectDefinitions.Count; i++)
+            {
+                AnimalDraft draft = GetDraft(selectedObjectDefinitions[i]);
+                draft.aiSettings = next.Clone();
+                draft.dirty = true;
+            }
+        }
+
+        EditorGUILayout.HelpBox(
+            "실제 행동은 플레이어 기준 GameManager의 Animal AI Active Radius 안에서만 수행됩니다.",
+            MessageType.Info);
+        EditorGUILayout.EndVertical();
+    }
+
+    private static bool AreAISettingsEqual(AnimalAISettings left, AnimalAISettings right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left == null || right == null)
+        {
+            return false;
+        }
+
+        return string.Equals(
+            JsonUtility.ToJson(left),
+            JsonUtility.ToJson(right),
+            StringComparison.Ordinal);
     }
 
     private static void DrawAgeDistributionGraph(int preferredAge)
@@ -766,6 +1109,319 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
     }
 
+    private void DrawObjectDropItems()
+    {
+        if (selectedObjectDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        AnimalDraft firstDraft = GetDraft(selectedObjectDefinitions[0]);
+        firstDraft.dropItems ??= new List<AnimalDropEntry>();
+        bool hasMixedDropItems = false;
+        for (int i = 1; i < selectedObjectDefinitions.Count; i++)
+        {
+            AnimalDraft otherDraft = GetDraft(selectedObjectDefinitions[i]);
+            if (!AreDropItemsEqual(firstDraft.dropItems, otherDraft.dropItems))
+            {
+                hasMixedDropItems = true;
+                break;
+            }
+        }
+
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Gender Common Drop Items", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(
+            "이 객체의 Female/Male 변형에 동일하게 저장됩니다.",
+            EditorStyles.miniLabel);
+        if (hasMixedDropItems)
+        {
+            EditorGUILayout.HelpBox(
+                "현재 성별 자산의 드롭 설정이 서로 다릅니다. 아래 값을 편집하거나 동기화하면 첫 번째 변형의 값으로 통일됩니다.",
+                MessageType.Warning);
+        }
+
+        int removeIndex = -1;
+        bool changed = false;
+        for (int i = 0; i < firstDraft.dropItems.Count; i++)
+        {
+            AnimalDropEntry entry =
+                firstDraft.dropItems[i] ??= new AnimalDropEntry();
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Entry {i + 1}", EditorStyles.miniBoldLabel);
+            if (GUILayout.Button("Remove", GUILayout.Width(65f)))
+            {
+                removeIndex = i;
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            DrawDropItemPopup(i, entry);
+
+            EditorGUI.BeginChangeCheck();
+            int minAmount = Mathf.Max(
+                0,
+                EditorGUILayout.IntField("Minimum Amount", entry.MinAmount));
+            int maxAmount = Mathf.Max(
+                minAmount,
+                EditorGUILayout.IntField("Maximum Amount", entry.MaxAmount));
+            float chancePercent = EditorGUILayout.Slider(
+                "Drop Chance (%)",
+                entry.DropChance * 100f,
+                0f,
+                100f);
+            if (EditorGUI.EndChangeCheck())
+            {
+                entry.MinAmount = minAmount;
+                entry.MaxAmount = maxAmount;
+                entry.DropChance = chancePercent * 0.01f;
+                changed = true;
+            }
+
+            if (entry.ItemDefinition != null)
+            {
+                EditorGUILayout.LabelField(
+                    $"Item ID {entry.ItemDefinition.id} · {entry.ItemDefinition.itemName}",
+                    EditorStyles.miniLabel);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        if (removeIndex >= 0)
+        {
+            firstDraft.dropItems.RemoveAt(removeIndex);
+            changed = true;
+        }
+
+        if (GUILayout.Button("Add Drop Item"))
+        {
+            firstDraft.dropItems.Add(new AnimalDropEntry());
+            changed = true;
+        }
+
+        if (hasMixedDropItems
+            && GUILayout.Button("Synchronize Female / Male"))
+        {
+            changed = true;
+        }
+
+        if (changed)
+        {
+            SynchronizeCommonDropItems(firstDraft);
+        }
+
+        EditorGUILayout.HelpBox(
+            "동물 시체를 채집하면 이 목록 순서대로 아이템이 지급됩니다.",
+            MessageType.Info);
+        EditorGUILayout.EndVertical();
+    }
+
+    private void DrawDropItemPopup(int entryIndex, AnimalDropEntry entry)
+    {
+        Rect rowRect = EditorGUILayout.GetControlRect();
+        Rect popupRect = EditorGUI.PrefixLabel(rowRect, new GUIContent("Item"));
+        int currentOptionIndex = FindDropItemIndex(entry.ItemDefinition);
+        GUIContent selectedContent = currentOptionIndex >= 0
+            && currentOptionIndex < dropItemOptions.Length
+            ? dropItemOptions[currentOptionIndex]
+            : dropItemOptions[0];
+        Sprite selectedIcon = currentOptionIndex > 0
+            && currentOptionIndex <= dropItemDefinitions.Count
+            ? dropItemDefinitions[currentOptionIndex - 1]?.icon
+            : null;
+
+        bool hasIcon = selectedIcon != null;
+        GUIStyle popupStyle = hasIcon
+            ? GetDropItemPopupWithIconStyle()
+            : EditorStyles.popup;
+        bool openDropdown = EditorGUI.DropdownButton(
+                popupRect,
+                new GUIContent(selectedContent.text),
+                FocusType.Keyboard,
+                popupStyle);
+        if (hasIcon)
+        {
+            const float iconSize = 16f;
+            Rect iconRect = new Rect(
+                popupRect.x + 3f,
+                popupRect.y + (popupRect.height - iconSize) * 0.5f,
+                iconSize,
+                iconSize);
+            DrawSprite(iconRect, selectedIcon);
+        }
+
+        if (openDropdown)
+        {
+            PopupWindow.Show(
+                popupRect,
+                new DropItemPopupContent(
+                    dropItemOptions,
+                    dropItemDefinitions,
+                    currentOptionIndex,
+                    optionIndex => ApplyDropItemSelection(entryIndex, optionIndex)));
+        }
+    }
+
+    private GUIStyle GetDropItemPopupWithIconStyle()
+    {
+        if (dropItemPopupWithIconStyle == null)
+        {
+            dropItemPopupWithIconStyle = new GUIStyle(EditorStyles.popup);
+            dropItemPopupWithIconStyle.padding.left = 23;
+        }
+
+        return dropItemPopupWithIconStyle;
+    }
+
+    private void ApplyDropItemSelection(int entryIndex, int optionIndex)
+    {
+        if (selectedObjectDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        AnimalDraft firstDraft = GetDraft(selectedObjectDefinitions[0]);
+        firstDraft.dropItems ??= new List<AnimalDropEntry>();
+        if (entryIndex < 0 || entryIndex >= firstDraft.dropItems.Count)
+        {
+            return;
+        }
+
+        ItemDefinition selectedDefinition = optionIndex > 0
+            && optionIndex <= dropItemDefinitions.Count
+            ? dropItemDefinitions[optionIndex - 1]
+            : null;
+        AnimalDropEntry entry =
+            firstDraft.dropItems[entryIndex] ??= new AnimalDropEntry();
+        if (entry.ItemDefinition == selectedDefinition)
+        {
+            return;
+        }
+
+        entry.ItemDefinition = selectedDefinition;
+        SynchronizeCommonDropItems(firstDraft);
+        Repaint();
+    }
+
+    private void SynchronizeCommonDropItems(AnimalDraft sourceDraft)
+    {
+        List<AnimalDropEntry> commonDropItems =
+            AnimalDropEntry.CloneList(sourceDraft.dropItems);
+        for (int i = 0; i < selectedObjectDefinitions.Count; i++)
+        {
+            AnimalDraft draft = GetDraft(selectedObjectDefinitions[i]);
+            draft.dropItems = AnimalDropEntry.CloneList(commonDropItems);
+            draft.dirty = true;
+        }
+    }
+
+    private static bool AreDropItemsEqual(
+        IReadOnlyList<AnimalDropEntry> left,
+        IReadOnlyList<AnimalDropEntry> right)
+    {
+        int leftCount = left != null ? left.Count : 0;
+        int rightCount = right != null ? right.Count : 0;
+        if (leftCount != rightCount)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < leftCount; i++)
+        {
+            AnimalDropEntry leftEntry = left[i];
+            AnimalDropEntry rightEntry = right[i];
+            if (ReferenceEquals(leftEntry, rightEntry))
+            {
+                continue;
+            }
+
+            if (leftEntry == null
+                || rightEntry == null
+                || leftEntry.ItemDefinition != rightEntry.ItemDefinition
+                || leftEntry.MinAmount != rightEntry.MinAmount
+                || leftEntry.MaxAmount != rightEntry.MaxAmount
+                || !Mathf.Approximately(
+                    leftEntry.DropChance,
+                    rightEntry.DropChance))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool RefreshDropItemOptions(bool force = true)
+    {
+        List<ItemDefinition> latestDefinitions = LoadAllItemDefinitions();
+        int latestSignature =
+            ItemDataEditorWindow.DefinitionCatalog.ComputeSignature(
+                latestDefinitions);
+        if (!force && latestSignature == dropItemCatalogSignature)
+        {
+            return false;
+        }
+
+        dropItemCatalogSignature = latestSignature;
+        dropItemDefinitions.Clear();
+        dropItemDefinitions.AddRange(latestDefinitions);
+
+        dropItemOptions = new GUIContent[dropItemDefinitions.Count + 1];
+        dropItemOptions[0] = new GUIContent("None");
+        for (int i = 0; i < dropItemDefinitions.Count; i++)
+        {
+            ItemDefinition definition = dropItemDefinitions[i];
+            string itemName = !string.IsNullOrWhiteSpace(definition.itemName)
+                ? definition.itemName
+                : definition.name;
+            dropItemOptions[i + 1] = new GUIContent(
+                $"[{definition.id}] {itemName}");
+        }
+
+        return true;
+    }
+
+    private static void DrawSprite(Rect targetRect, Sprite sprite)
+    {
+        if (sprite == null || sprite.texture == null)
+        {
+            return;
+        }
+
+        Rect textureRect = sprite.textureRect;
+        Texture2D texture = sprite.texture;
+        Rect textureCoordinates = new Rect(
+            textureRect.x / texture.width,
+            textureRect.y / texture.height,
+            textureRect.width / texture.width,
+            textureRect.height / texture.height);
+        GUI.DrawTextureWithTexCoords(
+            targetRect,
+            texture,
+            textureCoordinates,
+            true);
+    }
+
+    private int FindDropItemIndex(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return 0;
+        }
+
+        for (int i = 0; i < dropItemDefinitions.Count; i++)
+        {
+            if (dropItemDefinitions[i] == definition)
+            {
+                return i + 1;
+            }
+        }
+
+        return 0;
+    }
+
     private void DrawPreview(AnimalDraft draft)
     {
         EditorGUILayout.LabelField("3D Preview", EditorStyles.boldLabel);
@@ -785,7 +1441,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.BeginHorizontal();
-        int nextAnimationIndex = EditorGUILayout.Popup("Animation", previewAnimationIndex, AnimationStateLabels);
+        int nextAnimationIndex = EditorGUILayout.Popup(
+            "Animation",
+            previewAnimationIndex,
+            previewAnimationStateLabels);
         if (nextAnimationIndex != previewAnimationIndex)
         {
             previewAnimationIndex = nextAnimationIndex;
@@ -897,6 +1556,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             previewInstance.transform.rotation = Quaternion.identity;
             previewAnimal = previewInstance.GetComponentInChildren<Animal>(true);
             previewAnimator = previewInstance.GetComponentInChildren<Animator>(true);
+            RefreshPreviewAnimationStateLabels();
             ApplyPreviewAge();
             ApplyPreviewAnimation();
         }
@@ -926,6 +1586,105 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         previewAnimator.Rebind();
         previewAnimator.SetInteger("State", AnimationStates[previewAnimationIndex]);
         previewAnimator.Update(0f);
+    }
+
+    private void RefreshPreviewAnimationStateLabels()
+    {
+        previewAnimationStateLabels = (string[])DefaultAnimationStateLabels.Clone();
+        AnimatorController controller = ResolveAnimatorController(
+            previewAnimator != null ? previewAnimator.runtimeAnimatorController : null);
+        if (controller == null || controller.layers.Length == 0)
+        {
+            return;
+        }
+
+        Dictionary<int, string> stateNames = new Dictionary<int, string>();
+        CollectAnimationStateNames(controller.layers[0].stateMachine, stateNames);
+        for (int i = 0; i < AnimationStates.Length; i++)
+        {
+            if (stateNames.TryGetValue(AnimationStates[i], out string stateName)
+                && !string.IsNullOrWhiteSpace(stateName))
+            {
+                previewAnimationStateLabels[i] = GetAnimationStateDisplayName(stateName);
+            }
+        }
+    }
+
+    private static string GetAnimationStateDisplayName(string stateName)
+    {
+        switch (stateName)
+        {
+            case "Galop":
+                return "Gallop";
+            case "Sweem":
+                return "Swim";
+            case "IdlleToLay":
+                return "Rest (Sleep)";
+            default:
+                return ObjectNames.NicifyVariableName(stateName);
+        }
+    }
+
+    private static AnimatorController ResolveAnimatorController(RuntimeAnimatorController runtimeController)
+    {
+        while (runtimeController is AnimatorOverrideController overrideController)
+        {
+            runtimeController = overrideController.runtimeAnimatorController;
+        }
+
+        return runtimeController as AnimatorController;
+    }
+
+    private static void CollectAnimationStateNames(
+        AnimatorStateMachine stateMachine,
+        Dictionary<int, string> stateNames)
+    {
+        if (stateMachine == null)
+        {
+            return;
+        }
+
+        if (stateMachine.defaultState != null)
+        {
+            stateNames[0] = stateMachine.defaultState.name;
+        }
+
+        ChildAnimatorState[] childStates = stateMachine.states;
+        for (int i = 0; i < childStates.Length; i++)
+        {
+            AnimatorState state = childStates[i].state;
+            if (state == null)
+            {
+                continue;
+            }
+
+            AnimatorStateTransition[] transitions = state.transitions;
+            for (int transitionIndex = 0; transitionIndex < transitions.Length; transitionIndex++)
+            {
+                AnimatorStateTransition transition = transitions[transitionIndex];
+                if (transition == null || transition.destinationState == null)
+                {
+                    continue;
+                }
+
+                AnimatorCondition[] conditions = transition.conditions;
+                for (int conditionIndex = 0; conditionIndex < conditions.Length; conditionIndex++)
+                {
+                    AnimatorCondition condition = conditions[conditionIndex];
+                    if (condition.parameter == "State"
+                        && condition.mode == AnimatorConditionMode.Equals)
+                    {
+                        stateNames[Mathf.RoundToInt(condition.threshold)] = transition.destinationState.name;
+                    }
+                }
+            }
+        }
+
+        ChildAnimatorStateMachine[] childStateMachines = stateMachine.stateMachines;
+        for (int i = 0; i < childStateMachines.Length; i++)
+        {
+            CollectAnimationStateNames(childStateMachines[i].stateMachine, stateNames);
+        }
     }
 
     private void DrawReadOnlyReferences(AnimalDraft draft)
@@ -994,6 +1753,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 draft.minHerdSize,
                 draft.maxHerdSize,
                 draft.spawnWeight,
+                draft.maxHealth,
+                draft.aiSettings,
+                draft.dropItems,
                 "Save Animal Data");
             draft.dirty = false;
             savedCount++;
@@ -1039,6 +1801,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         definitions.Clear();
         definitions.AddRange(AnimalDataEditorUtility.LoadDefinitions());
+        RefreshDropItemOptions();
         drafts.Clear();
         for (int i = 0; i < definitions.Count; i++)
         {
@@ -1120,6 +1883,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                         AnimalDefinition.DefaultMinHerdSize,
                         AnimalDefinition.DefaultMaxHerdSize,
                         AnimalDefinition.DefaultSpawnWeight,
+                        AnimalDefinition.DefaultMaxHealth,
+                        new AnimalAISettings(),
+                        new List<AnimalDropEntry>(),
                         "Create Animal Definition");
                     currentDefinitions.Add(definition);
                     createdCount++;
@@ -1150,6 +1916,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     definition.MinHerdSize,
                     definition.MaxHerdSize,
                     definition.SpawnWeight,
+                    definition.MaxHealth,
+                    definition.AISettings,
+                    definition.DropItems,
                     "Rebuild Animal Definition");
                 filledCount++;
             }
@@ -1205,6 +1974,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             return;
         }
 
+        List<ItemDefinition> itemDefinitions = file.version >= 8
+            ? LoadAllItemDefinitions()
+            : null;
         int loadedCount = 0;
         for (int i = 0; file.animals != null && i < file.animals.Count; i++)
         {
@@ -1231,6 +2003,39 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             draft.spawnWeight = file.version >= 3
                 ? Mathf.Clamp(entry.spawnWeight, draft.minHerdSize, draft.maxHerdSize)
                 : Mathf.Clamp(AnimalDefinition.DefaultSpawnWeight, draft.minHerdSize, draft.maxHerdSize);
+            draft.maxHealth = file.version >= 5
+                ? Mathf.Max(1f, entry.maxHealth)
+                : AnimalDefinition.DefaultMaxHealth;
+            if (file.version >= 4 && entry.aiSettings != null)
+            {
+                draft.aiSettings = entry.aiSettings.Clone();
+                if (file.version < 6)
+                {
+                    draft.aiSettings.LookAroundWeight =
+                        AnimalAISettings.DefaultLookAroundWeight;
+                    draft.aiSettings.LookAroundDuration =
+                        AnimalAISettings.DefaultLookAroundDuration;
+                }
+
+                if (file.version < 7)
+                {
+                    draft.aiSettings.FleeSafeDistance =
+                        AnimalAISettings.DefaultFleeSafeDistance;
+                    draft.aiSettings.NearbyThreatRadius =
+                        AnimalAISettings.DefaultNearbyThreatRadius;
+                    draft.aiSettings.FleeSpeedMultiplier =
+                        AnimalAISettings.DefaultFleeSpeedMultiplier;
+                }
+
+                draft.aiSettings.Normalize();
+            }
+            if (file.version >= 8)
+            {
+                draft.dropItems = ImportDropItems(
+                    entry.dropItems,
+                    itemDefinitions);
+            }
+
             draft.prefab = AssetDatabase.LoadAssetAtPath<GameObject>(entry.prefabAssetPath);
             draft.adultIcon = AssetDatabase.LoadAssetAtPath<Sprite>(entry.adultIconAssetPath);
             draft.childIcon = AssetDatabase.LoadAssetAtPath<Sprite>(entry.childIconAssetPath);
@@ -1262,6 +2067,11 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 minHerdSize = definition.MinHerdSize,
                 maxHerdSize = definition.MaxHerdSize,
                 spawnWeight = definition.SpawnWeight,
+                maxHealth = definition.MaxHealth,
+                aiSettings = definition.AISettings != null
+                    ? definition.AISettings.Clone()
+                    : new AnimalAISettings(),
+                dropItems = ExportDropItems(definition.DropItems),
                 hierarchyPath = AnimalDataEditorUtility.GetHierarchyPath(definition),
                 definitionAssetPath = AssetDatabase.GetAssetPath(definition),
                 prefabAssetPath = AssetDatabase.GetAssetPath(definition.AnimalPrefab),
@@ -1279,6 +2089,92 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         File.WriteAllText(absolutePath, JsonUtility.ToJson(file, true));
         Debug.Log("Animal Data JSON exported: " + absolutePath);
+    }
+
+    private static List<AnimalDropJsonEntry> ExportDropItems(
+        IReadOnlyList<AnimalDropEntry> source)
+    {
+        List<AnimalDropJsonEntry> result = new List<AnimalDropJsonEntry>(
+            source != null ? source.Count : 0);
+        for (int i = 0; source != null && i < source.Count; i++)
+        {
+            AnimalDropEntry entry = source[i] ?? new AnimalDropEntry();
+            ItemDefinition itemDefinition = entry.ItemDefinition;
+            result.Add(new AnimalDropJsonEntry
+            {
+                itemId = itemDefinition != null ? itemDefinition.id : -1,
+                itemName = itemDefinition != null
+                    ? itemDefinition.itemName ?? string.Empty
+                    : string.Empty,
+                itemAssetPath = AssetDatabase.GetAssetPath(itemDefinition),
+                minAmount = entry.MinAmount,
+                maxAmount = entry.MaxAmount,
+                dropChance = entry.DropChance
+            });
+        }
+
+        return result;
+    }
+
+    private static List<AnimalDropEntry> ImportDropItems(
+        IReadOnlyList<AnimalDropJsonEntry> source,
+        IReadOnlyList<ItemDefinition> itemDefinitions)
+    {
+        List<AnimalDropEntry> result = new List<AnimalDropEntry>(
+            source != null ? source.Count : 0);
+        for (int i = 0; source != null && i < source.Count; i++)
+        {
+            AnimalDropJsonEntry jsonEntry = source[i];
+            if (jsonEntry == null)
+            {
+                result.Add(new AnimalDropEntry());
+                continue;
+            }
+
+            ItemDefinition itemDefinition =
+                AssetDatabase.LoadAssetAtPath<ItemDefinition>(
+                    jsonEntry.itemAssetPath);
+            if (itemDefinition == null)
+            {
+                itemDefinition = ResolveDropItemDefinition(
+                    itemDefinitions,
+                    jsonEntry.itemId,
+                    jsonEntry.itemName);
+            }
+
+            AnimalDropEntry entry = new AnimalDropEntry
+            {
+                ItemDefinition = itemDefinition,
+                MinAmount = jsonEntry.minAmount,
+                MaxAmount = jsonEntry.maxAmount,
+                DropChance = jsonEntry.dropChance
+            };
+            result.Add(entry);
+        }
+
+        return result;
+    }
+
+    private static List<ItemDefinition> LoadAllItemDefinitions()
+    {
+        return ItemDataEditorWindow.DefinitionCatalog.LoadCurrent();
+    }
+
+    private static ItemDefinition ResolveDropItemDefinition(
+        IReadOnlyList<ItemDefinition> definitions,
+        int itemId,
+        string itemName)
+    {
+        ItemDefinition idMatch =
+            ItemDefinitionLookup.ResolveById(definitions, itemId);
+        if (idMatch != null)
+        {
+            return idMatch;
+        }
+
+        return ItemDefinitionLookup.ResolveByStableName(
+            definitions,
+            itemName);
     }
 
     private AnimalDefinition ResolveJsonDefinition(AnimalJsonEntry entry)
@@ -1555,6 +2451,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         previewInstance = null;
         previewAnimal = null;
         previewAnimator = null;
+        previewAnimationStateLabels = DefaultAnimationStateLabels;
         if (previewRenderer != null)
         {
             previewRenderer.Cleanup();

@@ -239,6 +239,7 @@ public static class SaveGameItemIdRemapper
 
         RemapPlayerSlots(player.bagSlots, itemIdMap);
         RemapPlayerSlots(player.handSlots, itemIdMap);
+        player.activeTorchItemId = RemapItemId(player.activeTorchItemId, itemIdMap);
         if (player.craftingQueue == null)
         {
             return;

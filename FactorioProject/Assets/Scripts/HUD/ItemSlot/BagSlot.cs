@@ -2620,7 +2620,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         int sourceItemId = boundBag.GetSlotItemId(slotIndex);
         int sourceCount = boundBag.GetSlotCount(slotIndex);
-        if (sourceItemId < 0 || sourceCount <= 0)
+        int sourceRemovableCount = boundBag.GetSlotRemovableCount(slotIndex);
+        if (sourceItemId < 0 || sourceCount <= 0 || sourceRemovableCount <= 0)
         {
             return false;
         }
@@ -2631,14 +2632,16 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (targetItemId < 0 || targetCount <= 0)
         {
             int targetMax = targetBag.GetSlotMaxCount(targetIndex);
-            int moveCount = Mathf.Min(sourceCount, Mathf.Max(0, targetMax));
+            int moveCount = Mathf.Min(sourceRemovableCount, Mathf.Max(0, targetMax));
             return TryTransferStackToBagSlot(sourceItemId, moveCount, targetBag, targetIndex);
         }
 
         if (targetItemId == sourceItemId)
         {
             int targetMax = targetBag.GetSlotMaxCount(targetIndex);
-            int moveCount = Mathf.Min(sourceCount, Mathf.Max(0, targetMax - targetCount));
+            int moveCount = Mathf.Min(
+                sourceRemovableCount,
+                Mathf.Max(0, targetMax - targetCount));
             if (moveCount <= 0)
             {
                 return false;
@@ -2649,7 +2652,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         int sourceMax = boundBag.GetSlotMaxCount(slotIndex);
         int targetMaxSwap = targetBag.GetSlotMaxCount(targetIndex);
-        if (sourceMax < targetCount || targetMaxSwap < sourceCount)
+        if (sourceRemovableCount < sourceCount
+            || targetBag.GetSlotRemovableCount(targetIndex) < targetCount
+            || sourceMax < targetCount
+            || targetMaxSwap < sourceCount)
         {
             return false;
         }
@@ -2718,7 +2724,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         int sourceCount = sourceBag.GetSlotCount(sourceIndex);
         int targetCount = targetBag.GetSlotCount(targetIndex);
-        if (sourceCount < itemCount)
+        if (sourceCount < itemCount
+            || sourceBag.GetSlotRemovableCount(sourceIndex) < itemCount)
         {
             return false;
         }

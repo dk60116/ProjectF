@@ -747,7 +747,6 @@ MonoBehaviour:
   dinoRenderer: {fileID: 472043295556272473}
   Eye: {fileID: 4745744939561479610, guid: 0cfe501bbd658984d92e66c72726b900, type: 3}
   headBone: {fileID: 4374375575040172103}
-  eyeShapeChangingSpeed: 10
   dinoTransform: {fileID: 5370390395258724067}
   youngDinoLeftEye: {fileID: 6611355445053438872}
   youngDinoRightEye: {fileID: 4724372046639147273}

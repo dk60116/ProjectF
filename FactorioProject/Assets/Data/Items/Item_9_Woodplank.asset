@@ -19,6 +19,8 @@ MonoBehaviour:
   portableMat: {fileID: 2100000, guid: 0f45ec8088ab2b84ba32cd0e27b8271a, type: 2}
   icon: {fileID: 21300000, guid: be417b1028b535648827167f9df9cb1e, type: 3}
   interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

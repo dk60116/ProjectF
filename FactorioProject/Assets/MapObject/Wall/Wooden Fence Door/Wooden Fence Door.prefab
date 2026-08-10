@@ -65,7 +65,7 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4909268776646986644, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 42872a1b7ef6da54abf30a525ddd4364, type: 2}
     m_RemovedComponents: []
@@ -167,7 +167,7 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
     - target: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -250,7 +250,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Wooden fence door
-  objId: 38
+  objId: 39
   itemDefinition: {fileID: 11400000, guid: e110bd69d6c9d9d49aa13090a2202fd1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -288,7 +288,7 @@ MonoBehaviour:
   localTriCornerSecondDirection: 0
   localTriCornerThirdDirection: 3
   hinge: {fileID: 6501265905879078602}
-  doorCollider: {fileID: 0}
+  doorCollider: {fileID: 5666385723369650934}
   isOpen: 0
   hingeTweenDuration: 0.2
   hingeTweenEase: 9
@@ -360,7 +360,7 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 4300000, guid: 1c12ecf43a8c765478c5d626512026a7, type: 2}
     - target: {fileID: 4909268776646986644, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 42872a1b7ef6da54abf30a525ddd4364, type: 2}
     m_RemovedComponents: []

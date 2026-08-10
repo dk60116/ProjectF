@@ -7,8 +7,18 @@ public class ItemDefinition : ScriptableObject
 {
     private const float DefaultCraftingDurationSeconds = 5f;
     private const float KilowattsToWatts = 1000f;
+    private const float DefaultItemLightRange = 6f;
 
     public enum EnergyType { None, Burn, Electricity }
+
+    public enum ItemLightMode
+    {
+        None,
+        Always,
+        Toggle,
+        NightOnly,
+        Working
+    }
 
     public string itemName;
     public int id;
@@ -17,6 +27,9 @@ public class ItemDefinition : ScriptableObject
     public Material portableMat;
     public Sprite icon;
     public List<Sprite> interactionButtonList = new List<Sprite>();
+    public ItemLightMode lightMode = ItemLightMode.None;
+    [Min(0.1f)]
+    public float lightRange = DefaultItemLightRange;
     public uint size;
     public bool itemFilter;
     [Min(1)]
@@ -41,6 +54,7 @@ public class ItemDefinition : ScriptableObject
     private float craftingDurationSeconds = DefaultCraftingDurationSeconds;
 
     public float CraftingDurationSeconds => craftingDurationSeconds > 0f ? craftingDurationSeconds : DefaultCraftingDurationSeconds;
+    public float LightRange => Mathf.Max(0.1f, lightRange);
     public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
     public float ElectricUseWatts => ResolveElectricUseWatts(this);
 
@@ -115,6 +129,7 @@ public class ItemDefinition : ScriptableObject
 
         utilityPoleConnectionRadius = Mathf.Max(0, utilityPoleConnectionRadius);
         utilityPoleSupplyRadius = Mathf.Max(0, utilityPoleSupplyRadius);
+        lightRange = Mathf.Max(0.1f, lightRange);
     }
 #endif
 }
@@ -123,6 +138,86 @@ public static class ItemDefinitionLookup
 {
     private const int LegacyConveyorBelt2FItemId = 26;
     private const string ConveyorBelt2FItemName = "Conveyor belt 2F";
+    private const char PersistenceNameSeparator = '\u001f';
+
+    public static string GetPersistenceName(
+        ItemDefinition definition,
+        IReadOnlyList<ItemDefinition> definitions)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        string itemName = GetDisplayName(definition);
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            return string.Empty;
+        }
+
+        int matchingNameCount = 0;
+        if (definitions != null)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition candidate = definitions[i];
+                if (candidate != null
+                    && string.Equals(GetDisplayName(candidate), itemName, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchingNameCount++;
+                }
+            }
+        }
+
+        if (matchingNameCount <= 1)
+        {
+            return itemName;
+        }
+
+        string definitionName = definition.name != null ? definition.name.Trim() : string.Empty;
+        return string.IsNullOrWhiteSpace(definitionName)
+            ? itemName
+            : string.Concat(itemName, PersistenceNameSeparator, definitionName);
+    }
+
+    public static ItemDefinition ResolveByPersistenceName(
+        IReadOnlyList<ItemDefinition> definitions,
+        string persistenceName)
+    {
+        if (definitions == null || string.IsNullOrWhiteSpace(persistenceName))
+        {
+            return null;
+        }
+
+        string normalizedName = persistenceName.Trim();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && string.Equals(
+                    GetPersistenceName(definition, definitions),
+                    normalizedName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return definition;
+            }
+        }
+
+        return ResolveByStableName(definitions, normalizedName);
+    }
+
+    public static string GetDisplayName(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        string itemName = string.IsNullOrWhiteSpace(definition.itemName)
+            ? definition.name
+            : definition.itemName;
+        return itemName != null ? itemName.Trim() : string.Empty;
+    }
 
     public static ItemDefinition ResolveById(IReadOnlyList<ItemDefinition> definitions, int itemId)
     {

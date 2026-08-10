@@ -7193,6 +7193,40 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    public bool TryResolveFenceLoadPlacement(
+        ItemDefinition definition,
+        Vector2Int anchorCoordinate,
+        int preferredQuarterTurns,
+        out MapObject resolvedPrefab,
+        out int resolvedQuarterTurns,
+        out int resolvedVariantKind)
+    {
+        resolvedPrefab = null;
+        resolvedQuarterTurns = NormalizePlacementQuarterTurns(preferredQuarterTurns);
+        resolvedVariantKind = -1;
+
+        if (definition == null || !(definition.mapObject is Wall fencePrototype))
+        {
+            return false;
+        }
+
+        if (!TryResolveFencePlacementVariant(
+                fencePrototype,
+                anchorCoordinate,
+                preferredQuarterTurns,
+                null,
+                out resolvedPrefab,
+                out resolvedQuarterTurns)
+            || !(resolvedPrefab is Wall resolvedFence))
+        {
+            return false;
+        }
+
+        resolvedQuarterTurns = NormalizePlacementQuarterTurnsForObject(resolvedPrefab, resolvedQuarterTurns);
+        resolvedVariantKind = resolvedFence.VariantKindId;
+        return true;
+    }
+
     private bool TryResolveFencePlacementVariant(
         Wall fencePrototype,
         Vector2Int anchorCoordinate,

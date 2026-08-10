@@ -27,6 +27,8 @@ internal sealed class EditorToolForm : Form
     private const int ConveyorStressTestTimeoutMilliseconds = 35000;
     private const int ConveyorStressTestCount = 1000;
     private const int ConveyorItemStressTestCount = 500;
+    private const int AnimalStressTestSmallCount = 100;
+    private const int AnimalStressTestLargeCount = 500;
     private const int SaveSlotCount = 10;
 
     private readonly List<ItemCatalogEntry> allItems = new List<ItemCatalogEntry>();
@@ -41,6 +43,9 @@ internal sealed class EditorToolForm : Form
     private readonly Button pingButton = new Button();
     private readonly Button conveyorLineButton = new Button();
     private readonly Button conveyorItemFillButton = new Button();
+    private readonly Button animalStress100Button = new Button();
+    private readonly Button animalStress500Button = new Button();
+    private readonly Button animalThreatButton = new Button();
     private readonly ComboBox saveSlotComboBox = new ComboBox();
     private readonly Button saveSlotButton = new Button();
     private readonly Button loadSlotButton = new Button();
@@ -55,11 +60,25 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showRailLineCheckBox = new CheckBox();
     private readonly CheckBox showDirectionsCheckBox = new CheckBox();
     private readonly CheckBox freeCameraCheckBox = new CheckBox();
+    private readonly CheckBox showAnimalHerdAreasCheckBox = new CheckBox();
+    private readonly CheckBox animalAIPausedCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
     private readonly NumericUpDown cameraMaxSizeInput = new NumericUpDown();
     private readonly Button applyCameraSizeButton = new Button();
     private readonly TextBox seedTextBox = new TextBox();
     private readonly Button applySeedButton = new Button();
+    private readonly Label worldTimeStateLabel = new Label();
+    private readonly NumericUpDown worldTimeHourInput = new NumericUpDown();
+    private readonly NumericUpDown worldTimeMinuteInput = new NumericUpDown();
+    private readonly Button worldTimePauseButton = new Button();
+    private readonly Button worldTimeScale1Button = new Button();
+    private readonly Button worldTimeScale10Button = new Button();
+    private readonly Button worldTimeNextSunriseButton = new Button();
+    private readonly Button worldTime0600Button = new Button();
+    private readonly Button worldTime0800Button = new Button();
+    private readonly Button worldTime1800Button = new Button();
+    private readonly Button worldTimeApplyButton = new Button();
+    private readonly Button worldTimeCheckButton = new Button();
     private readonly TextBox logTextBox = new TextBox();
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
@@ -71,11 +90,12 @@ internal sealed class EditorToolForm : Form
     private bool refreshingSaveSlots;
     private bool pollingStatus;
     private bool applyingRuntimeDebugState;
+    private bool worldTimePaused;
 
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 930);
+        MinimumSize = new Size(760, 1140);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -91,16 +111,17 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 9
+            RowCount = 10
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214f));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 112f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 112f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -116,7 +137,7 @@ internal sealed class EditorToolForm : Form
 
         Label descriptionLabel = new Label
         {
-            Text = "아이템 지급, 컨베이어 자동 설치, 저장/로드, 런타임 디버그 토글을 조작합니다.",
+            Text = "아이템 지급, 컨베이어·동물 AI 부하 테스트, 저장/로드, 런타임 디버그를 조작합니다.",
             AutoSize = true,
             ForeColor = Color.FromArgb(176, 177, 158),
             Location = new Point(2, 42)
@@ -231,6 +252,20 @@ internal sealed class EditorToolForm : Form
         conveyorItemFillButton.Width = 190;
         conveyorItemFillButton.Click += async (_, _) => await SendConveyorItemFillAsync();
 
+        StyleSecondaryButton(animalStress100Button, "동물 100마리");
+        animalStress100Button.Width = 130;
+        animalStress100Button.Click += async (_, _) =>
+            await SendAnimalStressAsync(AnimalStressTestSmallCount);
+
+        StyleSecondaryButton(animalStress500Button, "동물 500마리");
+        animalStress500Button.Width = 130;
+        animalStress500Button.Click += async (_, _) =>
+            await SendAnimalStressAsync(AnimalStressTestLargeCount);
+
+        StyleSecondaryButton(animalThreatButton, "동물 위협 강제");
+        animalThreatButton.Width = 130;
+        animalThreatButton.Click += async (_, _) => await SendAnimalThreatAsync();
+
         statusLabel.Text = "대기 중";
         statusLabel.AutoSize = true;
         statusLabel.ForeColor = Color.FromArgb(176, 177, 158);
@@ -240,6 +275,9 @@ internal sealed class EditorToolForm : Form
         buttonPanel.Controls.Add(pingButton);
         buttonPanel.Controls.Add(conveyorLineButton);
         buttonPanel.Controls.Add(conveyorItemFillButton);
+        buttonPanel.Controls.Add(animalStress100Button);
+        buttonPanel.Controls.Add(animalStress500Button);
+        buttonPanel.Controls.Add(animalThreatButton);
         buttonPanel.Controls.Add(statusLabel);
         layout.Controls.Add(buttonPanel, 0, 2);
         layout.SetColumnSpan(buttonPanel, 2);
@@ -321,6 +359,102 @@ internal sealed class EditorToolForm : Form
         layout.Controls.Add(seedPanel, 0, 4);
         layout.SetColumnSpan(seedPanel, 2);
 
+        FlowLayoutPanel worldTimePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 4, 0, 0),
+            WrapContents = true
+        };
+
+        worldTimeStateLabel.Text = "Time: --";
+        worldTimeStateLabel.AutoSize = false;
+        worldTimeStateLabel.Width = 440;
+        worldTimeStateLabel.Height = 30;
+        worldTimeStateLabel.ForeColor = Color.FromArgb(204, 199, 176);
+        worldTimeStateLabel.Margin = new Padding(0, 10, 10, 0);
+
+        StyleSecondaryButton(worldTimePauseButton, "Pause");
+        worldTimePauseButton.Width = 76;
+        worldTimePauseButton.Height = 30;
+        worldTimePauseButton.Margin = new Padding(0, 4, 8, 0);
+        worldTimePauseButton.Click += async (_, _) => await SendWorldTimePauseAsync();
+
+        StyleSecondaryButton(worldTimeScale1Button, "1x");
+        worldTimeScale1Button.Width = 54;
+        worldTimeScale1Button.Height = 30;
+        worldTimeScale1Button.Margin = new Padding(0, 4, 8, 0);
+        worldTimeScale1Button.Click += async (_, _) => await SendWorldTimeScaleAsync(1f);
+
+        StyleSecondaryButton(worldTimeScale10Button, "10x");
+        worldTimeScale10Button.Width = 58;
+        worldTimeScale10Button.Height = 30;
+        worldTimeScale10Button.Margin = new Padding(0, 4, 8, 0);
+        worldTimeScale10Button.Click += async (_, _) => await SendWorldTimeScaleAsync(10f);
+
+        StyleSecondaryButton(worldTimeNextSunriseButton, "Next Sunrise");
+        worldTimeNextSunriseButton.Width = 116;
+        worldTimeNextSunriseButton.Height = 30;
+        worldTimeNextSunriseButton.Margin = new Padding(0, 4, 8, 0);
+        worldTimeNextSunriseButton.Click += async (_, _) => await SendWorldTimeNextSunriseAsync();
+
+        ConfigureWorldTimeInput(worldTimeHourInput, 8, 0, 23);
+        ConfigureWorldTimeInput(worldTimeMinuteInput, 0, 0, 59);
+
+        StyleSecondaryButton(worldTimeApplyButton, "Set");
+        worldTimeApplyButton.Width = 58;
+        worldTimeApplyButton.Height = 30;
+        worldTimeApplyButton.Margin = new Padding(0, 4, 8, 0);
+        worldTimeApplyButton.Click += async (_, _) => await SendWorldTimeSetAsync(
+            Decimal.ToInt32(worldTimeHourInput.Value),
+            Decimal.ToInt32(worldTimeMinuteInput.Value));
+
+        StyleSecondaryButton(worldTime0600Button, "06:00");
+        worldTime0600Button.Width = 68;
+        worldTime0600Button.Height = 30;
+        worldTime0600Button.Margin = new Padding(0, 4, 8, 0);
+        worldTime0600Button.Click += async (_, _) => await SendWorldTimeSetAsync(6, 0);
+
+        StyleSecondaryButton(worldTime0800Button, "08:00");
+        worldTime0800Button.Width = 68;
+        worldTime0800Button.Height = 30;
+        worldTime0800Button.Margin = new Padding(0, 4, 8, 0);
+        worldTime0800Button.Click += async (_, _) => await SendWorldTimeSetAsync(8, 0);
+
+        StyleSecondaryButton(worldTime1800Button, "18:00");
+        worldTime1800Button.Width = 68;
+        worldTime1800Button.Height = 30;
+        worldTime1800Button.Margin = new Padding(0, 4, 8, 0);
+        worldTime1800Button.Click += async (_, _) => await SendWorldTimeSetAsync(18, 0);
+
+        StyleSecondaryButton(worldTimeCheckButton, "Check");
+        worldTimeCheckButton.Width = 68;
+        worldTimeCheckButton.Height = 30;
+        worldTimeCheckButton.Margin = new Padding(0, 4, 8, 0);
+        worldTimeCheckButton.Click += async (_, _) => await SendWorldTimeCheckAsync();
+
+        worldTimePanel.Controls.Add(worldTimeStateLabel);
+        worldTimePanel.Controls.Add(worldTimePauseButton);
+        worldTimePanel.Controls.Add(worldTimeScale1Button);
+        worldTimePanel.Controls.Add(worldTimeScale10Button);
+        worldTimePanel.Controls.Add(worldTimeNextSunriseButton);
+        worldTimePanel.Controls.Add(worldTimeHourInput);
+        worldTimePanel.Controls.Add(new Label
+        {
+            Text = ":",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(204, 199, 176),
+            Margin = new Padding(0, 10, 0, 0)
+        });
+        worldTimePanel.Controls.Add(worldTimeMinuteInput);
+        worldTimePanel.Controls.Add(worldTimeApplyButton);
+        worldTimePanel.Controls.Add(worldTime0600Button);
+        worldTimePanel.Controls.Add(worldTime0800Button);
+        worldTimePanel.Controls.Add(worldTime1800Button);
+        worldTimePanel.Controls.Add(worldTimeCheckButton);
+        layout.Controls.Add(worldTimePanel, 0, 5);
+        layout.SetColumnSpan(worldTimePanel, 2);
+
         FlowLayoutPanel debugTogglePanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -384,6 +518,20 @@ internal sealed class EditorToolForm : Form
                 freeCameraCheckBox.Checked,
                 "FreeCamera");
 
+        StyleDebugCheckBox(showAnimalHerdAreasCheckBox, "Show Animal Herd Area");
+        showAnimalHerdAreasCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showAnimalHerdAreas",
+                showAnimalHerdAreasCheckBox.Checked,
+                "Show Animal Herd Area");
+
+        StyleDebugCheckBox(animalAIPausedCheckBox, "Pause Animal AI");
+        animalAIPausedCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "animalAIPaused",
+                animalAIPausedCheckBox.Checked,
+                "Pause Animal AI");
+
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
@@ -392,7 +540,9 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(showRailLineCheckBox);
         debugTogglePanel.Controls.Add(showDirectionsCheckBox);
         debugTogglePanel.Controls.Add(freeCameraCheckBox);
-        layout.Controls.Add(debugTogglePanel, 0, 5);
+        debugTogglePanel.Controls.Add(showAnimalHerdAreasCheckBox);
+        debugTogglePanel.Controls.Add(animalAIPausedCheckBox);
+        layout.Controls.Add(debugTogglePanel, 0, 6);
         layout.SetColumnSpan(debugTogglePanel, 2);
 
         FlowLayoutPanel cameraSizePanel = new FlowLayoutPanel
@@ -441,7 +591,7 @@ internal sealed class EditorToolForm : Form
         cameraSizePanel.Controls.Add(cameraMaxSizeLabel);
         cameraSizePanel.Controls.Add(cameraMaxSizeInput);
         cameraSizePanel.Controls.Add(applyCameraSizeButton);
-        layout.Controls.Add(cameraSizePanel, 0, 6);
+        layout.Controls.Add(cameraSizePanel, 0, 7);
         layout.SetColumnSpan(cameraSizePanel, 2);
 
         Panel runtimeStatsCard = CreateCardPanel();
@@ -474,7 +624,7 @@ internal sealed class EditorToolForm : Form
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
-        layout.Controls.Add(runtimeStatsCard, 0, 7);
+        layout.Controls.Add(runtimeStatsCard, 0, 8);
         layout.SetColumnSpan(runtimeStatsCard, 2);
 
         Panel logCard = CreateCardPanel();
@@ -488,7 +638,7 @@ internal sealed class EditorToolForm : Form
         logTextBox.ForeColor = Color.FromArgb(231, 224, 200);
         logTextBox.Font = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         logCard.Controls.Add(logTextBox);
-        layout.Controls.Add(logCard, 0, 8);
+        layout.Controls.Add(logCard, 0, 9);
         layout.SetColumnSpan(logCard, 2);
 
         shellPanel.Controls.Add(layout);
@@ -575,6 +725,19 @@ internal sealed class EditorToolForm : Form
         input.Increment = 0.1m;
         input.Value = value;
         input.Width = 86;
+        input.Margin = new Padding(0, 5, 0, 0);
+    }
+
+    private static void ConfigureWorldTimeInput(
+        NumericUpDown input,
+        decimal value,
+        decimal minimum,
+        decimal maximum)
+    {
+        input.Minimum = minimum;
+        input.Maximum = maximum;
+        input.Value = value;
+        input.Width = 52;
         input.Margin = new Padding(0, 5, 0, 0);
     }
 
@@ -833,6 +996,21 @@ internal sealed class EditorToolForm : Form
         await RefreshStatusAsync();
     }
 
+    private async Task SendAnimalStressAsync(int count)
+    {
+        await SendCommandAsync(
+            $"animalstress {count}",
+            $"Animal AI stress spawn, count={count}",
+            timeoutMilliseconds: ConveyorStressTestTimeoutMilliseconds);
+        await RefreshStatusAsync();
+    }
+
+    private async Task SendAnimalThreatAsync()
+    {
+        await SendCommandAsync("animalthreat 20", "Animal forced threat, radius=20");
+        await RefreshStatusAsync();
+    }
+
     private async Task SendSaveSlotAsync()
     {
         int slotNumber = GetSelectedSaveSlotNumber();
@@ -914,6 +1092,44 @@ internal sealed class EditorToolForm : Form
         await RefreshStatusAsync();
     }
 
+    private async Task SendWorldTimePauseAsync()
+    {
+        bool nextPaused = !worldTimePaused;
+        await SendCommandAsync(
+            $"time pause {(nextPaused ? 1 : 0)}",
+            nextPaused ? "World Time Pause" : "World Time Resume");
+    }
+
+    private async Task SendWorldTimeScaleAsync(float scale)
+    {
+        string scaleText = scale.ToString("0.###", CultureInfo.InvariantCulture);
+        await SendCommandAsync($"time scale {scaleText}", $"World Time {scaleText}x");
+        if (worldTimePaused)
+        {
+            await SendCommandAsync("time pause 0", "World Time Resume");
+        }
+    }
+
+    private async Task SendWorldTimeSetAsync(int hour, int minute)
+    {
+        string clock = string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:00}:{1:00}",
+            Math.Clamp(hour, 0, 23),
+            Math.Clamp(minute, 0, 59));
+        await SendCommandAsync($"time set {clock}", $"World Time {clock}");
+    }
+
+    private async Task SendWorldTimeNextSunriseAsync()
+    {
+        await SendCommandAsync("time next sunrise", "World Time Next Sunrise");
+    }
+
+    private async Task SendWorldTimeCheckAsync()
+    {
+        await SendCommandAsync("time check", "World Time Check");
+    }
+
     private async Task RefreshStatusAsync()
     {
         if (pollingStatus)
@@ -945,6 +1161,7 @@ internal sealed class EditorToolForm : Form
                 fpsLabel.Text = "FPS: --";
                 fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
                 SetRuntimeStatsUnavailable("상태 응답 없음");
+                SetWorldTimeUnavailable("상태 응답 없음");
             }
 
             PositionFpsLabel(fpsLabel.Parent ?? this);
@@ -954,6 +1171,7 @@ internal sealed class EditorToolForm : Form
             fpsLabel.Text = "FPS: offline";
             fpsLabel.ForeColor = Color.FromArgb(236, 104, 94);
             SetRuntimeStatsUnavailable("게임 연결 안 됨");
+            SetWorldTimeUnavailable("게임 연결 안 됨");
             PositionFpsLabel(fpsLabel.Parent ?? this);
         }
         finally
@@ -964,6 +1182,8 @@ internal sealed class EditorToolForm : Form
 
     private void UpdateRuntimeStatsFromResponse(string response)
     {
+        ApplyWorldTimeState(response);
+
         if (!TryReadProtocolInt(response, "installTotal", out int installTotal)
             || !TryReadProtocolInt(response, "beltItems", out int beltItems))
         {
@@ -972,7 +1192,10 @@ internal sealed class EditorToolForm : Form
         }
 
         TryReadProtocolToken(response, "installTypes", out string installTypes);
-        runtimeStatsLabel.Text = $"Runtime Stats: 설치 {installTotal:N0}개    벨트 아이템 {beltItems:N0}개";
+        TryReadProtocolInt(response, "animalTotal", out int animalTotal);
+        TryReadProtocolInt(response, "animalAIActive", out int animalAIActive);
+        runtimeStatsLabel.Text =
+            $"Runtime Stats: 설치 {installTotal:N0}개    벨트 아이템 {beltItems:N0}개    동물 {animalAIActive:N0}/{animalTotal:N0}";
         runtimeStatsTextBox.Text = FormatInstallTypeCounts(installTypes);
 
         if (TryReadProtocolBool(response, "showConveyorSlotDots", out bool showConveyorSlotDots))
@@ -1015,6 +1238,16 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(freeCameraCheckBox, freeCamera);
         }
 
+        if (TryReadProtocolBool(response, "showAnimalHerdAreas", out bool showAnimalHerdAreas))
+        {
+            ApplyRuntimeCheckBoxState(showAnimalHerdAreasCheckBox, showAnimalHerdAreas);
+        }
+
+        if (TryReadProtocolBool(response, "animalAIPaused", out bool animalAIPaused))
+        {
+            ApplyRuntimeCheckBoxState(animalAIPausedCheckBox, animalAIPaused);
+        }
+
         if (TryReadProtocolFloat(response, "cameraMinSize", out float cameraMinSize)
             && TryReadProtocolFloat(response, "cameraMaxSize", out float cameraMaxSize))
         {
@@ -1025,6 +1258,52 @@ internal sealed class EditorToolForm : Form
         {
             ApplySeedState(seed);
         }
+    }
+
+    private void ApplyWorldTimeState(string response)
+    {
+        if (!TryReadProtocolInt(response, "day", out int day)
+            || !TryReadProtocolToken(response, "time", out string clock)
+            || !TryReadProtocolFloat(response, "timeScale", out float scale)
+            || !TryReadProtocolBool(response, "timePaused", out bool paused)
+            || !TryReadProtocolBool(response, "isDay", out bool isDay))
+        {
+            return;
+        }
+
+        worldTimePaused = paused;
+        worldTimePauseButton.Text = paused ? "Resume" : "Pause";
+
+        string temperatureText = string.Empty;
+        if (TryReadProtocolFloat(response, "airTemperature", out float airTemperature)
+            && TryReadProtocolFloat(response, "waterTemperature", out float waterTemperature))
+        {
+            temperatureText = $"  Air {airTemperature:0.#}°C / Water {waterTemperature:0.#}°C";
+        }
+
+        worldTimeStateLabel.Text =
+            $"Time: D{day:N0} {clock} {(isDay ? "Day" : "Night")} {scale:0.###}x{(paused ? " Paused" : string.Empty)}{temperatureText}";
+
+        string[] clockParts = clock.Split(':');
+        if (clockParts.Length == 2
+            && int.TryParse(clockParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int hour)
+            && int.TryParse(clockParts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int minute))
+        {
+            if (!worldTimeHourInput.Focused)
+            {
+                SetNumericValue(worldTimeHourInput, hour);
+            }
+
+            if (!worldTimeMinuteInput.Focused)
+            {
+                SetNumericValue(worldTimeMinuteInput, minute);
+            }
+        }
+    }
+
+    private void SetWorldTimeUnavailable(string message)
+    {
+        worldTimeStateLabel.Text = $"Time: {message}";
     }
 
     private void SetRuntimeStatsUnavailable(string message)
@@ -1215,6 +1494,7 @@ internal sealed class EditorToolForm : Form
             AppendLog($"> {command}");
             AppendLog(response);
             UpdateSaveSlotsFromResponse(response, applyResponseSelectedSlot);
+            ApplyWorldTimeState(response);
             statusLabel.Text = response.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
                 ? "성공"
                 : "실패";
@@ -1339,6 +1619,9 @@ internal sealed class EditorToolForm : Form
         pingButton.Enabled = !busy;
         conveyorLineButton.Enabled = !busy;
         conveyorItemFillButton.Enabled = !busy;
+        animalStress100Button.Enabled = !busy;
+        animalStress500Button.Enabled = !busy;
+        animalThreatButton.Enabled = !busy;
         saveSlotComboBox.Enabled = !busy;
         saveSlotButton.Enabled = !busy;
         loadSlotButton.Enabled = !busy;
@@ -1353,11 +1636,24 @@ internal sealed class EditorToolForm : Form
         showRailLineCheckBox.Enabled = !busy;
         showDirectionsCheckBox.Enabled = !busy;
         freeCameraCheckBox.Enabled = !busy;
+        showAnimalHerdAreasCheckBox.Enabled = !busy;
+        animalAIPausedCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;
         cameraMaxSizeInput.Enabled = !busy;
         applyCameraSizeButton.Enabled = !busy;
         seedTextBox.Enabled = !busy;
         applySeedButton.Enabled = !busy;
+        worldTimeHourInput.Enabled = !busy;
+        worldTimeMinuteInput.Enabled = !busy;
+        worldTimePauseButton.Enabled = !busy;
+        worldTimeScale1Button.Enabled = !busy;
+        worldTimeScale10Button.Enabled = !busy;
+        worldTimeNextSunriseButton.Enabled = !busy;
+        worldTime0600Button.Enabled = !busy;
+        worldTime0800Button.Enabled = !busy;
+        worldTime1800Button.Enabled = !busy;
+        worldTimeApplyButton.Enabled = !busy;
+        worldTimeCheckButton.Enabled = !busy;
         statusLabel.Text = status;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }

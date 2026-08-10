@@ -89,6 +89,11 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -110,9 +115,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1 &3946359752171824948
 GameObject:
@@ -229,8 +236,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Rail handcar
-  objId: 53
-  itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
+  objId: 63
+  itemDefinition: {fileID: 11400000, guid: 9b57d4232b128e44dad8eb1f0335b314, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -369,6 +376,11 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -390,9 +402,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1 &8037597029420780899
 GameObject:
@@ -482,7 +496,7 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
     - target: {fileID: -5695465308945310401, guid: e6ba59cf3d72670458fde9cf125a93ac, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
     - target: {fileID: -4583364733566820070, guid: e6ba59cf3d72670458fde9cf125a93ac, type: 3}
@@ -498,7 +512,7 @@ PrefabInstance:
       value: -0.026
       objectReference: {fileID: 0}
     - target: {fileID: -808618298570977559, guid: e6ba59cf3d72670458fde9cf125a93ac, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 2afbca8fe9eeebc48b76add56c621353, type: 2}
     - target: {fileID: 768492227869904787, guid: e6ba59cf3d72670458fde9cf125a93ac, type: 3}
@@ -518,11 +532,11 @@ PrefabInstance:
       value: Body
       objectReference: {fileID: 0}
     - target: {fileID: 1796110182014208364, guid: e6ba59cf3d72670458fde9cf125a93ac, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 6ef80d07784d2b64f921613e5a97cc82, type: 2}
     - target: {fileID: 8179351096882468041, guid: e6ba59cf3d72670458fde9cf125a93ac, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 2afbca8fe9eeebc48b76add56c621353, type: 2}
     m_RemovedComponents: []

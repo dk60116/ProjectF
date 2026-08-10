@@ -13,12 +13,14 @@ MonoBehaviour:
   m_Name: Item_31_Boiler
   m_EditorClassIdentifier: 
   itemName: Boiler
-  id: 32
+  id: 33
   mapObject: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: a628ddd2a38b95940813b0bb46eec89f, type: 3}
   interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

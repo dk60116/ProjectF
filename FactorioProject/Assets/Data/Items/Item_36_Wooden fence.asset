@@ -13,12 +13,14 @@ MonoBehaviour:
   m_Name: Item_36_Wooden fence
   m_EditorClassIdentifier: 
   itemName: Wooden fence
-  id: 37
+  id: 38
   mapObject: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
   portableMesh: {fileID: 4300000, guid: aa42873b872750b40a2c314806377503, type: 2}
   portableMat: {fileID: 2100000, guid: 18982fa21a513704aa4f1f45a1cfaba6, type: 2}
   icon: {fileID: 21300000, guid: dac4f30093e209d408e04e1efeec296b, type: 3}
   interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

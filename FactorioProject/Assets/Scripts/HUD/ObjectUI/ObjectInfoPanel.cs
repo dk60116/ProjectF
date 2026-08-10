@@ -193,17 +193,18 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void RefreshFocusedInfoPanels(Component target, Resource underlyingResource)
     {
-        if (focusedPanelTarget == target
-            && focusedPanelUnderlyingResource == underlyingResource)
+        bool selectionChanged = focusedPanelTarget != target
+                                || focusedPanelUnderlyingResource != underlyingResource;
+        if (selectionChanged)
         {
-            return;
+            ClearFocusedInfoPanels();
         }
 
-        ClearFocusedInfoPanels();
         if (target is Animal animal)
         {
             SetFocusedInfoPanelAnimal(animal);
             focusedPanelTarget = animal;
+            focusedPanelUnderlyingResource = null;
             return;
         }
 

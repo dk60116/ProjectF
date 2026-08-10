@@ -79,6 +79,7 @@ public class SaveManager : MonoBehaviour
             savedAtUtcTicks = DateTime.UtcNow.Ticks,
             itemCatalog = SaveGameItemIdRemapper.CaptureItemCatalog(GameManager.Instance?.ItemManger?.ItemDefinitions),
             terrain = terrain.CaptureTerrainSaveState(),
+            worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
             map = terrain.CaptureMapSaveState(),
             player = player != null ? player.CaptureSaveState() : new PlayerSaveData()
         };
@@ -183,6 +184,9 @@ public class SaveManager : MonoBehaviour
             player.ApplySaveState(defaultPlayerState);
         }
 
+        WorldTimeService worldTime = GameManager.Instance?.WorldTime ?? WorldTimeService.Active;
+        worldTime?.ResetToDefault();
+
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain != null)
         {
@@ -266,6 +270,9 @@ public class SaveManager : MonoBehaviour
             player.ApplyTransformState(data.player);
         }
 
+        WorldTimeService worldTime = GameManager.Instance?.WorldTime ?? WorldTimeService.Active;
+        worldTime?.ApplySaveState(data.worldTime);
+
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain != null)
         {
@@ -281,6 +288,29 @@ public class SaveManager : MonoBehaviour
         if (player != null && data.player != null && data.player.hasPlayer)
         {
             player.ApplyInventoryAndStatState(data.player);
+            RestorePlayerNooseState(player, data.player);
+        }
+    }
+
+    private static void RestorePlayerNooseState(
+        Player player,
+        PlayerSaveData playerSaveData)
+    {
+        if (player == null
+            || playerSaveData == null
+            || playerSaveData.nooseLeashedAnimalId == 0L)
+        {
+            return;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null
+            || !playerController.TryRestoreNooseLeashedAnimal(
+                playerSaveData.nooseLeashedAnimalId))
+        {
+            Debug.LogWarning(
+                $"[SaveManager] 올가미로 연결된 동물을 복원하지 못했습니다. "
+                + $"animalId={playerSaveData.nooseLeashedAnimalId}");
         }
     }
 

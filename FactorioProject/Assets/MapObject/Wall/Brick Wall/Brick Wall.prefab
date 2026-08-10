@@ -65,7 +65,7 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4909268776646986644, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 5409a2e0720f78849af78a6cda4710fd, type: 2}
     m_RemovedComponents: []
@@ -111,7 +111,7 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
     - target: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -197,7 +197,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Brick wall
-  objId: 39
+  objId: 40
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

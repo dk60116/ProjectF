@@ -200,6 +200,15 @@ public partial class TerrainGenerator : MonoBehaviour
             AnimalSpeciesPair species = herdPlan.species;
             int herdSize = herdPlan.size;
             Block centerBlock = animalEligibleBlocksScratch[random.Range(0, animalEligibleBlocksScratch.Count)];
+            Vector3 herdCenter = centerBlock.transform.position;
+            long herdId = BuildAnimalHerdId(
+                chunkCoordinate,
+                centerBlock.Coordinate,
+                species.Settings != null ? species.Settings.Id : -1,
+                herdIndex);
+            float herdRadius = species.Settings != null && species.Settings.AISettings != null
+                ? species.Settings.AISettings.HerdAreaRadius
+                : AnimalAISettings.DefaultHerdAreaRadius;
 
             for (int memberIndex = 0; memberIndex < herdSize; memberIndex++)
             {
@@ -231,6 +240,10 @@ public partial class TerrainGenerator : MonoBehaviour
                     ChooseAnimalSpawnAge(definition, ref random),
                     -1f,
                     false,
+                    herdId,
+                    herdCenter,
+                    herdRadius,
+                    null,
                     animalRoot);
             }
         }
@@ -460,6 +473,10 @@ public partial class TerrainGenerator : MonoBehaviour
         float age,
         float baseScale,
         bool interacted,
+        long herdId,
+        Vector3 herdCenter,
+        float herdRadius,
+        AnimalSaveEntry restoredState,
         Transform parent)
     {
         if (definition == null || definition.AnimalPrefab == null || parent == null)
@@ -484,14 +501,28 @@ public partial class TerrainGenerator : MonoBehaviour
             instance = instanceObject.AddComponent<TerrainAnimalInstance>();
         }
 
-        instance.Configure(deterministicId, definition.Id, interacted);
+        instance.Configure(
+            deterministicId,
+            definition.Id,
+            interacted,
+            herdId,
+            herdCenter,
+            herdRadius);
         if (baseScale >= 0f)
         {
             animal.SetBaseScale(baseScale);
         }
 
         animal.SetAge(age);
+        animal.ConfigureHealth(definition, restoredState);
         animal.enabled = false;
+        AnimalAIController controller = instanceObject.GetComponent<AnimalAIController>();
+        if (controller == null)
+        {
+            controller = instanceObject.AddComponent<AnimalAIController>();
+        }
+
+        controller.Configure(animal, definition, instance, restoredState);
         loadedAnimalIds.Add(deterministicId);
         return animal;
     }
@@ -521,6 +552,14 @@ public partial class TerrainGenerator : MonoBehaviour
                 state.age,
                 state.baseScale,
                 true,
+                state.herdId != 0L ? state.herdId : state.deterministicId,
+                state.herdCenter != Vector3.zero ? state.herdCenter : state.position,
+                state.herdRadius > 0f
+                    ? state.herdRadius
+                    : definition != null && definition.AISettings != null
+                        ? definition.AISettings.HerdAreaRadius
+                        : AnimalAISettings.DefaultHerdAreaRadius,
+                state,
                 parent);
             if (animal != null)
             {
@@ -581,16 +620,8 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             Animal animal = instance.GetComponentInChildren<Animal>(true);
-            animalSaveOverrides[instance.DeterministicId] = new AnimalSaveEntry
-            {
-                deterministicId = instance.DeterministicId,
-                definitionId = instance.DefinitionId,
-                position = instance.transform.position,
-                rotation = instance.transform.rotation,
-                age = animal != null ? animal.Age : 10f,
-                baseScale = animal != null ? animal.BaseScaleValue : 1f,
-                removed = false
-            };
+            animalSaveOverrides[instance.DeterministicId] =
+                CreateAnimalSaveEntry(instance, animal, false);
         }
     }
 
@@ -620,16 +651,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (preserveRemoval && instance.DeterministicId != 0L)
         {
-            animalSaveOverrides[instance.DeterministicId] = new AnimalSaveEntry
-            {
-                deterministicId = instance.DeterministicId,
-                definitionId = instance.DefinitionId,
-                position = instance.transform.position,
-                rotation = instance.transform.rotation,
-                age = animal.Age,
-                baseScale = animal.BaseScaleValue,
-                removed = true
-            };
+            animalSaveOverrides[instance.DeterministicId] =
+                CreateAnimalSaveEntry(instance, animal, true);
         }
 
         loadedAnimalIds.Remove(instance.DeterministicId);
@@ -897,8 +920,299 @@ public partial class TerrainGenerator : MonoBehaviour
                 rotation = source.rotation,
                 age = source.age,
                 baseScale = source.baseScale,
-                removed = source.removed
+                removed = source.removed,
+                herdId = source.herdId,
+                herdCenter = source.herdCenter,
+                herdRadius = source.herdRadius,
+                behaviorState = source.behaviorState,
+                behaviorTimeRemaining = source.behaviorTimeRemaining,
+                targetPosition = source.targetPosition,
+                hasTarget = source.hasTarget,
+                movingToActivity = source.movingToActivity,
+                randomState = source.randomState,
+                hasHealth = source.hasHealth,
+                currentHealth = source.currentHealth,
+                corpseLootInitialized = source.corpseLootInitialized,
+                corpseRemainingItemIds = source.corpseRemainingItemIds != null
+                    ? new List<int>(source.corpseRemainingItemIds)
+                    : new List<int>()
             };
+    }
+
+    private static AnimalSaveEntry CreateAnimalSaveEntry(
+        TerrainAnimalInstance instance,
+        Animal animal,
+        bool removed)
+    {
+        AnimalSaveEntry entry = new AnimalSaveEntry
+        {
+            deterministicId = instance.DeterministicId,
+            definitionId = instance.DefinitionId,
+            position = instance.transform.position,
+            rotation = instance.transform.rotation,
+            age = animal != null ? animal.Age : 10f,
+            baseScale = animal != null ? animal.BaseScaleValue : 1f,
+            removed = removed,
+            herdId = instance.HerdId,
+            herdCenter = instance.HerdCenter,
+            herdRadius = instance.HerdRadius
+        };
+        animal?.CaptureHealthSaveState(entry);
+        instance.GetComponent<AnimalAIController>()?.CaptureSaveState(entry);
+        return entry;
+    }
+
+    public bool CanAnimalMoveTo(Vector3 worldPosition, bool requireLoadedBlock)
+    {
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(worldPosition.x),
+            Mathf.RoundToInt(worldPosition.z));
+        if (!IsCoordinateInsideMapBounds(coordinate)
+            || GetTileBiome(coordinate) == TerrainBiome.Water)
+        {
+            return false;
+        }
+
+        if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
+        {
+            return !requireLoadedBlock;
+        }
+
+        if (!block.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        MapObject mapObject = block.MapObject;
+        return mapObject == null
+               || mapObject.AllowsAnimalTraversal;
+    }
+
+    public bool IsAnimalDrinkLocation(Vector3 worldPosition)
+    {
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(worldPosition.x),
+            Mathf.RoundToInt(worldPosition.z));
+        if (!IsCoordinateInsideMapBounds(coordinate)
+            || GetTileBiome(coordinate) == TerrainBiome.Water)
+        {
+            return false;
+        }
+
+        return GetTileBiome(coordinate + Vector2Int.up) == TerrainBiome.Water
+               || GetTileBiome(coordinate + Vector2Int.right) == TerrainBiome.Water
+               || GetTileBiome(coordinate + Vector2Int.down) == TerrainBiome.Water
+               || GetTileBiome(coordinate + Vector2Int.left) == TerrainBiome.Water;
+    }
+
+    public int CreateAnimalAIStressTest(int requestedCount)
+    {
+        int targetCount = Mathf.Clamp(requestedCount, 1, 2000);
+        EnsureAnimalSpeciesCache();
+        if (animalSpeciesCache.Count == 0)
+        {
+            return 0;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player == null)
+        {
+            return 0;
+        }
+
+        Vector3 playerPosition = player.transform.position;
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(playerPosition.x),
+            Mathf.RoundToInt(playerPosition.z));
+        int searchRadius = Mathf.Clamp(Mathf.CeilToInt(Mathf.Sqrt(targetCount) * 1.5f), 12, 90);
+        int stressSequence = ++animalStressTestSequence;
+        DeterministicAnimalRandom random = new DeterministicAnimalRandom(
+            seed ^ stressSequence * 7919,
+            center);
+        int created = 0;
+        int herdMemberIndex = int.MaxValue;
+        int herdSize = 1;
+        long herdId = 0L;
+        Vector3 herdCenter = playerPosition;
+        AnimalSpeciesPair species = null;
+
+        for (int radius = 0; radius <= searchRadius && created < targetCount; radius++)
+        {
+            for (int z = -radius; z <= radius && created < targetCount; z++)
+            {
+                for (int x = -radius; x <= radius && created < targetCount; x++)
+                {
+                    if (radius > 0 && Mathf.Abs(x) != radius && Mathf.Abs(z) != radius)
+                    {
+                        continue;
+                    }
+
+                    Vector2Int coordinate = center + new Vector2Int(x, z);
+                    if (!TryGetLoadedBlock(coordinate, out Block block)
+                        || !CanSpawnAnimalOnBlock(block))
+                    {
+                        continue;
+                    }
+
+                    if (herdMemberIndex >= herdSize)
+                    {
+                        species = animalSpeciesCache[random.Range(0, animalSpeciesCache.Count)];
+                        if (species == null)
+                        {
+                            continue;
+                        }
+
+                        herdSize = Mathf.Max(1, species.PreferredHerdSize);
+                        herdMemberIndex = 0;
+                        herdCenter = block.transform.position;
+                        herdId = BuildAnimalStressHerdId(stressSequence, created);
+                    }
+
+                    AnimalDefinition definition = ChooseGenderDefinition(species, ref random);
+                    Transform chunkTransform = block.transform.parent;
+                    Transform parent = GetOrCreateAnimalRoot(chunkTransform);
+                    long deterministicId = BuildAnimalStressId(stressSequence, created);
+                    Animal animal = SpawnAnimalInstance(
+                        definition,
+                        deterministicId,
+                        block.transform.position,
+                        Quaternion.Euler(0f, random.Value() * 360f, 0f),
+                        ChooseAnimalSpawnAge(definition, ref random),
+                        -1f,
+                        false,
+                        herdId,
+                        herdCenter,
+                        definition != null && definition.AISettings != null
+                            ? definition.AISettings.HerdAreaRadius
+                            : AnimalAISettings.DefaultHerdAreaRadius,
+                        null,
+                        parent);
+                    if (animal == null)
+                    {
+                        continue;
+                    }
+
+                    created++;
+                    herdMemberIndex++;
+                }
+            }
+        }
+
+        return created;
+    }
+
+    public int CreateAnimalCollisionStressTest(int requestedCount)
+    {
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player == null)
+        {
+            return 0;
+        }
+
+        if (animalCollisionStressRoot != null)
+        {
+            DestroyAnimalObject(animalCollisionStressRoot);
+        }
+
+        Vector3 center = player.transform.position;
+        animalCollisionStressRoot = new GameObject("Animal Collision Stress Harness");
+        animalCollisionStressRoot.transform.SetParent(transform, true);
+        animalCollisionStressRoot.transform.position = center;
+
+        int obstacleLayer = LayerMask.NameToLayer("Block");
+        if (obstacleLayer < 0)
+        {
+            obstacleLayer = 0;
+        }
+
+        CreateAnimalCollisionStressWall(
+            animalCollisionStressRoot.transform,
+            "East Wall",
+            new Vector3(3f, 1f, 0f),
+            new Vector3(0.75f, 2f, 4.5f),
+            obstacleLayer);
+        CreateAnimalCollisionStressWall(
+            animalCollisionStressRoot.transform,
+            "West Wall",
+            new Vector3(-3f, 1f, 0f),
+            new Vector3(0.75f, 2f, 4.5f),
+            obstacleLayer);
+        CreateAnimalCollisionStressWall(
+            animalCollisionStressRoot.transform,
+            "North Wall",
+            new Vector3(0f, 1f, 3f),
+            new Vector3(4.5f, 2f, 0.75f),
+            obstacleLayer);
+        CreateAnimalCollisionStressWall(
+            animalCollisionStressRoot.transform,
+            "South Wall",
+            new Vector3(0f, 1f, -3f),
+            new Vector3(4.5f, 2f, 0.75f),
+            obstacleLayer);
+        Physics.SyncTransforms();
+
+        int created = CreateAnimalAIStressTest(requestedCount);
+        AnimalAIWorld.Instance?.ForceThreatPulse(center, 6f);
+        return created;
+    }
+
+    private static void CreateAnimalCollisionStressWall(
+        Transform parent,
+        string wallName,
+        Vector3 localPosition,
+        Vector3 localScale,
+        int layer)
+    {
+        GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wall.name = wallName;
+        wall.layer = layer;
+        wall.transform.SetParent(parent, false);
+        wall.transform.localPosition = localPosition;
+        wall.transform.localScale = localScale;
+    }
+
+    private int animalStressTestSequence;
+    private GameObject animalCollisionStressRoot;
+
+    private long BuildAnimalHerdId(
+        Vector2Int chunkCoordinate,
+        Vector2Int centerCoordinate,
+        int definitionId,
+        int herdIndex)
+    {
+        unchecked
+        {
+            ulong hash = 1469598103934665603UL;
+            hash = (hash ^ (uint)seed) * 1099511628211UL;
+            hash = (hash ^ (uint)chunkCoordinate.x) * 1099511628211UL;
+            hash = (hash ^ (uint)chunkCoordinate.y) * 1099511628211UL;
+            hash = (hash ^ (uint)centerCoordinate.x) * 1099511628211UL;
+            hash = (hash ^ (uint)centerCoordinate.y) * 1099511628211UL;
+            hash = (hash ^ (uint)definitionId) * 1099511628211UL;
+            hash = (hash ^ (uint)herdIndex) * 1099511628211UL;
+            long result = (long)hash;
+            return result != 0L ? result : 1L;
+        }
+    }
+
+    private static long BuildAnimalStressHerdId(int sequence, int index)
+    {
+        unchecked
+        {
+            long value = ((long)sequence << 32) ^ (uint)index ^ 0x535452455353L;
+            return value != 0L ? value : 1L;
+        }
+    }
+
+    private static long BuildAnimalStressId(int sequence, int index)
+    {
+        unchecked
+        {
+            long value = long.MinValue
+                         | ((long)(uint)sequence << 31)
+                         | (uint)(index + 1);
+            return value != 0L ? value : long.MinValue + 1L;
+        }
     }
 
     private void ClearAnimalSpawnScratch()

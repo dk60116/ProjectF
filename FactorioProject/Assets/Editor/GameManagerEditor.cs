@@ -31,6 +31,65 @@ public class GameManagerEditor : Editor
             {
                 ToggleRuntimeBool(gameManager, gameManager.FreeCamera, value => gameManager.SetFreeCamera(value), "Toggle Free Camera");
             }
+
+            DrawWorldTimeControls(gameManager);
+        }
+    }
+
+    private static void DrawWorldTimeControls(GameManager gameManager)
+    {
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("World Time", EditorStyles.boldLabel);
+
+        WorldTimeService worldTime = gameManager.WorldTime;
+        EditorGUILayout.LabelField(
+            worldTime != null ? worldTime.ClockText : "WorldTimeService unavailable");
+        if (worldTime == null)
+        {
+            return;
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button(worldTime.Paused ? "Resume" : "Pause"))
+            {
+                gameManager.SetWorldTimePaused(!worldTime.Paused);
+            }
+
+            if (GUILayout.Button("1x"))
+            {
+                gameManager.SetWorldTimeScale(1f);
+                gameManager.SetWorldTimePaused(false);
+            }
+
+            if (GUILayout.Button("10x"))
+            {
+                gameManager.SetWorldTimeScale(10f);
+                gameManager.SetWorldTimePaused(false);
+            }
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("06:00"))
+            {
+                gameManager.TrySetWorldTime(6, 0);
+            }
+
+            if (GUILayout.Button("08:00"))
+            {
+                gameManager.TrySetWorldTime(8, 0);
+            }
+
+            if (GUILayout.Button("18:00"))
+            {
+                gameManager.TrySetWorldTime(18, 0);
+            }
+        }
+
+        if (GUILayout.Button("Next Sunrise"))
+        {
+            gameManager.AdvanceWorldTimeToNextSunrise();
         }
     }
 

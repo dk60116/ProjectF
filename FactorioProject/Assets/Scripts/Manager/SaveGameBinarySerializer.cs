@@ -166,6 +166,7 @@ public static class SaveGameBinarySerializer
         writer.Write(data.savedAtUtcTicks);
         WriteItemCatalog(writer, data.itemCatalog);
         WriteTerrain(writer, data.terrain);
+        WriteWorldTime(writer, data.worldTime);
         WriteMap(writer, data.map);
         WritePlayer(writer, data.player);
     }
@@ -185,6 +186,9 @@ public static class SaveGameBinarySerializer
             ? ReadList(reader, () => ReadItemCatalogEntry(reader))
             : new List<SaveItemCatalogEntry>();
         data.terrain = ReadTerrain(reader, fileVersion);
+        data.worldTime = fileVersion >= 24
+            ? ReadWorldTime(reader)
+            : new WorldTimeSaveData { hasTime = false };
         data.map = ReadMap(reader, fileVersion, compatibilityMode);
         data.player = ReadPlayer(reader, fileVersion);
         return data;
@@ -240,6 +244,59 @@ public static class SaveGameBinarySerializer
         return terrain;
     }
 
+    private static void WriteWorldTime(BinaryWriter writer, WorldTimeSaveData worldTime)
+    {
+        worldTime ??= new WorldTimeSaveData();
+        writer.Write(worldTime.hasTime);
+        writer.Write(Mathf.Max(1, worldTime.dayIndex));
+        writer.Write(worldTime.secondsOfDay);
+    }
+
+    private static WorldTimeSaveData ReadWorldTime(BinaryReader reader)
+    {
+        return new WorldTimeSaveData
+        {
+            hasTime = reader.ReadBoolean(),
+            dayIndex = Mathf.Max(1, reader.ReadInt32()),
+            secondsOfDay = reader.ReadDouble()
+        };
+    }
+
+    public static bool RunWorldTimeRoundTripSelfCheck(out string firstIssue)
+    {
+        WorldTimeSaveData expected = new WorldTimeSaveData
+        {
+            hasTime = true,
+            dayIndex = 17,
+            secondsOfDay = (18d * WorldTimeService.GameSecondsPerHour)
+                           + (45d * WorldTimeService.SecondsPerMinute)
+        };
+
+        using MemoryStream stream = new MemoryStream();
+        using (BinaryWriter writer = new BinaryWriter(stream, Encoding.UTF8, true))
+        {
+            WriteWorldTime(writer, expected);
+        }
+
+        stream.Position = 0L;
+        WorldTimeSaveData actual;
+        using (BinaryReader reader = new BinaryReader(stream, Encoding.UTF8, true))
+        {
+            actual = ReadWorldTime(reader);
+        }
+
+        if (actual.hasTime != expected.hasTime
+            || actual.dayIndex != expected.dayIndex
+            || Math.Abs(actual.secondsOfDay - expected.secondsOfDay) > 0.001d)
+        {
+            firstIssue = "world_time_save_roundtrip_mismatch";
+            return false;
+        }
+
+        firstIssue = string.Empty;
+        return true;
+    }
+
     private static void WriteMap(BinaryWriter writer, MapSaveData map)
     {
         map ??= new MapSaveData();
@@ -266,7 +323,7 @@ public static class SaveGameBinarySerializer
 
         if (version >= 22)
         {
-            map.animals = ReadList(reader, () => ReadAnimalEntry(reader));
+            map.animals = ReadList(reader, () => ReadAnimalEntry(reader, version));
         }
 
         return map;
@@ -282,11 +339,24 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.age);
         writer.Write(entry.baseScale);
         writer.Write(entry.removed);
+        writer.Write(entry.herdId);
+        WriteVector3(writer, entry.herdCenter);
+        writer.Write(entry.herdRadius);
+        writer.Write(entry.behaviorState);
+        writer.Write(entry.behaviorTimeRemaining);
+        WriteVector3(writer, entry.targetPosition);
+        writer.Write(entry.hasTarget);
+        writer.Write(entry.movingToActivity);
+        writer.Write(entry.randomState);
+        writer.Write(entry.hasHealth);
+        writer.Write(entry.currentHealth);
+        writer.Write(entry.corpseLootInitialized);
+        WriteIntList(writer, entry.corpseRemainingItemIds);
     }
 
-    private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader)
+    private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader, int version)
     {
-        return new AnimalSaveEntry
+        AnimalSaveEntry entry = new AnimalSaveEntry
         {
             deterministicId = reader.ReadInt64(),
             definitionId = reader.ReadInt32(),
@@ -296,6 +366,39 @@ public static class SaveGameBinarySerializer
             baseScale = reader.ReadSingle(),
             removed = reader.ReadBoolean()
         };
+
+        if (version >= 23)
+        {
+            entry.herdId = reader.ReadInt64();
+            entry.herdCenter = ReadVector3(reader);
+            entry.herdRadius = reader.ReadSingle();
+            entry.behaviorState = reader.ReadInt32();
+            entry.behaviorTimeRemaining = reader.ReadSingle();
+            entry.targetPosition = ReadVector3(reader);
+            entry.hasTarget = reader.ReadBoolean();
+            entry.movingToActivity = reader.ReadBoolean();
+            entry.randomState = reader.ReadInt32();
+        }
+        else
+        {
+            entry.herdId = entry.deterministicId;
+            entry.herdCenter = entry.position;
+            entry.herdRadius = AnimalAISettings.DefaultHerdAreaRadius;
+        }
+
+        if (version >= 25)
+        {
+            entry.hasHealth = reader.ReadBoolean();
+            entry.currentHealth = reader.ReadSingle();
+        }
+
+        if (version >= 26)
+        {
+            entry.corpseLootInitialized = reader.ReadBoolean();
+            entry.corpseRemainingItemIds = ReadIntList(reader);
+        }
+
+        return entry;
     }
 
     private static void WriteResourceEntry(BinaryWriter writer, ResourceSaveEntry entry)
@@ -729,6 +832,9 @@ public static class SaveGameBinarySerializer
         WriteList(writer, player.bagSlots, WritePlayerSlot);
         WriteList(writer, player.handSlots, WritePlayerSlot);
         WriteList(writer, player.craftingQueue, WritePlayerCraftingQueueEntry);
+        writer.Write(player.nooseLeashedAnimalId);
+        writer.Write(player.activeTorchItemId);
+        writer.Write(player.activeTorchRemainingEnergy);
     }
 
     private static PlayerSaveData ReadPlayer(BinaryReader reader, int version)
@@ -756,6 +862,17 @@ public static class SaveGameBinarySerializer
         if (version >= 4)
         {
             player.craftingQueue = ReadList(reader, () => ReadPlayerCraftingQueueEntry(reader));
+        }
+
+        if (version >= 27)
+        {
+            player.nooseLeashedAnimalId = reader.ReadInt64();
+        }
+
+        if (version >= 28)
+        {
+            player.activeTorchItemId = reader.ReadInt32();
+            player.activeTorchRemainingEnergy = reader.ReadSingle();
         }
 
         return player;

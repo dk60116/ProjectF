@@ -165,6 +165,9 @@ internal static class AnimalDataEditorUtility
         int minHerdSize,
         int maxHerdSize,
         int spawnWeight,
+        float maxHealth,
+        AnimalAISettings aiSettings,
+        IReadOnlyList<AnimalDropEntry> dropItems,
         string undoName)
     {
         if (definition == null)
@@ -192,7 +195,33 @@ internal static class AnimalDataEditorUtility
             spawnWeight,
             normalizedMinHerdSize,
             normalizedMaxHerdSize);
+        serializedDefinition.FindProperty("maxHealth").floatValue = Mathf.Max(1f, maxHealth);
+        SerializedProperty dropItemsProperty = serializedDefinition.FindProperty("dropItems");
+        if (dropItemsProperty != null)
+        {
+            int dropCount = dropItems != null ? dropItems.Count : 0;
+            dropItemsProperty.arraySize = dropCount;
+            for (int i = 0; i < dropCount; i++)
+            {
+                AnimalDropEntry entry = dropItems[i] ?? new AnimalDropEntry();
+                entry.Normalize();
+                SerializedProperty element = dropItemsProperty.GetArrayElementAtIndex(i);
+                element.FindPropertyRelative("itemDefinition").objectReferenceValue =
+                    entry.ItemDefinition;
+                element.FindPropertyRelative("minAmount").intValue = entry.MinAmount;
+                element.FindPropertyRelative("maxAmount").intValue = entry.MaxAmount;
+                element.FindPropertyRelative("dropChance").floatValue = entry.DropChance;
+            }
+        }
+
         serializedDefinition.ApplyModifiedPropertiesWithoutUndo();
+
+        AnimalAISettings normalizedAISettings =
+            (aiSettings ?? new AnimalAISettings()).Clone();
+        normalizedAISettings.Normalize();
+        JsonUtility.FromJsonOverwrite(
+            JsonUtility.ToJson(normalizedAISettings),
+            definition.AISettings);
         EditorUtility.SetDirty(definition);
         EnsureDefinitionLink(definition);
     }

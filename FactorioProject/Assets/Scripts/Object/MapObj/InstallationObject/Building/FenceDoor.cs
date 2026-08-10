@@ -24,6 +24,7 @@ public class FenceDoor : Wall
     private float openedAngle = OpenAngle;
 
     public bool IsOpen => isOpen;
+    public override bool AllowsAnimalTraversal => isOpen;
 
     protected override void OnEnable()
     {
@@ -180,7 +181,11 @@ public class FenceDoor : Wall
             return doorCollider;
         }
 
-        doorCollider = GetComponent<Collider>();
+        // Door 프리팹의 충돌체는 FenceDoor 루트가 아니라 회전하는 Hinge 자식에 있다.
+        // 루트만 검색하면 문이 열려도 문짝 충돌체가 계속 활성화된다.
+        doorCollider = hinge != null
+            ? hinge.GetComponentInChildren<Collider>(true)
+            : GetComponentInChildren<Collider>(true);
         return doorCollider;
     }
 

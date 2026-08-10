@@ -5,12 +5,13 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 22;
+    public const int CurrentVersion = 28;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
     public List<SaveItemCatalogEntry> itemCatalog = new List<SaveItemCatalogEntry>();
     public TerrainSaveData terrain = new TerrainSaveData();
+    public WorldTimeSaveData worldTime = new WorldTimeSaveData();
     public MapSaveData map = new MapSaveData();
     public PlayerSaveData player = new PlayerSaveData();
 }
@@ -27,6 +28,14 @@ public sealed class TerrainSaveData
 {
     public int seed;
     public int mapSize;
+}
+
+[Serializable]
+public sealed class WorldTimeSaveData
+{
+    public bool hasTime = true;
+    public int dayIndex = 1;
+    public double secondsOfDay = WorldTimeService.DefaultStartHour * WorldTimeService.GameSecondsPerHour;
 }
 
 [Serializable]
@@ -49,6 +58,19 @@ public sealed class AnimalSaveEntry
     public float age = 10f;
     public float baseScale = 1f;
     public bool removed;
+    public long herdId;
+    public Vector3 herdCenter;
+    public float herdRadius = AnimalAISettings.DefaultHerdAreaRadius;
+    public int behaviorState;
+    public float behaviorTimeRemaining;
+    public Vector3 targetPosition;
+    public bool hasTarget;
+    public bool movingToActivity;
+    public int randomState;
+    public bool hasHealth;
+    public float currentHealth;
+    public bool corpseLootInitialized;
+    public List<int> corpseRemainingItemIds = new List<int>();
 }
 
 [Serializable]
@@ -225,6 +247,9 @@ public sealed class PlayerSaveData
     public long mountedVehiclePlacementSequence;
     public Vector2Int mountedVehicleAnchorCoordinate;
     public int mountedVehiclePlayerPointIndex = -1;
+    public long nooseLeashedAnimalId;
+    public int activeTorchItemId = -1;
+    public float activeTorchRemainingEnergy;
     public int bagLevel = 1;
     public PlayerStatSaveData stats = new PlayerStatSaveData();
     public List<PlayerInventorySlotSaveState> bagSlots = new List<PlayerInventorySlotSaveState>();

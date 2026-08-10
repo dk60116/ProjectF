@@ -19,8 +19,10 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
     private const int ColorPropertySize = sizeof(float) * 4;
     private const uint PerInstanceMetadataBit = 0x80000000u;
     private const int OpaqueRenderQueueUpperBound = 3000;
+    private const string AlphaTestKeyword = "_ALPHATEST_ON";
     private const string BrgCompatibleTag = "BatchRendererGroupCompatible";
-    private const string UrpShaderPrefix = "Universal Render Pipeline/";
+    private const string RenderTypeTag = "RenderType";
+    private const string TransparentCutoutRenderType = "TransparentCutout";
 
     private static readonly int ObjectToWorldShaderId = Shader.PropertyToID("unity_ObjectToWorld");
     private static readonly int WorldToObjectShaderId = Shader.PropertyToID("unity_WorldToObject");
@@ -30,6 +32,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
     private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
     private static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
+    private static readonly int AlphaClipShaderId = Shader.PropertyToID("_AlphaClip");
     private static readonly Matrix4x4[] ZeroPrefix = { Matrix4x4.zero };
     private static readonly BatchCullingViewType[] EnabledViewTypes =
     {
@@ -102,16 +105,26 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         }
 
         Shader shader = key.Material.shader;
+        bool usesAlphaClip = key.Material.IsKeywordEnabled(AlphaTestKeyword)
+            || (key.Material.HasProperty(AlphaClipShaderId)
+                && key.Material.GetFloat(AlphaClipShaderId) > 0.5f)
+            || string.Equals(
+                key.Material.GetTag(RenderTypeTag, false, string.Empty),
+                TransparentCutoutRenderType,
+                StringComparison.OrdinalIgnoreCase);
         bool hasDotsKeyword = shader.keywordSpace
             .FindKeyword("DOTS_INSTANCING_ON")
             .isValid;
         bool isExplicitlySupported = string.Equals(
-                key.Material.GetTag(BrgCompatibleTag, false, string.Empty),
-                "True",
-                StringComparison.OrdinalIgnoreCase)
-            || shader.name.StartsWith(UrpShaderPrefix, StringComparison.Ordinal);
+            key.Material.GetTag(BrgCompatibleTag, false, string.Empty),
+            "True",
+            StringComparison.OrdinalIgnoreCase);
 
-        isCompatible = hasDotsKeyword && isExplicitlySupported;
+        // A DOTS keyword in the shader metadata does not guarantee that the Player build
+        // retained a compatible variant or that its BRG property layout matches this backend.
+        // Stock URP materials therefore stay on Graphics.RenderMeshInstanced unless their
+        // shader explicitly opts into this backend.
+        isCompatible = !usesAlphaClip && hasDotsKeyword && isExplicitlySupported;
         materialCompatibility.Add(key.Material, isCompatible);
         return isCompatible;
     }
@@ -712,9 +725,9 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
                 extents.x * Math.Abs(normal.x)
                 + extents.y * Math.Abs(normal.y)
                 + extents.z * Math.Abs(normal.z);
-            // BatchCullingContext의 평면 법선은 컬링 볼륨 바깥쪽을 향한다.
-            // AABB에서 법선 반대편에 있는 가장 가까운 점까지 양수면 완전히 바깥이다.
-            if (plane.GetDistanceToPoint(center) - projectedRadius > 0f)
+            // BatchCullingContext의 평면은 내부에서 양수가 되는 방향이다.
+            // AABB의 가장 가까운 점까지 음수일 때만 완전히 밖으로 판정한다.
+            if (plane.GetDistanceToPoint(center) + projectedRadius < 0f)
             {
                 return false;
             }

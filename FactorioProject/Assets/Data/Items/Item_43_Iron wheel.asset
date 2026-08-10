@@ -12,13 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_43_Iron wheel
   m_EditorClassIdentifier: 
-  itemName: Iron wheel
-  id: 46
+  itemName: Knife
+  id: 48
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
-  portableMat: {fileID: 0}
-  icon: {fileID: 21300000, guid: 9ca8fd1fa977fa447a2cb5972a431e47, type: 3}
+  portableMat: {fileID: 2100000, guid: 68f7701a505109c4ba6afb3ae4478f84, type: 2}
+  icon: {fileID: 21300000, guid: afca9b1187a77004fa1f37020025714e, type: 3}
   interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
   size: 0
   itemFilter: 0
   capacity: 10

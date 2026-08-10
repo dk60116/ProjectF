@@ -27,6 +27,21 @@ public class PlayerController : MonoBehaviour
     private const float WaterBoundarySlideScoreTolerance = 0.01f;
     private const float DefaultMultiFocusFacingScoreWeight = 0.75f;
     private const float TemporaryDropFocusDuration = 0.18f;
+    private const float MinimumAnimalKnifeInteractionRange = 0.75f;
+    private const float AnimalKnifeInteractionTimeout = 1.5f;
+    private const float PickAnimationDuration = 1.1666666f;
+    private const float AnimalKnifeDamageNormalizedTime = 0.5f;
+    private const float AnimalKnifeDamageDelay =
+        PickAnimationDuration * AnimalKnifeDamageNormalizedTime;
+    private const float AnimalKnifeDamage = 20f;
+    private const float AnimalPushClearance = 0.05f;
+    private const int CrowdedAnimalPathThreshold = 3;
+    private const float NooseThrowDistance = 3.5f;
+    private const float NooseThrowWindupDuration = 0.8f;
+    private const float NooseThrowOutboundDuration = 0.4f;
+    private const float NooseThrowHoldDuration = 0.12f;
+    private const float NooseThrowReturnDuration = 0.4f;
+    private const float NooseThrowArcHeight = 0.45f;
     private const int InitialMouseFocusRaycastHitBufferSize = 32;
     private const int MaxMouseFocusRaycastHitBufferSize = 128;
     private static readonly Vector2[] WaterBoundarySampleDirections =
@@ -57,6 +72,16 @@ public class PlayerController : MonoBehaviour
     private Joystick joystick;
     private ResourceWrokGauge resourceWorkGauge;
     private Resource currentTargetResource;
+    private Animal currentKnifeTargetAnimal;
+    private Animal pendingKnifeTargetAnimal;
+    private Animal currentCorpseHarvestTarget;
+    private readonly Queue<Animal> pendingCorpseHarvestAnimals = new Queue<Animal>();
+    private bool animalKnifePickPending;
+    private bool animalKnifeDamageApplied;
+    private float animalKnifeDamageTime;
+    private float animalKnifeInteractionEndTime;
+    private float animalKnifeInteractionTimeout;
+    private NooseThrowVisual activeNooseThrowVisual;
     private readonly HashSet<Block> currentFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> combinedInteractionFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyInputOutputModuleFocusBlocks = new List<Block>();
@@ -67,6 +92,9 @@ public class PlayerController : MonoBehaviour
     private readonly HashSet<Block> currentMouseFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> mouseFocusBlocks = new List<Block>();
     private readonly List<Block> mouseFocusRemovalBuffer = new List<Block>();
+    private readonly HashSet<Block> currentSelectedFocusedBlocks = new HashSet<Block>();
+    private readonly List<Block> selectedFocusBlocks = new List<Block>();
+    private readonly List<Block> selectedFocusRemovalBuffer = new List<Block>();
     private readonly List<FocusMarkerGroup> focusMarkerGroups = new List<FocusMarkerGroup>();
     private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
@@ -139,6 +167,13 @@ public class PlayerController : MonoBehaviour
         public Block singleBlock;
     }
 
+    private enum FocusMarkerKind
+    {
+        Interaction,
+        Mouse,
+        Selection
+    }
+
     private sealed class FocusMarkerGroup
     {
         public MapObject mapObject;
@@ -197,6 +232,37 @@ public class PlayerController : MonoBehaviour
 
     public bool IsResourceHarvestingActive => currentTargetResource != null && pendingHarvestResources.Count > 0;
 
+    public bool TryGetActiveResourceHarvestMode(out Resource.HarvestMode harvestMode)
+    {
+        if (!IsResourceHarvestingActive)
+        {
+            harvestMode = default;
+            return false;
+        }
+
+        harvestMode = currentTargetResource.ResolvedHarvestMode;
+        return true;
+    }
+
+    public bool IsAnimalKnifeInteractionActive =>
+        currentKnifeTargetAnimal != null
+        || animalKnifePickPending
+        || currentCorpseHarvestTarget != null
+        || pendingCorpseHarvestAnimals.Count > 0;
+    public bool IsNooseThrowActive => activeNooseThrowVisual != null;
+    private bool IsNooseThrowInFlight =>
+        activeNooseThrowVisual != null
+        && !activeNooseThrowVisual.HasAttachedAnimal;
+
+    public bool TryGetAnimalKnifeFocusTarget(out Animal focusedAnimal)
+    {
+        focusedAnimal = currentKnifeTargetAnimal != null
+            ? currentKnifeTargetAnimal
+            : pendingKnifeTargetAnimal;
+        return focusedAnimal != null
+               && focusedAnimal.gameObject.activeInHierarchy;
+    }
+
     private void Awake()
     {
         player = GetComponent<Player>();
@@ -228,14 +294,17 @@ public class PlayerController : MonoBehaviour
         hasPendingFacingDirection = false;
         pendingFacingDirection = Vector3.zero;
         ClearTemporaryDropFocus();
+        SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
         SetMouseFocusedAnimal(null);
         SetMouseFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         currentMouseFocusedBlocks.Clear();
+        currentSelectedFocusedBlocks.Clear();
         focusRemovalBuffer.Clear();
         mouseFocusRemovalBuffer.Clear();
         mouseFocusBlocks.Clear();
+        selectedFocusBlocks.Clear();
         mountedPinnedFocusBlocks.Clear();
         mountedPinnedFocusTarget = null;
         mountedPinnedFocusFallbackBlock = null;
@@ -248,6 +317,8 @@ public class PlayerController : MonoBehaviour
         nearbyFenceDoorInteractionDistanceSqr = float.MaxValue;
         nearbyVehicleInteractionTarget = null;
         nearbyVehicleInteractionDistanceSqr = float.MaxValue;
+        CancelAnimalKnifeInteraction();
+        CancelNooseThrow();
     }
 
     private TerrainGenerator ResolveTerrainGenerator()
@@ -293,7 +364,7 @@ public class PlayerController : MonoBehaviour
 
         temporaryDropFocusBlock = block;
         temporaryDropFocusUntilTime = Time.time + TemporaryDropFocusDuration;
-        temporaryDropFocusBlock.SetFocusVisible(true);
+        temporaryDropFocusBlock.SetTemporaryDropFocusVisible(true);
     }
 
     public void ClearTemporaryDropFocus()
@@ -306,10 +377,54 @@ public class PlayerController : MonoBehaviour
         Block previousDropFocusBlock = temporaryDropFocusBlock;
         temporaryDropFocusBlock = null;
         temporaryDropFocusUntilTime = 0f;
-        if (previousDropFocusBlock != null && !currentFocusedBlocks.Contains(previousDropFocusBlock))
+        if (previousDropFocusBlock != null)
         {
-            previousDropFocusBlock.SetFocusVisible(false);
+            previousDropFocusBlock.SetTemporaryDropFocusVisible(false);
         }
+    }
+
+    public void SetSelectedMapObjectFocus(MapObject mapObject)
+    {
+        selectedFocusBlocks.Clear();
+        if (mapObject == null
+            || !mapObject.gameObject.activeInHierarchy
+            || !mapObject.AllowsFocus)
+        {
+            SetSelectedFocusedBlocks(null);
+            return;
+        }
+
+        Block fallbackBlock = ResolveSelectedFocusFallbackBlock(mapObject);
+        if (!AppendMapObjectFocusBlocks(mapObject, fallbackBlock, selectedFocusBlocks))
+        {
+            SetSelectedFocusedBlocks(null);
+            return;
+        }
+
+        SetSelectedFocusedBlocks(selectedFocusBlocks);
+    }
+
+    private Block ResolveSelectedFocusFallbackBlock(MapObject mapObject)
+    {
+        if (mapObject is Resource resource)
+        {
+            return ResolveResourceOwningBlock(resource);
+        }
+
+        if (currentMouseFocusedMapObject != mapObject)
+        {
+            return null;
+        }
+
+        foreach (Block block in currentMouseFocusedBlocks)
+        {
+            if (block != null)
+            {
+                return block;
+            }
+        }
+
+        return null;
     }
 
     public Vehicle MountedVehicle => interactionPointSnapTarget != null ? interactionPointSnapVehicle : null;
@@ -360,6 +475,84 @@ public class PlayerController : MonoBehaviour
         currentConveyorCarryVelocity = Vector3.zero;
     }
 
+    public void ClearNooseForLoad()
+    {
+        CancelNooseThrow();
+    }
+
+    public bool TryGetNooseLeashedAnimalId(out long deterministicId)
+    {
+        deterministicId = 0L;
+        return activeNooseThrowVisual != null
+               && activeNooseThrowVisual.TryGetAttachedAnimalId(out deterministicId);
+    }
+
+    public bool TryRestoreNooseLeashedAnimal(long deterministicId)
+    {
+        CancelNooseThrow();
+        if (deterministicId == 0L
+            || player == null
+            || interactionPointSnapTarget != null)
+        {
+            return false;
+        }
+
+        AnimalAIWorld world = AnimalAIWorld.Instance;
+        if (world == null
+            || !world.TryGetControllerByDeterministicId(
+                deterministicId,
+                out AnimalAIController animalController))
+        {
+            return false;
+        }
+
+        Animal animal = animalController.Animal;
+        PlayerBag handBag = player.GetHandBag();
+        if (animal == null
+            || handBag == null
+            || handBag.GetSlotCount(0) <= 0)
+        {
+            return false;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        ItemDefinition nooseDefinition = ItemDefinitionLookup.ResolveById(
+            itemManager != null ? itemManager.ItemDefinitions : null,
+            handBag.GetSlotItemId(0));
+        if (nooseDefinition == null || nooseDefinition.portableMat == null)
+        {
+            return false;
+        }
+
+        Vector3 attachDirection = animal.GetWorldCenter() - handBag.transform.position;
+        attachDirection.y = 0f;
+        if (attachDirection.sqrMagnitude <= 0.0001f)
+        {
+            attachDirection = transform.forward;
+            attachDirection.y = 0f;
+        }
+
+        if (attachDirection.sqrMagnitude <= 0.0001f)
+        {
+            attachDirection = Vector3.forward;
+        }
+
+        NooseThrowVisual visual = CreateNooseThrowVisual(
+            handBag,
+            nooseDefinition.id,
+            attachDirection.normalized,
+            nooseDefinition.portableMat);
+        if (visual != null && visual.TryAttachExisting(animal, animalController))
+        {
+            return true;
+        }
+
+        CancelNooseThrow();
+        return false;
+    }
+
     public bool TrySnapBodyToInteractionPoint(Transform targetPoint, Vehicle vehicle = null)
     {
         if (targetPoint == null)
@@ -393,6 +586,7 @@ public class PlayerController : MonoBehaviour
         }
 
         CancelActiveResourceHarvest();
+        CancelAnimalKnifeInteraction();
         ClearTemporaryDropFocus();
         SetFocusedBlocks(null);
         SetMouseFocusedBlocks(null);
@@ -629,7 +823,43 @@ public class PlayerController : MonoBehaviour
             input = Vector2.ClampMagnitude(input + GetKeyboardMoveInput(), 1f);
         }
 
+        if (IsNooseThrowInFlight)
+        {
+            input = Vector2.zero;
+        }
+
+        bool hasManualMovementInput = input.sqrMagnitude > 0.0001f;
+        if (isInteractionLocked
+            || isKeyboardMoveLocked
+            || interactionPointSnapTarget != null)
+        {
+            CancelAnimalKnifeInteraction();
+        }
+        else if (hasManualMovementInput)
+        {
+            if (animalKnifePickPending)
+            {
+                input = Vector2.zero;
+                hasManualMovementInput = false;
+            }
+            else
+            {
+                CancelAnimalKnifeApproach();
+            }
+        }
+
         Vector3 moveDirection = GetMoveDirection(input);
+        if (!hasManualMovementInput
+            && !isInteractionLocked
+            && !isKeyboardMoveLocked
+            && interactionPointSnapTarget == null
+            && !animalKnifePickPending
+            && currentKnifeTargetAnimal != null
+            && TryGetAnimalKnifeApproachDirection(out Vector3 knifeApproachDirection))
+        {
+            moveDirection = knifeApproachDirection;
+        }
+
         bool hasMovement = moveDirection.sqrMagnitude > 0.0001f;
 
         if (interactionPointSnapTarget != null)
@@ -673,7 +903,7 @@ public class PlayerController : MonoBehaviour
             if (cachedRigidbody == null)
             {
                 Vector3 startPosition = ClampRootPositionToGroundY(transform.position);
-                Vector3 moveDelta = moveDirection * player.Stat.currentMoveSpeed * Time.deltaTime;
+                Vector3 moveDelta = moveDirection * GetCurrentOnFootMoveSpeed() * Time.deltaTime;
                 moveDelta = ResolveWaterConstrainedMove(startPosition, moveDelta);
                 transform.position = ClampRootPositionToGroundY(
                     startPosition + moveDelta);
@@ -688,7 +918,28 @@ public class PlayerController : MonoBehaviour
             CancelActiveResourceHarvest();
         }
 
-        bool finishedPickThisFrame = player.UpdateAnimationState(hasMovement);
+        if (hasMovement)
+        {
+            CancelActiveCorpseHarvest();
+        }
+
+        bool finishedPickThisFrame = player.UpdateAnimationState(
+            hasMovement,
+            GetCurrentWalkAnimationSpeed());
+        if (animalKnifePickPending
+            && !animalKnifeDamageApplied
+            && Time.time >= animalKnifeDamageTime)
+        {
+            ApplyPendingAnimalKnifeDamage();
+        }
+
+        if (animalKnifePickPending
+            && (Time.time >= animalKnifeInteractionEndTime
+                || Time.time >= animalKnifeInteractionTimeout))
+        {
+            ClearPendingAnimalKnifeAttack();
+        }
+
         ResolveCompletedPick(finishedPickThisFrame);
         RefreshInteractionFocus(hasMovement);
         RefreshMouseMapObjectFocus();
@@ -718,7 +969,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector3 manualVelocity = pendingMoveDirection * player.Stat.currentMoveSpeed;
+        Vector3 manualVelocity = pendingMoveDirection * GetCurrentOnFootMoveSpeed();
         Vector3 targetCarryVelocity = Vector3.zero;
         bool hasRawCarryDelta = TryGetStandingConveyorCarryDelta(
             Time.fixedDeltaTime,
@@ -831,9 +1082,16 @@ public class PlayerController : MonoBehaviour
 
         Vector3 direction = delta / distance;
         Vector3 startPosition = ClampRootPositionToGroundY(cachedRigidbody.position);
+        bool relieveAnimalCrowd = HasCrowdedAnimalPath(
+            startPosition,
+            startPosition + delta);
         Vector3 finalMove = Vector3.zero;
 
-        if (TryGetBlockingSweepHit(direction, distance + sweepBuffer, out RaycastHit hit))
+        if (TryGetBlockingSweepHit(
+                direction,
+                distance + sweepBuffer,
+                relieveAnimalCrowd,
+                out RaycastHit hit))
         {
             float allowedDistance = Mathf.Max(0f, hit.distance - sweepBuffer);
             if (allowedDistance > 0f)
@@ -850,9 +1108,17 @@ public class PlayerController : MonoBehaviour
                 {
                     Vector3 slideDirection = slide.normalized;
                     float slideDistance = slide.magnitude;
-                    if (!TryGetBlockingSweepHit(slideDirection, slideDistance + sweepBuffer, out _))
+                    bool relieveSlideCrowd = HasCrowdedAnimalPath(
+                        startPosition + finalMove,
+                        startPosition + finalMove + slide);
+                    if (!TryGetBlockingSweepHit(
+                            slideDirection,
+                            slideDistance + sweepBuffer,
+                            relieveSlideCrowd,
+                            out _))
                     {
                         finalMove += slide;
+                        relieveAnimalCrowd |= relieveSlideCrowd;
                     }
                 }
             }
@@ -867,8 +1133,64 @@ public class PlayerController : MonoBehaviour
         Vector3 finalPosition = ClampRootPositionToGroundY(startPosition + finalMove);
         if (finalMove.sqrMagnitude > MinPhysicsMoveDistanceSqr)
         {
+            if (relieveAnimalCrowd)
+            {
+                RelieveAnimalCrowdAlongMovement(startPosition, finalPosition);
+            }
+
             cachedRigidbody.MovePosition(finalPosition);
         }
+    }
+
+    private bool HasCrowdedAnimalPath(Vector3 startPosition, Vector3 endPosition)
+    {
+        AnimalAIWorld world = AnimalAIWorld.Instance;
+        if (world == null)
+        {
+            return false;
+        }
+
+        return world.CountAnimalsAlongPath(
+                   startPosition,
+                   endPosition,
+                   GetPlayerCollisionRadius(),
+                   AnimalPushClearance,
+                   CrowdedAnimalPathThreshold)
+               >= CrowdedAnimalPathThreshold;
+    }
+
+    private void RelieveAnimalCrowdAlongMovement(
+        Vector3 startPosition,
+        Vector3 endPosition)
+    {
+        AnimalAIWorld world = AnimalAIWorld.Instance;
+        if (world == null
+            || !HasCrowdedAnimalPath(startPosition, endPosition))
+        {
+            return;
+        }
+
+        int pushedCount = world.PushAnimalsAlongPath(
+            startPosition,
+            endPosition,
+            GetPlayerCollisionRadius(),
+            AnimalPushClearance);
+        if (pushedCount > 0)
+        {
+            Physics.SyncTransforms();
+        }
+    }
+
+    private float GetPlayerCollisionRadius()
+    {
+        if (cachedCapsuleCollider == null)
+        {
+            return 0.2f;
+        }
+
+        Vector3 scale = cachedCapsuleCollider.transform.lossyScale;
+        float horizontalScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+        return Mathf.Max(0.01f, cachedCapsuleCollider.radius * horizontalScale);
     }
 
     private Vector3 ResolveWaterConstrainedMove(Vector3 startPosition, Vector3 moveDelta)
@@ -1186,7 +1508,11 @@ public class PlayerController : MonoBehaviour
         return position;
     }
 
-    private bool TryGetBlockingSweepHit(Vector3 direction, float distance, out RaycastHit blockingHit)
+    private bool TryGetBlockingSweepHit(
+        Vector3 direction,
+        float distance,
+        bool ignoreLiveAnimals,
+        out RaycastHit blockingHit)
     {
         blockingHit = default;
         if (cachedRigidbody == null || distance <= 0f)
@@ -1207,7 +1533,11 @@ public class PlayerController : MonoBehaviour
         for (int i = 0; i < hits.Length; i++)
         {
             RaycastHit hit = hits[i];
-            if (hit.collider == null || ShouldIgnorePlayerMovementSweepHit(hit, direction))
+            if (hit.collider == null
+                || ShouldIgnorePlayerMovementSweepHit(
+                    hit,
+                    direction,
+                    ignoreLiveAnimals))
             {
                 continue;
             }
@@ -1224,8 +1554,21 @@ public class PlayerController : MonoBehaviour
         return left.distance.CompareTo(right.distance);
     }
 
-    private bool ShouldIgnorePlayerMovementSweepHit(RaycastHit hit, Vector3 direction)
+    private bool ShouldIgnorePlayerMovementSweepHit(
+        RaycastHit hit,
+        Vector3 direction,
+        bool ignoreLiveAnimals)
     {
+        AnimalAIController animalController = hit.collider != null
+            ? hit.collider.GetComponentInParent<AnimalAIController>()
+            : null;
+        if (ignoreLiveAnimals
+            && animalController != null
+            && animalController.IsConfigured)
+        {
+            return true;
+        }
+
         Pipe pipe = hit.collider != null ? hit.collider.GetComponentInParent<Pipe>() : null;
         if (pipe == null
             || !TryResolvePipeBridgeBelt(pipe, out ConvayorBelt2F belt2F)
@@ -1658,11 +2001,25 @@ public class PlayerController : MonoBehaviour
 
     private void ResolveCompletedPick(bool finishedPickThisFrame)
     {
-        if (!finishedPickThisFrame || pendingHarvestResources.Count == 0)
+        if (!finishedPickThisFrame)
         {
             return;
         }
 
+        if (pendingHarvestResources.Count > 0)
+        {
+            ResolveCompletedResourceHarvest();
+            return;
+        }
+
+        if (pendingCorpseHarvestAnimals.Count > 0)
+        {
+            ResolveCompletedCorpseHarvest();
+        }
+    }
+
+    private void ResolveCompletedResourceHarvest()
+    {
         Resource harvestedResource = pendingHarvestResources.Dequeue();
         if (harvestedResource == null)
         {
@@ -1689,6 +2046,78 @@ public class PlayerController : MonoBehaviour
                 resourceWorkGauge?.HideIfNotFinishing();
             }
         }
+    }
+
+    private void ResolveCompletedCorpseHarvest()
+    {
+        Animal harvestedCorpse = pendingCorpseHarvestAnimals.Dequeue();
+        if (harvestedCorpse == null || !harvestedCorpse.CanHarvestCorpse)
+        {
+            currentCorpseHarvestTarget = null;
+            return;
+        }
+
+        bool hasReward = harvestedCorpse.TryGetPreparedCorpseLootItem(out int itemId);
+        bool rewardDelivered = !hasReward || TryDeliverCorpseLoot(harvestedCorpse, itemId);
+        if (!harvestedCorpse.CommitPreparedCorpseHarvestStep(rewardDelivered))
+        {
+            harvestedCorpse.CancelPreparedCorpseHarvestStep();
+            currentCorpseHarvestTarget = null;
+            return;
+        }
+
+        if (!harvestedCorpse.HasRemainingCorpseLoot)
+        {
+            currentCorpseHarvestTarget = null;
+            RemoveHarvestedCorpse(harvestedCorpse);
+            return;
+        }
+
+        if (harvestedCorpse != currentCorpseHarvestTarget
+            || !IsAnimalWithinKnifeInteractionRange(harvestedCorpse)
+            || !QueueCorpseHarvestStep(harvestedCorpse))
+        {
+            currentCorpseHarvestTarget = null;
+        }
+    }
+
+    private bool TryDeliverCorpseLoot(Animal corpse, int itemId)
+    {
+        if (corpse == null || itemId < 0 || player == null)
+        {
+            return false;
+        }
+
+        ItemDefinition itemDefinition = corpse.ResolveCorpseLootItemDefinition(itemId);
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        if (itemDefinition != null)
+        {
+            itemManager?.RegisterRuntimeItemDefinition(itemDefinition);
+        }
+
+        return player.TryAddToBagAnimated(
+            itemId,
+            corpse.GetCorpseLootOrigin());
+    }
+
+    private void RemoveHarvestedCorpse(Animal corpse)
+    {
+        if (corpse == null)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain != null && terrain.RemoveAnimal(corpse))
+        {
+            return;
+        }
+
+        TerrainAnimalInstance instance = corpse.GetComponentInParent<TerrainAnimalInstance>();
+        GameObject corpseRoot = instance != null ? instance.gameObject : corpse.gameObject;
+        Destroy(corpseRoot);
     }
 
     private void CancelPendingHarvest()
@@ -2134,7 +2563,7 @@ public class PlayerController : MonoBehaviour
         ExpireTemporaryDropFocusIfNeeded();
         if (temporaryDropFocusBlock != null)
         {
-            temporaryDropFocusBlock.SetFocusVisible(true);
+            temporaryDropFocusBlock.SetTemporaryDropFocusVisible(true);
         }
     }
 
@@ -2405,6 +2834,364 @@ public class PlayerController : MonoBehaviour
         focusedAnimal = currentMouseFocusedAnimal;
         return focusedAnimal != null
                && focusedAnimal.gameObject.activeInHierarchy;
+    }
+
+    public bool RequestAnimalKnifeInteraction(Animal animal)
+    {
+        if (animal == null
+            || !animal.gameObject.activeInHierarchy
+            || player == null
+            || interactionPointSnapTarget != null)
+        {
+            return false;
+        }
+
+        if (!animal.IsAlive)
+        {
+            return RequestCorpseHarvest(animal);
+        }
+
+        if (player.IsCarrying)
+        {
+            return false;
+        }
+
+        if (currentKnifeTargetAnimal == animal || animalKnifePickPending)
+        {
+            return true;
+        }
+
+        CancelActiveResourceHarvest();
+        CancelActiveCorpseHarvest();
+        currentKnifeTargetAnimal = animal;
+        return true;
+    }
+
+    public bool RequestNooseThrow(ItemDefinition nooseDefinition)
+    {
+        if (nooseDefinition == null
+            || nooseDefinition.portableMat == null
+            || player == null
+            || interactionPointSnapTarget != null
+            || GameManager.TextInputFocused
+            || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked))
+        {
+            return false;
+        }
+
+        PlayerBag handBag = player.GetHandBag();
+        if (handBag == null
+            || handBag.GetSlotCount(0) <= 0
+            || handBag.GetSlotItemId(0) != nooseDefinition.id)
+        {
+            return false;
+        }
+
+        if (activeNooseThrowVisual != null)
+        {
+            if (!activeNooseThrowVisual.HasAttachedAnimal)
+            {
+                return false;
+            }
+
+            CancelNooseThrow(true);
+            return true;
+        }
+
+        Transform body = player.BodyTransform != null ? player.BodyTransform : transform;
+        Vector3 throwDirection = body.forward;
+        throwDirection.y = 0f;
+        if (throwDirection.sqrMagnitude <= 0.0001f)
+        {
+            throwDirection = transform.forward;
+            throwDirection.y = 0f;
+        }
+
+        if (throwDirection.sqrMagnitude <= 0.0001f)
+        {
+            throwDirection = Vector3.forward;
+        }
+
+        CancelActiveResourceHarvest();
+        CancelAnimalKnifeInteraction();
+        pendingMoveDirection = Vector3.zero;
+        pendingFacingDirection = Vector3.zero;
+        hasPendingFacingDirection = false;
+
+        if (CreateNooseThrowVisual(
+                handBag,
+                nooseDefinition.id,
+                throwDirection.normalized,
+                nooseDefinition.portableMat) == null)
+        {
+            return false;
+        }
+
+        if (player.TriggerThrowAnimation())
+        {
+            return true;
+        }
+
+        CancelNooseThrow();
+        return false;
+    }
+
+    private NooseThrowVisual CreateNooseThrowVisual(
+        PlayerBag handBag,
+        int nooseItemId,
+        Vector3 throwDirection,
+        Material material)
+    {
+        if (handBag == null || nooseItemId < 0 || material == null)
+        {
+            return null;
+        }
+
+        GameObject visualObject = new GameObject("NooseThrowVisual");
+        visualObject.layer = gameObject.layer;
+        activeNooseThrowVisual = visualObject.AddComponent<NooseThrowVisual>();
+        activeNooseThrowVisual.Initialize(
+            handBag.transform,
+            nooseItemId,
+            throwDirection,
+            material,
+            NooseThrowDistance,
+            NooseThrowWindupDuration,
+            NooseThrowOutboundDuration,
+            NooseThrowHoldDuration,
+            NooseThrowReturnDuration,
+            NooseThrowArcHeight);
+        return activeNooseThrowVisual;
+    }
+
+    private void CancelNooseThrow(bool consumeAttachedNoose = false)
+    {
+        if (activeNooseThrowVisual == null)
+        {
+            return;
+        }
+
+        activeNooseThrowVisual.ReleaseAttachment(consumeAttachedNoose);
+        Destroy(activeNooseThrowVisual.gameObject);
+        activeNooseThrowVisual = null;
+    }
+
+    private float GetCurrentOnFootMoveSpeed()
+    {
+        float playerMoveSpeed = player != null
+            ? Mathf.Max(0f, player.Stat.currentMoveSpeed)
+            : 0f;
+        if (activeNooseThrowVisual == null
+            || !activeNooseThrowVisual.HasAttachedAnimal)
+        {
+            return playerMoveSpeed;
+        }
+
+        return Mathf.Min(
+            playerMoveSpeed,
+            activeNooseThrowVisual.AttachedMovementSpeedLimit);
+    }
+
+    private float GetCurrentWalkAnimationSpeed()
+    {
+        if (player == null)
+        {
+            return 1f;
+        }
+
+        float normalMoveSpeed = Mathf.Max(0f, player.Stat.currentMoveSpeed);
+        if (normalMoveSpeed <= 0.0001f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01(GetCurrentOnFootMoveSpeed() / normalMoveSpeed);
+    }
+
+    public bool IsAnimalWithinKnifeInteractionRange(Animal animal)
+    {
+        if (animal == null
+            || !animal.gameObject.activeInHierarchy
+            || player == null
+            || interactionPointSnapTarget != null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        Vector3 offset = animal.transform.position - origin;
+        offset.y = 0f;
+        float interactionRange = Mathf.Max(
+            MinimumAnimalKnifeInteractionRange,
+            player.State.HarvestRange);
+        return offset.sqrMagnitude <= interactionRange * interactionRange;
+    }
+
+    private bool RequestCorpseHarvest(Animal corpse)
+    {
+        if (!corpse.CanHarvestCorpse || !IsAnimalWithinKnifeInteractionRange(corpse))
+        {
+            return false;
+        }
+
+        if (currentCorpseHarvestTarget == corpse
+            && pendingCorpseHarvestAnimals.Count > 0)
+        {
+            return true;
+        }
+
+        CancelActiveResourceHarvest();
+        CancelAnimalKnifeAttack();
+        if (currentCorpseHarvestTarget != corpse)
+        {
+            CancelActiveCorpseHarvest();
+            currentCorpseHarvestTarget = corpse;
+        }
+
+        if (QueueCorpseHarvestStep(corpse))
+        {
+            return true;
+        }
+
+        currentCorpseHarvestTarget = null;
+        return false;
+    }
+
+    private bool QueueCorpseHarvestStep(Animal corpse)
+    {
+        if (corpse == null
+            || !corpse.CanHarvestCorpse
+            || !IsAnimalWithinKnifeInteractionRange(corpse)
+            || !corpse.PrepareCorpseHarvestStep())
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        Vector3 facingDirection = corpse.transform.position - origin;
+        facingDirection.y = 0f;
+        if (facingDirection.sqrMagnitude > 0.0001f)
+        {
+            pendingFacingDirection = facingDirection.normalized;
+            hasPendingFacingDirection = true;
+        }
+
+        pendingCorpseHarvestAnimals.Enqueue(corpse);
+        player.QueuePickAnimation();
+        return true;
+    }
+
+    private bool TryGetAnimalKnifeApproachDirection(out Vector3 direction)
+    {
+        direction = Vector3.zero;
+        Animal targetAnimal = currentKnifeTargetAnimal;
+        if (targetAnimal == null
+            || !targetAnimal.gameObject.activeInHierarchy
+            || !targetAnimal.IsAlive
+            || player == null
+            || player.IsCarrying)
+        {
+            CancelAnimalKnifeApproach();
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        Vector3 offset = targetAnimal.transform.position - origin;
+        offset.y = 0f;
+        float interactionRange = Mathf.Max(
+            MinimumAnimalKnifeInteractionRange,
+            player.State.HarvestRange);
+        if (offset.sqrMagnitude > interactionRange * interactionRange)
+        {
+            direction = offset.normalized;
+            return true;
+        }
+
+        currentKnifeTargetAnimal = null;
+        if (offset.sqrMagnitude > 0.0001f)
+        {
+            pendingFacingDirection = offset.normalized;
+            hasPendingFacingDirection = true;
+        }
+
+        pendingKnifeTargetAnimal = targetAnimal;
+        animalKnifePickPending = true;
+        animalKnifeDamageApplied = false;
+        animalKnifeDamageTime = Time.time + AnimalKnifeDamageDelay;
+        animalKnifeInteractionEndTime = Time.time + PickAnimationDuration;
+        animalKnifeInteractionTimeout = Time.time + AnimalKnifeInteractionTimeout;
+        player.QueuePickAnimation();
+        return false;
+    }
+
+    private void ApplyPendingAnimalKnifeDamage()
+    {
+        if (!animalKnifePickPending || animalKnifeDamageApplied)
+        {
+            return;
+        }
+
+        animalKnifeDamageApplied = true;
+        if (pendingKnifeTargetAnimal != null && pendingKnifeTargetAnimal.IsAlive)
+        {
+            pendingKnifeTargetAnimal.TakeDamage(
+                AnimalKnifeDamage,
+                player != null ? player.transform.position : transform.position);
+        }
+    }
+
+    private void CancelAnimalKnifeApproach()
+    {
+        currentKnifeTargetAnimal = null;
+    }
+
+    private void ClearPendingAnimalKnifeAttack()
+    {
+        pendingKnifeTargetAnimal = null;
+        animalKnifePickPending = false;
+        animalKnifeDamageApplied = false;
+        animalKnifeDamageTime = 0f;
+        animalKnifeInteractionEndTime = 0f;
+        animalKnifeInteractionTimeout = 0f;
+    }
+
+    private void CancelAnimalKnifeAttack()
+    {
+        bool hadActiveInteraction = currentKnifeTargetAnimal != null || animalKnifePickPending;
+        CancelAnimalKnifeApproach();
+        ClearPendingAnimalKnifeAttack();
+        if (hadActiveInteraction)
+        {
+            player?.ClearQueuedPickAnimations();
+        }
+    }
+
+    private void CancelActiveCorpseHarvest()
+    {
+        if (currentCorpseHarvestTarget == null && pendingCorpseHarvestAnimals.Count == 0)
+        {
+            return;
+        }
+
+        while (pendingCorpseHarvestAnimals.Count > 0)
+        {
+            pendingCorpseHarvestAnimals.Dequeue()?.CancelPreparedCorpseHarvestStep();
+        }
+
+        currentCorpseHarvestTarget = null;
+        player?.ClearQueuedPickAnimations();
+    }
+
+    private void CancelAnimalKnifeInteraction()
+    {
+        CancelAnimalKnifeAttack();
+        CancelActiveCorpseHarvest();
     }
 
     public bool RequestResourceHarvest(Resource resource)
@@ -4265,17 +5052,60 @@ public class PlayerController : MonoBehaviour
         RefreshTemporaryDropFocusVisibility();
     }
 
+    private void SetSelectedFocusedBlocks(List<Block> nextBlocks)
+    {
+        selectedFocusRemovalBuffer.Clear();
+        foreach (Block currentBlock in currentSelectedFocusedBlocks)
+        {
+            if (!ContainsFocusedBlock(nextBlocks, currentBlock))
+            {
+                selectedFocusRemovalBuffer.Add(currentBlock);
+            }
+        }
+
+        for (int i = 0; i < selectedFocusRemovalBuffer.Count; i++)
+        {
+            Block block = selectedFocusRemovalBuffer[i];
+            currentSelectedFocusedBlocks.Remove(block);
+            if (block != null)
+            {
+                block.SetSelectionFocusVisible(false);
+            }
+        }
+
+        if (nextBlocks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < nextBlocks.Count; i++)
+        {
+            Block block = nextBlocks[i];
+            if (block != null)
+            {
+                currentSelectedFocusedBlocks.Add(block);
+            }
+        }
+
+        RefreshSelectedFocusMarkers();
+    }
+
     private void RefreshInteractionFocusMarkers()
     {
-        RefreshGroupedFocusMarkers(currentFocusedBlocks, false);
+        RefreshGroupedFocusMarkers(currentFocusedBlocks, FocusMarkerKind.Interaction);
     }
 
     private void RefreshMouseFocusMarkers()
     {
-        RefreshGroupedFocusMarkers(currentMouseFocusedBlocks, true);
+        RefreshGroupedFocusMarkers(currentMouseFocusedBlocks, FocusMarkerKind.Mouse);
     }
 
-    private void RefreshGroupedFocusMarkers(HashSet<Block> focusedBlocks, bool mouseFocus)
+    private void RefreshSelectedFocusMarkers()
+    {
+        RefreshGroupedFocusMarkers(currentSelectedFocusedBlocks, FocusMarkerKind.Selection);
+    }
+
+    private void RefreshGroupedFocusMarkers(HashSet<Block> focusedBlocks, FocusMarkerKind focusKind)
     {
         focusMarkerGroupCount = 0;
         if (focusedBlocks == null || focusedBlocks.Count <= 0)
@@ -4290,17 +5120,17 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            SetBlockFocusVisible(block, mouseFocus, false);
+            SetBlockFocusVisible(block, focusKind, false);
             if (IsInputOutputRuntimeFocusAreaCoordinate(block.Coordinate))
             {
-                SetBlockFocusVisible(block, mouseFocus, true);
+                SetBlockFocusVisible(block, focusKind, true);
                 continue;
             }
 
             MapObject focusedMapObject = block.MapObject;
             if (focusedMapObject == null)
             {
-                SetBlockFocusVisible(block, mouseFocus, true);
+                SetBlockFocusVisible(block, focusKind, true);
                 continue;
             }
 
@@ -4326,11 +5156,11 @@ public class PlayerController : MonoBehaviour
 
             if (group.count <= 1)
             {
-                SetBlockFocusVisible(group.markerBlock, mouseFocus, true);
+                SetBlockFocusVisible(group.markerBlock, focusKind, true);
             }
             else
             {
-                SetBlockFocusVisible(group.markerBlock, mouseFocus, true, group.Center, group.Size);
+                SetBlockFocusVisible(group.markerBlock, focusKind, true, group.Center, group.Size);
             }
         }
     }
@@ -4371,37 +5201,50 @@ public class PlayerController : MonoBehaviour
         return null;
     }
 
-    private static void SetBlockFocusVisible(Block block, bool mouseFocus, bool isVisible)
+    private static void SetBlockFocusVisible(Block block, FocusMarkerKind focusKind, bool isVisible)
     {
         if (block == null)
         {
             return;
         }
 
-        if (mouseFocus)
+        switch (focusKind)
         {
-            block.SetMouseFocusVisible(isVisible);
-        }
-        else
-        {
-            block.SetFocusVisible(isVisible);
+            case FocusMarkerKind.Mouse:
+                block.SetMouseFocusVisible(isVisible);
+                break;
+            case FocusMarkerKind.Selection:
+                block.SetSelectionFocusVisible(isVisible);
+                break;
+            default:
+                block.SetFocusVisible(isVisible);
+                break;
         }
     }
 
-    private static void SetBlockFocusVisible(Block block, bool mouseFocus, bool isVisible, Vector3 center, Vector2 size)
+    private static void SetBlockFocusVisible(
+        Block block,
+        FocusMarkerKind focusKind,
+        bool isVisible,
+        Vector3 center,
+        Vector2 size)
     {
         if (block == null)
         {
             return;
         }
 
-        if (mouseFocus)
+        switch (focusKind)
         {
-            block.SetMouseFocusVisible(isVisible, center, size);
-        }
-        else
-        {
-            block.SetFocusVisible(isVisible, center, size);
+            case FocusMarkerKind.Mouse:
+                block.SetMouseFocusVisible(isVisible, center, size);
+                break;
+            case FocusMarkerKind.Selection:
+                block.SetSelectionFocusVisible(isVisible, center, size);
+                break;
+            default:
+                block.SetFocusVisible(isVisible, center, size);
+                break;
         }
     }
 

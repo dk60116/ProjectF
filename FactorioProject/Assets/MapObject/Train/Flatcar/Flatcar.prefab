@@ -177,8 +177,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Flatcar
-  objId: 51
-  itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+  objId: 57
+  itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -307,6 +307,11 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -328,9 +333,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1 &8427335179590875495
 GameObject:
@@ -390,6 +397,11 @@ MeshRenderer:
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
   m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -411,9 +423,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1001 &6061987914082118060
 PrefabInstance:
@@ -468,7 +482,7 @@ PrefabInstance:
       value: Body
       objectReference: {fileID: 0}
     - target: {fileID: 1796110182014208364, guid: 3bf71242377e79448a1905c3adc6255f, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: ba7409b1e5060144aa17a0e8b16e8529, type: 2}
     - target: {fileID: 3430959829112424491, guid: 3bf71242377e79448a1905c3adc6255f, type: 3}
@@ -496,7 +510,7 @@ PrefabInstance:
       value: Wheel
       objectReference: {fileID: 0}
     - target: {fileID: 8179351096882468041, guid: 3bf71242377e79448a1905c3adc6255f, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
     m_RemovedComponents: []

@@ -19,6 +19,8 @@ public class ItemManager : MonoBehaviour
         public Mesh portableMesh;
         public Material portableMat;
         public Sprite icon;
+        public ItemDefinition.ItemLightMode lightMode;
+        public float lightRange;
         public int size;
     }
 
@@ -35,6 +37,29 @@ public class ItemManager : MonoBehaviour
 
     public List<ItemSet> ItemSets => items;
     public List<ItemDefinition> ItemDefinitions => itemDefinitions;
+
+    public bool RegisterRuntimeItemDefinition(ItemDefinition definition)
+    {
+        if (definition == null || definition.id < 0)
+        {
+            return false;
+        }
+
+        itemDefinitions ??= new List<ItemDefinition>();
+        for (int i = 0; i < itemDefinitions.Count; i++)
+        {
+            ItemDefinition registeredDefinition = itemDefinitions[i];
+            if (registeredDefinition == definition
+                || (registeredDefinition != null
+                    && registeredDefinition.id == definition.id))
+            {
+                return true;
+            }
+        }
+
+        itemDefinitions.Add(definition);
+        return true;
+    }
 
     public bool TryGetItemSetById(int id, out ItemSet itemSet)
     {
@@ -53,6 +78,8 @@ public class ItemManager : MonoBehaviour
                         portableMesh = definition.portableMesh,
                         portableMat = definition.portableMat,
                         icon = definition.icon,
+                        lightMode = definition.lightMode,
+                        lightRange = definition.LightRange,
                         size = (int)definition.size
                     };
                     return true;
@@ -95,6 +122,11 @@ public class ItemManager : MonoBehaviour
     }
 
 #if UNITY_EDITOR
+    private const string SharedAnimalMeatPortableMeshPath = "Assets/Items/Animal/Meet_P.asset";
+    private const string SharedWheelPortableMeshPath = "Assets/Items/Train/Wheel/Wheel_P.mesh";
+    private const string IronWheelPortableMaterialPath = "Assets/Items/Train/Wheel/M_IronWheel_P.mat";
+    private const string WoodenWheelPortableMaterialPath = "Assets/Items/Train/Wheel/M_WoodenWheel_P.mat";
+
     private void OnValidate()
     {
         if (!autoMigrateDefinitions)
@@ -138,6 +170,69 @@ public class ItemManager : MonoBehaviour
         RebuildItemsFromAssetFolders();
     }
 
+    public bool RebuildItemDefinitionFromAssets(ItemDefinition definition, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (definition == null)
+        {
+            errorMessage = "선택한 ItemDefinition이 없습니다.";
+            return false;
+        }
+
+        if (definition.id < 0)
+        {
+            errorMessage = $"'{GetItemDefinitionLookupName(definition)}'의 ID가 유효하지 않습니다.";
+            return false;
+        }
+
+        string definitionName = GetItemDefinitionLookupName(definition);
+        Dictionary<string, string> itemFolderLookup = BuildItemFolderLookup();
+        string itemFolder = GetItemFolderForName(definitionName, itemFolderLookup);
+        if (string.IsNullOrWhiteSpace(itemFolder))
+        {
+            errorMessage = $"Assets/Items에서 '{definitionName}'에 대응하는 아이템 폴더를 찾지 못했습니다.";
+            return false;
+        }
+
+        string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            errorMessage = $"'{itemFolder}'에서 아이템 이름을 확인할 수 없습니다.";
+            return false;
+        }
+
+        items ??= new List<ItemSet>();
+        int itemIndex = FindItemSetIndex(definition.id, itemName);
+        bool hasPreviousItem = itemIndex >= 0;
+        ItemSet previousItem = hasPreviousItem
+            ? items[itemIndex]
+            : CreateItemSetFallback(definition, itemName);
+        ItemSet rebuiltItem = BuildItemSetFromAssetFolder(
+            itemFolder,
+            itemName,
+            definition.id,
+            hasPreviousItem,
+            previousItem,
+            definition);
+
+        if (hasPreviousItem)
+        {
+            items[itemIndex] = rebuiltItem;
+        }
+        else
+        {
+            items.Add(rebuiltItem);
+        }
+
+        SortItemSetsByIdThenName(items);
+        ApplyItemSetToDefinition(rebuiltItem, definition, itemFolderLookup);
+        RegisterRebuiltItemDefinition(definition);
+        SortItemDefinitionsById(itemDefinitions);
+        ApplyItemIdToPrefab(rebuiltItem);
+        MarkEditorDirty();
+        return true;
+    }
+
     private void RebuildItemsFromAssetFolders()
     {
         if (itemDefinitions == null)
@@ -169,11 +264,7 @@ public class ItemManager : MonoBehaviour
             }
 
             bool hasPreviousItem = previousItemsByName.TryGetValue(itemName, out ItemSet previousItem);
-            PropObj propObject = FindPropObjInFolder(itemFolder, out GameObject prefabRoot);
-
-            ResolvePortableAssets(itemFolder, prefabRoot, out Mesh portableMesh, out Material portableMaterial);
-
-            TryOverrideInstallationPortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
+            existingDefinitionsByName.TryGetValue(itemName, out ItemDefinition existingDefinition);
 
             int itemId = preservedIdsByItemName.TryGetValue(itemName, out int preservedId)
                          && assignedIds.Add(preservedId)
@@ -182,20 +273,13 @@ public class ItemManager : MonoBehaviour
             usedIds.Add(itemId);
             assignedIds.Add(itemId);
 
-            Sprite resolvedIcon = ResolveItemIcon(itemFolder, itemName, hasPreviousItem ? previousItem.icon : null);
-
-            ItemSet itemSet = new ItemSet
-            {
-                id = itemId,
-                name = itemName,
-                prefab = propObject,
-                portableMesh = portableMesh,
-                portableMat = portableMaterial,
-                icon = resolvedIcon,
-                size = ResolvePreservedItemSize(itemName, hasPreviousItem ? previousItem.size : 0, existingDefinitionsByName)
-            };
-
-            rebuiltItems.Add(itemSet);
+            rebuiltItems.Add(BuildItemSetFromAssetFolder(
+                itemFolder,
+                itemName,
+                itemId,
+                hasPreviousItem,
+                previousItem,
+                existingDefinition));
         }
 
         SortItemSetsByIdThenName(rebuiltItems);
@@ -205,6 +289,88 @@ public class ItemManager : MonoBehaviour
         MigrateResourceDefinitionsFromResources();
         SyncTerrainGeneratorResourceDefinitions();
         MarkEditorDirty();
+    }
+
+    private static ItemSet BuildItemSetFromAssetFolder(
+        string itemFolder,
+        string itemName,
+        int itemId,
+        bool hasPreviousItem,
+        ItemSet previousItem,
+        ItemDefinition existingDefinition)
+    {
+        PropObj propObject = FindPropObjInFolder(itemFolder, out GameObject prefabRoot);
+        ResolvePortableAssets(itemFolder, prefabRoot, out Mesh portableMesh, out Material portableMaterial);
+        TryOverridePortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
+
+        if (existingDefinition != null)
+        {
+            propObject ??= existingDefinition.mapObject;
+            portableMesh = existingDefinition.portableMesh != null ? existingDefinition.portableMesh : portableMesh;
+            portableMaterial = existingDefinition.portableMat != null ? existingDefinition.portableMat : portableMaterial;
+        }
+
+        if (hasPreviousItem)
+        {
+            portableMesh ??= previousItem.portableMesh;
+            portableMaterial ??= previousItem.portableMat;
+        }
+
+        return new ItemSet
+        {
+            id = itemId,
+            name = itemName,
+            prefab = propObject,
+            portableMesh = portableMesh,
+            portableMat = portableMaterial,
+            icon = ResolveItemIcon(
+                itemFolder,
+                itemName,
+                existingDefinition != null ? existingDefinition.icon : hasPreviousItem ? previousItem.icon : null),
+            lightMode = existingDefinition != null ? existingDefinition.lightMode : previousItem.lightMode,
+            lightRange = existingDefinition != null ? existingDefinition.LightRange : previousItem.lightRange,
+            size = existingDefinition != null
+                ? Mathf.Max(0, (int)existingDefinition.size)
+                : Mathf.Max(0, previousItem.size)
+        };
+    }
+
+    private static ItemSet CreateItemSetFallback(ItemDefinition definition, string itemName)
+    {
+        return new ItemSet
+        {
+            id = definition.id,
+            name = itemName,
+            prefab = definition.mapObject,
+            portableMesh = definition.portableMesh,
+            portableMat = definition.portableMat,
+            icon = definition.icon,
+            lightMode = definition.lightMode,
+            lightRange = definition.LightRange,
+            size = Mathf.Max(0, (int)definition.size)
+        };
+    }
+
+    private int FindItemSetIndex(int itemId, string itemName)
+    {
+        int nameMatchIndex = -1;
+        for (int i = 0; items != null && i < items.Count; i++)
+        {
+            ItemSet itemSet = items[i];
+            if (itemSet.id == itemId)
+            {
+                return i;
+            }
+
+            if (nameMatchIndex < 0
+                && !string.IsNullOrWhiteSpace(itemName)
+                && string.Equals(itemSet.name, itemName, StringComparison.OrdinalIgnoreCase))
+            {
+                nameMatchIndex = i;
+            }
+        }
+
+        return nameMatchIndex;
     }
 
     private static Dictionary<string, ItemSet> BuildItemSetLookupByName(List<ItemSet> sourceItems)
@@ -1450,6 +1616,92 @@ public class ItemManager : MonoBehaviour
         }
     }
 
+    private static void TryOverridePortableAssets(
+        string itemName,
+        string itemFolder,
+        GameObject prefabRoot,
+        ref Mesh portableMesh,
+        ref Material portableMaterial)
+    {
+        TryOverrideInstallationPortableAssets(
+            itemName,
+            itemFolder,
+            prefabRoot,
+            ref portableMesh,
+            ref portableMaterial);
+
+        TryOverrideAnimalMeatPortableMesh(itemName, ref portableMesh);
+        TryOverrideWheelPortableAssets(itemName, ref portableMesh, ref portableMaterial);
+    }
+
+    private static void TryOverrideAnimalMeatPortableMesh(string itemName, ref Mesh portableMesh)
+    {
+        if (!UsesSharedAnimalMeatPortableMesh(itemName))
+        {
+            return;
+        }
+
+        Mesh sharedMeatMesh = AssetDatabase.LoadAssetAtPath<Mesh>(SharedAnimalMeatPortableMeshPath);
+        if (sharedMeatMesh != null)
+        {
+            portableMesh = sharedMeatMesh;
+            return;
+        }
+
+        Debug.LogWarning(
+            $"ItemManager: Shared animal meat portable mesh was not found at '{SharedAnimalMeatPortableMeshPath}'.");
+    }
+
+    private static void TryOverrideWheelPortableAssets(
+        string itemName,
+        ref Mesh portableMesh,
+        ref Material portableMaterial)
+    {
+        string itemKey = NormalizePortableLookupName(itemName);
+        string materialPath;
+        if (itemKey == "ironwheel")
+        {
+            materialPath = IronWheelPortableMaterialPath;
+        }
+        else if (itemKey == "woodenwheel")
+        {
+            materialPath = WoodenWheelPortableMaterialPath;
+        }
+        else
+        {
+            return;
+        }
+
+        Mesh wheelMesh = AssetDatabase.LoadAssetAtPath<Mesh>(SharedWheelPortableMeshPath);
+        Material wheelMaterial = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+        if (wheelMesh != null)
+        {
+            portableMesh = wheelMesh;
+        }
+        else
+        {
+            Debug.LogWarning($"ItemManager: Wheel portable mesh was not found at '{SharedWheelPortableMeshPath}'.");
+        }
+
+        if (wheelMaterial != null)
+        {
+            portableMaterial = wheelMaterial;
+        }
+        else
+        {
+            Debug.LogWarning($"ItemManager: Wheel portable material was not found at '{materialPath}'.");
+        }
+    }
+
+    private static bool UsesSharedAnimalMeatPortableMesh(string itemName)
+    {
+        string itemKey = NormalizePortableLookupName(itemName);
+        return itemKey == "beef"
+               || itemKey == "beefsteak"
+               || itemKey == "pork"
+               || itemKey == "porksteak";
+    }
+
     private static string ResolveInstallationPortableItemFolder(string itemFolder, GameObject prefabRoot)
     {
         if (!string.IsNullOrWhiteSpace(itemFolder))
@@ -2173,29 +2425,34 @@ public class ItemManager : MonoBehaviour
 
         for (int i = 0; i < items.Count; i++)
         {
-            PropObj prefab = items[i].prefab;
-            if (prefab == null)
-            {
-                continue;
-            }
-
-            SerializedObject serializedPrefab = new SerializedObject(prefab);
-            SerializedProperty objIdProperty = serializedPrefab.FindProperty("objId");
-            if (objIdProperty == null)
-            {
-                continue;
-            }
-
-            objIdProperty.intValue = items[i].id;
-            serializedPrefab.ApplyModifiedPropertiesWithoutUndo();
-
-            GameObject prefabRoot = prefab.gameObject;
-            PrefabUtility.SavePrefabAsset(prefabRoot);
-            EditorUtility.SetDirty(prefabRoot);
+            ApplyItemIdToPrefab(items[i]);
         }
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+    }
+
+    private static void ApplyItemIdToPrefab(ItemSet itemSet)
+    {
+        PropObj prefab = itemSet.prefab;
+        if (prefab == null)
+        {
+            return;
+        }
+
+        SerializedObject serializedPrefab = new SerializedObject(prefab);
+        SerializedProperty objIdProperty = serializedPrefab.FindProperty("objId");
+        if (objIdProperty == null)
+        {
+            return;
+        }
+
+        objIdProperty.intValue = itemSet.id;
+        serializedPrefab.ApplyModifiedPropertiesWithoutUndo();
+
+        GameObject prefabRoot = prefab.gameObject;
+        PrefabUtility.SavePrefabAsset(prefabRoot);
+        EditorUtility.SetDirty(prefabRoot);
     }
 
     private static string SanitizeAssetFileName(string value)
@@ -2311,29 +2568,9 @@ public class ItemManager : MonoBehaviour
                 AssetDatabase.CreateAsset(definition, assetPath);
             }
 
-            definition.id = itemSet.id;
-            definition.itemName = itemSet.name;
-            definition.mapObject = FindMapObjectForItem(itemSet.name, GetItemFolderForName(itemSet.name, itemFolderLookup));
-
-            Mesh definitionPortableMesh = itemSet.portableMesh;
-            Material definitionPortableMaterial = itemSet.portableMat;
-            TryOverrideInstallationPortableAssets(
-                itemSet.name,
-                GetItemFolderForName(itemSet.name, itemFolderLookup),
-                GetMapObjectPrefabRoot(definition.mapObject),
-                ref definitionPortableMesh,
-                ref definitionPortableMaterial);
-            definition.portableMesh = definitionPortableMesh;
-            definition.portableMat = definitionPortableMaterial;
-            definition.icon = itemSet.icon;
-            definition.size = (uint)Mathf.Max(0, itemSet.size);
+            ApplyItemSetToDefinition(itemSet, definition, itemFolderLookup);
             rebuiltDefinitions.Add(definition);
             usedDefinitions.Add(definition);
-
-            BindMapObjectDefinition(definition);
-            TryBindItemDefinitionToPrefab(itemSet.prefab, definition);
-
-            EditorUtility.SetDirty(definition);
         }
 
         itemDefinitions.Clear();
@@ -2343,6 +2580,60 @@ public class ItemManager : MonoBehaviour
         MarkEditorDirty();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+    }
+
+    private static void ApplyItemSetToDefinition(
+        ItemSet itemSet,
+        ItemDefinition definition,
+        Dictionary<string, string> itemFolderLookup)
+    {
+        if (definition == null)
+        {
+            return;
+        }
+
+        string itemFolder = GetItemFolderForName(itemSet.name, itemFolderLookup);
+        definition.id = itemSet.id;
+        definition.itemName = itemSet.name;
+        definition.mapObject = FindMapObjectForItem(itemSet.name, itemFolder);
+
+        Mesh definitionPortableMesh = itemSet.portableMesh;
+        Material definitionPortableMaterial = itemSet.portableMat;
+        TryOverridePortableAssets(
+            itemSet.name,
+            itemFolder,
+            GetMapObjectPrefabRoot(definition.mapObject),
+            ref definitionPortableMesh,
+            ref definitionPortableMaterial);
+        definition.portableMesh = definitionPortableMesh;
+        definition.portableMat = definitionPortableMaterial;
+        definition.icon = itemSet.icon;
+        definition.size = (uint)Mathf.Max(0, itemSet.size);
+
+        BindMapObjectDefinition(definition);
+        TryBindItemDefinitionToPrefab(itemSet.prefab, definition);
+        EditorUtility.SetDirty(definition);
+    }
+
+    private void RegisterRebuiltItemDefinition(ItemDefinition definition)
+    {
+        itemDefinitions ??= new List<ItemDefinition>();
+        for (int i = 0; i < itemDefinitions.Count; i++)
+        {
+            ItemDefinition registeredDefinition = itemDefinitions[i];
+            if (registeredDefinition == definition)
+            {
+                return;
+            }
+
+            if (registeredDefinition != null && registeredDefinition.id == definition.id)
+            {
+                itemDefinitions[i] = definition;
+                return;
+            }
+        }
+
+        itemDefinitions.Add(definition);
     }
 
     public void MarkEditorDirty()
@@ -2739,19 +3030,6 @@ public class ItemManager : MonoBehaviour
         }
 
         return results;
-    }
-
-    private static int ResolvePreservedItemSize(string itemName, int fallbackSize, Dictionary<string, ItemDefinition> existingDefinitionsByName)
-    {
-        if (!string.IsNullOrWhiteSpace(itemName)
-            && existingDefinitionsByName != null
-            && existingDefinitionsByName.TryGetValue(itemName.Trim(), out ItemDefinition definition)
-            && definition != null)
-        {
-            return Mathf.Max(0, (int)definition.size);
-        }
-
-        return Mathf.Max(0, fallbackSize);
     }
 
     private static string GetItemDefinitionLookupName(ItemDefinition definition)

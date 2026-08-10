@@ -62,6 +62,8 @@ Shader "ProjectF/Terrain/WaterSurfaceGlint"
                 half _FlowSpeed;
             CBUFFER_END
 
+            #include "TerrainWaterLighting.hlsl"
+
             half StableGlintNoise(float2 value)
             {
                 half waveA = 0.5h + 0.5h * sin(value.x * 12.9898h + value.y * 78.233h);
@@ -131,11 +133,13 @@ Shader "ProjectF/Terrain/WaterSurfaceGlint"
                 softRipple = smoothstep(0.78h, 1.0h, softRipple) * lerp(0.0h, 0.28h, softPulse);
 
                 half surfacePulse = StationaryGlintPulse(along - 2.1h, across + 4.3h, 7.4h, _FlowSpeed * 0.83h);
+                half waterBrightness = GetWorldWaterBrightness();
                 half alpha = saturate((layerA + (layerB * 0.58h) + softRipple)
                     * _GlintColor.a
-                    * lerp(0.45h, 1.65h, surfacePulse));
+                    * lerp(0.45h, 1.65h, surfacePulse)
+                    * waterBrightness);
 
-                half3 color = MixFog(_GlintColor.rgb, input.fogFactor);
+                half3 color = MixFog(_GlintColor.rgb * waterBrightness, input.fogFactor);
                 return half4(color, alpha);
             }
             ENDHLSL

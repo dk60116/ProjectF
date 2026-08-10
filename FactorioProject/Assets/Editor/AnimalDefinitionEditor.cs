@@ -10,6 +10,7 @@ public sealed class AnimalDefinitionEditor : Editor
     private GameObject draftPrefab;
     private Sprite draftAdultIcon;
     private Sprite draftChildIcon;
+    private float draftMaxHealth;
     private bool dirty;
 
     private void OnEnable()
@@ -32,6 +33,7 @@ public sealed class AnimalDefinitionEditor : Editor
         GameObject nextPrefab = (GameObject)EditorGUILayout.ObjectField("Animal Prefab", draftPrefab, typeof(GameObject), false);
         Sprite nextAdultIcon = (Sprite)EditorGUILayout.ObjectField("Adult Icon", draftAdultIcon, typeof(Sprite), false);
         Sprite nextChildIcon = (Sprite)EditorGUILayout.ObjectField("Child Icon", draftChildIcon, typeof(Sprite), false);
+        float nextMaxHealth = Mathf.Max(1f, EditorGUILayout.FloatField("Max Health", draftMaxHealth));
         if (EditorGUI.EndChangeCheck())
         {
             draftId = Mathf.Max(-1, nextId);
@@ -39,6 +41,7 @@ public sealed class AnimalDefinitionEditor : Editor
             draftPrefab = nextPrefab;
             draftAdultIcon = nextAdultIcon;
             draftChildIcon = nextChildIcon;
+            draftMaxHealth = nextMaxHealth;
             dirty = true;
         }
 
@@ -61,6 +64,9 @@ public sealed class AnimalDefinitionEditor : Editor
                 definition.MinHerdSize,
                 definition.MaxHerdSize,
                 definition.SpawnWeight,
+                draftMaxHealth,
+                definition.AISettings,
+                definition.DropItems,
                 "Save Animal Definition");
             AssetDatabase.SaveAssets();
             ReloadDraft();
@@ -114,6 +120,7 @@ public sealed class AnimalDefinitionEditor : Editor
         draftPrefab = definition.AnimalPrefab;
         draftAdultIcon = definition.AdultIcon;
         draftChildIcon = definition.ChildIcon;
+        draftMaxHealth = definition.MaxHealth;
         dirty = false;
         Repaint();
     }

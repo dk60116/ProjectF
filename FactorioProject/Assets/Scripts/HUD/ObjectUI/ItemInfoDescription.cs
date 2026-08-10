@@ -17,6 +17,7 @@ public class ItemInfoDescription : MonoBehaviour
     private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
     private static readonly Color ElectricGaugeFillColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color BurnEnergyGaugeFillColor = new Color(1f, 0.42f, 0.08f, 1f);
+    private static readonly Color HealthGaugeFillColor = new Color(0.78f, 0.12f, 0.1f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
     private static readonly Dictionary<Image, float> GaugeFillTargets = new Dictionary<Image, float>();
@@ -110,6 +111,26 @@ public class ItemInfoDescription : MonoBehaviour
             $"Age: {animal.Age.ToString("0.#", CultureInfo.InvariantCulture)}",
             true);
         SetDefaultSign(1, false, Color.white);
+
+        if (!animal.IsAlive)
+        {
+            return;
+        }
+
+        float currentHealth = animal.CurrentHealth;
+        float maxHealth = animal.MaxHealth;
+        SetGauge(
+            defaultGauge,
+            defaultFill,
+            defaultGaugeText,
+            true,
+            maxHealth > 0f ? currentHealth / maxHealth : 0f,
+            HealthGaugeFillColor,
+            currentHealth,
+            maxHealth,
+            false,
+            $"HP: {currentHealth.ToString("0.#", CultureInfo.InvariantCulture)}"
+            + $"/{maxHealth.ToString("0.#", CultureInfo.InvariantCulture)}");
     }
 
     public void ShowConveyorBelt(ConveyorBelt conveyorBelt, Resource underlyingResource = null)

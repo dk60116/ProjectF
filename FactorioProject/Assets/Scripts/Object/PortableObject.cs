@@ -16,6 +16,7 @@ public class PortableObject : MonoBehaviour
     public const float MoveToDuration = 0.3f;
 
     private static readonly HashSet<PortableObject> liveObjects = new HashSet<PortableObject>();
+    private static readonly HashSet<int> missingPortableAssetWarnings = new HashSet<int>();
     public event Action<PortableObject> MoveCancelled;
 
     [SerializeField, ReadOnly]
@@ -230,11 +231,14 @@ public class PortableObject : MonoBehaviour
         if (InputOutputModule.IsFluidItemId(id))
         {
             this.id = -1;
+            ItemLightController.Configure(
+                CachedGameObject,
+                -1,
+                ItemDefinition.ItemLightMode.None,
+                0f);
             SetVisualRenderingSuppressed(true);
             return false;
         }
-
-        this.id = id;
 
         if (body == null)
         {
@@ -248,23 +252,43 @@ public class PortableObject : MonoBehaviour
         ResolveBodyRenderer();
         if (body == null || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
+            ClearItemLight();
             return false;
         }
 
         ItemManager itemManager = GameManager.Instance.ItemManger;
         if (itemManager == null || !itemManager.TryGetItemSetById(id, out ItemManager.ItemSet itemSet))
         {
+            ClearItemLight();
             return false;
         }
 
         Mesh portableMesh = itemSet.portableMesh;
         Material portableMat = itemSet.portableMat;
 
-        if (bodyRenderer == null)
+        if (bodyRenderer == null || portableMesh == null || portableMat == null)
         {
+            this.id = -1;
+            ClearItemLight();
+            body.sharedMesh = null;
+            if (bodyRenderer != null)
+            {
+                bodyRenderer.sharedMaterial = null;
+            }
+
+            SetVisualRenderingSuppressed(true);
+            if (missingPortableAssetWarnings.Add(id))
+            {
+                Debug.LogWarning(
+                    $"PortableObject: item '{itemSet.name}' (id {id}) cannot be rendered because its portable "
+                    + $"{(portableMesh == null ? "mesh" : "material")} is missing.");
+            }
+
             return false;
         }
 
+        this.id = id;
+        SetVisualRenderingSuppressed(false);
         if (portableMat != null && !portableMat.enableInstancing)
         {
             portableMat.enableInstancing = true;
@@ -272,10 +296,41 @@ public class PortableObject : MonoBehaviour
 
         body.sharedMesh = portableMesh;
         bodyRenderer.sharedMaterial = portableMat;
+        ConfigureItemLight(itemSet);
         MarkPortableItemRenderDataDirty();
         UpdateRendererVisibility();
         RefreshSleepAwakeVisual(true);
         return true;
+    }
+
+    private void ConfigureItemLight(ItemManager.ItemSet itemSet)
+    {
+        PropObj parentProp = GetComponentInParent<PropObj>();
+        bool representedByParent = parentProp != null
+                                   && parentProp.gameObject != CachedGameObject
+                                   && parentProp.ResolveItemId() == itemSet.id;
+        ItemLightController.Configure(
+            CachedGameObject,
+            itemSet.id,
+            representedByParent
+                ? ItemDefinition.ItemLightMode.None
+                : itemSet.lightMode,
+            itemSet.lightRange,
+            false);
+    }
+
+    private void ClearItemLight()
+    {
+        ItemLightController.Configure(
+            CachedGameObject,
+            -1,
+            ItemDefinition.ItemLightMode.None,
+            0f);
+    }
+
+    public void SetItemLightToggled(bool active)
+    {
+        GetComponent<ItemLightController>()?.SetToggled(active);
     }
 
     public void SetBatchedRendering(bool shouldUseBatchedRendering)

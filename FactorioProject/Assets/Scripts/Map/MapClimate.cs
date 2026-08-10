@@ -5,12 +5,19 @@ public class MapClimate : MonoBehaviour
 {
     public const float DefaultCurrentTemperatureCelsius = 20f;
     public const float DefaultWaterTemperatureCelsius = 15f;
+    public const float DefaultNightTemperatureCelsius = 10f;
     private const float WaterTemperatureAirResponse = 0.5f;
 
     public static MapClimate Active { get; private set; }
 
     [SerializeField]
     private float currentTemperatureCelsius = DefaultCurrentTemperatureCelsius;
+    [SerializeField]
+    private bool useWorldTimeTemperature = true;
+    [SerializeField]
+    private float dayTemperatureCelsius = DefaultCurrentTemperatureCelsius;
+    [SerializeField]
+    private float nightTemperatureCelsius = DefaultNightTemperatureCelsius;
 
     public event Action<float> CurrentTemperatureChanged;
     public static event Action<float> ActiveCurrentTemperatureChanged;
@@ -50,13 +57,42 @@ public class MapClimate : MonoBehaviour
     {
         RegisterActiveIfNeeded();
         NormalizeCurrentTemperature();
+        WorldTimeService.GlobalTimeStateChanged += HandleWorldTimeStateChanged;
+        RefreshWorldTimeTemperature();
     }
 
     private void OnDisable()
     {
+        WorldTimeService.GlobalTimeStateChanged -= HandleWorldTimeStateChanged;
         if (Active == this)
         {
             Active = null;
+        }
+    }
+
+    private void HandleWorldTimeStateChanged(
+        float normalizedDayTime,
+        float daylightFactor,
+        bool isDay)
+    {
+        if (!useWorldTimeTemperature)
+        {
+            return;
+        }
+
+        SetCurrentTemperatureCelsius(
+            Mathf.Lerp(nightTemperatureCelsius, dayTemperatureCelsius, daylightFactor));
+    }
+
+    private void RefreshWorldTimeTemperature()
+    {
+        WorldTimeService worldTime = WorldTimeService.Active;
+        if (useWorldTimeTemperature && worldTime != null)
+        {
+            HandleWorldTimeStateChanged(
+                worldTime.NormalizedDayTime,
+                worldTime.DaylightFactor,
+                worldTime.IsDay);
         }
     }
 
@@ -110,6 +146,12 @@ public class MapClimate : MonoBehaviour
     private void OnValidate()
     {
         NormalizeCurrentTemperature();
+        dayTemperatureCelsius = NormalizeTemperatureValue(dayTemperatureCelsius);
+        nightTemperatureCelsius = NormalizeTemperatureValue(nightTemperatureCelsius);
+        if (Application.isPlaying)
+        {
+            RefreshWorldTimeTemperature();
+        }
     }
 #endif
 }

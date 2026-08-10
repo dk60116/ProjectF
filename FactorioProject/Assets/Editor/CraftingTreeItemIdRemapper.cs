@@ -6,7 +6,9 @@ using UnityEngine;
 
 internal static class CraftingTreeItemIdRemapper
 {
-    private const int CurrentCraftingTreeFileVersion = 4;
+    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int ItemNameCraftingTreeFileVersion = 5;
+    private const int ItemIdCraftingTreeFileVersion = 4;
 
     [Serializable]
     private sealed class CraftingTreeJsonFile
@@ -121,6 +123,7 @@ internal static class CraftingTreeItemIdRemapper
         public string guid = string.Empty;
         public string assetPath = string.Empty;
         public string itemName = string.Empty;
+        public string persistenceName = string.Empty;
     }
 
     internal static CapturedCraftingTree CapturePersistedCraftingTree(IReadOnlyList<ItemDefinition> definitions)
@@ -151,8 +154,8 @@ internal static class CraftingTreeItemIdRemapper
 
         DefinitionLookup lookup = BuildDefinitionLookup(definitions);
         List<BinaryRecipeEntry> entries = BuildBinaryEntries(capturedTree, lookup);
-        WriteCurrentBinaryFile(GetCraftingTreeAssetPath(), entries);
-        WriteCurrentBinaryFile(GetCraftingTreeResourcesPath(), entries);
+        WriteCurrentBinaryFile(GetCraftingTreeAssetPath(), entries, definitions);
+        WriteCurrentBinaryFile(GetCraftingTreeResourcesPath(), entries, definitions);
         WriteJsonFile(GetCraftingTreeJsonPath(), entries, definitions);
 
         AssetDatabase.Refresh();
@@ -163,7 +166,7 @@ internal static class CraftingTreeItemIdRemapper
     private static CapturedCraftingTree CaptureBinaryFile(string path, Dictionary<int, DefinitionIdentity> identitiesById)
     {
         CapturedCraftingTree captured = new CapturedCraftingTree();
-        if (!TryReadCurrentBinaryFile(path, out List<BinaryRecipeEntry> entries))
+        if (!TryReadCurrentBinaryFile(path, identitiesById, out List<BinaryRecipeEntry> entries))
         {
             return captured;
         }
@@ -554,7 +557,8 @@ internal static class CraftingTreeItemIdRemapper
                 itemId = definition.id,
                 guid = GetGuid(assetPath),
                 assetPath = assetPath,
-                itemName = GetDefinitionDisplayName(definition)
+                itemName = GetDefinitionDisplayName(definition),
+                persistenceName = ItemDefinitionLookup.GetPersistenceName(definition, definitions)
             });
         }
 
@@ -819,7 +823,10 @@ internal static class CraftingTreeItemIdRemapper
         return Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
     }
 
-    private static bool TryReadCurrentBinaryFile(string path, out List<BinaryRecipeEntry> entries)
+    private static bool TryReadCurrentBinaryFile(
+        string path,
+        Dictionary<int, DefinitionIdentity> identitiesById,
+        out List<BinaryRecipeEntry> entries)
     {
         entries = new List<BinaryRecipeEntry>();
         try
@@ -828,7 +835,8 @@ internal static class CraftingTreeItemIdRemapper
             using (BinaryReader reader = new BinaryReader(stream))
             {
                 int version = reader.ReadInt32();
-                if (version != CurrentCraftingTreeFileVersion)
+                if (version != ItemIdCraftingTreeFileVersion
+                    && version != ItemNameCraftingTreeFileVersion)
                 {
                     Debug.LogWarning($"CraftingTreeItemIdRemapper: unsupported crafting tree version {version} at '{path}'.");
                     return false;
@@ -839,13 +847,17 @@ internal static class CraftingTreeItemIdRemapper
                 {
                     BinaryRecipeEntry entry = new BinaryRecipeEntry
                     {
-                        itemId = reader.ReadInt32()
+                        itemId = ReadItemId(reader, version, identitiesById)
                     };
 
                     int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
                     for (int mapObjectIndex = 0; mapObjectIndex < mapObjectCount; mapObjectIndex++)
                     {
-                        entry.requiredMapObjectItemIds.Add(reader.ReadInt32());
+                        int mapObjectItemId = ReadItemId(reader, version, identitiesById);
+                        if (mapObjectItemId >= 0)
+                        {
+                            entry.requiredMapObjectItemIds.Add(mapObjectItemId);
+                        }
                     }
 
                     entry.outputCount = Mathf.Max(1, reader.ReadInt32());
@@ -855,7 +867,7 @@ internal static class CraftingTreeItemIdRemapper
                     {
                         entry.ingredients.Add(new BinaryIngredientEntry
                         {
-                            itemId = reader.ReadInt32(),
+                            itemId = ReadItemId(reader, version, identitiesById),
                             count = Mathf.Max(1, reader.ReadInt32())
                         });
                     }
@@ -874,7 +886,38 @@ internal static class CraftingTreeItemIdRemapper
         }
     }
 
-    private static void WriteCurrentBinaryFile(string path, List<BinaryRecipeEntry> entries)
+    private static int ReadItemId(
+        BinaryReader reader,
+        int version,
+        Dictionary<int, DefinitionIdentity> identitiesById)
+    {
+        if (version < ItemNameCraftingTreeFileVersion)
+        {
+            return reader.ReadInt32();
+        }
+
+        string itemName = reader.ReadString();
+        if (identitiesById != null && !string.IsNullOrWhiteSpace(itemName))
+        {
+            foreach (KeyValuePair<int, DefinitionIdentity> pair in identitiesById)
+            {
+                DefinitionIdentity identity = pair.Value;
+                if (identity != null
+                    && string.Equals(identity.persistenceName, itemName.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return identity.itemId;
+                }
+            }
+        }
+
+        Debug.LogWarning($"CraftingTreeItemIdRemapper: unresolved item name '{itemName}'.");
+        return -1;
+    }
+
+    private static void WriteCurrentBinaryFile(
+        string path,
+        List<BinaryRecipeEntry> entries,
+        IReadOnlyList<ItemDefinition> definitions)
     {
         EnsureParentFolder(path);
         using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write))
@@ -890,11 +933,11 @@ internal static class CraftingTreeItemIdRemapper
             for (int i = 0; i < entries.Count; i++)
             {
                 BinaryRecipeEntry entry = entries[i];
-                writer.Write(entry.itemId);
+                writer.Write(GetRequiredItemName(entry.itemId, definitions));
                 writer.Write(entry.requiredMapObjectItemIds.Count);
                 for (int mapObjectIndex = 0; mapObjectIndex < entry.requiredMapObjectItemIds.Count; mapObjectIndex++)
                 {
-                    writer.Write(entry.requiredMapObjectItemIds[mapObjectIndex]);
+                    writer.Write(GetRequiredItemName(entry.requiredMapObjectItemIds[mapObjectIndex], definitions));
                 }
 
                 writer.Write(Mathf.Max(1, entry.outputCount));
@@ -902,11 +945,23 @@ internal static class CraftingTreeItemIdRemapper
                 for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
                 {
                     BinaryIngredientEntry ingredient = entry.ingredients[ingredientIndex];
-                    writer.Write(ingredient.itemId);
+                    writer.Write(GetRequiredItemName(ingredient.itemId, definitions));
                     writer.Write(Mathf.Max(1, ingredient.count));
                 }
             }
         }
+    }
+
+    private static string GetRequiredItemName(int itemId, IReadOnlyList<ItemDefinition> definitions)
+    {
+        ItemDefinition definition = FindDefinitionById(definitions, itemId);
+        string itemName = ItemDefinitionLookup.GetPersistenceName(definition, definitions);
+        if (definition == null || string.IsNullOrWhiteSpace(itemName))
+        {
+            throw new InvalidDataException($"CraftingTree item id {itemId}의 이름을 찾지 못했습니다.");
+        }
+
+        return itemName.Trim();
     }
 
     private static void EnsureParentFolder(string path)

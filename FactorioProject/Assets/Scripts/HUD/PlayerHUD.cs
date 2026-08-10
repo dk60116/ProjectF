@@ -12,11 +12,17 @@ public class PlayerHUD : BagSlot
     private List<BagSlot> bagSlots;
     [SerializeField]
     private HandSlot handSlot;
+    [SerializeField]
+    private Image handItemGauge;
 
     private PlayerBag boundInventoryBag;
     private PlayerBag boundHandBag;
     private BagSlot expandedBagSlot;
     private bool isRefreshing;
+    private RectTransform handItemGaugeRect;
+    private GameObject handItemGaugeRoot;
+    private float handItemGaugeMinAnchorX;
+    private float handItemGaugeMaxAnchorX;
 
     [SerializeField]
     private List<CreatingQueueSlot> craftingWaitingQueue; 
@@ -28,6 +34,8 @@ public class PlayerHUD : BagSlot
     private float craftedPortableMoveInterval = 0.1f;
 
     private const float DefaultCraftingDurationSeconds = 5f;
+    private const string NooseItemName = "Noose";
+    private const string TorchItemName = "Torch";
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
     private float craftingIngredientRefreshTimer;
@@ -64,6 +72,12 @@ public class PlayerHUD : BagSlot
     [SerializeField]
     private InteractionButton DoorInteractionButton;
     [SerializeField]
+    private InteractionButton ThrowInteractionButton;
+    [SerializeField, Min(0f)]
+    private float parallelInteractionButtonSpacing = 10f;
+    [SerializeField]
+    private Sprite animalInteractionIcon;
+    [SerializeField]
     private Button ItemFilterButton;
 
     [SerializeField]
@@ -84,6 +98,7 @@ public class PlayerHUD : BagSlot
     private float objectInfoPanelRefreshInterval = 0.2f;
 
     private TerrainGenerator cachedTerrainGenerator;
+    private Animal currentInteractionAnimal;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
@@ -108,6 +123,9 @@ public class PlayerHUD : BagSlot
     private Transform cachedMapEditRoot;
     private InteractionButton boundInteractionButton;
     private InteractionButton boundDoorInteractionButton;
+    private InteractionButton boundThrowInteractionButton;
+    private Vector2 interactionButtonAnchorPosition;
+    private bool interactionButtonAnchorPositionCached;
     private readonly Dictionary<Button, Vector2> cachedInstallButtonPositions = new Dictionary<Button, Vector2>();
     private readonly Dictionary<Button, Vector2> cachedMapEditButtonPositions = new Dictionary<Button, Vector2>();
     private Sequence mapEditButtonAnimationSequence;
@@ -147,6 +165,7 @@ public class PlayerHUD : BagSlot
         UpdateInstallModeButtons();
         UpdateInteractionButtonState();
         UpdateItemFilterButtonState();
+        UpdateHandItemGauge();
         RefreshBag(null);
         RefreshCraftingQueueSlots(true);
         EnsureMapPaperBinding();
@@ -167,6 +186,7 @@ public class PlayerHUD : BagSlot
         UpdateInstallModeButtons();
         UpdateInteractionButtonState();
         UpdateItemFilterButtonState();
+        UpdateHandItemGauge();
         EnsureInitialBagBinding();
         EnsureMapPaperBinding();
     }
@@ -178,6 +198,7 @@ public class PlayerHUD : BagSlot
         isBagRefreshQueued = false;
         queuedBagRefreshFrame = -1;
         pendingBagRefreshAfterCraftingVisibilityChange = false;
+        SetHandItemGaugeVisible(false);
         TrainFilter.SetFocusedRouteTrain(null);
         ClearObjectInfoPanelState();
     }
@@ -194,11 +215,13 @@ public class PlayerHUD : BagSlot
             installModeButtonsResolved = false;
             boundInteractionButton = null;
             boundDoorInteractionButton = null;
+            boundThrowInteractionButton = null;
         }
 
         ResolveInstallModeButtons();
         ResolveInteractionButton();
         ResolveDoorInteractionButton();
+        ResolveThrowInteractionButton();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveTrainStationFilter();
@@ -217,6 +240,7 @@ public class PlayerHUD : BagSlot
         UpdateInstallModeButtons();
         ProcessQueuedBagRefresh();
         UpdateInteractionButtonState();
+        UpdateHandItemGauge();
         UpdateObjectInfoPanelState();
         UpdateTrainRouteFocusState();
         HandleInteractionButtonKeyboardInput();
@@ -731,6 +755,7 @@ public class PlayerHUD : BagSlot
             InteractionButton = GetComponentInChildren<InteractionButton>(true);
         }
 
+        CacheInteractionButtonAnchorPosition();
         BindInteractionButton();
     }
 
@@ -754,6 +779,52 @@ public class PlayerHUD : BagSlot
         }
 
         BindDoorInteractionButton();
+    }
+
+    private void ResolveThrowInteractionButton()
+    {
+        if (ThrowInteractionButton == null)
+        {
+            Transform buttonTransform = FindDescendantByName(transform, "ThrowInteractionButton");
+            if (buttonTransform == null)
+            {
+                buttonTransform = FindDescendantByName(transform, "ThrowButton");
+            }
+
+            if (buttonTransform != null)
+            {
+                ThrowInteractionButton = buttonTransform.GetComponent<InteractionButton>();
+            }
+        }
+
+        if (ThrowInteractionButton == null && InteractionButton != null)
+        {
+            ThrowInteractionButton = Instantiate(
+                InteractionButton,
+                InteractionButton.transform.parent);
+            ThrowInteractionButton.name = "ThrowInteractionButton";
+            ThrowInteractionButton.SetVisible(false);
+        }
+
+        BindThrowInteractionButton();
+        UpdateInteractionButtonLayout();
+    }
+
+    private void CacheInteractionButtonAnchorPosition()
+    {
+        if (interactionButtonAnchorPositionCached || InteractionButton == null)
+        {
+            return;
+        }
+
+        RectTransform rectTransform = InteractionButton.transform as RectTransform;
+        if (rectTransform == null)
+        {
+            return;
+        }
+
+        interactionButtonAnchorPosition = rectTransform.anchoredPosition;
+        interactionButtonAnchorPositionCached = true;
     }
 
     private void ResolveItemFilterButton()
@@ -1774,7 +1845,7 @@ public class PlayerHUD : BagSlot
             || GameManager.Instance.Player == null
             || GameManager.Instance.PlayerInteractionLocked)
         {
-            ClearInteractionButtonState();
+            ClearAllInteractionButtonState();
             return;
         }
 
@@ -1782,44 +1853,64 @@ public class PlayerHUD : BagSlot
         Transform bodyTransform = currentPlayer.BodyTransform != null ? currentPlayer.BodyTransform : currentPlayer.transform;
         if (bodyTransform == null)
         {
-            ClearInteractionButtonState();
+            ClearAllInteractionButtonState();
             return;
         }
 
         PlayerController playerController = currentPlayer.GetComponent<PlayerController>();
-        if (playerController != null && playerController.IsResourceHarvestingActive)
+        if (playerController != null
+            && (playerController.IsResourceHarvestingActive
+                || playerController.IsAnimalKnifeInteractionActive))
         {
-            ClearInteractionButtonState();
+            ClearAllInteractionButtonState();
             return;
         }
+
+        bool hasHeldNoose = TryResolveHeldNoose(currentPlayer, out ItemDefinition heldNoose);
+        ItemDefinition heldLightItem = null;
+        bool hasHeldLightItem = !hasHeldNoose
+                                && TryResolveHeldLightInteractionItem(
+                                    currentPlayer,
+                                    out heldLightItem);
+        SetThrowInteractionButtonState(
+            hasHeldNoose
+                ? heldNoose.icon
+                : (hasHeldLightItem ? heldLightItem.icon : null));
 
         Vehicle mountedVehicle = playerController != null ? playerController.MountedVehicle : null;
         if (mountedVehicle != null)
         {
-            currentInteractionBoxObject = null;
-            currentInteractionDoorObject = null;
-            currentInteractionResource = null;
+            ClearInteractionTargets();
             currentInteractionMapObject = mountedVehicle;
             SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(mountedVehicle, 1));
             return;
         }
 
+        if (!hasHeldNoose
+            && animalInteractionIcon != null
+            && TryGetObjectInfoFocusedAnimal(out Animal focusedAnimal))
+        {
+            if (CanUseAnimalInteractionTarget(focusedAnimal, playerController))
+            {
+                ClearInteractionTargets();
+                currentInteractionAnimal = focusedAnimal;
+                SetActiveInteractionButton(InteractionButton, animalInteractionIcon);
+                return;
+            }
+        }
+
         if (TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
         {
+            ClearInteractionTargets();
             currentInteractionBoxObject = focusedBoxObject;
-            currentInteractionDoorObject = null;
-            currentInteractionResource = null;
-            currentInteractionMapObject = null;
             SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(focusedBoxObject));
             return;
         }
 
         if (TryGetNearbyInteractionFenceDoor(out FenceDoor focusedFenceDoor))
         {
-            currentInteractionBoxObject = null;
+            ClearInteractionTargets();
             currentInteractionDoorObject = focusedFenceDoor;
-            currentInteractionResource = null;
-            currentInteractionMapObject = null;
             SetActiveInteractionButton(ResolveDoorInteractionButtonForUse(), ResolveInteractionIcon(focusedFenceDoor));
             return;
         }
@@ -1829,9 +1920,7 @@ public class PlayerHUD : BagSlot
             Sprite vehicleIcon = ResolveInteractionIcon(nearbyVehicle, 0);
             if (vehicleIcon != null)
             {
-                currentInteractionBoxObject = null;
-                currentInteractionDoorObject = null;
-                currentInteractionResource = null;
+                ClearInteractionTargets();
                 currentInteractionMapObject = nearbyVehicle;
                 SetActiveInteractionButton(InteractionButton, vehicleIcon);
                 return;
@@ -1843,10 +1932,8 @@ public class PlayerHUD : BagSlot
             Sprite resourceIcon = ResolveInteractionIcon(focusedResource);
             if (resourceIcon != null)
             {
-                currentInteractionBoxObject = null;
-                currentInteractionDoorObject = null;
+                ClearInteractionTargets();
                 currentInteractionResource = focusedResource;
-                currentInteractionMapObject = null;
                 SetActiveInteractionButton(InteractionButton, resourceIcon);
                 return;
             }
@@ -1858,31 +1945,60 @@ public class PlayerHUD : BagSlot
             && !(focusedMapObject is FenceDoor))
         {
             Sprite mapObjectIcon = ResolveInteractionIcon(focusedMapObject, 0);
+            ItemDefinition focusedDefinition = focusedMapObject.BoundItemDefinition;
+            if (mapObjectIcon == null
+                && focusedDefinition != null
+                && focusedDefinition.lightMode == ItemDefinition.ItemLightMode.Toggle)
+            {
+                mapObjectIcon = focusedDefinition.icon;
+            }
             if (mapObjectIcon != null)
             {
-                currentInteractionBoxObject = null;
-                currentInteractionDoorObject = null;
-                currentInteractionResource = null;
+                ClearInteractionTargets();
                 currentInteractionMapObject = focusedMapObject;
                 SetActiveInteractionButton(InteractionButton, mapObjectIcon);
                 return;
             }
         }
 
-        ClearInteractionButtonState();
+        ClearContextInteractionButtonState();
     }
 
-    private void ClearInteractionButtonState()
+    private static bool CanUseAnimalInteractionTarget(Animal animal, PlayerController playerController)
     {
-        currentInteractionBoxObject = null;
-        currentInteractionDoorObject = null;
-        currentInteractionResource = null;
-        currentInteractionMapObject = null;
+        return animal != null
+               && (animal.IsAlive
+                   || (playerController != null
+                       && animal.CanHarvestCorpse
+                       && playerController.IsAnimalWithinKnifeInteractionRange(animal)));
+    }
+
+    private void ClearAllInteractionButtonState()
+    {
+        ClearContextInteractionButtonState();
+        HideInteractionButton(ThrowInteractionButton);
+        UpdateInteractionButtonLayout();
+    }
+
+    private void ClearContextInteractionButtonState()
+    {
+        ClearInteractionTargets();
         HideInteractionButton(InteractionButton);
         if (DoorInteractionButton != null && DoorInteractionButton != InteractionButton)
         {
             HideInteractionButton(DoorInteractionButton);
         }
+
+        UpdateInteractionButtonLayout();
+    }
+
+    private void ClearInteractionTargets()
+    {
+        currentInteractionAnimal = null;
+        currentInteractionBoxObject = null;
+        currentInteractionDoorObject = null;
+        currentInteractionResource = null;
+        currentInteractionMapObject = null;
     }
 
     private void SetActiveInteractionButton(InteractionButton activeButton, Sprite icon)
@@ -1904,6 +2020,64 @@ public class PlayerHUD : BagSlot
 
         activeButton.SetIcon(icon);
         activeButton.SetVisible(true);
+        UpdateInteractionButtonLayout();
+    }
+
+    private void SetThrowInteractionButtonState(Sprite icon)
+    {
+        if (ThrowInteractionButton == null)
+        {
+            return;
+        }
+
+        if (icon == null)
+        {
+            HideInteractionButton(ThrowInteractionButton);
+        }
+        else
+        {
+            ThrowInteractionButton.SetIcon(icon);
+            ThrowInteractionButton.SetVisible(true);
+        }
+
+        UpdateInteractionButtonLayout();
+    }
+
+    private void UpdateInteractionButtonLayout()
+    {
+        CacheInteractionButtonAnchorPosition();
+        if (ThrowInteractionButton == null
+            || !(ThrowInteractionButton.transform is RectTransform throwRect))
+        {
+            return;
+        }
+
+        throwRect.anchoredPosition = interactionButtonAnchorPosition;
+        if (!IsInteractionButtonVisible(ThrowInteractionButton))
+        {
+            return;
+        }
+
+        InteractionButton contextButton = IsInteractionButtonVisible(DoorInteractionButton)
+            ? DoorInteractionButton
+            : (IsInteractionButtonVisible(InteractionButton) ? InteractionButton : null);
+        if (contextButton == null
+            || contextButton == ThrowInteractionButton
+            || contextButton.transform.parent != ThrowInteractionButton.transform.parent
+            || !(contextButton.transform is RectTransform contextRect))
+        {
+            return;
+        }
+
+        float separation = contextRect.rect.width * 0.5f
+                           + throwRect.rect.width * 0.5f
+                           + Mathf.Max(0f, parallelInteractionButtonSpacing);
+        throwRect.anchoredPosition = contextRect.anchoredPosition + Vector2.left * separation;
+    }
+
+    private static bool IsInteractionButtonVisible(InteractionButton interactionButton)
+    {
+        return interactionButton != null && interactionButton.gameObject.activeSelf;
     }
 
     private static void HideInteractionButton(InteractionButton interactionButton)
@@ -1922,6 +2096,7 @@ public class PlayerHUD : BagSlot
         ResolveObjectInfoPanel();
         if (objectInfoPanel == null)
         {
+            SetObjectInfoSelectionFocus(null, false);
             SetFocusedAnimalOutline(currentObjectInfoTarget, false);
             currentObjectInfoTarget = null;
             SetObjectInfoSupplyRangeVisual(null, false);
@@ -1963,6 +2138,27 @@ public class PlayerHUD : BagSlot
             return;
         }
 
+        if (playerController != null
+            && playerController.TryGetAnimalKnifeFocusTarget(out Animal knifeFocusAnimal))
+        {
+            // 접근 및 공격 애니메이션 도중에는 근처의 자동 포커스 후보가
+            // 사용자가 선택한 동물의 HUD와 아웃라인을 교체하지 못하게 한다.
+            lastYellowObjectInfoFocusTarget = null;
+            if (currentObjectInfoTarget != knifeFocusAnimal
+                || !objectInfoPanel.IsBoundTo(knifeFocusAnimal)
+                || !objectInfoPanel.gameObject.activeSelf)
+            {
+                BindObjectInfoPanel(knifeFocusAnimal, false);
+            }
+            else
+            {
+                currentObjectInfoOpenedByYellowFocus = false;
+                RefreshCurrentObjectInfoPanelTarget();
+            }
+
+            return;
+        }
+
         if (HandleYellowFocusObjectInfoChange())
         {
             return;
@@ -1973,7 +2169,14 @@ public class PlayerHUD : BagSlot
 
     private bool HandleYellowFocusObjectInfoChange()
     {
-        if (TryGetFocusedMapObject(out MapObject focusedMapObject))
+        if (!currentObjectInfoOpenedByYellowFocus && currentObjectInfoTarget != null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = ResolvePlayerController();
+        if (playerController != null
+            && playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
         {
             if (lastYellowObjectInfoFocusTarget == focusedMapObject)
             {
@@ -2046,14 +2249,23 @@ public class PlayerHUD : BagSlot
         }
 
         currentObjectInfoOpenedByYellowFocus = openedByYellowFocus;
+        if (!openedByYellowFocus)
+        {
+            lastYellowObjectInfoFocusTarget = null;
+        }
+
         objectInfoPanel.Bind(target);
-        nextObjectInfoPanelRefreshTime = Time.unscaledTime + Mathf.Max(0.02f, objectInfoPanelRefreshInterval);
+        // Bind 시점보다 늦게 대상의 item ID나 아이콘 참조가 확정되는 경우를 위해
+        // 다음 프레임에 한 번 더 갱신하고, 이후부터 일반 갱신 주기를 적용한다.
+        nextObjectInfoPanelRefreshTime = Time.unscaledTime;
         SetObjectInfoSupplyRangeVisual(target as MapObject, !openedByYellowFocus);
+        SetObjectInfoSelectionFocus(target as MapObject, !openedByYellowFocus);
         TrainFilter.MarkRouteSelectionDirty();
     }
 
     private void ClearObjectInfoPanelState()
     {
+        SetObjectInfoSelectionFocus(null, false);
         SetObjectInfoSupplyRangeVisual(null, false);
         SetFocusedAnimalOutline(currentObjectInfoTarget, false);
         currentObjectInfoTarget = null;
@@ -2065,6 +2277,11 @@ public class PlayerHUD : BagSlot
         }
 
         TrainFilter.MarkRouteSelectionDirty();
+    }
+
+    private void SetObjectInfoSelectionFocus(MapObject target, bool requested)
+    {
+        ResolvePlayerController()?.SetSelectedMapObjectFocus(requested ? target : null);
     }
 
     private static void SetFocusedAnimalOutline(Component target, bool visible)
@@ -2167,6 +2384,75 @@ public class PlayerHUD : BagSlot
         int itemId = boxObject.ResolveItemId();
         int preferredIconIndex = boxObject.IsOpen ? 1 : 0;
         return ResolveInteractionIcon(itemId, preferredIconIndex);
+    }
+
+    private static bool TryResolveHeldNoose(Player currentPlayer, out ItemDefinition nooseDefinition)
+    {
+        return TryResolveHeldItem(currentPlayer, NooseItemName, out nooseDefinition);
+    }
+
+    private static bool TryResolveHeldItem(
+        Player currentPlayer,
+        string itemName,
+        out ItemDefinition itemDefinition)
+    {
+        if (!TryResolveHeldItem(currentPlayer, out itemDefinition))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            itemDefinition.itemName,
+            itemName,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryResolveHeldLightInteractionItem(
+        Player currentPlayer,
+        out ItemDefinition itemDefinition)
+    {
+        if (currentPlayer != null
+            && currentPlayer.TryGetActiveTorchEnergy(out itemDefinition, out _, out _))
+        {
+            return true;
+        }
+
+        if (!TryResolveHeldItem(currentPlayer, out itemDefinition))
+        {
+            return false;
+        }
+
+        return itemDefinition.lightMode == ItemDefinition.ItemLightMode.Toggle
+               || string.Equals(
+                   itemDefinition.itemName,
+                   TorchItemName,
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryResolveHeldItem(
+        Player currentPlayer,
+        out ItemDefinition itemDefinition)
+    {
+        itemDefinition = null;
+        if (currentPlayer == null)
+        {
+            return false;
+        }
+
+        PlayerBag handBag = currentPlayer.GetHandBag();
+        if (handBag == null || handBag.GetSlotCount(0) <= 0)
+        {
+            return false;
+        }
+
+        ItemDefinition heldDefinition = GetItemDefinition(handBag.GetSlotItemId(0));
+        if (heldDefinition == null)
+        {
+            return false;
+        }
+
+        itemDefinition = heldDefinition;
+        return true;
     }
 
     private static Sprite ResolveInteractionIcon(FenceDoor fenceDoor)
@@ -2372,6 +2658,22 @@ public class PlayerHUD : BagSlot
         boundDoorInteractionButton = DoorInteractionButton;
     }
 
+    private void BindThrowInteractionButton()
+    {
+        if (ThrowInteractionButton == null)
+        {
+            return;
+        }
+
+        if (boundThrowInteractionButton == ThrowInteractionButton)
+        {
+            return;
+        }
+
+        ThrowInteractionButton.SetClickAction(HandleThrowInteractionButtonClicked);
+        boundThrowInteractionButton = ThrowInteractionButton;
+    }
+
     private void BindItemFilterButton()
     {
         if (ItemFilterButton == null)
@@ -2413,6 +2715,58 @@ public class PlayerHUD : BagSlot
         }
     }
 
+    private void UpdateHandItemGauge()
+    {
+        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (currentPlayer == null
+            || !currentPlayer.TryGetActiveTorchEnergy(
+                out _,
+                out float remainingEnergy,
+                out float energyCapacity))
+        {
+            SetHandItemGaugeVisible(false);
+            return;
+        }
+
+        CacheHandItemGaugeReferences();
+        if (handItemGaugeRect == null || energyCapacity <= 0f)
+        {
+            SetHandItemGaugeVisible(false);
+            return;
+        }
+
+        float normalizedEnergy = Mathf.Clamp01(remainingEnergy / energyCapacity);
+        SetHandItemGaugeVisible(true);
+
+        Vector2 anchorMax = handItemGaugeRect.anchorMax;
+        anchorMax.x = Mathf.Lerp(handItemGaugeMinAnchorX, handItemGaugeMaxAnchorX, normalizedEnergy);
+        handItemGaugeRect.anchorMax = anchorMax;
+    }
+
+    private void SetHandItemGaugeVisible(bool visible)
+    {
+        CacheHandItemGaugeReferences();
+        if (handItemGaugeRoot != null && handItemGaugeRoot.activeSelf != visible)
+        {
+            handItemGaugeRoot.SetActive(visible);
+        }
+    }
+
+    private void CacheHandItemGaugeReferences()
+    {
+        if (handItemGauge == null || handItemGaugeRect != null)
+        {
+            return;
+        }
+
+        handItemGaugeRect = handItemGauge.rectTransform;
+        handItemGaugeRoot = handItemGaugeRect.parent != null
+            ? handItemGaugeRect.parent.gameObject
+            : handItemGauge.gameObject;
+        handItemGaugeMinAnchorX = handItemGaugeRect.anchorMin.x;
+        handItemGaugeMaxAnchorX = handItemGaugeRect.anchorMax.x;
+    }
+
     private bool IsItemFilterButtonPanelActive()
     {
         if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
@@ -2436,10 +2790,45 @@ public class PlayerHUD : BagSlot
         }
     }
 
+    private void HandleThrowInteractionButtonClicked()
+    {
+        if (IsPlacementOrMapEditModeActive())
+        {
+            return;
+        }
+
+        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (TryResolveHeldNoose(currentPlayer, out ItemDefinition heldNoose))
+        {
+            PlayerController playerController = ResolvePlayerController();
+            playerController?.RequestNooseThrow(heldNoose);
+            UpdateInteractionButtonState();
+            return;
+        }
+
+        if (TryResolveHeldLightInteractionItem(
+                currentPlayer,
+                out ItemDefinition heldLightItem))
+        {
+            currentPlayer.ToggleHeldItemLight(heldLightItem);
+            UpdateInteractionButtonState();
+            UpdateHandItemGauge();
+        }
+    }
+
     private void HandleInteractionButtonClicked()
     {
         if (IsPlacementOrMapEditModeActive())
         {
+            return;
+        }
+
+        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (currentInteractionAnimal != null)
+        {
+            PlayerController playerController = ResolvePlayerController();
+            playerController?.RequestAnimalKnifeInteraction(currentInteractionAnimal);
+            UpdateInteractionButtonState();
             return;
         }
 
@@ -2486,7 +2875,6 @@ public class PlayerHUD : BagSlot
 
             if (currentInteractionMapObject is Vehicle vehicle)
             {
-                Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
                 PlayerController playerController = currentPlayer != null
                     ? currentPlayer.GetComponent<PlayerController>()
                     : null;
@@ -2499,6 +2887,20 @@ public class PlayerHUD : BagSlot
                 {
                     vehicle.TryDockPlayer(currentPlayer);
                 }
+
+                UpdateInteractionButtonState();
+                return;
+            }
+
+            PlayerController lightInteractionController = currentPlayer != null
+                ? currentPlayer.GetComponent<PlayerController>()
+                : null;
+            if (lightInteractionController != null
+                && lightInteractionController.IsWithinInteractionRange(currentInteractionMapObject)
+                && currentInteractionMapObject.ToggleItemLight())
+            {
+                UpdateInteractionButtonState();
+                return;
             }
 
             UpdateInteractionButtonState();
@@ -2566,21 +2968,26 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        InteractionButton activeButton = currentInteractionDoorObject != null
+        InteractionButton contextButton = currentInteractionDoorObject != null
             ? ResolveDoorInteractionButtonForUse()
             : InteractionButton;
-        bool hasInteractionTarget = currentInteractionBoxObject != null
-                                    || currentInteractionDoorObject != null
-                                    || currentInteractionResource != null
-                                    || currentInteractionMapObject != null;
-        if (!hasInteractionTarget
-            || activeButton == null
-            || !activeButton.gameObject.activeInHierarchy)
+        bool hasContextTarget = currentInteractionBoxObject != null
+                                || currentInteractionAnimal != null
+                                || currentInteractionDoorObject != null
+                                || currentInteractionResource != null
+                                || currentInteractionMapObject != null;
+        if (hasContextTarget && IsInteractionButtonVisible(contextButton))
         {
+            HandleInteractionButtonClicked();
             return;
         }
 
-        HandleInteractionButtonClicked();
+        if ((TryResolveHeldNoose(GameManager.Instance.Player, out _)
+             || TryResolveHeldLightInteractionItem(GameManager.Instance.Player, out _))
+            && IsInteractionButtonVisible(ThrowInteractionButton))
+        {
+            HandleThrowInteractionButtonClicked();
+        }
     }
 
     private static Vector3 ResolveCurrentPlayerInteractionPosition()
@@ -2756,6 +3163,29 @@ public class PlayerHUD : BagSlot
     public bool TryGetObjectInfoFocusedMapObject(out MapObject focusedMapObject)
     {
         focusedMapObject = null;
+        if (!HasActiveObjectInfoTarget())
+        {
+            return false;
+        }
+
+        focusedMapObject = currentObjectInfoTarget as MapObject;
+        return focusedMapObject != null;
+    }
+
+    public bool TryGetObjectInfoFocusedAnimal(out Animal focusedAnimal)
+    {
+        focusedAnimal = null;
+        if (!HasActiveObjectInfoTarget())
+        {
+            return false;
+        }
+
+        focusedAnimal = currentObjectInfoTarget as Animal;
+        return focusedAnimal != null;
+    }
+
+    private bool HasActiveObjectInfoTarget()
+    {
         if (currentObjectInfoTarget == null
             || !currentObjectInfoTarget.gameObject.activeInHierarchy)
         {
@@ -2763,15 +3193,9 @@ public class PlayerHUD : BagSlot
         }
 
         ResolveObjectInfoPanel();
-        if (objectInfoPanel == null
-            || !objectInfoPanel.gameObject.activeSelf
-            || !objectInfoPanel.IsBoundTo(currentObjectInfoTarget))
-        {
-            return false;
-        }
-
-        focusedMapObject = currentObjectInfoTarget as MapObject;
-        return focusedMapObject != null;
+        return objectInfoPanel != null
+               && objectInfoPanel.gameObject.activeSelf
+               && objectInfoPanel.IsBoundTo(currentObjectInfoTarget);
     }
 
     private PlayerController ResolvePlayerController()
@@ -3023,7 +3447,8 @@ public class PlayerHUD : BagSlot
     private bool IsPointerOverInteractionButtonArea(Vector2 pointerPosition)
     {
         return IsPointerOverInteractionButtonArea(InteractionButton, pointerPosition)
-               || IsPointerOverInteractionButtonArea(DoorInteractionButton, pointerPosition);
+               || IsPointerOverInteractionButtonArea(DoorInteractionButton, pointerPosition)
+               || IsPointerOverInteractionButtonArea(ThrowInteractionButton, pointerPosition);
     }
 
     private static bool IsPointerOverInteractionButtonArea(InteractionButton interactionButton, Vector2 pointerPosition)

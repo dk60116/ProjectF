@@ -9,6 +9,83 @@ using UnityEngine.U2D;
 
 public class ItemDataEditorWindow : EditorWindow
 {
+    internal static class DefinitionCatalog
+    {
+        internal const string AssetFolder = "Assets/Data/Items";
+
+        internal static event Action Changed;
+
+        internal static List<ItemDefinition> LoadCurrent()
+        {
+            List<ItemDefinition> definitions = new List<ItemDefinition>();
+            Fill(definitions, FindItemManagerUncached());
+            return definitions;
+        }
+
+        internal static void Fill(
+            List<ItemDefinition> definitions,
+            ItemManager itemManager)
+        {
+            definitions.Clear();
+            if (itemManager != null && itemManager.ItemDefinitions != null)
+            {
+                for (int i = 0; i < itemManager.ItemDefinitions.Count; i++)
+                {
+                    AppendUniqueDefinition(
+                        definitions,
+                        itemManager.ItemDefinitions[i]);
+                }
+            }
+
+            if (!EditorApplication.isPlaying)
+            {
+                AppendMissingItemDefinitionAssets(definitions);
+            }
+
+            SortDefinitionsById(definitions);
+        }
+
+        internal static int ComputeSignature(
+            IReadOnlyList<ItemDefinition> definitions)
+        {
+            unchecked
+            {
+                int signature = definitions != null ? definitions.Count : 0;
+                for (int i = 0; definitions != null && i < definitions.Count; i++)
+                {
+                    ItemDefinition definition = definitions[i];
+                    signature = signature * 31
+                        + (definition != null ? definition.GetHashCode() : 0);
+                    if (definition == null)
+                    {
+                        continue;
+                    }
+
+                    signature = signature * 31 + definition.id;
+                    signature = signature * 31
+                        + (definition.itemName != null
+                            ? definition.itemName.GetHashCode()
+                            : 0);
+                    signature = signature * 31
+                        + (definition.name != null
+                            ? definition.name.GetHashCode()
+                            : 0);
+                    signature = signature * 31
+                        + (definition.icon != null
+                            ? definition.icon.GetHashCode()
+                            : 0);
+                }
+
+                return signature;
+            }
+        }
+
+        internal static void NotifyChanged()
+        {
+            Changed?.Invoke();
+        }
+    }
+
     private const float SidebarWidth = 260f;
     private const float GiveButtonWidth = 46f;
     private const float ItemListRowHeight = 28f;
@@ -19,8 +96,7 @@ public class ItemDataEditorWindow : EditorWindow
     private const float RectGridPaletteBlockWidth = 78f;
     private const float PlacementCenterGridCellSize = 30f;
     private const float PlacementCenterGridCellSpacing = 4f;
-    private const string ItemDefinitionAssetFolder = "Assets/Data/Items";
-    private const int CurrentCraftingTreeFileVersion = 4;
+    private const string ItemDefinitionAssetFolder = DefinitionCatalog.AssetFolder;
     private const string UiIconAtlasFolder = "Assets/Image/UI/Item";
     private const string UiIconAtlasPath = UiIconAtlasFolder + "/ItemUIIcons.spriteatlas";
     private const string TrainStationItemGuid = "2cbd885291664af429fdc0ef3784d40d";
@@ -32,6 +108,14 @@ public class ItemDataEditorWindow : EditorWindow
         "1944e65739557ca4485c86a1309a15c6",
         "9524753a56ea05540be3c118174151dd",
         "4d68593c4bba3a34487b0f60cff9fd9e"
+    };
+    private static readonly string[] ItemLightModeLabels =
+    {
+        "None",
+        "Always",
+        "Toggle",
+        "Night Only",
+        "Working"
     };
     private static readonly RectGridPaletteEntry[] RectGridPaletteEntries =
     {
@@ -104,7 +188,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 2;
+        public int version = 3;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -119,6 +203,9 @@ public class ItemDataEditorWindow : EditorWindow
         public string portableMaterialAssetPath;
         public string iconAssetPath;
         public List<string> interactionButtonAssetPaths;
+        public string lightMode;
+        public int lightModeValue = -1;
+        public float lightRange = -1f;
         public int size;
         public bool itemFilter;
         public int capacity = -1;
@@ -157,53 +244,6 @@ public class ItemDataEditorWindow : EditorWindow
         public int rectGridHeight;
         public List<RectGridBlockPlacementJsonEntry> rectGridBlocks = new List<RectGridBlockPlacementJsonEntry>();
         public List<InputOutputPairJsonEntry> ioPairs = new List<InputOutputPairJsonEntry>();
-    }
-
-    [Serializable]
-    private sealed class CraftingTreeJsonFile
-    {
-        public string format = "ProjectF.CraftingTree";
-        public int version = 2;
-        public List<CraftingTreeJsonEntry> recipes = new List<CraftingTreeJsonEntry>();
-        public List<CraftingTreeJsonEntry> items = new List<CraftingTreeJsonEntry>();
-        public List<CraftingTreeJsonEntry> entries = new List<CraftingTreeJsonEntry>();
-    }
-
-    [Serializable]
-    private sealed class CraftingTreeJsonEntry
-    {
-        public int itemId = -1;
-        public string itemName = string.Empty;
-        public string definitionAssetPath = string.Empty;
-        public int outputCount = 1;
-        public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
-        public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
-        public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
-    }
-
-    [Serializable]
-    private sealed class CraftingIngredientJsonEntry
-    {
-        public int itemId = -1;
-        public string itemName = string.Empty;
-        public string definitionAssetPath = string.Empty;
-        public int count = 1;
-    }
-
-    [Serializable]
-    private sealed class CraftingMapObjectJsonEntry
-    {
-        public int itemId = -1;
-        public string mapObjectName = string.Empty;
-        public string assetPath = string.Empty;
-    }
-
-    private sealed class CraftingTreeBinaryEntry
-    {
-        public int itemId;
-        public int outputCount = 1;
-        public readonly List<int> requiredMapObjectItemIds = new List<int>();
-        public readonly List<InputOutputJsonEntry> ingredients = new List<InputOutputJsonEntry>();
     }
 
     [Serializable]
@@ -249,7 +289,8 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        Dictionary<int, int> itemIdRemap = BuildCompactItemIdRemap(definitions, orderedDefinitions);
+        CraftingTreeItemIdRemapper.CapturedCraftingTree craftingTreeSnapshot =
+            CraftingTreeItemIdRemapper.CapturePersistedCraftingTree(definitions);
         for (int i = 0; i < orderedDefinitions.Count; i++)
         {
             ItemDefinition definition = orderedDefinitions[i];
@@ -273,7 +314,7 @@ public class ItemDataEditorWindow : EditorWindow
             itemManager.MarkEditorDirty();
         }
 
-        RewriteCraftingTreeWithIdRemap(itemIdRemap, orderedDefinitions);
+        CraftingTreeItemIdRemapper.RewritePersistedCraftingTree(craftingTreeSnapshot, orderedDefinitions);
         WriteItemDataJson(GetDefaultItemDataJsonPath(), orderedDefinitions);
 
         AssetDatabase.SaveAssets();
@@ -281,6 +322,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorSceneManager.SaveOpenScenes();
         CraftingTreeRuntime.ForceReload();
         CraftingTreeEditorWindow.ReloadOpenWindows();
+        DefinitionCatalog.NotifyChanged();
         Debug.Log($"ItemDataEditorWindow: normalized {orderedDefinitions.Count} item IDs and exported item data.");
     }
 
@@ -323,6 +365,7 @@ public class ItemDataEditorWindow : EditorWindow
     {
         InvalidateDefinitionPresentationCache();
         inputOutputTargetKeyCache.Clear();
+        DefinitionCatalog.NotifyChanged();
         Repaint();
     }
 
@@ -974,6 +1017,20 @@ public class ItemDataEditorWindow : EditorWindow
             Selection.activeObject = definition.mapObject.gameObject;
         }
         GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        using (new EditorGUI.DisabledScope(EditorApplication.isPlaying))
+        {
+            GUIContent rebuildContent = new GUIContent(
+                "Rebuild Item",
+                "선택한 아이템만 Assets/Items의 에셋을 기준으로 다시 연결합니다.");
+            if (GUILayout.Button(rebuildContent, GUILayout.Width(110f)))
+            {
+                RebuildItemData(definition);
+            }
+        }
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
     }
@@ -990,6 +1047,8 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty portableMatProperty = serializedObject.FindProperty("portableMat");
         SerializedProperty iconProperty = serializedObject.FindProperty("icon");
         SerializedProperty interactionButtonListProperty = serializedObject.FindProperty("interactionButtonList");
+        SerializedProperty lightModeProperty = serializedObject.FindProperty("lightMode");
+        SerializedProperty lightRangeProperty = serializedObject.FindProperty("lightRange");
         SerializedProperty sizeProperty = serializedObject.FindProperty("size");
         SerializedProperty itemFilterProperty = serializedObject.FindProperty("itemFilter");
         SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
@@ -1027,6 +1086,26 @@ public class ItemDataEditorWindow : EditorWindow
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Interaction", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(interactionButtonListProperty, new GUIContent("Interaction Button List"), true);
+        }
+
+        if (lightModeProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Lighting", EditorStyles.boldLabel);
+            int lightModeIndex = Mathf.Clamp(
+                lightModeProperty.enumValueIndex,
+                0,
+                ItemLightModeLabels.Length - 1);
+            lightModeProperty.enumValueIndex = EditorGUILayout.Popup(
+                "Light Condition",
+                lightModeIndex,
+                ItemLightModeLabels);
+            if (lightModeProperty.enumValueIndex != (int)ItemDefinition.ItemLightMode.None
+                && lightRangeProperty != null)
+            {
+                lightRangeProperty.floatValue = Mathf.Max(0.1f, lightRangeProperty.floatValue);
+                EditorGUILayout.PropertyField(lightRangeProperty, new GUIContent("Light Range"));
+            }
         }
 
         EditorGUILayout.Space(8f);
@@ -1164,7 +1243,12 @@ public class ItemDataEditorWindow : EditorWindow
         if (serializedObject.ApplyModifiedProperties())
         {
             EditorUtility.SetDirty(definition);
+            if (EditorApplication.isPlaying)
+            {
+                ItemLightController.RefreshDefinition(definition);
+            }
             InvalidateDefinitionPresentationCache();
+            DefinitionCatalog.NotifyChanged();
             Repaint();
         }
     }
@@ -2864,6 +2948,7 @@ public class ItemDataEditorWindow : EditorWindow
         AssetDatabase.Refresh();
         InvalidateDefinitionCache();
         EnsureSelection();
+        DefinitionCatalog.NotifyChanged();
         Repaint();
     }
 
@@ -2889,6 +2974,7 @@ public class ItemDataEditorWindow : EditorWindow
         AssetDatabase.Refresh();
         InvalidateDefinitionCache();
         EnsureSelection(GetDefinitions(itemManager));
+        DefinitionCatalog.NotifyChanged();
         Repaint();
     }
 
@@ -2912,7 +2998,45 @@ public class ItemDataEditorWindow : EditorWindow
         AssetDatabase.Refresh();
         InvalidateDefinitionCache();
         EnsureSelection(GetDefinitions(itemManager));
+        DefinitionCatalog.NotifyChanged();
         ShowNotification(new GUIContent($"Item Data rebuilt. Production recipes: {productionMachineRecipeCount}"));
+        Repaint();
+    }
+
+    private void RebuildItemData(ItemDefinition definition)
+    {
+        ItemManager itemManager = FindItemManager();
+        if (itemManager == null)
+        {
+            EditorUtility.DisplayDialog("Item Data", "씬에서 ItemManager를 찾을 수 없습니다.", "OK");
+            EnsureSelection();
+            Repaint();
+            return;
+        }
+
+        if (definition == null)
+        {
+            EditorUtility.DisplayDialog("Item Data", "리빌드할 아이템을 선택하세요.", "OK");
+            return;
+        }
+
+        string displayName = GetDefinitionDisplayName(definition);
+        Undo.RecordObjects(
+            new UnityEngine.Object[] { itemManager, definition },
+            "Rebuild Selected Item Data");
+        if (!itemManager.RebuildItemDefinitionFromAssets(definition, out string errorMessage))
+        {
+            EditorUtility.DisplayDialog("Item Data", errorMessage, "OK");
+            return;
+        }
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        InvalidateDefinitionCache();
+        selectedItemId = definition.id;
+        EnsureSelection(GetDefinitions(itemManager));
+        DefinitionCatalog.NotifyChanged();
+        ShowNotification(new GUIContent($"[{definition.id}] {displayName} rebuilt."));
         Repaint();
     }
 
@@ -3146,41 +3270,6 @@ public class ItemDataEditorWindow : EditorWindow
         return orderedDefinitions;
     }
 
-    private static Dictionary<int, int> BuildCompactItemIdRemap(
-        List<ItemDefinition> sourceDefinitions,
-        List<ItemDefinition> orderedDefinitions)
-    {
-        Dictionary<int, int> remap = new Dictionary<int, int>();
-        for (int i = 0; i < orderedDefinitions.Count; i++)
-        {
-            ItemDefinition definition = orderedDefinitions[i];
-            if (definition != null && definition.id >= 0)
-            {
-                remap[definition.id] = i;
-            }
-        }
-
-        if (sourceDefinitions != null)
-        {
-            for (int i = 0; i < sourceDefinitions.Count; i++)
-            {
-                ItemDefinition definition = sourceDefinitions[i];
-                if (definition == null || definition.id < 0 || remap.ContainsKey(definition.id))
-                {
-                    continue;
-                }
-
-                int compactId = orderedDefinitions.IndexOf(definition);
-                if (compactId >= 0)
-                {
-                    remap[definition.id] = compactId;
-                }
-            }
-        }
-
-        return remap;
-    }
-
     private static void RenameItemDefinitionAssets(List<ItemDefinition> definitions)
     {
         if (definitions == null || definitions.Count == 0)
@@ -3263,236 +3352,6 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private static void RewriteCraftingTreeWithIdRemap(
-        Dictionary<int, int> itemIdRemap,
-        List<ItemDefinition> definitions)
-    {
-        List<CraftingTreeBinaryEntry> entries = ReadCraftingTreeBinary(GetCraftingTreeAssetPath());
-        if (entries.Count == 0)
-        {
-            entries = ReadCraftingTreeBinary(GetCraftingTreeResourcesPath());
-        }
-
-        if (entries.Count == 0)
-        {
-            return;
-        }
-
-        Dictionary<int, CraftingTreeBinaryEntry> remappedEntries = new Dictionary<int, CraftingTreeBinaryEntry>();
-        for (int i = 0; i < entries.Count; i++)
-        {
-            CraftingTreeBinaryEntry sourceEntry = entries[i];
-            int targetItemId = RemapItemId(sourceEntry.itemId, itemIdRemap);
-            if (targetItemId < 0)
-            {
-                continue;
-            }
-
-            CraftingTreeBinaryEntry targetEntry = new CraftingTreeBinaryEntry
-            {
-                itemId = targetItemId,
-                outputCount = Mathf.Max(1, sourceEntry.outputCount)
-            };
-
-            HashSet<int> seenMapObjectIds = new HashSet<int>();
-            for (int mapObjectIndex = 0; mapObjectIndex < sourceEntry.requiredMapObjectItemIds.Count; mapObjectIndex++)
-            {
-                int mapObjectId = RemapItemId(sourceEntry.requiredMapObjectItemIds[mapObjectIndex], itemIdRemap);
-                if (mapObjectId >= 0 && seenMapObjectIds.Add(mapObjectId))
-                {
-                    targetEntry.requiredMapObjectItemIds.Add(mapObjectId);
-                }
-            }
-
-            for (int ingredientIndex = 0; ingredientIndex < sourceEntry.ingredients.Count; ingredientIndex++)
-            {
-                InputOutputJsonEntry ingredient = sourceEntry.ingredients[ingredientIndex];
-                int ingredientId = RemapItemId(ingredient.id, itemIdRemap);
-                if (ingredientId < 0)
-                {
-                    continue;
-                }
-
-                targetEntry.ingredients.Add(new InputOutputJsonEntry
-                {
-                    id = ingredientId,
-                    count = Mathf.Max(1, ingredient.count)
-                });
-            }
-
-            remappedEntries[targetItemId] = targetEntry;
-        }
-
-        List<CraftingTreeBinaryEntry> sortedEntries = new List<CraftingTreeBinaryEntry>(remappedEntries.Values);
-        sortedEntries.Sort((left, right) => left.itemId.CompareTo(right.itemId));
-        WriteCraftingTreeBinary(GetCraftingTreeAssetPath(), sortedEntries);
-        WriteCraftingTreeBinary(GetCraftingTreeResourcesPath(), sortedEntries);
-        WriteCraftingTreeJson(GetCraftingTreeJsonPath(), sortedEntries, definitions);
-    }
-
-    private static List<CraftingTreeBinaryEntry> ReadCraftingTreeBinary(string path)
-    {
-        List<CraftingTreeBinaryEntry> entries = new List<CraftingTreeBinaryEntry>();
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return entries;
-        }
-
-        using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read))
-        using (BinaryReader reader = new BinaryReader(stream))
-        {
-            int version = reader.ReadInt32();
-            if (version != CurrentCraftingTreeFileVersion)
-            {
-                return entries;
-            }
-
-            int recipeCount = Mathf.Max(0, reader.ReadInt32());
-            for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
-            {
-                CraftingTreeBinaryEntry entry = new CraftingTreeBinaryEntry
-                {
-                    itemId = reader.ReadInt32()
-                };
-
-                int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
-                for (int mapObjectIndex = 0; mapObjectIndex < mapObjectCount; mapObjectIndex++)
-                {
-                    entry.requiredMapObjectItemIds.Add(reader.ReadInt32());
-                }
-
-                entry.outputCount = Mathf.Max(1, reader.ReadInt32());
-                int ingredientCount = Mathf.Max(0, reader.ReadInt32());
-                for (int ingredientIndex = 0; ingredientIndex < ingredientCount; ingredientIndex++)
-                {
-                    entry.ingredients.Add(new InputOutputJsonEntry
-                    {
-                        id = reader.ReadInt32(),
-                        count = Mathf.Max(1, reader.ReadInt32())
-                    });
-                }
-
-                entries.Add(entry);
-            }
-        }
-
-        return entries;
-    }
-
-    private static void WriteCraftingTreeBinary(string path, List<CraftingTreeBinaryEntry> entries)
-    {
-        EnsureParentFolder(path);
-        using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write))
-        using (BinaryWriter writer = new BinaryWriter(stream))
-        {
-            writer.Write(CurrentCraftingTreeFileVersion);
-            writer.Write(entries != null ? entries.Count : 0);
-            if (entries == null)
-            {
-                return;
-            }
-
-            for (int i = 0; i < entries.Count; i++)
-            {
-                CraftingTreeBinaryEntry entry = entries[i];
-                writer.Write(entry.itemId);
-                writer.Write(entry.requiredMapObjectItemIds.Count);
-                for (int mapObjectIndex = 0; mapObjectIndex < entry.requiredMapObjectItemIds.Count; mapObjectIndex++)
-                {
-                    writer.Write(entry.requiredMapObjectItemIds[mapObjectIndex]);
-                }
-
-                writer.Write(Mathf.Max(1, entry.outputCount));
-                writer.Write(entry.ingredients.Count);
-                for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
-                {
-                    InputOutputJsonEntry ingredient = entry.ingredients[ingredientIndex];
-                    writer.Write(ingredient.id);
-                    writer.Write(Mathf.Max(1, ingredient.count));
-                }
-            }
-        }
-    }
-
-    private static void WriteCraftingTreeJson(
-        string path,
-        List<CraftingTreeBinaryEntry> entries,
-        List<ItemDefinition> definitions)
-    {
-        CraftingTreeJsonFile file = new CraftingTreeJsonFile();
-        if (entries != null)
-        {
-            for (int i = 0; i < entries.Count; i++)
-            {
-                CraftingTreeJsonEntry entry = BuildCraftingTreeJsonEntry(entries[i], definitions);
-                file.recipes.Add(entry);
-                file.items.Add(entry);
-                file.entries.Add(entry);
-            }
-        }
-
-        EnsureParentFolder(path);
-        File.WriteAllText(path, JsonUtility.ToJson(file, true));
-    }
-
-    private static CraftingTreeJsonEntry BuildCraftingTreeJsonEntry(
-        CraftingTreeBinaryEntry sourceEntry,
-        List<ItemDefinition> definitions)
-    {
-        ItemDefinition targetDefinition = FindDefinitionById(definitions, sourceEntry.itemId);
-        CraftingTreeJsonEntry entry = new CraftingTreeJsonEntry
-        {
-            itemId = sourceEntry.itemId,
-            itemName = GetDefinitionDisplayName(targetDefinition),
-            definitionAssetPath = AssetDatabase.GetAssetPath(targetDefinition),
-            outputCount = Mathf.Max(1, sourceEntry.outputCount)
-        };
-
-        for (int i = 0; i < sourceEntry.requiredMapObjectItemIds.Count; i++)
-        {
-            CraftingMapObjectJsonEntry mapObjectEntry = BuildCraftingMapObjectJsonEntry(
-                sourceEntry.requiredMapObjectItemIds[i],
-                definitions);
-            entry.craftingMapObjects.Add(mapObjectEntry);
-            entry.requiredMapObjects.Add(mapObjectEntry);
-        }
-
-        for (int i = 0; i < sourceEntry.ingredients.Count; i++)
-        {
-            InputOutputJsonEntry sourceIngredient = sourceEntry.ingredients[i];
-            ItemDefinition ingredientDefinition = FindDefinitionById(definitions, sourceIngredient.id);
-            entry.ingredients.Add(new CraftingIngredientJsonEntry
-            {
-                itemId = sourceIngredient.id,
-                itemName = GetDefinitionDisplayName(ingredientDefinition),
-                definitionAssetPath = AssetDatabase.GetAssetPath(ingredientDefinition),
-                count = Mathf.Max(1, sourceIngredient.count)
-            });
-        }
-
-        return entry;
-    }
-
-    private static CraftingMapObjectJsonEntry BuildCraftingMapObjectJsonEntry(
-        int itemId,
-        List<ItemDefinition> definitions)
-    {
-        ItemDefinition definition = FindDefinitionById(definitions, itemId);
-        MapObject mapObject = definition != null ? definition.mapObject : null;
-        GameObject prefabRoot = null;
-        if (mapObject != null)
-        {
-            prefabRoot = mapObject.transform.root != null ? mapObject.transform.root.gameObject : mapObject.gameObject;
-        }
-
-        return new CraftingMapObjectJsonEntry
-        {
-            itemId = itemId,
-            mapObjectName = prefabRoot != null ? prefabRoot.name : GetDefinitionDisplayName(definition),
-            assetPath = prefabRoot != null ? AssetDatabase.GetAssetPath(prefabRoot) : string.Empty
-        };
-    }
-
     private static void WriteItemDataJson(string path, List<ItemDefinition> definitions)
     {
         ItemDataJsonFile file = new ItemDataJsonFile();
@@ -3536,18 +3395,6 @@ public class ItemDataEditorWindow : EditorWindow
             : AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
     }
 
-    private static int RemapItemId(int itemId, Dictionary<int, int> itemIdRemap)
-    {
-        if (itemId < 0)
-        {
-            return -1;
-        }
-
-        return itemIdRemap != null && itemIdRemap.TryGetValue(itemId, out int remappedId)
-            ? remappedId
-            : itemId;
-    }
-
     private static string GetExpectedItemDefinitionAssetPath(ItemDefinition definition)
     {
         string displayName = GetDefinitionDisplayName(definition);
@@ -3577,21 +3424,6 @@ public class ItemDataEditorWindow : EditorWindow
     private static string GetDefaultItemDataJsonPath()
     {
         return Path.Combine(Application.dataPath, "Data", "Items", "item_data.json");
-    }
-
-    private static string GetCraftingTreeAssetPath()
-    {
-        return Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.bytes");
-    }
-
-    private static string GetCraftingTreeResourcesPath()
-    {
-        return Path.Combine(Application.dataPath, "Resources", "Data", "CraftingTree", "crafting_tree.bytes");
-    }
-
-    private static string GetCraftingTreeJsonPath()
-    {
-        return Path.Combine(Application.dataPath, "Data", "CraftingTree", "crafting_tree.json");
     }
 
     private static void EnsureParentFolder(string path)
@@ -3718,6 +3550,9 @@ public class ItemDataEditorWindow : EditorWindow
             portableMeshAssetPath = AssetDatabase.GetAssetPath(definition.portableMesh),
             portableMaterialAssetPath = AssetDatabase.GetAssetPath(definition.portableMat),
             iconAssetPath = AssetDatabase.GetAssetPath(definition.icon),
+            lightMode = definition.lightMode.ToString(),
+            lightModeValue = (int)definition.lightMode,
+            lightRange = definition.LightRange,
             size = Mathf.Max(0, (int)definition.size),
             itemFilter = definition.itemFilter,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
@@ -3927,6 +3762,14 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         definition.size = (uint)Mathf.Max(0, entry.size);
+        definition.lightMode = ParseItemLightMode(
+            entry.lightMode,
+            entry.lightModeValue,
+            definition.lightMode);
+        if (entry.lightRange > 0f)
+        {
+            definition.lightRange = Mathf.Max(0.1f, entry.lightRange);
+        }
         definition.itemFilter = entry.itemFilter;
         if (entry.capacity > 0)
         {
@@ -3996,6 +3839,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         ApplyMapObjectJson(definition.mapObject, entry, definition, definitions);
+        if (EditorApplication.isPlaying)
+        {
+            ItemLightController.RefreshDefinition(definition);
+        }
         EditorUtility.SetDirty(definition);
     }
 
@@ -4671,21 +4518,7 @@ public class ItemDataEditorWindow : EditorWindow
             return cachedDefinitions;
         }
 
-        cachedDefinitions.Clear();
-        if (itemManager != null && itemManager.ItemDefinitions != null)
-        {
-            for (int i = 0; i < itemManager.ItemDefinitions.Count; i++)
-            {
-                AppendUniqueDefinition(cachedDefinitions, itemManager.ItemDefinitions[i]);
-            }
-        }
-
-        if (!EditorApplication.isPlaying)
-        {
-            AppendMissingItemDefinitionAssets(cachedDefinitions);
-        }
-
-        SortDefinitionsById(cachedDefinitions);
+        DefinitionCatalog.Fill(cachedDefinitions, itemManager);
         cachedDefinitionsItemManager = itemManager;
         cachedDefinitionsItemManagerCount = itemManagerDefinitionCount;
         definitionsCacheDirty = false;
@@ -4761,6 +4594,26 @@ public class ItemDataEditorWindow : EditorWindow
 
         SortDefinitionsById(missingDefinitions);
         definitions.AddRange(missingDefinitions);
+    }
+
+    private static ItemDefinition.ItemLightMode ParseItemLightMode(
+        string rawValue,
+        int rawEnumValue,
+        ItemDefinition.ItemLightMode fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(rawValue)
+            && Enum.TryParse(
+                rawValue,
+                true,
+                out ItemDefinition.ItemLightMode parsedMode))
+        {
+            return parsedMode;
+        }
+
+        return rawEnumValue >= 0
+               && Enum.IsDefined(typeof(ItemDefinition.ItemLightMode), rawEnumValue)
+            ? (ItemDefinition.ItemLightMode)rawEnumValue
+            : fallback;
     }
 
     private static void AppendUniqueDefinition(List<ItemDefinition> definitions, ItemDefinition definition)
