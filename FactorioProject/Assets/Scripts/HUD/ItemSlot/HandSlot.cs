@@ -2,15 +2,6 @@ using UnityEngine;
 
 public class HandSlot : BagSlot
 {
-    private const int MirroredBagSlotCraftingCapacity = 9;
-
-    protected override int GetCraftingDirectionSign()
-    {
-        return -base.GetCraftingDirectionSign();
-    }
-
-    protected override int MinimumCraftingSlotCapacity => MirroredBagSlotCraftingCapacity;
-
     protected override bool AllowPickupOnClick => true;
 
     protected override bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRange, bool allowFocusedConveyorPickup = true)

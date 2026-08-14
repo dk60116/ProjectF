@@ -762,19 +762,7 @@ public partial class BlockStateStore : MonoBehaviour
             }
         }
 
-        if (mapSaveData.installations != null)
-        {
-            for (int i = 0; i < mapSaveData.installations.Count; i++)
-            {
-                InstallationSaveEntry entry = mapSaveData.installations[i];
-                if (entry?.state == null)
-                {
-                    continue;
-                }
-
-                StoreInstallationState(entry.state);
-            }
-        }
+        ApplyInstallationSaveStates(mapSaveData.installations);
 
         if (mapSaveData.conveyorItems != null)
         {
@@ -1127,6 +1115,58 @@ public partial class BlockStateStore : MonoBehaviour
             savedBackgroundInstallationStorageKeys.Remove(duplicateKey);
             world?.RemoveInstallation(duplicateKey);
         }
+    }
+
+    private void ApplyInstallationSaveStates(IReadOnlyList<InstallationSaveEntry> entries)
+    {
+        if (entries == null || entries.Count <= 0)
+        {
+            return;
+        }
+
+        Dictionary<Vector2Int, InstallationSaveState> newestWallStatesByAnchor = null;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            InstallationSaveState state = entries[i]?.state;
+            if (state == null)
+            {
+                continue;
+            }
+
+            if (!IsWallInstallationState(state))
+            {
+                StoreInstallationState(state);
+                continue;
+            }
+
+            newestWallStatesByAnchor ??= new Dictionary<Vector2Int, InstallationSaveState>();
+            if (!newestWallStatesByAnchor.TryGetValue(state.anchorCoordinate, out InstallationSaveState existingState)
+                || ShouldPreferLoadedWallState(state, existingState))
+            {
+                newestWallStatesByAnchor[state.anchorCoordinate] = state;
+            }
+        }
+
+        if (newestWallStatesByAnchor == null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in newestWallStatesByAnchor)
+        {
+            InstallationSaveState canonicalState = pair.Value.Clone();
+            canonicalState.hasStorageKey = false;
+            canonicalState.storageKey = default;
+            StoreInstallationState(canonicalState);
+        }
+    }
+
+    private static bool ShouldPreferLoadedWallState(
+        InstallationSaveState incomingState,
+        InstallationSaveState existingState)
+    {
+        return existingState == null
+               || incomingState.placementSequence >= existingState.placementSequence;
     }
 
     private static bool RequiresBackgroundInstallationWake(InstallationSaveState state)
@@ -1554,6 +1594,33 @@ public partial class BlockStateStore : MonoBehaviour
 
     private static bool IsTrainInstallationState(InstallationSaveState state)
     {
+        if (!TryResolveInstallationMapObject(state, out MapObject mapObject))
+        {
+            return false;
+        }
+
+        return mapObject is Train
+               || mapObject.GetComponent<Train>() != null
+               || mapObject.GetComponentInChildren<Train>(true) != null;
+    }
+
+    private static bool IsWallInstallationState(InstallationSaveState state)
+    {
+        if (!TryResolveInstallationMapObject(state, out MapObject mapObject))
+        {
+            return false;
+        }
+
+        return mapObject is Wall
+               || mapObject.GetComponent<Wall>() != null
+               || mapObject.GetComponentInChildren<Wall>(true) != null;
+    }
+
+    private static bool TryResolveInstallationMapObject(
+        InstallationSaveState state,
+        out MapObject mapObject)
+    {
+        mapObject = null;
         if (state == null || state.itemId < 0)
         {
             return false;
@@ -1573,9 +1640,8 @@ public partial class BlockStateStore : MonoBehaviour
                 continue;
             }
 
-            return definition.mapObject is Train
-                   || definition.mapObject.GetComponent<Train>() != null
-                   || definition.mapObject.GetComponentInChildren<Train>(true) != null;
+            mapObject = definition.mapObject;
+            return true;
         }
 
         return false;

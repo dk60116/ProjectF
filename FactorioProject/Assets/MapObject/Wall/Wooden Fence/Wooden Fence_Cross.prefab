@@ -61,7 +61,7 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 4300000, guid: f7f63782a9e473e4da7f43e171f4192f, type: 2}
     - target: {fileID: 4909268776646986644, guid: eb53ce8c8d2c44bb9b09ea4c58395c34, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: 42872a1b7ef6da54abf30a525ddd4364, type: 2}
     m_RemovedComponents: []
@@ -107,7 +107,7 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1486337113364116701, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
-      propertyPath: m_Materials.Array.data[0]
+      propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
     - target: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}
@@ -204,17 +204,24 @@ MonoBehaviour:
     mapSizeY: 1
     centerCellX: 0
     centerCellY: 0
-  multiFocusMode: 1
+  multiFocusMode: 2
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}
-  mapFilter: 1
+  particleEffect: {fileID: 0}
+  mapFilter: 257
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
   runtimeQuarterTurns: 0
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
+  excludeFromTerrainPersistence: 0
+  storedFluidLiters: 0
+  storedFluidItemId: -1
+  storedFluidTemperatureCelsius: 20
+  powerLinePoint: {fileID: 0}
   straightVariantPrefab: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
   cornerVariantPrefab: {fileID: 7796861901037811338, guid: 238954f228bb70940a3d17ec0d6f67f3, type: 3}
   triCornerVariantPrefab: {fileID: 7796861901037811338, guid: 926071467c9a81d409bc3b278de1e466, type: 3}

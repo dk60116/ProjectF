@@ -368,17 +368,22 @@ public class AreaMarkerPool : MonoBehaviour
 
 public class InputOutputModuleAreaMarkerController : MonoBehaviour
 {
+    // Floor tiles rise roughly 0.05 units above the terrain. Keep markers physically
+    // above that surface so normal depth testing still hides them behind real objects.
+    private const float DefaultVerticalOffset = 0.08f;
+
     private readonly List<AreaMarker> activeMarkers = new List<AreaMarker>();
 
     [SerializeField, Min(0f)]
     private float visibleRange = 5f;
 
     [SerializeField, Min(0f)]
-    private float verticalOffset = 0.03f;
+    private float verticalOffset = DefaultVerticalOffset;
 
     private AreaMarkerPool areaMarkerPool;
     private bool areMarkersVisible = true;
     private bool forceMarkerVisibility;
+    private bool selectionVisibilityRequested;
     private int markerSortingOrderOffset;
     private bool renderMarkersOnTop;
     private float markerVerticalOffset;
@@ -430,6 +435,22 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
     public bool ShouldShowLinkedUi()
     {
         return ShouldMarkersBeVisible();
+    }
+
+    public void SetSelectionVisibilityRequested(bool requested)
+    {
+        if (selectionVisibilityRequested == requested)
+        {
+            if (requested)
+            {
+                RefreshMarkerVisibility(true);
+            }
+
+            return;
+        }
+
+        selectionVisibilityRequested = requested;
+        RefreshMarkerVisibility(true);
     }
 
     private void Update()
@@ -600,6 +621,11 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         }
 
         if (forceMarkerVisibility)
+        {
+            return true;
+        }
+
+        if (selectionVisibilityRequested)
         {
             return true;
         }

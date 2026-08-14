@@ -30,8 +30,12 @@ public class ItemDefinition : ScriptableObject
     public ItemLightMode lightMode = ItemLightMode.None;
     [Min(0.1f)]
     public float lightRange = DefaultItemLightRange;
+    [Min(0.01f)]
+    public float lightIntensityMultiplier = 1f;
     public uint size;
     public bool itemFilter;
+    [Tooltip("부모 I/O 모듈이 설치되어 있을 때 이 아이템으로 업그레이드할 수 있는지 여부입니다.")]
+    public bool upgradeable = true;
     [Min(1)]
     public int capacity = 10;
     public bool storesFluid;
@@ -55,6 +59,7 @@ public class ItemDefinition : ScriptableObject
 
     public float CraftingDurationSeconds => craftingDurationSeconds > 0f ? craftingDurationSeconds : DefaultCraftingDurationSeconds;
     public float LightRange => Mathf.Max(0.1f, lightRange);
+    public float LightIntensityMultiplier => lightIntensityMultiplier > 0f ? lightIntensityMultiplier : 1f;
     public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
     public float ElectricUseWatts => ResolveElectricUseWatts(this);
 
@@ -130,6 +135,7 @@ public class ItemDefinition : ScriptableObject
         utilityPoleConnectionRadius = Mathf.Max(0, utilityPoleConnectionRadius);
         utilityPoleSupplyRadius = Mathf.Max(0, utilityPoleSupplyRadius);
         lightRange = Mathf.Max(0.1f, lightRange);
+        lightIntensityMultiplier = Mathf.Max(0.01f, lightIntensityMultiplier);
     }
 #endif
 }
@@ -412,7 +418,7 @@ public static class ItemDefinitionLookup
         return ResolveConveyorBelt2F(definitions);
     }
 
-    private static bool IsInstallationDefinition(ItemDefinition definition)
+    public static bool IsInstallationDefinition(ItemDefinition definition)
     {
         if (definition == null || definition.mapObject == null)
         {

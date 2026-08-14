@@ -12,10 +12,24 @@ public class InteractionButton : MonoBehaviour
 
     private Button cachedButton;
     private UnityAction cachedClickAction;
+    private RectTransform cachedRectTransform;
+    private float layoutWidth;
+    private bool hasLayoutWidth;
+
+    public float LayoutWidth
+    {
+        get
+        {
+            CacheLayoutWidth();
+            return layoutWidth;
+        }
+    }
 
     private void Awake()
     {
         cachedButton = GetComponent<Button>();
+        cachedRectTransform = transform as RectTransform;
+        CacheLayoutWidth();
         ResolveIcon();
         SetVisible(false);
     }
@@ -94,5 +108,28 @@ public class InteractionButton : MonoBehaviour
         {
             cachedButton.onClick.AddListener(cachedClickAction);
         }
+    }
+
+    private void CacheLayoutWidth()
+    {
+        if (hasLayoutWidth)
+        {
+            return;
+        }
+
+        cachedRectTransform ??= transform as RectTransform;
+        if (cachedRectTransform == null)
+        {
+            return;
+        }
+
+        float resolvedWidth = cachedRectTransform.rect.width;
+        if (resolvedWidth <= 0f)
+        {
+            return;
+        }
+
+        layoutWidth = resolvedWidth;
+        hasLayoutWidth = true;
     }
 }

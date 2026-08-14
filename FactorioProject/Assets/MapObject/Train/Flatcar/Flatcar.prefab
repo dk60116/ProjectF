@@ -177,7 +177,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Flatcar
-  objId: 57
+  objId: 62
   itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -190,7 +190,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 165
+  mapFilter: 421
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}

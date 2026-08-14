@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_22_Mortor
   m_EditorClassIdentifier: 
   itemName: Mortor
-  id: 24
+  id: 27
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9586cb29a055bf546a2af7d7e3224302, type: 2}
   portableMat: {fileID: 2100000, guid: bef0d89290a73a64d97713298c4dd1a0, type: 2}
@@ -21,6 +21,7 @@ MonoBehaviour:
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

@@ -61,6 +61,7 @@ public class PlayerCamera : MonoBehaviour
     private float orthographicZoomVelocity;
     private bool hasInitializedDistance;
     private bool hasInitializedOrthographicSize;
+    private bool hasInitializedBoxZoomVisibility;
     private bool freeCameraEnabled;
     private bool hasSavedFreeCameraProjection;
     private bool savedCameraOrthographic;
@@ -114,11 +115,14 @@ public class PlayerCamera : MonoBehaviour
 
     private void LateUpdate()
     {
+        ItemLightController.UpdateDisplayLightGlobals(ResolveDisplayLightingFocusPosition());
+
         if (freeCameraEnabled)
         {
             EnsureCameraCached();
             ApplyFreeCameraProjectionState();
             HandleFreeCameraInput();
+            RefreshBoxCountTextZoomVisibility();
             return;
         }
 
@@ -152,6 +156,7 @@ public class PlayerCamera : MonoBehaviour
         EnsureOrthographicSizeInitialized();
         HandleZoomInput();
         UpdateZoom();
+        RefreshBoxCountTextZoomVisibility();
 
         transform.rotation = FixedRotation;
         transform.position = focusPoint - FixedForward * followDistance;
@@ -271,6 +276,21 @@ public class PlayerCamera : MonoBehaviour
         return angle > 180f ? angle - 360f : angle;
     }
 
+    private Vector3 ResolveDisplayLightingFocusPosition()
+    {
+        if (focusTarget != null)
+        {
+            return focusTarget.position + focusOffset;
+        }
+
+        if (target != null)
+        {
+            return target.position + focusOffset;
+        }
+
+        return transform.position;
+    }
+
     private void ResolveTarget()
     {
         if (GameManager.Instance != null && GameManager.Instance.Player != null)
@@ -332,6 +352,28 @@ public class PlayerCamera : MonoBehaviour
         }
 
         UpdateFollowDistance();
+    }
+
+    private void RefreshBoxCountTextZoomVisibility()
+    {
+        if (cachedCamera == null)
+        {
+            return;
+        }
+
+        float normalizedZoom = cachedCamera.orthographic
+            ? Mathf.InverseLerp(
+                Mathf.Max(0.1f, minOrthographicSize),
+                Mathf.Max(minOrthographicSize, maxOrthographicSize),
+                cachedCamera.orthographicSize)
+            : Mathf.InverseLerp(
+                Mathf.Max(0.1f, minFollowDistance),
+                Mathf.Max(minFollowDistance, maxFollowDistance),
+                followDistance);
+        BoxObject.RefreshCountTextZoomVisibility(
+            normalizedZoom,
+            !hasInitializedBoxZoomVisibility);
+        hasInitializedBoxZoomVisibility = true;
     }
 
     private void UpdateFollowDistance()

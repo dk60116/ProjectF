@@ -21,6 +21,7 @@ public class ItemManager : MonoBehaviour
         public Sprite icon;
         public ItemDefinition.ItemLightMode lightMode;
         public float lightRange;
+        public float lightIntensityMultiplier;
         public int size;
     }
 
@@ -80,6 +81,7 @@ public class ItemManager : MonoBehaviour
                         icon = definition.icon,
                         lightMode = definition.lightMode,
                         lightRange = definition.LightRange,
+                        lightIntensityMultiplier = definition.LightIntensityMultiplier,
                         size = (int)definition.size
                     };
                     return true;
@@ -154,7 +156,12 @@ public class ItemManager : MonoBehaviour
     [ContextMenu("Rebuild Items From Assets (Definitions)")]
     public void RebuildItemDefinitionsFromAssets()
     {
-        RebuildItemsFromAssetFolders();
+        RebuildItemsFromAssetFolders(null);
+    }
+
+    public void RebuildItemDefinitionsFromAssets(Action<string, float> reportProgress)
+    {
+        RebuildItemsFromAssetFolders(reportProgress);
     }
 
     [ContextMenu("Migrate Item + Resource Definitions")]
@@ -167,7 +174,7 @@ public class ItemManager : MonoBehaviour
 
     public void RebuildItemsFromAssets()
     {
-        RebuildItemsFromAssetFolders();
+        RebuildItemsFromAssetFolders(null);
     }
 
     public bool RebuildItemDefinitionFromAssets(ItemDefinition definition, out string errorMessage)
@@ -186,18 +193,18 @@ public class ItemManager : MonoBehaviour
         }
 
         string definitionName = GetItemDefinitionLookupName(definition);
-        Dictionary<string, string> itemFolderLookup = BuildItemFolderLookup();
-        string itemFolder = GetItemFolderForName(definitionName, itemFolderLookup);
-        if (string.IsNullOrWhiteSpace(itemFolder))
+        Dictionary<string, List<string>> itemFolderLookup = BuildItemFolderLookup();
+        List<string> itemFolders = GetItemFoldersForName(definitionName, itemFolderLookup);
+        if (itemFolders == null || itemFolders.Count == 0)
         {
             errorMessage = $"Assets/Items에서 '{definitionName}'에 대응하는 아이템 폴더를 찾지 못했습니다.";
             return false;
         }
 
-        string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
+        string itemName = ResolveItemName(itemFolders[0], Path.GetFileName(itemFolders[0]));
         if (string.IsNullOrWhiteSpace(itemName))
         {
-            errorMessage = $"'{itemFolder}'에서 아이템 이름을 확인할 수 없습니다.";
+            errorMessage = $"'{itemFolders[0]}'에서 아이템 이름을 확인할 수 없습니다.";
             return false;
         }
 
@@ -207,8 +214,8 @@ public class ItemManager : MonoBehaviour
         ItemSet previousItem = hasPreviousItem
             ? items[itemIndex]
             : CreateItemSetFallback(definition, itemName);
-        ItemSet rebuiltItem = BuildItemSetFromAssetFolder(
-            itemFolder,
+        ItemSet rebuiltItem = BuildItemSetFromAssetFolders(
+            itemFolders,
             itemName,
             definition.id,
             hasPreviousItem,
@@ -233,8 +240,9 @@ public class ItemManager : MonoBehaviour
         return true;
     }
 
-    private void RebuildItemsFromAssetFolders()
+    private void RebuildItemsFromAssetFolders(Action<string, float> reportProgress)
     {
+        ReportRebuildProgress(reportProgress, "아이템 폴더 검색 중...", 0f);
         if (itemDefinitions == null)
         {
             itemDefinitions = new List<ItemDefinition>();
@@ -246,21 +254,38 @@ public class ItemManager : MonoBehaviour
         }
 
         Dictionary<string, ItemSet> previousItemsByName = BuildItemSetLookupByName(items);
-        List<string> itemFolders = CollectItemFolderPaths();
-        Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemFolders, previousItemsByName);
+        Dictionary<string, List<string>> itemFolderLookup = BuildItemFolderLookup();
+        List<string> itemNames = new List<string>(itemFolderLookup.Keys);
+        itemNames.Sort(StringComparer.OrdinalIgnoreCase);
+        ReportRebuildProgress(reportProgress, $"아이템 목록 분석 중... ({itemNames.Count}개)", 0.08f);
+        Dictionary<string, int> preservedIdsByItemName = BuildPreservedItemIds(itemNames, previousItemsByName);
         Dictionary<string, ItemDefinition> existingDefinitionsByName = BuildExistingItemDefinitionLookupByName();
         HashSet<int> usedIds = new HashSet<int>(preservedIdsByItemName.Values);
         HashSet<int> assignedIds = new HashSet<int>();
 
         List<ItemSet> rebuiltItems = new List<ItemSet>();
 
-        for (int i = 0; i < itemFolders.Count; i++)
+        for (int i = 0; i < itemNames.Count; i++)
         {
-            string itemFolder = itemFolders[i];
-            string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
-            if (string.IsNullOrWhiteSpace(itemName))
+            string itemName = itemNames[i];
+            float itemProgress = itemNames.Count > 0 ? (float)i / itemNames.Count : 1f;
+            ReportRebuildProgress(
+                reportProgress,
+                $"아이템 리빌드 중 ({i + 1}/{itemNames.Count}): {itemName}",
+                Mathf.Lerp(0.12f, 0.58f, itemProgress));
+            if (string.IsNullOrWhiteSpace(itemName)
+                || !itemFolderLookup.TryGetValue(itemName, out List<string> itemFolders)
+                || itemFolders == null
+                || itemFolders.Count == 0)
             {
                 continue;
+            }
+
+            if (itemFolders.Count > 1)
+            {
+                Debug.LogWarning(
+                    $"ItemManager: '{itemName}' resolves from multiple asset folders and will be rebuilt as one item: "
+                    + string.Join(", ", itemFolders));
             }
 
             bool hasPreviousItem = previousItemsByName.TryGetValue(itemName, out ItemSet previousItem);
@@ -273,8 +298,8 @@ public class ItemManager : MonoBehaviour
             usedIds.Add(itemId);
             assignedIds.Add(itemId);
 
-            rebuiltItems.Add(BuildItemSetFromAssetFolder(
-                itemFolder,
+            rebuiltItems.Add(BuildItemSetFromAssetFolders(
+                itemFolders,
                 itemName,
                 itemId,
                 hasPreviousItem,
@@ -284,30 +309,81 @@ public class ItemManager : MonoBehaviour
 
         SortItemSetsByIdThenName(rebuiltItems);
         items = rebuiltItems;
-        RecreateItemDefinitionsFromItems(rebuiltItems);
+        RecreateItemDefinitionsFromItems(
+            rebuiltItems,
+            itemFolderLookup,
+            (message, progress) => ReportRebuildProgress(
+                reportProgress,
+                message,
+                Mathf.Lerp(0.58f, 0.86f, progress)));
         SortItemDefinitionsById(itemDefinitions);
+        ReportRebuildProgress(reportProgress, "리소스 Definition 동기화 중...", 0.88f);
         MigrateResourceDefinitionsFromResources();
+        ReportRebuildProgress(reportProgress, "Terrain 리소스 연결 중...", 0.96f);
         SyncTerrainGeneratorResourceDefinitions();
         MarkEditorDirty();
+        ReportRebuildProgress(reportProgress, "아이템 데이터 리빌드 완료", 1f);
     }
 
-    private static ItemSet BuildItemSetFromAssetFolder(
-        string itemFolder,
+    private static void ReportRebuildProgress(
+        Action<string, float> reportProgress,
+        string message,
+        float progress)
+    {
+        reportProgress?.Invoke(message, Mathf.Clamp01(progress));
+    }
+
+    private static ItemSet BuildItemSetFromAssetFolders(
+        IReadOnlyList<string> itemFolders,
         string itemName,
         int itemId,
         bool hasPreviousItem,
         ItemSet previousItem,
         ItemDefinition existingDefinition)
     {
-        PropObj propObject = FindPropObjInFolder(itemFolder, out GameObject prefabRoot);
-        ResolvePortableAssets(itemFolder, prefabRoot, out Mesh portableMesh, out Material portableMaterial);
-        TryOverridePortableAssets(itemName, itemFolder, prefabRoot, ref portableMesh, ref portableMaterial);
+        PropObj propObject = null;
+        GameObject prefabRoot = null;
+        Mesh portableMesh = null;
+        Material portableMaterial = null;
+        Sprite icon = existingDefinition != null
+            ? existingDefinition.icon
+            : hasPreviousItem ? previousItem.icon : null;
+
+        for (int i = 0; itemFolders != null && i < itemFolders.Count; i++)
+        {
+            string itemFolder = itemFolders[i];
+            PropObj candidatePropObject = FindPropObjInFolder(itemFolder, out GameObject candidatePrefabRoot);
+            if (propObject == null && candidatePropObject != null)
+            {
+                propObject = candidatePropObject;
+                prefabRoot = candidatePrefabRoot;
+            }
+
+            ResolvePortableAssets(
+                itemFolder,
+                candidatePrefabRoot,
+                out Mesh candidatePortableMesh,
+                out Material candidatePortableMaterial);
+            portableMesh ??= candidatePortableMesh;
+            portableMaterial ??= candidatePortableMaterial;
+            icon = ResolveItemIcon(itemFolder, itemName, icon);
+        }
+
+        for (int i = 0; itemFolders != null && i < itemFolders.Count; i++)
+        {
+            TryOverridePortableAssets(
+                itemName,
+                itemFolders[i],
+                prefabRoot,
+                ref portableMesh,
+                ref portableMaterial);
+        }
 
         if (existingDefinition != null)
         {
             propObject ??= existingDefinition.mapObject;
-            portableMesh = existingDefinition.portableMesh != null ? existingDefinition.portableMesh : portableMesh;
-            portableMaterial = existingDefinition.portableMat != null ? existingDefinition.portableMat : portableMaterial;
+            portableMesh ??= existingDefinition.portableMesh;
+            portableMaterial ??= existingDefinition.portableMat;
         }
 
         if (hasPreviousItem)
@@ -323,12 +399,12 @@ public class ItemManager : MonoBehaviour
             prefab = propObject,
             portableMesh = portableMesh,
             portableMat = portableMaterial,
-            icon = ResolveItemIcon(
-                itemFolder,
-                itemName,
-                existingDefinition != null ? existingDefinition.icon : hasPreviousItem ? previousItem.icon : null),
+            icon = icon,
             lightMode = existingDefinition != null ? existingDefinition.lightMode : previousItem.lightMode,
             lightRange = existingDefinition != null ? existingDefinition.LightRange : previousItem.lightRange,
+            lightIntensityMultiplier = existingDefinition != null
+                ? existingDefinition.LightIntensityMultiplier
+                : previousItem.lightIntensityMultiplier > 0f ? previousItem.lightIntensityMultiplier : 1f,
             size = existingDefinition != null
                 ? Mathf.Max(0, (int)existingDefinition.size)
                 : Mathf.Max(0, previousItem.size)
@@ -347,6 +423,7 @@ public class ItemManager : MonoBehaviour
             icon = definition.icon,
             lightMode = definition.lightMode,
             lightRange = definition.LightRange,
+            lightIntensityMultiplier = definition.LightIntensityMultiplier,
             size = Mathf.Max(0, (int)definition.size)
         };
     }
@@ -384,7 +461,13 @@ public class ItemManager : MonoBehaviour
         for (int i = 0; i < sourceItems.Count; i++)
         {
             ItemSet itemSet = sourceItems[i];
-            if (!string.IsNullOrWhiteSpace(itemSet.name))
+            if (string.IsNullOrWhiteSpace(itemSet.name))
+            {
+                continue;
+            }
+
+            if (!results.TryGetValue(itemSet.name, out ItemSet existingItem)
+                || (itemSet.id >= 0 && (existingItem.id < 0 || itemSet.id < existingItem.id)))
             {
                 results[itemSet.name] = itemSet;
             }
@@ -420,19 +503,20 @@ public class ItemManager : MonoBehaviour
         return candidateId;
     }
 
-    private static Dictionary<string, int> BuildPreservedItemIds(List<string> itemFolders, Dictionary<string, ItemSet> previousItemsByName)
+    private static Dictionary<string, int> BuildPreservedItemIds(
+        IReadOnlyList<string> itemNames,
+        Dictionary<string, ItemSet> previousItemsByName)
     {
         Dictionary<string, int> results = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        if (itemFolders == null || previousItemsByName == null || previousItemsByName.Count == 0)
+        if (itemNames == null || previousItemsByName == null || previousItemsByName.Count == 0)
         {
             return results;
         }
 
         HashSet<int> usedIds = new HashSet<int>();
-        for (int i = 0; i < itemFolders.Count; i++)
+        for (int i = 0; i < itemNames.Count; i++)
         {
-            string itemFolder = itemFolders[i];
-            string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
+            string itemName = itemNames[i];
             if (string.IsNullOrWhiteSpace(itemName))
             {
                 continue;
@@ -559,9 +643,9 @@ public class ItemManager : MonoBehaviour
         return sorted;
     }
 
-    private static Dictionary<string, string> BuildItemFolderLookup()
+    private static Dictionary<string, List<string>> BuildItemFolderLookup()
     {
-        Dictionary<string, string> lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, List<string>> lookup = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         List<string> itemFolders = CollectItemFolderPaths();
         for (int i = 0; i < itemFolders.Count; i++)
         {
@@ -571,29 +655,37 @@ public class ItemManager : MonoBehaviour
                 continue;
             }
 
-            string folderName = Path.GetFileName(itemFolder);
-            if (string.IsNullOrWhiteSpace(folderName))
+            string itemName = ResolveItemName(itemFolder, Path.GetFileName(itemFolder));
+            if (string.IsNullOrWhiteSpace(itemName))
             {
                 continue;
             }
 
-            if (!lookup.ContainsKey(folderName))
+            if (!lookup.TryGetValue(itemName, out List<string> matchingFolders))
             {
-                lookup[folderName] = itemFolder;
+                matchingFolders = new List<string>();
+                lookup[itemName] = matchingFolders;
+            }
+
+            if (!matchingFolders.Contains(itemFolder))
+            {
+                matchingFolders.Add(itemFolder);
             }
         }
 
         return lookup;
     }
 
-    private static string GetItemFolderForName(string itemName, Dictionary<string, string> itemFolderLookup)
+    private static List<string> GetItemFoldersForName(
+        string itemName,
+        Dictionary<string, List<string>> itemFolderLookup)
     {
         if (string.IsNullOrWhiteSpace(itemName) || itemFolderLookup == null)
         {
-            return string.Empty;
+            return null;
         }
 
-        return itemFolderLookup.TryGetValue(itemName, out string folderPath) ? folderPath : string.Empty;
+        return itemFolderLookup.TryGetValue(itemName, out List<string> folderPaths) ? folderPaths : null;
     }
 
     private static void AddSearchFolderIfExists(List<string> folders, string path)
@@ -699,6 +791,22 @@ public class ItemManager : MonoBehaviour
 
         string parent = Path.GetDirectoryName(normalized)?.Replace("\\", "/");
         return string.IsNullOrWhiteSpace(parent) ? string.Empty : Path.GetFileName(parent);
+    }
+
+    private static MapObject FindMapObjectForItem(
+        string itemName,
+        IReadOnlyList<string> itemFolders)
+    {
+        for (int i = 0; itemFolders != null && i < itemFolders.Count; i++)
+        {
+            MapObject mapObject = FindMapObjectForItem(itemName, itemFolders[i]);
+            if (mapObject != null)
+            {
+                return mapObject;
+            }
+        }
+
+        return FindMapObjectForItem(itemName, string.Empty);
     }
 
     private static MapObject FindMapObjectForItem(string itemName, string itemFolder)
@@ -1142,6 +1250,13 @@ public class ItemManager : MonoBehaviour
                 continue;
             }
 
+            // Portable mesh base textures are not UI icons. Letting a *_TB
+            // texture through here also converts its importer to Sprite below.
+            if (IsPortableBaseTextureCandidate(candidatePath))
+            {
+                continue;
+            }
+
             if (!IsCandidateInCategory(candidatePath, categoryToken, prefabDirectory, parentDirectory))
             {
                 continue;
@@ -1168,7 +1283,6 @@ public class ItemManager : MonoBehaviour
     {
         string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(assetPath);
         string normalizedFileName = NormalizeItemLookupName(fileNameWithoutExtension);
-        string lowerFileName = fileNameWithoutExtension.ToLower(CultureInfo.InvariantCulture);
         string normalizedPath = assetPath.Replace("\\", "/");
 
         int score = 0;
@@ -1201,12 +1315,21 @@ public class ItemManager : MonoBehaviour
             }
         }
 
-        if (lowerFileName.Contains("_tb") || lowerFileName.EndsWith("tb"))
+        return score;
+    }
+
+    private static bool IsPortableBaseTextureCandidate(string assetPath)
+    {
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(assetPath);
+        if (string.IsNullOrWhiteSpace(fileNameWithoutExtension))
         {
-            score += 80;
+            return false;
         }
 
-        return score;
+        string lowerFileName = fileNameWithoutExtension.ToLower(CultureInfo.InvariantCulture);
+        return lowerFileName.EndsWith("_tb", StringComparison.Ordinal)
+               || lowerFileName.EndsWith("-tb", StringComparison.Ordinal)
+               || lowerFileName.EndsWith(" tb", StringComparison.Ordinal);
     }
 
     private static bool IsExplicitIconCandidate(string assetPath)
@@ -2418,18 +2541,34 @@ public class ItemManager : MonoBehaviour
 
     public void ApplyItemIdsToPrefabs()
     {
+        ApplyItemIdsToPrefabs(null);
+    }
+
+    public void ApplyItemIdsToPrefabs(Action<string, float> reportProgress)
+    {
         if (items == null)
         {
+            ReportRebuildProgress(reportProgress, "Prefab ID 반영 완료", 1f);
             return;
         }
 
         for (int i = 0; i < items.Count; i++)
         {
-            ApplyItemIdToPrefab(items[i]);
+            ItemSet itemSet = items[i];
+            string itemName = string.IsNullOrWhiteSpace(itemSet.name)
+                ? $"ID {itemSet.id}"
+                : itemSet.name;
+            ReportRebuildProgress(
+                reportProgress,
+                $"Prefab ID 반영 중 ({i + 1}/{items.Count}): {itemName}",
+                items.Count > 0 ? (float)i / items.Count : 1f);
+            ApplyItemIdToPrefab(itemSet);
         }
 
+        ReportRebuildProgress(reportProgress, "Prefab 변경사항 저장 중...", 0.98f);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+        ReportRebuildProgress(reportProgress, "Prefab ID 반영 완료", 1f);
     }
 
     private static void ApplyItemIdToPrefab(ItemSet itemSet)
@@ -2515,7 +2654,10 @@ public class ItemManager : MonoBehaviour
         return AssetDatabase.IsValidFolder(folderPath);
     }
 
-    private void RecreateItemDefinitionsFromItems(List<ItemSet> sourceItems)
+    private void RecreateItemDefinitionsFromItems(
+        List<ItemSet> sourceItems,
+        Dictionary<string, List<string>> itemFolderLookup = null,
+        Action<string, float> reportProgress = null)
     {
         if (sourceItems == null || sourceItems.Count == 0)
         {
@@ -2535,16 +2677,32 @@ public class ItemManager : MonoBehaviour
             itemDefinitions = new List<ItemDefinition>();
         }
 
-        Dictionary<string, string> itemFolderLookup = BuildItemFolderLookup();
+        itemFolderLookup ??= BuildItemFolderLookup();
         List<ItemDefinition> existingDefinitions = CollectExistingItemDefinitions(targetDirectory);
         List<ItemDefinition> rebuiltDefinitions = new List<ItemDefinition>();
         HashSet<ItemDefinition> usedDefinitions = new HashSet<ItemDefinition>();
+        HashSet<string> rebuiltItemNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < sourceItems.Count; i++)
         {
             ItemSet itemSet = sourceItems[i];
+            string progressItemName = string.IsNullOrWhiteSpace(itemSet.name)
+                ? $"ID {itemSet.id}"
+                : itemSet.name;
+            ReportRebuildProgress(
+                reportProgress,
+                $"ItemDefinition 연결 중 ({i + 1}/{sourceItems.Count}): {progressItemName}",
+                sourceItems.Count > 0 ? (float)i / sourceItems.Count : 1f);
             if (itemSet.id < 0)
             {
+                continue;
+            }
+
+            string itemName = itemSet.name?.Trim();
+            if (!string.IsNullOrWhiteSpace(itemName) && !rebuiltItemNames.Add(itemName))
+            {
+                Debug.LogWarning(
+                    $"ItemManager: Skipped duplicate rebuild entry for '{itemName}' (id {itemSet.id}).");
                 continue;
             }
 
@@ -2573,6 +2731,8 @@ public class ItemManager : MonoBehaviour
             usedDefinitions.Add(definition);
         }
 
+        ReportRebuildProgress(reportProgress, "ItemDefinition 목록 정리 중...", 0.96f);
+
         itemDefinitions.Clear();
         itemDefinitions.AddRange(rebuiltDefinitions);
         SortItemDefinitionsById(itemDefinitions);
@@ -2580,31 +2740,48 @@ public class ItemManager : MonoBehaviour
         MarkEditorDirty();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+        ReportRebuildProgress(reportProgress, "ItemDefinition 연결 완료", 1f);
     }
 
     private static void ApplyItemSetToDefinition(
         ItemSet itemSet,
         ItemDefinition definition,
-        Dictionary<string, string> itemFolderLookup)
+        Dictionary<string, List<string>> itemFolderLookup)
     {
         if (definition == null)
         {
             return;
         }
 
-        string itemFolder = GetItemFolderForName(itemSet.name, itemFolderLookup);
+        List<string> itemFolders = GetItemFoldersForName(itemSet.name, itemFolderLookup);
         definition.id = itemSet.id;
         definition.itemName = itemSet.name;
-        definition.mapObject = FindMapObjectForItem(itemSet.name, itemFolder);
+        definition.mapObject = FindMapObjectForItem(itemSet.name, itemFolders);
 
         Mesh definitionPortableMesh = itemSet.portableMesh;
         Material definitionPortableMaterial = itemSet.portableMat;
-        TryOverridePortableAssets(
-            itemSet.name,
-            itemFolder,
-            GetMapObjectPrefabRoot(definition.mapObject),
-            ref definitionPortableMesh,
-            ref definitionPortableMaterial);
+        GameObject mapObjectRoot = GetMapObjectPrefabRoot(definition.mapObject);
+        if (itemFolders == null || itemFolders.Count == 0)
+        {
+            TryOverridePortableAssets(
+                itemSet.name,
+                string.Empty,
+                mapObjectRoot,
+                ref definitionPortableMesh,
+                ref definitionPortableMaterial);
+        }
+        else
+        {
+            for (int i = 0; i < itemFolders.Count; i++)
+            {
+                TryOverridePortableAssets(
+                    itemSet.name,
+                    itemFolders[i],
+                    mapObjectRoot,
+                    ref definitionPortableMesh,
+                    ref definitionPortableMaterial);
+            }
+        }
         definition.portableMesh = definitionPortableMesh;
         definition.portableMat = definitionPortableMaterial;
         definition.icon = itemSet.icon;
@@ -2744,7 +2921,10 @@ public class ItemManager : MonoBehaviour
         bool nameMatches = !string.IsNullOrWhiteSpace(itemName)
                            && !string.IsNullOrWhiteSpace(definitionName)
                            && string.Equals(definitionName, itemName, StringComparison.OrdinalIgnoreCase);
-        if (!idMatches && !nameMatches)
+        // IDs are reordered editor data, not stable asset identities. Reusing a
+        // differently named definition by ID transfers all definition-only data
+        // (energy, filters, light settings, etc.) to the wrong item.
+        if (!nameMatches)
         {
             return int.MinValue;
         }
@@ -2759,11 +2939,6 @@ public class ItemManager : MonoBehaviour
         {
             score += 700;
         }
-        else
-        {
-            score += 300;
-        }
-
         if (IsExpectedItemDefinitionAssetPath(assetPath, targetDirectory, itemSet.id, itemName))
         {
             score += 2000;

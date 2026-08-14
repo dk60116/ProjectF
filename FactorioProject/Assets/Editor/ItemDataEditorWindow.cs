@@ -99,6 +99,7 @@ public class ItemDataEditorWindow : EditorWindow
     private const string ItemDefinitionAssetFolder = DefinitionCatalog.AssetFolder;
     private const string UiIconAtlasFolder = "Assets/Image/UI/Item";
     private const string UiIconAtlasPath = UiIconAtlasFolder + "/ItemUIIcons.spriteatlas";
+    private const string ItemRebuildProgressTitle = "Item Data Rebuild";
     private const string TrainStationItemGuid = "2cbd885291664af429fdc0ef3784d40d";
     private static readonly string[] CompactTrainItemGuids =
     {
@@ -162,6 +163,10 @@ public class ItemDataEditorWindow : EditorWindow
     private GUIContent[] cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
     private readonly Dictionary<int, int> cachedInputOutputDefinitionOptionIndexes = new Dictionary<int, int>();
     private int cachedInputOutputDefinitionOptionsVersion = -1;
+    private ItemDefinition[] cachedParentInputOutputModuleItemOptions = Array.Empty<ItemDefinition>();
+    private GUIContent[] cachedParentInputOutputModuleItemOptionContents = Array.Empty<GUIContent>();
+    private readonly Dictionary<int, int> cachedParentInputOutputModuleItemOptionIndexes = new Dictionary<int, int>();
+    private int cachedParentInputOutputModuleItemOptionsVersion = -1;
     private int cachedCraftingTreeIngredientSummaryVersion = -1;
     private readonly Dictionary<int, string> inputOutputTargetKeyCache = new Dictionary<int, string>();
     private static GUIStyle placementCenterLabelStyle;
@@ -188,7 +193,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 3;
+        public int version = 5;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -206,8 +211,11 @@ public class ItemDataEditorWindow : EditorWindow
         public string lightMode;
         public int lightModeValue = -1;
         public float lightRange = -1f;
+        public float lightIntensityMultiplier = -1f;
         public int size;
         public bool itemFilter;
+        public bool hasUpgradeable;
+        public bool upgradeable = true;
         public int capacity = -1;
         public bool storesFluid;
         public float fluidStorageLiters;
@@ -239,7 +247,10 @@ public class ItemDataEditorWindow : EditorWindow
         public int multiFocusModeValue = -1;
         public string mapFilter;
         public int mapFilterValue = -1;
+        public string rotationFilter;
+        public int rotationFilterValue = -1;
         public string inputOutputLayoutType;
+        public InputOutputJsonEntry parentInputOutputModuleItem;
         public int rectGridWidth;
         public int rectGridHeight;
         public List<RectGridBlockPlacementJsonEntry> rectGridBlocks = new List<RectGridBlockPlacementJsonEntry>();
@@ -402,6 +413,10 @@ public class ItemDataEditorWindow : EditorWindow
         cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
         cachedInputOutputDefinitionOptionIndexes.Clear();
         cachedInputOutputDefinitionOptionsVersion = -1;
+        cachedParentInputOutputModuleItemOptions = Array.Empty<ItemDefinition>();
+        cachedParentInputOutputModuleItemOptionContents = Array.Empty<GUIContent>();
+        cachedParentInputOutputModuleItemOptionIndexes.Clear();
+        cachedParentInputOutputModuleItemOptionsVersion = -1;
         cachedCraftingTreeIngredientSummaries.Clear();
         cachedCraftingTreeIngredientSummaryVersion = -1;
     }
@@ -440,7 +455,6 @@ public class ItemDataEditorWindow : EditorWindow
 
         List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
         EnsureSelection(definitions, visibleDefinitions);
-        bool allowReorder = string.IsNullOrWhiteSpace(itemSearchText);
 
         if (visibleDefinitions.Count == 0)
         {
@@ -472,10 +486,7 @@ public class ItemDataEditorWindow : EditorWindow
             Rect giveRect = new Rect(selectRect.xMax + 4f, rowRect.y, GiveButtonWidth, rowRect.height);
             GUIContent content = new GUIContent($"[{definition.id}] {displayName}");
             ItemDefinitionDragAndDropUtility.HandleListItemDrag(selectRect, definition, content.text, this);
-            if (allowReorder)
-            {
-                HandleDefinitionReorderDropTarget(rowRect, itemManager, definitions, visibleDefinitions, i);
-            }
+            HandleDefinitionReorderDropTarget(rowRect, itemManager, definitions, visibleDefinitions, i);
 
             bool pressed = GUI.Toggle(selectRect, isSelected, GUIContent.none, "Button");
             if (pressed)
@@ -502,11 +513,8 @@ public class ItemDataEditorWindow : EditorWindow
             GUILayout.Space(hiddenTrailingRowCount * ItemListRowHeight);
         }
 
-        if (allowReorder)
-        {
-            Rect endDropRect = GUILayoutUtility.GetRect(1f, 16f, GUILayout.ExpandWidth(true));
-            HandleDefinitionReorderDropTarget(endDropRect, itemManager, definitions, visibleDefinitions, visibleDefinitions.Count);
-        }
+        Rect endDropRect = GUILayoutUtility.GetRect(1f, 16f, GUILayout.ExpandWidth(true));
+        HandleDefinitionReorderDropTarget(endDropRect, itemManager, definitions, visibleDefinitions, visibleDefinitions.Count);
 
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
@@ -542,8 +550,11 @@ public class ItemDataEditorWindow : EditorWindow
         List<ItemDefinition> visibleDefinitions,
         int visibleInsertIndex)
     {
-        ItemDefinition draggedDefinition = GetDraggedItemDefinition();
-        if (draggedDefinition == null || definitions == null || visibleDefinitions == null || itemManager == null)
+        if (!ItemDefinitionDragAndDropUtility.TryGetDraggedDefinition(out ItemDefinition draggedDefinition)
+            || definitions == null
+            || visibleDefinitions == null
+            || itemManager == null
+            || !definitions.Contains(draggedDefinition))
         {
             return;
         }
@@ -565,6 +576,7 @@ public class ItemDataEditorWindow : EditorWindow
         {
             case EventType.DragUpdated:
                 DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                Repaint();
                 current.Use();
                 break;
 
@@ -603,7 +615,19 @@ public class ItemDataEditorWindow : EditorWindow
         int targetIndex;
         if (visibleInsertIndex >= visibleDefinitions.Count)
         {
-            targetIndex = definitions.Count;
+            if (visibleDefinitions.Count <= 0)
+            {
+                return;
+            }
+
+            ItemDefinition lastVisibleDefinition = visibleDefinitions[visibleDefinitions.Count - 1];
+            targetIndex = definitions.IndexOf(lastVisibleDefinition);
+            if (targetIndex < 0)
+            {
+                return;
+            }
+
+            targetIndex++;
         }
         else
         {
@@ -642,8 +666,6 @@ public class ItemDataEditorWindow : EditorWindow
 
         ItemDefinition selectedDefinition = FindDefinitionById(definitions, selectedItemId);
         pendingReorderSelection = selectedDefinition != null ? selectedDefinition : draggedDefinition;
-        CraftingTreeItemIdRemapper.CapturedCraftingTree craftingTreeSnapshot =
-            CraftingTreeItemIdRemapper.CapturePersistedCraftingTree(definitions);
 
         Undo.RegisterCompleteObjectUndo(itemManager, "Reorder Item Definitions");
         for (int i = 0; i < definitions.Count; i++)
@@ -672,12 +694,14 @@ public class ItemDataEditorWindow : EditorWindow
         ApplyDefinitionOrderToItemManager(itemManager, definitions);
         SyncItemManagerItemSets(itemManager, definitions);
         itemManager.ApplyItemIdsToPrefabs();
-        CraftingTreeItemIdRemapper.RewritePersistedCraftingTree(craftingTreeSnapshot, definitions);
+        // Crafting tree v5 stores stable item names, so an ID-only reorder must not
+        // rewrite the imported binary asset. Reloading remaps those names to the new IDs.
+        CraftingTreeRuntime.ForceReload();
         CraftingTreeEditorWindow.ReloadOpenWindows();
         itemManager.MarkEditorDirty();
         AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
         InvalidateDefinitionCache();
+        DefinitionCatalog.NotifyChanged();
 
         if (pendingReorderSelection != null)
         {
@@ -833,25 +857,6 @@ public class ItemDataEditorWindow : EditorWindow
 
         itemSets.Clear();
         itemSets.AddRange(uniqueItemSets);
-    }
-
-    private static ItemDefinition GetDraggedItemDefinition()
-    {
-        UnityEngine.Object[] objectReferences = DragAndDrop.objectReferences;
-        if (objectReferences == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < objectReferences.Length; i++)
-        {
-            if (objectReferences[i] is ItemDefinition definition)
-            {
-                return definition;
-            }
-        }
-
-        return null;
     }
 
     private static void DrawDefinitionReorderHighlight(Rect rect, bool insertAfter, bool isEndTarget)
@@ -1049,8 +1054,10 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty interactionButtonListProperty = serializedObject.FindProperty("interactionButtonList");
         SerializedProperty lightModeProperty = serializedObject.FindProperty("lightMode");
         SerializedProperty lightRangeProperty = serializedObject.FindProperty("lightRange");
+        SerializedProperty lightIntensityMultiplierProperty = serializedObject.FindProperty("lightIntensityMultiplier");
         SerializedProperty sizeProperty = serializedObject.FindProperty("size");
         SerializedProperty itemFilterProperty = serializedObject.FindProperty("itemFilter");
+        SerializedProperty upgradeableProperty = serializedObject.FindProperty("upgradeable");
         SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
         SerializedProperty storesFluidProperty = serializedObject.FindProperty("storesFluid");
         SerializedProperty fluidStorageLitersProperty = serializedObject.FindProperty("fluidStorageLiters");
@@ -1105,6 +1112,15 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 lightRangeProperty.floatValue = Mathf.Max(0.1f, lightRangeProperty.floatValue);
                 EditorGUILayout.PropertyField(lightRangeProperty, new GUIContent("Light Range"));
+                if (lightIntensityMultiplierProperty != null)
+                {
+                    lightIntensityMultiplierProperty.floatValue = Mathf.Max(
+                        0.01f,
+                        lightIntensityMultiplierProperty.floatValue);
+                    EditorGUILayout.PropertyField(
+                        lightIntensityMultiplierProperty,
+                        new GUIContent("Light Intensity Multiplier"));
+                }
             }
         }
 
@@ -1114,6 +1130,14 @@ public class ItemDataEditorWindow : EditorWindow
         if (itemFilterProperty != null)
         {
             EditorGUILayout.PropertyField(itemFilterProperty, new GUIContent("Item Filter"));
+        }
+        if (upgradeableProperty != null
+            && definition.mapObject is InputOutputModule inputOutputModule
+            && inputOutputModule.ParentInputOutputModuleItem != null)
+        {
+            EditorGUILayout.PropertyField(
+                upgradeableProperty,
+                new GUIContent("Upgrade able", "체크하면 부모 I/O 모듈을 이 아이템으로 업그레이드할 수 있습니다."));
         }
         if (ShouldShowCapacity(definition) && capacityProperty != null)
         {
@@ -1260,12 +1284,8 @@ public class ItemDataEditorWindow : EditorWindow
             return false;
         }
 
-        return (installationObject.MapFilter & InstallationMapFilter.ItemArea) != 0;
-    }
-
-    private static InstallationMapFilter NormalizeInstallationMapFilter(InstallationMapFilter filter)
-    {
-        return filter == InstallationMapFilter.None ? InstallationObject.DefaultMapFilter : filter;
+        return installationObject is BoxObject
+               || (installationObject.MapFilter & InstallationMapFilter.ItemArea) != 0;
     }
 
     private static bool TryParseInstallationMapFilter(string mapFilter, out InstallationMapFilter parsedFilter)
@@ -1278,7 +1298,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (Enum.TryParse(mapFilter, true, out parsedFilter))
         {
-            parsedFilter = NormalizeInstallationMapFilter(parsedFilter);
+            parsedFilter = InstallationObject.NormalizeMapFilter(parsedFilter);
             return true;
         }
 
@@ -1324,7 +1344,7 @@ public class ItemDataEditorWindow : EditorWindow
             return false;
         }
 
-        parsedFilter = NormalizeInstallationMapFilter(combinedFilter);
+        parsedFilter = InstallationObject.NormalizeMapFilter(combinedFilter);
         return true;
     }
 
@@ -1426,17 +1446,29 @@ public class ItemDataEditorWindow : EditorWindow
             SerializedProperty mapFilterProperty = mapObjectSerializedObject.FindProperty("mapFilter");
             if (mapFilterProperty != null)
             {
-                InstallationMapFilter currentFilter = NormalizeInstallationMapFilter(
+                InstallationMapFilter currentFilter = InstallationObject.NormalizeMapFilter(
                     (InstallationMapFilter)mapFilterProperty.intValue);
+                mapFilterProperty.intValue = (int)currentFilter;
 
                 EditorGUI.BeginChangeCheck();
                 InstallationMapFilter nextFilter = (InstallationMapFilter)EditorGUILayout.EnumFlagsField("Map Filter", currentFilter);
-                nextFilter = NormalizeInstallationMapFilter(nextFilter);
+                nextFilter = InstallationObject.NormalizeMapFilter(nextFilter);
 
                 if (EditorGUI.EndChangeCheck())
                 {
                     mapFilterProperty.intValue = (int)nextFilter;
                 }
+            }
+
+            SerializedProperty rotationFilterProperty = mapObjectSerializedObject.FindProperty("rotationFilter");
+            if (rotationFilterProperty != null)
+            {
+                InstallationRotationFilter currentRotationFilter = InstallationObject.NormalizeRotationFilter(
+                    (InstallationRotationFilter)rotationFilterProperty.intValue);
+                InstallationRotationFilter nextRotationFilter = (InstallationRotationFilter)EditorGUILayout.EnumPopup(
+                    "Rotation Filter",
+                    currentRotationFilter);
+                rotationFilterProperty.intValue = (int)InstallationObject.NormalizeRotationFilter(nextRotationFilter);
             }
         }
 
@@ -1809,6 +1841,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty inputListProperty = mapObjectSerializedObject.FindProperty("inputList");
         SerializedProperty outputListProperty = mapObjectSerializedObject.FindProperty("outputList");
         SerializedProperty legacyOutputProperty = mapObjectSerializedObject.FindProperty("output");
+        SerializedProperty parentItemProperty = mapObjectSerializedObject.FindProperty("parentInputOutputModuleItem");
         if (inputListProperty == null || outputListProperty == null)
         {
             return;
@@ -1819,6 +1852,52 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.Space(6f);
         EditorGUILayout.LabelField("Input Output Module", EditorStyles.boldLabel);
         UnityEngine.Object targetObject = mapObjectSerializedObject.targetObject;
+        InputOutputModule inputOutputModule = targetObject as InputOutputModule;
+        int inheritedPairCount = 0;
+        ItemDefinition parentItem = DrawParentInputOutputModuleItemField(
+            parentItemProperty,
+            definitions,
+            inputOutputModule);
+        InputOutputModule parentModule = parentItem != null
+            ? parentItem.mapObject as InputOutputModule
+            : null;
+        if (parentItem != null && parentModule == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Parent IOModule Item에는 MapObject가 InputOutputModule인 아이템만 지정할 수 있습니다.",
+                MessageType.Error);
+        }
+        else if (parentModule == inputOutputModule)
+        {
+            EditorGUILayout.HelpBox("현재 아이템 자신은 부모로 지정할 수 없습니다.", MessageType.Error);
+        }
+
+        if (parentModule != null)
+        {
+            DrawReferencedItemPreview(parentItem);
+            IReadOnlyList<InputOutputModule.ItemIoEntry> inheritedInputs = parentModule.InputList;
+            IReadOnlyList<InputOutputModule.ItemIoEntry> inheritedOutputs = parentModule.OutputList;
+            inheritedPairCount = Mathf.Min(inheritedInputs.Count, inheritedOutputs.Count);
+            EditorGUILayout.LabelField($"Inherited Pairs ({inheritedPairCount})", EditorStyles.miniBoldLabel);
+            using (new EditorGUI.DisabledScope(true))
+            {
+                for (int i = 0; i < inheritedPairCount; i++)
+                {
+                    InputOutputModule.ItemIoEntry inheritedInput = inheritedInputs[i];
+                    InputOutputModule.ItemIoEntry inheritedOutput = inheritedOutputs[i];
+                    string inputName = inheritedInput.itemDefinition != null
+                        ? inheritedInput.itemDefinition.itemName
+                        : "None";
+                    string outputName = inheritedOutput.itemDefinition != null
+                        ? inheritedOutput.itemDefinition.itemName
+                        : "None";
+                    EditorGUILayout.TextField(
+                        $"{i + 1}. {inputName} x{Mathf.Max(1, inheritedInput.count)}  →  "
+                        + $"{outputName} x{Mathf.Max(1, inheritedOutput.count)}");
+                }
+            }
+        }
+
         int pairCount = inputListProperty.arraySize;
         string sectionFoldoutKey = GetInputOutputPairSectionFoldoutKey(targetObject);
         InitializeInputOutputPairFoldoutStates(sectionFoldoutKey, targetObject, pairCount);
@@ -1827,7 +1906,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         bool nextSectionExpanded = EditorGUILayout.Foldout(
             isSectionExpanded,
-            $"Input / Output Pairs ({pairCount})",
+            $"Local Input / Output Pairs ({pairCount})",
             true,
             EditorStyles.foldout);
         if (nextSectionExpanded != isSectionExpanded)
@@ -1884,7 +1963,62 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         GUILayout.Space(8f);
-        DrawInputOutputRectGridFields(mapObjectSerializedObject, pairCount);
+        DrawInputOutputRectGridFields(mapObjectSerializedObject, inheritedPairCount + pairCount);
+    }
+
+    private ItemDefinition DrawParentInputOutputModuleItemField(
+        SerializedProperty parentItemProperty,
+        List<ItemDefinition> definitions,
+        InputOutputModule currentModule)
+    {
+        if (parentItemProperty == null)
+        {
+            return null;
+        }
+
+        EnsureParentInputOutputModuleItemOptionCache(definitions);
+        ItemDefinition currentItem = parentItemProperty.objectReferenceValue as ItemDefinition;
+        int currentIndex = currentItem != null
+                           && cachedParentInputOutputModuleItemOptionIndexes.TryGetValue(
+                               currentItem.GetInstanceID(),
+                               out int resolvedIndex)
+            ? resolvedIndex
+            : 0;
+
+        Rect rowRect = EditorGUILayout.GetControlRect();
+        Rect popupRect = EditorGUI.PrefixLabel(
+            rowRect,
+            new GUIContent(
+                "Parent IOModule",
+                "부모로 사용할 IOModule 아이템입니다. 부모의 Pair 뒤에 현재 아이템의 Local Pair가 추가됩니다."));
+        int nextIndex = EditorGUI.Popup(
+            popupRect,
+            currentIndex,
+            cachedParentInputOutputModuleItemOptionContents);
+        ItemDefinition nextItem = nextIndex > 0 && nextIndex < cachedParentInputOutputModuleItemOptions.Length
+            ? cachedParentInputOutputModuleItemOptions[nextIndex]
+            : null;
+        if (nextItem != null && nextItem.mapObject == currentModule)
+        {
+            nextItem = currentItem;
+        }
+
+        if (ItemDefinitionDragAndDropUtility.HandleDropTarget(popupRect, this, out ItemDefinition droppedItem))
+        {
+            nextItem = droppedItem != null
+                       && droppedItem.mapObject is InputOutputModule droppedModule
+                       && droppedModule != currentModule
+                ? droppedItem
+                : currentItem;
+        }
+
+        if (nextItem != currentItem)
+        {
+            parentItemProperty.objectReferenceValue = nextItem;
+            currentItem = nextItem;
+        }
+
+        return currentItem;
     }
 
     private string GetInputOutputPairSectionFoldoutKey(UnityEngine.Object targetObject)
@@ -2869,6 +3003,35 @@ public class ItemDataEditorWindow : EditorWindow
         cachedInputOutputDefinitionOptionsVersion = definitionsCacheVersion;
     }
 
+    private void EnsureParentInputOutputModuleItemOptionCache(List<ItemDefinition> definitions)
+    {
+        if (cachedParentInputOutputModuleItemOptionsVersion == definitionsCacheVersion)
+        {
+            return;
+        }
+
+        List<ItemDefinition> parentItems = new List<ItemDefinition>();
+        if (definitions != null)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition != null && definition.mapObject is InputOutputModule)
+                {
+                    parentItems.Add(definition);
+                }
+            }
+        }
+
+        cachedParentInputOutputModuleItemOptions = BuildInputOutputDefinitionOptions(parentItems);
+        cachedParentInputOutputModuleItemOptionContents =
+            BuildInputOutputDefinitionOptionContents(cachedParentInputOutputModuleItemOptions);
+        BuildInputOutputDefinitionOptionIndexes(
+            cachedParentInputOutputModuleItemOptions,
+            cachedParentInputOutputModuleItemOptionIndexes);
+        cachedParentInputOutputModuleItemOptionsVersion = definitionsCacheVersion;
+    }
+
     private static ItemDefinition[] BuildInputOutputDefinitionOptions(List<ItemDefinition> definitions)
     {
         int optionCount = definitions != null ? definitions.Count : 0;
@@ -2989,18 +3152,53 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        Undo.RecordObject(itemManager, "Rebuild Item Data");
-        itemManager.RebuildItemDefinitionsFromAssets();
-        itemManager.ApplyItemIdsToPrefabs();
-        int productionMachineRecipeCount = ProductionMachineRecipeAutoFill.SyncProductionMachines(itemManager);
-        itemManager.MarkEditorDirty();
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-        InvalidateDefinitionCache();
-        EnsureSelection(GetDefinitions(itemManager));
-        DefinitionCatalog.NotifyChanged();
+        Exception rebuildException = null;
+        int productionMachineRecipeCount = 0;
+        try
+        {
+            DisplayItemRebuildProgress("리빌드 준비 중...", 0.01f);
+            Undo.RecordObject(itemManager, "Rebuild Item Data");
+            itemManager.RebuildItemDefinitionsFromAssets((message, progress) =>
+                DisplayItemRebuildProgress(message, Mathf.Lerp(0.02f, 0.72f, progress)));
+            itemManager.ApplyItemIdsToPrefabs((message, progress) =>
+                DisplayItemRebuildProgress(message, Mathf.Lerp(0.72f, 0.88f, progress)));
+
+            DisplayItemRebuildProgress("생산 기계 레시피 동기화 중...", 0.9f);
+            productionMachineRecipeCount = ProductionMachineRecipeAutoFill.SyncProductionMachines(itemManager);
+            itemManager.MarkEditorDirty();
+
+            DisplayItemRebuildProgress("변경된 에셋 저장 중...", 0.94f);
+            AssetDatabase.SaveAssets();
+            DisplayItemRebuildProgress("에셋 데이터베이스 새로고침 중...", 0.97f);
+            AssetDatabase.Refresh();
+
+            DisplayItemRebuildProgress("아이템 UI 갱신 중...", 0.99f);
+            InvalidateDefinitionCache();
+            EnsureSelection(GetDefinitions(itemManager));
+            DefinitionCatalog.NotifyChanged();
+            DisplayItemRebuildProgress("아이템 리빌드 완료", 1f);
+        }
+        catch (Exception exception)
+        {
+            rebuildException = exception;
+            Debug.LogException(exception);
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+            Repaint();
+        }
+
+        if (rebuildException != null)
+        {
+            EditorUtility.DisplayDialog(
+                "Item Data",
+                $"아이템 리빌드 중 오류가 발생했습니다.\n{rebuildException.Message}",
+                "OK");
+            return;
+        }
+
         ShowNotification(new GUIContent($"Item Data rebuilt. Production recipes: {productionMachineRecipeCount}"));
-        Repaint();
     }
 
     private void RebuildItemData(ItemDefinition definition)
@@ -3021,23 +3219,66 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         string displayName = GetDefinitionDisplayName(definition);
-        Undo.RecordObjects(
-            new UnityEngine.Object[] { itemManager, definition },
-            "Rebuild Selected Item Data");
-        if (!itemManager.RebuildItemDefinitionFromAssets(definition, out string errorMessage))
+        string errorMessage = string.Empty;
+        Exception rebuildException = null;
+        bool rebuilt = false;
+        try
+        {
+            DisplayItemRebuildProgress($"[{definition.id}] {displayName} 리빌드 준비 중...", 0.05f);
+            Undo.RecordObjects(
+                new UnityEngine.Object[] { itemManager, definition },
+                "Rebuild Selected Item Data");
+            DisplayItemRebuildProgress($"[{definition.id}] {displayName} 에셋 연결 중...", 0.2f);
+            rebuilt = itemManager.RebuildItemDefinitionFromAssets(definition, out errorMessage);
+            if (rebuilt)
+            {
+                DisplayItemRebuildProgress("변경된 에셋 저장 중...", 0.7f);
+                AssetDatabase.SaveAssets();
+                DisplayItemRebuildProgress("에셋 데이터베이스 새로고침 중...", 0.85f);
+                AssetDatabase.Refresh();
+                DisplayItemRebuildProgress("아이템 UI 갱신 중...", 0.96f);
+                InvalidateDefinitionCache();
+                selectedItemId = definition.id;
+                EnsureSelection(GetDefinitions(itemManager));
+                DefinitionCatalog.NotifyChanged();
+                DisplayItemRebuildProgress("선택 아이템 리빌드 완료", 1f);
+            }
+        }
+        catch (Exception exception)
+        {
+            rebuildException = exception;
+            Debug.LogException(exception);
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+            Repaint();
+        }
+
+        if (rebuildException != null)
+        {
+            EditorUtility.DisplayDialog(
+                "Item Data",
+                $"선택 아이템 리빌드 중 오류가 발생했습니다.\n{rebuildException.Message}",
+                "OK");
+            return;
+        }
+
+        if (!rebuilt)
         {
             EditorUtility.DisplayDialog("Item Data", errorMessage, "OK");
             return;
         }
 
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-        InvalidateDefinitionCache();
-        selectedItemId = definition.id;
-        EnsureSelection(GetDefinitions(itemManager));
-        DefinitionCatalog.NotifyChanged();
         ShowNotification(new GUIContent($"[{definition.id}] {displayName} rebuilt."));
-        Repaint();
+    }
+
+    private static void DisplayItemRebuildProgress(string message, float progress)
+    {
+        EditorUtility.DisplayProgressBar(
+            ItemRebuildProgressTitle,
+            message,
+            Mathf.Clamp01(progress));
     }
 
     private void CreateUiIconAtlas()
@@ -3553,8 +3794,11 @@ public class ItemDataEditorWindow : EditorWindow
             lightMode = definition.lightMode.ToString(),
             lightModeValue = (int)definition.lightMode,
             lightRange = definition.LightRange,
+            lightIntensityMultiplier = definition.LightIntensityMultiplier,
             size = Mathf.Max(0, (int)definition.size),
             itemFilter = definition.itemFilter,
+            hasUpgradeable = true,
+            upgradeable = definition.upgradeable,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             storesFluid = definition.storesFluid,
             fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
@@ -3639,11 +3883,15 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 entry.mapFilter = installationObject.MapFilter.ToString();
                 entry.mapFilterValue = (int)installationObject.MapFilter;
+                entry.rotationFilter = installationObject.RotationFilter.ToString();
+                entry.rotationFilterValue = (int)installationObject.RotationFilter;
             }
 
             if (definition.mapObject is InputOutputModule inputOutputModule)
             {
                 entry.inputOutputLayoutType = inputOutputModule.LayoutType.ToString();
+                entry.parentInputOutputModuleItem = BuildDefinitionReferenceJsonEntry(
+                    inputOutputModule.ParentInputOutputModuleItem);
                 entry.rectGridWidth = inputOutputModule.RectGridWidth;
                 entry.rectGridHeight = inputOutputModule.RectGridHeight;
 
@@ -3653,8 +3901,8 @@ public class ItemDataEditorWindow : EditorWindow
                     entry.rectGridBlocks.Add(BuildRectGridBlockPlacementJsonEntry(rectGridPlacements[i]));
                 }
 
-                IReadOnlyList<InputOutputModule.ItemIoEntry> inputs = inputOutputModule.InputList;
-                IReadOnlyList<InputOutputModule.ItemIoEntry> outputs = inputOutputModule.OutputList;
+                IReadOnlyList<InputOutputModule.ItemIoEntry> inputs = inputOutputModule.LocalInputList;
+                IReadOnlyList<InputOutputModule.ItemIoEntry> outputs = inputOutputModule.LocalOutputList;
                 int pairCount = Mathf.Min(inputs.Count, outputs.Count);
                 for (int i = 0; i < pairCount; i++)
                 {
@@ -3684,13 +3932,25 @@ public class ItemDataEditorWindow : EditorWindow
 
     private static InputOutputJsonEntry BuildInputOutputJsonEntry(InputOutputModule.ItemIoEntry entry)
     {
-        ItemDefinition definition = entry.itemDefinition;
+        InputOutputJsonEntry jsonEntry = BuildDefinitionReferenceJsonEntry(entry.itemDefinition)
+                                         ?? new InputOutputJsonEntry();
+        jsonEntry.count = Mathf.Max(1, entry.count);
+        return jsonEntry;
+    }
+
+    private static InputOutputJsonEntry BuildDefinitionReferenceJsonEntry(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return null;
+        }
+
         return new InputOutputJsonEntry
         {
-            id = definition != null ? definition.id : -1,
-            itemName = definition != null ? definition.itemName : string.Empty,
-            definitionAssetPath = definition != null ? AssetDatabase.GetAssetPath(definition) : string.Empty,
-            count = Mathf.Max(1, entry.count)
+            id = definition.id,
+            itemName = definition.itemName,
+            definitionAssetPath = AssetDatabase.GetAssetPath(definition),
+            count = 1
         };
     }
 
@@ -3770,7 +4030,15 @@ public class ItemDataEditorWindow : EditorWindow
         {
             definition.lightRange = Mathf.Max(0.1f, entry.lightRange);
         }
+        if (entry.lightIntensityMultiplier > 0f)
+        {
+            definition.lightIntensityMultiplier = Mathf.Max(0.01f, entry.lightIntensityMultiplier);
+        }
         definition.itemFilter = entry.itemFilter;
+        if (entry.hasUpgradeable)
+        {
+            definition.upgradeable = entry.upgradeable;
+        }
         if (entry.capacity > 0)
         {
             definition.capacity = Mathf.Max(1, entry.capacity);
@@ -3925,7 +4193,26 @@ public class ItemDataEditorWindow : EditorWindow
                 else if (entry.mapFilterValue >= 0)
                 {
                     InstallationMapFilter parsedFilterValue = (InstallationMapFilter)entry.mapFilterValue;
-                    mapFilterProperty.intValue = (int)NormalizeInstallationMapFilter(parsedFilterValue);
+                    mapFilterProperty.intValue = (int)InstallationObject.NormalizeMapFilter(parsedFilterValue);
+                }
+            }
+
+            SerializedProperty rotationFilterProperty = serializedMapObject.FindProperty("rotationFilter");
+            if (rotationFilterProperty != null)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.rotationFilter)
+                    && Enum.TryParse(
+                        entry.rotationFilter,
+                        true,
+                        out InstallationRotationFilter parsedRotationFilter))
+                {
+                    rotationFilterProperty.intValue = (int)InstallationObject.NormalizeRotationFilter(
+                        parsedRotationFilter);
+                }
+                else if (entry.rotationFilterValue >= 0)
+                {
+                    rotationFilterProperty.intValue = (int)InstallationObject.NormalizeRotationFilter(
+                        (InstallationRotationFilter)entry.rotationFilterValue);
                 }
             }
         }
@@ -4055,12 +4342,24 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         SerializedProperty slotLayoutTypeProperty = serializedMapObject.FindProperty("slotLayoutType");
+        SerializedProperty parentItemProperty = serializedMapObject.FindProperty("parentInputOutputModuleItem");
         SerializedProperty rectGridWidthProperty = serializedMapObject.FindProperty("rectGridWidth");
         SerializedProperty rectGridHeightProperty = serializedMapObject.FindProperty("rectGridHeight");
         if (slotLayoutTypeProperty != null && !string.IsNullOrWhiteSpace(entry.inputOutputLayoutType)
             && Enum.TryParse(entry.inputOutputLayoutType, true, out InputOutputModule.SlotLayoutType parsedLayoutType))
         {
             slotLayoutTypeProperty.enumValueIndex = (int)parsedLayoutType;
+        }
+
+        if (parentItemProperty != null)
+        {
+            ItemDefinition parentItem = ResolveDefinitionReference(
+                definitions,
+                entry.parentInputOutputModuleItem);
+            parentItemProperty.objectReferenceValue = parentItem != null
+                                                      && parentItem.mapObject is InputOutputModule
+                ? parentItem
+                : null;
         }
 
         if (rectGridWidthProperty != null && entry.rectGridWidth > 0)
@@ -4535,7 +4834,6 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         HashSet<string> knownAssetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> knownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition existingDefinition = definitions[i];
@@ -4548,12 +4846,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (!string.IsNullOrWhiteSpace(existingAssetPath))
             {
                 knownAssetPaths.Add(existingAssetPath);
-            }
-
-            string existingName = GetDefinitionDisplayName(existingDefinition);
-            if (!string.IsNullOrWhiteSpace(existingName))
-            {
-                knownNames.Add(existingName.Trim());
             }
         }
 
@@ -4573,9 +4865,7 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             ItemDefinition definition = AssetDatabase.LoadAssetAtPath<ItemDefinition>(assetPath);
-            string definitionName = definition != null ? GetDefinitionDisplayName(definition) : string.Empty;
-            if (definition == null
-                || (!string.IsNullOrWhiteSpace(definitionName) && knownNames.Contains(definitionName.Trim())))
+            if (definition == null)
             {
                 continue;
             }
@@ -4584,11 +4874,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (!string.IsNullOrWhiteSpace(assetPath))
             {
                 knownAssetPaths.Add(assetPath);
-            }
-
-            if (!string.IsNullOrWhiteSpace(definitionName))
-            {
-                knownNames.Add(definitionName.Trim());
             }
         }
 
@@ -4634,7 +4919,6 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         string assetPath = AssetDatabase.GetAssetPath(definition);
-        string definitionName = GetDefinitionDisplayName(definition);
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition existingDefinition = definitions[i];
@@ -4652,19 +4936,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (!string.IsNullOrWhiteSpace(assetPath)
                 && !string.IsNullOrWhiteSpace(existingAssetPath)
                 && string.Equals(assetPath, existingAssetPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (definition.id >= 0 && existingDefinition.id == definition.id)
-            {
-                return true;
-            }
-
-            string existingName = GetDefinitionDisplayName(existingDefinition);
-            if (!string.IsNullOrWhiteSpace(definitionName)
-                && !string.IsNullOrWhiteSpace(existingName)
-                && string.Equals(definitionName.Trim(), existingName.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

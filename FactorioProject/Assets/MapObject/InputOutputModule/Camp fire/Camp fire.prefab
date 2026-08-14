@@ -33,6 +33,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 8457414239673307602}
+  - {fileID: 7016347072070557847}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1218127140146215825
@@ -49,7 +50,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Campfire
   id: 0
   objectName: Camp fire
-  objId: 49
+  objId: 54
   itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -62,7 +63,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 37
+  mapFilter: 293
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
@@ -74,16 +76,27 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
+  parentInputOutputModuleItem: {fileID: 0}
   inputList: []
   outputList: []
   output:
     itemDefinition: {fileID: 0}
     count: 1
-  slotLayoutType: 0
+  slotLayoutType: 1
   rectGridWidth: 1
-  rectGridHeight: 1
-  rectGridCells: []
-  rectGridPlacements: []
+  rectGridHeight: 2
+  rectGridCells:
+  - x: 0
+    y: 1
+  - x: 0
+    y: 0
+  rectGridPlacements:
+  - x: 0
+    y: 0
+    blockType: 1
+  - x: 0
+    y: 1
+    blockType: 2
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1
@@ -108,6 +121,7 @@ MonoBehaviour:
   activeRecipeIndex: -1
   activeOutputItemId: -1
   activeOutputCount: 0
+  fireEffect: {fileID: 7429032727231792693}
 --- !u!95 &4863933332349520842
 Animator:
   serializedVersion: 7
@@ -210,91 +224,97 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents:
-    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 3637a1dcdb6b52d4c8b1b72fcdb207d9, type: 3}
-      insertIndex: 1
-      addedObject: {fileID: 8867953118417492903}
+    m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 3637a1dcdb6b52d4c8b1b72fcdb207d9, type: 3}
 --- !u!4 &8457414239673307602 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 3637a1dcdb6b52d4c8b1b72fcdb207d9, type: 3}
   m_PrefabInstance: {fileID: 8274374808191612473}
   m_PrefabAsset: {fileID: 0}
---- !u!1 &9085191864515988328 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 3637a1dcdb6b52d4c8b1b72fcdb207d9, type: 3}
-  m_PrefabInstance: {fileID: 8274374808191612473}
-  m_PrefabAsset: {fileID: 0}
---- !u!114 &8867953118417492903
-MonoBehaviour:
+--- !u!1001 &8832231368775252908
+PrefabInstance:
   m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 2705861293071220046}
+    m_Modifications:
+    - target: {fileID: 160837039458802138, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: InitialModule.size3D
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 160837039458802138, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: InitialModule.rotation3D
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 160837039458802138, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: InitialModule.startSize.scalar
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 160837039458802138, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: InitialModule.startSizeY.scalar
+      value: 1.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 1531874621849739402, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.579
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7204939966784245927, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+      propertyPath: m_Name
+      value: Fire
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+--- !u!4 &7016347072070557847 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 2003382610205023035, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+  m_PrefabInstance: {fileID: 8832231368775252908}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9085191864515988328}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: acdf5fa1053dcee4eba3ce076f50c602, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Campfire
-  id: 0
-  objectName: 
-  objId: 0
-  itemDefinition: {fileID: 0}
-  portableObj: {fileID: 0}
-  mapStatus:
-    mapSizeX: 1
-    mapSizeY: 1
-    centerCellX: 0
-    centerCellY: 0
-  multiFocusMode: 1
-  itemFilterMaskInitialized: 0
-  itemFilterMaskWords: 
-  animator: {fileID: 0}
-  particleEffect: {fileID: 0}
-  mapFilter: 37
-  installationFocusRadius: 1
-  installedDirection: 0
-  runtimeAnchorCoordinate: {x: 0, y: 0}
-  runtimeQuarterTurns: 0
-  runtimeOccupiedCoordinates: []
-  runtimePlacementSequence: 0
-  excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
-  storedFluidItemId: -1
-  storedFluidTemperatureCelsius: 20
-  powerLinePoint: {fileID: 0}
-  inputList: []
-  outputList: []
-  output:
-    itemDefinition: {fileID: 0}
-    count: 1
-  slotLayoutType: 0
-  rectGridWidth: 1
-  rectGridHeight: 1
-  rectGridCells: []
-  rectGridPlacements: []
-  craftDuration: 5
-  inputConsumeMoveInterval: 0.1
-  outputMoveInterval: 0.1
-  energyGaugeVerticalOffset: 0.25
-  craftProgressGaugeCanvasVerticalOffset: 14
-  energyGaugeFillColor: {r: 1, g: 0.05, b: 0, a: 1}
-  craftProgressGaugeFillColor: {r: 0.026268482, g: 1, b: 0, a: 1}
-  playParticleEffectWhileCrafting: 0
-  runtimeAreaMaxObjects: 10
-  runtimeInputEnergyCoordinates: []
-  runtimeInputItemAreas: []
-  runtimeOutputCoordinates: []
-  runtimePipeInputCoordinates: []
-  runtimeGridCoordinates: []
-  runtimeFocusCoordinates: []
-  storedEnergy: 0
-  energyGaugeCapacity: 0
-  hasActiveCraft: 0
-  waitingForOutput: 0
-  remainingCraftTime: 0
-  activeCraftConsumedEnergy: 0
-  activeRecipeIndex: -1
-  activeOutputItemId: -1
-  activeOutputCount: 0
+--- !u!198 &7429032727231792693 stripped
+ParticleSystem:
+  m_CorrespondingSourceObject: {fileID: 2128894505130016153, guid: 8ec6feced57f8fd4b9b0c2a2e66b614c, type: 3}
+  m_PrefabInstance: {fileID: 8832231368775252908}
+  m_PrefabAsset: {fileID: 0}

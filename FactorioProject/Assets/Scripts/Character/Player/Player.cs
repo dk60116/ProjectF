@@ -12,8 +12,10 @@ public class Player : Character
     private const string PickStateName = "Pick";
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
+    private const string TorchLightAnchorName = "_TorchLightAnchor";
     private const float PlayerRootY = 0f;
     private const float TorchEnergyEpsilon = 0.0001f;
+    private const float TorchLightFallbackHeight = 2f;
 
     [Serializable]
     public struct PlayerState
@@ -88,6 +90,8 @@ public class Player : Character
     private GameObject torchObject;
 
     private PlayerController playerController;
+    private Transform torchLightAnchor;
+    private Transform torchHeadTransform;
     private int toggledLightItemId = -1;
     private ItemDefinition toggledLightDefinition;
     private bool itemLightToggleRequested;
@@ -206,6 +210,10 @@ public class Player : Character
     {
         UpdateActiveTorchEnergy(Time.deltaTime);
         RefreshEquipVisual();
+        if (torchEquipVisualActive)
+        {
+            UpdateTorchLightAnchorPosition();
+        }
     }
 
     public bool ToggleTorchEquip(int torchItemId)
@@ -394,11 +402,64 @@ public class Player : Character
         }
 
         SetEquipObjectActive(torchObject, active);
+        torchObject?.GetComponent<ItemLightController>()?.SetToggled(false);
+
+        Transform lightAnchor = ResolveTorchLightAnchor();
         ItemLightController.Configure(
-            torchObject,
+            lightAnchor != null ? lightAnchor.gameObject : null,
             active ? toggledLightDefinition : null,
             active);
         torchEquipVisualActive = active;
+    }
+
+    private Transform ResolveTorchLightAnchor()
+    {
+        if (torchLightAnchor != null)
+        {
+            return torchLightAnchor;
+        }
+
+        Transform existing = transform.Find(TorchLightAnchorName);
+        if (existing != null)
+        {
+            torchLightAnchor = existing;
+        }
+        else
+        {
+            GameObject anchorObject = new GameObject(TorchLightAnchorName);
+            torchLightAnchor = anchorObject.transform;
+            torchLightAnchor.SetParent(transform, false);
+        }
+
+        UpdateTorchLightAnchorPosition();
+        return torchLightAnchor;
+    }
+
+    private void UpdateTorchLightAnchorPosition()
+    {
+        if (torchLightAnchor == null)
+        {
+            return;
+        }
+
+        if (torchHeadTransform == null)
+        {
+            if (animator == null)
+            {
+                animator = GetComponentInChildren<Animator>();
+            }
+
+            if (animator != null && animator.isHuman)
+            {
+                torchHeadTransform = animator.GetBoneTransform(HumanBodyBones.Head);
+            }
+        }
+
+        Vector3 anchorPosition = torchHeadTransform != null
+            ? torchHeadTransform.position
+            : transform.position + Vector3.up * TorchLightFallbackHeight;
+        torchLightAnchor.position = anchorPosition;
+        torchLightAnchor.rotation = Quaternion.identity;
     }
 
     private void SetHeldPortableLightToggled(int itemId, bool active)

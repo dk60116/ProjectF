@@ -256,6 +256,11 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             return "Working";
         }
 
+        if (!TryResolveDropCoordinate(out _))
+        {
+            return "No output area";
+        }
+
         if (CanPickupOneItem())
         {
             isWorking = true;

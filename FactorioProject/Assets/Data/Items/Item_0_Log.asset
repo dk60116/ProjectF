@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_0_Log
   m_EditorClassIdentifier: 
   itemName: Log
-  id: 0
+  id: 4
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: f931e2d250afe8847a0230e25513af2f, type: 2}
   portableMat: {fileID: 2100000, guid: 2cbb04f1f01402c42bf511527a7bd2ed, type: 2}
@@ -22,6 +22,7 @@ MonoBehaviour:
   - {fileID: 21300000, guid: ef2f61a6d6e4ba74d8864a5f8d382e78, type: 3}
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

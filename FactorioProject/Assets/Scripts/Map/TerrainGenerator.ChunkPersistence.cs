@@ -860,6 +860,8 @@ public partial class TerrainGenerator : MonoBehaviour
                     yield return null;
                 }
             }
+
+            ResolveInstallationPlacementController()?.NormalizeLoadedFenceVariants(orderedInstallationAnchors);
         }
         finally
         {
@@ -1057,7 +1059,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int restoreQuarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
-        if (placementController != null
+        // Variant kind and quarter-turns are one persisted state. Re-resolving only
+        // one wall while its neighbors are still loading can overwrite a valid shape.
+        if (savedState.conveyorVariantKind < 0
+            && placementController != null
             && placementController.TryResolveFenceLoadPlacement(
                 definition,
                 savedState.anchorCoordinate,

@@ -180,7 +180,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Stone
-  objId: 3
+  objId: 7
   itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -194,7 +194,7 @@ MonoBehaviour:
   harvestMode: 1
   definition: {fileID: 11400000, guid: 96e45d7fa97ca7e4aad0fb7b1ad1db16, type: 2}
   resourceStatus:
-    outputId: 3
+    outputId: 7
     outputItemName: Stone
     resourceCount: 1
     getCount: 1

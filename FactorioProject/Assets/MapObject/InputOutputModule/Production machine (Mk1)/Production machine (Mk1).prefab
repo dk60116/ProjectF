@@ -528,7 +528,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (Mk1)
-  objId: 36
+  objId: 39
   itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -541,7 +541,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 3703143181103027719}
   particleEffect: {fileID: 0}
-  mapFilter: 37
+  mapFilter: 293
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
@@ -553,6 +554,7 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
+  parentInputOutputModuleItem: {fileID: 0}
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
@@ -560,24 +562,30 @@ MonoBehaviour:
     count: 3
   - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
     count: 3
-  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
-    count: 6
   - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
     count: 8
+  - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+    count: 3
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 4
-  - itemDefinition: {fileID: 11400000, guid: ae10ba0d1a5a35a4f9732630fda54471, type: 2}
-    count: 3
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+    count: 4
+  - itemDefinition: {fileID: 11400000, guid: c386ddb4f7fc1904fbb047de3bff6a99, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
     count: 3
   - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
-    count: 6
+    count: 10
   - itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
     count: 4
+  - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 4
+  - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+    count: 2
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 2
@@ -585,9 +593,11 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: f5afae373c201a7438785dd9cdf2ee6c, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
     count: 1
@@ -595,13 +605,17 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: ae10ba0d1a5a35a4f9732630fda54471, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: ad919f4ddfe2a924194a2ddac61bf5af, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: a12533b7d9061de419a756ab68bb9ea6, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 9807425657e17b14387ed43757f8bbbb, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: a10ec264242e79b42b1d48d44ad69394, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}

@@ -197,7 +197,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Wooden fence
-  objId: 38
+  objId: 41
   itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -210,7 +210,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 37
+  mapFilter: 293
+  rotationFilter: 1
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}

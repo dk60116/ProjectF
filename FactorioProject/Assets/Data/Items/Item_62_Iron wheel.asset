@@ -13,14 +13,15 @@ MonoBehaviour:
   m_Name: Item_62_Iron wheel
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Iron wheel
-  id: 62
+  id: 61
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 3ac5cf3eb7d07b446ae7d941db5f8db4, type: 2}
   portableMat: {fileID: 2100000, guid: 19ec132cdbe29b048b4ddf833c3f1b5a, type: 2}
-  icon: {fileID: 21300000, guid: 9ca8fd1fa977fa447a2cb5972a431e47, type: 3}
+  icon: {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

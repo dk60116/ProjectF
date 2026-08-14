@@ -140,7 +140,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Mining machine
-  objId: 30
+  objId: 33
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -153,7 +153,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 37
+  mapFilter: 293
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
@@ -165,6 +166,7 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
+  parentInputOutputModuleItem: {fileID: 0}
   inputList: []
   outputList: []
   output:

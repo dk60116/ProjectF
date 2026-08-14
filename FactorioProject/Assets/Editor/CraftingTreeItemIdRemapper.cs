@@ -128,21 +128,21 @@ internal static class CraftingTreeItemIdRemapper
 
     internal static CapturedCraftingTree CapturePersistedCraftingTree(IReadOnlyList<ItemDefinition> definitions)
     {
-        Dictionary<int, DefinitionIdentity> identitiesById = BuildDefinitionIdentitiesById(definitions);
+        Dictionary<int, DefinitionIdentity> identitiesByKey = BuildDefinitionIdentitiesByKey(definitions);
 
-        CapturedCraftingTree captured = CaptureBinaryFile(GetCraftingTreeAssetPath(), identitiesById);
+        CapturedCraftingTree captured = CaptureBinaryFile(GetCraftingTreeAssetPath(), identitiesByKey);
         if (captured.HasRecipes)
         {
             return captured;
         }
 
-        captured = CaptureBinaryFile(GetCraftingTreeResourcesPath(), identitiesById);
+        captured = CaptureBinaryFile(GetCraftingTreeResourcesPath(), identitiesByKey);
         if (captured.HasRecipes)
         {
             return captured;
         }
 
-        return CaptureJsonFile(GetCraftingTreeJsonPath(), identitiesById);
+        return CaptureJsonFile(GetCraftingTreeJsonPath(), identitiesByKey);
     }
 
     internal static bool RewritePersistedCraftingTree(CapturedCraftingTree capturedTree, IReadOnlyList<ItemDefinition> definitions)
@@ -163,10 +163,10 @@ internal static class CraftingTreeItemIdRemapper
         return true;
     }
 
-    private static CapturedCraftingTree CaptureBinaryFile(string path, Dictionary<int, DefinitionIdentity> identitiesById)
+    private static CapturedCraftingTree CaptureBinaryFile(string path, Dictionary<int, DefinitionIdentity> identitiesByKey)
     {
         CapturedCraftingTree captured = new CapturedCraftingTree();
-        if (!TryReadCurrentBinaryFile(path, identitiesById, out List<BinaryRecipeEntry> entries))
+        if (!TryReadCurrentBinaryFile(path, identitiesByKey, out List<BinaryRecipeEntry> entries))
         {
             return captured;
         }
@@ -174,7 +174,7 @@ internal static class CraftingTreeItemIdRemapper
         for (int i = 0; i < entries.Count; i++)
         {
             BinaryRecipeEntry sourceEntry = entries[i];
-            DefinitionReference targetReference = BuildDefinitionReference(sourceEntry.itemId, identitiesById);
+            DefinitionReference targetReference = BuildDefinitionReference(sourceEntry.itemId, identitiesByKey);
             if (!targetReference.HasStableIdentity)
             {
                 Debug.LogWarning($"CraftingTreeItemIdRemapper: skipped recipe for unresolved item id {sourceEntry.itemId}.");
@@ -189,7 +189,7 @@ internal static class CraftingTreeItemIdRemapper
 
             for (int mapObjectIndex = 0; mapObjectIndex < sourceEntry.requiredMapObjectItemIds.Count; mapObjectIndex++)
             {
-                DefinitionReference mapObjectReference = BuildDefinitionReference(sourceEntry.requiredMapObjectItemIds[mapObjectIndex], identitiesById);
+                DefinitionReference mapObjectReference = BuildDefinitionReference(sourceEntry.requiredMapObjectItemIds[mapObjectIndex], identitiesByKey);
                 if (mapObjectReference.HasStableIdentity)
                 {
                     capturedEntry.mapObjects.Add(new CapturedMapObjectEntry
@@ -202,7 +202,7 @@ internal static class CraftingTreeItemIdRemapper
             for (int ingredientIndex = 0; ingredientIndex < sourceEntry.ingredients.Count; ingredientIndex++)
             {
                 BinaryIngredientEntry sourceIngredient = sourceEntry.ingredients[ingredientIndex];
-                DefinitionReference ingredientReference = BuildDefinitionReference(sourceIngredient.itemId, identitiesById);
+                DefinitionReference ingredientReference = BuildDefinitionReference(sourceIngredient.itemId, identitiesByKey);
                 if (!ingredientReference.HasStableIdentity)
                 {
                     Debug.LogWarning($"CraftingTreeItemIdRemapper: skipped unresolved ingredient id {sourceIngredient.itemId}.");
@@ -222,7 +222,7 @@ internal static class CraftingTreeItemIdRemapper
         return captured;
     }
 
-    private static CapturedCraftingTree CaptureJsonFile(string path, Dictionary<int, DefinitionIdentity> identitiesById)
+    private static CapturedCraftingTree CaptureJsonFile(string path, Dictionary<int, DefinitionIdentity> identitiesByKey)
     {
         CapturedCraftingTree captured = new CapturedCraftingTree();
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
@@ -247,7 +247,7 @@ internal static class CraftingTreeItemIdRemapper
                     sourceEntry.definitionAssetPath,
                     sourceEntry.itemName,
                     sourceEntry.itemId,
-                    identitiesById);
+                    identitiesByKey);
 
                 if (!targetReference.HasStableIdentity)
                 {
@@ -267,7 +267,7 @@ internal static class CraftingTreeItemIdRemapper
                     CraftingMapObjectJsonEntry mapObjectEntry = mapObjects[mapObjectIndex];
                     capturedEntry.mapObjects.Add(new CapturedMapObjectEntry
                     {
-                        item = BuildDefinitionReference(mapObjectEntry.itemId, identitiesById),
+                        item = BuildDefinitionReference(mapObjectEntry.itemId, identitiesByKey),
                         mapObjectName = mapObjectEntry.mapObjectName ?? string.Empty,
                         assetPath = NormalizeAssetPath(mapObjectEntry.assetPath)
                     });
@@ -282,7 +282,7 @@ internal static class CraftingTreeItemIdRemapper
                             sourceIngredient.definitionAssetPath,
                             sourceIngredient.itemName,
                             sourceIngredient.itemId,
-                            identitiesById);
+                            identitiesByKey);
 
                         if (!ingredientReference.HasStableIdentity)
                         {
@@ -535,24 +535,38 @@ internal static class CraftingTreeItemIdRemapper
         };
     }
 
-    private static Dictionary<int, DefinitionIdentity> BuildDefinitionIdentitiesById(IReadOnlyList<ItemDefinition> definitions)
+    private static Dictionary<int, DefinitionIdentity> BuildDefinitionIdentitiesByKey(IReadOnlyList<ItemDefinition> definitions)
     {
-        Dictionary<int, DefinitionIdentity> identitiesById = new Dictionary<int, DefinitionIdentity>();
+        Dictionary<int, DefinitionIdentity> identitiesByKey = new Dictionary<int, DefinitionIdentity>();
         if (definitions == null)
         {
-            return identitiesById;
+            return identitiesByKey;
         }
 
+        int nextSyntheticIdentityKey = int.MinValue;
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition definition = definitions[i];
-            if (definition == null || identitiesById.ContainsKey(definition.id))
+            if (definition == null)
             {
                 continue;
             }
 
+            // Version 5 resolves entries by persistence name. Keep every asset addressable
+            // while duplicate IDs exist so reordering can repair the IDs without losing recipes.
+            int identityKey = definition.id;
+            if (identitiesByKey.ContainsKey(identityKey))
+            {
+                while (identitiesByKey.ContainsKey(nextSyntheticIdentityKey))
+                {
+                    nextSyntheticIdentityKey++;
+                }
+
+                identityKey = nextSyntheticIdentityKey++;
+            }
+
             string assetPath = GetDefinitionAssetPath(definition);
-            identitiesById.Add(definition.id, new DefinitionIdentity
+            identitiesByKey.Add(identityKey, new DefinitionIdentity
             {
                 itemId = definition.id,
                 guid = GetGuid(assetPath),
@@ -562,7 +576,7 @@ internal static class CraftingTreeItemIdRemapper
             });
         }
 
-        return identitiesById;
+        return identitiesByKey;
     }
 
     private static DefinitionLookup BuildDefinitionLookup(IReadOnlyList<ItemDefinition> definitions)
@@ -593,16 +607,16 @@ internal static class CraftingTreeItemIdRemapper
         return lookup;
     }
 
-    private static DefinitionReference BuildDefinitionReference(int itemId, Dictionary<int, DefinitionIdentity> identitiesById)
+    private static DefinitionReference BuildDefinitionReference(int identityKey, Dictionary<int, DefinitionIdentity> identitiesByKey)
     {
-        if (identitiesById != null && identitiesById.TryGetValue(itemId, out DefinitionIdentity identity))
+        if (identitiesByKey != null && identitiesByKey.TryGetValue(identityKey, out DefinitionIdentity identity))
         {
             return BuildDefinitionReference(identity);
         }
 
         return new DefinitionReference
         {
-            oldItemId = itemId
+            oldItemId = identityKey
         };
     }
 
@@ -610,7 +624,7 @@ internal static class CraftingTreeItemIdRemapper
         string assetPath,
         string itemName,
         int itemId,
-        Dictionary<int, DefinitionIdentity> identitiesById)
+        Dictionary<int, DefinitionIdentity> identitiesByKey)
     {
         string normalizedPath = NormalizeAssetPath(assetPath);
         if (!string.IsNullOrWhiteSpace(normalizedPath))
@@ -624,7 +638,7 @@ internal static class CraftingTreeItemIdRemapper
             };
         }
 
-        DefinitionReference reference = BuildDefinitionReference(itemId, identitiesById);
+        DefinitionReference reference = BuildDefinitionReference(itemId, identitiesByKey);
         if (reference.HasStableIdentity)
         {
             return reference;
@@ -825,7 +839,7 @@ internal static class CraftingTreeItemIdRemapper
 
     private static bool TryReadCurrentBinaryFile(
         string path,
-        Dictionary<int, DefinitionIdentity> identitiesById,
+        Dictionary<int, DefinitionIdentity> identitiesByKey,
         out List<BinaryRecipeEntry> entries)
     {
         entries = new List<BinaryRecipeEntry>();
@@ -847,14 +861,14 @@ internal static class CraftingTreeItemIdRemapper
                 {
                     BinaryRecipeEntry entry = new BinaryRecipeEntry
                     {
-                        itemId = ReadItemId(reader, version, identitiesById)
+                        itemId = ReadItemId(reader, version, identitiesByKey)
                     };
 
                     int mapObjectCount = Mathf.Max(0, reader.ReadInt32());
                     for (int mapObjectIndex = 0; mapObjectIndex < mapObjectCount; mapObjectIndex++)
                     {
-                        int mapObjectItemId = ReadItemId(reader, version, identitiesById);
-                        if (mapObjectItemId >= 0)
+                        int mapObjectItemId = ReadItemId(reader, version, identitiesByKey);
+                        if (mapObjectItemId != -1)
                         {
                             entry.requiredMapObjectItemIds.Add(mapObjectItemId);
                         }
@@ -867,7 +881,7 @@ internal static class CraftingTreeItemIdRemapper
                     {
                         entry.ingredients.Add(new BinaryIngredientEntry
                         {
-                            itemId = ReadItemId(reader, version, identitiesById),
+                            itemId = ReadItemId(reader, version, identitiesByKey),
                             count = Mathf.Max(1, reader.ReadInt32())
                         });
                     }
@@ -889,7 +903,7 @@ internal static class CraftingTreeItemIdRemapper
     private static int ReadItemId(
         BinaryReader reader,
         int version,
-        Dictionary<int, DefinitionIdentity> identitiesById)
+        Dictionary<int, DefinitionIdentity> identitiesByKey)
     {
         if (version < ItemNameCraftingTreeFileVersion)
         {
@@ -897,15 +911,15 @@ internal static class CraftingTreeItemIdRemapper
         }
 
         string itemName = reader.ReadString();
-        if (identitiesById != null && !string.IsNullOrWhiteSpace(itemName))
+        if (identitiesByKey != null && !string.IsNullOrWhiteSpace(itemName))
         {
-            foreach (KeyValuePair<int, DefinitionIdentity> pair in identitiesById)
+            foreach (KeyValuePair<int, DefinitionIdentity> pair in identitiesByKey)
             {
                 DefinitionIdentity identity = pair.Value;
                 if (identity != null
                     && string.Equals(identity.persistenceName, itemName.Trim(), StringComparison.OrdinalIgnoreCase))
                 {
-                    return identity.itemId;
+                    return pair.Key;
                 }
             }
         }

@@ -138,7 +138,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steam generator
-  objId: 34
+  objId: 37
   itemDefinition: {fileID: 11400000, guid: fde3e14d2afafaf4a9603cedda8d94d6, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -151,7 +151,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 3340840304908249940}
-  mapFilter: 37
+  mapFilter: 293
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
@@ -163,6 +164,7 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
+  parentInputOutputModuleItem: {fileID: 0}
   inputList:
   - itemDefinition: {fileID: 11400000, guid: f40db410eac38e44386c4ef5c3396514, type: 2}
     count: 10

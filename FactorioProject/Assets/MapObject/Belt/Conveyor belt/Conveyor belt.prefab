@@ -713,7 +713,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Conveyor belt
-  objId: 27
+  objId: 31
   itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -726,7 +726,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 37
+  mapFilter: 293
+  rotationFilter: 0
   installationFocusRadius: 0.5
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}

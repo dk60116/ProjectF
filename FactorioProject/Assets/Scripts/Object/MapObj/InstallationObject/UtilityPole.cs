@@ -2594,7 +2594,10 @@ public class UtilityPole : InstallationObject
                 network.PowerSources.Add(steamGenerator);
             }
 
-            if (TryGetElectricPowerRequirement(installationObject, out float requiredWatts))
+            // LightObjects have toggle-dependent demand and are added during the
+            // per-frame runtime refresh instead of being fixed into the topology total.
+            if (!(installationObject is LightObject)
+                && TryGetElectricPowerRequirement(installationObject, out float requiredWatts))
             {
                 network.StaticRequiredWatts += requiredWatts;
             }
@@ -2626,6 +2629,14 @@ public class UtilityPole : InstallationObject
         network.ClearPowerRuntime();
 
         network.RequiredWatts = network.StaticRequiredWatts;
+        foreach (InstallationObject installationObject in network.SuppliedInstallations)
+        {
+            if (installationObject is LightObject
+                && TryGetElectricPowerDemand(installationObject, out float demandWatts))
+            {
+                network.RequiredWatts += demandWatts;
+            }
+        }
 
         for (int i = 0; i < network.PowerSources.Count; i++)
         {
@@ -2771,6 +2782,11 @@ public class UtilityPole : InstallationObject
         if (consumer is RobotArm robotArm)
         {
             return robotArm.TryGetElectricPowerDemand(out wattsPerSecond);
+        }
+
+        if (consumer is LightObject lightObject)
+        {
+            return lightObject.TryGetElectricPowerDemand(out wattsPerSecond);
         }
 
         return false;

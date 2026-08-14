@@ -164,6 +164,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is LightObject lightObject)
+        {
+            ShowLightObjectInfo(lightObject, underlyingResource);
+            return;
+        }
+
         if (mapObject is RailHandcar railHandcar)
         {
             ShowRailHandcarInfo(railHandcar, underlyingResource);
@@ -458,6 +464,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowUtilityPole(utilityPole, underlyingResource);
+    }
+
+    private void ShowLightObjectInfo(LightObject lightObject, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowLightObject(lightObject, underlyingResource);
     }
 
     private void ShowRailHandcarInfo(RailHandcar railHandcar, Resource underlyingResource)

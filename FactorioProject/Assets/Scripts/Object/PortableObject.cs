@@ -316,7 +316,8 @@ public class PortableObject : MonoBehaviour
                 ? ItemDefinition.ItemLightMode.None
                 : itemSet.lightMode,
             itemSet.lightRange,
-            false);
+            false,
+            itemSet.lightIntensityMultiplier);
     }
 
     private void ClearItemLight()

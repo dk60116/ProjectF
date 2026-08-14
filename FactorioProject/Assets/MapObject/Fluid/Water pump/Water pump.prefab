@@ -139,7 +139,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 32
+  objId: 35
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -152,7 +152,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 32
+  mapFilter: 288
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
@@ -164,6 +165,7 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
+  parentInputOutputModuleItem: {fileID: 0}
   inputList: []
   outputList: []
   output:

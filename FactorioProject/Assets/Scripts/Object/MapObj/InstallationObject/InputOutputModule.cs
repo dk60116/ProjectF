@@ -198,6 +198,8 @@ public class InputOutputModule : InstallationObject,
     }
 
     [SerializeField]
+    private ItemDefinition parentInputOutputModuleItem;
+    [SerializeField]
     private List<ItemIoEntry> inputList = new List<ItemIoEntry>();
     [SerializeField]
     private List<ItemIoEntry> outputList = new List<ItemIoEntry>();
@@ -299,8 +301,13 @@ public class InputOutputModule : InstallationObject,
     private bool lastWorkAnimatorState;
     private bool runtimeUpdateTickRegistered;
     private bool runtimeSleeping;
+    private readonly List<ItemIoEntry> effectiveInputList = new List<ItemIoEntry>();
+    private readonly List<ItemIoEntry> effectiveOutputList = new List<ItemIoEntry>();
+    private bool effectivePairDataInitialized;
 
-    public IReadOnlyList<ItemIoEntry> InputList
+    public ItemDefinition ParentInputOutputModuleItem => parentInputOutputModuleItem;
+
+    public IReadOnlyList<ItemIoEntry> LocalInputList
     {
         get
         {
@@ -309,7 +316,7 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
-    public IReadOnlyList<ItemIoEntry> OutputList
+    public IReadOnlyList<ItemIoEntry> LocalOutputList
     {
         get
         {
@@ -318,12 +325,30 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
+    public IReadOnlyList<ItemIoEntry> InputList
+    {
+        get
+        {
+            EnsureEffectivePairData();
+            return effectiveInputList;
+        }
+    }
+
+    public IReadOnlyList<ItemIoEntry> OutputList
+    {
+        get
+        {
+            EnsureEffectivePairData();
+            return effectiveOutputList;
+        }
+    }
+
     public ItemIoEntry Output
     {
         get
         {
-            EnsurePairData();
-            return outputList.Count > 0 ? outputList[0] : output;
+            EnsureEffectivePairData();
+            return effectiveOutputList.Count > 0 ? effectiveOutputList[0] : output;
         }
     }
 
@@ -1461,7 +1486,7 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        int recipeCount = GetEffectiveRecipeCount();
         if (recipeCount <= 0)
         {
             return false;
@@ -1516,7 +1541,7 @@ public class InputOutputModule : InstallationObject,
         }
 
         runtimeSleeping = false;
-        EnsurePairData();
+        EnsureEffectivePairData();
         if (CanStoreFluid)
         {
             DiscardIncompatibleStoredFluid();
@@ -1977,8 +2002,7 @@ public class InputOutputModule : InstallationObject,
 
     private int ResolvePreferredFluidInputItemId()
     {
-        EnsurePairData();
-        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
             if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out int outputItemId, out _)
@@ -2016,8 +2040,7 @@ public class InputOutputModule : InstallationObject,
 
     private bool HasFluidInputRecipe()
     {
-        EnsurePairData();
-        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
             if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out _, out _))
@@ -2036,8 +2059,7 @@ public class InputOutputModule : InstallationObject,
 
     private bool CanAcceptFluidInputItem(int fluidItemId)
     {
-        EnsurePairData();
-        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
             if (!TryGetRecipePair(
@@ -2433,6 +2455,8 @@ public class InputOutputModule : InstallationObject,
     protected override void OnEnable()
     {
         base.OnEnable();
+        effectivePairDataInitialized = false;
+        EnsureEffectivePairData();
         activeRuntimeModules.Add(this);
         RegisterRuntimeGridCoordinates();
         RegisterRuntimeAreaCoordinates();
@@ -2592,11 +2616,11 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        EnsurePairData();
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
         bool foundAny = false;
-        for (int i = 0; i < outputList.Count; i++)
+        for (int i = 0; i < outputs.Count; i++)
         {
-            ItemDefinition itemDefinition = outputList[i].itemDefinition;
+            ItemDefinition itemDefinition = outputs[i].itemDefinition;
             if (itemDefinition == null || itemDefinition.id < 0)
             {
                 continue;
@@ -2616,10 +2640,10 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        EnsurePairData();
-        for (int i = 0; i < outputList.Count; i++)
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        for (int i = 0; i < outputs.Count; i++)
         {
-            ItemDefinition itemDefinition = outputList[i].itemDefinition;
+            ItemDefinition itemDefinition = outputs[i].itemDefinition;
             if (itemDefinition != null && itemDefinition.id == itemId)
             {
                 return true;
@@ -3028,6 +3052,80 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
+    private void EnsureEffectivePairData()
+    {
+        if (effectivePairDataInitialized && Application.isPlaying)
+        {
+            return;
+        }
+
+        effectiveInputList.Clear();
+        effectiveOutputList.Clear();
+        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
+        AppendEffectivePairData(this, visitedModules, effectiveInputList, effectiveOutputList);
+        effectivePairDataInitialized = true;
+    }
+
+    private int GetEffectiveRecipeCount()
+    {
+        EnsureEffectivePairData();
+        return Mathf.Min(effectiveInputList.Count, effectiveOutputList.Count);
+    }
+
+    private static void AppendEffectivePairData(
+        InputOutputModule module,
+        ISet<InputOutputModule> visitedModules,
+        List<ItemIoEntry> resolvedInputs,
+        List<ItemIoEntry> resolvedOutputs)
+    {
+        if (module == null
+            || visitedModules == null
+            || resolvedInputs == null
+            || resolvedOutputs == null
+            || !visitedModules.Add(module))
+        {
+            return;
+        }
+
+        module.EnsurePairData();
+        AppendEffectivePairData(
+            module.ResolveParentInputOutputModule(),
+            visitedModules,
+            resolvedInputs,
+            resolvedOutputs);
+
+        int localPairCount = Mathf.Min(module.inputList.Count, module.outputList.Count);
+        for (int i = 0; i < localPairCount; i++)
+        {
+            resolvedInputs.Add(module.inputList[i]);
+            resolvedOutputs.Add(module.outputList[i]);
+        }
+    }
+
+    private bool HasCircularParentReference()
+    {
+        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
+        InputOutputModule current = this;
+        while (current != null)
+        {
+            if (!visitedModules.Add(current))
+            {
+                return true;
+            }
+
+            current = current.ResolveParentInputOutputModule();
+        }
+
+        return false;
+    }
+
+    private InputOutputModule ResolveParentInputOutputModule()
+    {
+        return parentInputOutputModuleItem != null
+            ? parentInputOutputModuleItem.mapObject as InputOutputModule
+            : null;
+    }
+
     public void GetObjectInfoStatus(out string statusText, out bool isProducing)
     {
         statusText = ResolveObjectInfoStatus(out isProducing);
@@ -3064,7 +3162,7 @@ public class InputOutputModule : InstallationObject,
             return "No output area";
         }
 
-        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        int recipeCount = GetEffectiveRecipeCount();
         if (recipeCount <= 0)
         {
             return "No recipe";
@@ -3231,8 +3329,6 @@ public class InputOutputModule : InstallationObject,
         out int outputAreaCount,
         out int outputAreaCapacity)
     {
-        EnsurePairData();
-
         int inputRecipeCount;
         int outputRecipeCount;
         if ((hasActiveCraft || waitingForOutput)
@@ -3284,7 +3380,8 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        for (int i = 0; i < inputList.Count; i++)
+        IReadOnlyList<ItemIoEntry> inputs = InputList;
+        for (int i = 0; i < inputs.Count; i++)
         {
             if (TryGetObjectInfoRecipeLine(
                     i,
@@ -3379,7 +3476,8 @@ public class InputOutputModule : InstallationObject,
     {
         int inputRecipeCount;
         int outputRecipeCount;
-        for (int i = 0; i < inputList.Count; i++)
+        IReadOnlyList<ItemIoEntry> inputs = InputList;
+        for (int i = 0; i < inputs.Count; i++)
         {
             if (!TryGetObjectInfoRecipeLine(
                     i,
@@ -3541,18 +3639,20 @@ public class InputOutputModule : InstallationObject,
         outputItemId = -1;
         outputCount = 0;
 
-        if (recipeIndex < 0 || recipeIndex >= inputList.Count)
+        IReadOnlyList<ItemIoEntry> inputs = InputList;
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        if (recipeIndex < 0 || recipeIndex >= inputs.Count)
         {
             return false;
         }
 
-        ItemIoEntry inputEntry = inputList[recipeIndex];
+        ItemIoEntry inputEntry = inputs[recipeIndex];
         inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
         inputCount = Mathf.Max(1, inputEntry.count);
 
-        if (recipeIndex < outputList.Count)
+        if (recipeIndex < outputs.Count)
         {
-            ItemIoEntry outputEntry = outputList[recipeIndex];
+            ItemIoEntry outputEntry = outputs[recipeIndex];
             outputItemId = outputEntry.itemDefinition != null ? outputEntry.itemDefinition.id : -1;
             outputCount = Mathf.Max(1, outputEntry.count);
         }
@@ -4091,7 +4191,7 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        int recipeCount = Mathf.Min(inputList.Count, outputList.Count);
+        int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
             if (!TryGetRecipePair(recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
@@ -4642,13 +4742,15 @@ public class InputOutputModule : InstallationObject,
         outputItemId = -1;
         outputCount = 0;
 
-        if (recipeIndex < 0 || recipeIndex >= inputList.Count || recipeIndex >= outputList.Count)
+        IReadOnlyList<ItemIoEntry> inputs = InputList;
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        if (recipeIndex < 0 || recipeIndex >= inputs.Count || recipeIndex >= outputs.Count)
         {
             return false;
         }
 
-        ItemIoEntry inputEntry = inputList[recipeIndex];
-        ItemIoEntry outputEntry = outputList[recipeIndex];
+        ItemIoEntry inputEntry = inputs[recipeIndex];
+        ItemIoEntry outputEntry = outputs[recipeIndex];
         inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
         outputItemId = outputEntry.itemDefinition != null ? outputEntry.itemDefinition.id : -1;
         inputCount = Mathf.Max(1, inputEntry.count);
@@ -6164,7 +6266,24 @@ public class InputOutputModule : InstallationObject,
     protected override void OnValidate()
     {
         base.OnValidate();
-        EnsurePairData();
+        InputOutputModule resolvedParentModule = ResolveParentInputOutputModule();
+        if (parentInputOutputModuleItem != null && resolvedParentModule == null)
+        {
+            Debug.LogWarning(
+                $"InputOutputModule: '{name}'의 Parent IOModule Item은 InputOutputModule 아이템이어야 합니다.",
+                this);
+            parentInputOutputModuleItem = null;
+        }
+        else if (resolvedParentModule == this || HasCircularParentReference())
+        {
+            Debug.LogWarning(
+                $"InputOutputModule: '{name}'의 Parent IOModule Item 순환 참조를 제거했습니다.",
+                this);
+            parentInputOutputModuleItem = null;
+        }
+
+        effectivePairDataInitialized = false;
+        EnsureEffectivePairData();
         EnsureRectGridData();
         EnsureRectGridPlacementData();
     }

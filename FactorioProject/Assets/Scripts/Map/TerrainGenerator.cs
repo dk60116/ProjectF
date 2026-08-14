@@ -2460,6 +2460,20 @@ public partial class TerrainGenerator : MonoBehaviour
         RefreshChunks(currentCenterChunk, true);
     }
 
+#if UNITY_EDITOR
+    public void ClearEditorPreviewChunks()
+    {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
+        ClearPendingChunkGenerations();
+        ClearLoadedChunks(false, true);
+        hasGeneratedChunks = false;
+    }
+#endif
+
     public void RandomizeSeed()
     {
         SetSeed(UnityEngine.Random.Range(int.MinValue, int.MaxValue));
@@ -2686,6 +2700,7 @@ public partial class TerrainGenerator : MonoBehaviour
         GameObject chunkObject = new GameObject($"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})");
         chunkObject.transform.SetParent(transform, false);
         chunkObject.transform.position = new Vector3(origin.x, 0f, origin.y);
+        MarkEditorPreviewHierarchyTransient(chunkObject.transform);
         loadedChunks.Add(chunkCoordinate, chunkObject.transform);
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
@@ -2797,6 +2812,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ApplyChunkBiomeSurface(chunkObject.transform, chunkSurface);
+        MarkEditorPreviewHierarchyTransient(chunkObject.transform);
 
         if (allowYield)
         {
@@ -3036,6 +3052,22 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             DestroyImmediate(chunkObject);
         }
+    }
+
+    private static void MarkEditorPreviewHierarchyTransient(Transform hierarchyRoot)
+    {
+#if UNITY_EDITOR
+        if (Application.isPlaying || hierarchyRoot == null)
+        {
+            return;
+        }
+
+        hierarchyRoot.gameObject.hideFlags |= HideFlags.DontSaveInEditor;
+        for (int i = 0; i < hierarchyRoot.childCount; i++)
+        {
+            MarkEditorPreviewHierarchyTransient(hierarchyRoot.GetChild(i));
+        }
+#endif
     }
 
     private bool TryGetBlockSet(Block.BlockType type, out BlockSet blockSet)

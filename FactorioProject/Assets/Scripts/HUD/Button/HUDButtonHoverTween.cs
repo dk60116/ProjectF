@@ -10,8 +10,6 @@ using UnityEngine.UI;
 public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     private const float HiddenSizeSqrMagnitude = 0.0001f;
-    private static readonly Dictionary<Behaviour, int> sharedFrozenLayoutDriverCounts = new Dictionary<Behaviour, int>();
-
     [SerializeField, FormerlySerializedAs("hoverScaleMultiplier"), Min(1f)]
     private float hoverSizeMultiplier = 1.1f;
 
@@ -29,7 +27,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
     private Button button;
     private Tween sizeTween;
     private Vector2 hoverBaseSize;
-    private Vector2 hoverBaseSizeDelta;
+    private Vector3 hoverBaseLocalScale;
     private Vector3 hoverBaseWorldCenter;
     private Vector3 hoverBaseAnchoredPosition;
     private readonly Vector3[] worldCorners = new Vector3[4];
@@ -39,22 +37,14 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
     private bool pointerInside;
     private int enabledFrame = -1;
     private readonly List<NestedButtonSizeCompensation> nestedButtonCompensations = new List<NestedButtonSizeCompensation>();
-    private readonly List<FrozenLayoutDriver> frozenLayoutDrivers = new List<FrozenLayoutDriver>();
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
 
     private sealed class NestedButtonSizeCompensation
     {
         public RectTransform target;
-        public Vector2 baseSize;
-        public Vector2 baseSizeDelta;
+        public Vector3 baseLocalScale;
         public Vector3 baseAnchoredPosition;
         public Vector3 baseWorldCenter;
-    }
-
-    private sealed class FrozenLayoutDriver
-    {
-        public Behaviour component;
-        public RectTransform rectTransform;
     }
 
     private void Awake()
@@ -77,7 +67,6 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         KillSizeTween();
         RestoreHoverSizeIfOwned();
         RestoreNestedButtonCompensations();
-        RestoreFrozenLayoutDrivers(rebuildLayout);
         hoverActive = false;
         pointerInside = false;
         hasHoverBaseSize = false;
@@ -135,8 +124,6 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
 
         if (!hasHoverBaseSize)
         {
-            Canvas.ForceUpdateCanvases();
-            FreezeLayoutDrivers();
             CaptureHoverBaseGeometry();
             hasHoverBaseSize = hoverBaseSize.sqrMagnitude > HiddenSizeSqrMagnitude;
         }
@@ -151,8 +138,11 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         }
 
         hoverActive = true;
-        CaptureNestedButtonCompensations();
-        TweenTo(hoverBaseSize * Mathf.Max(1f, hoverSizeMultiplier), false, false);
+        if (nestedButtonCompensations.Count == 0)
+        {
+            CaptureNestedButtonCompensations();
+        }
+        TweenTo(Mathf.Max(1f, hoverSizeMultiplier), false, false);
     }
 
     private void EndHover()
@@ -161,7 +151,6 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         {
             KillSizeTween();
             RestoreNestedButtonCompensations();
-            RestoreFrozenLayoutDrivers(true);
             hoverActive = false;
             hasHoverBaseGeometry = false;
             return;
@@ -173,7 +162,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         }
 
         hoverActive = false;
-        TweenTo(hoverBaseSize, true, true);
+        TweenTo(1f, true, true);
     }
 
     private bool CanAnimateHover()
@@ -202,7 +191,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         resolvedSizeTarget = ResolveSizeTarget();
     }
 
-    private void TweenTo(Vector2 targetSize, bool restoreCompensationsOnComplete, bool clearBaseSizeOnComplete)
+    private void TweenTo(float targetMultiplier, bool restoreCompensationsOnComplete, bool clearBaseSizeOnComplete)
     {
         KillSizeTween();
 
@@ -211,32 +200,37 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             return;
         }
 
+        Vector3 targetScale = new Vector3(
+            hoverBaseLocalScale.x * targetMultiplier,
+            hoverBaseLocalScale.y * targetMultiplier,
+            hoverBaseLocalScale.z);
+
         if (tweenDuration <= 0f)
         {
-            ApplyRectSize(resolvedSizeTarget, targetSize);
+            resolvedSizeTarget.localScale = targetScale;
             ApplyCenterCompensation();
             ApplyNestedButtonCompensations();
             CompleteSizeTween(restoreCompensationsOnComplete, clearBaseSizeOnComplete);
             return;
         }
 
-        Vector2 currentSize = GetRectSize(resolvedSizeTarget);
+        Vector3 currentScale = resolvedSizeTarget.localScale;
         sizeTween = DOTween.To(
-                () => currentSize,
+                () => currentScale,
                 value =>
                 {
-                    currentSize = value;
-                    ApplyRectSize(resolvedSizeTarget, value);
+                    currentScale = value;
+                    resolvedSizeTarget.localScale = value;
                     ApplyCenterCompensation();
                     ApplyNestedButtonCompensations();
                 },
-                targetSize,
+                targetScale,
                 tweenDuration)
             .SetEase(ease)
             .SetUpdate(true)
             .OnComplete(() =>
             {
-                ApplyRectSize(resolvedSizeTarget, targetSize);
+                resolvedSizeTarget.localScale = targetScale;
                 ApplyCenterCompensation();
                 ApplyNestedButtonCompensations();
                 CompleteSizeTween(restoreCompensationsOnComplete, clearBaseSizeOnComplete);
@@ -254,7 +248,6 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         if (clearBaseSizeOnComplete)
         {
             RestoreHoverGeometryIfOwned();
-            RestoreFrozenLayoutDrivers(true);
             hasHoverBaseSize = false;
             hasHoverBaseGeometry = false;
         }
@@ -277,161 +270,8 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             return;
         }
 
-        ApplyRectSize(resolvedSizeTarget, hoverBaseSize);
+        resolvedSizeTarget.localScale = hoverBaseLocalScale;
         RestoreHoverGeometryIfOwned();
-    }
-
-    private void FreezeLayoutDrivers()
-    {
-        RestoreFrozenLayoutDrivers(false);
-
-        if (resolvedSizeTarget == null)
-        {
-            return;
-        }
-
-        FreezeLayoutDriversInChildren(resolvedSizeTarget);
-
-        Transform current = resolvedSizeTarget;
-        while (current != null)
-        {
-            RectTransform currentRect = current as RectTransform;
-            FreezeLayoutDriver(current.GetComponent<ContentSizeFitter>(), currentRect);
-            FreezeLayoutDriver(current.GetComponent<LayoutGroup>(), currentRect);
-            FreezeLayoutDriver(current.GetComponent<AspectRatioFitter>(), currentRect);
-
-            if (current.GetComponent<Canvas>() != null && current != resolvedSizeTarget)
-            {
-                break;
-            }
-
-            current = current.parent;
-        }
-    }
-
-    private void FreezeLayoutDriversInChildren(RectTransform root)
-    {
-        if (root == null)
-        {
-            return;
-        }
-
-        ContentSizeFitter[] contentSizeFitters = root.GetComponentsInChildren<ContentSizeFitter>(true);
-        for (int i = 0; i < contentSizeFitters.Length; i++)
-        {
-            FreezeLayoutDriver(contentSizeFitters[i], contentSizeFitters[i].transform as RectTransform);
-        }
-
-        LayoutGroup[] layoutGroups = root.GetComponentsInChildren<LayoutGroup>(true);
-        for (int i = 0; i < layoutGroups.Length; i++)
-        {
-            FreezeLayoutDriver(layoutGroups[i], layoutGroups[i].transform as RectTransform);
-        }
-
-        AspectRatioFitter[] aspectRatioFitters = root.GetComponentsInChildren<AspectRatioFitter>(true);
-        for (int i = 0; i < aspectRatioFitters.Length; i++)
-        {
-            FreezeLayoutDriver(aspectRatioFitters[i], aspectRatioFitters[i].transform as RectTransform);
-        }
-    }
-
-    private void FreezeLayoutDriver(Behaviour component, RectTransform rectTransform)
-    {
-        if (component == null || rectTransform == null || HasFrozenLayoutDriver(component))
-        {
-            return;
-        }
-
-        if (sharedFrozenLayoutDriverCounts.TryGetValue(component, out int freezeCount))
-        {
-            sharedFrozenLayoutDriverCounts[component] = freezeCount + 1;
-        }
-        else
-        {
-            if (!component.enabled)
-            {
-                return;
-            }
-
-            component.enabled = false;
-            sharedFrozenLayoutDriverCounts[component] = 1;
-        }
-
-        frozenLayoutDrivers.Add(new FrozenLayoutDriver
-        {
-            component = component,
-            rectTransform = rectTransform
-        });
-    }
-
-    private bool HasFrozenLayoutDriver(Behaviour component)
-    {
-        for (int i = 0; i < frozenLayoutDrivers.Count; i++)
-        {
-            if (frozenLayoutDrivers[i] != null && frozenLayoutDrivers[i].component == component)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private void RestoreFrozenLayoutDrivers(bool rebuildLayout)
-    {
-        if (frozenLayoutDrivers.Count <= 0)
-        {
-            return;
-        }
-
-        for (int i = frozenLayoutDrivers.Count - 1; i >= 0; i--)
-        {
-            FrozenLayoutDriver frozenDriver = frozenLayoutDrivers[i];
-            if (frozenDriver != null && frozenDriver.component != null)
-            {
-                RestoreSharedLayoutDriver(frozenDriver.component);
-            }
-        }
-
-        if (rebuildLayout)
-        {
-            Canvas.ForceUpdateCanvases();
-            for (int i = frozenLayoutDrivers.Count - 1; i >= 0; i--)
-            {
-                RectTransform rectTransform = frozenLayoutDrivers[i] != null
-                    ? frozenLayoutDrivers[i].rectTransform
-                    : null;
-                if (rectTransform != null)
-                {
-                    LayoutRebuilder.ForceRebuildLayoutImmediate(rectTransform);
-                }
-            }
-            Canvas.ForceUpdateCanvases();
-        }
-
-        frozenLayoutDrivers.Clear();
-    }
-
-    private static void RestoreSharedLayoutDriver(Behaviour component)
-    {
-        if (component == null)
-        {
-            return;
-        }
-
-        if (!sharedFrozenLayoutDriverCounts.TryGetValue(component, out int freezeCount))
-        {
-            return;
-        }
-
-        if (freezeCount > 1)
-        {
-            sharedFrozenLayoutDriverCounts[component] = freezeCount - 1;
-            return;
-        }
-
-        sharedFrozenLayoutDriverCounts.Remove(component);
-        component.enabled = true;
     }
 
     private void CaptureHoverBaseGeometry()
@@ -444,7 +284,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         }
 
         hoverBaseSize = GetRectSize(resolvedSizeTarget);
-        hoverBaseSizeDelta = resolvedSizeTarget.sizeDelta;
+        hoverBaseLocalScale = resolvedSizeTarget.localScale;
         hoverBaseAnchoredPosition = resolvedSizeTarget.anchoredPosition3D;
         hoverBaseWorldCenter = GetWorldCenter(resolvedSizeTarget);
         hasHoverBaseGeometry = true;
@@ -471,7 +311,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             return;
         }
 
-        resolvedSizeTarget.sizeDelta = hoverBaseSizeDelta;
+        resolvedSizeTarget.localScale = hoverBaseLocalScale;
         resolvedSizeTarget.anchoredPosition3D = hoverBaseAnchoredPosition;
     }
 
@@ -526,8 +366,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             nestedButtonCompensations.Add(new NestedButtonSizeCompensation
             {
                 target = compensationTarget,
-                baseSize = GetRectSize(compensationTarget),
-                baseSizeDelta = compensationTarget.sizeDelta,
+                baseLocalScale = compensationTarget.localScale,
                 baseAnchoredPosition = compensationTarget.anchoredPosition3D,
                 baseWorldCenter = GetWorldCenter(compensationTarget)
             });
@@ -632,7 +471,11 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
                 continue;
             }
 
-            ApplyRectSize(compensation.target, compensation.baseSize);
+            Vector3 parentScaleRatio = GetHoverScaleRatio();
+            compensation.target.localScale = new Vector3(
+                DivideOrFallback(compensation.baseLocalScale.x, parentScaleRatio.x),
+                DivideOrFallback(compensation.baseLocalScale.y, parentScaleRatio.y),
+                DivideOrFallback(compensation.baseLocalScale.z, parentScaleRatio.z));
 
             Vector3 centerOffset = compensation.baseWorldCenter - GetWorldCenter(compensation.target);
             if (centerOffset.sqrMagnitude > 0.000001f)
@@ -649,7 +492,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             NestedButtonSizeCompensation compensation = nestedButtonCompensations[i];
             if (compensation != null && compensation.target != null)
             {
-                compensation.target.sizeDelta = compensation.baseSizeDelta;
+                compensation.target.localScale = compensation.baseLocalScale;
                 compensation.target.anchoredPosition3D = compensation.baseAnchoredPosition;
             }
         }
@@ -657,10 +500,23 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         nestedButtonCompensations.Clear();
     }
 
-    private static void ApplyRectSize(RectTransform target, Vector2 size)
+    private Vector3 GetHoverScaleRatio()
     {
-        target.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, Mathf.Max(0f, size.x));
-        target.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, Mathf.Max(0f, size.y));
+        if (resolvedSizeTarget == null)
+        {
+            return Vector3.one;
+        }
+
+        Vector3 currentScale = resolvedSizeTarget.localScale;
+        return new Vector3(
+            DivideOrFallback(currentScale.x, hoverBaseLocalScale.x),
+            DivideOrFallback(currentScale.y, hoverBaseLocalScale.y),
+            DivideOrFallback(currentScale.z, hoverBaseLocalScale.z));
+    }
+
+    private static float DivideOrFallback(float numerator, float denominator)
+    {
+        return Mathf.Abs(denominator) > Mathf.Epsilon ? numerator / denominator : 1f;
     }
 
     private static Vector2 GetRectSize(RectTransform target)

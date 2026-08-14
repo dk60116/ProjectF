@@ -49,6 +49,7 @@ public class ItemInfoDescription : MonoBehaviour
     private bool defaultItemSiblingIndicesCaptured;
     private RobotArm liveGaugeRobotArm;
     private UtilityPole liveGaugeUtilityPole;
+    private LightObject liveGaugeLightObject;
     private InputOutputModule liveGaugeModule;
     private RailHandcar liveGaugeRailHandcar;
 
@@ -232,6 +233,25 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+    }
+
+    public void ShowLightObject(LightObject lightObject, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        liveGaugeLightObject = lightObject;
+        RefreshLightObjectInfo(lightObject);
+
+        bool energyUseDisplayed = lightObject != null
+            && lightObject.TryGetElectricPowerRequirement(out float wattsPerSecond)
+            && SetEnergyUseRateDefaultItemSlot(
+                0,
+                ItemDefinition.EnergyType.Electricity,
+                wattsPerSecond,
+                -1);
+        if (!energyUseDisplayed)
+        {
+            SetDefaultItemSlot(0, -1, false);
+        }
     }
 
     public void ShowRailHandcar(RailHandcar railHandcar, Resource underlyingResource = null)
@@ -579,6 +599,7 @@ public class ItemInfoDescription : MonoBehaviour
     {
         liveGaugeRobotArm = null;
         liveGaugeUtilityPole = null;
+        liveGaugeLightObject = null;
         liveGaugeModule = null;
         liveGaugeRailHandcar = null;
     }
@@ -599,6 +620,12 @@ public class ItemInfoDescription : MonoBehaviour
         if (liveGaugeUtilityPole != null && liveGaugeUtilityPole.gameObject.activeInHierarchy)
         {
             RefreshUtilityPoleGaugeTarget(liveGaugeUtilityPole);
+            return;
+        }
+
+        if (liveGaugeLightObject != null && liveGaugeLightObject.gameObject.activeInHierarchy)
+        {
+            RefreshLightObjectInfo(liveGaugeLightObject);
             return;
         }
 
@@ -624,6 +651,18 @@ public class ItemInfoDescription : MonoBehaviour
         {
             TrySetElectricPowerGauge(energyGauge, energyFill, energyText, liveGaugeRobotArm);
         }
+    }
+
+    private void RefreshLightObjectInfo(LightObject lightObject)
+    {
+        if (lightObject == null)
+        {
+            return;
+        }
+
+        lightObject.GetObjectInfoStatus(out string statusText, out bool isLit);
+        SetDefaultStatus(statusText, isLit);
+        TrySetElectricPowerGauge(energyGauge, energyFill, energyText, lightObject);
     }
 
     private void RefreshInputOutputModuleGaugeTargets(InputOutputModule module)

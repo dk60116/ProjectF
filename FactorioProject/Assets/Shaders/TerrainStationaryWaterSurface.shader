@@ -37,6 +37,9 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
             #pragma multi_compile_fog
             #pragma multi_compile_instancing
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
+            #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -57,6 +60,9 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half3 normalWS : TEXCOORD1;
                 half fogFactor : TEXCOORD2;
                 half waterDepth : TEXCOORD4;
+#if defined(_ADDITIONAL_LIGHTS_VERTEX)
+                half3 vertexLighting : TEXCOORD5;
+#endif
 #if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
                 float4 shadowCoord : TEXCOORD3;
 #endif
@@ -121,6 +127,9 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 output.normalWS = NormalizeNormalPerVertex(normalInput.normalWS);
                 output.fogFactor = ComputeFogFactor(vertexInput.positionCS.z);
                 output.waterDepth = saturate(input.color.r);
+#if defined(_ADDITIONAL_LIGHTS_VERTEX)
+                output.vertexLighting = VertexLighting(vertexInput.positionWS, output.normalWS);
+#endif
 #if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
                 output.shadowCoord = GetShadowCoord(vertexInput);
 #endif
@@ -150,6 +159,24 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half shadowAttenuation = mainLight.shadowAttenuation * mainLight.distanceAttenuation;
                 half3 color = baseColor * lerp(0.78h, 1.05h, lightFacing * shadowAttenuation);
                 color *= GetWorldWaterBrightness();
+
+#if defined(_ADDITIONAL_LIGHTS_VERTEX)
+                color += baseColor * input.vertexLighting;
+#elif defined(_ADDITIONAL_LIGHTS)
+                InputData inputData = (InputData)0;
+                inputData.positionWS = input.positionWS;
+                inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
+
+                uint pixelLightCount = GetAdditionalLightsCount();
+                LIGHT_LOOP_BEGIN(pixelLightCount)
+                    Light additionalLight = GetAdditionalLight(lightIndex, input.positionWS, half4(1.0h, 1.0h, 1.0h, 1.0h));
+                    half3 attenuatedLightColor = additionalLight.color
+                        * additionalLight.distanceAttenuation
+                        * additionalLight.shadowAttenuation;
+                    color += baseColor * LightingLambert(attenuatedLightColor, additionalLight.direction, normalWS);
+                LIGHT_LOOP_END
+#endif
+
                 color = MixFog(color, input.fogFactor);
 
                 return half4(color, _BaseColor.a);

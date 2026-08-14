@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_48_Flatcar
   m_EditorClassIdentifier: 
   itemName: Beef steak
-  id: 54
+  id: 58
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 4b2420f80567bd84e87ca350c9e00d4f, type: 2}
   portableMat: {fileID: 2100000, guid: 0804dd1f3fe5f3f4bb07d25f01714c32, type: 2}
@@ -23,6 +23,7 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 7b654ce797ed8754f8f5bfc320ab51fb, type: 3}
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

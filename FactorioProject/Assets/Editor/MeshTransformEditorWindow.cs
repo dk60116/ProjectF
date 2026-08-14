@@ -165,11 +165,6 @@ public class MeshTransformEditorWindow : EditorWindow
             previewDirty = true;
         }
         EditorGUILayout.EndScrollView();
-
-        if (Event.current.type == EventType.Repaint)
-        {
-            Repaint();
-        }
     }
 
     private void DrawSourceSection()
@@ -1489,6 +1484,7 @@ public class MeshTransformEditorWindow : EditorWindow
             case EventType.ScrollWheel:
                 previewZoom = Mathf.Clamp(previewZoom + currentEvent.delta.y * 0.03f, 0.35f, 4.5f);
                 previewDirty = true;
+                Repaint();
                 currentEvent.Use();
                 break;
 
@@ -1501,6 +1497,7 @@ public class MeshTransformEditorWindow : EditorWindow
                 previewOrbit.x += currentEvent.delta.x;
                 previewOrbit.y = Mathf.Clamp(previewOrbit.y - currentEvent.delta.y, -89f, 89f);
                 previewDirty = true;
+                Repaint();
                 currentEvent.Use();
                 break;
         }

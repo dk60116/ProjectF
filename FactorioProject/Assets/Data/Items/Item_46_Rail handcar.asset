@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_46_Rail handcar
   m_EditorClassIdentifier: 
   itemName: Axe
-  id: 47
+  id: 51
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
@@ -23,6 +23,7 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 7b654ce797ed8754f8f5bfc320ab51fb, type: 3}
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

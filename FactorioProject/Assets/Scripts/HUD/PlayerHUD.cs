@@ -17,7 +17,6 @@ public class PlayerHUD : BagSlot
 
     private PlayerBag boundInventoryBag;
     private PlayerBag boundHandBag;
-    private BagSlot expandedBagSlot;
     private bool isRefreshing;
     private RectTransform handItemGaugeRect;
     private GameObject handItemGaugeRoot;
@@ -78,6 +77,8 @@ public class PlayerHUD : BagSlot
     [SerializeField]
     private Sprite animalInteractionIcon;
     [SerializeField]
+    private UpgradeButton upgradeButton;
+    [SerializeField]
     private Button ItemFilterButton;
 
     [SerializeField]
@@ -104,6 +105,8 @@ public class PlayerHUD : BagSlot
     private Resource currentInteractionResource;
     private MapObject currentInteractionMapObject;
     private Component currentObjectInfoTarget;
+    private Component clickedObjectInfoTarget;
+    private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
     private UtilityPole currentObjectInfoSupplyRangePole;
     private MapObject lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
@@ -115,9 +118,6 @@ public class PlayerHUD : BagSlot
     private bool mapEditButtonsInitialized;
     private bool lastInstallActionButtonsVisible;
     private bool lastMapEditExtraButtonsVisible;
-    private bool pendingBagRefreshAfterCraftingVisibilityChange;
-    private bool isBagRefreshQueued;
-    private int queuedBagRefreshFrame = -1;
     private bool hudReferencesResolved;
     private bool installModeButtonsResolved;
     private Transform cachedMapEditRoot;
@@ -195,9 +195,6 @@ public class PlayerHUD : BagSlot
     {
         CollapseExpandedBagSlot(true);
         UnbindCurrentBag();
-        isBagRefreshQueued = false;
-        queuedBagRefreshFrame = -1;
-        pendingBagRefreshAfterCraftingVisibilityChange = false;
         SetHandItemGaugeVisible(false);
         TrainFilter.SetFocusedRouteTrain(null);
         ClearObjectInfoPanelState();
@@ -238,10 +235,9 @@ public class PlayerHUD : BagSlot
         PollHandBagChanges();
         ResolveHudReferences();
         UpdateInstallModeButtons();
-        ProcessQueuedBagRefresh();
+        UpdateObjectInfoPanelState();
         UpdateInteractionButtonState();
         UpdateHandItemGauge();
-        UpdateObjectInfoPanelState();
         UpdateTrainRouteFocusState();
         HandleInteractionButtonKeyboardInput();
         UpdateItemFilterButtonState();
@@ -292,14 +288,7 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (expandedSlot == expandedBagSlot)
-        {
-            CollapseExpandedBagSlot(false);
-        }
-        else
-        {
-            BagSlot.CloseAnyExpanded(false);
-        }
+        CollapseExpandedBagSlot(false);
     }
 
     public void Bind(PlayerBag bag)
@@ -336,12 +325,6 @@ public class PlayerHUD : BagSlot
 
         isRefreshing = true;
 
-        if (expandedBagSlot != null && !expandedBagSlot.IsCraftingExpanded)
-        {
-            expandedBagSlot = null;
-        }
-
-        BagSlot visibleExpandedSlot = GetVisibleExpandedBagSlot();
         int visibleSlotCount = bag != null ? bag.SlotCount : 0;
         for (int i = 0; i < bagSlots.Count; i++)
         {
@@ -368,8 +351,6 @@ public class PlayerHUD : BagSlot
                 slot.gameObject.SetActive(true);
             }
 
-            bool shouldShowSlot = visibleExpandedSlot == null || slot == visibleExpandedSlot;
-            slot.SetSlotVisible(shouldShowSlot);
             int slotItemId = bag.GetSlotItemId(i);
             int slotItemCount = bag.GetSlotCount(i);
             bool allowZeroCountDisplay = TryApplyVisualPreservedSlotDisplay(
@@ -386,19 +367,9 @@ public class PlayerHUD : BagSlot
                 allowZeroCountDisplay);
         }
 
-        if (visibleExpandedSlot == null)
-        {
-            RestoreAllBagSlotVisibility(visibleSlotCount);
-        }
-
+        RefreshBagSlotVisibility(visibleSlotCount);
         RefreshHandSlot(boundHandBag);
         isRefreshing = false;
-
-        if (pendingBagRefreshAfterCraftingVisibilityChange)
-        {
-            pendingBagRefreshAfterCraftingVisibilityChange = false;
-            QueueBagRefresh();
-        }
     }
 
     private void HandleBagChanged()
@@ -1888,80 +1859,174 @@ public class PlayerHUD : BagSlot
 
         if (!hasHeldNoose
             && animalInteractionIcon != null
-            && TryGetObjectInfoFocusedAnimal(out Animal focusedAnimal))
-        {
-            if (CanUseAnimalInteractionTarget(focusedAnimal, playerController))
-            {
-                ClearInteractionTargets();
-                currentInteractionAnimal = focusedAnimal;
-                SetActiveInteractionButton(InteractionButton, animalInteractionIcon);
-                return;
-            }
-        }
-
-        if (TryGetFocusedBoxObject(out BoxObject focusedBoxObject))
+            && TryGetClickedObjectInfoFocusedAnimal(out Animal selectedAnimal)
+            && CanUseAnimalInteractionTarget(selectedAnimal, playerController))
         {
             ClearInteractionTargets();
-            currentInteractionBoxObject = focusedBoxObject;
-            SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(focusedBoxObject));
+            currentInteractionAnimal = selectedAnimal;
+            SetActiveInteractionButton(InteractionButton, animalInteractionIcon);
             return;
         }
 
-        if (TryGetNearbyInteractionFenceDoor(out FenceDoor focusedFenceDoor))
+        if (TryGetClickedObjectInfoFocusedMapObject(out MapObject selectedMapObject)
+            && CanDisplayClickedMapObjectInteraction(selectedMapObject, playerController)
+            && TryActivateMapObjectInteraction(selectedMapObject))
         {
-            ClearInteractionTargets();
-            currentInteractionDoorObject = focusedFenceDoor;
-            SetActiveInteractionButton(ResolveDoorInteractionButtonForUse(), ResolveInteractionIcon(focusedFenceDoor));
             return;
         }
 
-        if (TryGetNearbyInteractionVehicle(out Vehicle nearbyVehicle))
+        if (playerController != null
+            && TryActivateNearestAutomaticMapObjectInteraction(playerController))
         {
-            Sprite vehicleIcon = ResolveInteractionIcon(nearbyVehicle, 0);
-            if (vehicleIcon != null)
-            {
-                ClearInteractionTargets();
-                currentInteractionMapObject = nearbyVehicle;
-                SetActiveInteractionButton(InteractionButton, vehicleIcon);
-                return;
-            }
-        }
-
-        if (TryGetNearbyInteractionResource(out Resource focusedResource))
-        {
-            Sprite resourceIcon = ResolveInteractionIcon(focusedResource);
-            if (resourceIcon != null)
-            {
-                ClearInteractionTargets();
-                currentInteractionResource = focusedResource;
-                SetActiveInteractionButton(InteractionButton, resourceIcon);
-                return;
-            }
-        }
-
-        if (TryGetFocusedMapObject(out MapObject focusedMapObject)
-            && !(focusedMapObject is Vehicle)
-            && !(focusedMapObject is Resource)
-            && !(focusedMapObject is FenceDoor))
-        {
-            Sprite mapObjectIcon = ResolveInteractionIcon(focusedMapObject, 0);
-            ItemDefinition focusedDefinition = focusedMapObject.BoundItemDefinition;
-            if (mapObjectIcon == null
-                && focusedDefinition != null
-                && focusedDefinition.lightMode == ItemDefinition.ItemLightMode.Toggle)
-            {
-                mapObjectIcon = focusedDefinition.icon;
-            }
-            if (mapObjectIcon != null)
-            {
-                ClearInteractionTargets();
-                currentInteractionMapObject = focusedMapObject;
-                SetActiveInteractionButton(InteractionButton, mapObjectIcon);
-                return;
-            }
+            return;
         }
 
         ClearContextInteractionButtonState();
+    }
+
+    private bool TryActivateMapObjectInteraction(MapObject mapObject)
+    {
+        if (!TryResolveMapObjectInteraction(
+                mapObject,
+                out InteractionButton targetButton,
+                out Sprite icon))
+        {
+            return false;
+        }
+
+        ActivateMapObjectInteraction(mapObject, targetButton, icon);
+        return true;
+    }
+
+    private bool TryActivateNearestAutomaticMapObjectInteraction(
+        PlayerController playerController)
+    {
+        MapObject nearestTarget = null;
+        InteractionButton nearestButton = null;
+        Sprite nearestIcon = null;
+        float nearestDistanceSqr = float.MaxValue;
+
+        int targetCount = playerController.InteractionButtonFocusTargetCount;
+        for (int i = 0; i < targetCount; i++)
+        {
+            if (!playerController.TryGetInteractionButtonFocusTarget(
+                    i,
+                    out MapObject candidate,
+                    out float distanceSqr)
+                || !playerController.IsWithinInteractionRange(candidate)
+                || distanceSqr >= nearestDistanceSqr
+                || !TryResolveMapObjectInteraction(
+                    candidate,
+                    out InteractionButton candidateButton,
+                    out Sprite candidateIcon))
+            {
+                continue;
+            }
+
+            nearestTarget = candidate;
+            nearestButton = candidateButton;
+            nearestIcon = candidateIcon;
+            nearestDistanceSqr = distanceSqr;
+        }
+
+        if (nearestTarget == null)
+        {
+            return false;
+        }
+
+        ActivateMapObjectInteraction(nearestTarget, nearestButton, nearestIcon);
+        return true;
+    }
+
+    private bool TryResolveMapObjectInteraction(
+        MapObject mapObject,
+        out InteractionButton targetButton,
+        out Sprite icon)
+    {
+        targetButton = InteractionButton;
+        icon = null;
+        if (mapObject == null
+            || !mapObject.gameObject.activeInHierarchy
+            || !mapObject.AllowsFocus)
+        {
+            return false;
+        }
+
+        if (mapObject is BoxObject boxObject)
+        {
+            icon = ResolveInteractionIcon(boxObject);
+        }
+        else if (mapObject is FenceDoor fenceDoor)
+        {
+            icon = ResolveInteractionIcon(fenceDoor);
+            targetButton = ResolveDoorInteractionButtonForUse();
+        }
+        else if (mapObject is Resource resource)
+        {
+            icon = ResolveInteractionIcon(resource);
+        }
+        else
+        {
+            icon = ResolveInteractionIcon(mapObject, 0);
+            ItemDefinition definition = mapObject.BoundItemDefinition;
+            if (icon == null
+                && definition != null
+                && definition.lightMode == ItemDefinition.ItemLightMode.Toggle)
+            {
+                icon = definition.icon;
+            }
+        }
+
+        if (icon == null || targetButton == null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool CanDisplayClickedMapObjectInteraction(
+        MapObject mapObject,
+        PlayerController playerController)
+    {
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        if (!mapObject.RequiresItemLightInteractionRange)
+        {
+            return true;
+        }
+
+        return playerController != null
+               && playerController.IsWithinInteractionRange(mapObject);
+    }
+
+    private void ActivateMapObjectInteraction(
+        MapObject mapObject,
+        InteractionButton targetButton,
+        Sprite icon)
+    {
+        ClearInteractionTargets();
+        if (mapObject is BoxObject targetBox)
+        {
+            currentInteractionBoxObject = targetBox;
+        }
+        else if (mapObject is FenceDoor targetDoor)
+        {
+            currentInteractionDoorObject = targetDoor;
+        }
+        else if (mapObject is Resource targetResource)
+        {
+            currentInteractionResource = targetResource;
+        }
+        else
+        {
+            currentInteractionMapObject = mapObject;
+        }
+
+        SetActiveInteractionButton(targetButton, icon);
     }
 
     private static bool CanUseAnimalInteractionTarget(Animal animal, PlayerController playerController)
@@ -2069,8 +2134,8 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        float separation = contextRect.rect.width * 0.5f
-                           + throwRect.rect.width * 0.5f
+        float separation = contextButton.LayoutWidth * 0.5f
+                           + ThrowInteractionButton.LayoutWidth * 0.5f
                            + Mathf.Max(0f, parallelInteractionButtonSpacing);
         throwRect.anchoredPosition = contextRect.anchoredPosition + Vector2.left * separation;
     }
@@ -2097,9 +2162,12 @@ public class PlayerHUD : BagSlot
         if (objectInfoPanel == null)
         {
             SetObjectInfoSelectionFocus(null, false);
+            SetObjectInfoAreaMarkerVisibility(null, false);
             SetFocusedAnimalOutline(currentObjectInfoTarget, false);
             currentObjectInfoTarget = null;
+            clickedObjectInfoTarget = null;
             SetObjectInfoSupplyRangeVisual(null, false);
+            upgradeButton?.Clear();
             return;
         }
 
@@ -2121,16 +2189,15 @@ public class PlayerHUD : BagSlot
             }
 
             if (playerController != null
-                && playerController.TryGetMouseFocusedAnimal(out Animal mouseFocusedAnimal))
+                && playerController.TryResolvePointerFocusTarget(
+                    pointerPosition,
+                    out Animal clickedAnimal,
+                    out MapObject clickedMapObject))
             {
-                BindObjectInfoPanel(mouseFocusedAnimal, false);
-                return;
-            }
-
-            if (playerController != null
-                && playerController.TryGetMouseFocusedMapObject(out MapObject mouseFocusedMapObject))
-            {
-                BindObjectInfoPanel(mouseFocusedMapObject, false);
+                clickedObjectInfoTarget = clickedAnimal != null
+                    ? clickedAnimal
+                    : clickedMapObject;
+                BindObjectInfoPanel(clickedObjectInfoTarget, false);
                 return;
             }
 
@@ -2148,10 +2215,12 @@ public class PlayerHUD : BagSlot
                 || !objectInfoPanel.IsBoundTo(knifeFocusAnimal)
                 || !objectInfoPanel.gameObject.activeSelf)
             {
+                clickedObjectInfoTarget = null;
                 BindObjectInfoPanel(knifeFocusAnimal, false);
             }
             else
             {
+                clickedObjectInfoTarget = null;
                 currentObjectInfoOpenedByYellowFocus = false;
                 RefreshCurrentObjectInfoPanelTarget();
             }
@@ -2184,6 +2253,7 @@ public class PlayerHUD : BagSlot
             }
 
             lastYellowObjectInfoFocusTarget = focusedMapObject;
+            clickedObjectInfoTarget = null;
             BindObjectInfoPanel(focusedMapObject, true);
             return true;
         }
@@ -2259,16 +2329,41 @@ public class PlayerHUD : BagSlot
         // 다음 프레임에 한 번 더 갱신하고, 이후부터 일반 갱신 주기를 적용한다.
         nextObjectInfoPanelRefreshTime = Time.unscaledTime;
         SetObjectInfoSupplyRangeVisual(target as MapObject, !openedByYellowFocus);
+        SetObjectInfoAreaMarkerVisibility(target as MapObject, !openedByYellowFocus);
         SetObjectInfoSelectionFocus(target as MapObject, !openedByYellowFocus);
+        upgradeButton?.Bind(
+            target as MapObject,
+            !openedByYellowFocus,
+            installationPlacementController);
         TrainFilter.MarkRouteSelectionDirty();
+    }
+
+    public void ReplaceFocusedObjectAfterUpgrade(
+        InstallationObject previousObject,
+        InstallationObject upgradedObject)
+    {
+        if (!ReferenceEquals(currentObjectInfoTarget, previousObject)
+            || upgradedObject == null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(clickedObjectInfoTarget, previousObject))
+        {
+            clickedObjectInfoTarget = upgradedObject;
+        }
+
+        BindObjectInfoPanel(upgradedObject, false);
     }
 
     private void ClearObjectInfoPanelState()
     {
         SetObjectInfoSelectionFocus(null, false);
+        SetObjectInfoAreaMarkerVisibility(null, false);
         SetObjectInfoSupplyRangeVisual(null, false);
         SetFocusedAnimalOutline(currentObjectInfoTarget, false);
         currentObjectInfoTarget = null;
+        clickedObjectInfoTarget = null;
         currentObjectInfoOpenedByYellowFocus = false;
         nextObjectInfoPanelRefreshTime = 0f;
         if (objectInfoPanel != null)
@@ -2276,12 +2371,61 @@ public class PlayerHUD : BagSlot
             objectInfoPanel.Clear();
         }
 
+        upgradeButton?.Clear();
+
         TrainFilter.MarkRouteSelectionDirty();
     }
 
     private void SetObjectInfoSelectionFocus(MapObject target, bool requested)
     {
         ResolvePlayerController()?.SetSelectedMapObjectFocus(requested ? target : null);
+    }
+
+    private void SetObjectInfoAreaMarkerVisibility(MapObject target, bool requested)
+    {
+        InputOutputModuleAreaMarkerController nextController = requested
+            ? ResolveAreaMarkerController(target)
+            : null;
+        if (currentObjectInfoAreaMarkerController == nextController)
+        {
+            if (nextController != null)
+            {
+                nextController.SetSelectionVisibilityRequested(true);
+            }
+
+            return;
+        }
+
+        if (currentObjectInfoAreaMarkerController != null)
+        {
+            currentObjectInfoAreaMarkerController.SetSelectionVisibilityRequested(false);
+        }
+
+        currentObjectInfoAreaMarkerController = nextController;
+        if (currentObjectInfoAreaMarkerController != null)
+        {
+            currentObjectInfoAreaMarkerController.SetSelectionVisibilityRequested(true);
+        }
+    }
+
+    private static InputOutputModuleAreaMarkerController ResolveAreaMarkerController(MapObject target)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        InputOutputModuleAreaMarkerController controller =
+            target.GetComponent<InputOutputModuleAreaMarkerController>();
+        if (controller != null)
+        {
+            return controller;
+        }
+
+        controller = target.GetComponentInParent<InputOutputModuleAreaMarkerController>();
+        return controller != null
+            ? controller
+            : target.GetComponentInChildren<InputOutputModuleAreaMarkerController>(true);
     }
 
     private static void SetFocusedAnimalOutline(Component target, bool visible)
@@ -2896,7 +3040,8 @@ public class PlayerHUD : BagSlot
                 ? currentPlayer.GetComponent<PlayerController>()
                 : null;
             if (lightInteractionController != null
-                && lightInteractionController.IsWithinInteractionRange(currentInteractionMapObject)
+                && (!currentInteractionMapObject.RequiresItemLightInteractionRange
+                    || lightInteractionController.IsWithinInteractionRange(currentInteractionMapObject))
                 && currentInteractionMapObject.ToggleItemLight())
             {
                 UpdateInteractionButtonState();
@@ -3099,54 +3244,6 @@ public class PlayerHUD : BagSlot
         return false;
     }
 
-    private bool TryGetFocusedBoxObject(out BoxObject focusedBoxObject)
-    {
-        focusedBoxObject = null;
-        PlayerController playerController = ResolvePlayerController();
-        if (playerController == null)
-        {
-            return false;
-        }
-
-        return playerController.TryGetFocusedBoxObject(out focusedBoxObject);
-    }
-
-    private bool TryGetNearbyInteractionFenceDoor(out FenceDoor fenceDoor)
-    {
-        fenceDoor = null;
-        PlayerController playerController = ResolvePlayerController();
-        if (playerController == null)
-        {
-            return false;
-        }
-
-        return playerController.TryGetNearbyInteractionFenceDoor(out fenceDoor);
-    }
-
-    private bool TryGetNearbyInteractionVehicle(out Vehicle vehicle)
-    {
-        vehicle = null;
-        PlayerController playerController = ResolvePlayerController();
-        if (playerController == null)
-        {
-            return false;
-        }
-
-        return playerController.TryGetNearbyInteractionVehicle(out vehicle);
-    }
-
-    private bool TryGetNearbyInteractionResource(out Resource resource)
-    {
-        resource = null;
-        PlayerController playerController = ResolvePlayerController();
-        if (playerController == null)
-        {
-            return false;
-        }
-
-        return playerController.TryGetNearbyInteractionResource(out resource);
-    }
-
     private bool TryGetFocusedMapObject(out MapObject focusedMapObject)
     {
         focusedMapObject = null;
@@ -3172,6 +3269,19 @@ public class PlayerHUD : BagSlot
         return focusedMapObject != null;
     }
 
+    private bool TryGetClickedObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    {
+        focusedMapObject = null;
+        if (!TryGetObjectInfoFocusedMapObject(out MapObject currentTarget)
+            || !ReferenceEquals(clickedObjectInfoTarget, currentTarget))
+        {
+            return false;
+        }
+
+        focusedMapObject = currentTarget;
+        return true;
+    }
+
     public bool TryGetObjectInfoFocusedAnimal(out Animal focusedAnimal)
     {
         focusedAnimal = null;
@@ -3182,6 +3292,19 @@ public class PlayerHUD : BagSlot
 
         focusedAnimal = currentObjectInfoTarget as Animal;
         return focusedAnimal != null;
+    }
+
+    private bool TryGetClickedObjectInfoFocusedAnimal(out Animal focusedAnimal)
+    {
+        focusedAnimal = null;
+        if (!TryGetObjectInfoFocusedAnimal(out Animal currentTarget)
+            || !ReferenceEquals(clickedObjectInfoTarget, currentTarget))
+        {
+            return false;
+        }
+
+        focusedAnimal = currentTarget;
+        return true;
     }
 
     private bool HasActiveObjectInfoTarget()
@@ -3234,28 +3357,18 @@ public class PlayerHUD : BagSlot
 
     private void HandleCraftingVisibilityChanged(BagSlot slot, bool isVisible)
     {
-        if (isVisible)
-        {
-            expandedBagSlot = slot;
-        }
-        else if (expandedBagSlot == slot)
-        {
-            expandedBagSlot = null;
-        }
-
         if (isRefreshing)
         {
-            pendingBagRefreshAfterCraftingVisibilityChange = true;
-            QueueBagRefresh();
             return;
         }
 
-        QueueBagRefresh();
+        RefreshBagSlotVisibility();
     }
 
     private BagSlot GetVisibleExpandedBagSlot()
     {
-        if (expandedBagSlot == null || !expandedBagSlot.IsCraftingExpanded)
+        BagSlot expandedSlot = BagSlot.ExpandedSlot;
+        if (expandedSlot == null || !expandedSlot.IsCraftingExpanded)
         {
             return null;
         }
@@ -3267,67 +3380,41 @@ public class PlayerHUD : BagSlot
 
         for (int i = 0; i < bagSlots.Count; i++)
         {
-            if (bagSlots[i] == expandedBagSlot)
+            if (bagSlots[i] == expandedSlot)
             {
-                return expandedBagSlot;
+                return expandedSlot;
             }
         }
 
         return null;
     }
 
-    private void QueueBagRefresh()
-    {
-        if (!isActiveAndEnabled || !gameObject.activeInHierarchy)
-        {
-            return;
-        }
-
-        isBagRefreshQueued = true;
-        queuedBagRefreshFrame = Time.frameCount + 1;
-    }
-
-    private void ProcessQueuedBagRefresh()
-    {
-        if (!isBagRefreshQueued)
-        {
-            return;
-        }
-
-        if (!isActiveAndEnabled || !gameObject.activeInHierarchy)
-        {
-            isBagRefreshQueued = false;
-            queuedBagRefreshFrame = -1;
-            return;
-        }
-
-        if (Time.frameCount < queuedBagRefreshFrame)
-        {
-            return;
-        }
-
-        isBagRefreshQueued = false;
-        queuedBagRefreshFrame = -1;
-
-        RefreshBag(boundInventoryBag);
-        if (expandedBagSlot == null)
-        {
-            RestoreAllBagSlotVisibility(boundInventoryBag != null ? boundInventoryBag.SlotCount : 0);
-        }
-    }
-
-    private void RestoreAllBagSlotVisibility(int visibleSlotCount)
+    private void RefreshBagSlotVisibility(int visibleSlotCount = -1)
     {
         if (bagSlots == null)
         {
             return;
         }
 
+        if (visibleSlotCount < 0)
+        {
+            visibleSlotCount = boundInventoryBag != null ? boundInventoryBag.SlotCount : 0;
+        }
+
+        BagSlot visibleExpandedSlot = GetVisibleExpandedBagSlot();
+
         for (int i = 0; i < bagSlots.Count; i++)
         {
             BagSlot slot = bagSlots[i];
-            if (slot == null || i >= visibleSlotCount)
+            if (slot == null)
             {
+                continue;
+            }
+
+            bool isWithinCapacity = i < visibleSlotCount;
+            if (!isWithinCapacity)
+            {
+                slot.SetSlotVisible(false);
                 continue;
             }
 
@@ -3336,21 +3423,19 @@ public class PlayerHUD : BagSlot
                 slot.gameObject.SetActive(true);
             }
 
-            slot.SetSlotVisible(true);
+            slot.SetSlotVisible(visibleExpandedSlot == null || slot == visibleExpandedSlot);
         }
     }
 
     private void CollapseExpandedBagSlot(bool immediate)
     {
-        if (expandedBagSlot == null)
+        BagSlot target = BagSlot.ExpandedSlot;
+        if (target == null)
         {
             return;
         }
 
-        BagSlot target = expandedBagSlot;
-        expandedBagSlot = null;
         target.CloseCraftingSlots(immediate);
-        RefreshBag(boundInventoryBag);
     }
 
     private bool IsPointerOverExpandedBagArea(BagSlot slot, Vector2 pointerPosition)
@@ -3524,7 +3609,7 @@ public class PlayerHUD : BagSlot
 
     private void UpdateCraftingIngredientRefresh(float deltaTime)
     {
-        if (IsInventoryEditLocked() || expandedBagSlot == null)
+        if (IsInventoryEditLocked() || BagSlot.ExpandedSlot == null)
         {
             craftingIngredientRefreshTimer = 0f;
             return;
@@ -4022,19 +4107,21 @@ public class PlayerHUD : BagSlot
 
     private void RefreshVisibleCraftingUi()
     {
-        if (expandedBagSlot == null)
+        BagSlot expandedSlot = BagSlot.ExpandedSlot;
+        if (expandedSlot == null)
         {
             return;
         }
 
-        expandedBagSlot.RefreshCraftingAvailability(false);
+        expandedSlot.RefreshCraftingAvailability(false);
 
-        if (expandedBagSlot == null || !expandedBagSlot.IsCraftingExpanded)
+        expandedSlot = BagSlot.ExpandedSlot;
+        if (expandedSlot == null || !expandedSlot.IsCraftingExpanded)
         {
             return;
         }
 
-        expandedBagSlot.RefreshExpandedCraftingSlotStatus();
+        expandedSlot.RefreshExpandedCraftingSlotStatus();
     }
 
     private bool TryGetPrimaryPointerDown(out Vector2 pointerPosition)
@@ -4084,14 +4171,7 @@ public class PlayerHUD : BagSlot
 
         if (isLocked)
         {
-            if (expandedBagSlot != null)
-            {
-                CollapseExpandedBagSlot(true);
-            }
-            else
-            {
-                BagSlot.CloseAnyExpanded(true);
-            }
+            BagSlot.CloseAnyExpanded(true);
         }
 
         UpdateInstallModeButtons();

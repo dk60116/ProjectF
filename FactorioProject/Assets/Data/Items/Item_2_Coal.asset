@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_2_Coal
   m_EditorClassIdentifier: 
   itemName: Coal
-  id: 2
+  id: 6
   mapObject: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: c794b4c8f412a824999b84bf29af69ff, type: 2}
@@ -22,6 +22,7 @@ MonoBehaviour:
   - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

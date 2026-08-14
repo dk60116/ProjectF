@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_49_Iron wheel
   m_EditorClassIdentifier: 
   itemName: Pork steak
-  id: 55
+  id: 57
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 4b2420f80567bd84e87ca350c9e00d4f, type: 2}
   portableMat: {fileID: 2100000, guid: 7f8555ef28f90f14c9972463aa0fcd49, type: 2}
@@ -21,6 +21,7 @@ MonoBehaviour:
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_8_Electricity
   m_EditorClassIdentifier: 
   itemName: Electricity
-  id: 8
+  id: 3
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
@@ -21,6 +21,7 @@ MonoBehaviour:
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

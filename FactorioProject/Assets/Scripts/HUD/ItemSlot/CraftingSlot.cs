@@ -1,4 +1,5 @@
 using DG.Tweening;
+using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -9,6 +10,7 @@ public class CraftingSlot : ItemSlot
 {
     private const float DefaultIngredientSpacing = 10f;
     private const float DefaultIngredientChildSize = 80f;
+    private const float DefaultIngredientsRootOffset = 120f;
     private const float MinimumLayoutSize = 0.01f;
 
     private static CraftingSlot activeIngredientsSlot;
@@ -59,10 +61,18 @@ public class CraftingSlot : ItemSlot
     private bool isRefreshingCraftingMapObjectVisuals;
     private bool isHidingIngredientsImmediate;
     private bool ingredientsManualLayoutReady;
+    private bool ingredientsRootOffsetCached;
     private bool ingredientRevealAnimating;
     private Sequence ingredientRevealSequence;
     private float ingredientsSpacing = DefaultIngredientSpacing;
+    private float ingredientsRootHorizontalOffset = DefaultIngredientsRootOffset;
+    private int ingredientsExpansionDirectionSign;
     private int requiredCraftingMapObjectId = -1;
+    private Func<int, bool> externalCreateAction;
+    private Func<int, bool> externalCanCreate;
+    private int externallyProvidedIngredientItemId = -1;
+    private int externallyProvidedIngredientCount;
+    private bool externalCreateButtonReady = true;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
     private readonly List<HUDButtonHoverTween> hoverTweenBuffer = new List<HUDButtonHoverTween>();
@@ -227,6 +237,11 @@ public class CraftingSlot : ItemSlot
 
             if (ingredientsRoot == null)
             {
+                ingredientsRoot = ResolveSerializedIngredientsRoot();
+            }
+
+            if (ingredientsRoot == null)
+            {
                 Transform target = transform.Find("Ingredients");
                 ingredientsRoot = target as RectTransform;
             }
@@ -335,7 +350,8 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
-        BagSlot parentBagSlot = GetComponentInParent<BagSlot>();
+        bool usesExternalCreateAction = externalCreateAction != null;
+        BagSlot parentBagSlot = usesExternalCreateAction ? null : GetComponentInParent<BagSlot>();
         if (parentBagSlot != null && !parentBagSlot.CanCraftItem(craftItemId))
         {
             parentBagSlot.RefreshCraftingAvailability();
@@ -349,6 +365,31 @@ public class CraftingSlot : ItemSlot
 
         if (!HasAllIngredients())
         {
+            RefreshIngredients();
+            return;
+        }
+
+        if (usesExternalCreateAction)
+        {
+            if (externalCanCreate != null && !externalCanCreate(craftItemId))
+            {
+                RefreshIngredients();
+                return;
+            }
+
+            List<CraftingTreeRuntime.IngredientEntry> externalConsumedIngredients = null;
+            if (ingredientBuffer.Count > 0
+                && !TryConsumeIngredients(out externalConsumedIngredients))
+            {
+                RefreshIngredients();
+                return;
+            }
+
+            if (!externalCreateAction(craftItemId))
+            {
+                RefundIngredients(externalConsumedIngredients);
+            }
+
             RefreshIngredients();
             return;
         }
@@ -420,7 +461,46 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        CaptureIngredientsExpansionDirection();
         RefreshIngredients(true);
+    }
+
+    public void ConfigureExternalCreateAction(
+        Func<int, bool> createAction,
+        int providedIngredientItemId = -1,
+        int providedIngredientCount = 0,
+        Func<int, bool> canCreate = null)
+    {
+        externalCreateAction = createAction;
+        externalCanCreate = canCreate;
+        externallyProvidedIngredientItemId = providedIngredientItemId;
+        externallyProvidedIngredientCount = Mathf.Max(0, providedIngredientCount);
+        SetTargetButtonHoverEnabled(false);
+        RefreshCraftingMapObjectState();
+        RefreshIngredientsIfVisible();
+    }
+
+    public void ClearExternalCreateAction()
+    {
+        externalCreateAction = null;
+        externalCanCreate = null;
+        externallyProvidedIngredientItemId = -1;
+        externallyProvidedIngredientCount = 0;
+        externalCreateButtonReady = true;
+        SetTargetButtonHoverEnabled(true);
+        RefreshCraftingMapObjectState();
+    }
+
+    public void ShowIngredientsForExternalUse()
+    {
+        if (externalCreateAction == null || !HasItem)
+        {
+            HideIngredientsImmediate();
+            return;
+        }
+
+        ResetHoverTweensImmediate();
+        ShowIngredients();
     }
 
     private void RefreshIngredients()
@@ -439,8 +519,7 @@ public class CraftingSlot : ItemSlot
         bool revealSequentially = forceSequentialReveal || !ingredientsVisible;
         bool preserveRunningReveal = !revealSequentially && ingredientRevealAnimating;
         bool rootWasActive = ingredientsRoot.gameObject.activeSelf;
-        ingredientBuffer.Clear();
-        if (!CraftingTreeRuntime.TryGetIngredients(ItemId, ingredientBuffer))
+        if (!TryBuildIngredientBuffer(ItemId))
         {
             HideIngredientsImmediate();
             return;
@@ -453,8 +532,27 @@ public class CraftingSlot : ItemSlot
 
         bool hasAllIngredients = RefreshIngredientSlotDisplays();
 
-        bool handReady = CanPrepareHandForCrafting(ItemId);
-        bool createButtonChangedVisibility = SetCreateButtonVisible((hasAllIngredients && handReady) || blockedByCraftingMapObject);
+        bool handReady = externalCreateAction != null
+            ? externalCanCreate == null || externalCanCreate(ItemId)
+            : CanPrepareHandForCrafting(ItemId);
+        bool createButtonReady = hasAllIngredients && handReady;
+        bool createButtonChangedVisibility;
+        if (externalCreateAction != null)
+        {
+            externalCreateButtonReady = createButtonReady;
+            createButtonChangedVisibility = SetCreateButtonVisible(true);
+            if (createButton != null)
+            {
+                createButton.interactable = createButtonReady;
+                SetCreateButtonHoverEnabled(true);
+            }
+        }
+        else
+        {
+            externalCreateButtonReady = true;
+            createButtonChangedVisibility = SetCreateButtonVisible(
+                createButtonReady || blockedByCraftingMapObject);
+        }
         bool resetCreateButtonLayout = ShouldResetCreateButtonLayout(
             revealSequentially,
             rootWasActive,
@@ -553,7 +651,45 @@ public class CraftingSlot : ItemSlot
     private bool TryBuildIngredientBuffer(int itemId)
     {
         ingredientBuffer.Clear();
-        return CraftingTreeRuntime.TryGetIngredients(itemId, ingredientBuffer);
+        bool hasRecipeIngredients = CraftingTreeRuntime.TryGetIngredients(itemId, ingredientBuffer);
+        if (!hasRecipeIngredients || externalCreateAction == null)
+        {
+            return hasRecipeIngredients;
+        }
+
+        RemoveExternallyProvidedIngredient();
+        return true;
+    }
+
+    private void RemoveExternallyProvidedIngredient()
+    {
+        int remainingProvidedCount = externallyProvidedIngredientCount;
+        if (externallyProvidedIngredientItemId < 0 || remainingProvidedCount <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < ingredientBuffer.Count && remainingProvidedCount > 0; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            if (entry.itemId != externallyProvidedIngredientItemId || entry.count <= 0)
+            {
+                continue;
+            }
+
+            int providedCount = Mathf.Min(entry.count, remainingProvidedCount);
+            entry.count -= providedCount;
+            remainingProvidedCount -= providedCount;
+            if (entry.count <= 0)
+            {
+                ingredientBuffer.RemoveAt(i);
+                i--;
+            }
+            else
+            {
+                ingredientBuffer[i] = entry;
+            }
+        }
     }
 
     private void RefreshCreateCountText()
@@ -595,7 +731,7 @@ public class CraftingSlot : ItemSlot
             }
         }
 
-        return ingredientBuffer.Count > 0;
+        return ingredientBuffer.Count > 0 || externalCreateAction != null;
     }
 
     private bool CanPrepareHandForCrafting(int craftItemId)
@@ -913,6 +1049,7 @@ public class CraftingSlot : ItemSlot
         {
             StopIngredientReveal();
             ingredientsVisible = false;
+            ingredientsExpansionDirectionSign = 0;
             if (activeIngredientsSlot == this)
             {
                 activeIngredientsSlot = null;
@@ -1040,7 +1177,10 @@ public class CraftingSlot : ItemSlot
 
         if (createButton != null && createButton.gameObject.activeSelf && !preserveRunningReveal)
         {
-            SetRevealCanvasGroup(createButton.gameObject, 1f, true);
+            SetRevealCanvasGroup(
+                createButton.gameObject,
+                ResolveCreateButtonVisualAlpha(),
+                createButton.interactable);
         }
     }
 
@@ -1106,11 +1246,19 @@ public class CraftingSlot : ItemSlot
                 sequence,
                 createButton.gameObject,
                 ref hasRevealTarget,
-                () => createButton.interactable = restoreCreateInteractable);
+                () => createButton.interactable = restoreCreateInteractable,
+                ResolveCreateButtonVisualAlpha(),
+                restoreCreateInteractable);
         }
     }
 
-    private void AppendRevealTarget(Sequence sequence, GameObject target, ref bool hasPreviousTarget, TweenCallback onComplete = null)
+    private void AppendRevealTarget(
+        Sequence sequence,
+        GameObject target,
+        ref bool hasPreviousTarget,
+        TweenCallback onComplete = null,
+        float targetAlpha = 1f,
+        bool interactive = true)
     {
         if (sequence == null || target == null)
         {
@@ -1135,20 +1283,27 @@ public class CraftingSlot : ItemSlot
         {
             sequence.AppendCallback(() =>
             {
-                SetRevealCanvasGroup(revealGroup, 1f, true);
+                SetRevealCanvasGroup(revealGroup, targetAlpha, interactive);
                 onComplete?.Invoke();
             });
             return;
         }
 
         sequence.Append(
-            revealGroup.DOFade(1f, duration)
+            revealGroup.DOFade(targetAlpha, duration)
                 .SetEase(Ease.OutQuad)
                 .OnComplete(() =>
                 {
-                    SetRevealCanvasGroup(revealGroup, 1f, true);
+                    SetRevealCanvasGroup(revealGroup, targetAlpha, interactive);
                     onComplete?.Invoke();
                 }));
+    }
+
+    private float ResolveCreateButtonVisualAlpha()
+    {
+        return externalCreateAction != null && !externalCreateButtonReady
+            ? Mathf.Clamp01(insufficientIngredientAlpha)
+            : 1f;
     }
 
     private void StopIngredientReveal()
@@ -1360,6 +1515,17 @@ public class CraftingSlot : ItemSlot
             contentSizeFitter.enabled = false;
         }
 
+        if (!ingredientsRootOffsetCached)
+        {
+            float configuredOffset = Mathf.Abs(ingredientsRoot.anchoredPosition.x);
+            if (configuredOffset > MinimumLayoutSize)
+            {
+                ingredientsRootHorizontalOffset = configuredOffset;
+            }
+
+            ingredientsRootOffsetCached = true;
+        }
+
         ingredientsManualLayoutReady = true;
     }
 
@@ -1372,6 +1538,9 @@ public class CraftingSlot : ItemSlot
 
         PrepareIngredientsManualLayout();
 
+        int directionSign = GetIngredientsExpansionDirectionSign();
+        ApplyIngredientsRootDirection(directionSign);
+
         float nextX = 0f;
         float maxHeight = 0f;
         int safeVisibleCount = Mathf.Max(0, visibleIngredientCount);
@@ -1380,7 +1549,12 @@ public class CraftingSlot : ItemSlot
         bool placeCreateButtonFirst = ShouldPlaceCreateButtonFirst();
         if (placeCreateButtonFirst)
         {
-            PositionCreateButtonIfVisible(createRect, ref nextX, ref maxHeight, applyCreateButtonSize);
+            PositionCreateButtonIfVisible(
+                createRect,
+                directionSign,
+                ref nextX,
+                ref maxHeight,
+                applyCreateButtonSize);
         }
 
         if (ingredientSlots != null)
@@ -1395,7 +1569,7 @@ public class CraftingSlot : ItemSlot
                 }
 
                 Vector2 childSize = ResolveStableIngredientChildSize(slotRect);
-                PositionIngredientChild(slotRect, nextX, childSize, true);
+                PositionIngredientChild(slotRect, nextX, childSize, true, directionSign);
                 nextX += childSize.x + ingredientsSpacing;
                 maxHeight = Mathf.Max(maxHeight, childSize.y);
             }
@@ -1403,7 +1577,12 @@ public class CraftingSlot : ItemSlot
 
         if (!placeCreateButtonFirst)
         {
-            PositionCreateButtonIfVisible(createRect, ref nextX, ref maxHeight, applyCreateButtonSize);
+            PositionCreateButtonIfVisible(
+                createRect,
+                directionSign,
+                ref nextX,
+                ref maxHeight,
+                applyCreateButtonSize);
         }
 
         float width = Mathf.Max(0f, nextX - ingredientsSpacing);
@@ -1411,12 +1590,17 @@ public class CraftingSlot : ItemSlot
         ingredientsRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, maxHeight);
     }
 
-    private void PositionCreateButtonIfVisible(RectTransform createRect, ref float nextX, ref float maxHeight, bool applySize)
+    private void PositionCreateButtonIfVisible(
+        RectTransform createRect,
+        int directionSign,
+        ref float nextX,
+        ref float maxHeight,
+        bool applySize)
     {
         if (createRect != null && createButton != null && createButton.gameObject.activeSelf)
         {
             Vector2 childSize = ResolveStableIngredientChildSize(createRect);
-            PositionIngredientChild(createRect, nextX, childSize, applySize);
+            PositionIngredientChild(createRect, nextX, childSize, applySize, directionSign);
             nextX += childSize.x + ingredientsSpacing;
             maxHeight = Mathf.Max(maxHeight, childSize.y);
         }
@@ -1500,21 +1684,98 @@ public class CraftingSlot : ItemSlot
         return size.x > MinimumLayoutSize && size.y > MinimumLayoutSize;
     }
 
-    private static void PositionIngredientChild(RectTransform child, float left, Vector2 size, bool applySize)
+    private static void PositionIngredientChild(
+        RectTransform child,
+        float distance,
+        Vector2 size,
+        bool applySize,
+        int directionSign)
     {
         if (child == null)
         {
             return;
         }
 
-        child.anchorMin = new Vector2(0f, 0.5f);
-        child.anchorMax = new Vector2(0f, 0.5f);
+        float anchorX = directionSign > 0 ? 0f : 1f;
+        child.anchorMin = new Vector2(anchorX, 0.5f);
+        child.anchorMax = new Vector2(anchorX, 0.5f);
         child.pivot = new Vector2(0.5f, 0.5f);
         if (applySize)
         {
             ApplyRectSize(child, size);
         }
-        child.anchoredPosition = new Vector2(left + size.x * 0.5f, 0f);
+        child.anchoredPosition = new Vector2(
+            directionSign * (distance + size.x * 0.5f),
+            0f);
+    }
+
+    private void CaptureIngredientsExpansionDirection()
+    {
+        Canvas.ForceUpdateCanvases();
+        ingredientsExpansionDirectionSign = CalculateIngredientsExpansionDirectionSign();
+    }
+
+    private int GetIngredientsExpansionDirectionSign()
+    {
+        if (ingredientsExpansionDirectionSign == 0)
+        {
+            ingredientsExpansionDirectionSign = CalculateIngredientsExpansionDirectionSign();
+        }
+
+        return ingredientsExpansionDirectionSign;
+    }
+
+    private int CalculateIngredientsExpansionDirectionSign()
+    {
+        Canvas canvas = GetComponentInParent<Canvas>();
+        Camera eventCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+        Vector3 slotCenter = rectTransform != null
+            ? rectTransform.TransformPoint(rectTransform.rect.center)
+            : transform.position;
+        Vector2 slotScreenPosition = RectTransformUtility.WorldToScreenPoint(eventCamera, slotCenter);
+        int desiredScreenDirection = slotScreenPosition.x <= Screen.width * 0.5f ? 1 : -1;
+
+        RectTransform directionRoot = rectTransform != null ? rectTransform : ingredientsRoot;
+        if (directionRoot == null)
+        {
+            return desiredScreenDirection;
+        }
+
+        Vector2 localOriginScreen = RectTransformUtility.WorldToScreenPoint(
+            eventCamera,
+            directionRoot.TransformPoint(Vector3.zero));
+        Vector2 localRightScreen = RectTransformUtility.WorldToScreenPoint(
+            eventCamera,
+            directionRoot.TransformPoint(Vector3.right));
+        float localRightScreenDelta = localRightScreen.x - localOriginScreen.x;
+        int localRightScreenDirection = Mathf.Abs(localRightScreenDelta) > MinimumLayoutSize
+            ? (localRightScreenDelta > 0f ? 1 : -1)
+            : 1;
+        return desiredScreenDirection * localRightScreenDirection;
+    }
+
+    private void ApplyIngredientsRootDirection(int directionSign)
+    {
+        if (ingredientsRoot == null)
+        {
+            return;
+        }
+
+        float anchorX = directionSign > 0 ? 0f : 1f;
+        Vector2 anchorMin = ingredientsRoot.anchorMin;
+        Vector2 anchorMax = ingredientsRoot.anchorMax;
+        Vector2 pivot = ingredientsRoot.pivot;
+        Vector2 anchoredPosition = ingredientsRoot.anchoredPosition;
+        anchorMin.x = anchorX;
+        anchorMax.x = anchorX;
+        pivot.x = anchorX;
+        anchoredPosition.x = directionSign * ingredientsRootHorizontalOffset;
+        ingredientsRoot.anchorMin = anchorMin;
+        ingredientsRoot.anchorMax = anchorMax;
+        ingredientsRoot.pivot = pivot;
+        ingredientsRoot.anchoredPosition = anchoredPosition;
     }
 
     private static void ApplyRectSize(RectTransform target, Vector2 size)
@@ -1571,7 +1832,7 @@ public class CraftingSlot : ItemSlot
         blockedByCraftingMapObject = false;
         requiredCraftingMapObjectId = -1;
 
-        if (!HasItem)
+        if (!HasItem || externalCreateAction != null)
         {
             RefreshCraftingMapObjectVisuals();
             return;
@@ -1615,7 +1876,10 @@ public class CraftingSlot : ItemSlot
 
         isRefreshingCraftingMapObjectVisuals = true;
 
-        bool showBlockedState = HasItem && blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0;
+        bool showBlockedState = externalCreateAction == null
+                                && HasItem
+                                && blockedByCraftingMapObject
+                                && requiredCraftingMapObjectId >= 0;
         try
         {
             SetCreateButtonHoverEnabled(!showBlockedState);
@@ -1733,9 +1997,60 @@ public class CraftingSlot : ItemSlot
         return true;
     }
 
+    private RectTransform ResolveSerializedIngredientsRoot()
+    {
+        if (ingredientSlots == null || ingredientSlots.Count <= 0)
+        {
+            return null;
+        }
+
+        Transform sharedParent = null;
+        for (int i = 0; i < ingredientSlots.Count; i++)
+        {
+            ItemSlot slot = ingredientSlots[i];
+            if (slot == null || slot.transform == null || slot.transform.parent == null)
+            {
+                continue;
+            }
+
+            Transform candidateParent = slot.transform.parent;
+            if (sharedParent == null)
+            {
+                sharedParent = candidateParent;
+                continue;
+            }
+
+            if (sharedParent != candidateParent)
+            {
+                return null;
+            }
+        }
+
+        return sharedParent as RectTransform;
+    }
+
     private void SetCreateButtonHoverEnabled(bool enabled)
     {
         SetHoverTweensEnabledIn(createButton, enabled, !enabled, false);
+    }
+
+    private void SetTargetButtonHoverEnabled(bool enabled)
+    {
+        CacheReferences();
+        HUDButtonHoverTween hoverTween = button != null
+            ? button.GetComponent<HUDButtonHoverTween>()
+            : null;
+        if (hoverTween == null)
+        {
+            return;
+        }
+
+        if (!enabled)
+        {
+            hoverTween.ResetHoverImmediate(false);
+        }
+
+        hoverTween.enabled = enabled;
     }
 
     private void ResetCreateButtonHoverImmediate(bool rebuildLayout)

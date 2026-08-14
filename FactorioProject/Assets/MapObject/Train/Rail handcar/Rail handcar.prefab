@@ -237,7 +237,7 @@ MonoBehaviour:
   id: 0
   objectName: Rail handcar
   objId: 63
-  itemDefinition: {fileID: 11400000, guid: 9b57d4232b128e44dad8eb1f0335b314, type: 2}
+  itemDefinition: {fileID: 11400000, guid: e93a970b73b08f348b062a6caa40bc92, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -249,7 +249,8 @@ MonoBehaviour:
   itemFilterMaskWords: 
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
-  mapFilter: 165
+  mapFilter: 421
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}

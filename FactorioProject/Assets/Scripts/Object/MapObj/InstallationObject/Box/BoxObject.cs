@@ -4,13 +4,16 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class BoxObject : InstallationObject
+public class BoxObject : InputOutputModule
 {
     private static readonly HashSet<BoxObject> ActiveInstances = new HashSet<BoxObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private const float ClosedAngle = 0f;
     private const float OpenAngle = 120f;
+    private const float CountTextHideZoomThreshold = 0.95f;
+    private const float CountTextShowZoomThreshold = 0.9f;
+    private static bool countTextVisibleForZoom = true;
 
     [SerializeField]
     private Transform hinge;
@@ -102,6 +105,29 @@ public class BoxObject : InstallationObject
         return nearestBoxObject != null;
     }
 
+    public static void RefreshCountTextZoomVisibility(float normalizedZoom, bool force = false)
+    {
+        normalizedZoom = Mathf.Clamp01(normalizedZoom);
+        bool shouldShow = countTextVisibleForZoom
+            ? normalizedZoom < CountTextHideZoomThreshold
+            : normalizedZoom <= CountTextShowZoomThreshold;
+        if (!force && shouldShow == countTextVisibleForZoom)
+        {
+            return;
+        }
+
+        countTextVisibleForZoom = shouldShow;
+        foreach (BoxObject boxObject in ActiveInstances)
+        {
+            if (boxObject == null)
+            {
+                continue;
+            }
+
+            boxObject.ApplyCountTextZoomVisibility(shouldShow);
+        }
+    }
+
     protected override void OnEnable()
     {
         base.OnEnable();
@@ -109,6 +135,7 @@ public class BoxObject : InstallationObject
         globalMaxFocusActivationRadiusDirty = true;
         ApplyHingeRotation(false);
         RefreshBoxVisuals(true);
+        ApplyCountTextZoomVisibility(countTextVisibleForZoom, true);
     }
 
     protected override void OnDisable()
@@ -670,23 +697,7 @@ public class BoxObject : InstallationObject
 
     private void SyncItemIcon(bool force = false)
     {
-        if (itemIcon == null)
-        {
-            SetLockIconVisible(false, force);
-            return;
-        }
-
-        if (TryGetSingleResolvedItemId(out int filteredItemId))
-        {
-            ApplyItemIconSprite(ResolveItemIconSprite(filteredItemId), filteredItemId, force);
-            SetLockIconVisible(true, force);
-            return;
-        }
-
-        SetLockIconVisible(false, force);
-
         TryGetContentBlock(out Block contentBlock);
-
         SyncItemIcon(contentBlock, force);
     }
 
@@ -694,6 +705,13 @@ public class BoxObject : InstallationObject
     {
         if (itemIcon == null)
         {
+            SetLockIconVisible(false, force);
+            return;
+        }
+
+        if (isOpen)
+        {
+            ApplyItemIconSprite(null, -1, force);
             SetLockIconVisible(false, force);
             return;
         }
@@ -771,7 +789,13 @@ public class BoxObject : InstallationObject
 
     private void ApplyItemIconSprite(Sprite sprite, int itemId, bool force)
     {
-        if (!force && cachedDisplayedItemId == itemId && cachedDisplayedSprite == sprite)
+        bool shouldEnable = sprite != null;
+        bool isGameObjectActive = itemIcon.gameObject == null || itemIcon.gameObject.activeSelf;
+        if (!force
+            && cachedDisplayedItemId == itemId
+            && cachedDisplayedSprite == sprite
+            && isGameObjectActive
+            && itemIcon.enabled == shouldEnable)
         {
             return;
         }
@@ -785,7 +809,7 @@ public class BoxObject : InstallationObject
         }
 
         itemIcon.sprite = sprite;
-        itemIcon.enabled = sprite != null;
+        itemIcon.enabled = shouldEnable;
     }
 
     private void SetLockIconVisible(bool visible, bool force)
@@ -836,6 +860,8 @@ public class BoxObject : InstallationObject
             return;
         }
 
+        ApplyCountTextZoomVisibility(countTextVisibleForZoom);
+
         if (!force
             && cachedCountTextHasValue
             && cachedCountTextItemCount == itemCount
@@ -849,6 +875,15 @@ public class BoxObject : InstallationObject
         cachedCountTextCapacity = capacity;
         cachedCountTextValue = $"{itemCount:00} / {capacity:00}";
         countText.text = cachedCountTextValue;
+    }
+
+    private void ApplyCountTextZoomVisibility(bool visible, bool force = false)
+    {
+        bool shouldShow = visible && !isOpen;
+        if (countText != null && (force || countText.enabled != shouldShow))
+        {
+            countText.enabled = shouldShow;
+        }
     }
 
     private bool TryGetSingleFilteredItemId(out int itemId)

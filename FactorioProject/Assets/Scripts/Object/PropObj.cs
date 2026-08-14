@@ -15,6 +15,8 @@ public class PropObj : BaseObject
     [SerializeField, ReadOnly]
     protected PortableObject portableObj;
 
+    private ItemLightController itemLightController;
+
     protected void Awake()
     {
         portableObj = GetComponentInChildren<PortableObject>(true);
@@ -33,6 +35,8 @@ public class PropObj : BaseObject
 
     public ItemDefinition BoundItemDefinition => itemDefinition;
 
+    public virtual bool RequiresItemLightInteractionRange => true;
+
     protected void RefreshItemLight(bool toggled = false)
     {
         ItemDefinition definition = itemDefinition;
@@ -46,13 +50,57 @@ public class PropObj : BaseObject
                 ResolveItemId());
         }
 
-        ItemLightController.Configure(gameObject, definition, toggled);
+        itemLightController = ItemLightController.Configure(gameObject, definition, toggled);
+        OnItemLightToggleStateChanged(itemLightController != null && itemLightController.IsToggled);
     }
 
     public bool ToggleItemLight()
     {
-        ItemLightController lightController = GetComponent<ItemLightController>();
-        return lightController != null && lightController.Toggle();
+        ItemLightController lightController = ResolveItemLightController();
+        if (lightController == null
+            || lightController.Mode != ItemDefinition.ItemLightMode.Toggle)
+        {
+            return false;
+        }
+
+        return SetItemLightToggled(!lightController.IsToggled);
+    }
+
+    protected bool IsItemLightToggled
+    {
+        get
+        {
+            ItemLightController lightController = ResolveItemLightController();
+            return lightController != null && lightController.IsToggled;
+        }
+    }
+
+    protected bool SetItemLightToggled(bool active)
+    {
+        ItemLightController lightController = ResolveItemLightController();
+        if (lightController == null
+            || lightController.Mode != ItemDefinition.ItemLightMode.Toggle)
+        {
+            return false;
+        }
+
+        lightController.SetToggled(active);
+        OnItemLightToggleStateChanged(active);
+        return true;
+    }
+
+    private ItemLightController ResolveItemLightController()
+    {
+        if (itemLightController == null)
+        {
+            itemLightController = GetComponent<ItemLightController>();
+        }
+
+        return itemLightController;
+    }
+
+    protected virtual void OnItemLightToggleStateChanged(bool active)
+    {
     }
 
     public int ResolveItemId()

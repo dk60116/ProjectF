@@ -10,7 +10,6 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private const float SidebarWidth = 280f;
     private const float PreviewHeight = 320f;
     private const float ListRowHeight = 28f;
-    private const double DropItemCatalogPollInterval = 0.25d;
 
     private static readonly int[] AnimationStates =
     {
@@ -244,7 +243,6 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private string[] previewAnimationStateLabels = DefaultAnimationStateLabels;
     private bool previewPlaying;
     private double lastPreviewUpdateTime;
-    private double nextDropItemCatalogPollTime;
     private int dropItemCatalogSignature = int.MinValue;
 
     [MenuItem("Window/ProjectF/Animal Data")]
@@ -274,11 +272,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private void OnEnable()
     {
         Undo.undoRedoPerformed += HandleUndoRedo;
-        EditorApplication.update += HandleEditorUpdate;
         ItemDataEditorWindow.DefinitionCatalog.Changed +=
             HandleItemDefinitionCatalogChanged;
         ReloadDefinitions(false);
-        lastPreviewUpdateTime = EditorApplication.timeSinceStartup;
     }
 
     private void OnDisable()
@@ -318,28 +314,31 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private void HandleEditorUpdate()
     {
-        double currentTime = EditorApplication.timeSinceStartup;
-        bool shouldRepaint = false;
-        if (currentTime >= nextDropItemCatalogPollTime)
+        if (!previewPlaying || previewAnimator == null || !previewAnimator.isInitialized)
         {
-            nextDropItemCatalogPollTime =
-                currentTime + DropItemCatalogPollInterval;
-            shouldRepaint = RefreshDropItemOptions(false);
+            SetPreviewPlaying(false);
+            return;
         }
 
+        double currentTime = EditorApplication.timeSinceStartup;
         float deltaTime = (float)Math.Min(0.1d, Math.Max(0d, currentTime - lastPreviewUpdateTime));
         lastPreviewUpdateTime = currentTime;
 
-        if (previewPlaying && previewAnimator != null && previewAnimator.isInitialized)
+        previewAnimator.Update(deltaTime);
+        Repaint();
+    }
+
+    private void SetPreviewPlaying(bool shouldPlay)
+    {
+        previewPlaying = shouldPlay;
+        EditorApplication.update -= HandleEditorUpdate;
+        if (!previewPlaying)
         {
-            previewAnimator.Update(deltaTime);
-            shouldRepaint = true;
+            return;
         }
 
-        if (shouldRepaint)
-        {
-            Repaint();
-        }
+        lastPreviewUpdateTime = EditorApplication.timeSinceStartup;
+        EditorApplication.update += HandleEditorUpdate;
     }
 
     private void OnGUI()
@@ -1454,8 +1453,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         bool nextPlaying = GUILayout.Toggle(previewPlaying, previewPlaying ? "Pause" : "Play", "Button", GUILayout.Width(70f));
         if (nextPlaying != previewPlaying)
         {
-            previewPlaying = nextPlaying;
-            lastPreviewUpdateTime = EditorApplication.timeSinceStartup;
+            SetPreviewPlaying(nextPlaying);
         }
         EditorGUILayout.EndHorizontal();
 
@@ -2439,9 +2437,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private void ResetPreview()
     {
+        SetPreviewPlaying(false);
         DisposePreview();
         previewPrefab = null;
-        previewPlaying = false;
         previewAge = 10f;
         previewAnimationIndex = 0;
     }

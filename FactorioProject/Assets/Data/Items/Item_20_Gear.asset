@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_20_Gear
   m_EditorClassIdentifier: 
   itemName: Gear
-  id: 22
+  id: 25
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: c7420867e7dfa5d4aa7f56cd07b08f96, type: 2}
   portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
@@ -21,6 +21,7 @@ MonoBehaviour:
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

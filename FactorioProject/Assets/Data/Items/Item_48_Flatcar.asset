@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_48_Flatcar
   m_EditorClassIdentifier: 
   itemName: Beef
-  id: 53
+  id: 56
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 4b2420f80567bd84e87ca350c9e00d4f, type: 2}
   portableMat: {fileID: 2100000, guid: 4581171f624c4d24e925faf59d6ec49f, type: 2}
@@ -21,6 +21,7 @@ MonoBehaviour:
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

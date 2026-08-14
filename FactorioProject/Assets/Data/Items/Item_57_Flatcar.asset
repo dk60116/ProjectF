@@ -13,14 +13,15 @@ MonoBehaviour:
   m_Name: Item_57_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Flatcar
-  id: 57
+  id: 62
   mapObject: {fileID: 8246531933118439867, guid: a34b33398bb75a84aaa6febe564ccb3e, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
-  icon: {fileID: 21300000, guid: 9bace8f3f6fadd24bb38c880999fb509, type: 3}
+  icon: {fileID: 21300000, guid: ba608c03b7cefea4cbc21ecf28f1fbda, type: 3}
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
+  lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
   capacity: 10

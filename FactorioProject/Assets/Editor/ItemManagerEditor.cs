@@ -13,10 +13,27 @@ public class ItemManagerEditor : Editor
         if (GUILayout.Button("Rebuild"))
         {
             ItemManager itemManager = (ItemManager)target;
-            Undo.RecordObject(itemManager, "Rebuild Item Data");
-            itemManager.RebuildItemDefinitionsFromAssets();
-            itemManager.ApplyItemIdsToPrefabs();
-            itemManager.MarkEditorDirty();
+            try
+            {
+                EditorUtility.DisplayProgressBar("Item Data Rebuild", "리빌드 준비 중...", 0.01f);
+                Undo.RecordObject(itemManager, "Rebuild Item Data");
+                itemManager.RebuildItemDefinitionsFromAssets((message, progress) =>
+                    EditorUtility.DisplayProgressBar(
+                        "Item Data Rebuild",
+                        message,
+                        Mathf.Lerp(0.02f, 0.82f, progress)));
+                itemManager.ApplyItemIdsToPrefabs((message, progress) =>
+                    EditorUtility.DisplayProgressBar(
+                        "Item Data Rebuild",
+                        message,
+                        Mathf.Lerp(0.82f, 0.98f, progress)));
+                itemManager.MarkEditorDirty();
+                EditorUtility.DisplayProgressBar("Item Data Rebuild", "아이템 리빌드 완료", 1f);
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
         }
 
         if (GUILayout.Button("Open Item Data UI"))

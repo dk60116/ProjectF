@@ -15,7 +15,17 @@ public enum InstallationMapFilter
     Tree = 1 << 4,
     WaterOutline = 1 << 5,
     Pipe = 1 << 6,
-    Railload = 1 << 7
+    Railload = 1 << 7,
+    Floor = 1 << 8,
+    OtherInstallObject = 1 << 9
+}
+
+public enum InstallationRotationFilter
+{
+    All = 0,
+    [InspectorName("Horizontal and Vertical")]
+    HorizontalAndVertical = 1,
+    Fixed = 2
 }
 
 public enum InstallationFacingDirection
@@ -29,7 +39,10 @@ public enum InstallationFacingDirection
 public class InstallationObject : MapObject
 {
     public const InstallationMapFilter DefaultMapFilter =
-        InstallationMapFilter.Ground | InstallationMapFilter.Ore | InstallationMapFilter.WaterOutline;
+        InstallationMapFilter.Ground
+        | InstallationMapFilter.Ore
+        | InstallationMapFilter.WaterOutline
+        | InstallationMapFilter.Floor;
     private const float FluidInRateSampleSeconds = 0.25f;
     private const float FluidInRateIdleResetSeconds = 0.75f;
     private const string PowerLinePointName = "PowerLinePoint";
@@ -54,6 +67,8 @@ public class InstallationObject : MapObject
 
     [SerializeField]
     private InstallationMapFilter mapFilter = DefaultMapFilter;
+    [SerializeField]
+    private InstallationRotationFilter rotationFilter = InstallationRotationFilter.All;
     [SerializeField]
     [Min(0f)]
     private float installationFocusRadius = 1f;
@@ -88,8 +103,32 @@ public class InstallationObject : MapObject
 
     public InstallationMapFilter MapFilter
     {
-        get => mapFilter == InstallationMapFilter.None ? DefaultMapFilter : mapFilter;
-        set => mapFilter = value == InstallationMapFilter.None ? DefaultMapFilter : value;
+        get => NormalizeMapFilter(mapFilter);
+        set => mapFilter = NormalizeMapFilter(value);
+    }
+
+    public InstallationRotationFilter RotationFilter
+    {
+        get => NormalizeRotationFilter(rotationFilter);
+        set => rotationFilter = NormalizeRotationFilter(value);
+    }
+
+    public static InstallationMapFilter NormalizeMapFilter(InstallationMapFilter filter)
+    {
+        InstallationMapFilter normalizedFilter = filter == InstallationMapFilter.None
+            ? DefaultMapFilter
+            : filter;
+        return normalizedFilter | InstallationMapFilter.Floor;
+    }
+
+    public static InstallationRotationFilter NormalizeRotationFilter(InstallationRotationFilter filter)
+    {
+        return filter switch
+        {
+            InstallationRotationFilter.HorizontalAndVertical => InstallationRotationFilter.HorizontalAndVertical,
+            InstallationRotationFilter.Fixed => InstallationRotationFilter.Fixed,
+            _ => InstallationRotationFilter.All
+        };
     }
 
     public virtual float FocusActivationRadius => Mathf.Max(0f, installationFocusRadius);
@@ -910,10 +949,8 @@ public class InstallationObject : MapObject
 #if UNITY_EDITOR
     protected virtual void OnValidate()
     {
-        if (mapFilter == InstallationMapFilter.None)
-        {
-            mapFilter = DefaultMapFilter;
-        }
+        mapFilter = NormalizeMapFilter(mapFilter);
+        rotationFilter = NormalizeRotationFilter(rotationFilter);
 
         if (installationFocusRadius < 0f)
         {
