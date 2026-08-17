@@ -6,6 +6,7 @@ using UnityEditor.SceneManagement;
 using UnityEditor.U2D;
 using UnityEngine;
 using UnityEngine.U2D;
+using ProjectF.EditorTools;
 
 public class ItemDataEditorWindow : EditorWindow
 {
@@ -89,6 +90,11 @@ public class ItemDataEditorWindow : EditorWindow
     private const float SidebarWidth = 260f;
     private const float GiveButtonWidth = 46f;
     private const float ItemListRowHeight = 28f;
+    private const float ItemFolderIndent = 14f;
+    private const float ItemFolderDeleteButtonWidth = 22f;
+    private const float ItemFolderDragHandleWidth = 16f;
+    private const float ItemFolderDragStartDistance = 6f;
+    private const string ItemFolderDragDataKey = "ProjectF.ItemDataFolder";
     private const int ItemListOverscanRows = 3;
     private const int LargeInputOutputPairAutoCollapseThreshold = 8;
     private const float RectGridCellSize = 34f;
@@ -136,8 +142,15 @@ public class ItemDataEditorWindow : EditorWindow
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedItemId = -1;
+    private readonly HashSet<ItemDefinition> selectedItemDefinitions = new HashSet<ItemDefinition>();
+    private readonly List<ItemDefinition> selectedItemDefinitionsInOrder = new List<ItemDefinition>();
+    private readonly List<ItemDefinition> draggedItemDefinitions = new List<ItemDefinition>();
+    private readonly HashSet<ItemDefinition> availableItemDefinitions = new HashSet<ItemDefinition>();
+    private readonly List<ItemDefinition> invalidSelectedItemDefinitions = new List<ItemDefinition>();
+    private ItemDefinition rangeSelectionAnchor;
+    private ItemDefinition pendingPlainSelectionDefinition;
+    private Vector2 pendingPlainSelectionMouseDownPosition;
     private string itemSearchText = string.Empty;
-    private bool showPlayModeDetailFields;
     private ItemDefinition pendingReorderSelection;
     private readonly HashSet<string> collapsedInputOutputPairSectionKeys = new HashSet<string>();
     private readonly HashSet<string> collapsedInputOutputPairKeys = new HashSet<string>();
@@ -157,8 +170,22 @@ public class ItemDataEditorWindow : EditorWindow
     private int definitionsCacheVersion;
     private readonly List<ItemDefinition> cachedDefinitions = new List<ItemDefinition>();
     private readonly List<ItemDefinition> cachedVisibleDefinitions = new List<ItemDefinition>();
+    private readonly List<ItemListRow> cachedItemListRows = new List<ItemListRow>();
+    private readonly List<ItemDefinition> cachedFolderOrderedDefinitions = new List<ItemDefinition>();
+    private readonly List<ItemDefinition> pendingFolderOrderedDefinitions = new List<ItemDefinition>();
+    private readonly Dictionary<ItemDefinition, string> cachedItemFolderIds =
+        new Dictionary<ItemDefinition, string>();
     private string cachedVisibleDefinitionsSearchText = string.Empty;
     private int cachedVisibleDefinitionsVersion = -1;
+    private string cachedItemListRowsSearchText = string.Empty;
+    private int cachedItemListRowsDefinitionsVersion = -1;
+    private int cachedItemListRowsFolderRevision = -1;
+    private string pendingFolderDragId;
+    private Vector2 pendingFolderDragMouseDownPosition;
+    private bool folderItemIdNormalizationScheduled;
+    private string editingFolderId;
+    private string editingFolderName;
+    private bool folderNameFocusPending;
     private ItemDefinition[] cachedInputOutputDefinitionOptions = Array.Empty<ItemDefinition>();
     private GUIContent[] cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
     private readonly Dictionary<int, int> cachedInputOutputDefinitionOptionIndexes = new Dictionary<int, int>();
@@ -169,9 +196,168 @@ public class ItemDataEditorWindow : EditorWindow
     private int cachedParentInputOutputModuleItemOptionsVersion = -1;
     private int cachedCraftingTreeIngredientSummaryVersion = -1;
     private readonly Dictionary<int, string> inputOutputTargetKeyCache = new Dictionary<int, string>();
+    private readonly Dictionary<string, SerializedProperty> cachedSelectedDefinitionProperties =
+        new Dictionary<string, SerializedProperty>(StringComparer.Ordinal);
+    private readonly Dictionary<string, SerializedProperty> cachedMultiSelectedDefinitionProperties =
+        new Dictionary<string, SerializedProperty>(StringComparer.Ordinal);
+    private readonly Dictionary<string, SerializedProperty> cachedSelectedMapObjectProperties =
+        new Dictionary<string, SerializedProperty>(StringComparer.Ordinal);
+    private ItemDefinition cachedSerializedDefinitionTarget;
+    private SerializedObject cachedSerializedDefinition;
+    private ItemDefinition[] cachedMultiSerializedDefinitionTargets = Array.Empty<ItemDefinition>();
+    private SerializedObject cachedMultiSerializedDefinition;
+    private MapObject cachedSerializedMapObjectTarget;
+    private SerializedObject cachedSerializedMapObject;
+    private ConveyorBelt cachedSerializedConveyorTarget;
+    private SerializedObject cachedSerializedConveyor;
     private static GUIStyle placementCenterLabelStyle;
     private static GUIStyle rectGridPaletteLabelStyle;
     private static GUIStyle rectGridBlockLabelStyle;
+    private GUIStyle manualTargetPopupWithIconStyle;
+
+    internal readonly struct ItemListRow
+    {
+        public readonly ItemDataFolderSettings.FolderEntry Folder;
+        public readonly ItemDefinition Definition;
+        public readonly ItemDefinition FolderIconDefinition;
+        public readonly int ItemCount;
+
+        private ItemListRow(
+            ItemDataFolderSettings.FolderEntry folder,
+            ItemDefinition definition,
+            ItemDefinition folderIconDefinition,
+            int itemCount)
+        {
+            Folder = folder;
+            Definition = definition;
+            FolderIconDefinition = folderIconDefinition;
+            ItemCount = itemCount;
+        }
+
+        public bool IsFolder => Definition == null;
+
+        public static ItemListRow CreateFolder(
+            ItemDataFolderSettings.FolderEntry folder,
+            ItemDefinition folderIconDefinition,
+            int itemCount)
+        {
+            return new ItemListRow(folder, null, folderIconDefinition, itemCount);
+        }
+
+        public static ItemListRow CreateItem(ItemDefinition definition)
+        {
+            return new ItemListRow(null, definition, null, 0);
+        }
+    }
+
+    private readonly struct ItemLayoutElement
+    {
+        public readonly ItemDataFolderSettings.FolderEntry Folder;
+        public readonly ItemDefinition Definition;
+        public readonly int DefinitionIndex;
+        public readonly int FolderOrder;
+
+        private ItemLayoutElement(
+            ItemDataFolderSettings.FolderEntry folder,
+            ItemDefinition definition,
+            int definitionIndex,
+            int folderOrder)
+        {
+            Folder = folder;
+            Definition = definition;
+            DefinitionIndex = definitionIndex;
+            FolderOrder = folderOrder;
+        }
+
+        public static ItemLayoutElement CreateFolder(
+            ItemDataFolderSettings.FolderEntry folder,
+            int definitionIndex,
+            int folderOrder)
+        {
+            return new ItemLayoutElement(folder, null, definitionIndex, folderOrder);
+        }
+
+        public static ItemLayoutElement CreateItem(ItemDefinition definition, int definitionIndex)
+        {
+            return new ItemLayoutElement(null, definition, definitionIndex, int.MaxValue);
+        }
+    }
+
+    private sealed class ManualTargetItemPopupContent : PopupWindowContent
+    {
+        private const float PopupWidth = 340f;
+        private const float RowHeight = 28f;
+        private const float MaximumPopupHeight = 420f;
+        private readonly ItemDefinition[] definitions;
+        private readonly ItemDefinition selectedDefinition;
+        private readonly Action<ItemDefinition> selectionCallback;
+        private Vector2 scrollPosition;
+
+        public ManualTargetItemPopupContent(
+            ItemDefinition[] definitions,
+            ItemDefinition selectedDefinition,
+            Action<ItemDefinition> selectionCallback)
+        {
+            this.definitions = definitions ?? Array.Empty<ItemDefinition>();
+            this.selectedDefinition = selectedDefinition;
+            this.selectionCallback = selectionCallback;
+        }
+
+        public override Vector2 GetWindowSize()
+        {
+            float contentHeight = Mathf.Max(RowHeight, definitions.Length * RowHeight + 8f);
+            return new Vector2(PopupWidth, Mathf.Min(MaximumPopupHeight, contentHeight));
+        }
+
+        public override void OnGUI(Rect rect)
+        {
+            Event currentEvent = Event.current;
+            if (currentEvent != null && currentEvent.type == EventType.MouseMove)
+            {
+                editorWindow.Repaint();
+            }
+
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            for (int i = 0; i < definitions.Length; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                Rect rowRect = GUILayoutUtility.GetRect(1f, RowHeight, GUILayout.ExpandWidth(true));
+                bool isSelected = definition == selectedDefinition;
+                bool isHovered = currentEvent != null && rowRect.Contains(currentEvent.mousePosition);
+                if (isSelected || isHovered)
+                {
+                    EditorGUI.DrawRect(
+                        rowRect,
+                        isSelected
+                            ? new Color(0.24f, 0.49f, 0.78f, 0.75f)
+                            : new Color(1f, 1f, 1f, 0.08f));
+                }
+
+                Rect iconRect = new Rect(rowRect.x + 5f, rowRect.y + 3f, 22f, 22f);
+                DrawIconBackground(iconRect);
+                DrawItemIcon(iconRect, definition);
+
+                string label = definition != null
+                    ? $"[{definition.id}] {GetDefinitionDisplayName(definition)}"
+                    : "(None)";
+                Rect labelRect = new Rect(
+                    iconRect.xMax + 7f,
+                    rowRect.y,
+                    rowRect.width - 38f,
+                    RowHeight);
+                GUI.Label(labelRect, label);
+
+                if (GUI.Button(rowRect, GUIContent.none, GUIStyle.none))
+                {
+                    selectionCallback?.Invoke(definition);
+                    editorWindow.Close();
+                    GUIUtility.ExitGUI();
+                }
+            }
+
+            EditorGUILayout.EndScrollView();
+        }
+    }
 
     private readonly struct RectGridPaletteEntry
     {
@@ -193,7 +379,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 5;
+        public int version = 8;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -214,6 +400,11 @@ public class ItemDataEditorWindow : EditorWindow
         public float lightIntensityMultiplier = -1f;
         public int size;
         public bool itemFilter;
+        public bool hasIgnoreFilter;
+        public bool ignoreFilter;
+        public bool hasManual;
+        public bool isManual;
+        public InputOutputJsonEntry manualTargetItem;
         public bool hasUpgradeable;
         public bool upgradeable = true;
         public int capacity = -1;
@@ -347,6 +538,15 @@ public class ItemDataEditorWindow : EditorWindow
     private void OnDisable()
     {
         Undo.undoRedoPerformed -= HandleUndoRedoPerformed;
+        if (folderItemIdNormalizationScheduled)
+        {
+            EditorApplication.delayCall -= NormalizeFolderItemIds;
+            folderItemIdNormalizationScheduled = false;
+        }
+
+        pendingFolderOrderedDefinitions.Clear();
+        CancelFolderNameEditing();
+        ClearSelectedSerializedObjectCaches();
     }
 
     private void OnFocus()
@@ -396,6 +596,7 @@ public class ItemDataEditorWindow : EditorWindow
 
     private void InvalidateDefinitionCache()
     {
+        ClearSelectedSerializedObjectCaches();
         definitionsCacheDirty = true;
         cachedDefinitionsItemManager = null;
         cachedDefinitionsItemManagerCount = -1;
@@ -409,6 +610,7 @@ public class ItemDataEditorWindow : EditorWindow
         cachedVisibleDefinitions.Clear();
         cachedVisibleDefinitionsSearchText = string.Empty;
         cachedVisibleDefinitionsVersion = -1;
+        InvalidateItemFolderPresentationCache();
         cachedInputOutputDefinitionOptions = Array.Empty<ItemDefinition>();
         cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
         cachedInputOutputDefinitionOptionIndexes.Clear();
@@ -419,6 +621,16 @@ public class ItemDataEditorWindow : EditorWindow
         cachedParentInputOutputModuleItemOptionsVersion = -1;
         cachedCraftingTreeIngredientSummaries.Clear();
         cachedCraftingTreeIngredientSummaryVersion = -1;
+    }
+
+    private void InvalidateItemFolderPresentationCache()
+    {
+        cachedItemListRows.Clear();
+        cachedFolderOrderedDefinitions.Clear();
+        cachedItemFolderIds.Clear();
+        cachedItemListRowsSearchText = string.Empty;
+        cachedItemListRowsDefinitionsVersion = -1;
+        cachedItemListRowsFolderRevision = -1;
     }
 
     private void DrawBackground()
@@ -435,17 +647,19 @@ public class ItemDataEditorWindow : EditorWindow
         GUILayout.Space(10f);
         DrawToolbar();
         DrawSearchField();
-        EditorGUILayout.LabelField("Items", EditorStyles.boldLabel);
 
         ItemManager itemManager = FindItemManager();
         if (itemManager == null)
         {
+            DrawItemFolderToolbar(0);
             EditorGUILayout.HelpBox("씬에서 ItemManager를 찾을 수 없습니다.", MessageType.Info);
             GUILayout.EndArea();
             return;
         }
 
         List<ItemDefinition> definitions = GetDefinitions(itemManager);
+        List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
+        DrawItemFolderToolbar(visibleDefinitions.Count);
         if (definitions.Count == 0)
         {
             EditorGUILayout.HelpBox("ItemDefinitions가 비어있습니다.", MessageType.Warning);
@@ -453,71 +667,1852 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
         EnsureSelection(definitions, visibleDefinitions);
+        EnsureMultiSelection(definitions);
 
+        ItemDataFolderSettings folderSettings = ItemDataFolderSettings.instance;
+        List<ItemListRow> itemListRows = BuildItemListRows(definitions, visibleDefinitions, folderSettings);
+        ScheduleFolderItemIdNormalization(itemManager, definitions, folderSettings);
+
+        listScroll = EditorGUILayout.BeginScrollView(listScroll);
         if (visibleDefinitions.Count == 0)
         {
             EditorGUILayout.HelpBox("검색 결과가 없습니다.", MessageType.Info);
-            GUILayout.EndArea();
-            return;
         }
 
-        listScroll = EditorGUILayout.BeginScrollView(listScroll);
-        int firstVisibleIndex = GetFirstVisibleItemListIndex(visibleDefinitions.Count);
-        int lastVisibleIndex = GetLastVisibleItemListIndex(firstVisibleIndex, visibleDefinitions.Count);
+        int firstVisibleIndex = GetFirstVisibleItemListIndex(itemListRows.Count);
+        int lastVisibleIndex = GetLastVisibleItemListIndex(firstVisibleIndex, itemListRows.Count);
         if (firstVisibleIndex > 0)
         {
             GUILayout.Space(firstVisibleIndex * ItemListRowHeight);
         }
 
-        for (int i = firstVisibleIndex; i <= lastVisibleIndex; i++)
+        for (int i = firstVisibleIndex;
+             i <= lastVisibleIndex && i < itemListRows.Count;
+             i++)
         {
-            ItemDefinition definition = visibleDefinitions[i];
-            if (definition == null)
+            ItemListRow row = itemListRows[i];
+            if (row.IsFolder)
             {
+                DrawItemFolderRow(row, folderSettings, itemManager, definitions);
                 continue;
             }
 
-            string displayName = GetDefinitionDisplayName(definition);
-            bool isSelected = definition.id == selectedItemId;
-            Rect rowRect = GUILayoutUtility.GetRect(1f, ItemListRowHeight, GUILayout.ExpandWidth(true));
-            Rect selectRect = new Rect(rowRect.x, rowRect.y, Mathf.Max(1f, rowRect.width - GiveButtonWidth - 4f), rowRect.height);
-            Rect giveRect = new Rect(selectRect.xMax + 4f, rowRect.y, GiveButtonWidth, rowRect.height);
-            GUIContent content = new GUIContent($"[{definition.id}] {displayName}");
-            ItemDefinitionDragAndDropUtility.HandleListItemDrag(selectRect, definition, content.text, this);
-            HandleDefinitionReorderDropTarget(rowRect, itemManager, definitions, visibleDefinitions, i);
-
-            bool pressed = GUI.Toggle(selectRect, isSelected, GUIContent.none, "Button");
-            if (pressed)
-            {
-                selectedItemId = definition.id;
-            }
-
-            Rect iconRect = new Rect(selectRect.x + 4f, selectRect.y + 4f, 20f, 20f);
-            Rect labelRect = new Rect(iconRect.xMax + 4f, selectRect.y, Mathf.Max(1f, selectRect.xMax - iconRect.xMax - 8f), selectRect.height);
-            DrawItemIcon(iconRect, definition);
-            GUI.Label(labelRect, content, EditorStyles.miniLabel);
-
-            EditorGUI.BeginDisabledGroup(!EditorApplication.isPlaying);
-            if (GUI.Button(giveRect, "Give"))
-            {
-                TryGiveItemToPlayer(definition);
-            }
-            EditorGUI.EndDisabledGroup();
+            DrawItemDefinitionRow(
+                row,
+                itemManager,
+                definitions,
+                visibleDefinitions,
+                folderSettings);
         }
 
-        int hiddenTrailingRowCount = visibleDefinitions.Count - lastVisibleIndex - 1;
+        int hiddenTrailingRowCount = itemListRows.Count - lastVisibleIndex - 1;
         if (hiddenTrailingRowCount > 0)
         {
             GUILayout.Space(hiddenTrailingRowCount * ItemListRowHeight);
         }
 
         Rect endDropRect = GUILayoutUtility.GetRect(1f, 16f, GUILayout.ExpandWidth(true));
-        HandleDefinitionReorderDropTarget(endDropRect, itemManager, definitions, visibleDefinitions, visibleDefinitions.Count);
+        if (folderSettings.Folders.Count > 0)
+        {
+            HandleItemLayoutDropTarget(
+                endDropRect,
+                default,
+                true,
+                itemManager,
+                definitions,
+                folderSettings);
+        }
+        else
+        {
+            HandleDefinitionReorderDropTarget(
+                endDropRect,
+                itemManager,
+                definitions,
+                visibleDefinitions,
+                visibleDefinitions.Count);
+        }
 
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
+    }
+
+    private void DrawItemFolderToolbar(int visibleItemCount)
+    {
+        EditorGUILayout.BeginHorizontal();
+        GUIContent itemCountContent = new GUIContent($"Items ({Mathf.Max(0, visibleItemCount)})");
+        float itemCountWidth = EditorStyles.boldLabel.CalcSize(itemCountContent).x;
+        GUILayout.Label(
+            itemCountContent,
+            EditorStyles.boldLabel,
+            GUILayout.Width(itemCountWidth));
+        if (selectedItemDefinitions.Count > 1)
+        {
+            string selectionCountText = $"{selectedItemDefinitions.Count} selected";
+            float selectionCountWidth = EditorStyles.miniLabel.CalcSize(
+                new GUIContent(selectionCountText)).x;
+            GUILayout.Label(
+                selectionCountText,
+                EditorStyles.miniLabel,
+                GUILayout.Width(selectionCountWidth));
+        }
+
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button(new GUIContent("+ Folder", "에디터 목록 정리용 폴더를 추가합니다."), GUILayout.Width(72f)))
+        {
+            ItemDataFolderSettings folderSettings = ItemDataFolderSettings.instance;
+            ItemDataFolderSettings.FolderEntry folder = folderSettings.AddFolder();
+            ItemManager itemManager = FindItemManager();
+            List<ItemDefinition> definitions = itemManager != null
+                ? GetDefinitions(itemManager)
+                : null;
+            ItemDefinition anchorDefinition = definitions != null
+                ? FindDefinitionById(definitions, selectedItemId)
+                : null;
+            if (anchorDefinition == null && definitions != null && definitions.Count > 0)
+            {
+                anchorDefinition = definitions[0];
+            }
+
+            folderSettings.SetFolderPlacement(folder.Id, anchorDefinition);
+            InvalidateItemFolderPresentationCache();
+            GUI.FocusControl(null);
+            Repaint();
+        }
+
+        GUILayout.Space(4f);
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private List<ItemListRow> BuildItemListRows(
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> visibleDefinitions,
+        ItemDataFolderSettings folderSettings)
+    {
+        string searchText = string.IsNullOrWhiteSpace(itemSearchText) ? string.Empty : itemSearchText.Trim();
+        int folderRevision = folderSettings != null ? folderSettings.Revision : -1;
+        if (cachedItemListRowsDefinitionsVersion == definitionsCacheVersion
+            && cachedItemListRowsFolderRevision == folderRevision
+            && string.Equals(cachedItemListRowsSearchText, searchText, StringComparison.Ordinal))
+        {
+            return cachedItemListRows;
+        }
+
+        BuildFolderLayoutRows(
+            definitions,
+            visibleDefinitions,
+            folderSettings,
+            !string.IsNullOrEmpty(searchText),
+            cachedItemListRows,
+            cachedFolderOrderedDefinitions,
+            cachedItemFolderIds);
+
+        CacheItemListRowState(searchText, folderRevision);
+        return cachedItemListRows;
+    }
+
+    internal static void BuildFolderLayoutRows(
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> visibleDefinitions,
+        ItemDataFolderSettings folderSettings,
+        bool forceExpandedForSearch,
+        List<ItemListRow> itemListRows,
+        List<ItemDefinition> folderOrderedDefinitions,
+        Dictionary<ItemDefinition, string> itemFolderIds)
+    {
+        itemListRows?.Clear();
+        folderOrderedDefinitions?.Clear();
+        itemFolderIds?.Clear();
+        if (definitions == null
+            || visibleDefinitions == null
+            || itemListRows == null
+            || folderOrderedDefinitions == null
+            || itemFolderIds == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<ItemDataFolderSettings.FolderEntry> folders = folderSettings != null
+            ? folderSettings.Folders
+            : null;
+        if (folders == null || folders.Count == 0)
+        {
+            folderOrderedDefinitions.AddRange(definitions);
+            for (int i = 0; i < visibleDefinitions.Count; i++)
+            {
+                ItemDefinition definition = visibleDefinitions[i];
+                if (definition != null)
+                {
+                    itemListRows.Add(ItemListRow.CreateItem(definition));
+                }
+            }
+
+            return;
+        }
+
+        HashSet<ItemDefinition> visibleDefinitionSet = new HashSet<ItemDefinition>(visibleDefinitions);
+        Dictionary<string, List<ItemDefinition>> membersByFolder =
+            new Dictionary<string, List<ItemDefinition>>(StringComparer.Ordinal);
+        Dictionary<string, int> firstMemberIndexByFolder =
+            new Dictionary<string, int>(StringComparer.Ordinal);
+        List<ItemLayoutElement> layoutElements = new List<ItemLayoutElement>();
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string folderId = folderSettings.GetItemFolderId(definition);
+            itemFolderIds[definition] = folderId;
+            if (string.IsNullOrEmpty(folderId))
+            {
+                layoutElements.Add(ItemLayoutElement.CreateItem(definition, i));
+                continue;
+            }
+
+            if (!membersByFolder.TryGetValue(folderId, out List<ItemDefinition> members))
+            {
+                members = new List<ItemDefinition>();
+                membersByFolder.Add(folderId, members);
+                firstMemberIndexByFolder.Add(folderId, i);
+            }
+
+            members.Add(definition);
+        }
+
+        for (int folderIndex = 0; folderIndex < folders.Count; folderIndex++)
+        {
+            ItemDataFolderSettings.FolderEntry folder = folders[folderIndex];
+            if (folder == null)
+            {
+                continue;
+            }
+
+            int definitionIndex = firstMemberIndexByFolder.TryGetValue(folder.Id, out int firstMemberIndex)
+                ? firstMemberIndex
+                : ResolveFolderPlacementIndex(definitions, folder, folderSettings);
+            layoutElements.Add(ItemLayoutElement.CreateFolder(folder, definitionIndex, folderIndex));
+        }
+
+        layoutElements.Sort(CompareItemLayoutElements);
+        for (int i = 0; i < layoutElements.Count; i++)
+        {
+            ItemLayoutElement element = layoutElements[i];
+            if (element.Folder == null)
+            {
+                folderOrderedDefinitions.Add(element.Definition);
+                if (visibleDefinitionSet.Contains(element.Definition))
+                {
+                    itemListRows.Add(ItemListRow.CreateItem(element.Definition));
+                }
+
+                continue;
+            }
+
+            membersByFolder.TryGetValue(element.Folder.Id, out List<ItemDefinition> members);
+            if (members != null)
+            {
+                folderOrderedDefinitions.AddRange(members);
+            }
+
+            int visibleMemberCount = CountVisibleFolderMembers(members, visibleDefinitionSet);
+            if (forceExpandedForSearch && visibleMemberCount == 0)
+            {
+                continue;
+            }
+
+            ItemDefinition folderIconDefinition = members != null && members.Count > 0
+                ? members[0]
+                : null;
+            itemListRows.Add(ItemListRow.CreateFolder(
+                element.Folder,
+                folderIconDefinition,
+                visibleMemberCount));
+            if (!element.Folder.Expanded && !forceExpandedForSearch)
+            {
+                continue;
+            }
+
+            AppendVisibleFolderMembers(members, visibleDefinitionSet, itemListRows);
+        }
+    }
+
+    private void ScheduleFolderItemIdNormalization(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        ItemDataFolderSettings folderSettings)
+    {
+        if (folderItemIdNormalizationScheduled
+            || itemManager == null
+            || definitions == null
+            || folderSettings == null
+            || folderSettings.Folders.Count == 0
+            || cachedFolderOrderedDefinitions.Count != definitions.Count
+            || HaveSameDefinitionOrder(definitions, cachedFolderOrderedDefinitions))
+        {
+            return;
+        }
+
+        pendingFolderOrderedDefinitions.Clear();
+        pendingFolderOrderedDefinitions.AddRange(cachedFolderOrderedDefinitions);
+        folderItemIdNormalizationScheduled = true;
+        EditorApplication.delayCall += NormalizeFolderItemIds;
+    }
+
+    private void NormalizeFolderItemIds()
+    {
+        EditorApplication.delayCall -= NormalizeFolderItemIds;
+        folderItemIdNormalizationScheduled = false;
+        if (this == null || pendingFolderOrderedDefinitions.Count == 0)
+        {
+            pendingFolderOrderedDefinitions.Clear();
+            return;
+        }
+
+        ItemManager itemManager = FindItemManager();
+        List<ItemDefinition> currentDefinitions = itemManager != null
+            ? GetDefinitions(itemManager)
+            : null;
+        if (!HaveSameDefinitions(currentDefinitions, pendingFolderOrderedDefinitions))
+        {
+            pendingFolderOrderedDefinitions.Clear();
+            InvalidateItemFolderPresentationCache();
+            Repaint();
+            return;
+        }
+
+        if (HaveSameDefinitionOrder(currentDefinitions, pendingFolderOrderedDefinitions))
+        {
+            pendingFolderOrderedDefinitions.Clear();
+            return;
+        }
+
+        ItemDefinition selection = FindDefinitionById(currentDefinitions, selectedItemId);
+        RegisterDefinitionOrderUndo(itemManager, currentDefinitions, "Normalize Folder Item IDs");
+        CommitDefinitionOrderChange(
+            itemManager,
+            pendingFolderOrderedDefinitions,
+            selection);
+        pendingFolderOrderedDefinitions.Clear();
+    }
+
+    private static bool HaveSameDefinitionOrder(
+        IReadOnlyList<ItemDefinition> left,
+        IReadOnlyList<ItemDefinition> right)
+    {
+        if (left == null || right == null || left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HaveSameDefinitions(
+        IReadOnlyList<ItemDefinition> left,
+        IReadOnlyList<ItemDefinition> right)
+    {
+        if (left == null || right == null || left.Count != right.Count)
+        {
+            return false;
+        }
+
+        HashSet<ItemDefinition> definitions = new HashSet<ItemDefinition>();
+        for (int i = 0; i < left.Count; i++)
+        {
+            if (left[i] == null || !definitions.Add(left[i]))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < right.Count; i++)
+        {
+            if (right[i] == null || !definitions.Remove(right[i]))
+            {
+                return false;
+            }
+        }
+
+        return definitions.Count == 0;
+    }
+
+    private void CacheItemListRowState(string searchText, int folderRevision)
+    {
+        cachedItemListRowsSearchText = searchText;
+        cachedItemListRowsDefinitionsVersion = definitionsCacheVersion;
+        cachedItemListRowsFolderRevision = folderRevision;
+    }
+
+    private static int CompareItemLayoutElements(ItemLayoutElement left, ItemLayoutElement right)
+    {
+        int positionCompare = left.DefinitionIndex.CompareTo(right.DefinitionIndex);
+        if (positionCompare != 0)
+        {
+            return positionCompare;
+        }
+
+        if (left.Folder != null && right.Folder != null)
+        {
+            return left.FolderOrder.CompareTo(right.FolderOrder);
+        }
+
+        return left.Folder != null ? -1 : right.Folder != null ? 1 : 0;
+    }
+
+    private static int CountVisibleFolderMembers(
+        List<ItemDefinition> members,
+        HashSet<ItemDefinition> visibleDefinitions)
+    {
+        if (members == null || visibleDefinitions == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < members.Count; i++)
+        {
+            if (members[i] != null && visibleDefinitions.Contains(members[i]))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static void AppendVisibleFolderMembers(
+        List<ItemDefinition> members,
+        HashSet<ItemDefinition> visibleDefinitions,
+        List<ItemListRow> itemListRows)
+    {
+        if (members == null || visibleDefinitions == null || itemListRows == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < members.Count; i++)
+        {
+            ItemDefinition definition = members[i];
+            if (definition != null && visibleDefinitions.Contains(definition))
+            {
+                itemListRows.Add(ItemListRow.CreateItem(definition));
+            }
+        }
+    }
+
+    private void DrawItemFolderRow(
+        ItemListRow row,
+        ItemDataFolderSettings folderSettings,
+        ItemManager itemManager,
+        List<ItemDefinition> definitions)
+    {
+        Rect rowRect = GUILayoutUtility.GetRect(1f, ItemListRowHeight, GUILayout.ExpandWidth(true));
+        EditorGUI.DrawRect(rowRect, new Color(0.18f, 0.18f, 0.18f, 1f));
+
+        bool expanded = row.Folder != null && row.Folder.Expanded;
+        Rect foldoutRect = new Rect(rowRect.x + 2f, rowRect.y, 16f, rowRect.height);
+        bool nextExpanded = EditorGUI.Foldout(foldoutRect, expanded, GUIContent.none, true);
+        if (nextExpanded != expanded)
+        {
+            if (row.Folder != null)
+            {
+                folderSettings.SetFolderExpanded(row.Folder.Id, nextExpanded);
+            }
+
+            InvalidateItemFolderPresentationCache();
+        }
+
+        Rect dragHandleRect = new Rect(foldoutRect.xMax, rowRect.y, ItemFolderDragHandleWidth, rowRect.height);
+        HandleItemFolderDrag(dragHandleRect, row.Folder);
+        EditorGUIUtility.AddCursorRect(dragHandleRect, MouseCursor.Pan);
+        GUI.Label(dragHandleRect, new GUIContent("≡", "폴더와 내부 아이템을 함께 이동합니다."), EditorStyles.miniLabel);
+
+        float nameStartX = dragHandleRect.xMax + 2f;
+        if (row.FolderIconDefinition != null)
+        {
+            Rect iconRect = new Rect(nameStartX, rowRect.y + 4f, 20f, 20f);
+            DrawItemIcon(iconRect, row.FolderIconDefinition);
+            nameStartX = iconRect.xMax + 4f;
+        }
+
+        Rect countRect = new Rect(
+            rowRect.xMax - ItemFolderDeleteButtonWidth - 34f,
+            rowRect.y,
+            30f,
+            rowRect.height);
+        Rect nameRect = new Rect(
+            nameStartX,
+            rowRect.y + 3f,
+            Mathf.Max(20f, countRect.xMin - nameStartX - 4f),
+            rowRect.height - 6f);
+
+        if (row.Folder != null)
+        {
+            DrawEditableFolderName(nameRect, row.Folder, folderSettings);
+
+            Rect deleteRect = new Rect(
+                rowRect.xMax - ItemFolderDeleteButtonWidth,
+                rowRect.y + 3f,
+                ItemFolderDeleteButtonWidth,
+                rowRect.height - 6f);
+            if (GUI.Button(deleteRect, new GUIContent("×", "폴더만 제거하고 아이템은 Unfiled로 이동합니다.")))
+            {
+                string folderName = row.Folder.DisplayName;
+                if (EditorUtility.DisplayDialog(
+                        "Remove Item Folder",
+                        $"'{folderName}' 폴더를 제거하시겠습니까?\n아이템 데이터와 순서는 변경되지 않습니다.",
+                        "Remove",
+                        "Cancel")
+                    && folderSettings.RemoveFolder(row.Folder.Id))
+                {
+                    if (string.Equals(editingFolderId, row.Folder.Id, StringComparison.Ordinal))
+                    {
+                        CancelFolderNameEditing();
+                    }
+
+                    InvalidateItemFolderPresentationCache();
+                    GUI.FocusControl(null);
+                }
+            }
+        }
+
+        GUI.Label(countRect, row.ItemCount.ToString(), EditorStyles.miniLabel);
+        HandleItemLayoutDropTarget(
+            rowRect,
+            row,
+            false,
+            itemManager,
+            definitions,
+            folderSettings);
+    }
+
+    private void DrawEditableFolderName(
+        Rect nameRect,
+        ItemDataFolderSettings.FolderEntry folder,
+        ItemDataFolderSettings folderSettings)
+    {
+        if (folder == null || folderSettings == null)
+        {
+            return;
+        }
+
+        bool isEditing = string.Equals(editingFolderId, folder.Id, StringComparison.Ordinal);
+        Event current = Event.current;
+        if (!isEditing)
+        {
+            GUI.Label(
+                nameRect,
+                new GUIContent(folder.DisplayName, "더블클릭하여 폴더명을 변경합니다."),
+                EditorStyles.boldLabel);
+            if (current != null
+                && current.type == EventType.MouseDown
+                && current.button == 0
+                && current.clickCount >= 2
+                && nameRect.Contains(current.mousePosition))
+            {
+                BeginFolderNameEditing(folder);
+                current.Use();
+                Repaint();
+            }
+
+            return;
+        }
+
+        string controlName = $"ProjectF.ItemFolderName.{folder.Id}";
+        GUI.SetNextControlName(controlName);
+        editingFolderName = EditorGUI.TextField(
+            nameRect,
+            editingFolderName ?? folder.DisplayName,
+            EditorStyles.textField);
+
+        if (folderNameFocusPending)
+        {
+            EditorGUI.FocusTextInControl(controlName);
+            folderNameFocusPending = false;
+        }
+
+        bool hasFolderNameFocus = string.Equals(
+            GUI.GetNameOfFocusedControl(),
+            controlName,
+            StringComparison.Ordinal);
+        if (current != null
+            && current.type == EventType.KeyDown
+            && hasFolderNameFocus)
+        {
+            if (current.keyCode == KeyCode.Return || current.keyCode == KeyCode.KeypadEnter)
+            {
+                CommitFolderNameEditing(folderSettings);
+                current.Use();
+                return;
+            }
+
+            if (current.keyCode == KeyCode.Escape)
+            {
+                CancelFolderNameEditing();
+                GUI.FocusControl(null);
+                current.Use();
+                Repaint();
+                return;
+            }
+        }
+
+        if (current != null
+            && current.type == EventType.MouseDown
+            && current.button == 0
+            && !nameRect.Contains(current.mousePosition))
+        {
+            CommitFolderNameEditing(folderSettings);
+            return;
+        }
+
+        if (current != null
+            && current.type == EventType.Repaint
+            && !hasFolderNameFocus)
+        {
+            CommitFolderNameEditing(folderSettings);
+        }
+    }
+
+    private void BeginFolderNameEditing(ItemDataFolderSettings.FolderEntry folder)
+    {
+        editingFolderId = folder != null ? folder.Id : null;
+        editingFolderName = folder != null ? folder.DisplayName : null;
+        folderNameFocusPending = folder != null;
+    }
+
+    private void CommitFolderNameEditing(ItemDataFolderSettings folderSettings)
+    {
+        string folderId = editingFolderId;
+        string folderName = editingFolderName;
+        CancelFolderNameEditing();
+        GUI.FocusControl(null);
+        if (!string.IsNullOrEmpty(folderId)
+            && folderSettings != null
+            && folderSettings.RenameFolder(folderId, folderName))
+        {
+            InvalidateItemFolderPresentationCache();
+        }
+
+        Repaint();
+    }
+
+    private void CancelFolderNameEditing()
+    {
+        editingFolderId = null;
+        editingFolderName = null;
+        folderNameFocusPending = false;
+    }
+
+    private void DrawItemDefinitionRow(
+        ItemListRow row,
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> visibleDefinitions,
+        ItemDataFolderSettings folderSettings)
+    {
+        ItemDefinition definition = row.Definition;
+        if (definition == null)
+        {
+            return;
+        }
+
+        string displayName = GetDefinitionDisplayName(definition);
+        Rect rowRect = GUILayoutUtility.GetRect(1f, ItemListRowHeight, GUILayout.ExpandWidth(true));
+        bool hasFolders = folderSettings != null && folderSettings.Folders.Count > 0;
+        bool isFolderMember = hasFolders
+            && cachedItemFolderIds.TryGetValue(definition, out string itemFolderId)
+            && !string.IsNullOrEmpty(itemFolderId);
+        float indent = isFolderMember ? ItemFolderIndent : 0f;
+        Rect selectRect = new Rect(
+            rowRect.x + indent,
+            rowRect.y,
+            Mathf.Max(1f, rowRect.width - indent - GiveButtonWidth - 4f),
+            rowRect.height);
+        Rect giveRect = new Rect(selectRect.xMax + 4f, rowRect.y, GiveButtonWidth, rowRect.height);
+        GUIContent content = new GUIContent($"[{definition.id}] {displayName}");
+        HandleItemSelectionInput(selectRect, definition, definitions);
+        bool isSelected = selectedItemDefinitions.Contains(definition);
+        IReadOnlyList<ItemDefinition> dragSelection = isSelected && selectedItemDefinitionsInOrder.Count > 1
+            ? selectedItemDefinitionsInOrder
+            : null;
+        string dragDisplayName = dragSelection != null
+            ? $"{selectedItemDefinitionsInOrder.Count} items"
+            : content.text;
+        ItemDefinitionDragAndDropUtility.HandleListItemDrag(
+            selectRect,
+            definition,
+            dragSelection,
+            dragDisplayName,
+            this);
+        if (hasFolders)
+        {
+            HandleItemLayoutDropTarget(
+                rowRect,
+                row,
+                false,
+                itemManager,
+                definitions,
+                folderSettings);
+        }
+        else
+        {
+            int visibleDefinitionIndex = visibleDefinitions.IndexOf(definition);
+            HandleDefinitionReorderDropTarget(
+                rowRect,
+                itemManager,
+                definitions,
+                visibleDefinitions,
+                visibleDefinitionIndex);
+        }
+
+        GUI.Toggle(selectRect, isSelected, GUIContent.none, "Button");
+
+        Rect iconRect = new Rect(selectRect.x + 4f, selectRect.y + 4f, 20f, 20f);
+        Rect labelRect = new Rect(
+            iconRect.xMax + 4f,
+            selectRect.y,
+            Mathf.Max(1f, selectRect.xMax - iconRect.xMax - 8f),
+            selectRect.height);
+        DrawItemIcon(iconRect, definition);
+        GUI.Label(labelRect, content, EditorStyles.miniLabel);
+
+        EditorGUI.BeginDisabledGroup(!EditorApplication.isPlaying);
+        if (GUI.Button(giveRect, "Give"))
+        {
+            TryGiveItemToPlayer(definition);
+        }
+        EditorGUI.EndDisabledGroup();
+
+        HandleItemFolderContextMenu(
+            rowRect,
+            definition,
+            folderSettings,
+            itemManager,
+            definitions);
+    }
+
+    private void HandleItemSelectionInput(
+        Rect selectRect,
+        ItemDefinition definition,
+        List<ItemDefinition> definitions)
+    {
+        Event current = Event.current;
+        if (current == null || definition == null || current.button != 0)
+        {
+            return;
+        }
+
+        switch (current.type)
+        {
+            case EventType.MouseDown:
+                if (!selectRect.Contains(current.mousePosition))
+                {
+                    return;
+                }
+
+                bool additive = current.control || current.command;
+                if (current.shift)
+                {
+                    ClearPendingPlainSelection();
+                    SelectItemRange(definition, additive, definitions);
+                    return;
+                }
+
+                if (additive)
+                {
+                    ClearPendingPlainSelection();
+                    ToggleItemSelection(definition, definitions);
+                    return;
+                }
+
+                pendingPlainSelectionDefinition = definition;
+                pendingPlainSelectionMouseDownPosition = current.mousePosition;
+                break;
+
+            case EventType.MouseDrag:
+                if (pendingPlainSelectionDefinition != null
+                    && ItemDefinitionDragAndDropUtility.HasExceededDragStartDistance(
+                        pendingPlainSelectionMouseDownPosition,
+                        current.mousePosition))
+                {
+                    ClearPendingPlainSelection();
+                }
+
+                break;
+
+            case EventType.MouseUp:
+                if (pendingPlainSelectionDefinition != definition)
+                {
+                    break;
+                }
+
+                if (selectRect.Contains(current.mousePosition))
+                {
+                    SetSingleItemSelection(definition, definitions);
+                }
+
+                ClearPendingPlainSelection();
+                break;
+
+            case EventType.DragExited:
+            case EventType.Ignore:
+                ClearPendingPlainSelection();
+                break;
+        }
+    }
+
+    private void SetSingleItemSelection(
+        ItemDefinition definition,
+        List<ItemDefinition> definitions)
+    {
+        selectedItemDefinitions.Clear();
+        if (definition != null)
+        {
+            selectedItemDefinitions.Add(definition);
+            selectedItemId = definition.id;
+        }
+
+        rangeSelectionAnchor = definition;
+        RebuildSelectedItemOrder(definitions);
+        Repaint();
+    }
+
+    private void ToggleItemSelection(
+        ItemDefinition definition,
+        List<ItemDefinition> definitions)
+    {
+        if (selectedItemDefinitions.Contains(definition))
+        {
+            if (selectedItemDefinitions.Count <= 1)
+            {
+                return;
+            }
+
+            selectedItemDefinitions.Remove(definition);
+            if (definition.id == selectedItemId)
+            {
+                ItemDefinition nextActiveDefinition = FindFirstSelectedDefinition(definitions);
+                selectedItemId = nextActiveDefinition != null ? nextActiveDefinition.id : -1;
+            }
+        }
+        else
+        {
+            selectedItemDefinitions.Add(definition);
+            selectedItemId = definition.id;
+        }
+
+        rangeSelectionAnchor = definition;
+        RebuildSelectedItemOrder(definitions);
+        Repaint();
+    }
+
+    private void SelectItemRange(
+        ItemDefinition definition,
+        bool additive,
+        List<ItemDefinition> definitions)
+    {
+        ItemDefinition anchor = rangeSelectionAnchor;
+        if (anchor == null)
+        {
+            anchor = FindDefinitionById(definitions, selectedItemId) ?? definition;
+        }
+
+        int anchorRowIndex = FindItemListRowIndex(anchor);
+        int targetRowIndex = FindItemListRowIndex(definition);
+        if (!additive)
+        {
+            selectedItemDefinitions.Clear();
+        }
+
+        if (anchorRowIndex < 0 || targetRowIndex < 0)
+        {
+            selectedItemDefinitions.Add(definition);
+            rangeSelectionAnchor = definition;
+        }
+        else
+        {
+            int firstRowIndex = Mathf.Min(anchorRowIndex, targetRowIndex);
+            int lastRowIndex = Mathf.Max(anchorRowIndex, targetRowIndex);
+            for (int i = firstRowIndex; i <= lastRowIndex; i++)
+            {
+                ItemDefinition rangeDefinition = cachedItemListRows[i].Definition;
+                if (rangeDefinition != null)
+                {
+                    selectedItemDefinitions.Add(rangeDefinition);
+                }
+            }
+
+            rangeSelectionAnchor = anchor;
+        }
+
+        selectedItemId = definition.id;
+        RebuildSelectedItemOrder(definitions);
+        Repaint();
+    }
+
+    private int FindItemListRowIndex(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < cachedItemListRows.Count; i++)
+        {
+            if (cachedItemListRows[i].Definition == definition)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private ItemDefinition FindFirstSelectedDefinition(List<ItemDefinition> definitions)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && selectedItemDefinitions.Contains(definition))
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private void RebuildSelectedItemOrder(List<ItemDefinition> definitions)
+    {
+        selectedItemDefinitionsInOrder.Clear();
+        if (definitions == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && selectedItemDefinitions.Contains(definition))
+            {
+                selectedItemDefinitionsInOrder.Add(definition);
+            }
+        }
+    }
+
+    private void ClearPendingPlainSelection()
+    {
+        pendingPlainSelectionDefinition = null;
+        pendingPlainSelectionMouseDownPosition = Vector2.zero;
+    }
+
+    private void HandleItemFolderDrag(
+        Rect rect,
+        ItemDataFolderSettings.FolderEntry folder)
+    {
+        if (folder == null)
+        {
+            return;
+        }
+
+        Event current = Event.current;
+        if (current == null || current.button != 0)
+        {
+            return;
+        }
+
+        switch (current.type)
+        {
+            case EventType.MouseDown:
+                if (rect.Contains(current.mousePosition))
+                {
+                    pendingFolderDragId = folder.Id;
+                    pendingFolderDragMouseDownPosition = current.mousePosition;
+                }
+                break;
+
+            case EventType.MouseDrag:
+                if (!string.Equals(pendingFolderDragId, folder.Id, StringComparison.Ordinal)
+                    || (current.mousePosition - pendingFolderDragMouseDownPosition).sqrMagnitude
+                    < ItemFolderDragStartDistance * ItemFolderDragStartDistance)
+                {
+                    return;
+                }
+
+                DragAndDrop.PrepareStartDrag();
+                DragAndDrop.objectReferences = Array.Empty<UnityEngine.Object>();
+                DragAndDrop.SetGenericData(ItemFolderDragDataKey, folder.Id);
+                DragAndDrop.StartDrag(folder.DisplayName);
+                ClearPendingFolderDrag();
+                Repaint();
+                current.Use();
+                break;
+
+            case EventType.MouseUp:
+            case EventType.DragExited:
+            case EventType.Ignore:
+                ClearPendingFolderDrag();
+                break;
+        }
+    }
+
+    private void ClearPendingFolderDrag()
+    {
+        pendingFolderDragId = null;
+        pendingFolderDragMouseDownPosition = Vector2.zero;
+    }
+
+    private static bool TryGetDraggedFolderId(out string folderId)
+    {
+        folderId = DragAndDrop.GetGenericData(ItemFolderDragDataKey) as string;
+        return !string.IsNullOrEmpty(folderId);
+    }
+
+    private void HandleItemLayoutDropTarget(
+        Rect rect,
+        ItemListRow targetRow,
+        bool isEndTarget,
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        ItemDataFolderSettings folderSettings)
+    {
+        bool hasDraggedFolder = TryGetDraggedFolderId(out string draggedFolderId);
+        bool hasDraggedItem = !hasDraggedFolder
+            && ItemDefinitionDragAndDropUtility.TryGetDraggedDefinitions(draggedItemDefinitions);
+        if ((!hasDraggedFolder && !hasDraggedItem)
+            || folderSettings == null
+            || itemManager == null
+            || definitions == null)
+        {
+            return;
+        }
+
+        if (hasDraggedItem
+            && !isEndTarget
+            && targetRow.Definition != null
+            && draggedItemDefinitions.Contains(targetRow.Definition))
+        {
+            return;
+        }
+
+        if (hasDraggedFolder && !CanDropFolderOnRow(draggedFolderId, targetRow, isEndTarget, folderSettings))
+        {
+            return;
+        }
+
+        Event current = Event.current;
+        if (current == null || !rect.Contains(current.mousePosition))
+        {
+            return;
+        }
+
+        bool insertAfter = !isEndTarget && current.mousePosition.y > rect.center.y;
+        bool itemIntoFolder = hasDraggedItem && !isEndTarget && targetRow.IsFolder;
+        switch (current.type)
+        {
+            case EventType.DragUpdated:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                Repaint();
+                current.Use();
+                break;
+
+            case EventType.DragPerform:
+                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                DragAndDrop.AcceptDrag();
+                if (hasDraggedFolder)
+                {
+                    MoveFolderForLayoutDrop(
+                        itemManager,
+                        definitions,
+                        folderSettings,
+                        draggedFolderId,
+                        targetRow,
+                        isEndTarget,
+                        insertAfter);
+                }
+                else
+                {
+                    MoveItemsForLayoutDrop(
+                        itemManager,
+                        definitions,
+                        folderSettings,
+                        draggedItemDefinitions,
+                        targetRow,
+                        isEndTarget,
+                        insertAfter);
+                }
+
+                GUI.changed = true;
+                current.Use();
+                break;
+
+            case EventType.Repaint:
+                if (itemIntoFolder)
+                {
+                    Color fillColor = new Color(0.35f, 0.65f, 1f, 0.16f);
+                    Color outlineColor = new Color(0.35f, 0.65f, 1f, 0.95f);
+                    EditorGUI.DrawRect(rect, fillColor);
+                    DrawRectOutline(rect, outlineColor);
+                }
+                else
+                {
+                    DrawDefinitionReorderHighlight(rect, insertAfter, isEndTarget);
+                }
+
+                break;
+        }
+    }
+
+    private static bool CanDropFolderOnRow(
+        string draggedFolderId,
+        ItemListRow targetRow,
+        bool isEndTarget,
+        ItemDataFolderSettings folderSettings)
+    {
+        if (isEndTarget)
+        {
+            return true;
+        }
+
+        if (targetRow.Folder != null)
+        {
+            return !string.Equals(draggedFolderId, targetRow.Folder.Id, StringComparison.Ordinal);
+        }
+
+        return targetRow.Definition == null
+            || !string.Equals(
+                draggedFolderId,
+                folderSettings.GetItemFolderId(targetRow.Definition),
+                StringComparison.Ordinal);
+    }
+
+    private void HandleItemFolderContextMenu(
+        Rect rect,
+        ItemDefinition definition,
+        ItemDataFolderSettings folderSettings,
+        ItemManager itemManager,
+        List<ItemDefinition> definitions)
+    {
+        Event current = Event.current;
+        if (current == null
+            || current.type != EventType.ContextClick
+            || !rect.Contains(current.mousePosition)
+            || definition == null
+            || folderSettings == null
+            || folderSettings.Folders.Count == 0)
+        {
+            return;
+        }
+
+        string currentFolderId = GetCommonActionFolderId(
+            definition,
+            folderSettings,
+            out bool allActionItemsShareFolder);
+        GenericMenu menu = new GenericMenu();
+        menu.AddItem(
+            new GUIContent("Move to Folder/Unfiled"),
+            allActionItemsShareFolder && string.IsNullOrEmpty(currentFolderId),
+            () => MoveItemToFolder(
+                definition,
+                string.Empty,
+                folderSettings,
+                itemManager,
+                definitions));
+
+        IReadOnlyList<ItemDataFolderSettings.FolderEntry> folders = folderSettings.Folders;
+        for (int i = 0; i < folders.Count; i++)
+        {
+            ItemDataFolderSettings.FolderEntry folder = folders[i];
+            if (folder == null)
+            {
+                continue;
+            }
+
+            string targetFolderId = folder.Id;
+            string menuName = folder.DisplayName.Replace("/", "∕");
+            menu.AddItem(
+                new GUIContent($"Move to Folder/{menuName}"),
+                allActionItemsShareFolder
+                && string.Equals(currentFolderId, targetFolderId, StringComparison.Ordinal),
+                () => MoveItemToFolder(
+                    definition,
+                    targetFolderId,
+                    folderSettings,
+                    itemManager,
+                    definitions));
+        }
+
+        menu.ShowAsContext();
+        current.Use();
+    }
+
+    private void MoveItemToFolder(
+        ItemDefinition definition,
+        string folderId,
+        ItemDataFolderSettings folderSettings,
+        ItemManager itemManager,
+        List<ItemDefinition> definitions)
+    {
+        List<ItemDefinition> actionDefinitions = BuildFolderActionDefinitions(definition);
+        string currentFolderId = actionDefinitions.Count > 0
+            ? folderSettings.GetItemFolderId(actionDefinitions[0])
+            : string.Empty;
+        bool allActionItemsShareFolder = true;
+        for (int i = 1; i < actionDefinitions.Count; i++)
+        {
+            if (!string.Equals(
+                    currentFolderId,
+                    folderSettings.GetItemFolderId(actionDefinitions[i]),
+                    StringComparison.Ordinal))
+            {
+                allActionItemsShareFolder = false;
+                break;
+            }
+        }
+
+        int insertBoundary;
+        if (string.IsNullOrEmpty(folderId))
+        {
+            insertBoundary = allActionItemsShareFolder && !string.IsNullOrEmpty(currentFolderId)
+                ? GetFolderBlockEndBoundary(definitions, currentFolderId, folderSettings)
+                : actionDefinitions.Count == 1
+                    ? Mathf.Max(0, definitions.IndexOf(definition))
+                : definitions.Count;
+        }
+        else
+        {
+            insertBoundary = GetFolderBlockEndBoundary(definitions, folderId, folderSettings);
+        }
+
+        MoveItemsToFolderAtBoundary(
+            itemManager,
+            definitions,
+            folderSettings,
+            actionDefinitions,
+            folderId,
+            insertBoundary);
+    }
+
+    private string GetCommonActionFolderId(
+        ItemDefinition clickedDefinition,
+        ItemDataFolderSettings folderSettings,
+        out bool allItemsShareFolder)
+    {
+        List<ItemDefinition> actionDefinitions = BuildFolderActionDefinitions(clickedDefinition);
+        string commonFolderId = actionDefinitions.Count > 0
+            ? folderSettings.GetItemFolderId(actionDefinitions[0])
+            : string.Empty;
+        allItemsShareFolder = actionDefinitions.Count > 0;
+        for (int i = 1; i < actionDefinitions.Count; i++)
+        {
+            if (!string.Equals(
+                    commonFolderId,
+                    folderSettings.GetItemFolderId(actionDefinitions[i]),
+                    StringComparison.Ordinal))
+            {
+                allItemsShareFolder = false;
+                break;
+            }
+        }
+
+        return commonFolderId;
+    }
+
+    private List<ItemDefinition> BuildFolderActionDefinitions(ItemDefinition clickedDefinition)
+    {
+        if (clickedDefinition != null
+            && selectedItemDefinitions.Contains(clickedDefinition)
+            && selectedItemDefinitionsInOrder.Count > 1)
+        {
+            return new List<ItemDefinition>(selectedItemDefinitionsInOrder);
+        }
+
+        return clickedDefinition != null
+            ? new List<ItemDefinition>(1) { clickedDefinition }
+            : new List<ItemDefinition>();
+    }
+
+    private void MoveItemsForLayoutDrop(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        ItemDataFolderSettings folderSettings,
+        IReadOnlyList<ItemDefinition> draggedDefinitions,
+        ItemListRow targetRow,
+        bool isEndTarget,
+        bool insertAfter)
+    {
+        if (draggedDefinitions == null || draggedDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        string targetFolderId;
+        int insertBoundary;
+        if (isEndTarget)
+        {
+            targetFolderId = string.Empty;
+            insertBoundary = definitions.Count;
+        }
+        else if (targetRow.Folder != null)
+        {
+            targetFolderId = targetRow.Folder.Id;
+            insertBoundary = GetFolderBlockEndBoundary(definitions, targetFolderId, folderSettings);
+        }
+        else
+        {
+            ItemDefinition targetDefinition = targetRow.Definition;
+            if (targetDefinition == null)
+            {
+                return;
+            }
+
+            targetFolderId = folderSettings.GetItemFolderId(targetDefinition);
+            int targetIndex = definitions.IndexOf(targetDefinition);
+            if (targetIndex < 0)
+            {
+                return;
+            }
+
+            insertBoundary = targetIndex + (insertAfter ? 1 : 0);
+        }
+
+        MoveItemsToFolderAtBoundary(
+            itemManager,
+            definitions,
+            folderSettings,
+            draggedDefinitions,
+            targetFolderId,
+            insertBoundary);
+    }
+
+    private void MoveItemsToFolderAtBoundary(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        ItemDataFolderSettings folderSettings,
+        IReadOnlyList<ItemDefinition> requestedDefinitions,
+        string targetFolderId,
+        int insertBoundary)
+    {
+        if (itemManager == null
+            || definitions == null
+            || folderSettings == null
+            || requestedDefinitions == null)
+        {
+            return;
+        }
+
+        List<ItemDefinition> movingDefinitions = CollectOrderedDefinitions(
+            definitions,
+            requestedDefinitions);
+        if (movingDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<string, int> movingCountBySourceFolder =
+            new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < movingDefinitions.Count; i++)
+        {
+            string sourceFolderId = folderSettings.GetItemFolderId(movingDefinitions[i]);
+            if (string.IsNullOrEmpty(sourceFolderId)
+                || string.Equals(sourceFolderId, targetFolderId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            movingCountBySourceFolder.TryGetValue(sourceFolderId, out int count);
+            movingCountBySourceFolder[sourceFolderId] = count + 1;
+        }
+
+        Dictionary<string, ItemDefinition> emptiedSourceFolderAnchors =
+            new Dictionary<string, ItemDefinition>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, int> sourceFolder in movingCountBySourceFolder)
+        {
+            if (CountFolderMembers(definitions, sourceFolder.Key, folderSettings) != sourceFolder.Value)
+            {
+                continue;
+            }
+
+            int sourceEndBoundary = GetFolderBlockEndBoundary(
+                definitions,
+                sourceFolder.Key,
+                folderSettings);
+            ItemDefinition emptyAnchor = string.IsNullOrEmpty(targetFolderId)
+                                         && movingCountBySourceFolder.Count == 1
+                                         && insertBoundary == sourceEndBoundary
+                ? FindFirstDefinitionInFolder(
+                    movingDefinitions,
+                    sourceFolder.Key,
+                    folderSettings)
+                : FindDefinitionAfterFolderBlock(definitions, sourceFolder.Key, folderSettings);
+            emptiedSourceFolderAnchors.Add(sourceFolder.Key, emptyAnchor);
+        }
+
+        bool membershipChanged = folderSettings.SetItemsFolder(movingDefinitions, targetFolderId);
+        ItemDefinition selection = FindDefinitionById(definitions, selectedItemId);
+        RegisterDefinitionOrderUndo(itemManager, definitions, "Move Item In Folder Layout");
+        bool orderChanged = MoveDefinitionBlock(
+            definitions,
+            movingDefinitions,
+            insertBoundary,
+            out _);
+
+        bool placementChanged = false;
+        foreach (KeyValuePair<string, ItemDefinition> sourceFolder in emptiedSourceFolderAnchors)
+        {
+            placementChanged |= folderSettings.SetFolderPlacement(
+                sourceFolder.Key,
+                sourceFolder.Value);
+        }
+
+        if (!string.IsNullOrEmpty(targetFolderId))
+        {
+            ItemDefinition targetAnchor = FindDefinitionAfterFolderBlock(
+                definitions,
+                targetFolderId,
+                folderSettings);
+            placementChanged |= folderSettings.SetFolderPlacement(targetFolderId, targetAnchor);
+        }
+
+        if (orderChanged)
+        {
+            CommitDefinitionOrderChange(
+                itemManager,
+                definitions,
+                selection != null ? selection : movingDefinitions[0]);
+        }
+        else if (membershipChanged || placementChanged)
+        {
+            InvalidateItemFolderPresentationCache();
+            Repaint();
+        }
+    }
+
+    private static List<ItemDefinition> CollectOrderedDefinitions(
+        List<ItemDefinition> definitions,
+        IReadOnlyList<ItemDefinition> requestedDefinitions)
+    {
+        List<ItemDefinition> orderedDefinitions = new List<ItemDefinition>();
+        if (definitions == null || requestedDefinitions == null)
+        {
+            return orderedDefinitions;
+        }
+
+        HashSet<ItemDefinition> requestedDefinitionSet =
+            new HashSet<ItemDefinition>(requestedDefinitions);
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null && requestedDefinitionSet.Contains(definition))
+            {
+                orderedDefinitions.Add(definition);
+            }
+        }
+
+        return orderedDefinitions;
+    }
+
+    private static ItemDefinition FindFirstDefinitionInFolder(
+        List<ItemDefinition> definitions,
+        string folderId,
+        ItemDataFolderSettings folderSettings)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && string.Equals(
+                    folderSettings.GetItemFolderId(definition),
+                    folderId,
+                    StringComparison.Ordinal))
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private void MoveFolderForLayoutDrop(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        ItemDataFolderSettings folderSettings,
+        string draggedFolderId,
+        ItemListRow targetRow,
+        bool isEndTarget,
+        bool insertAfter)
+    {
+        ItemDataFolderSettings.FolderEntry draggedFolder = folderSettings.FindFolder(draggedFolderId);
+        if (draggedFolder == null)
+        {
+            return;
+        }
+
+        int insertBoundary;
+        string relativeFolderId = null;
+        bool insertAfterRelativeFolder = false;
+        bool relativeFolderWasEmpty = false;
+        if (isEndTarget)
+        {
+            insertBoundary = definitions.Count;
+        }
+        else if (targetRow.Folder != null)
+        {
+            relativeFolderId = targetRow.Folder.Id;
+            insertAfterRelativeFolder = insertAfter;
+            relativeFolderWasEmpty = CountFolderMembers(
+                definitions,
+                relativeFolderId,
+                folderSettings) == 0;
+            insertBoundary = insertAfter
+                ? GetFolderBlockEndBoundary(definitions, relativeFolderId, folderSettings)
+                : GetFolderBlockStartBoundary(definitions, relativeFolderId, folderSettings);
+        }
+        else
+        {
+            ItemDefinition targetDefinition = targetRow.Definition;
+            if (targetDefinition == null)
+            {
+                return;
+            }
+
+            string targetFolderId = folderSettings.GetItemFolderId(targetDefinition);
+            if (!string.IsNullOrEmpty(targetFolderId))
+            {
+                relativeFolderId = targetFolderId;
+                insertAfterRelativeFolder = insertAfter;
+                relativeFolderWasEmpty = CountFolderMembers(
+                    definitions,
+                    relativeFolderId,
+                    folderSettings) == 0;
+                insertBoundary = insertAfter
+                    ? GetFolderBlockEndBoundary(definitions, targetFolderId, folderSettings)
+                    : GetFolderBlockStartBoundary(definitions, targetFolderId, folderSettings);
+            }
+            else
+            {
+                int targetIndex = definitions.IndexOf(targetDefinition);
+                if (targetIndex < 0)
+                {
+                    return;
+                }
+
+                insertBoundary = targetIndex + (insertAfter ? 1 : 0);
+            }
+        }
+
+        List<ItemDefinition> movingDefinitions = CollectFolderMembers(
+            definitions,
+            draggedFolderId,
+            folderSettings);
+        ItemDefinition selection = FindDefinitionById(definitions, selectedItemId);
+        RegisterDefinitionOrderUndo(itemManager, definitions, "Move Item Folder");
+        bool orderChanged = MoveDefinitionBlock(
+            definitions,
+            movingDefinitions,
+            insertBoundary,
+            out int insertedIndex);
+        int anchorIndex = Mathf.Clamp(insertedIndex + movingDefinitions.Count, 0, definitions.Count);
+        ItemDefinition anchorDefinition = anchorIndex < definitions.Count
+            ? definitions[anchorIndex]
+            : null;
+        bool placementChanged = folderSettings.SetFolderPlacement(
+            draggedFolderId,
+            anchorDefinition,
+            relativeFolderId,
+            insertAfterRelativeFolder);
+        if (insertAfterRelativeFolder
+            && relativeFolderWasEmpty
+            && movingDefinitions.Count > 0
+            && insertedIndex >= 0
+            && insertedIndex < definitions.Count)
+        {
+            placementChanged |= folderSettings.SetFolderPlacement(
+                relativeFolderId,
+                definitions[insertedIndex],
+                draggedFolderId,
+                false);
+        }
+
+        if (orderChanged)
+        {
+            CommitDefinitionOrderChange(
+                itemManager,
+                definitions,
+                selection);
+        }
+        else if (placementChanged)
+        {
+            InvalidateItemFolderPresentationCache();
+            Repaint();
+        }
+    }
+
+    private static List<ItemDefinition> CollectFolderMembers(
+        List<ItemDefinition> definitions,
+        string folderId,
+        ItemDataFolderSettings folderSettings)
+    {
+        List<ItemDefinition> members = new List<ItemDefinition>();
+        if (definitions == null || string.IsNullOrEmpty(folderId) || folderSettings == null)
+        {
+            return members;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && string.Equals(
+                    folderSettings.GetItemFolderId(definition),
+                    folderId,
+                    StringComparison.Ordinal))
+            {
+                members.Add(definition);
+            }
+        }
+
+        return members;
+    }
+
+    private static int CountFolderMembers(
+        List<ItemDefinition> definitions,
+        string folderId,
+        ItemDataFolderSettings folderSettings)
+    {
+        int count = 0;
+        if (definitions == null || string.IsNullOrEmpty(folderId) || folderSettings == null)
+        {
+            return count;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && string.Equals(
+                    folderSettings.GetItemFolderId(definition),
+                    folderId,
+                    StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int GetFolderBlockStartBoundary(
+        List<ItemDefinition> definitions,
+        string folderId,
+        ItemDataFolderSettings folderSettings)
+    {
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && string.Equals(
+                    folderSettings.GetItemFolderId(definition),
+                    folderId,
+                    StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        ItemDataFolderSettings.FolderEntry folder = folderSettings.FindFolder(folderId);
+        return ResolveFolderPlacementIndex(definitions, folder, folderSettings);
+    }
+
+    private static int GetFolderBlockEndBoundary(
+        List<ItemDefinition> definitions,
+        string folderId,
+        ItemDataFolderSettings folderSettings)
+    {
+        for (int i = definitions.Count - 1; i >= 0; i--)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition != null
+                && string.Equals(
+                    folderSettings.GetItemFolderId(definition),
+                    folderId,
+                    StringComparison.Ordinal))
+            {
+                return i + 1;
+            }
+        }
+
+        ItemDataFolderSettings.FolderEntry folder = folderSettings.FindFolder(folderId);
+        return ResolveFolderPlacementIndex(definitions, folder, folderSettings);
+    }
+
+    private static ItemDefinition FindDefinitionAfterFolderBlock(
+        List<ItemDefinition> definitions,
+        string folderId,
+        ItemDataFolderSettings folderSettings)
+    {
+        int endBoundary = GetFolderBlockEndBoundary(definitions, folderId, folderSettings);
+        return endBoundary >= 0 && endBoundary < definitions.Count
+            ? definitions[endBoundary]
+            : null;
+    }
+
+    private static int ResolveFolderPlacementIndex(
+        List<ItemDefinition> definitions,
+        ItemDataFolderSettings.FolderEntry folder,
+        ItemDataFolderSettings folderSettings)
+    {
+        if (definitions == null || folder == null || folderSettings == null)
+        {
+            return definitions != null ? definitions.Count : 0;
+        }
+
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            if (string.Equals(
+                    folderSettings.GetItemFolderId(definition),
+                    folder.Id,
+                    StringComparison.Ordinal))
+            {
+                return i;
+            }
+
+            string assetPath = AssetDatabase.GetAssetPath(definition);
+            string definitionGuid = string.IsNullOrEmpty(assetPath)
+                ? string.Empty
+                : AssetDatabase.AssetPathToGUID(assetPath);
+            if (!string.IsNullOrEmpty(definitionGuid)
+                && string.Equals(definitionGuid, folder.AnchorItemGuid, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return definitions.Count;
+    }
+
+    private static bool MoveDefinitionBlock(
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> movingDefinitions,
+        int insertBoundary,
+        out int insertedIndex)
+    {
+        insertedIndex = 0;
+        if (definitions == null || movingDefinitions == null)
+        {
+            return false;
+        }
+
+        HashSet<ItemDefinition> movingSet = new HashSet<ItemDefinition>();
+        List<ItemDefinition> orderedMovingDefinitions = new List<ItemDefinition>();
+        for (int i = 0; i < movingDefinitions.Count; i++)
+        {
+            ItemDefinition definition = movingDefinitions[i];
+            if (definition != null
+                && definitions.Contains(definition)
+                && movingSet.Add(definition))
+            {
+                orderedMovingDefinitions.Add(definition);
+            }
+        }
+
+        insertBoundary = Mathf.Clamp(insertBoundary, 0, definitions.Count);
+        int removedBeforeBoundary = 0;
+        List<ItemDefinition> remainingDefinitions = new List<ItemDefinition>(definitions.Count);
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (movingSet.Contains(definition))
+            {
+                if (i < insertBoundary)
+                {
+                    removedBeforeBoundary++;
+                }
+
+                continue;
+            }
+
+            remainingDefinitions.Add(definition);
+        }
+
+        insertedIndex = Mathf.Clamp(
+            insertBoundary - removedBeforeBoundary,
+            0,
+            remainingDefinitions.Count);
+        if (orderedMovingDefinitions.Count == 0)
+        {
+            return false;
+        }
+
+        List<ItemDefinition> reorderedDefinitions = new List<ItemDefinition>(definitions.Count);
+        for (int i = 0; i < insertedIndex; i++)
+        {
+            reorderedDefinitions.Add(remainingDefinitions[i]);
+        }
+
+        reorderedDefinitions.AddRange(orderedMovingDefinitions);
+        for (int i = insertedIndex; i < remainingDefinitions.Count; i++)
+        {
+            reorderedDefinitions.Add(remainingDefinitions[i]);
+        }
+
+        bool changed = reorderedDefinitions.Count != definitions.Count;
+        if (!changed)
+        {
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                if (definitions[i] != reorderedDefinitions[i])
+                {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        definitions.Clear();
+        definitions.AddRange(reorderedDefinitions);
+        return true;
+    }
+
+    private static void DrawRectOutline(Rect rect, Color color)
+    {
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, rect.width, 1f), color);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMax - 1f, rect.width, 1f), color);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, 1f, rect.height), color);
+        EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.yMin, 1f, rect.height), color);
     }
 
     private int GetFirstVisibleItemListIndex(int itemCount)
@@ -550,11 +2545,18 @@ public class ItemDataEditorWindow : EditorWindow
         List<ItemDefinition> visibleDefinitions,
         int visibleInsertIndex)
     {
-        if (!ItemDefinitionDragAndDropUtility.TryGetDraggedDefinition(out ItemDefinition draggedDefinition)
+        if (!ItemDefinitionDragAndDropUtility.TryGetDraggedDefinitions(draggedItemDefinitions)
             || definitions == null
             || visibleDefinitions == null
             || itemManager == null
-            || !definitions.Contains(draggedDefinition))
+            || draggedItemDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        if (visibleInsertIndex >= 0
+            && visibleInsertIndex < visibleDefinitions.Count
+            && draggedItemDefinitions.Contains(visibleDefinitions[visibleInsertIndex]))
         {
             return;
         }
@@ -582,7 +2584,13 @@ public class ItemDataEditorWindow : EditorWindow
 
             case EventType.DragPerform:
                 DragAndDrop.AcceptDrag();
-                ReorderDefinitions(itemManager, definitions, visibleDefinitions, draggedDefinition, visibleInsertIndex, insertAfter);
+                ReorderDefinitions(
+                    itemManager,
+                    definitions,
+                    visibleDefinitions,
+                    draggedItemDefinitions,
+                    visibleInsertIndex,
+                    insertAfter);
                 GUI.changed = true;
                 current.Use();
                 break;
@@ -597,22 +2605,19 @@ public class ItemDataEditorWindow : EditorWindow
         ItemManager itemManager,
         List<ItemDefinition> definitions,
         List<ItemDefinition> visibleDefinitions,
-        ItemDefinition draggedDefinition,
+        IReadOnlyList<ItemDefinition> draggedDefinitions,
         int visibleInsertIndex,
         bool insertAfter)
     {
-        if (itemManager == null || definitions == null || draggedDefinition == null)
+        if (itemManager == null
+            || definitions == null
+            || draggedDefinitions == null
+            || draggedDefinitions.Count == 0)
         {
             return;
         }
 
-        int sourceIndex = definitions.IndexOf(draggedDefinition);
-        if (sourceIndex < 0)
-        {
-            return;
-        }
-
-        int targetIndex;
+        int insertBoundary;
         if (visibleInsertIndex >= visibleDefinitions.Count)
         {
             if (visibleDefinitions.Count <= 0)
@@ -621,63 +2626,76 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             ItemDefinition lastVisibleDefinition = visibleDefinitions[visibleDefinitions.Count - 1];
-            targetIndex = definitions.IndexOf(lastVisibleDefinition);
-            if (targetIndex < 0)
+            insertBoundary = definitions.IndexOf(lastVisibleDefinition);
+            if (insertBoundary < 0)
             {
                 return;
             }
 
-            targetIndex++;
+            insertBoundary++;
         }
         else
         {
             ItemDefinition targetDefinition = visibleDefinitions[visibleInsertIndex];
-            targetIndex = definitions.IndexOf(targetDefinition);
-            if (targetIndex < 0)
+            insertBoundary = definitions.IndexOf(targetDefinition);
+            if (insertBoundary < 0)
             {
                 return;
             }
 
             if (insertAfter)
             {
-                targetIndex++;
+                insertBoundary++;
             }
         }
 
-        if (sourceIndex < targetIndex)
-        {
-            targetIndex--;
-        }
-
-        if (targetIndex < 0)
-        {
-            targetIndex = 0;
-        }
-
-        if (targetIndex > definitions.Count - 1)
-        {
-            targetIndex = definitions.Count - 1;
-        }
-
-        if (sourceIndex == targetIndex)
+        List<ItemDefinition> movingDefinitions = CollectOrderedDefinitions(
+            definitions,
+            draggedDefinitions);
+        ItemDefinition selectedDefinition = FindDefinitionById(definitions, selectedItemId);
+        RegisterDefinitionOrderUndo(itemManager, definitions, "Reorder Item Definitions");
+        if (!MoveDefinitionBlock(definitions, movingDefinitions, insertBoundary, out _))
         {
             return;
         }
 
-        ItemDefinition selectedDefinition = FindDefinitionById(definitions, selectedItemId);
-        pendingReorderSelection = selectedDefinition != null ? selectedDefinition : draggedDefinition;
+        CommitDefinitionOrderChange(
+            itemManager,
+            definitions,
+            selectedDefinition != null ? selectedDefinition : movingDefinitions[0]);
+    }
 
-        Undo.RegisterCompleteObjectUndo(itemManager, "Reorder Item Definitions");
+    private static void RegisterDefinitionOrderUndo(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        string undoName)
+    {
+        if (itemManager == null || definitions == null)
+        {
+            return;
+        }
+
+        Undo.RegisterCompleteObjectUndo(itemManager, undoName);
         for (int i = 0; i < definitions.Count; i++)
         {
             if (definitions[i] != null)
             {
-                Undo.RecordObject(definitions[i], "Reorder Item Definitions");
+                Undo.RecordObject(definitions[i], undoName);
             }
         }
+    }
 
-        definitions.RemoveAt(sourceIndex);
-        definitions.Insert(targetIndex, draggedDefinition);
+    private void CommitDefinitionOrderChange(
+        ItemManager itemManager,
+        List<ItemDefinition> definitions,
+        ItemDefinition selection)
+    {
+        if (itemManager == null || definitions == null)
+        {
+            return;
+        }
+
+        pendingReorderSelection = selection;
 
         for (int i = 0; i < definitions.Count; i++)
         {
@@ -869,48 +2887,45 @@ public class ItemDataEditorWindow : EditorWindow
     private void DrawToolbar()
     {
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Save", GUILayout.Width(70f)))
+        if (GUILayout.Button("Save", GUILayout.ExpandWidth(true)))
         {
             SaveItemData();
         }
 
-        if (GUILayout.Button("Load", GUILayout.Width(70f)))
+        if (GUILayout.Button("Load", GUILayout.ExpandWidth(true)))
         {
             LoadItemData();
         }
 
-        if (GUILayout.Button("Rebuild", GUILayout.Width(80f)))
+        if (GUILayout.Button("Rebuild", GUILayout.ExpandWidth(true)))
         {
             RebuildItemData();
         }
 
-        GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Export JSON", GUILayout.Width(100f)))
+        if (GUILayout.Button("Export JSON", GUILayout.ExpandWidth(true)))
         {
             ExportJson();
         }
 
-        if (GUILayout.Button("Load JSON", GUILayout.Width(100f)))
+        if (GUILayout.Button("Load JSON", GUILayout.ExpandWidth(true)))
         {
             LoadJson();
         }
 
-        GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Create UI Icon Atlas", GUILayout.Width(150f)))
+        if (GUILayout.Button("Create UI Icon Atlas", GUILayout.ExpandWidth(true)))
         {
             CreateUiIconAtlas();
         }
 
-        if (GUILayout.Button("Open UI Icon Atlas", GUILayout.Width(140f)))
+        if (GUILayout.Button("Open UI Icon Atlas", GUILayout.ExpandWidth(true)))
         {
             OpenUiIconAtlas();
         }
 
-        GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
         GUILayout.Space(6f);
     }
@@ -963,6 +2978,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         EnsureSelection(definitions);
+        EnsureMultiSelection(definitions);
 
         ItemDefinition selectedDefinition = FindDefinitionById(definitions, selectedItemId);
         if (selectedDefinition == null)
@@ -972,22 +2988,26 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        DrawSelectedItemHeader(selectedDefinition);
+        bool hasMultipleSelectedItems = selectedItemDefinitionsInOrder.Count > 1;
+        if (hasMultipleSelectedItems)
+        {
+            DrawMultiSelectedItemHeader(selectedDefinition);
+        }
+        else
+        {
+            DrawSelectedItemHeader(selectedDefinition);
+        }
         GUILayout.Space(8f);
 
-        if (EditorApplication.isPlaying)
-        {
-            showPlayModeDetailFields = EditorGUILayout.ToggleLeft("Show Detail Fields", showPlayModeDetailFields);
-            if (!showPlayModeDetailFields)
-            {
-                EditorGUILayout.HelpBox("Play Mode에서는 프레임 드랍을 줄이기 위해 상세 편집 필드를 그리지 않습니다.", MessageType.Info);
-                GUILayout.EndArea();
-                return;
-            }
-        }
-
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
-        DrawSelectedItemFields(selectedDefinition, definitions);
+        if (hasMultipleSelectedItems)
+        {
+            DrawMultiSelectedItemFields(definitions);
+        }
+        else
+        {
+            DrawSelectedItemFields(selectedDefinition, definitions);
+        }
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
     }
@@ -1023,9 +3043,9 @@ public class ItemDataEditorWindow : EditorWindow
         }
         GUILayout.EndHorizontal();
 
-        GUILayout.BeginHorizontal();
         using (new EditorGUI.DisabledScope(EditorApplication.isPlaying))
         {
+            GUILayout.BeginHorizontal();
             GUIContent rebuildContent = new GUIContent(
                 "Rebuild Item",
                 "선택한 아이템만 Assets/Items의 에셋을 기준으로 다시 연결합니다.");
@@ -1033,43 +3053,501 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 RebuildItemData(definition);
             }
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUIContent createBookIconContent = new GUIContent(
+                "Create Book Icon",
+                "일반 아이템을 선택하면 원본 ItemDefinition을 변경하지 않고 Assets/Items/Book 아래의 대응 Book 아이콘과 P 텍스처를 생성합니다.");
+            if (GUILayout.Button(createBookIconContent, GUILayout.Width(130f)))
+            {
+                CreateBookIcon(definition);
+            }
+
+            GUIContent createPaperIconContent = new GUIContent(
+                "Create Paper Icon",
+                "일반 아이템을 선택하면 원본 ItemDefinition을 변경하지 않고 Assets/Items/Paper 아래의 대응 Paper 아이콘과 P 텍스처를 생성합니다.");
+            if (GUILayout.Button(createPaperIconContent, GUILayout.Width(135f)))
+            {
+                CreatePaperIcon(definition);
+            }
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
         }
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
         GUILayout.EndVertical();
         GUILayout.EndHorizontal();
     }
 
+    private void DrawMultiSelectedItemHeader(ItemDefinition activeDefinition)
+    {
+        GUILayout.BeginHorizontal();
+        GUILayout.BeginVertical(GUILayout.Width(96f));
+        Rect iconRect = GUILayoutUtility.GetRect(80f, 80f, GUILayout.ExpandWidth(false));
+        DrawIconBackground(iconRect);
+        DrawItemIcon(iconRect, activeDefinition);
+        GUILayout.EndVertical();
+
+        GUILayout.BeginVertical();
+        EditorGUILayout.LabelField(
+            $"{selectedItemDefinitionsInOrder.Count} Items Selected",
+            EditorStyles.largeLabel);
+        EditorGUILayout.LabelField(
+            $"Active: [{activeDefinition.id}] {GetDefinitionDisplayName(activeDefinition)}",
+            EditorStyles.miniLabel);
+        GUILayout.Space(6f);
+
+        if (GUILayout.Button("Ping Selected", GUILayout.Width(120f)))
+        {
+            UnityEngine.Object[] selectedAssets =
+                new UnityEngine.Object[selectedItemDefinitionsInOrder.Count];
+            for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+            {
+                selectedAssets[i] = selectedItemDefinitionsInOrder[i];
+            }
+
+            Selection.objects = selectedAssets;
+            EditorGUIUtility.PingObject(activeDefinition);
+        }
+
+        GUILayout.EndVertical();
+        GUILayout.EndHorizontal();
+    }
+
+    private void DrawMultiSelectedItemFields(List<ItemDefinition> definitions)
+    {
+        SerializedObject serializedObject = GetMultiSelectedDefinitionSerializedObject();
+        if (serializedObject == null)
+        {
+            return;
+        }
+
+        serializedObject.UpdateIfRequiredOrScript();
+
+        SerializedProperty interactionButtonListProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "interactionButtonList");
+        SerializedProperty lightModeProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "lightMode");
+        SerializedProperty lightRangeProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "lightRange");
+        SerializedProperty lightIntensityMultiplierProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "lightIntensityMultiplier");
+        SerializedProperty sizeProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "size");
+        SerializedProperty itemFilterProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "itemFilter");
+        SerializedProperty ignoreFilterProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "ignoreFilter");
+        SerializedProperty isManualProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "isManual");
+        SerializedProperty manualTargetItemProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "manualTargetItem");
+        SerializedProperty upgradeableProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "upgradeable");
+        SerializedProperty capacityProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "capacity");
+        SerializedProperty storesFluidProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "storesFluid");
+        SerializedProperty fluidStorageLitersProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
+        SerializedProperty fluidDisplayColorProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "fluidDisplayColor");
+        SerializedProperty energyTypeProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "energyType");
+        SerializedProperty energyAmountProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "energyAmount");
+        SerializedProperty useEnergyTypeProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "useEnergyType");
+        SerializedProperty useEnergyAmountProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "useEnergyAmount");
+        SerializedProperty completeEnergyProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "completeEnergy");
+        SerializedProperty utilityPoleConnectionRadiusProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "utilityPoleConnectionRadius");
+        SerializedProperty utilityPoleSupplyRadiusProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "utilityPoleSupplyRadius");
+        SerializedProperty craftingDurationSecondsProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "craftingDurationSeconds");
+
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Common Item Fields", EditorStyles.boldLabel);
+
+        if (interactionButtonListProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Interaction", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(
+                interactionButtonListProperty,
+                new GUIContent("Interaction Button List"),
+                true);
+        }
+
+        if (lightModeProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Lighting", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(lightModeProperty, new GUIContent("Light Condition"));
+            if (lightModeProperty.hasMultipleDifferentValues
+                || lightModeProperty.enumValueIndex != (int)ItemDefinition.ItemLightMode.None)
+            {
+                DrawMultiClampedFloatProperty(
+                    lightRangeProperty,
+                    new GUIContent("Light Range"),
+                    0.1f);
+                DrawMultiClampedFloatProperty(
+                    lightIntensityMultiplierProperty,
+                    new GUIContent("Light Intensity Multiplier"),
+                    0.01f);
+            }
+        }
+
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
+        DrawMultiPropertyField(sizeProperty, new GUIContent("Size"));
+        DrawMultiPropertyField(itemFilterProperty, new GUIContent("Item Filter"));
+        DrawMultiPropertyField(
+            ignoreFilterProperty,
+            new GUIContent("Ignore Filter", "체크하면 박스의 아이템 필터 목록에서 제외합니다."));
+        if (isManualProperty != null)
+        {
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(
+                isManualProperty,
+                new GUIContent(
+                    "Manual Item",
+                    "제작법 설명서 등 Manual 용도로 사용하는 아이템이면 체크합니다."));
+            bool manualStateChanged = EditorGUI.EndChangeCheck();
+            if (manualStateChanged
+                && !isManualProperty.hasMultipleDifferentValues
+                && !isManualProperty.boolValue
+                && manualTargetItemProperty != null)
+            {
+                manualTargetItemProperty.objectReferenceValue = null;
+            }
+
+            if (!isManualProperty.hasMultipleDifferentValues && isManualProperty.boolValue)
+            {
+                DrawManualTargetItemField(
+                    manualTargetItemProperty,
+                    definitions);
+            }
+        }
+
+        if (upgradeableProperty != null && AllSelectedDefinitionsSupportUpgrade())
+        {
+            EditorGUILayout.PropertyField(
+                upgradeableProperty,
+                new GUIContent(
+                    "Upgrade able",
+                    "체크하면 부모 I/O 모듈을 이 아이템으로 업그레이드할 수 있습니다."));
+        }
+
+        if (capacityProperty != null && AllSelectedDefinitionsShowCapacity())
+        {
+            DrawMultiClampedLongProperty(capacityProperty, new GUIContent("Capacity"), 1L);
+        }
+
+        if (storesFluidProperty != null || fluidDisplayColorProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
+
+            if (fluidDisplayColorProperty != null && AllSelectedDefinitionsAreFluidItems())
+            {
+                EditorGUILayout.PropertyField(
+                    fluidDisplayColorProperty,
+                    new GUIContent("Pipe DP Color"));
+            }
+
+            if (storesFluidProperty != null)
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.PropertyField(storesFluidProperty, new GUIContent("Store Fluid"));
+                bool storesFluidChanged = EditorGUI.EndChangeCheck();
+                if (storesFluidChanged
+                    && !storesFluidProperty.hasMultipleDifferentValues
+                    && !storesFluidProperty.boolValue
+                    && fluidStorageLitersProperty != null)
+                {
+                    fluidStorageLitersProperty.floatValue = 0f;
+                }
+
+                if (storesFluidProperty.hasMultipleDifferentValues || storesFluidProperty.boolValue)
+                {
+                    DrawMultiClampedFloatProperty(
+                        fluidStorageLitersProperty,
+                        new GUIContent("Fluid Storage Liters"),
+                        0f);
+                }
+            }
+        }
+
+        DrawMultiClampedFloatProperty(
+            craftingDurationSecondsProperty,
+            new GUIContent("Crafting Time (sec)"),
+            0.01f);
+
+        if (energyTypeProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Energy", EditorStyles.boldLabel);
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(energyTypeProperty, new GUIContent("Energy Type"));
+            bool energyTypeChanged = EditorGUI.EndChangeCheck();
+            if (energyTypeChanged
+                && !energyTypeProperty.hasMultipleDifferentValues
+                && energyTypeProperty.enumValueIndex == (int)ItemDefinition.EnergyType.None
+                && energyAmountProperty != null)
+            {
+                energyAmountProperty.longValue = 0L;
+            }
+
+            if (energyTypeProperty.hasMultipleDifferentValues
+                || energyTypeProperty.enumValueIndex != (int)ItemDefinition.EnergyType.None)
+            {
+                DrawMultiClampedLongProperty(
+                    energyAmountProperty,
+                    new GUIContent("Energy Amount"),
+                    0L);
+            }
+        }
+
+        if (useEnergyTypeProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Use Energy", EditorStyles.boldLabel);
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(useEnergyTypeProperty, new GUIContent("Use Energy Type"));
+            bool useEnergyTypeChanged = EditorGUI.EndChangeCheck();
+            if (useEnergyTypeChanged
+                && !useEnergyTypeProperty.hasMultipleDifferentValues
+                && useEnergyTypeProperty.enumValueIndex == (int)ItemDefinition.EnergyType.None)
+            {
+                if (useEnergyAmountProperty != null)
+                {
+                    useEnergyAmountProperty.floatValue = 0f;
+                }
+
+                if (completeEnergyProperty != null)
+                {
+                    completeEnergyProperty.floatValue = 0f;
+                }
+            }
+
+            if (useEnergyTypeProperty.hasMultipleDifferentValues
+                || useEnergyTypeProperty.enumValueIndex != (int)ItemDefinition.EnergyType.None)
+            {
+                string useEnergyAmountLabel = !useEnergyTypeProperty.hasMultipleDifferentValues
+                    && useEnergyTypeProperty.enumValueIndex == (int)ItemDefinition.EnergyType.Electricity
+                        ? "Use Energy Amount (kW)"
+                        : "Use Energy Amount / Sec";
+                DrawMultiClampedFloatProperty(
+                    useEnergyAmountProperty,
+                    new GUIContent(useEnergyAmountLabel),
+                    0f);
+                DrawMultiClampedFloatProperty(
+                    completeEnergyProperty,
+                    new GUIContent("Complete Energy"),
+                    0f);
+            }
+        }
+
+        if (AllSelectedDefinitionsAreUtilityPoles()
+            && (utilityPoleConnectionRadiusProperty != null
+                || utilityPoleSupplyRadiusProperty != null))
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Utility Pole", EditorStyles.boldLabel);
+            DrawMultiClampedLongProperty(
+                utilityPoleConnectionRadiusProperty,
+                new GUIContent("Connection Radius"),
+                0L);
+            DrawMultiClampedLongProperty(
+                utilityPoleSupplyRadiusProperty,
+                new GUIContent("Supply Radius"),
+                0L);
+        }
+
+        if (!serializedObject.ApplyModifiedProperties())
+        {
+            return;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            ItemDefinition definition = selectedItemDefinitionsInOrder[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            EditorUtility.SetDirty(definition);
+            if (EditorApplication.isPlaying)
+            {
+                ItemLightController.RefreshDefinition(definition);
+            }
+        }
+
+        InvalidateDefinitionPresentationCache();
+        DefinitionCatalog.NotifyChanged();
+        Repaint();
+    }
+
+    private static void DrawMultiPropertyField(SerializedProperty property, GUIContent label)
+    {
+        if (property != null)
+        {
+            EditorGUILayout.PropertyField(property, label);
+        }
+    }
+
+    private static void DrawMultiClampedFloatProperty(
+        SerializedProperty property,
+        GUIContent label,
+        float minimum)
+    {
+        if (property == null)
+        {
+            return;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        EditorGUILayout.PropertyField(property, label);
+        if (EditorGUI.EndChangeCheck())
+        {
+            property.floatValue = Mathf.Max(minimum, property.floatValue);
+        }
+    }
+
+    private static void DrawMultiClampedLongProperty(
+        SerializedProperty property,
+        GUIContent label,
+        long minimum)
+    {
+        if (property == null)
+        {
+            return;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        EditorGUILayout.PropertyField(property, label);
+        if (EditorGUI.EndChangeCheck())
+        {
+            property.longValue = Math.Max(minimum, property.longValue);
+        }
+    }
+
+    private bool AllSelectedDefinitionsSupportUpgrade()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!(selectedItemDefinitionsInOrder[i].mapObject is InputOutputModule inputOutputModule)
+                || inputOutputModule.ParentInputOutputModuleItem == null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool AllSelectedDefinitionsShowCapacity()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!ShouldShowCapacity(selectedItemDefinitionsInOrder[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool AllSelectedDefinitionsAreFluidItems()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!InputOutputModule.IsFluidItemDefinition(selectedItemDefinitionsInOrder[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool AllSelectedDefinitionsAreUtilityPoles()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!(selectedItemDefinitionsInOrder[i].mapObject is UtilityPole))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void DrawSelectedItemFields(ItemDefinition definition, List<ItemDefinition> definitions)
     {
-        SerializedObject serializedObject = new SerializedObject(definition);
-        serializedObject.Update();
+        SerializedObject serializedObject = GetSelectedDefinitionSerializedObject(definition);
+        if (serializedObject == null)
+        {
+            return;
+        }
 
-        SerializedProperty itemNameProperty = serializedObject.FindProperty("itemName");
-        SerializedProperty idProperty = serializedObject.FindProperty("id");
-        SerializedProperty mapObjectProperty = serializedObject.FindProperty("mapObject");
-        SerializedProperty portableMeshProperty = serializedObject.FindProperty("portableMesh");
-        SerializedProperty portableMatProperty = serializedObject.FindProperty("portableMat");
-        SerializedProperty iconProperty = serializedObject.FindProperty("icon");
-        SerializedProperty interactionButtonListProperty = serializedObject.FindProperty("interactionButtonList");
-        SerializedProperty lightModeProperty = serializedObject.FindProperty("lightMode");
-        SerializedProperty lightRangeProperty = serializedObject.FindProperty("lightRange");
-        SerializedProperty lightIntensityMultiplierProperty = serializedObject.FindProperty("lightIntensityMultiplier");
-        SerializedProperty sizeProperty = serializedObject.FindProperty("size");
-        SerializedProperty itemFilterProperty = serializedObject.FindProperty("itemFilter");
-        SerializedProperty upgradeableProperty = serializedObject.FindProperty("upgradeable");
-        SerializedProperty capacityProperty = serializedObject.FindProperty("capacity");
-        SerializedProperty storesFluidProperty = serializedObject.FindProperty("storesFluid");
-        SerializedProperty fluidStorageLitersProperty = serializedObject.FindProperty("fluidStorageLiters");
-        SerializedProperty fluidDisplayColorProperty = serializedObject.FindProperty("fluidDisplayColor");
-        SerializedProperty energyTypeProperty = serializedObject.FindProperty("energyType");
-        SerializedProperty energyAmountProperty = serializedObject.FindProperty("energyAmount");
-        SerializedProperty useEnergyTypeProperty = serializedObject.FindProperty("useEnergyType");
-        SerializedProperty useEnergyAmountProperty = serializedObject.FindProperty("useEnergyAmount");
-        SerializedProperty completeEnergyProperty = serializedObject.FindProperty("completeEnergy");
-        SerializedProperty utilityPoleConnectionRadiusProperty = serializedObject.FindProperty("utilityPoleConnectionRadius");
-        SerializedProperty utilityPoleSupplyRadiusProperty = serializedObject.FindProperty("utilityPoleSupplyRadius");
-        SerializedProperty craftingDurationSecondsProperty = serializedObject.FindProperty("craftingDurationSeconds");
+        serializedObject.UpdateIfRequiredOrScript();
+
+        SerializedProperty itemNameProperty = GetSelectedDefinitionProperty(serializedObject, "itemName");
+        SerializedProperty idProperty = GetSelectedDefinitionProperty(serializedObject, "id");
+        SerializedProperty mapObjectProperty = GetSelectedDefinitionProperty(serializedObject, "mapObject");
+        SerializedProperty portableMeshProperty = GetSelectedDefinitionProperty(serializedObject, "portableMesh");
+        SerializedProperty portableMatProperty = GetSelectedDefinitionProperty(serializedObject, "portableMat");
+        SerializedProperty iconProperty = GetSelectedDefinitionProperty(serializedObject, "icon");
+        SerializedProperty interactionButtonListProperty = GetSelectedDefinitionProperty(serializedObject, "interactionButtonList");
+        SerializedProperty lightModeProperty = GetSelectedDefinitionProperty(serializedObject, "lightMode");
+        SerializedProperty lightRangeProperty = GetSelectedDefinitionProperty(serializedObject, "lightRange");
+        SerializedProperty lightIntensityMultiplierProperty = GetSelectedDefinitionProperty(serializedObject, "lightIntensityMultiplier");
+        SerializedProperty sizeProperty = GetSelectedDefinitionProperty(serializedObject, "size");
+        SerializedProperty itemFilterProperty = GetSelectedDefinitionProperty(serializedObject, "itemFilter");
+        SerializedProperty ignoreFilterProperty = GetSelectedDefinitionProperty(serializedObject, "ignoreFilter");
+        SerializedProperty isManualProperty = GetSelectedDefinitionProperty(serializedObject, "isManual");
+        SerializedProperty manualTargetItemProperty = GetSelectedDefinitionProperty(serializedObject, "manualTargetItem");
+        SerializedProperty upgradeableProperty = GetSelectedDefinitionProperty(serializedObject, "upgradeable");
+        SerializedProperty capacityProperty = GetSelectedDefinitionProperty(serializedObject, "capacity");
+        SerializedProperty storesFluidProperty = GetSelectedDefinitionProperty(serializedObject, "storesFluid");
+        SerializedProperty fluidStorageLitersProperty = GetSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
+        SerializedProperty fluidDisplayColorProperty = GetSelectedDefinitionProperty(serializedObject, "fluidDisplayColor");
+        SerializedProperty energyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "energyType");
+        SerializedProperty energyAmountProperty = GetSelectedDefinitionProperty(serializedObject, "energyAmount");
+        SerializedProperty useEnergyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyType");
+        SerializedProperty useEnergyAmountProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyAmount");
+        SerializedProperty completeEnergyProperty = GetSelectedDefinitionProperty(serializedObject, "completeEnergy");
+        SerializedProperty utilityPoleConnectionRadiusProperty = GetSelectedDefinitionProperty(serializedObject, "utilityPoleConnectionRadius");
+        SerializedProperty utilityPoleSupplyRadiusProperty = GetSelectedDefinitionProperty(serializedObject, "utilityPoleSupplyRadius");
+        SerializedProperty craftingDurationSecondsProperty = GetSelectedDefinitionProperty(serializedObject, "craftingDurationSeconds");
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Basic", EditorStyles.boldLabel);
@@ -1093,6 +3571,7 @@ public class ItemDataEditorWindow : EditorWindow
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Interaction", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(interactionButtonListProperty, new GUIContent("Interaction Button List"), true);
+            DrawInteractionDistanceField(mapObjectProperty.objectReferenceValue as MapObject);
         }
 
         if (lightModeProperty != null)
@@ -1130,6 +3609,31 @@ public class ItemDataEditorWindow : EditorWindow
         if (itemFilterProperty != null)
         {
             EditorGUILayout.PropertyField(itemFilterProperty, new GUIContent("Item Filter"));
+        }
+        if (ignoreFilterProperty != null)
+        {
+            EditorGUILayout.PropertyField(
+                ignoreFilterProperty,
+                new GUIContent("Ignore Filter", "체크하면 박스의 아이템 필터 목록에서 제외합니다."));
+        }
+        if (isManualProperty != null)
+        {
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(
+                isManualProperty,
+                new GUIContent("Manual Item", "제작법 설명서 등 Manual 용도로 사용하는 아이템이면 체크합니다."));
+            bool manualStateChanged = EditorGUI.EndChangeCheck();
+            if (manualStateChanged && !isManualProperty.boolValue && manualTargetItemProperty != null)
+            {
+                manualTargetItemProperty.objectReferenceValue = null;
+            }
+
+            if (isManualProperty.boolValue)
+            {
+                DrawManualTargetItemField(
+                    manualTargetItemProperty,
+                    definitions);
+            }
         }
         if (upgradeableProperty != null
             && definition.mapObject is InputOutputModule inputOutputModule
@@ -1277,6 +3781,198 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private SerializedObject GetMultiSelectedDefinitionSerializedObject()
+    {
+        int selectedCount = selectedItemDefinitionsInOrder.Count;
+        if (selectedCount <= 1)
+        {
+            ClearMultiSelectedSerializedObjectCache();
+            return null;
+        }
+
+        bool cacheMatchesSelection = cachedMultiSerializedDefinition != null
+                                     && cachedMultiSerializedDefinitionTargets.Length == selectedCount;
+        if (cacheMatchesSelection)
+        {
+            for (int i = 0; i < selectedCount; i++)
+            {
+                ItemDefinition definition = selectedItemDefinitionsInOrder[i];
+                if (definition == null || cachedMultiSerializedDefinitionTargets[i] != definition)
+                {
+                    cacheMatchesSelection = false;
+                    break;
+                }
+            }
+        }
+
+        if (cacheMatchesSelection)
+        {
+            return cachedMultiSerializedDefinition;
+        }
+
+        ClearMultiSelectedSerializedObjectCache();
+        cachedMultiSerializedDefinitionTargets = new ItemDefinition[selectedCount];
+        for (int i = 0; i < selectedCount; i++)
+        {
+            cachedMultiSerializedDefinitionTargets[i] = selectedItemDefinitionsInOrder[i];
+        }
+
+        cachedMultiSerializedDefinition =
+            new SerializedObject(cachedMultiSerializedDefinitionTargets);
+        return cachedMultiSerializedDefinition;
+    }
+
+    private SerializedProperty GetMultiSelectedDefinitionProperty(
+        SerializedObject serializedObject,
+        string propertyPath)
+    {
+        if (serializedObject == null || string.IsNullOrEmpty(propertyPath))
+        {
+            return null;
+        }
+
+        if (cachedMultiSelectedDefinitionProperties.TryGetValue(
+                propertyPath,
+                out SerializedProperty property))
+        {
+            return property;
+        }
+
+        property = serializedObject.FindProperty(propertyPath);
+        cachedMultiSelectedDefinitionProperties[propertyPath] = property;
+        return property;
+    }
+
+    private SerializedObject GetSelectedDefinitionSerializedObject(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            ClearSelectedSerializedObjectCaches();
+            return null;
+        }
+
+        if (cachedSerializedDefinition != null
+            && cachedSerializedDefinitionTarget == definition
+            && cachedSerializedDefinition.targetObject == definition)
+        {
+            return cachedSerializedDefinition;
+        }
+
+        ClearSelectedSerializedObjectCaches();
+        cachedSerializedDefinitionTarget = definition;
+        cachedSerializedDefinition = new SerializedObject(definition);
+        return cachedSerializedDefinition;
+    }
+
+    private SerializedProperty GetSelectedDefinitionProperty(
+        SerializedObject serializedObject,
+        string propertyPath)
+    {
+        if (serializedObject == null || string.IsNullOrEmpty(propertyPath))
+        {
+            return null;
+        }
+
+        if (cachedSelectedDefinitionProperties.TryGetValue(
+                propertyPath,
+                out SerializedProperty property))
+        {
+            return property;
+        }
+
+        property = serializedObject.FindProperty(propertyPath);
+        cachedSelectedDefinitionProperties[propertyPath] = property;
+        return property;
+    }
+
+    private SerializedObject GetSelectedMapObjectSerializedObject(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            ClearSelectedMapObjectSerializedObjectCache();
+            return null;
+        }
+
+        if (cachedSerializedMapObject != null
+            && cachedSerializedMapObjectTarget == mapObject
+            && cachedSerializedMapObject.targetObject == mapObject)
+        {
+            return cachedSerializedMapObject;
+        }
+
+        ClearSelectedMapObjectSerializedObjectCache();
+        cachedSerializedMapObjectTarget = mapObject;
+        cachedSerializedMapObject = new SerializedObject(mapObject);
+        return cachedSerializedMapObject;
+    }
+
+    private SerializedProperty GetSelectedMapObjectProperty(
+        SerializedObject serializedObject,
+        string propertyPath)
+    {
+        if (serializedObject == null || string.IsNullOrEmpty(propertyPath))
+        {
+            return null;
+        }
+
+        if (cachedSelectedMapObjectProperties.TryGetValue(
+                propertyPath,
+                out SerializedProperty property))
+        {
+            return property;
+        }
+
+        property = serializedObject.FindProperty(propertyPath);
+        cachedSelectedMapObjectProperties[propertyPath] = property;
+        return property;
+    }
+
+    private SerializedObject GetSelectedConveyorSerializedObject(ConveyorBelt conveyorBelt)
+    {
+        if (conveyorBelt == null)
+        {
+            cachedSerializedConveyorTarget = null;
+            cachedSerializedConveyor = null;
+            return null;
+        }
+
+        if (cachedSerializedConveyor != null
+            && cachedSerializedConveyorTarget == conveyorBelt
+            && cachedSerializedConveyor.targetObject == conveyorBelt)
+        {
+            return cachedSerializedConveyor;
+        }
+
+        cachedSerializedConveyorTarget = conveyorBelt;
+        cachedSerializedConveyor = new SerializedObject(conveyorBelt);
+        return cachedSerializedConveyor;
+    }
+
+    private void ClearSelectedSerializedObjectCaches()
+    {
+        cachedSerializedDefinitionTarget = null;
+        cachedSerializedDefinition = null;
+        cachedSelectedDefinitionProperties.Clear();
+        ClearMultiSelectedSerializedObjectCache();
+        ClearSelectedMapObjectSerializedObjectCache();
+    }
+
+    private void ClearMultiSelectedSerializedObjectCache()
+    {
+        cachedMultiSerializedDefinition = null;
+        cachedMultiSerializedDefinitionTargets = Array.Empty<ItemDefinition>();
+        cachedMultiSelectedDefinitionProperties.Clear();
+    }
+
+    private void ClearSelectedMapObjectSerializedObjectCache()
+    {
+        cachedSerializedMapObjectTarget = null;
+        cachedSerializedMapObject = null;
+        cachedSelectedMapObjectProperties.Clear();
+        cachedSerializedConveyorTarget = null;
+        cachedSerializedConveyor = null;
+    }
+
     private static bool ShouldShowCapacity(ItemDefinition definition)
     {
         if (definition == null || !(definition.mapObject is InstallationObject installationObject))
@@ -1355,10 +4051,15 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        SerializedObject mapObjectSerializedObject = new SerializedObject(mapObject);
-        mapObjectSerializedObject.Update();
+        SerializedObject mapObjectSerializedObject = GetSelectedMapObjectSerializedObject(mapObject);
+        if (mapObjectSerializedObject == null)
+        {
+            return;
+        }
 
-        SerializedProperty mapStatusProperty = mapObjectSerializedObject.FindProperty("mapStatus");
+        mapObjectSerializedObject.UpdateIfRequiredOrScript();
+
+        SerializedProperty mapStatusProperty = GetSelectedMapObjectProperty(mapObjectSerializedObject, "mapStatus");
         if (mapStatusProperty == null)
         {
             return;
@@ -1383,37 +4084,23 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUI.PropertyField(yRect, mapSizeYProperty, GUIContent.none);
         DrawPlacementCenterGridFields(mapObjectSerializedObject, mapStatusProperty, mapSizeXProperty, mapSizeYProperty, mapObject);
 
-        SerializedProperty multiFocusModeProperty = mapObjectSerializedObject.FindProperty("multiFocusMode");
+        SerializedProperty multiFocusModeProperty = GetSelectedMapObjectProperty(mapObjectSerializedObject, "multiFocusMode");
         if (multiFocusModeProperty != null)
         {
             DrawMultiFocusModeField(multiFocusModeProperty);
-        }
-
-        if (mapObject is WorkableObject)
-        {
-            DrawWorkableRangeCellsField(mapObjectSerializedObject);
-        }
-        else
-        {
-            SerializedProperty focusActivationRadiusProperty = GetMapObjectFocusRadiusProperty(mapObjectSerializedObject, mapObject);
-            if (focusActivationRadiusProperty != null)
-            {
-                focusActivationRadiusProperty.floatValue = Mathf.Max(0f, focusActivationRadiusProperty.floatValue);
-                EditorGUILayout.PropertyField(focusActivationRadiusProperty, new GUIContent("Focus Radius"));
-            }
         }
 
         bool shouldSyncConveyorVariantSpeed = false;
         ConveyorBelt conveyorBeltForSpeed = ResolveConveyorBelt(mapObject);
         bool usesSeparateConveyorSerializedObject = conveyorBeltForSpeed != null && conveyorBeltForSpeed != mapObject;
         SerializedObject conveyorSerializedObject = usesSeparateConveyorSerializedObject
-            ? new SerializedObject(conveyorBeltForSpeed)
+            ? GetSelectedConveyorSerializedObject(conveyorBeltForSpeed)
             : mapObjectSerializedObject;
         if (conveyorBeltForSpeed != null)
         {
             if (usesSeparateConveyorSerializedObject)
             {
-                conveyorSerializedObject.Update();
+                conveyorSerializedObject.UpdateIfRequiredOrScript();
             }
 
             SerializedProperty conveyorSpeedProperty = FindSerializedProperty(conveyorSerializedObject, "conveyorSpeed");
@@ -1443,7 +4130,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (mapObject is InstallationObject)
         {
-            SerializedProperty mapFilterProperty = mapObjectSerializedObject.FindProperty("mapFilter");
+            SerializedProperty mapFilterProperty = GetSelectedMapObjectProperty(mapObjectSerializedObject, "mapFilter");
             if (mapFilterProperty != null)
             {
                 InstallationMapFilter currentFilter = InstallationObject.NormalizeMapFilter(
@@ -1460,7 +4147,7 @@ public class ItemDataEditorWindow : EditorWindow
                 }
             }
 
-            SerializedProperty rotationFilterProperty = mapObjectSerializedObject.FindProperty("rotationFilter");
+            SerializedProperty rotationFilterProperty = GetSelectedMapObjectProperty(mapObjectSerializedObject, "rotationFilter");
             if (rotationFilterProperty != null)
             {
                 InstallationRotationFilter currentRotationFilter = InstallationObject.NormalizeRotationFilter(
@@ -2255,6 +4942,68 @@ public class ItemDataEditorWindow : EditorWindow
         return null;
     }
 
+    private void DrawInteractionDistanceField(MapObject mapObject)
+    {
+        if (!(mapObject is InstallationObject))
+        {
+            return;
+        }
+
+        SerializedObject serializedMapObject = GetSelectedMapObjectSerializedObject(mapObject);
+        if (serializedMapObject == null)
+        {
+            return;
+        }
+
+        serializedMapObject.UpdateIfRequiredOrScript();
+
+        if (mapObject is WorkableObject)
+        {
+            SerializedProperty workableRangeCellsProperty = serializedMapObject.FindProperty("workableRangeCells");
+            if (workableRangeCellsProperty == null)
+            {
+                return;
+            }
+
+            uint currentRangeCells = (uint)Mathf.Max(0, workableRangeCellsProperty.intValue);
+            float currentDistance = WorkableObject.ResolveRangeRadius(currentRangeCells);
+            float nextDistance = Mathf.Max(
+                0f,
+                EditorGUILayout.FloatField(
+                    new GUIContent(
+                        "Interaction Distance",
+                        "상호작용 아이콘 표시와 작업이 가능한 월드 거리입니다. 0.5 단위로 저장됩니다."),
+                    currentDistance));
+            workableRangeCellsProperty.intValue = Mathf.Max(0, Mathf.RoundToInt(nextDistance * 2f));
+        }
+        else
+        {
+            SerializedProperty focusRadiusProperty = GetMapObjectFocusRadiusProperty(serializedMapObject, mapObject);
+            if (focusRadiusProperty == null)
+            {
+                return;
+            }
+
+            focusRadiusProperty.floatValue = Mathf.Max(0f, focusRadiusProperty.floatValue);
+            EditorGUILayout.PropertyField(
+                focusRadiusProperty,
+                new GUIContent(
+                    "Interaction Distance",
+                    "상호작용 아이콘 표시와 실행이 가능한 월드 거리입니다."));
+        }
+
+        if (!serializedMapObject.ApplyModifiedProperties())
+        {
+            return;
+        }
+
+        EditorUtility.SetDirty(mapObject);
+        if (mapObject.gameObject != null)
+        {
+            EditorUtility.SetDirty(mapObject.gameObject);
+        }
+    }
+
     private static void ApplyVehicleJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry)
     {
         if (serializedMapObject == null || entry == null)
@@ -2292,28 +5041,6 @@ public class ItemDataEditorWindow : EditorWindow
         if (massProperty != null && entry.trainMass > 0f)
         {
             massProperty.floatValue = Mathf.Max(0.01f, entry.trainMass);
-        }
-    }
-
-    private static void DrawWorkableRangeCellsField(SerializedObject serializedMapObject)
-    {
-        if (serializedMapObject == null)
-        {
-            return;
-        }
-
-        SerializedProperty workableRangeCellsProperty = serializedMapObject.FindProperty("workableRangeCells");
-        if (workableRangeCellsProperty == null)
-        {
-            return;
-        }
-
-        int currentRangeCells = Mathf.Max(0, workableRangeCellsProperty.intValue);
-        EditorGUI.BeginChangeCheck();
-        int nextRangeCells = Mathf.Max(0, EditorGUILayout.IntField("Workable Range Cells", currentRangeCells));
-        if (EditorGUI.EndChangeCheck())
-        {
-            workableRangeCellsProperty.intValue = nextRangeCells;
         }
     }
 
@@ -2876,6 +5603,127 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private void DrawManualTargetItemField(
+        SerializedProperty targetItemProperty,
+        List<ItemDefinition> definitions)
+    {
+        if (targetItemProperty == null)
+        {
+            return;
+        }
+
+        ItemDefinition currentDefinition =
+            targetItemProperty.objectReferenceValue as ItemDefinition;
+        ItemDefinition[] dropdownDefinitions = GetInputOutputDefinitionOptions(definitions);
+        UnityEngine.Object[] editedTargets = targetItemProperty.serializedObject.targetObjects;
+
+        Rect rowRect = EditorGUILayout.GetControlRect();
+        Rect popupRect = EditorGUI.PrefixLabel(
+            rowRect,
+            new GUIContent(
+                "Target Item",
+                "이 Manual이 설명하는 대상 아이템입니다."));
+
+        bool previousMixedValue = EditorGUI.showMixedValue;
+        EditorGUI.showMixedValue = targetItemProperty.hasMultipleDifferentValues;
+        bool hasIcon = currentDefinition != null && currentDefinition.icon != null;
+        GUIStyle popupStyle = hasIcon
+            ? GetManualTargetPopupWithIconStyle()
+            : EditorStyles.popup;
+        string selectedLabel = currentDefinition != null
+            ? $"[{currentDefinition.id}] {GetDefinitionDisplayName(currentDefinition)}"
+            : "(None)";
+        bool openDropdown = EditorGUI.DropdownButton(
+            popupRect,
+            new GUIContent(selectedLabel),
+            FocusType.Keyboard,
+            popupStyle);
+        EditorGUI.showMixedValue = previousMixedValue;
+
+        if (hasIcon)
+        {
+            const float iconSize = 16f;
+            Rect iconRect = new Rect(
+                popupRect.x + 3f,
+                popupRect.y + (popupRect.height - iconSize) * 0.5f,
+                iconSize,
+                iconSize);
+            DrawItemIcon(iconRect, currentDefinition);
+        }
+
+        if (openDropdown)
+        {
+            PopupWindow.Show(
+                popupRect,
+                new ManualTargetItemPopupContent(
+                    dropdownDefinitions,
+                    currentDefinition,
+                    nextDefinition => ApplyManualTargetItemSelection(editedTargets, nextDefinition)));
+        }
+
+        if (ItemDefinitionDragAndDropUtility.HandleDropTarget(
+                popupRect,
+                this,
+                out ItemDefinition droppedDefinition))
+        {
+            if (ApplyManualTargetItemSelection(editedTargets, droppedDefinition))
+            {
+                currentDefinition = droppedDefinition;
+            }
+        }
+
+        if (currentDefinition != null && !targetItemProperty.hasMultipleDifferentValues)
+        {
+            DrawReferencedItemPreview(currentDefinition);
+        }
+    }
+
+    private bool ApplyManualTargetItemSelection(
+        UnityEngine.Object[] editedTargets,
+        ItemDefinition nextDefinition)
+    {
+        if (editedTargets == null || editedTargets.Length == 0)
+        {
+            return false;
+        }
+
+        if (nextDefinition != null)
+        {
+            for (int i = 0; i < editedTargets.Length; i++)
+            {
+                if (editedTargets[i] == nextDefinition)
+                {
+                    ShowNotification(new GUIContent("Manual은 자기 자신을 대상으로 지정할 수 없습니다."));
+                    return false;
+                }
+            }
+        }
+
+        SerializedObject editedDefinitions = new SerializedObject(editedTargets);
+        editedDefinitions.Update();
+        SerializedProperty manualTargetProperty = editedDefinitions.FindProperty(nameof(ItemDefinition.manualTargetItem));
+        if (manualTargetProperty == null)
+        {
+            return false;
+        }
+
+        manualTargetProperty.objectReferenceValue = nextDefinition;
+        editedDefinitions.ApplyModifiedProperties();
+        Repaint();
+        return true;
+    }
+
+    private GUIStyle GetManualTargetPopupWithIconStyle()
+    {
+        if (manualTargetPopupWithIconStyle == null)
+        {
+            manualTargetPopupWithIconStyle = new GUIStyle(EditorStyles.popup);
+            manualTargetPopupWithIconStyle.padding.left = 23;
+        }
+
+        return manualTargetPopupWithIconStyle;
+    }
+
     private void DrawReferencedItemPreview(ItemDefinition definition)
     {
         if (definition == null)
@@ -3271,6 +6119,87 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         ShowNotification(new GUIContent($"[{definition.id}] {displayName} rebuilt."));
+    }
+
+    private delegate bool TryCreateDocumentAssets(
+        ItemDefinition selectedDefinition,
+        IReadOnlyList<ItemDefinition> definitions,
+        out BookItemAssetGenerator.Result result,
+        out string errorMessage);
+
+    private void CreateBookIcon(ItemDefinition definition)
+    {
+        CreateDocumentIcon(definition, "Book", BookItemAssetGenerator.TryCreate);
+    }
+
+    private void CreatePaperIcon(ItemDefinition definition)
+    {
+        CreateDocumentIcon(definition, "Paper", PaperItemAssetGenerator.TryCreate);
+    }
+
+    private void CreateDocumentIcon(
+        ItemDefinition definition,
+        string documentType,
+        TryCreateDocumentAssets tryCreateAssets)
+    {
+        string dialogTitle = $"Create {documentType} Icon";
+        if (definition == null)
+        {
+            EditorUtility.DisplayDialog("Item Data", $"{documentType} 에셋을 생성할 아이템을 선택하세요.", "OK");
+            return;
+        }
+
+        ItemManager itemManager = FindItemManager();
+        List<ItemDefinition> definitions = itemManager != null
+            ? GetDefinitions(itemManager)
+            : DefinitionCatalog.LoadCurrent();
+        BookItemAssetGenerator.Result result = null;
+        string errorMessage = string.Empty;
+        bool created = false;
+        try
+        {
+            EditorUtility.DisplayProgressBar(
+                dialogTitle,
+                $"원본 아이템과 {documentType} 템플릿 확인 중...",
+                0.1f);
+            created = tryCreateAssets(
+                definition,
+                definitions,
+                out result,
+                out errorMessage);
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+        }
+
+        if (!created || result == null)
+        {
+            EditorUtility.DisplayDialog(
+                dialogTitle,
+                string.IsNullOrWhiteSpace(errorMessage)
+                    ? $"{documentType} 에셋을 생성하지 못했습니다."
+                    : errorMessage,
+                "OK");
+            return;
+        }
+
+        AssetDatabase.SaveAssets();
+        InvalidateDefinitionCache();
+        ItemDefinition selectionDefinition = result.TargetDefinition != null
+            ? result.TargetDefinition
+            : definition;
+        selectedItemId = selectionDefinition.id;
+        EnsureSelection(itemManager != null ? GetDefinitions(itemManager) : DefinitionCatalog.LoadCurrent());
+        DefinitionCatalog.NotifyChanged();
+        Selection.activeObject = result.Icon;
+        EditorGUIUtility.PingObject(result.Icon);
+        string targetStatus = result.TargetDefinition != null
+            ? $"{documentType} item '{GetDefinitionDisplayName(result.TargetDefinition)}' updated"
+            : $"{documentType} assets '{result.TargetItemName}' created (Rebuild Item Data to register)";
+        ShowNotification(new GUIContent(
+            $"{targetStatus} from {GetDefinitionDisplayName(result.SourceDefinition)}."));
+        Repaint();
     }
 
     private static void DisplayItemRebuildProgress(string message, float progress)
@@ -3797,6 +6726,13 @@ public class ItemDataEditorWindow : EditorWindow
             lightIntensityMultiplier = definition.LightIntensityMultiplier,
             size = Mathf.Max(0, (int)definition.size),
             itemFilter = definition.itemFilter,
+            hasIgnoreFilter = true,
+            ignoreFilter = definition.ignoreFilter,
+            hasManual = true,
+            isManual = definition.isManual,
+            manualTargetItem = definition.isManual
+                ? BuildDefinitionReferenceJsonEntry(definition.manualTargetItem)
+                : null,
             hasUpgradeable = true,
             upgradeable = definition.upgradeable,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
@@ -4035,6 +6971,17 @@ public class ItemDataEditorWindow : EditorWindow
             definition.lightIntensityMultiplier = Mathf.Max(0.01f, entry.lightIntensityMultiplier);
         }
         definition.itemFilter = entry.itemFilter;
+        if (entry.hasIgnoreFilter)
+        {
+            definition.ignoreFilter = entry.ignoreFilter;
+        }
+        if (entry.hasManual)
+        {
+            definition.isManual = entry.isManual;
+            definition.manualTargetItem = entry.isManual
+                ? ResolveDefinitionReference(definitions, entry.manualTargetItem)
+                : null;
+        }
         if (entry.hasUpgradeable)
         {
             definition.upgradeable = entry.upgradeable;
@@ -4769,6 +7716,59 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private void EnsureMultiSelection(List<ItemDefinition> definitions)
+    {
+        if (definitions == null || definitions.Count == 0)
+        {
+            selectedItemDefinitions.Clear();
+            selectedItemDefinitionsInOrder.Clear();
+            rangeSelectionAnchor = null;
+            ClearPendingPlainSelection();
+            return;
+        }
+
+        availableItemDefinitions.Clear();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            if (definitions[i] != null)
+            {
+                availableItemDefinitions.Add(definitions[i]);
+            }
+        }
+
+        invalidSelectedItemDefinitions.Clear();
+        foreach (ItemDefinition definition in selectedItemDefinitions)
+        {
+            if (definition == null || !availableItemDefinitions.Contains(definition))
+            {
+                invalidSelectedItemDefinitions.Add(definition);
+            }
+        }
+
+        for (int i = 0; i < invalidSelectedItemDefinitions.Count; i++)
+        {
+            selectedItemDefinitions.Remove(invalidSelectedItemDefinitions[i]);
+        }
+
+        invalidSelectedItemDefinitions.Clear();
+        ItemDefinition activeDefinition = FindDefinitionById(definitions, selectedItemId);
+        if (selectedItemDefinitions.Count == 0 && activeDefinition != null)
+        {
+            selectedItemDefinitions.Add(activeDefinition);
+        }
+        else if (activeDefinition != null && !selectedItemDefinitions.Contains(activeDefinition))
+        {
+            selectedItemDefinitions.Add(activeDefinition);
+        }
+
+        if (rangeSelectionAnchor == null || !availableItemDefinitions.Contains(rangeSelectionAnchor))
+        {
+            rangeSelectionAnchor = activeDefinition;
+        }
+
+        RebuildSelectedItemOrder(definitions);
+    }
+
     private List<ItemDefinition> FilterDefinitions(List<ItemDefinition> definitions)
     {
         if (definitions == null)
@@ -5024,7 +8024,7 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        TerrainGenerator terrain = FindObjectOfType<TerrainGenerator>();
+        TerrainGenerator terrain = FindAnyObjectByType<TerrainGenerator>();
         Vector3 playerPosition = player.transform.position;
         if (terrain != null
             && (terrain.TryAddDroppedItemAnimated(playerPosition, definition.id, playerPosition, out _)
@@ -5044,7 +8044,7 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(rect, new Color(0.2f, 0.2f, 0.2f));
     }
 
-    private static void DrawItemIcon(Rect rect, ItemDefinition definition)
+    internal static void DrawItemIcon(Rect rect, ItemDefinition definition)
     {
         if (!IsRepaintEvent())
         {

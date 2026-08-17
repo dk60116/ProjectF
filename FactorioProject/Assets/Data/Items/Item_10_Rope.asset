@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_10_Rope
   m_EditorClassIdentifier: 
   itemName: Rope
-  id: 12
+  id: 21
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 24f38b2c87025d445884f269a31a304a, type: 2}
   portableMat: {fileID: 2100000, guid: 82420e5b9bea8574db85d211db2703f4, type: 2}
@@ -24,6 +24,10 @@ MonoBehaviour:
   lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

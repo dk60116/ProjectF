@@ -27,6 +27,7 @@ public class SteamGenerator : InputOutputModule
 
     protected override void OnDisable()
     {
+        hasSteamGenerationReserve = false;
         StopGenerationVisuals(true);
         base.OnDisable();
     }
@@ -317,54 +318,48 @@ public class SteamGenerator : InputOutputModule
 
     private bool ConsumeSteamForGeneration(float deltaTime)
     {
-        if (deltaTime <= 0f
-            || !TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
+        if (deltaTime <= 0f)
+        {
+            return hasSteamGenerationReserve;
+        }
+
+        if (!TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
             || inputLitersPerSecond <= 0)
         {
+            SetSteamGenerationReserve(false);
             return false;
         }
 
         if (StoredFluidItemId >= 0 && !CanProvideFluidItem(inputItemId))
         {
+            SetSteamGenerationReserve(false);
             return false;
         }
 
         float requestedLiters = inputLitersPerSecond * deltaTime;
         if (requestedLiters <= FluidEpsilon)
         {
-            return false;
+            return hasSteamGenerationReserve;
         }
 
         float requiredStoredLiters = ResolveRequiredSteamReserveLiters(
             inputLitersPerSecond,
             requestedLiters);
         float missingLocalLiters = requiredStoredLiters - StoredFluidLiters;
-        float pulledLiters = 0f;
         if (missingLocalLiters > FluidEpsilon)
         {
-            TryPullFluidFromConnectedStorage(inputItemId, missingLocalLiters, out pulledLiters);
+            TryPullFluidFromConnectedStorage(inputItemId, missingLocalLiters, out _);
         }
 
         if (StoredFluidLiters + FluidEpsilon < requiredStoredLiters
             || !TryConsumeFluidLiters(inputItemId, requestedLiters, out float consumedLiters)
             || consumedLiters + FluidEpsilon < requestedLiters)
         {
-            if (missingLocalLiters > FluidEpsilon && pulledLiters <= FluidEpsilon)
-            {
-                DrainStoredSteamReserve(inputItemId, requestedLiters);
-            }
-
-            hasSteamGenerationReserve = false;
+            SetSteamGenerationReserve(false);
             return false;
         }
 
-        bool wasGenerating = hasSteamGenerationReserve;
-        hasSteamGenerationReserve = true;
-        if (!wasGenerating)
-        {
-            InputOutputModule.WakeElectricRuntimeModules();
-        }
-
+        SetSteamGenerationReserve(true);
         return true;
     }
 
@@ -390,7 +385,10 @@ public class SteamGenerator : InputOutputModule
 
     private float ResolveRequiredSteamReserveLiters(int inputLitersPerSecond, float requestedLiters)
     {
-        float continueReserveLiters = Mathf.Max(inputLitersPerSecond, requestedLiters);
+        // Once generation has started, the stored reserve is allowed to absorb
+        // uneven boiler/output update timing. Requiring a full second of steam on
+        // every tick made otherwise sufficient supplies repeatedly stop and start.
+        float continueReserveLiters = Mathf.Max(FluidEpsilon, requestedLiters);
         if (hasSteamGenerationReserve)
         {
             return continueReserveLiters;
@@ -405,18 +403,15 @@ public class SteamGenerator : InputOutputModule
             : startReserveLiters;
     }
 
-    private void DrainStoredSteamReserve(int inputItemId, float maxDrainLiters)
+    private void SetSteamGenerationReserve(bool hasReserve)
     {
-        if (inputItemId < 0
-            || maxDrainLiters <= FluidEpsilon
-            || StoredFluidLiters <= FluidEpsilon
-            || StoredFluidItemId < 0
-            || !CanProvideFluidItem(inputItemId))
+        if (hasSteamGenerationReserve == hasReserve)
         {
             return;
         }
 
-        TryConsumeFluidLiters(inputItemId, maxDrainLiters, out _);
+        hasSteamGenerationReserve = hasReserve;
+        InputOutputModule.WakeElectricRuntimeModules();
     }
 
     private bool TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)

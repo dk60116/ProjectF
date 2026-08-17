@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -51,6 +53,7 @@ public class ItemManagerEditor : Editor
 internal static class ItemDefinitionDragAndDropUtility
 {
     private const string DragDataKey = "ProjectF.ItemDefinition";
+    private const string DragGroupDataKey = "ProjectF.ItemDefinition.Group";
     private const float DragStartDistance = 6f;
     private static readonly Color DropFillColor = new Color(0.35f, 0.65f, 1f, 0.16f);
     private static readonly Color DropOutlineColor = new Color(0.35f, 0.65f, 1f, 0.95f);
@@ -58,8 +61,19 @@ internal static class ItemDefinitionDragAndDropUtility
     private static string pendingDisplayName;
     private static EditorWindow pendingOwner;
     private static Vector2 pendingMouseDownPosition;
+    private static ItemDefinition[] pendingDefinitions = Array.Empty<ItemDefinition>();
 
     public static void HandleListItemDrag(Rect rect, ItemDefinition definition, string displayName, EditorWindow owner)
+    {
+        HandleListItemDrag(rect, definition, null, displayName, owner);
+    }
+
+    public static void HandleListItemDrag(
+        Rect rect,
+        ItemDefinition definition,
+        IReadOnlyList<ItemDefinition> dragDefinitions,
+        string displayName,
+        EditorWindow owner)
     {
         if (definition == null)
         {
@@ -81,6 +95,7 @@ internal static class ItemDefinitionDragAndDropUtility
                     pendingDisplayName = displayName;
                     pendingOwner = owner;
                     pendingMouseDownPosition = current.mousePosition;
+                    pendingDefinitions = BuildPendingDefinitions(definition, dragDefinitions);
                 }
                 break;
 
@@ -90,14 +105,23 @@ internal static class ItemDefinitionDragAndDropUtility
                     return;
                 }
 
-                if ((current.mousePosition - pendingMouseDownPosition).sqrMagnitude < DragStartDistance * DragStartDistance)
+                if (!HasExceededDragStartDistance(
+                        pendingMouseDownPosition,
+                        current.mousePosition))
                 {
                     return;
                 }
 
                 DragAndDrop.PrepareStartDrag();
-                DragAndDrop.objectReferences = new UnityEngine.Object[] { definition };
+                UnityEngine.Object[] objectReferences = new UnityEngine.Object[pendingDefinitions.Length];
+                for (int i = 0; i < pendingDefinitions.Length; i++)
+                {
+                    objectReferences[i] = pendingDefinitions[i];
+                }
+
+                DragAndDrop.objectReferences = objectReferences;
                 DragAndDrop.SetGenericData(DragDataKey, definition);
+                DragAndDrop.SetGenericData(DragGroupDataKey, pendingDefinitions);
                 DragAndDrop.StartDrag(string.IsNullOrWhiteSpace(pendingDisplayName) ? definition.name : pendingDisplayName);
                 ClearPendingDrag();
                 owner?.Repaint();
@@ -113,6 +137,14 @@ internal static class ItemDefinitionDragAndDropUtility
                 }
                 break;
         }
+    }
+
+    internal static bool HasExceededDragStartDistance(
+        Vector2 mouseDownPosition,
+        Vector2 currentMousePosition)
+    {
+        return (currentMousePosition - mouseDownPosition).sqrMagnitude
+               >= DragStartDistance * DragStartDistance;
     }
 
     public static bool HandleDropTarget(Rect rect, EditorWindow owner, out ItemDefinition droppedDefinition)
@@ -158,6 +190,36 @@ internal static class ItemDefinitionDragAndDropUtility
         return draggedDefinition != null;
     }
 
+    public static bool TryGetDraggedDefinitions(List<ItemDefinition> draggedDefinitions)
+    {
+        if (draggedDefinitions == null)
+        {
+            return false;
+        }
+
+        draggedDefinitions.Clear();
+        object groupData = DragAndDrop.GetGenericData(DragGroupDataKey);
+        if (groupData is IReadOnlyList<ItemDefinition> group)
+        {
+            for (int i = 0; i < group.Count; i++)
+            {
+                ItemDefinition definition = group[i];
+                if (definition != null && !draggedDefinitions.Contains(definition))
+                {
+                    draggedDefinitions.Add(definition);
+                }
+            }
+        }
+
+        if (draggedDefinitions.Count == 0
+            && TryGetDraggedDefinition(out ItemDefinition draggedDefinition))
+        {
+            draggedDefinitions.Add(draggedDefinition);
+        }
+
+        return draggedDefinitions.Count > 0;
+    }
+
     private static ItemDefinition GetDraggedDefinition()
     {
         object draggedData = DragAndDrop.GetGenericData(DragDataKey);
@@ -195,6 +257,38 @@ internal static class ItemDefinitionDragAndDropUtility
         pendingDisplayName = null;
         pendingOwner = null;
         pendingMouseDownPosition = Vector2.zero;
+        pendingDefinitions = Array.Empty<ItemDefinition>();
+    }
+
+    private static ItemDefinition[] BuildPendingDefinitions(
+        ItemDefinition primaryDefinition,
+        IReadOnlyList<ItemDefinition> dragDefinitions)
+    {
+        if (primaryDefinition == null || dragDefinitions == null || dragDefinitions.Count <= 1)
+        {
+            return primaryDefinition != null
+                ? new[] { primaryDefinition }
+                : Array.Empty<ItemDefinition>();
+        }
+
+        bool containsPrimary = false;
+        HashSet<ItemDefinition> uniqueDefinitions = new HashSet<ItemDefinition>();
+        List<ItemDefinition> definitions = new List<ItemDefinition>(dragDefinitions.Count);
+        for (int i = 0; i < dragDefinitions.Count; i++)
+        {
+            ItemDefinition definition = dragDefinitions[i];
+            if (definition == null || !uniqueDefinitions.Add(definition))
+            {
+                continue;
+            }
+
+            containsPrimary |= definition == primaryDefinition;
+            definitions.Add(definition);
+        }
+
+        return containsPrimary && definitions.Count > 0
+            ? definitions.ToArray()
+            : new[] { primaryDefinition };
     }
 
     private static void DrawOutline(Rect rect, Color color)

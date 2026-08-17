@@ -639,6 +639,25 @@ public partial class TerrainGenerator : MonoBehaviour
         return virtualizedFloorObjectCoordinates.Contains(coordinate);
     }
 
+    public bool HasDroppedFloorObjectsAt(Vector2Int coordinate)
+    {
+        if (loadedBlocks.TryGetValue(coordinate, out Block block)
+            && block != null
+            && block.HasDroppedFloorObjects)
+        {
+            return true;
+        }
+
+        if (!virtualizedFloorObjectCoordinates.Contains(coordinate))
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        return resourceStateStore != null
+               && resourceStateStore.HasSavedDroppedFloorObjects(coordinate);
+    }
+
     public bool HasSavedConveyorItemAtLane(Vector2Int coordinate, int laneIndex)
     {
         if (!virtualizeConveyorItems

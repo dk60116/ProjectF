@@ -13,17 +13,21 @@ MonoBehaviour:
   m_Name: Item_53_Rail handcar
   m_EditorClassIdentifier: 
   itemName: Camp fire
-  id: 54
+  id: 26
   mapObject: {fileID: 1218127140146215825, guid: d1bcd749f595cfb4b819a990cfe8e6a4, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: 279281695dbf1c04c87fe3dac76f17f0, type: 3}
   interactionButtonList: []
   lightMode: 2
-  lightRange: 15
-  lightIntensityMultiplier: 1
+  lightRange: 12
+  lightIntensityMultiplier: 0.8
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

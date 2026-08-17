@@ -75,6 +75,9 @@ public class Block : BaseObject
     private List<Transform> floorObjects;
 
     [SerializeField]
+    private Transform floorObjectDropAnchor;
+
+    [SerializeField]
     private PortableObject floorObjectPrefab;
 
     [SerializeField, Min(1)]
@@ -719,24 +722,11 @@ public class Block : BaseObject
 
     public bool TryAddFloorObject(int objectId, out PortableObject targetPortableObject)
     {
-        return TryAddFloorObject(objectId, ResolveDefaultFloorDropReferenceWorldPosition(), out targetPortableObject);
-    }
-
-    private bool TryAddFloorObjectFromState(int objectId, out PortableObject targetPortableObject)
-    {
-        return TryAddFloorObject(objectId, transform.position, out targetPortableObject);
-    }
-
-    private bool TryAddFloorObjectToStackFromState(int objectId, int stackIndex, out PortableObject targetPortableObject)
-    {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
         if (BlocksFloorObjectStacking()
-            || objectId < 0
-            || stackIndex < 0
-            || stackIndex >= floorObjects.Count
-            || stackIndex >= floorStacks.Count)
+            || objectId < 0)
         {
             return false;
         }
@@ -746,12 +736,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Transform anchor = floorObjects[stackIndex];
-        List<PortableObject> stack = floorStacks[stackIndex];
-        if (anchor == null
-            || stack == null
-            || !IsStackCompatible(stack, objectId)
-            || stack.Count >= Mathf.Max(1, maxFloorObjectsPerStack))
+        if (!TryGetAvailableFloorStack(objectId, out Transform anchor, out List<PortableObject> stack))
         {
             return false;
         }
@@ -773,53 +758,6 @@ public class Block : BaseObject
         targetPortableObject = portableObject;
         NotifyRuntimeItemStackChanged();
         return true;
-    }
-
-    private bool TryAddFloorObject(int objectId, Vector3 referenceWorldPosition, out PortableObject targetPortableObject)
-    {
-        targetPortableObject = null;
-        EnsureFloorObjectsInitialized();
-
-        if (BlocksFloorObjectStacking())
-        {
-            return false;
-        }
-
-        if (!ResolveFloorObjectPool())
-        {
-            return false;
-        }
-
-        for (int pass = 0; pass < 2; pass++)
-        {
-            bool requireExisting = pass == 0;
-            if (!TryGetBestFloorStackIndex(objectId, requireExisting, referenceWorldPosition, out int stackIndex))
-            {
-                continue;
-            }
-
-            Transform anchor = floorObjects[stackIndex];
-            List<PortableObject> stack = floorStacks[stackIndex];
-            PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
-            if (portableObject == null)
-            {
-                continue;
-            }
-
-            ConfigureFloorObjectTransform(portableObject, anchor, stack.Count);
-            if (!TryInitializePooledPortableObject(portableObject, objectId))
-            {
-                continue;
-            }
-
-            portableObject.SetBatchedRendering(true);
-            stack.Add(portableObject);
-            targetPortableObject = portableObject;
-            NotifyRuntimeItemStackChanged();
-            return true;
-        }
-
-        return false;
     }
 
     public bool CanAddInputAreaCenterObjects(int count)
@@ -1219,6 +1157,32 @@ public class Block : BaseObject
         return GetAvailableFloorCapacity(itemId) >= count;
     }
 
+    public bool HasDroppedFloorObjects
+    {
+        get
+        {
+            EnsureFloorObjectsInitialized();
+            for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+            {
+                List<PortableObject> stack = floorStacks[stackIndex];
+                if (stack == null)
+                {
+                    continue;
+                }
+
+                for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+                {
+                    if (stack[objectIndex] != null)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+
     public bool HasFloorObjectItem(int itemId)
     {
         EnsureFloorObjectsInitialized();
@@ -1339,7 +1303,7 @@ public class Block : BaseObject
             stack.RemoveAt(objectIndex);
             ReleaseFloorObject(targetPortableObject);
 
-            Transform anchor = stackIndex < floorObjects.Count ? floorObjects[stackIndex] : null;
+            Transform anchor = ResolveFloorObjectDropAnchor();
             if (anchor != null)
             {
                 for (int i = objectIndex; i < stack.Count; i++)
@@ -1374,64 +1338,56 @@ public class Block : BaseObject
             return false;
         }
 
-        for (int pass = 0; pass < 2; pass++)
+        if (!TryGetAvailableFloorStack(objectId, out Transform anchor, out List<PortableObject> stack))
         {
-            bool requireExisting = pass == 0;
-            if (!TryGetBestFloorStackIndex(objectId, requireExisting, startWorldPosition, out int stackIndex))
-            {
-                continue;
-            }
-
-            Transform anchor = floorObjects[stackIndex];
-            List<PortableObject> stack = floorStacks[stackIndex];
-            PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
-            if (portableObject == null)
-            {
-                continue;
-            }
-
-            if (!TryInitializePooledPortableObject(portableObject, objectId))
-            {
-                continue;
-            }
-
-            portableObject.SetBatchedRendering(false);
-            portableObject.transform.SetParent(anchor, true);
-            portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
-            portableObject.transform.rotation = Quaternion.identity;
-            portableObject.transform.localScale = Vector3.one;
-            portableObject.gameObject.SetActive(true);
-
-            int objectIndex = stack.Count;
-            Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
-            Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
-            stack.Add(portableObject);
-            NotifyRuntimeItemStackChanged();
-            DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
-
-            portableObject.MoveTo(() => anchor != null ? anchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
-            {
-                if (portableObject == null || anchor == null)
-                {
-                    onComplete?.Invoke();
-                    return;
-                }
-
-                portableObject.transform.SetParent(anchor, false);
-                portableObject.transform.localPosition = finalLocalPosition;
-                portableObject.transform.localRotation = Quaternion.identity;
-                portableObject.transform.localScale = Vector3.one;
-                portableObject.gameObject.SetActive(true);
-                portableObject.SetBatchedRendering(true);
-                gate?.MarkSettled();
-                onComplete?.Invoke();
-            }, false, true, PortableObject.MoveToDuration, false);
-
-            targetPortableObject = portableObject;
-            return true;
+            return false;
         }
 
-        return false;
+        PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+        if (portableObject == null)
+        {
+            return false;
+        }
+
+        if (!TryInitializePooledPortableObject(portableObject, objectId))
+        {
+            return false;
+        }
+
+        portableObject.SetBatchedRendering(false);
+        portableObject.transform.SetParent(anchor, true);
+        portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
+        portableObject.transform.rotation = Quaternion.identity;
+        portableObject.transform.localScale = Vector3.one;
+        portableObject.gameObject.SetActive(true);
+
+        int objectIndex = stack.Count;
+        Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
+        Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
+        stack.Add(portableObject);
+        NotifyRuntimeItemStackChanged();
+        DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
+
+        portableObject.MoveTo(() => anchor != null ? anchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
+        {
+            if (portableObject == null || anchor == null)
+            {
+                onComplete?.Invoke();
+                return;
+            }
+
+            portableObject.transform.SetParent(anchor, false);
+            portableObject.transform.localPosition = finalLocalPosition;
+            portableObject.transform.localRotation = Quaternion.identity;
+            portableObject.transform.localScale = Vector3.one;
+            portableObject.gameObject.SetActive(true);
+            portableObject.SetBatchedRendering(true);
+            gate?.MarkSettled();
+            onComplete?.Invoke();
+        }, false, true, PortableObject.MoveToDuration, false);
+
+        targetPortableObject = portableObject;
+        return true;
     }
 
     private bool TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
@@ -2909,7 +2865,9 @@ public class Block : BaseObject
                             continue;
                         }
 
-                        TryAddFloorObjectToStackFromState(stackItemId, stackIndex, out _);
+                        // Floor drops now use one stack per cell. Fold legacy multi-stack
+                        // save entries into that stack while item type and capacity allow it.
+                        TryAddFloorObject(stackItemId, out _);
                     }
                 }
 
@@ -2958,7 +2916,7 @@ public class Block : BaseObject
                 continue;
             }
 
-            if (!TryAddFloorObjectFromState(itemId, out _))
+            if (!TryAddFloorObject(itemId, out _))
             {
                 break;
             }
@@ -3553,18 +3511,38 @@ public class Block : BaseObject
                          || mouseFocusVisible
                          || selectionFocusVisible
                          || temporaryDropFocusVisible;
-        Color focusColor = mouseFocusVisible || selectionFocusVisible
-            ? MapFocus.MouseFocusColor
-            : MapFocus.DefaultFocusColor;
-        if (mouseFocusVisible && mouseFocusUsesArea)
+        Color focusColor = selectionFocusVisible
+            ? MapFocus.SelectionFocusColor
+            : (mouseFocusVisible ? MapFocus.MouseFocusColor : MapFocus.DefaultFocusColor);
+        if (selectionFocusVisible)
         {
-            focus.SetAreaVisible(true, focusColor, mouseFocusAreaCenter, mouseFocusAreaSize);
+            if (selectionFocusUsesArea)
+            {
+                focus.SetAreaVisible(true, focusColor, selectionFocusAreaCenter, selectionFocusAreaSize);
+            }
+            else
+            {
+                focus.SetVisible(true, focusColor);
+            }
+
+            return;
         }
-        else if (selectionFocusVisible && selectionFocusUsesArea)
+
+        if (mouseFocusVisible)
         {
-            focus.SetAreaVisible(true, focusColor, selectionFocusAreaCenter, selectionFocusAreaSize);
+            if (mouseFocusUsesArea)
+            {
+                focus.SetAreaVisible(true, focusColor, mouseFocusAreaCenter, mouseFocusAreaSize);
+            }
+            else
+            {
+                focus.SetVisible(true, focusColor);
+            }
+
+            return;
         }
-        else if (interactionFocusVisible && interactionFocusUsesArea)
+
+        if (interactionFocusVisible && interactionFocusUsesArea)
         {
             focus.SetAreaVisible(true, focusColor, interactionFocusAreaCenter, interactionFocusAreaSize);
         }
@@ -4663,7 +4641,7 @@ public class Block : BaseObject
 
         EnsureFloorObjectsInitialized();
 
-        if ((floorObjects == null || floorObjects.Count == 0) && inputAreaCenterStack.Count == 0)
+        if (floorStacks.Count == 0 && inputAreaCenterStack.Count == 0)
         {
             return false;
         }
@@ -4790,7 +4768,7 @@ public class Block : BaseObject
 
         EnsureFloorObjectsInitialized();
 
-        if ((floorObjects == null || floorObjects.Count == 0) && inputAreaCenterStack.Count == 0)
+        if (floorStacks.Count == 0 && inputAreaCenterStack.Count == 0)
         {
             return false;
         }
@@ -4932,8 +4910,6 @@ public class Block : BaseObject
         bestDistanceSqr = 0f;
         if (player == null
             || pickupRadius <= 0f
-            || floorObjects == null
-            || floorObjects.Count == 0
             || floorStacks == null
             || floorStacks.Count == 0)
         {
@@ -4943,15 +4919,15 @@ public class Block : BaseObject
         float pickupRadiusSqr = pickupRadius * pickupRadius;
         Vector3 gateOriginPosition = player.transform.position;
         bool found = false;
-        for (int candidateStackIndex = 0; candidateStackIndex < floorObjects.Count; candidateStackIndex++)
+        for (int candidateStackIndex = 0; candidateStackIndex < floorStacks.Count; candidateStackIndex++)
         {
             if (skippedStackIndexes != null && skippedStackIndexes.Contains(candidateStackIndex))
             {
                 continue;
             }
 
-            Transform anchor = floorObjects[candidateStackIndex];
-            if (anchor == null || candidateStackIndex >= floorStacks.Count)
+            Transform anchor = ResolveFloorObjectDropAnchor();
+            if (anchor == null)
             {
                 continue;
             }
@@ -5082,12 +5058,12 @@ public class Block : BaseObject
         takenItemId = -1;
         EnsureFloorObjectsInitialized();
 
-        if (floorObjects == null || floorObjects.Count == 0)
+        if (floorStacks.Count == 0)
         {
             return false;
         }
 
-        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = stackIndex < floorStacks.Count ? floorStacks[stackIndex] : null;
             while (stack != null && stack.Count > 0)
@@ -5123,6 +5099,102 @@ public class Block : BaseObject
     {
         worldPosition = transform.position;
         return TryFindClosestFloorObject(referenceWorldPosition, itemFilter, out _, out _, out worldPosition);
+    }
+
+    public bool TryGetPortableItemStackUnderRay(
+        Ray ray,
+        out PortableObject focusedObject,
+        out float hitDistance)
+    {
+        focusedObject = null;
+        hitDistance = float.MaxValue;
+        EnsureFloorObjectsInitialized();
+
+        if ((floorStacks == null || floorStacks.Count == 0)
+            && inputAreaCenterStack.Count == 0)
+        {
+            return false;
+        }
+
+        List<PortableObject> focusedStack = null;
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            if (!TryGetPortableItemStackRayHit(
+                    stack,
+                    ray,
+                    out PortableObject representative,
+                    out float stackHitDistance)
+                || stackHitDistance >= hitDistance)
+            {
+                continue;
+            }
+
+            focusedObject = representative;
+            focusedStack = stack;
+            hitDistance = stackHitDistance;
+        }
+
+        if (!BoxObject.IsRuntimeContentBlock(this)
+            && TryGetPortableItemStackRayHit(
+                inputAreaCenterStack,
+                ray,
+                out PortableObject inputAreaRepresentative,
+                out float inputAreaHitDistance)
+            && inputAreaHitDistance < hitDistance)
+        {
+            focusedObject = inputAreaRepresentative;
+            focusedStack = inputAreaCenterStack;
+            hitDistance = inputAreaHitDistance;
+        }
+
+        if (focusedObject != null)
+        {
+            focusedObject.SetFocusStack(focusedStack);
+        }
+
+        return focusedObject != null;
+    }
+
+    private static bool TryGetPortableItemStackRayHit(
+        List<PortableObject> stack,
+        Ray ray,
+        out PortableObject representative,
+        out float hitDistance)
+    {
+        representative = null;
+        hitDistance = float.MaxValue;
+        if (stack == null || stack.Count == 0)
+        {
+            return false;
+        }
+
+        Bounds stackBounds = default;
+        bool hasStackBounds = false;
+        for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+        {
+            PortableObject candidate = stack[objectIndex];
+            if (candidate == null
+                || !candidate.TryGetWorldFocusBounds(out Bounds candidateBounds))
+            {
+                continue;
+            }
+
+            representative ??= candidate;
+            if (hasStackBounds)
+            {
+                stackBounds.Encapsulate(candidateBounds);
+            }
+            else
+            {
+                stackBounds = candidateBounds;
+                hasStackBounds = true;
+            }
+        }
+
+        return representative != null
+               && hasStackBounds
+               && stackBounds.IntersectRay(ray, out hitDistance);
     }
 
     public bool TryTakeClosestFloorObject(Vector3 referenceWorldPosition, out int takenItemId)
@@ -5172,13 +5244,13 @@ public class Block : BaseObject
         bestWorldPosition = transform.position;
         EnsureFloorObjectsInitialized();
 
-        if (floorObjects == null || floorObjects.Count == 0)
+        if (floorStacks.Count == 0)
         {
             return false;
         }
 
         float bestDistanceSqr = float.MaxValue;
-        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = stackIndex < floorStacks.Count ? floorStacks[stackIndex] : null;
             while (stack != null && stack.Count > 0)
@@ -5314,12 +5386,13 @@ public class Block : BaseObject
             floorObjects = new List<Transform>();
         }
 
-        while (floorStacks.Count < floorObjects.Count)
+        int floorStackCount = ResolveFloorObjectDropAnchor() != null ? 1 : 0;
+        while (floorStacks.Count < floorStackCount)
         {
             floorStacks.Add(new List<PortableObject>());
         }
 
-        while (floorStacks.Count > floorObjects.Count)
+        while (floorStacks.Count > floorStackCount)
         {
             floorStacks.RemoveAt(floorStacks.Count - 1);
         }
@@ -6730,89 +6803,62 @@ public class Block : BaseObject
             return 0;
         }
 
-        int capacity = 0;
+        Transform anchor = ResolveFloorObjectDropAnchor();
+        if (anchor == null || floorStacks.Count == 0)
+        {
+            return 0;
+        }
+
         int maxPerStack = Mathf.Max(1, maxFloorObjectsPerStack);
-        for (int i = 0; i < floorStacks.Count; i++)
+        List<PortableObject> stack = floorStacks[0];
+        if (stack == null
+            || (itemId >= 0 && !IsStackCompatible(stack, itemId) && stack.Count > 0))
         {
-            List<PortableObject> stack = floorStacks[i];
-            if (stack == null)
-            {
-                continue;
-            }
-
-            if (itemId >= 0 && !IsStackCompatible(stack, itemId) && stack.Count > 0)
-            {
-                continue;
-            }
-
-            capacity += Mathf.Max(0, maxPerStack - stack.Count);
+            return 0;
         }
 
-        return capacity;
+        return Mathf.Max(0, maxPerStack - stack.Count);
     }
 
-    private bool TryGetBestFloorStackIndex(int objectId, bool requireExisting, Vector3 referenceWorldPosition, out int bestStackIndex)
+    private bool TryGetAvailableFloorStack(
+        int objectId,
+        out Transform anchor,
+        out List<PortableObject> stack)
     {
-        bestStackIndex = -1;
-        float bestDistanceSqr = float.MaxValue;
-
-        for (int stackIndex = 0; stackIndex < floorObjects.Count; stackIndex++)
-        {
-            Transform anchor = floorObjects[stackIndex];
-            if (anchor == null)
-            {
-                continue;
-            }
-
-            List<PortableObject> stack = floorStacks[stackIndex];
-            if (stack == null)
-            {
-                continue;
-            }
-
-            if (requireExisting && stack.Count == 0)
-            {
-                continue;
-            }
-
-            if (!IsStackCompatible(stack, objectId))
-            {
-                continue;
-            }
-
-            if (stack.Count >= Mathf.Max(1, maxFloorObjectsPerStack))
-            {
-                continue;
-            }
-
-            Vector3 offset = anchor.position - referenceWorldPosition;
-            offset.y = 0f;
-            float distanceSqr = offset.sqrMagnitude;
-            if (bestStackIndex >= 0 && distanceSqr >= bestDistanceSqr)
-            {
-                continue;
-            }
-
-            bestDistanceSqr = distanceSqr;
-            bestStackIndex = stackIndex;
-        }
-
-        return bestStackIndex >= 0;
+        anchor = ResolveFloorObjectDropAnchor();
+        stack = floorStacks.Count > 0 ? floorStacks[0] : null;
+        return objectId >= 0
+               && anchor != null
+               && stack != null
+               && IsStackCompatible(stack, objectId)
+               && stack.Count < Mathf.Max(1, maxFloorObjectsPerStack);
     }
 
-    private Vector3 ResolveDefaultFloorDropReferenceWorldPosition()
+    private Transform ResolveFloorObjectDropAnchor()
     {
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        if (player != null)
+        if (floorObjectDropAnchor != null)
         {
-            Transform bodyTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
-            if (bodyTransform != null)
-            {
-                return bodyTransform.position;
-            }
+            return floorObjectDropAnchor;
         }
 
-        return transform.position;
+        if (floorObjects == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < floorObjects.Count; i++)
+        {
+            Transform laneAnchor = floorObjects[i];
+            if (laneAnchor == null)
+            {
+                continue;
+            }
+
+            floorObjectDropAnchor = laneAnchor.parent != null ? laneAnchor.parent : laneAnchor;
+            return floorObjectDropAnchor;
+        }
+
+        return null;
     }
 
     private bool BlocksFloorObjectStacking()

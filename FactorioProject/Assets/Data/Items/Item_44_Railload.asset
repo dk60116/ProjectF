@@ -13,10 +13,10 @@ MonoBehaviour:
   m_Name: Item_41_Railload
   m_EditorClassIdentifier: 
   itemName: Book
-  id: 49
+  id: 59
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
-  portableMat: {fileID: 2100000, guid: ef5249a41733d8f44939b4deeaf0c2ee, type: 2}
+  portableMat: {fileID: 2100000, guid: 12ba391bb16020946a1f08da9feb6b6f, type: 2}
   icon: {fileID: 21300000, guid: 3980a1651bef90140b5a903009c5aeda, type: 3}
   interactionButtonList: []
   lightMode: 0
@@ -24,6 +24,10 @@ MonoBehaviour:
   lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

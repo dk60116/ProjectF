@@ -137,6 +137,7 @@ public class PlayerController : MonoBehaviour
     private float temporaryDropFocusUntilTime;
     private MapObject currentMouseFocusedMapObject;
     private Animal currentMouseFocusedAnimal;
+    private PortableObject currentMouseFocusedPortableObject;
     private Camera cachedMouseFocusCamera;
     private int mouseFocusRefreshFrame = -1;
     private bool mouseFocusRefreshInteractionLocked;
@@ -274,6 +275,7 @@ public class PlayerController : MonoBehaviour
         SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
         SetMouseFocusedAnimal(null);
+        SetMouseFocusedPortableObject(null);
         SetMouseFocusedBlocks(null);
         currentFocusedBlocks.Clear();
         currentMouseFocusedBlocks.Clear();
@@ -562,6 +564,7 @@ public class PlayerController : MonoBehaviour
         CancelAnimalKnifeInteraction();
         ClearTemporaryDropFocus();
         SetFocusedBlocks(null);
+        SetMouseFocusedPortableObject(null);
         SetMouseFocusedBlocks(null);
         currentMouseFocusedMapObject = null;
 
@@ -860,6 +863,7 @@ public class PlayerController : MonoBehaviour
         if (isInteractionLocked)
         {
             SetMouseFocusedAnimal(null);
+            SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             HandleInstallationPlacementLock();
             wasInstallationPlacementActive = true;
@@ -2798,8 +2802,26 @@ public class PlayerController : MonoBehaviour
                    pointerPosition,
                    out focusedAnimal,
                    out focusedMapObject,
+                   out _,
                    out _)
                && (focusedAnimal != null || focusedMapObject != null);
+    }
+
+    public bool TryResolvePointerFocusTarget(
+        Vector2 pointerPosition,
+        out Animal focusedAnimal,
+        out MapObject focusedMapObject,
+        out PortableObject focusedPortableObject)
+    {
+        return TryResolveMouseFocusTargets(
+                   pointerPosition,
+                   out focusedAnimal,
+                   out focusedMapObject,
+                   out focusedPortableObject,
+                   out _)
+               && (focusedAnimal != null
+                   || focusedMapObject != null
+                   || focusedPortableObject != null);
     }
 
     public bool RequestAnimalKnifeInteraction(Animal animal)
@@ -4185,12 +4207,14 @@ public class PlayerController : MonoBehaviour
         if (isInteractionLocked)
         {
             SetMouseFocusedAnimal(null);
+            SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             return;
         }
 
         if (MountedVehicle != null)
         {
+            SetMouseFocusedPortableObject(null);
             RefreshMouseAnimalFocus();
             RefreshMountedPinnedMouseFocus();
             return;
@@ -4202,15 +4226,25 @@ public class PlayerController : MonoBehaviour
                 pointerPosition,
                 out Animal animal,
                 out MapObject mapObject,
+                out PortableObject portableObject,
                 out Block fallbackBlock))
         {
             SetMouseFocusedAnimal(null);
+            SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             return;
         }
 
         SetMouseFocusedAnimal(animal);
         if (animal != null)
+        {
+            SetMouseFocusedPortableObject(null);
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        SetMouseFocusedPortableObject(portableObject);
+        if (portableObject != null)
         {
             SetMouseFocusedBlocks(null);
             return;
@@ -4233,6 +4267,7 @@ public class PlayerController : MonoBehaviour
             || !TryResolveMouseFocusTargets(
                 pointerPosition,
                 out Animal animal,
+                out _,
                 out _,
                 out _))
         {
@@ -4278,8 +4313,10 @@ public class PlayerController : MonoBehaviour
                 pointerPosition,
                 out Animal animal,
                 out mapObject,
+                out PortableObject portableObject,
                 out fallbackBlock)
-            || animal != null)
+            || animal != null
+            || portableObject != null)
         {
             mapObject = null;
             fallbackBlock = null;
@@ -4293,10 +4330,12 @@ public class PlayerController : MonoBehaviour
         Vector2 pointerPosition,
         out Animal animal,
         out MapObject mapObject,
+        out PortableObject portableObject,
         out Block fallbackBlock)
     {
         animal = null;
         mapObject = null;
+        portableObject = null;
         fallbackBlock = null;
 
         Camera targetCamera = ResolveMouseFocusCamera();
@@ -4340,9 +4379,21 @@ public class PlayerController : MonoBehaviour
             closestDistance = hit.distance;
         }
 
-        if (closestAnimal != null && closestAnimalDistance <= closestDistance)
+        bool hasPortableObject = TryResolvePortableItemStackFocus(
+            ray,
+            out PortableObject closestPortableObject,
+            out float closestPortableObjectDistance);
+        if (closestAnimal != null
+            && closestAnimalDistance <= closestDistance
+            && (!hasPortableObject || closestAnimalDistance <= closestPortableObjectDistance))
         {
             animal = closestAnimal;
+            return true;
+        }
+
+        if (hasPortableObject && closestPortableObjectDistance <= closestDistance)
+        {
+            portableObject = closestPortableObject;
             return true;
         }
 
@@ -4381,6 +4432,49 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
+    private bool TryResolvePortableItemStackFocus(
+        Ray ray,
+        out PortableObject portableObject,
+        out float hitDistance)
+    {
+        portableObject = null;
+        hitDistance = float.MaxValue;
+        if (!TryGetPointerBlockFromGroundPlane(ray, out Block centerBlock))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector2Int centerCoordinate = centerBlock.Coordinate;
+        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        {
+            for (int offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!terrain.TryGetLoadedBlock(coordinate, out Block block)
+                    || block == null
+                    || !block.TryGetPortableItemStackUnderRay(
+                        ray,
+                        out PortableObject candidate,
+                        out float candidateDistance)
+                    || candidateDistance >= hitDistance)
+                {
+                    continue;
+                }
+
+                portableObject = candidate;
+                hitDistance = candidateDistance;
+            }
+        }
+
+        return portableObject != null;
+    }
+
     private void SetMouseFocusedAnimal(Animal nextAnimal)
     {
         if (currentMouseFocusedAnimal == nextAnimal)
@@ -4397,6 +4491,25 @@ public class PlayerController : MonoBehaviour
         if (currentMouseFocusedAnimal != null)
         {
             currentMouseFocusedAnimal.SetHoverOutline(true);
+        }
+    }
+
+    private void SetMouseFocusedPortableObject(PortableObject nextPortableObject)
+    {
+        if (currentMouseFocusedPortableObject == nextPortableObject)
+        {
+            return;
+        }
+
+        if (currentMouseFocusedPortableObject != null)
+        {
+            currentMouseFocusedPortableObject.SetHoverOutline(false);
+        }
+
+        currentMouseFocusedPortableObject = nextPortableObject;
+        if (currentMouseFocusedPortableObject != null)
+        {
+            currentMouseFocusedPortableObject.SetHoverOutline(true);
         }
     }
 

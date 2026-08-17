@@ -1,0 +1,258 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &1
+MonoBehaviour:
+  m_ObjectHideFlags: 53
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6781327fe95c8c408b3ddb637f49109, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp-Editor::ItemDataFolderSettings
+  folders:
+  - id: 839eaa9b00424dc59d967a096e100401
+    displayName: Energy
+    expanded: 1
+    anchorItemGuid: cc54448c2b8e64c40a4458e259ad7222
+  - id: 061b1e1292114fabaa190654551cea7c
+    displayName: Tools
+    expanded: 1
+    anchorItemGuid: cc54448c2b8e64c40a4458e259ad7222
+  - id: 52f654e67171467f864fb2b0973e4063
+    displayName: Resource
+    expanded: 1
+    anchorItemGuid: 22f7c943800c7d14987cc0b65ed337f6
+  - id: f15266f7c0944b46a765791c0cac6402
+    displayName: Workable
+    expanded: 1
+    anchorItemGuid: 97f6dea012d4db649abc845562a30b93
+  - id: 4008c2a9919643788ee7eedfdd9a2060
+    displayName: Processing
+    expanded: 1
+    anchorItemGuid: f0e8b5357a13bc04cbc5e8603014446c
+  - id: e309ae1eabbc4cc4937519070f6204ce
+    displayName: Rope
+    expanded: 1
+    anchorItemGuid: 4a87d679024ea8a44b02ecc16293a962
+  - id: 34ad8d0e6ec84f08ba483c8e55d63839
+    displayName: Box
+    expanded: 1
+    anchorItemGuid: 7ad57ef598401784aaa7e239c9a50507
+  - id: 9da9232414d34842a422459405ef2921
+    displayName: Fire
+    expanded: 1
+    anchorItemGuid: a42f84aea6bbe46419a3777181e987a1
+  - id: a6f688d669d74bd985df11be9ee89c0c
+    displayName: Iron tool
+    expanded: 1
+    anchorItemGuid: e38b0f871b2a4ef4b80c9d5864a2b5e0
+  - id: c7e077eece684be7b0fce1115e350081
+    displayName: Electro
+    expanded: 1
+    anchorItemGuid: add9dc54988936d4ab2eec894a7447f2
+  - id: fdd0cac64fda415abc3134f009e1f9ab
+    displayName: Belt
+    expanded: 1
+    anchorItemGuid: 347029aa316390a4982b64441c83789c
+  - id: 7f82e0373dbd406ba0fd649748577b61
+    displayName: Mining
+    expanded: 1
+    anchorItemGuid: 347029aa316390a4982b64441c83789c
+  - id: abe4f914cb684037afb8c746f6debe44
+    displayName: Water & Steam
+    expanded: 0
+    anchorItemGuid: 21883f622876a3f47a1c1f90a4b0004e
+  - id: c0a50a74f8524258abc5a4b4fcd867b6
+    displayName: Light
+    expanded: 0
+    anchorItemGuid: 21883f622876a3f47a1c1f90a4b0004e
+  - id: 719b89eaec88471098afae6081a59668
+    displayName: Machine
+    expanded: 1
+    anchorItemGuid: fde3e14d2afafaf4a9603cedda8d94d6
+  - id: 9e4995f6600f4c04ad51a59b2550be3b
+    displayName: Wooden building
+    expanded: 0
+    anchorItemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
+  - id: b66e74eb3909437e98f5ea9b777676a9
+    displayName: Animal
+    expanded: 0
+    anchorItemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
+  - id: 85aa68b4dba945dcb9adac06984edd46
+    displayName: Brick building
+    expanded: 0
+    anchorItemGuid: 607f7fef71c969144b6e767e76d193f9
+  - id: 6dc3503fe92247e6803d4e2740a6bcf7
+    displayName: Paper
+    expanded: 1
+    anchorItemGuid: 5e8eb859a7abfe04b919401e00125622
+  - id: 63b13fc99f8747da9db46e2210011669
+    displayName: Book
+    expanded: 1
+    anchorItemGuid: 75ee9ee3e9a835f45a5e2f7d279a723e
+  - id: 4b700d33e3bf4bfda1fc4dee7c89b691
+    displayName: Meet
+    expanded: 1
+    anchorItemGuid: 3a602d0ced7a02f4b82752721d640734
+  - id: c46f2864503448c084f910219612a1ce
+    displayName: Car
+    expanded: 1
+    anchorItemGuid: 1944e65739557ca4485c86a1309a15c6
+  - id: 7ed056f29f76442ca214403bfb035b36
+    displayName: Train
+    expanded: 1
+    anchorItemGuid: a10ec264242e79b42b1d48d44ad69394
+  - id: d4d72b0cf2fb491db21ccbc3248c91b8
+    displayName: Manual
+    expanded: 1
+    anchorItemGuid: d4748aa7ad1364d4da54a919623a3938
+  itemAssignments:
+  - itemGuid: e9950cff3cab70041b1997e87d6e22b1
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: 440d4476f9093b44e948d784c15c0d81
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: f40db410eac38e44386c4ef5c3396514
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: 763e6b55158c49c4db58cb49480d65f2
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: cc54448c2b8e64c40a4458e259ad7222
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: eac1a52a94dced248b2c431dae676dfb
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: 76038fd87aa315c40ad6ad9af1c04071
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: fc1cba8967b6adc48867e456639cad4a
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: 9f4a67f687b990743914d4045038aa8e
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: 97f6dea012d4db649abc845562a30b93
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: c7d14445b92c7d0468e83d73c68f384f
+    folderId: f15266f7c0944b46a765791c0cac6402
+  - itemGuid: 2d6039a716731b14c94f2980e22b1089
+    folderId: f15266f7c0944b46a765791c0cac6402
+  - itemGuid: 22f7c943800c7d14987cc0b65ed337f6
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 1e1fcabb313ee6840a8a369650290ace
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: c386ddb4f7fc1904fbb047de3bff6a99
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 5c4efc334bc1582409a913be8af752d3
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: a025b03cf674e024884437c532dfe480
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: f0e8b5357a13bc04cbc5e8603014446c
+    folderId: e309ae1eabbc4cc4937519070f6204ce
+  - itemGuid: f5afae373c201a7438785dd9cdf2ee6c
+    folderId: e309ae1eabbc4cc4937519070f6204ce
+  - itemGuid: 4a87d679024ea8a44b02ecc16293a962
+    folderId: 34ad8d0e6ec84f08ba483c8e55d63839
+  - itemGuid: f618ef8c86b605a418911317c85bd88d
+    folderId: 34ad8d0e6ec84f08ba483c8e55d63839
+  - itemGuid: 57b83ba7916f5cd4ab74c985f88f4a3a
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 02c4539254ea62f4d9c50893e24c8f63
+    folderId: 9da9232414d34842a422459405ef2921
+  - itemGuid: 9f62310ff160eb14b82cc587cd98f19c
+    folderId: 9da9232414d34842a422459405ef2921
+  - itemGuid: a42f84aea6bbe46419a3777181e987a1
+    folderId: a6f688d669d74bd985df11be9ee89c0c
+  - itemGuid: fae2696b5392f8946ad224e1317329af
+    folderId: a6f688d669d74bd985df11be9ee89c0c
+  - itemGuid: a2393aedc145bbd4a8de4f74073c1eca
+    folderId: a6f688d669d74bd985df11be9ee89c0c
+  - itemGuid: 771a4a8c595dbe74b9187ca84001cfcb
+    folderId: a6f688d669d74bd985df11be9ee89c0c
+  - itemGuid: ee57335a932a96a49963ace76adef614
+    folderId: a6f688d669d74bd985df11be9ee89c0c
+  - itemGuid: c0075e53760e0bc4e8a7625ac98e2167
+    folderId: c7e077eece684be7b0fce1115e350081
+  - itemGuid: e38b0f871b2a4ef4b80c9d5864a2b5e0
+    folderId: c7e077eece684be7b0fce1115e350081
+  - itemGuid: 7a8ea2c79da84f048815b5cbfe397fd1
+    folderId: c7e077eece684be7b0fce1115e350081
+  - itemGuid: 6a913ce143edf9c42b1a4c2b72cbdde8
+    folderId: c7e077eece684be7b0fce1115e350081
+  - itemGuid: add9dc54988936d4ab2eec894a7447f2
+    folderId: fdd0cac64fda415abc3134f009e1f9ab
+  - itemGuid: ae10ba0d1a5a35a4f9732630fda54471
+    folderId: fdd0cac64fda415abc3134f009e1f9ab
+  - itemGuid: 71b40722fa5571a4cbbbcaa98dbb05e1
+    folderId: 7f82e0373dbd406ba0fd649748577b61
+  - itemGuid: b9735abb8886622408d77bb1f9a1f4c3
+    folderId: 7f82e0373dbd406ba0fd649748577b61
+  - itemGuid: 7ad57ef598401784aaa7e239c9a50507
+    folderId: 9da9232414d34842a422459405ef2921
+  - itemGuid: 347029aa316390a4982b64441c83789c
+    folderId: abe4f914cb684037afb8c746f6debe44
+  - itemGuid: 763440cffdd93a948a7d8e73c541f673
+    folderId: abe4f914cb684037afb8c746f6debe44
+  - itemGuid: fde3e14d2afafaf4a9603cedda8d94d6
+    folderId: abe4f914cb684037afb8c746f6debe44
+  - itemGuid: 21883f622876a3f47a1c1f90a4b0004e
+    folderId: 719b89eaec88471098afae6081a59668
+  - itemGuid: a74ba1d8dd011f34ca2a0c33b1aa5725
+    folderId: 719b89eaec88471098afae6081a59668
+  - itemGuid: 29927129db7b22842886fe756c71a712
+    folderId: 719b89eaec88471098afae6081a59668
+  - itemGuid: 09ddda540280b014fadbf0bbfc3394d7
+    folderId: 9e4995f6600f4c04ad51a59b2550be3b
+  - itemGuid: 5184d5acd736fa943a532c1ee9009150
+    folderId: 9e4995f6600f4c04ad51a59b2550be3b
+  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
+    folderId: 9e4995f6600f4c04ad51a59b2550be3b
+  - itemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
+    folderId: 85aa68b4dba945dcb9adac06984edd46
+  - itemGuid: 09af47ed2a67de34dad96a547b0f030b
+    folderId: b66e74eb3909437e98f5ea9b777676a9
+  - itemGuid: 607f7fef71c969144b6e767e76d193f9
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
+  - itemGuid: dc58b0deafc26db4da1f6b763aaac1f2
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
+  - itemGuid: 7575e5697a9d4d34da40f1e6a2984c9a
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
+  - itemGuid: 75ee9ee3e9a835f45a5e2f7d279a723e
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
+  - itemGuid: 5e8eb859a7abfe04b919401e00125622
+    folderId: 63b13fc99f8747da9db46e2210011669
+  - itemGuid: d4748aa7ad1364d4da54a919623a3938
+    folderId: 63b13fc99f8747da9db46e2210011669
+  - itemGuid: 3a602d0ced7a02f4b82752721d640734
+    folderId: 63b13fc99f8747da9db46e2210011669
+  - itemGuid: 228fcd45b59e4994d8b5f8ee23dc4595
+    folderId: 061b1e1292114fabaa190654551cea7c
+  - itemGuid: 9524753a56ea05540be3c118174151dd
+    folderId: 061b1e1292114fabaa190654551cea7c
+  - itemGuid: 4f88609a6374aaf4098d50e6f0ec5400
+    folderId: 061b1e1292114fabaa190654551cea7c
+  - itemGuid: ba64144afa71dcb47b41000e16845b61
+    folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
+  - itemGuid: c5d6e973a767fdd48a87a2e4708be0cc
+    folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
+  - itemGuid: da7225a987c96d44181d40c5827ce416
+    folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
+  - itemGuid: 1944e65739557ca4485c86a1309a15c6
+    folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
+  - itemGuid: 9807425657e17b14387ed43757f8bbbb
+    folderId: c46f2864503448c084f910219612a1ce
+  - itemGuid: a10ec264242e79b42b1d48d44ad69394
+    folderId: c46f2864503448c084f910219612a1ce
+  - itemGuid: ced5cba395785e94897ab6dcb83d274a
+    folderId: 7ed056f29f76442ca214403bfb035b36
+  - itemGuid: 2cbd885291664af429fdc0ef3784d40d
+    folderId: 7ed056f29f76442ca214403bfb035b36
+  - itemGuid: c47ada2776c5c2046ba435d4a16764f3
+    folderId: 7ed056f29f76442ca214403bfb035b36
+  - itemGuid: e93a970b73b08f348b062a6caa40bc92
+    folderId: 7ed056f29f76442ca214403bfb035b36
+  - itemGuid: 4d68593c4bba3a34487b0f60cff9fd9e
+    folderId: 7ed056f29f76442ca214403bfb035b36
+  - itemGuid: f26efb1d776a4df469e75c19a5a1181b
+    folderId: c0a50a74f8524258abc5a4b4fcd867b6
+  - itemGuid: 762e4dd9db91c774ca6004b78fbf6331
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
+  - itemGuid: 9b769dd46a0b9fe4f91ace461114fcd2
+    folderId: d4d72b0cf2fb491db21ccbc3248c91b8

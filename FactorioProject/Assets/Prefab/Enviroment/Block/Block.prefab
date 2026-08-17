@@ -219,6 +219,7 @@ MonoBehaviour:
   - {fileID: 7753900536328879752}
   - {fileID: 1753055444253315275}
   - {fileID: 7186704789992371161}
+  floorObjectDropAnchor: {fileID: 894954101779390234}
   floorObjectPrefab: {fileID: 1580217320859176750, guid: 1bc8dcd90da82634dbcccb9790e06cdf, type: 3}
   maxFloorObjectsPerStack: 10
   floorObjectVerticalSpacing: 0.05

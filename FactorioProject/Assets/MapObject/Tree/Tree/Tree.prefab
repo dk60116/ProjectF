@@ -136,7 +136,7 @@ MonoBehaviour:
   harvestMode: 2
   definition: {fileID: 11400000, guid: f01734a3267e50745b36764f463c62d7, type: 2}
   resourceStatus:
-    outputId: 4
+    outputId: 7
     outputItemName: Log
     resourceCount: 1
     getCount: 4

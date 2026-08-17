@@ -134,7 +134,7 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
 
         private readonly Material maskMaterial;
         private readonly Material compositeMaterial;
-        private readonly Renderer[] maskRenderers = new Renderer[3];
+        private readonly Renderer[] maskRenderers = new Renderer[16];
         private readonly MaterialPropertyBlock compositeProperties = new MaterialPropertyBlock();
         private Renderer targetRenderer;
         private float widthPixels;
@@ -318,6 +318,16 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 if (animalRendererCount > 0)
                 {
                     return animalRendererCount;
+                }
+            }
+
+            PortableObject portableObject = renderer.GetComponentInParent<PortableObject>();
+            if (portableObject != null)
+            {
+                int portableRendererCount = portableObject.CopyOutlineMaskRenderers(destination);
+                if (portableRendererCount > 0)
+                {
+                    return portableRendererCount;
                 }
             }
 

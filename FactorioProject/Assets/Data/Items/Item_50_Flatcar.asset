@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_50_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Noose
-  id: 13
+  id: 22
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 2ddc8389f8c16044994e44211ce7f596, type: 2}
   portableMat: {fileID: 2100000, guid: 52782448e1be6d048abd4ed09d2cd35f, type: 2}
@@ -24,6 +24,10 @@ MonoBehaviour:
   lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_18_Brick
   m_EditorClassIdentifier: 
   itemName: Brick
-  id: 21
+  id: 18
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ca65f155f50ccc54b879a07c4f2e724b, type: 2}
   portableMat: {fileID: 2100000, guid: 31209f3560621654aa483d0d6b57f468, type: 2}
@@ -24,6 +24,10 @@ MonoBehaviour:
   lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

@@ -5,8 +5,6 @@ public class Campfire : InputOutputModule
     [SerializeField]
     private ParticleSystem fireEffect;
 
-    public override bool RequiresItemLightInteractionRange => false;
-
     public override void ManagedUpdateTick(float deltaTime)
     {
         if (Application.isPlaying
@@ -22,6 +20,13 @@ public class Campfire : InputOutputModule
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
         return IsItemLightToggled || base.ShouldKeepRuntimeUpdateTickActive();
+    }
+
+    protected override bool CanEnableItemLight()
+    {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        return installedDefinition != null
+               && HasOperationalEnergyAvailable(installedDefinition);
     }
 
     protected override string ResolveObjectInfoStatus(out bool isProducing)

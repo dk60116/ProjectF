@@ -194,6 +194,7 @@ public static class SaveGameItemIdRemapper
         }
 
         state.storedFluidItemId = RemapItemId(state.storedFluidItemId, itemIdMap);
+        state.storedInstallationItemId = RemapItemId(state.storedInstallationItemId, itemIdMap);
         if (state.robotArmState != null)
         {
             state.robotArmState.heldItemId = RemapItemId(state.robotArmState.heldItemId, itemIdMap);

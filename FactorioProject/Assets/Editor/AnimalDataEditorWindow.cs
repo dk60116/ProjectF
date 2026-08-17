@@ -221,6 +221,12 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private readonly List<AnimalValidationIssue> selectedIssues = new List<AnimalValidationIssue>();
     private readonly List<AnimalDefinition> selectedObjectDefinitions = new List<AnimalDefinition>();
     private readonly List<ItemDefinition> dropItemDefinitions = new List<ItemDefinition>();
+    private readonly Dictionary<ItemDefinition, int> dropItemOptionIndices =
+        new Dictionary<ItemDefinition, int>();
+    private readonly Dictionary<AnimalDefinition, string> definitionAssetPaths =
+        new Dictionary<AnimalDefinition, string>();
+    private readonly Dictionary<string, UnityEngine.Object> folderAssetCache =
+        new Dictionary<string, UnityEngine.Object>(StringComparer.OrdinalIgnoreCase);
 
     private HierarchyNode hierarchyRoot = new HierarchyNode("Animals", string.Empty);
     private GUIContent[] dropItemOptions = { new GUIContent("None") };
@@ -242,6 +248,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private int previewAnimationIndex;
     private string[] previewAnimationStateLabels = DefaultAnimationStateLabels;
     private bool previewPlaying;
+    private bool projectReloadQueued;
     private double lastPreviewUpdateTime;
     private int dropItemCatalogSignature = int.MinValue;
 
@@ -281,6 +288,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     {
         Undo.undoRedoPerformed -= HandleUndoRedo;
         EditorApplication.update -= HandleEditorUpdate;
+        EditorApplication.delayCall -= HandleDelayedProjectChange;
+        projectReloadQueued = false;
         ItemDataEditorWindow.DefinitionCatalog.Changed -=
             HandleItemDefinitionCatalogChanged;
         DisposePreview();
@@ -296,6 +305,24 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private void OnProjectChange()
     {
+        if (projectReloadQueued)
+        {
+            return;
+        }
+
+        projectReloadQueued = true;
+        EditorApplication.delayCall += HandleDelayedProjectChange;
+    }
+
+    private void HandleDelayedProjectChange()
+    {
+        EditorApplication.delayCall -= HandleDelayedProjectChange;
+        projectReloadQueued = false;
+        if (this == null)
+        {
+            return;
+        }
+
         ReloadDefinitions(true);
     }
 
@@ -598,7 +625,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         Rect iconRect = new Rect(rowRect.x + 4f, rowRect.y + 4f, 20f, 20f);
         if (icon != null)
         {
-            GUI.DrawTexture(iconRect, AssetPreview.GetAssetPreview(icon) ?? icon.texture, ScaleMode.ScaleToFit, true);
+            DrawSprite(iconRect, icon);
         }
 
         string dirtyMarker = draft.dirty ? "* " : string.Empty;
@@ -664,7 +691,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUILayout.EndVertical();
 
         string folderPath = AnimalDataEditorUtility.DefinitionRoot + "/" + objectNode.path;
-        UnityEngine.Object folder = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(folderPath);
+        UnityEngine.Object folder = GetFolderAsset(folderPath);
         EditorGUI.BeginDisabledGroup(folder == null);
         if (GUILayout.Button("Ping Object Folder", GUILayout.Width(125f), GUILayout.Height(24f)))
         {
@@ -714,14 +741,14 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(iconRect, new Color(0.1f, 0.1f, 0.1f));
         if (icon != null)
         {
-            GUI.DrawTexture(iconRect, AssetPreview.GetAssetPreview(icon) ?? icon.texture, ScaleMode.ScaleToFit, true);
+            DrawSprite(iconRect, icon);
         }
 
         EditorGUILayout.BeginVertical();
         string variantName = GetObjectVariantName(objectNode, definition);
         string dirtyMarker = draft.dirty ? "* " : string.Empty;
         EditorGUILayout.LabelField($"{dirtyMarker}{variantName}", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField(AssetDatabase.GetAssetPath(definition), EditorStyles.miniLabel);
+        EditorGUILayout.LabelField(GetDefinitionAssetPath(definition), EditorStyles.miniLabel);
         EditorGUILayout.EndVertical();
 
         if (GUILayout.Button("Full Details", GUILayout.Width(90f), GUILayout.Height(24f)))
@@ -1050,14 +1077,14 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(iconRect, new Color(0.1f, 0.1f, 0.1f));
         if (draft.adultIcon != null)
         {
-            GUI.DrawTexture(iconRect, AssetPreview.GetAssetPreview(draft.adultIcon) ?? draft.adultIcon.texture, ScaleMode.ScaleToFit, true);
+            DrawSprite(iconRect, draft.adultIcon);
         }
 
         EditorGUILayout.BeginVertical();
         string displayName = string.IsNullOrWhiteSpace(draft.animalName) ? definition.name : draft.animalName;
         EditorGUILayout.LabelField($"[{draft.id}] {displayName}", EditorStyles.largeLabel);
         EditorGUILayout.LabelField(AnimalDataEditorUtility.GetHierarchyPath(definition), EditorStyles.miniLabel);
-        EditorGUILayout.LabelField(AssetDatabase.GetAssetPath(definition), EditorStyles.miniLabel);
+        EditorGUILayout.LabelField(GetDefinitionAssetPath(definition), EditorStyles.miniLabel);
         EditorGUILayout.BeginHorizontal();
         if (GUILayout.Button("Ping Definition", GUILayout.Width(110f)))
         {
@@ -1366,6 +1393,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         dropItemCatalogSignature = latestSignature;
         dropItemDefinitions.Clear();
         dropItemDefinitions.AddRange(latestDefinitions);
+        dropItemOptionIndices.Clear();
 
         dropItemOptions = new GUIContent[dropItemDefinitions.Count + 1];
         dropItemOptions[0] = new GUIContent("None");
@@ -1377,6 +1405,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 : definition.name;
             dropItemOptions[i + 1] = new GUIContent(
                 $"[{definition.id}] {itemName}");
+            dropItemOptionIndices[definition] = i + 1;
         }
 
         return true;
@@ -1405,20 +1434,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private int FindDropItemIndex(ItemDefinition definition)
     {
-        if (definition == null)
-        {
-            return 0;
-        }
-
-        for (int i = 0; i < dropItemDefinitions.Count; i++)
-        {
-            if (dropItemDefinitions[i] == definition)
-            {
-                return i + 1;
-            }
-        }
-
-        return 0;
+        return definition != null
+            && dropItemOptionIndices.TryGetValue(definition, out int optionIndex)
+                ? optionIndex
+                : 0;
     }
 
     private void DrawPreview(AnimalDraft draft)
@@ -1761,7 +1780,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         AssetDatabase.SaveAssets();
         WriteJson(AnimalDataEditorUtility.DefaultJsonPath, definitions);
-        AssetDatabase.Refresh();
+        ImportWrittenAsset(AnimalDataEditorUtility.DefaultJsonPath);
         ReloadDefinitions(false);
         AnimalDataEditorUtility.LogValidation(definitions);
         Debug.Log($"Animal Data: saved {savedCount} changed definitions and exported "
@@ -1801,10 +1820,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         definitions.AddRange(AnimalDataEditorUtility.LoadDefinitions());
         RefreshDropItemOptions();
         drafts.Clear();
+        definitionAssetPaths.Clear();
+        folderAssetCache.Clear();
         for (int i = 0; i < definitions.Count; i++)
         {
             AnimalDefinition definition = definitions[i];
             string path = AssetDatabase.GetAssetPath(definition);
+            definitionAssetPaths[definition] = path;
             AnimalDraft draft;
             if (!oldDraftsByPath.TryGetValue(path, out draft))
             {
@@ -1833,6 +1855,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         int createdCount = 0;
         int filledCount = 0;
         string[] textureGuids = AssetDatabase.FindAssets("t:Texture2D", new[] { AnimalDataEditorUtility.DefinitionRoot });
+        string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { AnimalDataEditorUtility.PrefabRoot });
+        string[] prefabPaths = new string[prefabGuids.Length];
+        for (int i = 0; i < prefabGuids.Length; i++)
+        {
+            prefabPaths[i] = AssetDatabase.GUIDToAssetPath(prefabGuids[i]);
+        }
+
         Dictionary<string, List<string>> texturePathsByFolder = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < textureGuids.Length; i++)
@@ -1861,7 +1890,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     ? AssetDatabase.LoadAssetAtPath<Sprite>(childIconPath)
                     : null;
                 AnimalDefinition definition = FindDefinitionForIcon(currentDefinitions, pair.Key, adultIcon);
-                GameObject prefab = FindBestPrefab(pair.Key, baseName);
+                GameObject prefab = FindBestPrefab(pair.Key, baseName, prefabPaths);
                 string displayName = baseName.Replace('_', ' ').Trim();
 
                 if (definition == null)
@@ -1923,10 +1952,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
         ReloadDefinitions(false);
         WriteJson(AnimalDataEditorUtility.DefaultJsonPath, definitions);
-        AssetDatabase.Refresh();
+        ImportWrittenAsset(AnimalDataEditorUtility.DefaultJsonPath);
         AnimalDataEditorUtility.LogValidation(definitions);
         Debug.Log($"Animal Data rebuild complete: {createdCount} created, {filledCount} completed.");
     }
@@ -1944,7 +1972,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         WriteJson(absolutePath, definitions);
-        AssetDatabase.Refresh();
+        ImportWrittenAsset(absolutePath);
     }
 
     private void LoadJsonWithDialog()
@@ -2087,6 +2115,22 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         File.WriteAllText(absolutePath, JsonUtility.ToJson(file, true));
         Debug.Log("Animal Data JSON exported: " + absolutePath);
+    }
+
+    private static void ImportWrittenAsset(string path)
+    {
+        string absolutePath = ToAbsolutePath(path);
+        string assetsPath = Path.GetFullPath(Application.dataPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string assetsPrefix = assetsPath + Path.DirectorySeparatorChar;
+        if (!absolutePath.StartsWith(assetsPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string relativePath = "Assets/" + absolutePath.Substring(assetsPrefix.Length)
+            .Replace('\\', '/');
+        AssetDatabase.ImportAsset(relativePath, ImportAssetOptions.ForceUpdate);
     }
 
     private static List<AnimalDropJsonEntry> ExportDropItems(
@@ -2547,10 +2591,12 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         return null;
     }
 
-    private static GameObject FindBestPrefab(string definitionFolder, string baseName)
+    private static GameObject FindBestPrefab(
+        string definitionFolder,
+        string baseName,
+        IReadOnlyList<string> prefabPaths)
     {
-        string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { AnimalDataEditorUtility.PrefabRoot });
-        GameObject bestPrefab = null;
+        string bestPrefabPath = null;
         int bestScore = int.MinValue;
         string relativeFolder = definitionFolder.StartsWith(AnimalDataEditorUtility.DefinitionRoot + "/", StringComparison.OrdinalIgnoreCase)
             ? definitionFolder.Substring(AnimalDataEditorUtility.DefinitionRoot.Length + 1)
@@ -2558,9 +2604,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         string[] hierarchySegments = relativeFolder.Split('/');
         string[] nameTokens = baseName.Split('_');
 
-        for (int i = 0; i < prefabGuids.Length; i++)
+        for (int i = 0; prefabPaths != null && i < prefabPaths.Count; i++)
         {
-            string prefabPath = AssetDatabase.GUIDToAssetPath(prefabGuids[i]);
+            string prefabPath = prefabPaths[i];
             string prefabName = Path.GetFileNameWithoutExtension(prefabPath);
             int score = 0;
             if (string.Equals(prefabName, baseName, StringComparison.OrdinalIgnoreCase))
@@ -2589,17 +2635,45 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 continue;
             }
 
-            GameObject candidate = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-            if (candidate == null)
-            {
-                continue;
-            }
-
-            bestPrefab = candidate;
+            bestPrefabPath = prefabPath;
             bestScore = score;
         }
 
-        return bestScore > 0 ? bestPrefab : null;
+        return bestScore > 0 && !string.IsNullOrEmpty(bestPrefabPath)
+            ? AssetDatabase.LoadAssetAtPath<GameObject>(bestPrefabPath)
+            : null;
+    }
+
+    private string GetDefinitionAssetPath(AnimalDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        if (!definitionAssetPaths.TryGetValue(definition, out string assetPath))
+        {
+            assetPath = AssetDatabase.GetAssetPath(definition);
+            definitionAssetPaths[definition] = assetPath;
+        }
+
+        return assetPath;
+    }
+
+    private UnityEngine.Object GetFolderAsset(string folderPath)
+    {
+        if (string.IsNullOrEmpty(folderPath))
+        {
+            return null;
+        }
+
+        if (!folderAssetCache.TryGetValue(folderPath, out UnityEngine.Object folder))
+        {
+            folder = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(folderPath);
+            folderAssetCache[folderPath] = folder;
+        }
+
+        return folder;
     }
 
     private static int GetNextAvailableId(List<AnimalDefinition> sourceDefinitions)

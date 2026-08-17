@@ -384,6 +384,18 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
+        int carriedItemId = boundBag.GetSlotItemId(slotIndex);
+        if (IsManualItem(carriedItemId))
+        {
+            if (TryGetFocusedDesk(player, out Desk focusedDesk)
+                && focusedDesk.TryStoreManualFromSlot(player, boundBag, slotIndex))
+            {
+                SuppressPickupPreviewAfterDrop(player);
+            }
+
+            return;
+        }
+
         bool isFocusedConveyorDrop = terrainGenerator.TryGetFocusedConveyorDropLimit(out int conveyorDropLimit);
         if (isFocusedConveyorDrop)
         {
@@ -1804,7 +1816,33 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     public bool CanCraftItem(int itemId)
     {
+        return HasRequiredManualForCrafting(itemId)
+               && CanSatisfyCraftingMapObjectRequirement(itemId);
+    }
+
+    public bool CanSatisfyCraftingMapObjectRequirement(int itemId)
+    {
         return CanShowCraftingItem(itemId);
+    }
+
+    public bool HasRequiredManualForCrafting(int itemId)
+    {
+        if (itemId < 0
+            || GameManager.Instance == null
+            || GameManager.Instance.ItemManger == null)
+        {
+            return false;
+        }
+
+        if (!GameManager.Instance.ItemManger.TryGetRequiredManualForTarget(
+                itemId,
+                out ItemDefinition requiredManual))
+        {
+            return true;
+        }
+
+        Player player = GameManager.Instance.Player;
+        return player != null && player.HasCraftingManual(requiredManual.id);
     }
 
     public bool ContainsUiObject(GameObject targetObject)
@@ -3981,6 +4019,34 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && focusedFreightCar.AllowsFocus;
     }
 
+    private static bool TryGetFocusedDesk(Player player, out Desk focusedDesk)
+    {
+        focusedDesk = null;
+        if (player == null)
+        {
+            return false;
+        }
+
+        PlayerController playerController = player.GetComponent<PlayerController>();
+        if (playerController == null
+            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+            || focusedMapObject == null)
+        {
+            return false;
+        }
+
+        focusedDesk = focusedMapObject as Desk;
+        if (focusedDesk == null)
+        {
+            focusedDesk = focusedMapObject.GetComponentInParent<Desk>();
+        }
+
+        return focusedDesk != null
+               && focusedDesk.gameObject.activeInHierarchy
+               && focusedDesk.AllowsFocus
+               && playerController.IsWithinInteractionRange(focusedDesk);
+    }
+
     protected static bool TryGetGroundPickupBlock(TerrainGenerator terrain, Vector2Int coordinate, out Block block)
     {
         block = null;
@@ -4097,6 +4163,15 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private static TerrainGenerator ResolveTerrain()
     {
         return TerrainGenerator.ResolveActive();
+    }
+
+    private static bool IsManualItem(int itemId)
+    {
+        return itemId >= 0
+               && GameManager.Instance != null
+               && GameManager.Instance.ItemManger != null
+               && GameManager.Instance.ItemManger.TryGetItemDefinitionById(itemId, out ItemDefinition definition)
+               && definition.isManual;
     }
 
     protected bool IsInventoryUiLocked()

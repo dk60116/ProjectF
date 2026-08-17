@@ -28,6 +28,7 @@ public partial class BlockStateStore : MonoBehaviour
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
+        public int storedInstallationItemId = -1;
         public bool hasWorldPose;
         public Vector3 worldPosition;
         public Quaternion worldRotation = Quaternion.identity;
@@ -76,6 +77,7 @@ public partial class BlockStateStore : MonoBehaviour
                 storedFluidLiters = storedFluidLiters,
                 storedFluidItemId = storedFluidItemId,
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
+                storedInstallationItemId = storedInstallationItemId,
                 hasWorldPose = hasWorldPose,
                 worldPosition = worldPosition,
                 worldRotation = worldRotation,
@@ -124,12 +126,19 @@ public partial class BlockStateStore : MonoBehaviour
         private readonly int[] rawItems;
         private readonly IntRun[] compressedRuns;
         private readonly int itemCount;
+        private readonly bool hasDroppedFloorObjects;
+        public bool HasDroppedFloorObjects => hasDroppedFloorObjects;
 
-        private FloorObjectSaveState(int[] rawItems, IntRun[] compressedRuns, int itemCount)
+        private FloorObjectSaveState(
+            int[] rawItems,
+            IntRun[] compressedRuns,
+            int itemCount,
+            bool hasDroppedFloorObjects)
         {
             this.rawItems = rawItems;
             this.compressedRuns = compressedRuns;
             this.itemCount = itemCount;
+            this.hasDroppedFloorObjects = hasDroppedFloorObjects;
         }
 
         public static FloorObjectSaveState FromSerialized(IReadOnlyList<int> itemIds)
@@ -140,6 +149,7 @@ public partial class BlockStateStore : MonoBehaviour
             }
 
             int count = itemIds.Count;
+            bool hasDroppedFloorObjects = ContainsDroppedFloorObjects(itemIds);
             int runCount = 1;
             int previousValue = itemIds[0];
             for (int i = 1; i < count; i++)
@@ -164,7 +174,7 @@ public partial class BlockStateStore : MonoBehaviour
                     rawCopy[i] = itemIds[i];
                 }
 
-                return new FloorObjectSaveState(rawCopy, null, count);
+                return new FloorObjectSaveState(rawCopy, null, count, hasDroppedFloorObjects);
             }
 
             IntRun[] runs = new IntRun[runCount];
@@ -186,14 +196,74 @@ public partial class BlockStateStore : MonoBehaviour
             }
 
             runs[runIndex] = new IntRun(currentValue, currentCount);
-            return new FloorObjectSaveState(null, runs, count);
+            return new FloorObjectSaveState(null, runs, count, hasDroppedFloorObjects);
         }
 
         public static FloorObjectSaveState FromOwnedRawItems(int[] itemIds)
         {
             return itemIds != null && itemIds.Length > 0
-                ? new FloorObjectSaveState(itemIds, null, itemIds.Length)
+                ? new FloorObjectSaveState(
+                    itemIds,
+                    null,
+                    itemIds.Length,
+                    ContainsDroppedFloorObjects(itemIds))
                 : null;
+        }
+
+        private static bool ContainsDroppedFloorObjects(IReadOnlyList<int> itemIds)
+        {
+            if (itemIds == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < itemIds.Count; i++)
+            {
+                int itemId = itemIds[i];
+                if (itemId == Block.FloorStackStateSentinel)
+                {
+                    if (i + 1 >= itemIds.Count)
+                    {
+                        return false;
+                    }
+
+                    int stackCount = Mathf.Max(0, itemIds[++i]);
+                    for (int stackIndex = 0; stackIndex < stackCount && i + 1 < itemIds.Count; stackIndex++)
+                    {
+                        int stackItemCount = Mathf.Max(0, itemIds[++i]);
+                        for (int objectIndex = 0; objectIndex < stackItemCount && i + 1 < itemIds.Count; objectIndex++)
+                        {
+                            if (itemIds[++i] >= 0)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (itemId == Block.InputAreaCenterStackStateSentinel
+                    || itemId == Block.ConveyorStackStateSentinel)
+                {
+                    if (i + 1 >= itemIds.Count)
+                    {
+                        return false;
+                    }
+
+                    int skippedItemCount = Mathf.Max(0, itemIds[++i]);
+                    i = Mathf.Min(itemIds.Count - 1, i + skippedItemCount);
+                    continue;
+                }
+
+                // Legacy floor-object states stored item ids without a stack sentinel.
+                if (itemId >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public List<int> ToSerializedList()
@@ -232,6 +302,7 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, LiveInstallationRecord> liveInstallationStates = new Dictionary<Vector2Int, LiveInstallationRecord>();
     private readonly Dictionary<Vector2Int, Vector2Int> liveInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<int, int> savedInstallationCountsByItemId = new Dictionary<int, int>();
+    private readonly Dictionary<int, int> savedInstallationStoredItemCountsByItemId = new Dictionary<int, int>();
     private int savedInstallationItemTotal;
     private VirtualObjectWorld virtualObjectWorld;
 
@@ -297,6 +368,13 @@ public partial class BlockStateStore : MonoBehaviour
 
         itemIds = null;
         return false;
+    }
+
+    public bool HasSavedDroppedFloorObjects(Vector2Int worldCoordinate)
+    {
+        return savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState)
+               && savedState != null
+               && savedState.HasDroppedFloorObjects;
     }
 
     public bool TryGetFloorObjectsCopy(Vector2Int worldCoordinate, out List<int> itemIds)
@@ -469,6 +547,13 @@ public partial class BlockStateStore : MonoBehaviour
         return savedInstallationItemTotal;
     }
 
+    public bool HasStoredInstallationItem(int itemId)
+    {
+        return itemId >= 0
+               && savedInstallationStoredItemCountsByItemId.TryGetValue(itemId, out int count)
+               && count > 0;
+    }
+
     public bool TryGetLiveInstallation(Vector2Int storageKey, out InstallationObject installationObject, out InstallationSaveState state)
     {
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord record)
@@ -625,6 +710,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedInstallationStates.Clear();
         savedBackgroundInstallationStorageKeys.Clear();
         savedInstallationCountsByItemId.Clear();
+        savedInstallationStoredItemCountsByItemId.Clear();
         savedInstallationItemTotal = 0;
         savedInstallationAnchorsByCoordinate.Clear();
         liveInstallationStates.Clear();
@@ -894,6 +980,10 @@ public partial class BlockStateStore : MonoBehaviour
         state.storedFluidLiters = installationObject.StoredFluidLiters;
         state.storedFluidItemId = installationObject.StoredFluidItemId;
         state.storedFluidTemperatureCelsius = installationObject.GetStoredFluidTemperatureCelsius(state.storedFluidItemId);
+        if (installationObject is IPersistentInstallationItemStorage itemStorage)
+        {
+            state.storedInstallationItemId = itemStorage.PersistentStoredItemId;
+        }
 
         return true;
     }
@@ -1459,21 +1549,37 @@ public partial class BlockStateStore : MonoBehaviour
 
     private void AdjustSavedInstallationCount(InstallationSaveState state, int delta)
     {
-        if (state == null || state.itemId < 0 || delta == 0)
+        if (state == null || delta == 0)
         {
             return;
         }
 
-        savedInstallationItemTotal = Mathf.Max(0, savedInstallationItemTotal + delta);
-        savedInstallationCountsByItemId.TryGetValue(state.itemId, out int currentCount);
+        if (state.itemId >= 0)
+        {
+            savedInstallationItemTotal = Mathf.Max(0, savedInstallationItemTotal + delta);
+            AdjustItemCount(savedInstallationCountsByItemId, state.itemId, delta);
+        }
+
+        if (state.storedInstallationItemId >= 0)
+        {
+            AdjustItemCount(
+                savedInstallationStoredItemCountsByItemId,
+                state.storedInstallationItemId,
+                delta);
+        }
+    }
+
+    private static void AdjustItemCount(Dictionary<int, int> countsByItemId, int itemId, int delta)
+    {
+        countsByItemId.TryGetValue(itemId, out int currentCount);
         int nextCount = currentCount + delta;
         if (nextCount > 0)
         {
-            savedInstallationCountsByItemId[state.itemId] = nextCount;
+            countsByItemId[itemId] = nextCount;
         }
         else
         {
-            savedInstallationCountsByItemId.Remove(state.itemId);
+            countsByItemId.Remove(itemId);
         }
     }
 

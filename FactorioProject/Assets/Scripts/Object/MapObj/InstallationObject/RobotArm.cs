@@ -123,7 +123,6 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
     private bool hasInputBodyLocalRotation;
     private bool hasRuntimeStateInitialized;
     private bool runtimeSleeping;
-    private bool updateTickRegistered;
     private Animator cachedAnimator;
     private Renderer[] sleepAwakeRenderers;
     private MaterialPropertyBlock sleepAwakePropertyBlock;
@@ -809,15 +808,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
 
     private void SetUpdateTickRegistered(bool registered)
     {
-        if (updateTickRegistered == registered)
-        {
-            return;
-        }
-
-        updateTickRegistered = registered;
         if (registered)
         {
-            ResetManagedUpdateClock();
+            if (!MapObjectTickManager.IsUpdateTickRegistered(this))
+            {
+                ResetManagedUpdateClock();
+            }
+
             MapObjectTickManager.RegisterUpdateTick(this);
         }
         else

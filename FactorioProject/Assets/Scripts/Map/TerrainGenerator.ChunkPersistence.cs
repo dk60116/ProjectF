@@ -1232,6 +1232,11 @@ public partial class TerrainGenerator : MonoBehaviour
             savedState.storedFluidLiters,
             savedState.storedFluidTemperatureCelsius);
 
+        if (restoredInstallation is IPersistentInstallationItemStorage itemStorage)
+        {
+            itemStorage.ApplyPersistentStoredItemId(savedState.storedInstallationItemId);
+        }
+
         if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
         {
             restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);

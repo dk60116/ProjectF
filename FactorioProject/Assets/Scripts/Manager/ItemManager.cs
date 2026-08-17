@@ -39,6 +39,48 @@ public class ItemManager : MonoBehaviour
     public List<ItemSet> ItemSets => items;
     public List<ItemDefinition> ItemDefinitions => itemDefinitions;
 
+    public bool TryGetItemDefinitionById(int id, out ItemDefinition definition)
+    {
+        if (id >= 0 && itemDefinitions != null)
+        {
+            for (int i = 0; i < itemDefinitions.Count; i++)
+            {
+                ItemDefinition candidate = itemDefinitions[i];
+                if (candidate != null && candidate.id == id)
+                {
+                    definition = candidate;
+                    return true;
+                }
+            }
+        }
+
+        definition = null;
+        return false;
+    }
+
+    public bool TryGetRequiredManualForTarget(int targetItemId, out ItemDefinition manualDefinition)
+    {
+        if (targetItemId >= 0 && itemDefinitions != null)
+        {
+            for (int i = 0; i < itemDefinitions.Count; i++)
+            {
+                ItemDefinition candidate = itemDefinitions[i];
+                ItemDefinition target = candidate != null ? candidate.ManualTargetItem : null;
+                if (candidate != null
+                    && candidate.id >= 0
+                    && target != null
+                    && target.id == targetItemId)
+                {
+                    manualDefinition = candidate;
+                    return true;
+                }
+            }
+        }
+
+        manualDefinition = null;
+        return false;
+    }
+
     public bool RegisterRuntimeItemDefinition(ItemDefinition definition)
     {
         if (definition == null || definition.id < 0)
@@ -64,29 +106,22 @@ public class ItemManager : MonoBehaviour
 
     public bool TryGetItemSetById(int id, out ItemSet itemSet)
     {
-        if (itemDefinitions != null && itemDefinitions.Count > 0)
+        if (TryGetItemDefinitionById(id, out ItemDefinition definition))
         {
-            for (int i = 0; i < itemDefinitions.Count; i++)
+            itemSet = new ItemSet
             {
-                ItemDefinition definition = itemDefinitions[i];
-                if (definition != null && definition.id == id)
-                {
-                    itemSet = new ItemSet
-                    {
-                        id = definition.id,
-                        name = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName,
-                        prefab = ResolvePrefabForId(definition.id),
-                        portableMesh = definition.portableMesh,
-                        portableMat = definition.portableMat,
-                        icon = definition.icon,
-                        lightMode = definition.lightMode,
-                        lightRange = definition.LightRange,
-                        lightIntensityMultiplier = definition.LightIntensityMultiplier,
-                        size = (int)definition.size
-                    };
-                    return true;
-                }
-            }
+                id = definition.id,
+                name = string.IsNullOrWhiteSpace(definition.itemName) ? definition.name : definition.itemName,
+                prefab = ResolvePrefabForId(definition.id),
+                portableMesh = definition.portableMesh,
+                portableMat = definition.portableMat,
+                icon = definition.icon,
+                lightMode = definition.lightMode,
+                lightRange = definition.LightRange,
+                lightIntensityMultiplier = definition.LightIntensityMultiplier,
+                size = (int)definition.size
+            };
+            return true;
         }
 
         if (items != null)
@@ -124,10 +159,11 @@ public class ItemManager : MonoBehaviour
     }
 
 #if UNITY_EDITOR
-    private const string SharedAnimalMeatPortableMeshPath = "Assets/Items/Animal/Meet_P.asset";
+    private const string SharedAnimalMeatPortableMeshPath = "Assets/Items/Meet/Meet_P.mesh";
     private const string SharedWheelPortableMeshPath = "Assets/Items/Train/Wheel/Wheel_P.mesh";
     private const string IronWheelPortableMaterialPath = "Assets/Items/Train/Wheel/M_IronWheel_P.mat";
     private const string WoodenWheelPortableMaterialPath = "Assets/Items/Train/Wheel/M_WoodenWheel_P.mat";
+    private static readonly string[] ItemIconAssetFilters = { "t:Sprite", "t:Texture2D" };
 
     private void OnValidate()
     {
@@ -650,7 +686,7 @@ public class ItemManager : MonoBehaviour
         for (int i = 0; i < itemFolders.Count; i++)
         {
             string itemFolder = itemFolders[i];
-            if (string.IsNullOrWhiteSpace(itemFolder))
+            if (string.IsNullOrWhiteSpace(itemFolder) || !ContainsItemAsset(itemFolder))
             {
                 continue;
             }
@@ -673,7 +709,78 @@ public class ItemManager : MonoBehaviour
             }
         }
 
+        List<string> itemNamesWithoutIcons = null;
+        foreach (KeyValuePair<string, List<string>> entry in lookup)
+        {
+            if (ContainsExplicitItemIcon(entry.Value))
+            {
+                continue;
+            }
+
+            itemNamesWithoutIcons ??= new List<string>();
+            itemNamesWithoutIcons.Add(entry.Key);
+        }
+
+        if (itemNamesWithoutIcons != null)
+        {
+            for (int i = 0; i < itemNamesWithoutIcons.Count; i++)
+            {
+                lookup.Remove(itemNamesWithoutIcons[i]);
+            }
+        }
+
         return lookup;
+    }
+
+    private static bool ContainsItemAsset(string itemFolder)
+    {
+        if (string.IsNullOrWhiteSpace(itemFolder) || !AssetDatabase.IsValidFolder(itemFolder))
+        {
+            return false;
+        }
+
+        string absoluteFolder = Path.GetFullPath(itemFolder);
+        if (!Directory.Exists(absoluteFolder))
+        {
+            return false;
+        }
+
+        foreach (string filePath in Directory.EnumerateFiles(absoluteFolder, "*", SearchOption.AllDirectories))
+        {
+            if (!filePath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsExplicitItemIcon(IReadOnlyList<string> itemFolders)
+    {
+        for (int i = 0; itemFolders != null && i < itemFolders.Count; i++)
+        {
+            string itemFolder = itemFolders[i];
+            if (string.IsNullOrWhiteSpace(itemFolder) || !AssetDatabase.IsValidFolder(itemFolder))
+            {
+                continue;
+            }
+
+            for (int filterIndex = 0; filterIndex < ItemIconAssetFilters.Length; filterIndex++)
+            {
+                string[] iconGuids = AssetDatabase.FindAssets(ItemIconAssetFilters[filterIndex], new[] { itemFolder });
+                for (int guidIndex = 0; guidIndex < iconGuids.Length; guidIndex++)
+                {
+                    string iconPath = AssetDatabase.GUIDToAssetPath(iconGuids[guidIndex]);
+                    if (IsExplicitIconCandidate(iconPath) && !IsPortableBaseTextureCandidate(iconPath))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static List<string> GetItemFoldersForName(
@@ -1703,18 +1810,13 @@ public class ItemManager : MonoBehaviour
         }
 
         string portableFolder = ResolveInstallationPortableItemFolder(itemFolder, prefabRoot);
-        string itemKey = NormalizePortableLookupName(
-            !string.IsNullOrWhiteSpace(itemName)
-                ? itemName
-                : prefabRoot != null ? prefabRoot.name : string.Empty);
-
-        Mesh folderPortableMesh = FindExactPortableMeshInItemDirectory(portableFolder, itemName, prefabRoot)
-                                  ?? FindPortableMeshInItemDirectory(portableFolder, itemKey);
-        if (folderPortableMesh != null)
+        Mesh resolvedPortableMesh = FindExactPortableMeshInItemDirectory(portableFolder, itemName, prefabRoot)
+                                    ?? FindPortableMesh(portableFolder, prefabRoot);
+        if (resolvedPortableMesh != null)
         {
-            portableMesh = folderPortableMesh;
+            portableMesh = resolvedPortableMesh;
         }
-        else
+        else if (portableMesh == null)
         {
             Mesh packageMesh = LoadPackagePortableMesh();
             if (packageMesh != null)
@@ -1723,13 +1825,13 @@ public class ItemManager : MonoBehaviour
             }
         }
 
-        Material folderPortableMaterial = FindExactPortableMaterialInItemDirectory(portableFolder, itemName, prefabRoot)
-                                          ?? FindPortableMaterialInItemDirectory(portableFolder, itemKey);
-        if (folderPortableMaterial != null)
+        Material resolvedPortableMaterial = FindExactPortableMaterialInItemDirectory(portableFolder, itemName, prefabRoot)
+                                            ?? FindPortableMaterial(portableFolder, prefabRoot);
+        if (resolvedPortableMaterial != null)
         {
-            portableMaterial = folderPortableMaterial;
+            portableMaterial = resolvedPortableMaterial;
         }
-        else
+        else if (portableMaterial == null)
         {
             Material packageMaterial = LoadPackagePortableMaterial();
             if (packageMaterial != null)
@@ -1759,7 +1861,11 @@ public class ItemManager : MonoBehaviour
 
     private static void TryOverrideAnimalMeatPortableMesh(string itemName, ref Mesh portableMesh)
     {
-        if (!UsesSharedAnimalMeatPortableMesh(itemName))
+        string itemKey = NormalizePortableLookupName(itemName);
+        if (itemKey != "beef"
+            && itemKey != "beefsteak"
+            && itemKey != "pork"
+            && itemKey != "porksteak")
         {
             return;
         }
@@ -1772,7 +1878,7 @@ public class ItemManager : MonoBehaviour
         }
 
         Debug.LogWarning(
-            $"ItemManager: Shared animal meat portable mesh was not found at '{SharedAnimalMeatPortableMeshPath}'.");
+            $"ItemManager: Animal meat portable mesh was not found at '{SharedAnimalMeatPortableMeshPath}'.");
     }
 
     private static void TryOverrideWheelPortableAssets(
@@ -1814,15 +1920,6 @@ public class ItemManager : MonoBehaviour
         {
             Debug.LogWarning($"ItemManager: Wheel portable material was not found at '{materialPath}'.");
         }
-    }
-
-    private static bool UsesSharedAnimalMeatPortableMesh(string itemName)
-    {
-        string itemKey = NormalizePortableLookupName(itemName);
-        return itemKey == "beef"
-               || itemKey == "beefsteak"
-               || itemKey == "pork"
-               || itemKey == "porksteak";
     }
 
     private static string ResolveInstallationPortableItemFolder(string itemFolder, GameObject prefabRoot)

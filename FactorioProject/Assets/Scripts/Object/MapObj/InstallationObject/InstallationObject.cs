@@ -36,6 +36,22 @@ public enum InstallationFacingDirection
     NegativeX
 }
 
+public interface IPlayerMapObjectInteraction
+{
+    bool CanPlayerInteract(Player player);
+
+    bool TryPlayerInteract(Player player);
+
+    int GetInteractionIconItemId(Player player);
+}
+
+public interface IPersistentInstallationItemStorage
+{
+    int PersistentStoredItemId { get; }
+
+    void ApplyPersistentStoredItemId(int itemId);
+}
+
 public class InstallationObject : MapObject
 {
     public const InstallationMapFilter DefaultMapFilter =

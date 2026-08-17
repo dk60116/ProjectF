@@ -8,7 +8,7 @@ public class TerrainDataEditorWindow : EditorWindow
     private const float TexturePreviewSize = 42f;
     private static readonly int TextureReferenceControlHash = "TerrainTextureReferenceField".GetHashCode();
     private static int activeTexturePickerControlId;
-    private static int activeTexturePickerTargetId;
+    private static Object activeTexturePickerTarget;
     private static string activeTexturePickerPropertyPath;
 
     private static readonly string[] CorePropertyPaths =
@@ -166,7 +166,14 @@ public class TerrainDataEditorWindow : EditorWindow
     };
 
     private Vector2 detailScroll;
-    private int selectedGeneratorInstanceId;
+    private TerrainGenerator selectedGenerator;
+    private readonly List<TerrainGenerator> visibleGenerators = new List<TerrainGenerator>();
+    private readonly Dictionary<string, SerializedProperty> serializedPropertyCache =
+        new Dictionary<string, SerializedProperty>(System.StringComparer.Ordinal);
+    private readonly HashSet<string> appliedFoldoutStateKeys =
+        new HashSet<string>(System.StringComparer.Ordinal);
+    private bool visibleGeneratorsDirty = true;
+    private SerializedObject selectedGeneratorSerializedObject;
 
     [MenuItem("Window/ProjectF/Terrain Editor")]
     public static void ShowWindow()
@@ -178,7 +185,15 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private void OnEnable()
     {
+        InvalidateVisibleGenerators();
         EnsureSelection();
+    }
+
+    private void OnDisable()
+    {
+        ClearSelectedGeneratorCache();
+        visibleGenerators.Clear();
+        visibleGeneratorsDirty = true;
     }
 
     private void OnFocus()
@@ -188,6 +203,7 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private void OnHierarchyChange()
     {
+        InvalidateVisibleGenerators();
         EnsureSelection();
         Repaint();
     }
@@ -224,8 +240,14 @@ public class TerrainDataEditorWindow : EditorWindow
             return;
         }
 
-        SerializedObject serializedGenerator = new SerializedObject(generator);
-        serializedGenerator.Update();
+        SerializedObject serializedGenerator = GetSelectedGeneratorSerializedObject(generator);
+        if (serializedGenerator == null)
+        {
+            GUILayout.EndArea();
+            return;
+        }
+
+        serializedGenerator.UpdateIfRequiredOrScript();
 
         DrawDetailHeader(generator);
 
@@ -336,15 +358,19 @@ public class TerrainDataEditorWindow : EditorWindow
         EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
         for (int i = 0; i < propertyPaths.Length; i++)
         {
-            SerializedProperty property = serializedObject.FindProperty(propertyPaths[i]);
+            SerializedProperty property = GetCachedProperty(serializedObject, propertyPaths[i]);
             if (property == null)
             {
                 continue;
             }
 
             ApplyPersistedFoldoutState(serializedObject, property);
+            EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(property, true);
-            PersistFoldoutState(serializedObject, property);
+            if (EditorGUI.EndChangeCheck())
+            {
+                PersistFoldoutState(serializedObject, property);
+            }
         }
 
         EditorGUILayout.EndVertical();
@@ -382,15 +408,19 @@ public class TerrainDataEditorWindow : EditorWindow
 
         for (int i = 0; i < propertyPaths.Length; i++)
         {
-            SerializedProperty property = serializedObject.FindProperty(propertyPaths[i]);
+            SerializedProperty property = GetCachedProperty(serializedObject, propertyPaths[i]);
             if (property == null)
             {
                 continue;
             }
 
             ApplyPersistedFoldoutState(serializedObject, property);
+            EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(property, true);
-            PersistFoldoutState(serializedObject, property);
+            if (EditorGUI.EndChangeCheck())
+            {
+                PersistFoldoutState(serializedObject, property);
+            }
         }
     }
 
@@ -411,10 +441,10 @@ public class TerrainDataEditorWindow : EditorWindow
 
         EditorGUI.indentLevel++;
         SerializedProperty baseTexture = !string.IsNullOrEmpty(textureSet.baseTexturePropertyPath)
-            ? serializedObject.FindProperty(textureSet.baseTexturePropertyPath)
+            ? GetCachedProperty(serializedObject, textureSet.baseTexturePropertyPath)
             : null;
         SerializedProperty baseColor = !string.IsNullOrEmpty(textureSet.baseColorPropertyPath)
-            ? serializedObject.FindProperty(textureSet.baseColorPropertyPath)
+            ? GetCachedProperty(serializedObject, textureSet.baseColorPropertyPath)
             : null;
         if (baseTexture != null)
         {
@@ -550,7 +580,10 @@ public class TerrainDataEditorWindow : EditorWindow
     private static void BeginTextureObjectPicker(SerializedProperty property, int controlId, Texture2D currentTexture)
     {
         activeTexturePickerControlId = controlId;
-        activeTexturePickerTargetId = GetSerializedTargetId(property);
+        activeTexturePickerTarget = property != null
+            && property.serializedObject != null
+                ? property.serializedObject.targetObject
+                : null;
         activeTexturePickerPropertyPath = property.propertyPath;
         EditorGUIUtility.ShowObjectPicker<Texture2D>(currentTexture, false, string.Empty, controlId);
     }
@@ -581,7 +614,7 @@ public class TerrainDataEditorWindow : EditorWindow
         if (currentEvent.commandName == "ObjectSelectorClosed")
         {
             activeTexturePickerControlId = 0;
-            activeTexturePickerTargetId = 0;
+            activeTexturePickerTarget = null;
             activeTexturePickerPropertyPath = null;
         }
 
@@ -591,17 +624,9 @@ public class TerrainDataEditorWindow : EditorWindow
     private static bool IsActiveTexturePickerProperty(SerializedProperty property)
     {
         return property != null
-            && activeTexturePickerTargetId == GetSerializedTargetId(property)
-            && activeTexturePickerPropertyPath == property.propertyPath;
-    }
-
-    private static int GetSerializedTargetId(SerializedProperty property)
-    {
-        return property != null
             && property.serializedObject != null
-            && property.serializedObject.targetObject != null
-            ? property.serializedObject.targetObject.GetInstanceID()
-            : 0;
+            && activeTexturePickerTarget == property.serializedObject.targetObject
+            && activeTexturePickerPropertyPath == property.propertyPath;
     }
 
     private static void SetTextureProperty(SerializedProperty property, Texture2D texture)
@@ -661,7 +686,7 @@ public class TerrainDataEditorWindow : EditorWindow
         currentEvent.Use();
     }
 
-    private static void ApplyPersistedFoldoutState(SerializedObject serializedObject, SerializedProperty property)
+    private void ApplyPersistedFoldoutState(SerializedObject serializedObject, SerializedProperty property)
     {
         if (serializedObject == null || property == null || !property.hasVisibleChildren)
         {
@@ -669,6 +694,11 @@ public class TerrainDataEditorWindow : EditorWindow
         }
 
         string rootKey = GetFoldoutStateKey(serializedObject, property.propertyPath);
+        if (!appliedFoldoutStateKeys.Add(rootKey))
+        {
+            return;
+        }
+
         property.isExpanded = SessionState.GetBool(rootKey, property.isExpanded);
         if (!property.isExpanded)
         {
@@ -711,10 +741,10 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private static string GetFoldoutStateKey(SerializedObject serializedObject, string propertyPath)
     {
-        int instanceId = serializedObject != null && serializedObject.targetObject != null
-            ? serializedObject.targetObject.GetInstanceID()
+        int targetHash = serializedObject != null && serializedObject.targetObject != null
+            ? serializedObject.targetObject.GetHashCode()
             : 0;
-        return $"TerrainDataEditorWindow.Foldout.{instanceId}.{propertyPath}";
+        return $"TerrainDataEditorWindow.Foldout.{targetHash}.{propertyPath}";
     }
 
     private static void VisitChildProperties(SerializedProperty rootProperty, System.Action<SerializedProperty> visitor)
@@ -737,12 +767,7 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private TerrainGenerator GetSelectedGenerator()
     {
-        if (selectedGeneratorInstanceId == 0)
-        {
-            return null;
-        }
-
-        return EditorUtility.InstanceIDToObject(selectedGeneratorInstanceId) as TerrainGenerator;
+        return selectedGenerator;
     }
 
     private void EnsureSelection()
@@ -754,14 +779,14 @@ public class TerrainDataEditorWindow : EditorWindow
     {
         if (generators == null || generators.Count == 0)
         {
-            selectedGeneratorInstanceId = 0;
+            SetSelectedGenerator(null);
             return;
         }
 
         TerrainGenerator activeSelection = GetTerrainGeneratorFromUnitySelection();
         if (activeSelection != null && generators.Contains(activeSelection))
         {
-            selectedGeneratorInstanceId = activeSelection.GetInstanceID();
+            SetSelectedGenerator(activeSelection);
             return;
         }
 
@@ -771,13 +796,30 @@ public class TerrainDataEditorWindow : EditorWindow
             return;
         }
 
-        selectedGeneratorInstanceId = generators[0].GetInstanceID();
+        SetSelectedGenerator(generators[0]);
     }
 
     private List<TerrainGenerator> GetVisibleGenerators()
     {
-        TerrainGenerator[] allGenerators = FindObjectsOfType<TerrainGenerator>(true);
-        List<TerrainGenerator> visibleGenerators = new List<TerrainGenerator>();
+        if (!visibleGeneratorsDirty)
+        {
+            for (int i = 0; i < visibleGenerators.Count; i++)
+            {
+                if (visibleGenerators[i] == null)
+                {
+                    visibleGeneratorsDirty = true;
+                    break;
+                }
+            }
+        }
+
+        if (!visibleGeneratorsDirty)
+        {
+            return visibleGenerators;
+        }
+
+        TerrainGenerator[] allGenerators = FindObjectsByType<TerrainGenerator>(FindObjectsInactive.Include);
+        visibleGenerators.Clear();
         for (int i = 0; i < allGenerators.Length; i++)
         {
             TerrainGenerator generator = allGenerators[i];
@@ -789,22 +831,97 @@ public class TerrainDataEditorWindow : EditorWindow
             visibleGenerators.Add(generator);
         }
 
-        visibleGenerators.Sort((left, right) =>
-        {
-            string leftScene = left != null && left.gameObject.scene.IsValid() ? left.gameObject.scene.name : string.Empty;
-            string rightScene = right != null && right.gameObject.scene.IsValid() ? right.gameObject.scene.name : string.Empty;
-            int sceneCompare = string.Compare(leftScene, rightScene, System.StringComparison.OrdinalIgnoreCase);
-            if (sceneCompare != 0)
-            {
-                return sceneCompare;
-            }
-
-            string leftName = left != null ? left.name : string.Empty;
-            string rightName = right != null ? right.name : string.Empty;
-            return string.Compare(leftName, rightName, System.StringComparison.OrdinalIgnoreCase);
-        });
+        visibleGenerators.Sort(CompareTerrainGenerators);
+        visibleGeneratorsDirty = false;
 
         return visibleGenerators;
+    }
+
+    private void InvalidateVisibleGenerators()
+    {
+        visibleGeneratorsDirty = true;
+    }
+
+    private void SetSelectedGenerator(TerrainGenerator generator)
+    {
+        if (selectedGenerator == generator)
+        {
+            return;
+        }
+
+        selectedGenerator = generator;
+        ClearSelectedGeneratorCache();
+    }
+
+    private SerializedObject GetSelectedGeneratorSerializedObject(TerrainGenerator generator)
+    {
+        if (generator == null)
+        {
+            ClearSelectedGeneratorCache();
+            return null;
+        }
+
+        if (selectedGeneratorSerializedObject != null
+            && selectedGeneratorSerializedObject.targetObject == generator)
+        {
+            return selectedGeneratorSerializedObject;
+        }
+
+        ClearSelectedGeneratorCache();
+        selectedGeneratorSerializedObject = new SerializedObject(generator);
+        return selectedGeneratorSerializedObject;
+    }
+
+    private SerializedProperty GetCachedProperty(SerializedObject serializedObject, string propertyPath)
+    {
+        if (serializedObject == null || string.IsNullOrEmpty(propertyPath))
+        {
+            return null;
+        }
+
+        if (serializedObject == selectedGeneratorSerializedObject
+            && serializedPropertyCache.TryGetValue(propertyPath, out SerializedProperty cachedProperty)
+            && cachedProperty != null)
+        {
+            return cachedProperty;
+        }
+
+        SerializedProperty property = serializedObject.FindProperty(propertyPath);
+        if (serializedObject == selectedGeneratorSerializedObject)
+        {
+            serializedPropertyCache[propertyPath] = property;
+        }
+
+        return property;
+    }
+
+    private void ClearSelectedGeneratorCache()
+    {
+        selectedGeneratorSerializedObject = null;
+        serializedPropertyCache.Clear();
+        appliedFoldoutStateKeys.Clear();
+    }
+
+    private static int CompareTerrainGenerators(TerrainGenerator left, TerrainGenerator right)
+    {
+        string leftScene = left != null && left.gameObject.scene.IsValid()
+            ? left.gameObject.scene.name
+            : string.Empty;
+        string rightScene = right != null && right.gameObject.scene.IsValid()
+            ? right.gameObject.scene.name
+            : string.Empty;
+        int sceneCompare = string.Compare(
+            leftScene,
+            rightScene,
+            System.StringComparison.OrdinalIgnoreCase);
+        if (sceneCompare != 0)
+        {
+            return sceneCompare;
+        }
+
+        string leftName = left != null ? left.name : string.Empty;
+        string rightName = right != null ? right.name : string.Empty;
+        return string.Compare(leftName, rightName, System.StringComparison.OrdinalIgnoreCase);
     }
 
     private static TerrainGenerator GetTerrainGeneratorFromUnitySelection()

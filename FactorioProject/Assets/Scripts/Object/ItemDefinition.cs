@@ -34,6 +34,12 @@ public class ItemDefinition : ScriptableObject
     public float lightIntensityMultiplier = 1f;
     public uint size;
     public bool itemFilter;
+    [Tooltip("체크하면 이 아이템을 박스의 아이템 필터 목록에 표시하지 않습니다.")]
+    public bool ignoreFilter;
+    [Tooltip("제작법 설명서 등 Manual 용도로 사용하는 아이템인지 여부입니다.")]
+    public bool isManual;
+    [Tooltip("이 Manual이 설명하는 대상 아이템입니다.")]
+    public ItemDefinition manualTargetItem;
     [Tooltip("부모 I/O 모듈이 설치되어 있을 때 이 아이템으로 업그레이드할 수 있는지 여부입니다.")]
     public bool upgradeable = true;
     [Min(1)]
@@ -60,6 +66,7 @@ public class ItemDefinition : ScriptableObject
     public float CraftingDurationSeconds => craftingDurationSeconds > 0f ? craftingDurationSeconds : DefaultCraftingDurationSeconds;
     public float LightRange => Mathf.Max(0.1f, lightRange);
     public float LightIntensityMultiplier => lightIntensityMultiplier > 0f ? lightIntensityMultiplier : 1f;
+    public ItemDefinition ManualTargetItem => isManual ? manualTargetItem : null;
     public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
     public float ElectricUseWatts => ResolveElectricUseWatts(this);
 
@@ -118,6 +125,11 @@ public class ItemDefinition : ScriptableObject
 #if UNITY_EDITOR
     private void OnValidate()
     {
+        if (!isManual || manualTargetItem == this)
+        {
+            manualTargetItem = null;
+        }
+
         if (craftingDurationSeconds <= 0f)
         {
             craftingDurationSeconds = DefaultCraftingDurationSeconds;

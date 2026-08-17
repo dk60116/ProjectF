@@ -242,8 +242,7 @@ internal static class PortableItemAssetRepairGenerator
     {
         Dictionary<int, ItemDefinition> definitionsById = BuildDefinitionLookupById();
         ItemManager[] itemManagers = UnityEngine.Object.FindObjectsByType<ItemManager>(
-            FindObjectsInactive.Include,
-            FindObjectsSortMode.None);
+            FindObjectsInactive.Include);
         int synchronizedCount = 0;
 
         for (int managerIndex = 0; managerIndex < itemManagers.Length; managerIndex++)

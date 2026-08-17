@@ -56,6 +56,9 @@ public class MeshCombineEditorWindow : EditorWindow
     private Material previewMaterial;
     private Mesh previewMesh;
     private bool previewDirty = true;
+    private bool combinedBoundsDirty = true;
+    private Bounds cachedCombinedBounds;
+    private bool cachedCombinedBoundsValid;
 
     [MenuItem("Window/ProjectF/Mesh Combine")]
     [MenuItem("Tools/MapObject/Mesh Combine")]
@@ -221,7 +224,7 @@ public class MeshCombineEditorWindow : EditorWindow
             MarkPreviewDirty();
         }
 
-        using (new EditorGUI.DisabledScope(!TryGetCombinedBounds(false, out Bounds bounds)))
+        using (new EditorGUI.DisabledScope(!TryGetCombinedBounds(out Bounds bounds)))
         {
             if (GUILayout.Button("Bounds Center"))
             {
@@ -416,7 +419,7 @@ public class MeshCombineEditorWindow : EditorWindow
 
     private float GetPivotGizmoSize()
     {
-        if (TryGetCombinedBounds(false, out Bounds bounds))
+        if (TryGetCombinedBounds(out Bounds bounds))
         {
             return Mathf.Max(bounds.extents.magnitude * 0.18f, 0.08f);
         }
@@ -1051,8 +1054,15 @@ public class MeshCombineEditorWindow : EditorWindow
         }
     }
 
-    private bool TryGetCombinedBounds(bool bakePivotToOrigin, out Bounds bounds)
+    private bool TryGetCombinedBounds(out Bounds bounds)
     {
+        if (!combinedBoundsDirty)
+        {
+            bounds = cachedCombinedBounds;
+            return cachedCombinedBoundsValid;
+        }
+
+        combinedBoundsDirty = false;
         bounds = new Bounds(Vector3.zero, Vector3.zero);
         bool hasBounds = false;
 
@@ -1074,11 +1084,6 @@ public class MeshCombineEditorWindow : EditorWindow
             for (int vertexIndex = 0; vertexIndex < sourceVertices.Length; vertexIndex++)
             {
                 Vector3 transformedVertex = matrix.MultiplyPoint3x4(sourceVertices[vertexIndex]);
-                if (bakePivotToOrigin)
-                {
-                    transformedVertex -= pivotPosition;
-                }
-
                 if (!hasBounds)
                 {
                     bounds = new Bounds(transformedVertex, Vector3.zero);
@@ -1091,7 +1096,7 @@ public class MeshCombineEditorWindow : EditorWindow
             }
         }
 
-        if (showPivotInPreview && !bakePivotToOrigin)
+        if (showPivotInPreview)
         {
             if (!hasBounds)
             {
@@ -1104,12 +1109,14 @@ public class MeshCombineEditorWindow : EditorWindow
             }
         }
 
+        cachedCombinedBounds = bounds;
+        cachedCombinedBoundsValid = hasBounds;
         return hasBounds;
     }
 
     private Bounds GetPreviewBounds()
     {
-        if (TryGetCombinedBounds(false, out Bounds bounds))
+        if (TryGetCombinedBounds(out Bounds bounds))
         {
             if (bounds.size.sqrMagnitude <= 0.0001f)
             {
@@ -1255,6 +1262,7 @@ public class MeshCombineEditorWindow : EditorWindow
     private void MarkPreviewDirty()
     {
         previewDirty = true;
+        combinedBoundsDirty = true;
         Repaint();
     }
 

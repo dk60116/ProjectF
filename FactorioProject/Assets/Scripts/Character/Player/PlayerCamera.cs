@@ -1,4 +1,7 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public class PlayerCamera : MonoBehaviour
 {
@@ -69,6 +72,9 @@ public class PlayerCamera : MonoBehaviour
     private float savedCameraOrthographicSize;
     private float freeCameraYaw;
     private float freeCameraPitch;
+    private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>(8);
+    private PointerEventData pointerEventData;
+    private EventSystem pointerEventSystem;
 
     public float MinimumOrthographicSize => minOrthographicSize;
     public float MaximumOrthographicSize => maxOrthographicSize;
@@ -312,7 +318,7 @@ public class PlayerCamera : MonoBehaviour
         bool useOrthographicZoom = cachedCamera != null && cachedCamera.orthographic;
 
         float wheelDelta = Input.mouseScrollDelta.y;
-        if (Mathf.Abs(wheelDelta) > 0.0001f)
+        if (Mathf.Abs(wheelDelta) > 0.0001f && !IsPointerOverActiveScrollRect())
         {
             zoomDelta += wheelDelta * (useOrthographicZoom ? orthographicMouseWheelZoomSpeed : mouseWheelZoomSpeed);
         }
@@ -341,6 +347,45 @@ public class PlayerCamera : MonoBehaviour
         {
             targetFollowDistance = ClampFollowDistance(targetFollowDistance - zoomDelta);
         }
+    }
+
+    private bool IsPointerOverActiveScrollRect()
+    {
+        EventSystem currentEventSystem = EventSystem.current;
+        if (currentEventSystem == null)
+        {
+            return false;
+        }
+
+        if (pointerEventData == null || pointerEventSystem != currentEventSystem)
+        {
+            pointerEventSystem = currentEventSystem;
+            pointerEventData = new PointerEventData(currentEventSystem);
+        }
+
+        pointerEventData.Reset();
+        pointerEventData.position = Input.mousePosition;
+        pointerRaycastResults.Clear();
+        currentEventSystem.RaycastAll(pointerEventData, pointerRaycastResults);
+
+        for (int i = 0; i < pointerRaycastResults.Count; i++)
+        {
+            GameObject hitObject = pointerRaycastResults[i].gameObject;
+            if (hitObject == null)
+            {
+                continue;
+            }
+
+            ScrollRect scrollRect = hitObject.GetComponentInParent<ScrollRect>();
+            if (scrollRect != null && scrollRect.isActiveAndEnabled)
+            {
+                pointerRaycastResults.Clear();
+                return true;
+            }
+        }
+
+        pointerRaycastResults.Clear();
+        return false;
     }
 
     private void UpdateZoom()

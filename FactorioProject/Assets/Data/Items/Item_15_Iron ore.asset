@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_15_Iron ore
   m_EditorClassIdentifier: 
   itemName: Iron ore
-  id: 9
+  id: 12
   mapObject: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: 8cc8777321a5b794887580573abb56f0, type: 2}
@@ -25,6 +25,10 @@ MonoBehaviour:
   lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

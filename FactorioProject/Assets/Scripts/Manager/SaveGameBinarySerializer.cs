@@ -532,6 +532,7 @@ public static class SaveGameBinarySerializer
         writer.Write(state.steamTrainAutoDriveRouteTargetStationName ?? string.Empty);
         writer.Write(state.steamTrainAutoDriveLastArrivedStationName ?? string.Empty);
         writer.Write(state.steamTrainAutoDriveStationWaitTimer);
+        writer.Write(state.storedInstallationItemId);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -646,6 +647,11 @@ public static class SaveGameBinarySerializer
             state.steamTrainAutoDriveRouteTargetStationName = reader.ReadString();
             state.steamTrainAutoDriveLastArrivedStationName = reader.ReadString();
             state.steamTrainAutoDriveStationWaitTimer = reader.ReadSingle();
+        }
+
+        if (version >= 29)
+        {
+            state.storedInstallationItemId = reader.ReadInt32();
         }
 
         return state;

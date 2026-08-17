@@ -7,6 +7,7 @@ using UnityEngine.Serialization;
 public class BoxObject : InputOutputModule
 {
     private static readonly HashSet<BoxObject> ActiveInstances = new HashSet<BoxObject>();
+    private static readonly Dictionary<Block, int> RuntimeContentBlockReferenceCounts = new Dictionary<Block, int>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private const float ClosedAngle = 0f;
@@ -103,6 +104,13 @@ public class BoxObject : InputOutputModule
         }
 
         return nearestBoxObject != null;
+    }
+
+    public static bool IsRuntimeContentBlock(Block block)
+    {
+        return block != null
+               && RuntimeContentBlockReferenceCounts.TryGetValue(block, out int referenceCount)
+               && referenceCount > 0;
     }
 
     public static void RefreshCountTextZoomVisibility(float normalizedZoom, bool force = false)
@@ -537,7 +545,7 @@ public class BoxObject : InputOutputModule
 
     private void SetObservedContentBlock(Block contentBlock)
     {
-        if (observedContentBlock == contentBlock)
+        if (ReferenceEquals(observedContentBlock, contentBlock))
         {
             return;
         }
@@ -547,10 +555,43 @@ public class BoxObject : InputOutputModule
             observedContentBlock.RuntimeItemStackChanged -= HandleObservedContentBlockItemStackChanged;
         }
 
+        UnregisterRuntimeContentBlock(observedContentBlock);
+
         observedContentBlock = contentBlock;
         if (observedContentBlock != null)
         {
             observedContentBlock.RuntimeItemStackChanged += HandleObservedContentBlockItemStackChanged;
+        }
+
+        RegisterRuntimeContentBlock(observedContentBlock);
+    }
+
+    private static void RegisterRuntimeContentBlock(Block contentBlock)
+    {
+        if (ReferenceEquals(contentBlock, null))
+        {
+            return;
+        }
+
+        RuntimeContentBlockReferenceCounts.TryGetValue(contentBlock, out int referenceCount);
+        RuntimeContentBlockReferenceCounts[contentBlock] = referenceCount + 1;
+    }
+
+    private static void UnregisterRuntimeContentBlock(Block contentBlock)
+    {
+        if (ReferenceEquals(contentBlock, null)
+            || !RuntimeContentBlockReferenceCounts.TryGetValue(contentBlock, out int referenceCount))
+        {
+            return;
+        }
+
+        if (referenceCount <= 1)
+        {
+            RuntimeContentBlockReferenceCounts.Remove(contentBlock);
+        }
+        else
+        {
+            RuntimeContentBlockReferenceCounts[contentBlock] = referenceCount - 1;
         }
     }
 

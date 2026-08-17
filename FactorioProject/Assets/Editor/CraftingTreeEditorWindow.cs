@@ -7,6 +7,8 @@ using UnityEngine;
 public class CraftingTreeEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 260f;
+    private const float ItemListRowHeight = 28f;
+    private const float ItemFolderIndent = 14f;
     private const int CurrentCraftingTreeFileVersion = 5;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
@@ -23,7 +25,32 @@ public class CraftingTreeEditorWindow : EditorWindow
     private readonly Dictionary<int, List<MapObject>> craftingMapObjectsByItemId = new Dictionary<int, List<MapObject>>();
     private readonly Dictionary<int, int> outputCountByItemId = new Dictionary<int, int>();
     private readonly List<ItemDefinition> synchronizedDefinitions = new List<ItemDefinition>();
+    private readonly List<ItemDefinition> filteredDefinitions = new List<ItemDefinition>();
+    private readonly List<ItemDataEditorWindow.ItemListRow> cachedItemListRows =
+        new List<ItemDataEditorWindow.ItemListRow>();
+    private readonly List<ItemDefinition> cachedFolderOrderedDefinitions = new List<ItemDefinition>();
+    private readonly Dictionary<ItemDefinition, string> cachedItemFolderIds =
+        new Dictionary<ItemDefinition, string>();
+    private readonly Dictionary<ItemDefinition, Texture> itemIconCache =
+        new Dictionary<ItemDefinition, Texture>();
+    private readonly Dictionary<ItemDefinition, GUIContent> itemRowContentCache =
+        new Dictionary<ItemDefinition, GUIContent>();
+    private readonly Dictionary<string, ItemDefinition> mapObjectDefinitionsByAssetPath =
+        new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
+    private readonly List<MapObject> cachedMapObjectCandidates = new List<MapObject>();
     private bool definitionCatalogDirty = true;
+    private int definitionCatalogVersion;
+    private int filteredDefinitionsVersion = -1;
+    private string filteredDefinitionsSearchText = string.Empty;
+    private int cachedItemListRowsDefinitionVersion = -1;
+    private int cachedItemListRowsFolderRevision = -1;
+    private string cachedItemListRowsSearchText = string.Empty;
+    private int mapObjectDefinitionLookupVersion = -1;
+    private bool mapObjectCandidatesDirty = true;
+    private ItemManager cachedItemManager;
+    private bool itemManagerCacheDirty = true;
+    private string loadedCraftingTreePath = string.Empty;
+    private long loadedCraftingTreeWriteTicks = -1L;
 
     [Serializable]
     private class CraftingTreeJsonFile
@@ -182,6 +209,9 @@ public class CraftingTreeEditorWindow : EditorWindow
     private void OnEnable()
     {
         ItemDataEditorWindow.DefinitionCatalog.Changed += HandleDefinitionCatalogChanged;
+        ItemDataFolderSettings.Changed += HandleItemFolderSettingsChanged;
+        itemManagerCacheDirty = true;
+        mapObjectCandidatesDirty = true;
         InvalidateDefinitionCatalog();
         LoadCraftingTree();
     }
@@ -189,19 +219,24 @@ public class CraftingTreeEditorWindow : EditorWindow
     private void OnDisable()
     {
         ItemDataEditorWindow.DefinitionCatalog.Changed -= HandleDefinitionCatalogChanged;
+        ItemDataFolderSettings.Changed -= HandleItemFolderSettingsChanged;
     }
 
     private void OnProjectChange()
     {
+        mapObjectCandidatesDirty = true;
         InvalidateDefinitionCatalog();
-        LoadCraftingTree();
+        if (HasCraftingTreeFileChanged())
+        {
+            LoadCraftingTree();
+        }
+
         Repaint();
     }
 
     private void OnHierarchyChange()
     {
-        InvalidateDefinitionCatalog();
-        LoadCraftingTree();
+        itemManagerCacheDirty = true;
         Repaint();
     }
 
@@ -209,6 +244,12 @@ public class CraftingTreeEditorWindow : EditorWindow
     {
         InvalidateDefinitionCatalog();
         LoadCraftingTree();
+        Repaint();
+    }
+
+    private void HandleItemFolderSettingsChanged()
+    {
+        InvalidateItemListRows();
         Repaint();
     }
 
@@ -233,17 +274,19 @@ public class CraftingTreeEditorWindow : EditorWindow
         GUILayout.Space(10f);
         DrawToolbar();
         DrawSearchField();
-        EditorGUILayout.LabelField("Items", EditorStyles.boldLabel);
 
         ItemManager itemManager = FindItemManager();
         if (itemManager == null)
         {
+            DrawItemListHeader(0);
             EditorGUILayout.HelpBox("씬에서 ItemManager를 찾을 수 없습니다.", MessageType.Info);
             GUILayout.EndArea();
             return;
         }
 
         List<ItemDefinition> definitions = GetSynchronizedDefinitions(itemManager);
+        List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
+        DrawItemListHeader(visibleDefinitions.Count);
         if (definitions == null || definitions.Count == 0)
         {
             EditorGUILayout.HelpBox("ItemDefinitions가 비어있습니다.", MessageType.Warning);
@@ -251,7 +294,6 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<ItemDefinition> visibleDefinitions = FilterDefinitions(definitions);
         EnsureVisibleSelection(definitions, visibleDefinitions);
 
         if (visibleDefinitions.Count == 0)
@@ -261,31 +303,138 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
+        ItemDataFolderSettings folderSettings = ItemDataFolderSettings.instance;
+        List<ItemDataEditorWindow.ItemListRow> itemListRows = GetItemListRows(
+            definitions,
+            visibleDefinitions,
+            folderSettings);
         listScroll = EditorGUILayout.BeginScrollView(listScroll);
-        for (int i = 0; i < visibleDefinitions.Count; i++)
+        for (int i = 0; i < itemListRows.Count; i++)
         {
-            ItemDefinition definition = visibleDefinitions[i];
-            if (definition == null)
+            ItemDataEditorWindow.ItemListRow row = itemListRows[i];
+            if (row.IsFolder)
             {
+                DrawItemFolderRow(row, folderSettings);
                 continue;
             }
 
-            string displayName = GetDefinitionDisplayName(definition);
-            bool isSelected = definition.id == selectedItemId;
-            Rect rowRect = GUILayoutUtility.GetRect(1f, 28f, GUILayout.ExpandWidth(true));
-            GUIContent content = new GUIContent($"[{definition.id}] {displayName}", GetItemIcon(definition));
-            ItemDefinitionDragAndDropUtility.HandleListItemDrag(rowRect, definition, content.text, this);
-            Color previousContentColor = GUI.contentColor;
-            GUI.contentColor = Color.white;
-            bool pressed = GUI.Toggle(rowRect, isSelected, content, "Button");
-            GUI.contentColor = previousContentColor;
-            if (pressed)
-            {
-                selectedItemId = definition.id;
-            }
+            DrawItemDefinitionRow(row.Definition);
         }
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
+    }
+
+    private static void DrawItemListHeader(int visibleItemCount)
+    {
+        EditorGUILayout.LabelField(
+            $"Items ({Mathf.Max(0, visibleItemCount)})",
+            EditorStyles.boldLabel);
+    }
+
+    private List<ItemDataEditorWindow.ItemListRow> GetItemListRows(
+        List<ItemDefinition> definitions,
+        List<ItemDefinition> visibleDefinitions,
+        ItemDataFolderSettings folderSettings)
+    {
+        string searchText = string.IsNullOrWhiteSpace(itemSearchText)
+            ? string.Empty
+            : itemSearchText.Trim();
+        int folderRevision = folderSettings != null ? folderSettings.Revision : -1;
+        if (cachedItemListRowsDefinitionVersion == definitionCatalogVersion
+            && cachedItemListRowsFolderRevision == folderRevision
+            && string.Equals(cachedItemListRowsSearchText, searchText, StringComparison.Ordinal))
+        {
+            return cachedItemListRows;
+        }
+
+        ItemDataEditorWindow.BuildFolderLayoutRows(
+            definitions,
+            visibleDefinitions,
+            folderSettings,
+            !string.IsNullOrEmpty(searchText),
+            cachedItemListRows,
+            cachedFolderOrderedDefinitions,
+            cachedItemFolderIds);
+        cachedItemListRowsDefinitionVersion = definitionCatalogVersion;
+        cachedItemListRowsFolderRevision = folderRevision;
+        cachedItemListRowsSearchText = searchText;
+        return cachedItemListRows;
+    }
+
+    private void DrawItemFolderRow(
+        ItemDataEditorWindow.ItemListRow row,
+        ItemDataFolderSettings folderSettings)
+    {
+        Rect rowRect = GUILayoutUtility.GetRect(1f, ItemListRowHeight, GUILayout.ExpandWidth(true));
+        EditorGUI.DrawRect(rowRect, new Color(0.18f, 0.18f, 0.18f, 1f));
+
+        bool expanded = row.Folder != null && row.Folder.Expanded;
+        Rect foldoutRect = new Rect(rowRect.x + 2f, rowRect.y, 16f, rowRect.height);
+        bool nextExpanded = EditorGUI.Foldout(foldoutRect, expanded, GUIContent.none, true);
+        if (nextExpanded != expanded && row.Folder != null)
+        {
+            folderSettings.SetFolderExpanded(row.Folder.Id, nextExpanded);
+        }
+
+        float contentStartX = foldoutRect.xMax + 2f;
+        if (row.FolderIconDefinition != null)
+        {
+            Rect iconRect = new Rect(contentStartX, rowRect.y + 4f, 20f, 20f);
+            DrawItemIcon(iconRect, row.FolderIconDefinition);
+            contentStartX = iconRect.xMax + 4f;
+        }
+
+        Rect countRect = new Rect(rowRect.xMax - 32f, rowRect.y, 30f, rowRect.height);
+        Rect nameRect = new Rect(
+            contentStartX,
+            rowRect.y,
+            Mathf.Max(20f, countRect.xMin - contentStartX - 4f),
+            rowRect.height);
+        GUI.Label(nameRect, row.Folder != null ? row.Folder.DisplayName : string.Empty, EditorStyles.boldLabel);
+        GUI.Label(countRect, row.ItemCount.ToString(), EditorStyles.miniLabel);
+    }
+
+    private void DrawItemDefinitionRow(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return;
+        }
+
+        Rect rowRect = GUILayoutUtility.GetRect(1f, ItemListRowHeight, GUILayout.ExpandWidth(true));
+        bool isFolderMember = cachedItemFolderIds.TryGetValue(definition, out string folderId)
+            && !string.IsNullOrEmpty(folderId);
+        Rect buttonRect = isFolderMember
+            ? new Rect(
+                rowRect.x + ItemFolderIndent,
+                rowRect.y,
+                Mathf.Max(1f, rowRect.width - ItemFolderIndent),
+                rowRect.height)
+            : rowRect;
+        bool isSelected = definition.id == selectedItemId;
+        GUIContent content = GetItemRowContent(definition);
+        ItemDefinitionDragAndDropUtility.HandleListItemDrag(
+            buttonRect,
+            definition,
+            content.text,
+            this);
+        Color previousContentColor = GUI.contentColor;
+        GUI.contentColor = Color.white;
+        bool pressed = GUI.Toggle(buttonRect, isSelected, GUIContent.none, "Button");
+        GUI.contentColor = previousContentColor;
+
+        Rect iconRect = new Rect(buttonRect.x + 4f, buttonRect.y + 4f, 20f, 20f);
+        Rect labelRect = new Rect(
+            iconRect.xMax + 4f,
+            buttonRect.y,
+            Mathf.Max(1f, buttonRect.xMax - iconRect.xMax - 8f),
+            buttonRect.height);
+        ItemDataEditorWindow.DrawItemIcon(iconRect, definition);
+        GUI.Label(labelRect, content.text, EditorStyles.miniLabel);
+        if (pressed)
+        {
+            selectedItemId = definition.id;
+        }
     }
 
     private void DrawToolbar()
@@ -481,7 +630,7 @@ public class CraftingTreeEditorWindow : EditorWindow
 
     private void DrawCraftingMapObjectRequirement(ItemDefinition targetDefinition)
     {
-        List<MapObject> mapObjects = CollectMapObjectCandidates();
+        List<MapObject> mapObjects = GetMapObjectCandidates();
         GUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Crafting MapObject", EditorStyles.boldLabel);
         GUILayout.FlexibleSpace();
@@ -563,6 +712,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         WriteCraftingTree(path, itemIds, definitions);
         WriteCraftingTree(resourcePath, itemIds, definitions);
 
+        UpdateLoadedCraftingTreeStamp(path);
         AssetDatabase.Refresh();
         CraftingTreeRuntime.ForceReload();
     }
@@ -635,7 +785,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             return;
         }
 
-        List<MapObject> mapObjectCandidates = CollectMapObjectCandidates();
+        List<MapObject> mapObjectCandidates = GetMapObjectCandidates();
         recipeByItemId.Clear();
         craftingMapObjectsByItemId.Clear();
         outputCountByItemId.Clear();
@@ -722,17 +872,9 @@ public class CraftingTreeEditorWindow : EditorWindow
 
     private void LoadCraftingTree()
     {
-        string path = GetCraftingTreeAssetPath();
-        if (!File.Exists(path))
-        {
-            string resourcePath = GetCraftingTreeResourcesPath();
-            if (File.Exists(resourcePath))
-            {
-                path = resourcePath;
-            }
-        }
+        string path = ResolveCraftingTreeLoadPath();
 
-        if (!File.Exists(path))
+        if (string.IsNullOrEmpty(path))
         {
             EditorUtility.DisplayDialog("CraftingTree", "저장된 CraftingTree 파일이 없습니다.", "OK");
             return;
@@ -790,7 +932,46 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
         }
 
+        UpdateLoadedCraftingTreeStamp(path);
         Repaint();
+    }
+
+    private bool HasCraftingTreeFileChanged()
+    {
+        string path = ResolveCraftingTreeLoadPath();
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        long writeTicks = File.GetLastWriteTimeUtc(path).Ticks;
+        return !string.Equals(path, loadedCraftingTreePath, StringComparison.OrdinalIgnoreCase)
+            || writeTicks != loadedCraftingTreeWriteTicks;
+    }
+
+    private void UpdateLoadedCraftingTreeStamp(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            loadedCraftingTreePath = string.Empty;
+            loadedCraftingTreeWriteTicks = -1L;
+            return;
+        }
+
+        loadedCraftingTreePath = path;
+        loadedCraftingTreeWriteTicks = File.GetLastWriteTimeUtc(path).Ticks;
+    }
+
+    private static string ResolveCraftingTreeLoadPath()
+    {
+        string path = GetCraftingTreeAssetPath();
+        if (File.Exists(path))
+        {
+            return path;
+        }
+
+        string resourcePath = GetCraftingTreeResourcesPath();
+        return File.Exists(resourcePath) ? resourcePath : string.Empty;
     }
 
     private static string GetCraftingTreeAssetPath()
@@ -1189,14 +1370,14 @@ public class CraftingTreeEditorWindow : EditorWindow
         return mapObject;
     }
 
-    private static MapObject ResolveMapObjectFromRuntimeId(int runtimeId)
+    private MapObject ResolveMapObjectFromRuntimeId(int runtimeId)
     {
         if (runtimeId < 0)
         {
             return null;
         }
 
-        List<MapObject> candidates = CollectMapObjectCandidates();
+        List<MapObject> candidates = GetMapObjectCandidates();
         for (int i = 0; i < candidates.Count; i++)
         {
             MapObject candidate = candidates[i];
@@ -1314,9 +1495,14 @@ public class CraftingTreeEditorWindow : EditorWindow
         return availableMapObjects[0];
     }
 
-    private static List<MapObject> CollectMapObjectCandidates()
+    private List<MapObject> GetMapObjectCandidates()
     {
-        List<MapObject> results = new List<MapObject>();
+        if (!mapObjectCandidatesDirty)
+        {
+            return cachedMapObjectCandidates;
+        }
+
+        cachedMapObjectCandidates.Clear();
         HashSet<MapObject> seen = new HashSet<MapObject>();
 
         List<string> searchFolders = new List<string>();
@@ -1331,7 +1517,8 @@ public class CraftingTreeEditorWindow : EditorWindow
 
         if (searchFolders.Count == 0)
         {
-            return results;
+            mapObjectCandidatesDirty = false;
+            return cachedMapObjectCandidates;
         }
 
         string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", searchFolders.ToArray());
@@ -1361,17 +1548,18 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
 
             seen.Add(mapObject);
-            results.Add(mapObject);
+            cachedMapObjectCandidates.Add(mapObject);
         }
 
-        results.Sort((left, right) =>
+        cachedMapObjectCandidates.Sort((left, right) =>
         {
             string leftName = left != null ? left.gameObject.name : string.Empty;
             string rightName = right != null ? right.gameObject.name : string.Empty;
             return string.Compare(leftName, rightName, System.StringComparison.OrdinalIgnoreCase);
         });
 
-        return results;
+        mapObjectCandidatesDirty = false;
+        return cachedMapObjectCandidates;
     }
 
     private void EnsureVisibleSelection(List<ItemDefinition> definitions, List<ItemDefinition> visibleDefinitions)
@@ -1399,13 +1587,21 @@ public class CraftingTreeEditorWindow : EditorWindow
 
     private List<ItemDefinition> FilterDefinitions(List<ItemDefinition> definitions)
     {
-        List<ItemDefinition> results = new List<ItemDefinition>();
         if (definitions == null)
         {
-            return results;
+            filteredDefinitions.Clear();
+            filteredDefinitionsVersion = -1;
+            return filteredDefinitions;
         }
 
         string searchText = string.IsNullOrWhiteSpace(itemSearchText) ? string.Empty : itemSearchText.Trim();
+        if (filteredDefinitionsVersion == definitionCatalogVersion
+            && string.Equals(filteredDefinitionsSearchText, searchText, StringComparison.Ordinal))
+        {
+            return filteredDefinitions;
+        }
+
+        filteredDefinitions.Clear();
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition definition = definitions[i];
@@ -1416,11 +1612,13 @@ public class CraftingTreeEditorWindow : EditorWindow
 
             if (string.IsNullOrEmpty(searchText) || MatchesDefinitionSearch(definition, searchText))
             {
-                results.Add(definition);
+                filteredDefinitions.Add(definition);
             }
         }
 
-        return results;
+        filteredDefinitionsVersion = definitionCatalogVersion;
+        filteredDefinitionsSearchText = searchText;
+        return filteredDefinitions;
     }
 
     private List<ItemDefinition> GetSynchronizedDefinitions(ItemManager itemManager)
@@ -1432,12 +1630,26 @@ public class CraftingTreeEditorWindow : EditorWindow
 
         ItemDataEditorWindow.DefinitionCatalog.Fill(synchronizedDefinitions, itemManager);
         definitionCatalogDirty = false;
+        definitionCatalogVersion++;
+        InvalidateItemListRows();
         return synchronizedDefinitions;
     }
 
     private void InvalidateDefinitionCatalog()
     {
         definitionCatalogDirty = true;
+        filteredDefinitionsVersion = -1;
+        mapObjectDefinitionLookupVersion = -1;
+        itemIconCache.Clear();
+        itemRowContentCache.Clear();
+        InvalidateItemListRows();
+    }
+
+    private void InvalidateItemListRows()
+    {
+        cachedItemListRowsDefinitionVersion = -1;
+        cachedItemListRowsFolderRevision = -1;
+        cachedItemListRowsSearchText = string.Empty;
     }
 
     private static bool MatchesDefinitionSearch(ItemDefinition definition, string searchText)
@@ -1518,9 +1730,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         Action<MapObject> onSelected)
     {
         Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
-        GUIContent selectedContent = new GUIContent(
-            GetMapObjectDisplayName(currentSelection),
-            GetMapObjectIcon(currentSelection));
+        GUIContent selectedContent = new GUIContent(GetMapObjectDisplayName(currentSelection));
         if (EditorGUI.DropdownButton(popupRect, selectedContent, FocusType.Keyboard, EditorStyles.popup))
         {
             List<MapObject> options = new List<MapObject>(mapObjects.Count + 1) { null };
@@ -1744,56 +1954,162 @@ public class CraftingTreeEditorWindow : EditorWindow
         EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.yMin, 1f, rect.height), color);
     }
 
-    private static Texture GetItemIcon(ItemDefinition definition)
+    private Texture GetItemIcon(ItemDefinition definition)
     {
         if (definition == null || definition.icon == null)
         {
             return null;
         }
 
+        if (itemIconCache.TryGetValue(definition, out Texture cachedIcon))
+        {
+            if (cachedIcon != null)
+            {
+                return cachedIcon;
+            }
+
+            itemIconCache.Remove(definition);
+        }
+
         Texture preview = AssetPreview.GetAssetPreview(definition.icon);
         if (preview != null)
         {
+            itemIconCache[definition] = preview;
             return preview;
         }
 
         Texture mini = AssetPreview.GetMiniThumbnail(definition.icon);
         if (mini != null)
         {
+            itemIconCache[definition] = mini;
             return mini;
         }
 
-        return definition.icon.texture;
+        Texture iconTexture = definition.icon.texture;
+        itemIconCache[definition] = iconTexture;
+        return iconTexture;
     }
 
-    private static Texture GetMapObjectIcon(MapObject mapObject)
+    private GUIContent GetItemRowContent(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return GUIContent.none;
+        }
+
+        if (itemRowContentCache.TryGetValue(definition, out GUIContent content))
+        {
+            return content;
+        }
+
+        content = new GUIContent(
+            $"[{definition.id}] {GetDefinitionDisplayName(definition)}");
+        itemRowContentCache[definition] = content;
+        return content;
+    }
+
+    private ItemDefinition ResolveMapObjectDefinition(MapObject mapObject)
     {
         if (mapObject == null)
         {
             return null;
         }
 
-        GameObject target = mapObject.gameObject;
-        Texture preview = AssetPreview.GetAssetPreview(target);
-        if (preview != null)
+        ItemDefinition boundDefinition = mapObject.BoundItemDefinition;
+        if (boundDefinition != null)
         {
-            return preview;
+            return boundDefinition;
         }
 
-        return AssetPreview.GetMiniThumbnail(target);
+        EnsureMapObjectDefinitionLookup();
+        string assetPath = GetMapObjectAssetPath(mapObject);
+        if (!string.IsNullOrEmpty(assetPath)
+            && mapObjectDefinitionsByAssetPath.TryGetValue(assetPath, out ItemDefinition assetDefinition))
+        {
+            return assetDefinition;
+        }
+
+        ItemDefinition definition = ItemDefinitionLookup.ResolveById(
+            synchronizedDefinitions,
+            mapObject.ResolveItemId());
+        if (definition != null)
+        {
+            return definition;
+        }
+
+        for (int i = 0; i < synchronizedDefinitions.Count; i++)
+        {
+            ItemDefinition candidate = synchronizedDefinitions[i];
+            if (candidate != null && candidate.mapObject == mapObject)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
-    private static void DrawMapObjectIcon(Rect rect, MapObject mapObject)
+    private void EnsureMapObjectDefinitionLookup()
     {
-        Texture icon = GetMapObjectIcon(mapObject);
-        if (icon == null)
+        if (mapObjectDefinitionLookupVersion == definitionCatalogVersion)
+        {
+            return;
+        }
+
+        mapObjectDefinitionsByAssetPath.Clear();
+        for (int i = 0; i < synchronizedDefinitions.Count; i++)
+        {
+            ItemDefinition definition = synchronizedDefinitions[i];
+            if (definition == null || definition.mapObject == null)
+            {
+                continue;
+            }
+
+            string assetPath = GetMapObjectAssetPath(definition.mapObject);
+            if (!string.IsNullOrEmpty(assetPath)
+                && !mapObjectDefinitionsByAssetPath.ContainsKey(assetPath))
+            {
+                mapObjectDefinitionsByAssetPath.Add(assetPath, definition);
+            }
+        }
+
+        mapObjectDefinitionLookupVersion = definitionCatalogVersion;
+    }
+
+    private void DrawMapObjectIcon(Rect rect, MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return;
+        }
+
+        ItemDefinition definition = ResolveMapObjectDefinition(mapObject);
+        if (definition != null && definition.icon != null)
+        {
+            DrawItemIcon(rect, definition);
+            return;
+        }
+
+        if (Event.current == null || Event.current.type != EventType.Repaint)
+        {
+            return;
+        }
+
+        GameObject prefabRoot = GetMapObjectPrefabRoot(mapObject);
+        Texture preview = AssetPreview.GetAssetPreview(prefabRoot);
+        if (preview == null)
+        {
+            preview = AssetPreview.GetMiniThumbnail(prefabRoot);
+        }
+
+        if (preview == null)
         {
             return;
         }
 
         Color previousColor = GUI.color;
         GUI.color = Color.white;
-        GUI.DrawTexture(rect, icon, ScaleMode.ScaleToFit);
+        GUI.DrawTexture(rect, preview, ScaleMode.ScaleToFit);
         GUI.color = previousColor;
     }
 
@@ -1866,25 +2182,23 @@ public class CraftingTreeEditorWindow : EditorWindow
         EditorGUI.DrawRect(rect, new Color(0.2f, 0.2f, 0.2f));
     }
 
-    private static void DrawItemIcon(Rect rect, ItemDefinition definition)
+    private void DrawItemIcon(Rect rect, ItemDefinition definition)
     {
-        Texture icon = GetItemIcon(definition);
-        if (icon == null)
-        {
-            return;
-        }
-
-        Color previousColor = GUI.color;
-        GUI.color = Color.white;
-        GUI.DrawTexture(rect, icon, ScaleMode.ScaleToFit);
-        GUI.color = previousColor;
+        ItemDataEditorWindow.DrawItemIcon(rect, definition);
     }
 
-    private static ItemManager FindItemManager()
+    private ItemManager FindItemManager()
     {
+        if (!itemManagerCacheDirty && cachedItemManager != null)
+        {
+            return cachedItemManager;
+        }
+
+        cachedItemManager = null;
         ItemManager[] managers = Resources.FindObjectsOfTypeAll<ItemManager>();
         if (managers == null || managers.Length == 0)
         {
+            itemManagerCacheDirty = false;
             return null;
         }
 
@@ -1892,10 +2206,12 @@ public class CraftingTreeEditorWindow : EditorWindow
         {
             if (managers[i] != null)
             {
-                return managers[i];
+                cachedItemManager = managers[i];
+                break;
             }
         }
 
-        return null;
+        itemManagerCacheDirty = false;
+        return cachedItemManager;
     }
 }

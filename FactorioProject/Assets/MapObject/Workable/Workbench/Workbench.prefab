@@ -51,7 +51,7 @@ PrefabInstance:
     - target: {fileID: -7511558181221131132, guid: 0c296af64118202469417d1ee21ca8d5, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
       value: 
-      objectReference: {fileID: 2100000, guid: 6a481f48fdd3956449636bc342234342, type: 2}
+      objectReference: {fileID: 2100000, guid: 9fed1bc8bb59e014581ca677742bdfc3, type: 2}
     - target: {fileID: 919132149155446097, guid: 0c296af64118202469417d1ee21ca8d5, type: 3}
       propertyPath: m_Name
       value: Body
@@ -196,7 +196,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Workbench
-  objId: 11
+  objId: 13
   itemDefinition: {fileID: 11400000, guid: c7d14445b92c7d0468e83d73c68f384f, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

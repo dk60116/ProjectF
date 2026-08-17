@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
@@ -16,12 +17,15 @@ public class ObjectInfoPanel : MonoBehaviour
     private List<ItemSlot> focusedObjectSlots = new List<ItemSlot>();
     [SerializeField]
     private ItemInfoDescription infoLine;
+    [SerializeField]
+    private TextMeshProUGUI stackCountText;
 
     private Component boundTarget;
     private Component focusedPanelTarget;
     private Resource focusedPanelUnderlyingResource;
     private bool referencesResolved;
     private float nextLayoutRefreshTime;
+    private int displayedStackCount = -1;
 
     private void Awake()
     {
@@ -38,7 +42,9 @@ public class ObjectInfoPanel : MonoBehaviour
     public void Bind(Component target)
     {
         ResolveReferences();
-        if (!(target is MapObject) && !(target is Animal))
+        if (!(target is MapObject)
+            && !(target is Animal)
+            && !(target is PortableObject))
         {
             Clear();
             return;
@@ -90,6 +96,7 @@ public class ObjectInfoPanel : MonoBehaviour
         nextLayoutRefreshTime = 0f;
         ResolveReferences();
         ClearFocusedInfoPanels();
+        SetStackCountDisplay(0);
         CloseInfoLine();
         if (gameObject.activeSelf)
         {
@@ -104,7 +111,11 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void ResolveReferences()
     {
-        if (referencesResolved && infoLine != null && IsLocalComponent(infoLine))
+        if (referencesResolved
+            && infoLine != null
+            && IsLocalComponent(infoLine)
+            && stackCountText != null
+            && IsLocalComponent(stackCountText))
         {
             return;
         }
@@ -113,6 +124,8 @@ public class ObjectInfoPanel : MonoBehaviour
         {
             infoLine = GetComponentInChildren<ItemInfoDescription>(true);
         }
+
+        ResolveStackCountText();
 
         ResolveFocusedInfoPanelReferences();
         CloseExtraInfoLines();
@@ -127,6 +140,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (target is PortableObject)
+        {
+            CloseInfoLine();
+            return;
+        }
+
         MapObject mapObject = target as MapObject;
         if (mapObject is Resource resource)
         {
@@ -137,6 +156,12 @@ public class ObjectInfoPanel : MonoBehaviour
         if (mapObject is BoxObject boxObject)
         {
             ShowBoxObjectInfo(boxObject, underlyingResource);
+            return;
+        }
+
+        if (mapObject is Desk desk)
+        {
+            ShowDeskInfo(desk, underlyingResource);
             return;
         }
 
@@ -199,6 +224,10 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void RefreshFocusedInfoPanels(Component target, Resource underlyingResource)
     {
+        SetStackCountDisplay(target is PortableObject focusedPortableObject
+            ? Mathf.Max(1, focusedPortableObject.FocusStackCount)
+            : 0);
+
         bool selectionChanged = focusedPanelTarget != target
                                 || focusedPanelUnderlyingResource != underlyingResource;
         if (selectionChanged)
@@ -210,6 +239,14 @@ public class ObjectInfoPanel : MonoBehaviour
         {
             SetFocusedInfoPanelAnimal(animal);
             focusedPanelTarget = animal;
+            focusedPanelUnderlyingResource = null;
+            return;
+        }
+
+        if (target is PortableObject portableObject)
+        {
+            SetFocusedInfoPanelPortableObject(portableObject);
+            focusedPanelTarget = portableObject;
             focusedPanelUnderlyingResource = null;
             return;
         }
@@ -287,6 +324,26 @@ public class ObjectInfoPanel : MonoBehaviour
             ? definition.AnimalName
             : (animal != null ? animal.gameObject.name.Replace("(Clone)", string.Empty).Trim() : string.Empty);
         slot.SetCustomDisplay(icon, displayName, string.Empty);
+    }
+
+    private void SetFocusedInfoPanelPortableObject(PortableObject portableObject)
+    {
+        int itemId = portableObject != null ? portableObject.ItemId : -1;
+        SetFocusedInfoPanelVisible(0, itemId >= 0);
+        ItemSlot slot = GetListItem(focusedObjectSlots, 0);
+        if (slot == null)
+        {
+            return;
+        }
+
+        if (itemId >= 0)
+        {
+            slot.SetItemDisplay(itemId, 1, 0, true, false);
+        }
+        else
+        {
+            slot.Clear();
+        }
     }
 
     private void SetFocusedInfoPanelVisible(int index, bool visible)
@@ -374,6 +431,50 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowAnimal(animal);
+    }
+
+    private void ResolveStackCountText()
+    {
+        if (stackCountText != null && IsLocalComponent(stackCountText))
+        {
+            return;
+        }
+
+        stackCountText = null;
+        TextMeshProUGUI[] textComponents = GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int i = 0; i < textComponents.Length; i++)
+        {
+            TextMeshProUGUI candidate = textComponents[i];
+            if (candidate != null && candidate.name == "Stack Count")
+            {
+                stackCountText = candidate;
+                break;
+            }
+        }
+
+        displayedStackCount = -1;
+    }
+
+    private void SetStackCountDisplay(int stackCount)
+    {
+        int normalizedCount = Mathf.Max(0, stackCount);
+        if (stackCountText == null)
+        {
+            displayedStackCount = normalizedCount;
+            return;
+        }
+
+        bool visible = normalizedCount > 0;
+        if (displayedStackCount != normalizedCount)
+        {
+            stackCountText.text = visible ? $"x {normalizedCount}" : string.Empty;
+            displayedStackCount = normalizedCount;
+        }
+
+        if (stackCountText.gameObject.activeSelf != visible)
+        {
+            stackCountText.gameObject.SetActive(visible);
+        }
     }
 
     private void ShowResourceInfo(Resource resource)
@@ -524,6 +625,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowInputOutputModule(inputOutputModule, underlyingResource);
+    }
+
+    private void ShowDeskInfo(Desk desk, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowDesk(desk, underlyingResource);
     }
 
     private void ShowInstallationObjectInfo(InstallationObject installationObject, Resource underlyingResource)

@@ -713,7 +713,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Conveyor belt
-  objId: 31
+  objId: 37
   itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

@@ -3,14 +3,14 @@ using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 
-public class CraftingSlot : ItemSlot
+public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 {
     private const float DefaultIngredientSpacing = 10f;
     private const float DefaultIngredientChildSize = 80f;
-    private const float DefaultIngredientsRootOffset = 120f;
     private const float MinimumLayoutSize = 0.01f;
 
     private static CraftingSlot activeIngredientsSlot;
@@ -57,22 +57,25 @@ public class CraftingSlot : ItemSlot
     private bool ingredientsVisible;
     private bool slotVisualHidden;
     private bool blockedByCraftingMapObject;
+    private bool blockedByRequiredManual;
     private bool isCachingReferences;
     private bool isRefreshingCraftingMapObjectVisuals;
     private bool isHidingIngredientsImmediate;
     private bool ingredientsManualLayoutReady;
-    private bool ingredientsRootOffsetCached;
     private bool ingredientRevealAnimating;
+    private bool targetIconRaised;
     private Sequence ingredientRevealSequence;
+    private int targetIconOriginalSiblingIndex = -1;
     private float ingredientsSpacing = DefaultIngredientSpacing;
-    private float ingredientsRootHorizontalOffset = DefaultIngredientsRootOffset;
+    private float ingredientsRootHorizontalOffset = DefaultIngredientChildSize + DefaultIngredientSpacing;
     private int ingredientsExpansionDirectionSign;
     private int requiredCraftingMapObjectId = -1;
+    private int requiredManualItemId = -1;
     private Func<int, bool> externalCreateAction;
     private Func<int, bool> externalCanCreate;
     private int externallyProvidedIngredientItemId = -1;
     private int externallyProvidedIngredientCount;
-    private bool externalCreateButtonReady = true;
+    private bool createActionReady = true;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
     private readonly List<HUDButtonHoverTween> hoverTweenBuffer = new List<HUDButtonHoverTween>();
@@ -91,7 +94,58 @@ public class CraftingSlot : ItemSlot
 
     private void OnDisable()
     {
+        RestoreTargetIconRenderOrder();
         HideIngredientsImmediate();
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        CacheReferences();
+        if (rectTransform != null
+            && eventData != null
+            && RectTransformUtility.RectangleContainsScreenPoint(
+                rectTransform,
+                eventData.position,
+                eventData.enterEventCamera))
+        {
+            RaiseTargetIconRenderOrder();
+        }
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        RestoreTargetIconRenderOrder();
+    }
+
+    private void RaiseTargetIconRenderOrder()
+    {
+        Transform targetIcon = IconImage != null ? IconImage.transform : null;
+        if (targetIconRaised || targetIcon == null || targetIcon.parent != transform)
+        {
+            return;
+        }
+
+        targetIconOriginalSiblingIndex = targetIcon.GetSiblingIndex();
+        targetIcon.SetAsLastSibling();
+        targetIconRaised = true;
+    }
+
+    private void RestoreTargetIconRenderOrder()
+    {
+        if (!targetIconRaised)
+        {
+            return;
+        }
+
+        Transform targetIcon = IconImage != null ? IconImage.transform : null;
+        if (targetIcon != null && targetIcon.parent == transform)
+        {
+            int maxSiblingIndex = Mathf.Max(0, targetIcon.parent.childCount - 1);
+            targetIcon.SetSiblingIndex(Mathf.Clamp(targetIconOriginalSiblingIndex, 0, maxSiblingIndex));
+        }
+
+        targetIconOriginalSiblingIndex = -1;
+        targetIconRaised = false;
     }
 
     public override void SetItem(int itemId, int itemCount, int maxItemCount = 0)
@@ -181,6 +235,7 @@ public class CraftingSlot : ItemSlot
     public void Hide()
     {
         CacheReferences();
+        RestoreTargetIconRenderOrder();
         ResetHoverTweensImmediate();
 
         rectTransform.DOKill();
@@ -196,6 +251,7 @@ public class CraftingSlot : ItemSlot
     public void HideImmediate()
     {
         CacheReferences();
+        RestoreTargetIconRenderOrder();
         ResetHoverTweensImmediate();
         rectTransform.DOKill();
         canvasGroup.DOKill();
@@ -461,6 +517,7 @@ public class CraftingSlot : ItemSlot
             return;
         }
 
+        SetTargetButtonHoverEnabled(false);
         CaptureIngredientsExpansionDirection();
         RefreshIngredients(true);
     }
@@ -486,7 +543,7 @@ public class CraftingSlot : ItemSlot
         externalCanCreate = null;
         externallyProvidedIngredientItemId = -1;
         externallyProvidedIngredientCount = 0;
-        externalCreateButtonReady = true;
+        createActionReady = true;
         SetTargetButtonHoverEnabled(true);
         RefreshCraftingMapObjectState();
     }
@@ -535,23 +592,21 @@ public class CraftingSlot : ItemSlot
         bool handReady = externalCreateAction != null
             ? externalCanCreate == null || externalCanCreate(ItemId)
             : CanPrepareHandForCrafting(ItemId);
-        bool createButtonReady = hasAllIngredients && handReady;
-        bool createButtonChangedVisibility;
-        if (externalCreateAction != null)
+        BagSlot parentBagSlot = externalCreateAction == null
+            ? GetComponentInParent<BagSlot>()
+            : null;
+        bool manualAccessReady = parentBagSlot == null
+                                 || parentBagSlot.HasRequiredManualForCrafting(ItemId);
+        bool craftingAccessReady = parentBagSlot == null || parentBagSlot.CanCraftItem(ItemId);
+        bool createButtonReady = hasAllIngredients && handReady && craftingAccessReady;
+        createActionReady = createButtonReady;
+        bool hasManualRequirement = externalCreateAction == null && requiredManualItemId >= 0;
+        bool showRequiredMapObject = externalCreateAction == null && requiredCraftingMapObjectId >= 0;
+        bool showCreateSlot = manualAccessReady || hasManualRequirement || showRequiredMapObject;
+        bool createButtonChangedVisibility = SetCreateButtonVisible(showCreateSlot);
+        if (createButton != null)
         {
-            externalCreateButtonReady = createButtonReady;
-            createButtonChangedVisibility = SetCreateButtonVisible(true);
-            if (createButton != null)
-            {
-                createButton.interactable = createButtonReady;
-                SetCreateButtonHoverEnabled(true);
-            }
-        }
-        else
-        {
-            externalCreateButtonReady = true;
-            createButtonChangedVisibility = SetCreateButtonVisible(
-                createButtonReady || blockedByCraftingMapObject);
+            createButton.interactable = manualAccessReady && createButtonReady;
         }
         bool resetCreateButtonLayout = ShouldResetCreateButtonLayout(
             revealSequentially,
@@ -1090,6 +1145,8 @@ public class CraftingSlot : ItemSlot
                     ResetRevealCanvasGroup(slot.gameObject, 0f, false);
                 }
             }
+
+            SetTargetButtonHoverEnabled(externalCreateAction == null);
         }
         finally
         {
@@ -1301,9 +1358,14 @@ public class CraftingSlot : ItemSlot
 
     private float ResolveCreateButtonVisualAlpha()
     {
-        return externalCreateAction != null && !externalCreateButtonReady
-            ? Mathf.Clamp01(insufficientIngredientAlpha)
-            : 1f;
+        if (externalCreateAction == null
+            && ((blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0)
+                || (blockedByRequiredManual && requiredManualItemId >= 0)))
+        {
+            return 1f;
+        }
+
+        return createActionReady ? 1f : Mathf.Clamp01(insufficientIngredientAlpha);
     }
 
     private void StopIngredientReveal()
@@ -1471,6 +1533,7 @@ public class CraftingSlot : ItemSlot
         }
         else
         {
+            RestoreTargetIconRenderOrder();
             rectTransform.localScale = Vector3.zero;
             canvasGroup.alpha = 0f;
             if (button != null)
@@ -1515,16 +1578,8 @@ public class CraftingSlot : ItemSlot
             contentSizeFitter.enabled = false;
         }
 
-        if (!ingredientsRootOffsetCached)
-        {
-            float configuredOffset = Mathf.Abs(ingredientsRoot.anchoredPosition.x);
-            if (configuredOffset > MinimumLayoutSize)
-            {
-                ingredientsRootHorizontalOffset = configuredOffset;
-            }
-
-            ingredientsRootOffsetCached = true;
-        }
+        Vector2 targetSlotSize = ResolveCurrentIngredientChildSize(rectTransform);
+        ingredientsRootHorizontalOffset = targetSlotSize.x + ingredientsSpacing;
 
         ingredientsManualLayoutReady = true;
     }
@@ -1830,12 +1885,26 @@ public class CraftingSlot : ItemSlot
     {
         requiredCraftingMapObjectIds.Clear();
         blockedByCraftingMapObject = false;
+        blockedByRequiredManual = false;
         requiredCraftingMapObjectId = -1;
+        requiredManualItemId = -1;
 
         if (!HasItem || externalCreateAction != null)
         {
             RefreshCraftingMapObjectVisuals();
             return;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        if (itemManager != null
+            && itemManager.TryGetRequiredManualForTarget(ItemId, out ItemDefinition requiredManual))
+        {
+            requiredManualItemId = requiredManual.id;
+            Player player = GameManager.Instance.Player;
+            blockedByRequiredManual = player == null
+                                      || !player.HasCraftingManual(requiredManualItemId);
         }
 
         if (!CraftingTreeRuntime.TryGetRequiredCraftingMapObjectIds(ItemId, requiredCraftingMapObjectIds))
@@ -1861,7 +1930,7 @@ public class CraftingSlot : ItemSlot
         BagSlot parentBagSlot = GetComponentInParent<BagSlot>();
         if (parentBagSlot != null)
         {
-            blockedByCraftingMapObject = !parentBagSlot.CanCraftItem(ItemId);
+            blockedByCraftingMapObject = !parentBagSlot.CanSatisfyCraftingMapObjectRequirement(ItemId);
         }
 
         RefreshCraftingMapObjectVisuals();
@@ -1876,10 +1945,18 @@ public class CraftingSlot : ItemSlot
 
         isRefreshingCraftingMapObjectVisuals = true;
 
-        bool showBlockedState = externalCreateAction == null
-                                && HasItem
-                                && blockedByCraftingMapObject
-                                && requiredCraftingMapObjectId >= 0;
+        bool showMissingManual = externalCreateAction == null
+                                 && HasItem
+                                 && blockedByRequiredManual
+                                 && requiredManualItemId >= 0;
+        bool showRequiredMapObject = !showMissingManual
+                                     && externalCreateAction == null
+                                     && HasItem
+                                     && blockedByCraftingMapObject
+                                     && requiredCraftingMapObjectId >= 0;
+        bool showRequirementIcon = showMissingManual || showRequiredMapObject;
+        bool showBlockedState = showMissingManual
+                                || (showRequiredMapObject && blockedByCraftingMapObject);
         try
         {
             SetCreateButtonHoverEnabled(!showBlockedState);
@@ -1891,14 +1968,17 @@ public class CraftingSlot : ItemSlot
 
             if (createIcon != null)
             {
-                createIcon.enabled = HasItem && !showBlockedState;
+                createIcon.enabled = HasItem && !showRequirementIcon;
             }
 
             if (mapObjectIcon != null)
             {
-                if (showBlockedState)
+                if (showRequirementIcon)
                 {
-                    mapObjectIcon.sprite = ResolveRequiredCraftingMapObjectIcon(requiredCraftingMapObjectId);
+                    int requiredItemId = showMissingManual
+                        ? requiredManualItemId
+                        : requiredCraftingMapObjectId;
+                    mapObjectIcon.sprite = ResolveRequiredItemIcon(requiredItemId);
                     mapObjectIcon.enabled = mapObjectIcon.sprite != null;
                 }
                 else
@@ -1910,7 +1990,7 @@ public class CraftingSlot : ItemSlot
 
             if (showBlockedState)
             {
-                ResetRequiredMapObjectTransform();
+                ResetRequiredItemTransform();
             }
         }
         finally
@@ -1919,7 +1999,7 @@ public class CraftingSlot : ItemSlot
         }
     }
 
-    private Sprite ResolveRequiredCraftingMapObjectIcon(int itemId)
+    private Sprite ResolveRequiredItemIcon(int itemId)
     {
         if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
@@ -2058,7 +2138,7 @@ public class CraftingSlot : ItemSlot
         ResetHoverTweensIn(createButton, rebuildLayout);
     }
 
-    private void ResetRequiredMapObjectTransform()
+    private void ResetRequiredItemTransform()
     {
         if (createButton != null && createButton.transform is RectTransform createRect)
         {

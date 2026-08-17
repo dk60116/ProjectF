@@ -375,8 +375,7 @@ internal static class WheelPortableAssetGenerator
     {
         int assignedCount = 0;
         ItemManager[] itemManagers = UnityEngine.Object.FindObjectsByType<ItemManager>(
-            FindObjectsInactive.Include,
-            FindObjectsSortMode.None);
+            FindObjectsInactive.Include);
 
         for (int managerIndex = 0; managerIndex < itemManagers.Length; managerIndex++)
         {

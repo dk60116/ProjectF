@@ -1659,6 +1659,12 @@ public partial class TerrainGenerator : MonoBehaviour
         return resourceStateStore.GetInstallationItemCounts(countsByItemId);
     }
 
+    public bool HasStoredInstallationItem(int itemId)
+    {
+        EnsureResourceStateStore();
+        return resourceStateStore != null && resourceStateStore.HasStoredInstallationItem(itemId);
+    }
+
     public void SaveRuntimeInstallationState(InstallationObject installationObject)
     {
         EnsureResourceStateStore();
@@ -2461,6 +2467,24 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
 #if UNITY_EDITOR
+    public bool HasEditorPreviewChunks()
+    {
+        if (Application.isPlaying)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            if (HasDirectChunkBlocks(transform.GetChild(i)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void ClearEditorPreviewChunks()
     {
         if (Application.isPlaying)

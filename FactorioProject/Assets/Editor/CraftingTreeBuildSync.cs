@@ -8,6 +8,8 @@ using UnityEngine;
 
 public static class CraftingTreeBuildSync
 {
+    private const string TargetAssetPath = "Assets/Resources/Data/CraftingTree/crafting_tree.bytes";
+
     [InitializeOnLoadMethod]
     private static void EnsureCraftingTreeInResources()
     {
@@ -38,7 +40,9 @@ public static class CraftingTreeBuildSync
         }
 
         File.Copy(sourcePath, targetPath, true);
-        AssetDatabase.Refresh();
+        AssetDatabase.ImportAsset(
+            TargetAssetPath,
+            ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
     }
 }
 

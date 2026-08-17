@@ -299,7 +299,6 @@ public class InputOutputModule : InstallationObject,
     private bool workAnimatorHasWorkParameter;
     private bool workAnimatorStateInitialized;
     private bool lastWorkAnimatorState;
-    private bool runtimeUpdateTickRegistered;
     private bool runtimeSleeping;
     private readonly List<ItemIoEntry> effectiveInputList = new List<ItemIoEntry>();
     private readonly List<ItemIoEntry> effectiveOutputList = new List<ItemIoEntry>();
@@ -1672,12 +1671,6 @@ public class InputOutputModule : InstallationObject,
 
     private void SetRuntimeUpdateTickRegistered(bool registered)
     {
-        if (runtimeUpdateTickRegistered == registered)
-        {
-            return;
-        }
-
-        runtimeUpdateTickRegistered = registered;
         if (registered)
         {
             MapObjectTickManager.RegisterUpdateTick(this);

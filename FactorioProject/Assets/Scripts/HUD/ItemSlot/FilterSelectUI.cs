@@ -155,11 +155,14 @@ public class FilterSelectUI : MonoBehaviour
         HashSet<int> allowedItemIds = new HashSet<int>();
         HashSet<ItemDefinition.EnergyType> allowedEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
         bool restrictToAreaItems = TryBuildAreaRestrictedFilter(boundTarget, allowedItemIds, allowedEnergyTypes);
+        bool excludeIgnoredDefinitions = boundTarget is BoxObject;
 
         for (int i = 0; i < definitions.Count; i++)
         {
             ItemDefinition definition = definitions[i];
-            if (definition == null || definition.id < 0)
+            if (definition == null
+                || definition.id < 0
+                || (excludeIgnoredDefinitions && definition.ignoreFilter))
             {
                 continue;
             }

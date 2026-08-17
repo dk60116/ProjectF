@@ -35,6 +35,13 @@ public class PortableObject : MonoBehaviour
     private bool useBatchedRendering;
     private bool suppressVisualRendering;
     private bool isMovingToTarget;
+    private bool hoverOutlineVisible;
+    private bool focusedOutlineVisible;
+    private bool restoreBatchedRenderingAfterOutline;
+    private List<PortableObject> focusStack;
+    private PortableObject focusOutlineOwner;
+    private Transform cachedFocusContainerParent;
+    private bool cachedFocusContainerExcluded;
     private bool sleepAwakeSleeping;
     private bool debugVisualStateInitialized;
     private bool lastSleepAwakeDarkTint;
@@ -48,6 +55,30 @@ public class PortableObject : MonoBehaviour
     public bool IsMovingToTarget => isMovingToTarget;
     public bool IsUsingBatchedRendering => useBatchedRendering;
     public bool IsVisualRenderingSuppressed => suppressVisualRendering;
+    public int FocusStackCount
+    {
+        get
+        {
+            int count = 0;
+            if (focusStack != null)
+            {
+                for (int i = 0; i < focusStack.Count; i++)
+                {
+                    PortableObject member = focusStack[i];
+                    if (member != null
+                        && member.ItemId == id
+                        && member.CachedGameObject.activeInHierarchy
+                        && !member.IsMovingToTarget
+                        && !member.IsVisualRenderingSuppressed)
+                    {
+                        count++;
+                    }
+                }
+            }
+
+            return count > 0 ? count : (id >= 0 ? 1 : 0);
+        }
+    }
     public bool WasMovedByConveyorThisFrame => lastConveyorMoveFrame == Time.frameCount;
     public Transform CachedTransform => cachedTransform != null ? cachedTransform : (cachedTransform = transform);
     public GameObject CachedGameObject => cachedGameObject != null ? cachedGameObject : (cachedGameObject = gameObject);
@@ -336,8 +367,19 @@ public class PortableObject : MonoBehaviour
 
     public void SetBatchedRendering(bool shouldUseBatchedRendering)
     {
+        if (!shouldUseBatchedRendering)
+        {
+            DetachFromFocusOutlineForExternalRenderingChange();
+        }
+
         suppressVisualRendering = false;
         ResolveBodyRenderer();
+        if (shouldUseBatchedRendering && HasActiveOutlineRequest)
+        {
+            restoreBatchedRenderingAfterOutline = true;
+            shouldUseBatchedRendering = false;
+        }
+
         if (useBatchedRendering == shouldUseBatchedRendering && (!useBatchedRendering || portableItemRenderer != null))
         {
             MarkPortableItemRenderDataDirty();
@@ -378,6 +420,7 @@ public class PortableObject : MonoBehaviour
         suppressVisualRendering = suppressed;
         if (suppressVisualRendering)
         {
+            ClearFocusOutlines(false);
             if (useBatchedRendering)
             {
                 UnregisterFromPortableItemRenderer();
@@ -570,6 +613,285 @@ public class PortableObject : MonoBehaviour
         UpdateRendererVisibility();
     }
 
+    public bool TryGetWorldFocusBounds(out Bounds focusBounds)
+    {
+        focusBounds = default;
+        if (id < 0
+            || isMovingToTarget
+            || suppressVisualRendering
+            || IsFocusExcludedByContainer()
+            || !CachedGameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        ResolveBodyRenderer();
+        if (bodyRenderer == null)
+        {
+            return false;
+        }
+
+        focusBounds = bodyRenderer.bounds;
+        focusBounds.Expand(new Vector3(0.24f, 0.16f, 0.24f));
+        return true;
+    }
+
+    private bool IsFocusExcludedByContainer()
+    {
+        Transform currentParent = CachedTransform.parent;
+        if (cachedFocusContainerParent == currentParent)
+        {
+            return cachedFocusContainerExcluded;
+        }
+
+        cachedFocusContainerParent = currentParent;
+        cachedFocusContainerExcluded = currentParent != null
+                                       && (currentParent.GetComponentInParent<Train>() != null
+                                           || currentParent.GetComponentInParent<BoxObject>() != null);
+        return cachedFocusContainerExcluded;
+    }
+
+    public void SetFocusStack(List<PortableObject> stack)
+    {
+        if (!ReferenceEquals(focusStack, stack))
+        {
+            ReleaseFocusStackOutlineMembers(true);
+            focusStack = stack;
+        }
+
+        if (HasOwnOutlineRequest)
+        {
+            AcquireFocusStackOutlineMembers();
+        }
+    }
+
+    public void SetHoverOutline(bool visible)
+    {
+        if (hoverOutlineVisible == visible)
+        {
+            return;
+        }
+
+        ResolveBodyRenderer();
+        if (bodyRenderer == null)
+        {
+            return;
+        }
+
+        hoverOutlineVisible = visible;
+        if (visible)
+        {
+            AcquireFocusStackOutlineMembers();
+            AnimalScreenSpaceOutline.ShowHovered(bodyRenderer);
+        }
+        else
+        {
+            AnimalScreenSpaceOutline.HideHovered(bodyRenderer);
+            RefreshFocusStackOutlineRendering();
+        }
+    }
+
+    public void SetFocusedOutline(bool visible)
+    {
+        if (focusedOutlineVisible == visible)
+        {
+            return;
+        }
+
+        ResolveBodyRenderer();
+        if (bodyRenderer == null)
+        {
+            return;
+        }
+
+        focusedOutlineVisible = visible;
+        if (visible)
+        {
+            AcquireFocusStackOutlineMembers();
+            AnimalScreenSpaceOutline.ShowFocused(bodyRenderer);
+        }
+        else
+        {
+            AnimalScreenSpaceOutline.HideFocused(bodyRenderer);
+            RefreshFocusStackOutlineRendering();
+        }
+    }
+
+    public int CopyOutlineMaskRenderers(Renderer[] destination)
+    {
+        if (destination == null || destination.Length == 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        if (HasOwnOutlineRequest && focusStack != null)
+        {
+            for (int i = 0; i < focusStack.Count && count < destination.Length; i++)
+            {
+                PortableObject member = focusStack[i];
+                if (member == null || member.focusOutlineOwner != this)
+                {
+                    continue;
+                }
+
+                member.ResolveBodyRenderer();
+                Renderer renderer = member.bodyRenderer;
+                if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy)
+                {
+                    destination[count++] = renderer;
+                }
+            }
+        }
+
+        if (count == 0)
+        {
+            ResolveBodyRenderer();
+            if (bodyRenderer != null && bodyRenderer.enabled && bodyRenderer.gameObject.activeInHierarchy)
+            {
+                destination[count++] = bodyRenderer;
+            }
+        }
+
+        return count;
+    }
+
+    private bool HasOwnOutlineRequest => hoverOutlineVisible || focusedOutlineVisible;
+    private bool HasActiveOutlineRequest => HasOwnOutlineRequest || focusOutlineOwner != null;
+
+    private void RefreshFocusStackOutlineRendering()
+    {
+        if (HasOwnOutlineRequest)
+        {
+            AcquireFocusStackOutlineMembers();
+            return;
+        }
+
+        ReleaseFocusStackOutlineMembers(true);
+    }
+
+    private void AcquireFocusStackOutlineMembers()
+    {
+        if (focusStack == null || focusStack.Count == 0)
+        {
+            AcquireFocusOutlineOwner(this);
+            return;
+        }
+
+        for (int i = 0; i < focusStack.Count; i++)
+        {
+            PortableObject member = focusStack[i];
+            if (member != null && member.ItemId == id)
+            {
+                member.AcquireFocusOutlineOwner(this);
+            }
+        }
+    }
+
+    private void AcquireFocusOutlineOwner(PortableObject owner)
+    {
+        if (owner == null || focusOutlineOwner != null)
+        {
+            return;
+        }
+
+        focusOutlineOwner = owner;
+        PrepareIndividualOutlineRendering();
+    }
+
+    private void PrepareIndividualOutlineRendering()
+    {
+        if (useBatchedRendering)
+        {
+            restoreBatchedRenderingAfterOutline = true;
+            useBatchedRendering = false;
+            UnregisterFromPortableItemRenderer();
+            UpdateRendererVisibility();
+        }
+        else
+        {
+            UpdateRendererVisibility();
+        }
+    }
+
+    private void RestoreBatchedRenderingAfterOutlineIfNeeded()
+    {
+        if (HasActiveOutlineRequest || !restoreBatchedRenderingAfterOutline)
+        {
+            return;
+        }
+
+        restoreBatchedRenderingAfterOutline = false;
+        SetBatchedRendering(true);
+    }
+
+    private void ReleaseFocusStackOutlineMembers(bool restoreBatchedRendering)
+    {
+        if (focusStack != null)
+        {
+            for (int i = 0; i < focusStack.Count; i++)
+            {
+                PortableObject member = focusStack[i];
+                if (member != null)
+                {
+                    member.ReleaseFocusOutlineOwner(this, restoreBatchedRendering || member != this);
+                }
+            }
+        }
+
+        ReleaseFocusOutlineOwner(this, restoreBatchedRendering);
+    }
+
+    private void ReleaseFocusOutlineOwner(PortableObject owner, bool restoreBatchedRendering)
+    {
+        if (focusOutlineOwner != owner)
+        {
+            return;
+        }
+
+        focusOutlineOwner = null;
+        if (restoreBatchedRendering)
+        {
+            RestoreBatchedRenderingAfterOutlineIfNeeded();
+        }
+        else
+        {
+            restoreBatchedRenderingAfterOutline = false;
+        }
+    }
+
+    private void DetachFromFocusOutlineForExternalRenderingChange()
+    {
+        if (HasOwnOutlineRequest)
+        {
+            ClearFocusOutlines(false);
+            return;
+        }
+
+        focusOutlineOwner = null;
+        restoreBatchedRenderingAfterOutline = false;
+    }
+
+    private void ClearFocusOutlines(bool restoreBatchedRendering)
+    {
+        if (bodyRenderer != null)
+        {
+            AnimalScreenSpaceOutline.HideHovered(bodyRenderer);
+            AnimalScreenSpaceOutline.HideFocused(bodyRenderer);
+        }
+
+        hoverOutlineVisible = false;
+        focusedOutlineVisible = false;
+        ReleaseFocusStackOutlineMembers(restoreBatchedRendering);
+        PortableObject remainingOwner = focusOutlineOwner;
+        if (remainingOwner != null)
+        {
+            ReleaseFocusOutlineOwner(remainingOwner, restoreBatchedRendering);
+        }
+
+        focusStack = null;
+    }
+
     private void OnEnable()
     {
         liveObjects.Add(this);
@@ -589,12 +911,14 @@ public class PortableObject : MonoBehaviour
     {
         liveObjects.Remove(this);
         isMovingToTarget = false;
+        ClearFocusOutlines(false);
         UnregisterFromPortableItemRenderer();
     }
 
     private void OnDestroy()
     {
         liveObjects.Remove(this);
+        ClearFocusOutlines(false);
         UnregisterFromPortableItemRenderer();
     }
 

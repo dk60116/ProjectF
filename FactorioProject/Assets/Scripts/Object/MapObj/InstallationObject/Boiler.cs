@@ -493,30 +493,39 @@ public class Boiler : InputOutputModule
         }
 
         preserveSteamReadyTemperatureForMakeupWater = false;
-        TryCoolStoredWater(deltaTime);
-
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (!HasOperationalEnergyAvailable(installedDefinition))
         {
+            TryCoolStoredWater(deltaTime);
             return;
         }
 
         if (WaterTemperatureCelsius + FluidEpsilon < MaxWaterTemperatureCelsiusValue)
         {
-            if (!TryHeatWater(deltaTime, inputItemId, installedDefinition)
-                || WaterTemperatureCelsius + FluidEpsilon < MaxWaterTemperatureCelsiusValue)
+            if (!TryHeatWater(deltaTime, inputItemId, installedDefinition))
             {
-                return;
+                TryCoolStoredWater(deltaTime);
             }
+
+            // Heating and steam generation are separate operating ticks. Running
+            // both here consumed the configured boiler energy rate twice whenever
+            // the water reached 100C during this tick.
+            return;
         }
 
-        TryGenerateSteam(
-            deltaTime,
-            inputItemId,
-            inputLitersPerSecond,
-            outputItemId,
-            outputLitersPerSecond,
-            installedDefinition);
+        if (!TryGenerateSteam(
+                deltaTime,
+                inputItemId,
+                inputLitersPerSecond,
+                outputItemId,
+                outputLitersPerSecond,
+                installedDefinition))
+        {
+            // A steam-ready boiler cools only while it cannot operate. Cooling
+            // before every generation tick forced it below 100C and made the
+            // full-water startup condition repeatedly interrupt steady output.
+            TryCoolStoredWater(deltaTime);
+        }
     }
 
     private bool TryHeatWater(float deltaTime, int inputItemId, ItemDefinition installedDefinition)

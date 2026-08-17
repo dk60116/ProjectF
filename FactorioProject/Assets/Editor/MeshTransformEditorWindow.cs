@@ -104,6 +104,14 @@ public class MeshTransformEditorWindow : EditorWindow
     private Mesh previewMeshSource;
     private GameObject previewModelSource;
     private bool previewDirty = true;
+    private bool sourceInfoDirty = true;
+    private GameObject cachedInfoSourceModel;
+    private Mesh cachedInfoSourceMesh;
+    private string cachedSourcePath = string.Empty;
+    private int cachedSourceMeshCount;
+    private int cachedSourceVertexCount;
+    private Bounds cachedSourceBounds;
+    private bool cachedSourceHasBounds;
     private PivotDragMode pivotDragMode = PivotDragMode.None;
     private Vector3 pivotDragStartPreviewPosition;
     private Vector3 pivotDragStartPointerPreviewPosition;
@@ -121,6 +129,7 @@ public class MeshTransformEditorWindow : EditorWindow
 
     private void OnEnable()
     {
+        sourceInfoDirty = true;
         TrySyncWithSelection();
         EnsurePreviewRenderer();
     }
@@ -302,6 +311,13 @@ public class MeshTransformEditorWindow : EditorWindow
         Repaint();
     }
 
+    private void OnProjectChange()
+    {
+        sourceInfoDirty = true;
+        previewDirty = true;
+        Repaint();
+    }
+
     private void DrawOptionsSection()
     {
         EditorGUILayout.LabelField("Options", EditorStyles.boldLabel);
@@ -456,6 +472,7 @@ public class MeshTransformEditorWindow : EditorWindow
 
         sourceModel = model;
         sourceMesh = model != null ? FindFirstMeshInModel(model) : null;
+        sourceInfoDirty = true;
         previewDirty = true;
     }
 
@@ -468,6 +485,7 @@ public class MeshTransformEditorWindow : EditorWindow
 
         sourceModel = null;
         sourceMesh = mesh;
+        sourceInfoDirty = true;
         previewDirty = true;
     }
 
@@ -478,82 +496,65 @@ public class MeshTransformEditorWindow : EditorWindow
 
     private string GetActiveSourcePath()
     {
-        if (sourceModel != null)
-        {
-            return AssetDatabase.GetAssetPath(sourceModel);
-        }
-
-        return sourceMesh != null ? AssetDatabase.GetAssetPath(sourceMesh) : string.Empty;
+        EnsureSourceInfoCache();
+        return cachedSourcePath;
     }
 
     private int GetSourceMeshCount()
     {
-        if (sourceModel != null)
-        {
-            MeshFilter[] meshFilters = sourceModel.GetComponentsInChildren<MeshFilter>(true);
-            int count = 0;
-            for (int i = 0; i < meshFilters.Length; i++)
-            {
-                if (meshFilters[i] != null && meshFilters[i].sharedMesh != null)
-                {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
-        return sourceMesh != null ? 1 : 0;
+        EnsureSourceInfoCache();
+        return cachedSourceMeshCount;
     }
 
     private int GetSourceVertexCount()
     {
-        if (sourceModel != null)
-        {
-            MeshFilter[] meshFilters = sourceModel.GetComponentsInChildren<MeshFilter>(true);
-            int count = 0;
-            for (int i = 0; i < meshFilters.Length; i++)
-            {
-                Mesh mesh = meshFilters[i] != null ? meshFilters[i].sharedMesh : null;
-                if (mesh != null)
-                {
-                    count += mesh.vertexCount;
-                }
-            }
-
-            return count;
-        }
-
-        return sourceMesh != null ? sourceMesh.vertexCount : 0;
+        EnsureSourceInfoCache();
+        return cachedSourceVertexCount;
     }
 
     private bool TryGetSourceBounds(out Bounds bounds)
     {
-        if (sourceModel != null)
-        {
-            return TryCalculateModelBounds(sourceModel, out bounds);
-        }
-
-        if (sourceMesh != null)
-        {
-            bounds = sourceMesh.bounds;
-            return true;
-        }
-
-        bounds = default;
-        return false;
+        EnsureSourceInfoCache();
+        bounds = cachedSourceBounds;
+        return cachedSourceHasBounds;
     }
 
-    private static bool TryCalculateModelBounds(GameObject modelRoot, out Bounds bounds)
+    private void EnsureSourceInfoCache()
     {
-        bounds = default;
-        if (modelRoot == null)
+        if (!sourceInfoDirty
+            && cachedInfoSourceModel == sourceModel
+            && cachedInfoSourceMesh == sourceMesh)
         {
-            return false;
+            return;
         }
 
-        bool hasBounds = false;
-        MeshFilter[] meshFilters = modelRoot.GetComponentsInChildren<MeshFilter>(true);
+        sourceInfoDirty = false;
+        cachedInfoSourceModel = sourceModel;
+        cachedInfoSourceMesh = sourceMesh;
+        cachedSourcePath = sourceModel != null
+            ? AssetDatabase.GetAssetPath(sourceModel)
+            : sourceMesh != null
+                ? AssetDatabase.GetAssetPath(sourceMesh)
+                : string.Empty;
+        cachedSourceMeshCount = 0;
+        cachedSourceVertexCount = 0;
+        cachedSourceBounds = default;
+        cachedSourceHasBounds = false;
+
+        if (sourceModel == null)
+        {
+            if (sourceMesh != null)
+            {
+                cachedSourceMeshCount = 1;
+                cachedSourceVertexCount = sourceMesh.vertexCount;
+                cachedSourceBounds = sourceMesh.bounds;
+                cachedSourceHasBounds = true;
+            }
+
+            return;
+        }
+
+        MeshFilter[] meshFilters = sourceModel.GetComponentsInChildren<MeshFilter>(true);
         for (int i = 0; i < meshFilters.Length; i++)
         {
             MeshFilter meshFilter = meshFilters[i];
@@ -563,11 +564,15 @@ public class MeshTransformEditorWindow : EditorWindow
                 continue;
             }
 
-            Matrix4x4 meshToRoot = GetTransformToRoot(modelRoot.transform, meshFilter.transform);
-            EncapsulateTransformedBounds(mesh.bounds, meshToRoot, ref bounds, ref hasBounds);
+            cachedSourceMeshCount++;
+            cachedSourceVertexCount += mesh.vertexCount;
+            Matrix4x4 meshToRoot = GetTransformToRoot(sourceModel.transform, meshFilter.transform);
+            EncapsulateTransformedBounds(
+                mesh.bounds,
+                meshToRoot,
+                ref cachedSourceBounds,
+                ref cachedSourceHasBounds);
         }
-
-        return hasBounds;
     }
 
     private static void EncapsulateTransformedBounds(

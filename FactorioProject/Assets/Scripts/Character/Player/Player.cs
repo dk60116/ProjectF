@@ -922,6 +922,46 @@ public class Player : Character
         return activeBag != null && activeBag.gameObject.activeInHierarchy ? activeBag : null;
     }
 
+    public int GetCarriedItemCount(int itemId)
+    {
+        if (itemId < 0)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        PlayerBag activeBag = GetBag();
+        if (activeBag != null)
+        {
+            total += activeBag.GetTotalItemCount(itemId);
+        }
+
+        PlayerBag activeHandBag = GetHandBag();
+        if (activeHandBag != null)
+        {
+            activeHandBag.RefreshExternalStackCounts(false);
+            total += activeHandBag.GetTotalItemCount(itemId);
+        }
+
+        return total;
+    }
+
+    public bool HasCraftingManual(int manualItemId)
+    {
+        if (manualItemId < 0)
+        {
+            return false;
+        }
+
+        if (GetCarriedItemCount(manualItemId) > 0 || Desk.HasStoredManual(manualItemId))
+        {
+            return true;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        return terrain != null && terrain.HasStoredInstallationItem(manualItemId);
+    }
+
     public bool TryAddToBag(int objectId, out PortableObject targetPortableObject)
     {
         targetPortableObject = null;

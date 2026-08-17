@@ -23,6 +23,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private static MapObjectTickManager instance;
     private static bool applicationQuitting;
+    private static readonly HashSet<IMapObjectUpdateTick> requestedUpdateTicks =
+        new HashSet<IMapObjectUpdateTick>();
 
     [SerializeField, Min(0.001f)]
     private float updateTickIntervalSeconds = DefaultUpdateTickIntervalSeconds;
@@ -34,6 +36,10 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private readonly HashSet<IMapObjectUpdateTick> updateTickEntrySet = new HashSet<IMapObjectUpdateTick>();
     private readonly Dictionary<IMapObjectUpdateTick, UpdateTickEntry> updateTickEntriesByTick =
         new Dictionary<IMapObjectUpdateTick, UpdateTickEntry>();
+    private readonly List<IMapObjectUpdateTick> requestedTickCleanupBuffer =
+        new List<IMapObjectUpdateTick>();
+    private readonly List<IMapObjectUpdateTick> activeTickCleanupBuffer =
+        new List<IMapObjectUpdateTick>();
     private int nextAliveValidationFrame;
     private bool tickingUpdateObjects;
     private bool updateTicksDirty;
@@ -45,17 +51,38 @@ public sealed class MapObjectTickManager : MonoBehaviour
             return;
         }
 
+        requestedUpdateTicks.Add(tick);
         EnsureInstance().AddUpdateTick(tick);
     }
 
     public static void UnregisterUpdateTick(IMapObjectUpdateTick tick)
     {
-        if (tick == null || instance == null)
+        if (tick == null)
         {
             return;
         }
 
-        instance.RemoveUpdateTick(tick);
+        requestedUpdateTicks.Remove(tick);
+        if (instance != null)
+        {
+            instance.RemoveUpdateTick(tick);
+        }
+    }
+
+    public static bool IsUpdateTickRegistered(IMapObjectUpdateTick tick)
+    {
+        return tick != null
+               && requestedUpdateTicks.Contains(tick)
+               && instance != null
+               && instance.HasExecutableUpdateTick(tick);
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        instance = null;
+        applicationQuitting = false;
+        requestedUpdateTicks.Clear();
     }
 
     private static MapObjectTickManager EnsureInstance()
@@ -81,11 +108,13 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
+        ReconcileRequestedUpdateTicks(true);
     }
 
     private void Update()
     {
-        RequestPeriodicAliveValidation();
+        bool fullValidationRequested = RequestPeriodicAliveValidation();
+        ReconcileRequestedUpdateTicks(fullValidationRequested);
         TickUpdateObjects(Time.deltaTime);
     }
 
@@ -109,9 +138,28 @@ public sealed class MapObjectTickManager : MonoBehaviour
             CompactUpdateTicks();
         }
 
-        if (tick == null || updateTickSet.Contains(tick))
+        if (tick == null)
         {
             return;
+        }
+
+        if (updateTickSet.Contains(tick))
+        {
+            if (HasExecutableUpdateTick(tick))
+            {
+                return;
+            }
+
+            // The active marker can survive after its bucket entry is lost.
+            // Remove the incomplete registration so it can be rebuilt below.
+            updateTickSet.Remove(tick);
+            updateTicksDirty = true;
+            if (tickingUpdateObjects)
+            {
+                return;
+            }
+
+            CompactUpdateTicks();
         }
 
         if (updateTickEntrySet.Contains(tick))
@@ -263,12 +311,12 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
     }
 
-    private void RequestPeriodicAliveValidation()
+    private bool RequestPeriodicAliveValidation()
     {
         int frameCount = Time.frameCount;
         if (frameCount < nextAliveValidationFrame)
         {
-            return;
+            return false;
         }
 
         nextAliveValidationFrame = frameCount + AliveValidationFrameInterval;
@@ -276,6 +324,83 @@ public sealed class MapObjectTickManager : MonoBehaviour
         {
             updateTicksDirty = true;
         }
+
+        return true;
+    }
+
+    private void ReconcileRequestedUpdateTicks(bool forceFullValidation)
+    {
+        if (!forceFullValidation && RegistrationCountsMatch())
+        {
+            return;
+        }
+
+        requestedTickCleanupBuffer.Clear();
+        foreach (IMapObjectUpdateTick tick in requestedUpdateTicks)
+        {
+            if (!IsTickAlive(tick))
+            {
+                requestedTickCleanupBuffer.Add(tick);
+                continue;
+            }
+
+            if (!HasExecutableUpdateTick(tick))
+            {
+                AddUpdateTick(tick);
+            }
+        }
+
+        for (int i = 0; i < requestedTickCleanupBuffer.Count; i++)
+        {
+            IMapObjectUpdateTick tick = requestedTickCleanupBuffer[i];
+            requestedUpdateTicks.Remove(tick);
+            RemoveUpdateTick(tick);
+        }
+
+        requestedTickCleanupBuffer.Clear();
+        if (!forceFullValidation && RegistrationCountsMatch())
+        {
+            return;
+        }
+
+        activeTickCleanupBuffer.Clear();
+        foreach (IMapObjectUpdateTick tick in updateTickSet)
+        {
+            if (!IsTickAlive(tick) || !requestedUpdateTicks.Contains(tick))
+            {
+                activeTickCleanupBuffer.Add(tick);
+            }
+        }
+
+        for (int i = 0; i < activeTickCleanupBuffer.Count; i++)
+        {
+            RemoveUpdateTick(activeTickCleanupBuffer[i]);
+        }
+
+        activeTickCleanupBuffer.Clear();
+        if (updateTickEntrySet.Count != updateTickSet.Count
+            || updateTickEntriesByTick.Count != updateTickSet.Count)
+        {
+            updateTicksDirty = true;
+        }
+    }
+
+    private bool RegistrationCountsMatch()
+    {
+        int requestedCount = requestedUpdateTicks.Count;
+        return requestedCount == updateTickSet.Count
+               && requestedCount == updateTickEntrySet.Count
+               && requestedCount == updateTickEntriesByTick.Count;
+    }
+
+    private bool HasExecutableUpdateTick(IMapObjectUpdateTick tick)
+    {
+        return tick != null
+               && updateTickSet.Contains(tick)
+               && updateTickEntrySet.Contains(tick)
+               && updateTickEntriesByTick.TryGetValue(tick, out UpdateTickEntry entry)
+               && entry != null
+               && ReferenceEquals(entry.Tick, tick);
     }
 
     private void CompactUpdateTicks()
@@ -355,7 +480,9 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void RefreshEnabledState()
     {
-        enabled = updateTickSet.Count > 0;
+        // requestedUpdateTicks is the registration source of truth. Keep the
+        // manager alive long enough to repair a missing runtime entry.
+        enabled = updateTickSet.Count > 0 || requestedUpdateTicks.Count > 0;
     }
 
     private UpdateTickBucket GetOrCreateUpdateTickBucket(float intervalSeconds)

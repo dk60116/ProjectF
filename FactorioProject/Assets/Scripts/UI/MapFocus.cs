@@ -6,7 +6,8 @@ public class MapFocus : MonoBehaviour
     private const int AreaLineCount = 4;
     private const float SingleMarkerCornerVisibleLengthRatio = 131f / 512f;
     public static readonly Color DefaultFocusColor = new Color(1f, 0.86f, 0f, 0.45f);
-    public static readonly Color MouseFocusColor = new Color(1f, 1f, 1f, 0.45f);
+    public static readonly Color MouseFocusColor = new Color(1f, 1f, 1f, 0.22f);
+    public static readonly Color SelectionFocusColor = new Color(1f, 1f, 1f, 0.45f);
 
     [SerializeField]
     private SpriteRenderer render;

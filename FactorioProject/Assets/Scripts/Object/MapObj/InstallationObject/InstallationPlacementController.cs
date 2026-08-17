@@ -355,6 +355,7 @@ public class InstallationPlacementController : MonoBehaviour
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
+        public int storedInstallationItemId = -1;
     }
 
     private sealed class AreaAttachedBoxState
@@ -3524,6 +3525,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         TransferPackedBlockItemsToPlayerStorage(packedSession, ref moveIndex);
         TransferPackedRobotArmHeldItemToPlayerStorage(packedSession, ref moveIndex);
+        TransferPackedStoredInstallationItemToPlayerStorage(packedSession, ref moveIndex);
     }
 
     private bool TryStorePackedItemInPlayerStorage(PackedInstallationSession packedSession, ref int moveIndex)
@@ -3622,6 +3624,27 @@ public class InstallationPlacementController : MonoBehaviour
         if (storedItem)
         {
             robotArm.TryClearHeldItemForPacking(itemId);
+        }
+    }
+
+    private void TransferPackedStoredInstallationItemToPlayerStorage(
+        PackedInstallationSession packedSession,
+        ref int moveIndex)
+    {
+        IPersistentInstallationItemStorage itemStorage =
+            packedSession?.editSession?.originalInstallation as IPersistentInstallationItemStorage;
+        int itemId = itemStorage != null ? itemStorage.PersistentStoredItemId : -1;
+        if (itemId < 0)
+        {
+            return;
+        }
+
+        Vector3 startPosition = ResolvePackedItemMoveStartPosition(packedSession);
+        bool storedItem = TryAddPackedItemToPlayerStorage(itemId, startPosition, ref moveIndex)
+                          || TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _);
+        if (storedItem)
+        {
+            itemStorage.ApplyPersistentStoredItemId(-1);
         }
     }
 
@@ -3982,6 +4005,10 @@ public class InstallationPlacementController : MonoBehaviour
         editSession.storedFluidItemId = installationObject.StoredFluidItemId;
         editSession.storedFluidTemperatureCelsius =
             installationObject.GetStoredFluidTemperatureCelsius(editSession.storedFluidItemId);
+        if (installationObject is IPersistentInstallationItemStorage itemStorage)
+        {
+            editSession.storedInstallationItemId = itemStorage.PersistentStoredItemId;
+        }
 
         CaptureAttachedAreaBoxes(editSession);
         CaptureInstallationBlockStates(editSession);
@@ -5017,6 +5044,10 @@ public class InstallationPlacementController : MonoBehaviour
                 editSession.storedFluidItemId,
                 editSession.storedFluidLiters,
                 editSession.storedFluidTemperatureCelsius);
+            if (restoredInstallationObject is IPersistentInstallationItemStorage itemStorage)
+            {
+                itemStorage.ApplyPersistentStoredItemId(editSession.storedInstallationItemId);
+            }
         }
         if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
         {
@@ -5291,6 +5322,10 @@ public class InstallationPlacementController : MonoBehaviour
                 editSession.storedFluidItemId,
                 editSession.storedFluidLiters,
                 editSession.storedFluidTemperatureCelsius);
+            if (replacementInstallation is IPersistentInstallationItemStorage itemStorage)
+            {
+                itemStorage.ApplyPersistentStoredItemId(editSession.storedInstallationItemId);
+            }
         }
 
         ReleaseInstalledObjectInstance(
@@ -17591,6 +17626,12 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || terrain.HasDroppedFloorObjectsAt(block.Coordinate))
+        {
+            return false;
+        }
+
         MapObject footprintSource = activeInstallDefinition.mapObject;
         if (useFastBoilerGridCheck)
         {
@@ -17937,7 +17978,8 @@ public class InstallationPlacementController : MonoBehaviour
                 placement.y - objectAnchorCell.y);
             Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
             if (!terrain.TryGetLoadedBlock(coordinate, out Block footprintBlock)
-                || footprintBlock == null)
+                || footprintBlock == null
+                || terrain.HasDroppedFloorObjectsAt(coordinate))
             {
                 return false;
             }
@@ -25499,6 +25541,9 @@ public class InstallationPlacementController : MonoBehaviour
         float storedFluidLiters = currentObject.StoredFluidLiters;
         float storedFluidTemperatureCelsius = currentObject.GetStoredFluidTemperatureCelsius(
             storedFluidItemId);
+        int storedInstallationItemId = currentObject is IPersistentInstallationItemStorage itemStorage
+            ? itemStorage.PersistentStoredItemId
+            : -1;
         long placementSequence = currentObject.RuntimePlacementSequence;
         List<Vector2Int> oldCoordinates = new List<Vector2Int>(currentObject.RuntimeOccupiedCoordinates);
         List<Vector2Int> newCoordinates = GetFootprintCoordinates(
@@ -25559,6 +25604,10 @@ public class InstallationPlacementController : MonoBehaviour
             storedFluidItemId,
             storedFluidLiters,
             storedFluidTemperatureCelsius);
+        if (replacementInstallation is IPersistentInstallationItemStorage replacementItemStorage)
+        {
+            replacementItemStorage.ApplyPersistentStoredItemId(storedInstallationItemId);
+        }
         RegisterInstalledObjectPersistence(replacementInstallation);
 
         for (int i = 0; i < newCoordinates.Count; i++)
@@ -25646,6 +25695,11 @@ public class InstallationPlacementController : MonoBehaviour
         {
             Vector2Int coordinate = occupiedCoordinates[i];
             if (!terrain.TryGetLoadedBlock(coordinate, out Block footprintBlock) || footprintBlock == null)
+            {
+                return false;
+            }
+
+            if (terrain.HasDroppedFloorObjectsAt(coordinate))
             {
                 return false;
             }

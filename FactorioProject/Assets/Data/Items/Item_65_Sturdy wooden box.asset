@@ -13,10 +13,10 @@ MonoBehaviour:
   m_Name: Item_65_Sturdy wooden box
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Sturdy wooden box
-  id: 15
+  id: 24
   mapObject: {fileID: 6524911674366201629, guid: 4c4bd387a46e24b488d86f0bb4d12e69, type: 3}
-  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
-  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  portableMesh: {fileID: 4300000, guid: 61d1fbf3e3aa50b4eba9e0b2ce723415, type: 2}
+  portableMat: {fileID: 2100000, guid: e20aa7e0e44a58245915fb700c7af2cf, type: 2}
   icon: {fileID: 21300000, guid: 4952d73823cf76741906d0026fbdfc18, type: 3}
   interactionButtonList:
   - {fileID: 21300000, guid: 409f7c1bb6dbd754d9d62c83be11e03e, type: 3}
@@ -26,6 +26,9 @@ MonoBehaviour:
   lightIntensityMultiplier: 1
   size: 0
   itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
   upgradeable: 1
   capacity: 20
   storesFluid: 0

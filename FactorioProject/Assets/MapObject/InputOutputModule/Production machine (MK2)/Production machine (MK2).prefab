@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK2)
-  objId: 40
+  objId: 47
   itemDefinition: {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -79,29 +79,41 @@ MonoBehaviour:
   inputList:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+    count: 2
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     count: 6
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
     count: 3
   - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
     count: 3
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 6
+  - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
+    count: 4
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
-    count: 8
+    count: 4
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 3
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
     count: 4
-  - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
-    count: 4
-  - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
-    count: 3
+  - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+    count: 2
+  - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: c386ddb4f7fc1904fbb047de3bff6a99, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
+    count: 2
   - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
     count: 2
@@ -115,48 +127,48 @@ MonoBehaviour:
     count: 2
   - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
     count: 2
+  - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
     count: 2
   - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
     count: 10
-  - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
-    count: 2
-  - itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
-    count: 4
-  - itemDefinition: {fileID: 11400000, guid: ad919f4ddfe2a924194a2ddac61bf5af, type: 2}
-    count: 5
-  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-    count: 1
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
-    count: 2
-  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
     count: 4
-  - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
-    count: 2
+  - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+    count: 10
+  - itemDefinition: {fileID: 11400000, guid: 771a4a8c595dbe74b9187ca84001cfcb, type: 2}
+    count: 10
+  - itemDefinition: {fileID: 11400000, guid: 607f7fef71c969144b6e767e76d193f9, type: 2}
+    count: 5
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 4
   - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
     count: 2
+  - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+    count: 2
   - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
     count: 4
   outputList:
-  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
-    count: 2
+  - itemDefinition: {fileID: 11400000, guid: 228fcd45b59e4994d8b5f8ee23dc4595, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 4f88609a6374aaf4098d50e6f0ec5400, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: c7d14445b92c7d0468e83d73c68f384f, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+    count: 2
   - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: f5afae373c201a7438785dd9cdf2ee6c, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 02c4539254ea62f4d9c50893e24c8f63, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
     count: 1
@@ -170,7 +182,11 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: c0075e53760e0bc4e8a7625ac98e2167, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 6a913ce143edf9c42b1a4c2b72cbdde8, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
     count: 2
@@ -184,33 +200,25 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
     count: 2
+  - itemDefinition: {fileID: 11400000, guid: 5184d5acd736fa943a532c1ee9009150, type: 2}
+    count: 1
   - itemDefinition: {fileID: 11400000, guid: e110bd69d6c9d9d49aa13090a2202fd1, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: 5184d5acd736fa943a532c1ee9009150, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 607f7fef71c969144b6e767e76d193f9, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: c0075e53760e0bc4e8a7625ac98e2167, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 7575e5697a9d4d34da40f1e6a2984c9a, type: 2}
     count: 1
-  - itemDefinition: {fileID: 11400000, guid: ad919f4ddfe2a924194a2ddac61bf5af, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 762e4dd9db91c774ca6004b78fbf6331, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 5e8eb859a7abfe04b919401e00125622, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 228fcd45b59e4994d8b5f8ee23dc4595, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 4f88609a6374aaf4098d50e6f0ec5400, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 02c4539254ea62f4d9c50893e24c8f63, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: ced5cba395785e94897ab6dcb83d274a, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: 9807425657e17b14387ed43757f8bbbb, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: a10ec264242e79b42b1d48d44ad69394, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: ced5cba395785e94897ab6dcb83d274a, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
     count: 1

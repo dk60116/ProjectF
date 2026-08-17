@@ -35,8 +35,6 @@ public class PropObj : BaseObject
 
     public ItemDefinition BoundItemDefinition => itemDefinition;
 
-    public virtual bool RequiresItemLightInteractionRange => true;
-
     protected void RefreshItemLight(bool toggled = false)
     {
         ItemDefinition definition = itemDefinition;
@@ -79,13 +77,19 @@ public class PropObj : BaseObject
     {
         ItemLightController lightController = ResolveItemLightController();
         if (lightController == null
-            || lightController.Mode != ItemDefinition.ItemLightMode.Toggle)
+            || lightController.Mode != ItemDefinition.ItemLightMode.Toggle
+            || (active && !CanEnableItemLight()))
         {
             return false;
         }
 
         lightController.SetToggled(active);
         OnItemLightToggleStateChanged(active);
+        return true;
+    }
+
+    protected virtual bool CanEnableItemLight()
+    {
         return true;
     }
 

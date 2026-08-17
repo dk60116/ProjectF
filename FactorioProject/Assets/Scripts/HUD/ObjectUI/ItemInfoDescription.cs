@@ -182,6 +182,21 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    public void ShowDesk(Desk desk, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+
+        int manualItemId = desk != null ? desk.StoredManualItemId : -1;
+        SetDefaultItemSlot(
+            0,
+            manualItemId,
+            manualItemId >= 0 ? 1 : 0,
+            1,
+            true,
+            true,
+            true);
+    }
+
     public void ShowRobotArm(RobotArm robotArm, Resource underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);

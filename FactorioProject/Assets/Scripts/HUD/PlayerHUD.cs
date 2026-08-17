@@ -1952,7 +1952,20 @@ public class PlayerHUD : BagSlot
             return false;
         }
 
-        if (mapObject is BoxObject boxObject)
+        if (mapObject is IPlayerMapObjectInteraction playerInteraction)
+        {
+            Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+            if (!playerInteraction.CanPlayerInteract(currentPlayer))
+            {
+                return false;
+            }
+
+            icon = ResolveInteractionIcon(
+                playerInteraction.GetInteractionIconItemId(currentPlayer),
+                0,
+                true);
+        }
+        else if (mapObject is BoxObject boxObject)
         {
             icon = ResolveInteractionIcon(boxObject);
         }
@@ -1992,11 +2005,6 @@ public class PlayerHUD : BagSlot
         if (mapObject == null)
         {
             return false;
-        }
-
-        if (!mapObject.RequiresItemLightInteractionRange)
-        {
-            return true;
         }
 
         return playerController != null
@@ -2163,7 +2171,7 @@ public class PlayerHUD : BagSlot
         {
             SetObjectInfoSelectionFocus(null, false);
             SetObjectInfoAreaMarkerVisibility(null, false);
-            SetFocusedAnimalOutline(currentObjectInfoTarget, false);
+            SetFocusedTargetOutline(currentObjectInfoTarget, false);
             currentObjectInfoTarget = null;
             clickedObjectInfoTarget = null;
             SetObjectInfoSupplyRangeVisual(null, false);
@@ -2192,11 +2200,14 @@ public class PlayerHUD : BagSlot
                 && playerController.TryResolvePointerFocusTarget(
                     pointerPosition,
                     out Animal clickedAnimal,
-                    out MapObject clickedMapObject))
+                    out MapObject clickedMapObject,
+                    out PortableObject clickedPortableObject))
             {
                 clickedObjectInfoTarget = clickedAnimal != null
                     ? clickedAnimal
-                    : clickedMapObject;
+                    : clickedPortableObject != null
+                        ? clickedPortableObject
+                        : clickedMapObject;
                 BindObjectInfoPanel(clickedObjectInfoTarget, false);
                 return;
             }
@@ -2280,7 +2291,11 @@ public class PlayerHUD : BagSlot
             return;
         }
 
-        if (!currentObjectInfoTarget.gameObject.activeInHierarchy)
+        if (!currentObjectInfoTarget.gameObject.activeInHierarchy
+            || (currentObjectInfoTarget is PortableObject portableObject
+                && (portableObject.ItemId < 0
+                    || portableObject.IsMovingToTarget
+                    || portableObject.IsVisualRenderingSuppressed)))
         {
             ClearObjectInfoPanelState();
             return;
@@ -2313,9 +2328,9 @@ public class PlayerHUD : BagSlot
 
         if (currentObjectInfoTarget != target)
         {
-            SetFocusedAnimalOutline(currentObjectInfoTarget, false);
+            SetFocusedTargetOutline(currentObjectInfoTarget, false);
             currentObjectInfoTarget = target;
-            SetFocusedAnimalOutline(currentObjectInfoTarget, true);
+            SetFocusedTargetOutline(currentObjectInfoTarget, true);
         }
 
         currentObjectInfoOpenedByYellowFocus = openedByYellowFocus;
@@ -2361,7 +2376,7 @@ public class PlayerHUD : BagSlot
         SetObjectInfoSelectionFocus(null, false);
         SetObjectInfoAreaMarkerVisibility(null, false);
         SetObjectInfoSupplyRangeVisual(null, false);
-        SetFocusedAnimalOutline(currentObjectInfoTarget, false);
+        SetFocusedTargetOutline(currentObjectInfoTarget, false);
         currentObjectInfoTarget = null;
         clickedObjectInfoTarget = null;
         currentObjectInfoOpenedByYellowFocus = false;
@@ -2428,11 +2443,15 @@ public class PlayerHUD : BagSlot
             : target.GetComponentInChildren<InputOutputModuleAreaMarkerController>(true);
     }
 
-    private static void SetFocusedAnimalOutline(Component target, bool visible)
+    private static void SetFocusedTargetOutline(Component target, bool visible)
     {
         if (target is Animal animal)
         {
             animal.SetFocusedOutline(visible);
+        }
+        else if (target is PortableObject portableObject)
+        {
+            portableObject.SetFocusedOutline(visible);
         }
     }
 
@@ -3010,6 +3029,21 @@ public class PlayerHUD : BagSlot
 
         if (currentInteractionMapObject != null)
         {
+            if (currentInteractionMapObject is IPlayerMapObjectInteraction playerInteraction)
+            {
+                PlayerController playerController = currentPlayer != null
+                    ? currentPlayer.GetComponent<PlayerController>()
+                    : null;
+                if (playerController != null
+                    && playerController.IsWithinInteractionRange(currentInteractionMapObject))
+                {
+                    playerInteraction.TryPlayerInteract(currentPlayer);
+                }
+
+                UpdateInteractionButtonState();
+                return;
+            }
+
             if (TryResolveTrainStation(currentInteractionMapObject, out Trainstation trainStation))
             {
                 ShowTrainStationFilter(trainStation);
@@ -3040,8 +3074,7 @@ public class PlayerHUD : BagSlot
                 ? currentPlayer.GetComponent<PlayerController>()
                 : null;
             if (lightInteractionController != null
-                && (!currentInteractionMapObject.RequiresItemLightInteractionRange
-                    || lightInteractionController.IsWithinInteractionRange(currentInteractionMapObject))
+                && lightInteractionController.IsWithinInteractionRange(currentInteractionMapObject)
                 && currentInteractionMapObject.ToggleItemLight())
             {
                 UpdateInteractionButtonState();
@@ -3642,7 +3675,9 @@ public class PlayerHUD : BagSlot
 
     public bool CanEnqueueCrafting(int itemId)
     {
-        if (itemId < 0 || IsInventoryEditLocked())
+        if (itemId < 0
+            || IsInventoryEditLocked()
+            || !HasRequiredManualForCrafting(itemId))
         {
             return false;
         }
@@ -3803,22 +3838,9 @@ public class PlayerHUD : BagSlot
             return null;
         }
 
-        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
-        if (definitions == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition != null && definition.id == itemId)
-            {
-                return definition;
-            }
-        }
-
-        return null;
+        return GameManager.Instance.ItemManger.TryGetItemDefinitionById(itemId, out ItemDefinition definition)
+            ? definition
+            : null;
     }
 
     private void UpdateCraftingQueue(float deltaTime)
