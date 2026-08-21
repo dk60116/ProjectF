@@ -140,7 +140,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Mining machine
-  objId: 39
+  objId: 42
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

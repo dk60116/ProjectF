@@ -15,6 +15,7 @@ MonoBehaviour:
   resourceName: Reed
   prefab: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
   harvestMode: 3
+  placementCategory: 0
   defaultResourceCount: 1
   defaultGetCount: 2
   defaultMaxGauge: 10

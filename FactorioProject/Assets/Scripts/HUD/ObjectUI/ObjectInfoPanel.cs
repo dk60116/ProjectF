@@ -159,6 +159,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is Handcart handcart)
+        {
+            ShowHandcartInfo(handcart, underlyingResource);
+            return;
+        }
+
         if (mapObject is Desk desk)
         {
             ShowDeskInfo(desk, underlyingResource);
@@ -489,7 +495,7 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowResourceReserves(resource != null ? resource.RemainingHarvestOutputCount : 0);
+        infoLine.ShowResourceReserves(resource);
     }
 
     private void ShowBoxObjectInfo(BoxObject boxObject, Resource underlyingResource)
@@ -505,6 +511,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowBoxObject(boxObject, underlyingResource);
+    }
+
+    private void ShowHandcartInfo(Handcart handcart, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowHandcart(handcart, underlyingResource);
     }
 
     private void ShowConveyorBeltInfo(ConveyorBelt conveyorBelt, Resource underlyingResource)

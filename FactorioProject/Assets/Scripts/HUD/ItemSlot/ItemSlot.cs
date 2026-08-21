@@ -53,6 +53,7 @@ public class ItemSlot : MonoBehaviour
 
         bool hasItem = itemId >= 0 && (allowZeroCount || itemCount > 0);
         bool shouldShowCount = hasItem && showCount;
+        int displayMaxItemCount = ResolveDisplayMaxItemCount(itemId, maxItemCount);
 
         if (!hasItem && keepIconWhenEmpty)
         {
@@ -91,7 +92,9 @@ public class ItemSlot : MonoBehaviour
         if (count != null)
         {
             count.text = shouldShowCount
-                ? (maxItemCount > 0 ? $"{itemCount} / {maxItemCount}" : itemCount.ToString())
+                ? (displayMaxItemCount > 0
+                    ? $"{itemCount} / {displayMaxItemCount}"
+                    : itemCount.ToString())
                 : string.Empty;
             if (count.gameObject.activeSelf != shouldShowCount)
             {
@@ -122,6 +125,14 @@ public class ItemSlot : MonoBehaviour
         }
 
         SetItemNameText(itemSet.name, true);
+    }
+
+    private static int ResolveDisplayMaxItemCount(int itemId, int maxItemCount)
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return ItemDefinition.ResolveStackCapacity(itemManager, itemId, maxItemCount);
     }
 
     public void SetEmptyCountDisplay(int itemCount, int maxItemCount)

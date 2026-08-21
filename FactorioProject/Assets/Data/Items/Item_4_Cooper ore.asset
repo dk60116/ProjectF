@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_4_Cooper ore
   m_EditorClassIdentifier: 
   itemName: Cooper ore
-  id: 11
+  id: 12
   mapObject: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: 054b13814fa09424ba3aa24a6bf66f86, type: 2}
   icon: {fileID: 21300000, guid: 5dc246db162925547952152ac9cc4f97, type: 3}
+  oneItem: 0
   interactionButtonList:
   - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
   lightMode: 0
@@ -33,6 +34,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

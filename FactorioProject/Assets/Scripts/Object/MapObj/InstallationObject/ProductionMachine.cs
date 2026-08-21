@@ -43,7 +43,9 @@ public class ProductionMachine : InputOutputModule
         {
             ItemDefinition outputDefinition = outputs[i].itemDefinition;
             int outputItemId = outputDefinition != null ? outputDefinition.id : -1;
-            if (outputItemId < 0 || !seenItemIds.Add(outputItemId))
+            if (outputItemId < 0
+                || !HasRequiredCraftingManual(outputItemId)
+                || !seenItemIds.Add(outputItemId))
             {
                 continue;
             }
@@ -75,6 +77,7 @@ public class ProductionMachine : InputOutputModule
             ItemDefinition outputDefinition = outputs[i].itemDefinition;
             int outputItemId = outputDefinition != null ? outputDefinition.id : -1;
             if (outputItemId < 0
+                || !HasRequiredCraftingManual(outputItemId)
                 || !TryGetProductionIngredients(outputItemId, productionIngredientBuffer))
             {
                 continue;

@@ -122,8 +122,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: 
-  objId: 0
-  itemDefinition: {fileID: 0}
+  objId: 7
+  itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -136,7 +136,7 @@ MonoBehaviour:
   harvestMode: 2
   definition: {fileID: 11400000, guid: f01734a3267e50745b36764f463c62d7, type: 2}
   resourceStatus:
-    outputId: 7
+    outputId: 8
     outputItemName: Log
     resourceCount: 1
     getCount: 4

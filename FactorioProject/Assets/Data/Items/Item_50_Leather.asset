@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_50_Leather
   m_EditorClassIdentifier: 
   itemName: Leather
-  id: 51
+  id: 55
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: a93c1180b6e5c4549b44e7103f3ee726, type: 2}
   portableMat: {fileID: 2100000, guid: c0de1ea7a6ab4d54b8dd61fd4689fa02, type: 2}
   icon: {fileID: 21300000, guid: fa63be29f879a9a4ca1d652750263558, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

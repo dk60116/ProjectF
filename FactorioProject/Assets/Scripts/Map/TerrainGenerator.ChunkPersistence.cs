@@ -28,6 +28,7 @@ public partial class TerrainGenerator : MonoBehaviour
         spawnedResource.transform.localPosition = Vector3.zero;
         spawnedResource.transform.localRotation = Quaternion.identity;
         ApplyResourceScaleProfile(spawnedResource, prefab);
+        bool isOilResource = IsOilResourcePrefab(prefab);
         spawnedResource.ApplyBodyYawStep(GetResourceBodyYawStep(prefab, worldCoordinate));
 
         if (resourceStateStore != null && resourceStateStore.TryGet(worldCoordinate, out Resource.ResourceSaveState savedState))
@@ -37,6 +38,13 @@ public partial class TerrainGenerator : MonoBehaviour
         else
         {
             spawnedResource.InitializeRuntimeQuantity(GetInitialResourceCount(prefab, worldCoordinate));
+        }
+
+        // Oil is a grid-aligned liquid plane. Old resource state may contain a
+        // random ore yaw, so restore the fixed orientation after loading it.
+        if (isOilResource)
+        {
+            spawnedResource.ApplyBodyYawStep(0);
         }
 
         block.SetMapObject(spawnedResource);
@@ -49,7 +57,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (IsTreeResourcePrefab(prefab))
+        if (IsTreeResourcePrefab(prefab) || IsOilResourcePrefab(prefab))
         {
             spawnedResource.ConfigureDynamicBodyScale(1f, 1f, 1);
             return;
@@ -339,13 +347,23 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         Vector2Int centerCoordinate = GetWorldBlockCoordinate(worldPosition);
 
-        if (loadedBlocks.TryGetValue(centerCoordinate, out Block centerBlock)
-            && IsValidDropBlock(centerBlock, itemId, itemCount))
+        if (!loadedBlocks.TryGetValue(centerCoordinate, out Block centerBlock)
+            || centerBlock == null)
+        {
+            loadedBlocks.Remove(centerCoordinate);
+            return null;
+        }
+
+        if (IsValidDropBlock(centerBlock, itemId, itemCount))
         {
             return centerBlock;
         }
 
-        return null;
+        // 설치물 입출력처럼 바닥 투척 자체가 금지된 셀에서는 다른 셀로 우회하지 않는다.
+        // 일반 바닥의 스택이 찼거나 다른 아이템이 놓인 경우에만 발밑 포함 3x3을 탐색한다.
+        return centerBlock.SupportsFloorObjectDrops
+            ? FindNearestDropBlock(centerCoordinate, itemId, itemCount, 1, false)
+            : null;
     }
 
     private Block FindNearestDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, int radius, bool requireSameItem)
@@ -546,14 +564,16 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool TryResolveInputAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
     {
         targetBlock = null;
-        if (TryResolveFocusedInputOutputModuleDropBlock(itemId, itemCount, out targetBlock))
-        {
-            return true;
-        }
-
         if (!loadedBlocks.TryGetValue(centerCoordinate, out Block block) || block == null)
         {
             return false;
+        }
+
+        // Input은 플레이어가 실제로 서 있는 셀만 대상으로 삼는다.
+        // 에너지 아이템은 영역이 겹치더라도 EnergyInput을 우선한다.
+        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, itemCount, out targetBlock))
+        {
+            return true;
         }
 
         if (IsValidInputItemAreaDropBlock(block, itemId, itemCount))
@@ -562,12 +582,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return true;
         }
 
-        if (TryResolveInputEnergyAreaDropBlock(centerCoordinate, itemId, itemCount, out targetBlock))
-        {
-            return true;
-        }
-
-        return TryResolveInputOutputModuleDropBlock(centerCoordinate, itemId, itemCount, out targetBlock);
+        return false;
     }
 
     private bool TryResolveInputEnergyAreaDropBlock(Vector2Int centerCoordinate, int itemId, int itemCount, out Block targetBlock)
@@ -602,47 +617,6 @@ public partial class TerrainGenerator : MonoBehaviour
                && block.CanAddInputAreaCenterObjects(itemCount, itemId);
     }
 
-    private bool TryResolveInputOutputModuleDropBlock(
-        Vector2Int sourceCoordinate,
-        int itemId,
-        int itemCount,
-        out Block targetBlock)
-    {
-        targetBlock = null;
-        if (itemId < 0
-            || !loadedBlocks.TryGetValue(sourceCoordinate, out Block sourceBlock)
-            || sourceBlock == null
-            || !TryResolveInputOutputModule(sourceBlock.MapObject, out InputOutputModule module)
-            || module == null
-            || !ModuleContainsRuntimeGridCoordinate(module, sourceCoordinate)
-            || !module.TryGetRuntimeInputBlock(this, itemId, out Block inputBlock)
-            || !IsValidInputItemAreaDropBlock(inputBlock, itemId, itemCount))
-        {
-            return false;
-        }
-
-        targetBlock = inputBlock;
-        return true;
-    }
-
-    private bool TryResolveFocusedInputOutputModuleDropBlock(int itemId, int itemCount, out Block targetBlock)
-    {
-        targetBlock = null;
-        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        if (itemId < 0
-            || itemCount <= 0
-            || !TryGetFocusedInputOutputModule(currentPlayer, out InputOutputModule module)
-            || module == null
-            || !module.TryGetRuntimeInputBlock(this, itemId, out Block inputBlock)
-            || !IsValidInputItemAreaDropBlock(inputBlock, itemId, itemCount))
-        {
-            return false;
-        }
-
-        targetBlock = inputBlock;
-        return true;
-    }
-
     private static bool CoordinateAcceptsInputItemId(Vector2Int coordinate, int itemId)
     {
         if (itemId < 0)
@@ -650,75 +624,14 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        if (InputOutputModuleItemAreaController.CoordinateAcceptsItemId(coordinate, itemId))
+        {
+            return true;
+        }
+
         HashSet<int> runtimeInputItemIds = new HashSet<int>();
-        if (InputOutputModule.TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(coordinate, runtimeInputItemIds))
-        {
-            return runtimeInputItemIds.Contains(itemId);
-        }
-
-        return InputOutputModuleItemAreaController.CoordinateAcceptsItemId(coordinate, itemId);
-    }
-
-    private static bool TryGetFocusedInputOutputModule(Player player, out InputOutputModule module)
-    {
-        module = null;
-        if (player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = player.GetComponent<PlayerController>();
-        if (playerController == null
-            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
-            || !TryResolveInputOutputModule(focusedMapObject, out module))
-        {
-            return false;
-        }
-
-        return module != null;
-    }
-
-    private static bool TryResolveInputOutputModule(MapObject mapObject, out InputOutputModule module)
-    {
-        module = null;
-        if (mapObject == null)
-        {
-            return false;
-        }
-
-        module = mapObject as InputOutputModule;
-        if (module != null)
-        {
-            return true;
-        }
-
-        module = mapObject.GetComponent<InputOutputModule>();
-        if (module != null)
-        {
-            return true;
-        }
-
-        module = mapObject.GetComponentInChildren<InputOutputModule>(true);
-        return module != null;
-    }
-
-    private static bool ModuleContainsRuntimeGridCoordinate(InputOutputModule module, Vector2Int coordinate)
-    {
-        IReadOnlyList<Vector2Int> coordinates = module != null ? module.RuntimeGridCoordinates : null;
-        if (coordinates == null || coordinates.Count <= 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < coordinates.Count; i++)
-        {
-            if (coordinates[i] == coordinate)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return InputOutputModule.TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(coordinate, runtimeInputItemIds)
+               && runtimeInputItemIds.Contains(itemId);
     }
 
     private static bool IsValidInputEnergyAreaDropBlock(
@@ -729,8 +642,27 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         return block != null
                && block.Type == Block.BlockType.Ground
-               && InputOutputModuleEnergyAreaController.CoordinateAcceptsEnergyType(block.Coordinate, energyType)
+               && CoordinateAcceptsInputEnergyType(block.Coordinate, energyType)
                && block.CanAddInputAreaCenterObjects(itemCount, itemId);
+    }
+
+    private static bool CoordinateAcceptsInputEnergyType(
+        Vector2Int coordinate,
+        ItemDefinition.EnergyType energyType)
+    {
+        if (energyType == ItemDefinition.EnergyType.None)
+        {
+            return false;
+        }
+
+        if (InputOutputModuleEnergyAreaController.CoordinateAcceptsEnergyType(coordinate, energyType))
+        {
+            return true;
+        }
+
+        HashSet<ItemDefinition.EnergyType> runtimeEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+        return InputOutputModule.TryGetInputEnergyTypesAtRuntimeGridCoordinate(coordinate, runtimeEnergyTypes)
+               && runtimeEnergyTypes.Contains(energyType);
     }
 
     private static bool IsValidOutputAreaDropBlock(Block block, int itemId, int itemCount)
@@ -861,7 +793,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
             }
 
-            ResolveInstallationPlacementController()?.NormalizeLoadedFenceVariants(orderedInstallationAnchors);
+            InstallationPlacementController placementController = ResolveInstallationPlacementController();
+            placementController?.NormalizeLoadedFenceVariants(orderedInstallationAnchors);
+            placementController?.NormalizeLoadedLegacyPipeVariants(orderedInstallationAnchors);
         }
         finally
         {
@@ -1058,9 +992,44 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        bool restoresUndergroundPipe = definition.mapObject is UndergroundPipe;
+        if (restoresUndergroundPipe)
+        {
+            sourcePrefab = definition.mapObject;
+        }
+
         int restoreQuarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
-        // Variant kind and quarter-turns are one persisted state. Re-resolving only
-        // one wall while its neighbors are still loading can overwrite a valid shape.
+        bool resolvedPipeBeforeActivation = false;
+        if (definition.mapObject is Pipe && !restoresUndergroundPipe)
+        {
+            if (placementController == null
+                || !placementController.TryResolvePipeLoadPlacement(
+                    definition,
+                    savedState.anchorCoordinate,
+                    restoreQuarterTurns,
+                    savedState.conveyorVariantKind,
+                    savedState.pipeConnectionMask,
+                    out MapObject resolvedPipePrefab,
+                    out int resolvedPipeQuarterTurns,
+                    out int resolvedPipeVariantKind)
+                || !(resolvedPipePrefab is Pipe resolvedPipe))
+            {
+                return false;
+            }
+
+            sourcePrefab = resolvedPipe;
+            restoreQuarterTurns = resolvedPipeQuarterTurns;
+            savedState.quarterTurns = restoreQuarterTurns;
+            savedState.conveyorVariantKind = resolvedPipeVariantKind;
+            savedState.pipeConnectionMask = resolvedPipe.GetConnectionMask(
+                placementController.GetInstalledObjectRotation(
+                    resolvedPipe,
+                    restoreQuarterTurns));
+            resolvedPipeBeforeActivation = true;
+        }
+
+        // Variant kind and quarter-turns are one persisted state. Re-resolving a wall
+        // or pipe while its neighbors are still loading can overwrite a valid shape.
         if (savedState.conveyorVariantKind < 0
             && placementController != null
             && placementController.TryResolveFenceLoadPlacement(
@@ -1077,7 +1046,10 @@ public partial class TerrainGenerator : MonoBehaviour
             savedState.quarterTurns = restoreQuarterTurns;
             savedState.conveyorVariantKind = resolvedFenceVariantKind;
         }
-        else if (placementController != null
+        else if (!restoresUndergroundPipe
+            && !resolvedPipeBeforeActivation
+            && savedState.conveyorVariantKind < 0
+            && placementController != null
             && placementController.TryResolvePipeLoadPlacement(
                 definition,
                 savedState.anchorCoordinate,
@@ -1091,6 +1063,21 @@ public partial class TerrainGenerator : MonoBehaviour
             restoreQuarterTurns = resolvedPipeQuarterTurns;
             savedState.quarterTurns = restoreQuarterTurns;
             savedState.conveyorVariantKind = resolvedPipeVariantKind;
+        }
+
+        if (!restoresUndergroundPipe
+            && !resolvedPipeBeforeActivation
+            && placementController != null
+            && sourcePrefab is Pipe savedPipePrefab
+            && savedState.pipeConnectionMask >= 0
+            && placementController.TryResolvePipeQuarterTurnsFromConnectionMask(
+                savedPipePrefab,
+                savedState.pipeConnectionMask,
+                restoreQuarterTurns,
+                out int connectionMaskQuarterTurns))
+        {
+            restoreQuarterTurns = connectionMaskQuarterTurns;
+            savedState.quarterTurns = restoreQuarterTurns;
         }
 
         Quaternion rotation = placementController != null
@@ -1236,6 +1223,10 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             itemStorage.ApplyPersistentStoredItemId(savedState.storedInstallationItemId);
         }
+        if (restoredInstallation is IPersistentInstallationItemCollectionStorage collectionStorage)
+        {
+            collectionStorage.ApplyPersistentStoredItemIds(savedState.storedInstallationItemIds);
+        }
 
         if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
         {
@@ -1244,6 +1235,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
         restoredInstallation.gameObject.SetActive(true);
         BindLoadedBlocksToInstallation(restoredInstallation, occupiedCoordinates);
+        if (restoredInstallation is Handcart restoredHandcart)
+        {
+            restoredHandcart.ConnectToNearbyActiveHandcarts();
+        }
         installationObject = restoredInstallation;
         return true;
         }
@@ -1309,6 +1304,35 @@ public partial class TerrainGenerator : MonoBehaviour
         return resourceStateStore.TryGetInstallationState(anchorCoordinate, out state);
     }
 
+    public bool TryGetSavedPipeInstallationStateAtCoordinate(
+        Vector2Int worldCoordinate,
+        out BlockStateStore.InstallationSaveState state)
+    {
+        state = null;
+        EnsureResourceStateStore();
+        return resourceStateStore != null
+               && resourceStateStore.TryGetSavedPipeInstallationStateAtCoordinate(
+                   worldCoordinate,
+                   out state);
+    }
+
+    public int CollectSavedInstallationStatesAtInteractionCoordinate(
+        Vector2Int worldCoordinate,
+        ICollection<BlockStateStore.InstallationSaveState> states)
+    {
+        if (states == null)
+        {
+            return 0;
+        }
+
+        EnsureResourceStateStore();
+        return resourceStateStore != null
+            ? resourceStateStore.CollectSavedInstallationStatesAtInteractionCoordinate(
+                worldCoordinate,
+                states)
+            : 0;
+    }
+
     private sealed class ChunkSurfaceWorkerInput
     {
         public Vector2Int origin;
@@ -1325,6 +1349,7 @@ public partial class TerrainGenerator : MonoBehaviour
         public int mapMaxExclusiveY;
         public TerrainBiome[] biomeGrid;
         public bool[] blockedWaterGrid;
+        public bool[] oilGrid;
         public float generatedSurfaceYOffset;
         public float waterSurfaceDepth;
         public bool generateWaterFoamOverlay;
@@ -1948,6 +1973,13 @@ public partial class TerrainGenerator : MonoBehaviour
                             break;
                         }
                     }
+                }
+
+                if (!hasAnyLoadedBlock
+                    && installationObject is Handcart handcart
+                    && handcart.ConnectedHandcarts.Count > 0)
+                {
+                    hasAnyLoadedBlock = true;
                 }
 
                 if (hasAnyLoadedBlock)

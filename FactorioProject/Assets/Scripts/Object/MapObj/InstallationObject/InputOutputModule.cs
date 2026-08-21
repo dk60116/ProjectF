@@ -6,8 +6,9 @@ public class InputOutputModule : InstallationObject,
     IMapObjectUpdateTickInterval,
     IItemLightWorkStateProvider
 {
+    public static event System.Action<InputOutputModule> RuntimePipeTopologyChanged;
+
     private const float DefaultManagedUpdateTickIntervalSeconds = 0.1f;
-    protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
     private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
     private static readonly Vector2Int[] FluidCardinalDirections =
     {
@@ -171,6 +172,7 @@ public class InputOutputModule : InstallationObject,
         public int activeOutputCount;
         public float boilerWaterTemperatureCelsius;
         public float boilerSteamLiterAccumulator;
+        public float oilDrillingProgressLiters;
 
         public PersistentState Clone()
         {
@@ -192,7 +194,8 @@ public class InputOutputModule : InstallationObject,
                 activeOutputItemId = activeOutputItemId,
                 activeOutputCount = activeOutputCount,
                 boilerWaterTemperatureCelsius = boilerWaterTemperatureCelsius,
-                boilerSteamLiterAccumulator = boilerSteamLiterAccumulator
+                boilerSteamLiterAccumulator = boilerSteamLiterAccumulator,
+                oilDrillingProgressLiters = oilDrillingProgressLiters
             };
         }
     }
@@ -272,6 +275,7 @@ public class InputOutputModule : InstallationObject,
     private DefaultGauge activeCraftProgressGauge;
     private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
     private readonly List<Vector2Int> objectInfoInputAreaCoordinates = new List<Vector2Int>();
+    private readonly HashSet<Vector2Int> singleItemOutputVisitedCoordinates = new HashSet<Vector2Int>();
     private readonly Queue<Vector2Int> connectedFluidSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> connectedFluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
@@ -444,6 +448,7 @@ public class InputOutputModule : InstallationObject,
         AddUniqueCoordinates(coordinates, runtimeGridCoordinates);
         RegisterRuntimeGridCoordinates();
         WakeRuntimeUpdate();
+        RuntimePipeTopologyChanged?.Invoke(this);
     }
 
     public void ConfigureRuntimeFocusCoordinates(IReadOnlyList<Vector2Int> coordinates)
@@ -1496,7 +1501,7 @@ public class InputOutputModule : InstallationObject,
         {
             if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out int outputItemId, out _)
                 || inputItemId < 0
-                || !IsRecipeOutputAllowedByItemFilter(outputItemId)
+                || !IsRecipeOutputAvailable(outputItemId)
                 || !TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea)
                 || inputArea.coordinate != coordinate)
             {
@@ -1771,30 +1776,6 @@ public class InputOutputModule : InstallationObject,
         return acceptedLiters > 0.0001f;
     }
 
-    private static float CalculateFluidEqualizationTransferLiters(
-        InstallationObject sourceStorage,
-        InstallationObject targetStorage)
-    {
-        if (sourceStorage == null || targetStorage == null)
-        {
-            return 0f;
-        }
-
-        float sourceCapacity = Mathf.Max(0f, sourceStorage.FluidStorageCapacityLiters);
-        float targetCapacity = Mathf.Max(0f, targetStorage.FluidStorageCapacityLiters);
-        if (sourceCapacity <= 0.0001f || targetCapacity <= 0.0001f)
-        {
-            return 0f;
-        }
-
-        float sourceLiters = Mathf.Clamp(sourceStorage.StoredFluidLiters, 0f, sourceCapacity);
-        float targetLiters = Mathf.Clamp(targetStorage.StoredFluidLiters, 0f, targetCapacity);
-        float equalizingTransfer =
-            ((sourceLiters * targetCapacity) - (targetLiters * sourceCapacity))
-            / (sourceCapacity + targetCapacity);
-        return Mathf.Max(0f, equalizingTransfer);
-    }
-
     private bool TryGetCachedConnectedFluidSource(
         int requiredFluidItemId,
         float currentFillRatio,
@@ -1908,7 +1889,7 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe && !pipe.HasConnectionTowards(pipeRotation, direction))
+                if (hasPipe && !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
                 }
@@ -1942,6 +1923,12 @@ public class InputOutputModule : InstallationObject,
                 {
                     EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
                 }
+            }
+
+            if (hasPipe
+                && pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+            {
+                EnqueueConnectedFluidSearchCoordinate(remoteCoordinate);
             }
         }
 
@@ -2000,7 +1987,7 @@ public class InputOutputModule : InstallationObject,
         {
             if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out int outputItemId, out _)
                 || !IsFluidItemId(inputItemId)
-                || !IsRecipeOutputAllowedByItemFilter(outputItemId))
+                || !IsRecipeOutputAvailable(outputItemId))
             {
                 continue;
             }
@@ -2167,7 +2154,7 @@ public class InputOutputModule : InstallationObject,
 
         if (TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation))
         {
-            if (!pipe.HasConnectionTowards(pipeRotation, directionToPrevious))
+            if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, directionToPrevious))
             {
                 return false;
             }
@@ -2455,6 +2442,7 @@ public class InputOutputModule : InstallationObject,
         RegisterRuntimeAreaCoordinates();
         WakeRuntimeUpdate();
         RefreshWorkAnimatorState(true);
+        RuntimePipeTopologyChanged?.Invoke(this);
     }
 
     protected override void OnDisable()
@@ -2466,6 +2454,7 @@ public class InputOutputModule : InstallationObject,
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
+        RuntimePipeTopologyChanged?.Invoke(this);
         ReleaseEnergyGaugeVisual();
         base.OnDisable();
     }
@@ -2547,6 +2536,19 @@ public class InputOutputModule : InstallationObject,
         return ContainsRuntimeOutputCoordinate(coordinate);
     }
 
+    public bool TryGetRuntimePipeOutputExternalDirection(
+        Vector2Int coordinate,
+        out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+        bool isPipeOutput = ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeOutputItem)
+                            || ContainsRuntimeRectGridBlockType(
+                                coordinate,
+                                RectGridBlockType.DoublePipeOutputItem);
+        return isPipeOutput
+               && TryGetRuntimePipeAreaExternalDirection(coordinate, out direction);
+    }
+
     public bool TryGetRuntimeOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
         if (outputItemIds == null || !ContainsRuntimeOutputCoordinate(coordinate))
@@ -2554,6 +2556,11 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
+        return AppendOutputItemIds(outputItemIds);
+    }
+
+    public bool TryAppendConfiguredOutputItemIds(ISet<int> outputItemIds)
+    {
         return AppendOutputItemIds(outputItemIds);
     }
 
@@ -3177,7 +3184,7 @@ public class InputOutputModule : InstallationObject,
             }
 
             hasRecipe = true;
-            if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
+            if (!IsRecipeOutputAvailable(outputItemId))
             {
                 blockedByTargetFilter = true;
                 continue;
@@ -3262,8 +3269,10 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        energyAreaCapacity = Mathf.Max(ResolveRuntimeAreaCapacity(runtimeInputEnergyCoordinates), 1);
         energyItemId = GetRuntimeAreaTopItemId(runtimeInputEnergyCoordinates);
+        energyAreaCapacity = Mathf.Max(
+            ResolveRuntimeAreaCapacity(runtimeInputEnergyCoordinates, energyItemId),
+            1);
         if (energyItemId >= 0)
         {
             energyAreaCount = GetRuntimeAreaObjectCount(runtimeInputEnergyCoordinates, energyItemId);
@@ -3289,7 +3298,10 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        energyAreaCapacity = Mathf.Max(ResolveRuntimeAreaCapacity(runtimeInputEnergyCoordinates), 1);
+        int energyItemId = GetRuntimeAreaTopItemId(runtimeInputEnergyCoordinates);
+        energyAreaCapacity = Mathf.Max(
+            ResolveRuntimeAreaCapacity(runtimeInputEnergyCoordinates, energyItemId),
+            1);
         burnEnergyAmount = GetRuntimeAreaEnergyAmount(
             runtimeInputEnergyCoordinates,
             installedDefinition.useEnergyType);
@@ -3383,7 +3395,7 @@ public class InputOutputModule : InstallationObject,
                     out outputItemId,
                     out outputRecipeCount))
             {
-                if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
+                if (!IsRecipeOutputAvailable(outputItemId))
                 {
                     continue;
                 }
@@ -3482,7 +3494,7 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
+            if (!IsRecipeOutputAvailable(outputItemId))
             {
                 continue;
             }
@@ -3552,16 +3564,20 @@ public class InputOutputModule : InstallationObject,
         }
 
         inputAreaCount = GetRuntimeAreaObjectCount(objectInfoInputAreaCoordinates, inputItemId);
-        inputAreaCapacity = Mathf.Max(
-            ResolveRuntimeAreaCapacity(objectInfoInputAreaCoordinates),
-            Mathf.Max(inputAreaCount, inputRecipeCount));
+        inputAreaCapacity = ResolveObjectInfoAreaCapacity(
+            objectInfoInputAreaCoordinates,
+            inputItemId,
+            inputAreaCount,
+            inputRecipeCount);
 
         if (outputItemId >= 0)
         {
             outputAreaCount = GetRuntimeAreaObjectCount(runtimeOutputCoordinates, outputItemId);
-            outputAreaCapacity = Mathf.Max(
-                ResolveRuntimeAreaCapacity(runtimeOutputCoordinates),
-                Mathf.Max(outputAreaCount, outputRecipeCount));
+            outputAreaCapacity = ResolveObjectInfoAreaCapacity(
+                runtimeOutputCoordinates,
+                outputItemId,
+                outputAreaCount,
+                outputRecipeCount);
         }
         else
         {
@@ -3593,9 +3609,11 @@ public class InputOutputModule : InstallationObject,
         }
 
         inputAreaCount = GetRuntimeAreaObjectCount(objectInfoInputAreaCoordinates, inputItemId);
-        inputAreaCapacity = Mathf.Max(
-            ResolveRuntimeAreaCapacity(objectInfoInputAreaCoordinates),
-            Mathf.Max(inputAreaCount, Mathf.Max(1, inputRecipeCount)));
+        inputAreaCapacity = ResolveObjectInfoAreaCapacity(
+            objectInfoInputAreaCoordinates,
+            inputItemId,
+            inputAreaCount,
+            Mathf.Max(1, inputRecipeCount));
         return true;
     }
 
@@ -3614,10 +3632,25 @@ public class InputOutputModule : InstallationObject,
         }
 
         outputAreaCount = GetRuntimeAreaObjectCount(runtimeOutputCoordinates, outputItemId);
-        outputAreaCapacity = Mathf.Max(
-            ResolveRuntimeAreaCapacity(runtimeOutputCoordinates),
-            Mathf.Max(outputAreaCount, Mathf.Max(1, outputRecipeCount)));
+        outputAreaCapacity = ResolveObjectInfoAreaCapacity(
+            runtimeOutputCoordinates,
+            outputItemId,
+            outputAreaCount,
+            Mathf.Max(1, outputRecipeCount));
         return true;
+    }
+
+    private int ResolveObjectInfoAreaCapacity(
+        IReadOnlyList<Vector2Int> coordinates,
+        int itemId,
+        int currentCount,
+        int recipeCount)
+    {
+        int capacity = ResolveRuntimeAreaCapacity(coordinates, itemId);
+        ItemDefinition definition = ResolveItemDefinition(itemId);
+        return definition != null && definition.oneItem
+            ? capacity
+            : Mathf.Max(capacity, Mathf.Max(currentCount, recipeCount));
     }
 
     private bool TryGetObjectInfoRecipeLine(
@@ -3670,11 +3703,11 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
-    public int ResolveRuntimeAreaCapacity(IReadOnlyList<Vector2Int> coordinates)
+    public int ResolveRuntimeAreaCapacity(IReadOnlyList<Vector2Int> coordinates, int itemId = -1)
     {
         if (coordinates == null || coordinates.Count <= 0)
         {
-            return RuntimeAreaMaxObjects;
+            return ResolveItemStackCapacity(itemId, RuntimeAreaMaxObjects);
         }
 
         int installedCapacityTotal = 0;
@@ -3693,20 +3726,35 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            installedCapacityTotal += Mathf.Max(1, blockCapacity);
+            installedCapacityTotal += ResolveItemStackCapacity(itemId, blockCapacity);
             hasInstalledCapacity = true;
         }
 
-        return hasInstalledCapacity
-            ? Mathf.Max(1, installedCapacityTotal)
-            : RuntimeAreaMaxObjects;
+        if (hasInstalledCapacity)
+        {
+            return Mathf.Max(1, installedCapacityTotal);
+        }
+
+        int defaultAreaCapacity = RuntimeAreaMaxObjects;
+        ItemDefinition definition = ResolveItemDefinition(itemId);
+        return definition != null && definition.oneItem
+            ? Mathf.Min(defaultAreaCapacity, Mathf.Max(1, visitedCoordinates.Count))
+            : defaultAreaCapacity;
     }
 
-    private int ResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, int defaultCapacity)
+    private int ResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, int itemId, int defaultCapacity)
     {
-        return TryResolveRuntimeBlockCenterCapacity(coordinate, out int capacity)
-            ? Mathf.Max(1, capacity)
+        int capacity = TryResolveRuntimeBlockCenterCapacity(coordinate, out int installedCapacity)
+            ? Mathf.Max(1, installedCapacity)
             : Mathf.Max(1, defaultCapacity);
+        return ResolveItemStackCapacity(itemId, capacity);
+    }
+
+    private static int ResolveItemStackCapacity(int itemId, int defaultCapacity)
+    {
+        return ItemDefinition.ResolveStackCapacity(
+            ResolveItemDefinition(itemId),
+            defaultCapacity);
     }
 
     private bool TryResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, out int capacity)
@@ -4192,7 +4240,7 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (!IsRecipeOutputAllowedByItemFilter(outputItemId))
+            if (!IsRecipeOutputAvailable(outputItemId))
             {
                 continue;
             }
@@ -4285,6 +4333,15 @@ public class InputOutputModule : InstallationObject,
 
     protected bool TryEmitOutputItems(int outputItemId, int outputCount, Vector3 startWorldPosition)
     {
+        ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
+        if (outputDefinition != null && outputDefinition.oneItem && outputCount > 1)
+        {
+            return TryEmitSingleItemStacks(
+                outputItemId,
+                outputCount,
+                startWorldPosition);
+        }
+
         if (!TryResolveOutputTarget(outputItemId, outputCount, out RuntimeAreaOutputTarget outputTarget))
         {
             return false;
@@ -4293,12 +4350,103 @@ public class InputOutputModule : InstallationObject,
         if (outputTarget.useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
-            int capacity = ResolveRuntimeBlockCenterCapacity(outputTarget.coordinate, RuntimeAreaMaxObjects);
+            int capacity = ResolveRuntimeBlockCenterCapacity(
+                outputTarget.coordinate,
+                outputItemId,
+                RuntimeAreaMaxObjects);
             return stateStore != null
                    && stateStore.TryAddSavedCenterItems(outputTarget.coordinate, outputItemId, outputCount, capacity);
         }
 
         return TryEmitOutputItemsToBlock(outputTarget.block, outputItemId, outputCount, startWorldPosition);
+    }
+
+    private bool TryEmitSingleItemStacks(
+        int outputItemId,
+        int outputCount,
+        Vector3 startWorldPosition)
+    {
+        if (!CanDistributeSingleItemStacks(outputItemId, outputCount))
+        {
+            return false;
+        }
+
+        for (int outputIndex = 0; outputIndex < outputCount; outputIndex++)
+        {
+            if (!TryResolveOutputTarget(outputItemId, 1, out RuntimeAreaOutputTarget outputTarget))
+            {
+                return false;
+            }
+
+            if (outputTarget.useSavedCenterStack)
+            {
+                BlockStateStore stateStore = ResolveBlockStateStore();
+                int capacity = ResolveRuntimeBlockCenterCapacity(
+                    outputTarget.coordinate,
+                    outputItemId,
+                    RuntimeAreaMaxObjects);
+                if (stateStore == null
+                    || !stateStore.TryAddSavedCenterItems(
+                        outputTarget.coordinate,
+                        outputItemId,
+                        1,
+                        capacity))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            Block outputBlock = outputTarget.block;
+            if (outputBlock == null
+                || !outputBlock.TryAddInputAreaCenterObjectAnimated(
+                    outputItemId,
+                    startWorldPosition,
+                    outputIndex * Mathf.Max(0f, outputMoveInterval),
+                    out PortableObject droppedObject))
+            {
+                return false;
+            }
+
+            DroppedItemPickupGate gate = droppedObject != null
+                ? droppedObject.GetComponent<DroppedItemPickupGate>()
+                : null;
+            gate?.SetAutoPickupBlocked(true);
+        }
+
+        return true;
+    }
+
+    private bool CanDistributeSingleItemStacks(int itemId, int count)
+    {
+        if (itemId < 0
+            || count <= 0
+            || GetRuntimeAreaObjectCount(runtimeOutputCoordinates) + count
+               > ResolveRuntimeAreaCapacity(runtimeOutputCoordinates, itemId))
+        {
+            return false;
+        }
+
+        int availableStackCount = 0;
+        singleItemOutputVisitedCoordinates.Clear();
+        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = runtimeOutputCoordinates[i];
+            if (!singleItemOutputVisitedCoordinates.Add(coordinate)
+                || !CanAddRuntimeCenterItems(coordinate, itemId, 1, out _, out _))
+            {
+                continue;
+            }
+
+            availableStackCount++;
+            if (availableStackCount >= count)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected bool TryEmitOutputItemsToBlock(Block outputBlock, int outputItemId, int outputCount, Vector3 startWorldPosition)
@@ -4470,7 +4618,8 @@ public class InputOutputModule : InstallationObject,
                     energyItemId,
                     1,
                     ResolveConsumeTargetWorldPosition(),
-                    0f) != 1)
+                    0f,
+                    ShouldAnimateVirtualizedEnergyConsumption()) != 1)
             {
                 continue;
             }
@@ -4498,6 +4647,12 @@ public class InputOutputModule : InstallationObject,
 
     protected bool CanResolveOutputTarget(int outputItemId, int outputCount)
     {
+        ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
+        if (outputDefinition != null && outputDefinition.oneItem && outputCount > 1)
+        {
+            return CanDistributeSingleItemStacks(outputItemId, outputCount);
+        }
+
         return TryResolveOutputTarget(outputItemId, outputCount, out _);
     }
 
@@ -4512,7 +4667,8 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        if (GetRuntimeAreaObjectCount(runtimeOutputCoordinates) + outputCount > ResolveRuntimeAreaCapacity(runtimeOutputCoordinates))
+        if (GetRuntimeAreaObjectCount(runtimeOutputCoordinates) + outputCount
+            > ResolveRuntimeAreaCapacity(runtimeOutputCoordinates, outputItemId))
         {
             return false;
         }
@@ -4563,7 +4719,7 @@ public class InputOutputModule : InstallationObject,
         if (useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
-            int capacity = ResolveRuntimeBlockCenterCapacity(coordinate, RuntimeAreaMaxObjects);
+            int capacity = ResolveRuntimeBlockCenterCapacity(coordinate, itemId, RuntimeAreaMaxObjects);
             return stateStore != null
                    && stateStore.CanAddSavedCenterItems(coordinate, itemId, count, capacity);
         }
@@ -4794,7 +4950,8 @@ public class InputOutputModule : InstallationObject,
         int itemId,
         int count,
         Vector3 consumeTargetWorldPosition,
-        float moveInterval)
+        float moveInterval,
+        bool animateVirtualizedConsumption = false)
     {
         if (itemId < 0 || count <= 0)
         {
@@ -4809,7 +4966,22 @@ public class InputOutputModule : InstallationObject,
         if (useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
-            return stateStore != null ? stateStore.RemoveSavedCenterItems(coordinate, itemId, count) : 0;
+            int removedCount = stateStore != null
+                ? stateStore.RemoveSavedCenterItems(coordinate, itemId, count)
+                : 0;
+            if (animateVirtualizedConsumption && block != null)
+            {
+                float interval = Mathf.Max(0f, moveInterval);
+                for (int removedIndex = 0; removedIndex < removedCount; removedIndex++)
+                {
+                    block.PlayVirtualInputAreaConsumeAnimation(
+                        itemId,
+                        consumeTargetWorldPosition,
+                        removedIndex * interval);
+                }
+            }
+
+            return removedCount;
         }
 
         return block != null
@@ -4897,7 +5069,8 @@ public class InputOutputModule : InstallationObject,
 
         string itemName = definition.itemName;
         return string.Equals(itemName, "Water", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Steam", System.StringComparison.OrdinalIgnoreCase);
+               || string.Equals(itemName, "Steam", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "Oil", System.StringComparison.OrdinalIgnoreCase);
     }
 
     protected static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
@@ -5160,7 +5333,7 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe && !pipe.HasConnectionTowards(pipeRotation, direction))
+                if (hasPipe && !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
                 }
@@ -5192,6 +5365,12 @@ public class InputOutputModule : InstallationObject,
                 {
                     EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
                 }
+            }
+
+            if (hasPipe
+                && pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+            {
+                EnqueueConnectedFluidSearchCoordinate(remoteCoordinate);
             }
         }
 
@@ -5482,6 +5661,11 @@ public class InputOutputModule : InstallationObject,
         }
 
         return transform.position;
+    }
+
+    protected virtual bool ShouldAnimateVirtualizedEnergyConsumption()
+    {
+        return false;
     }
 
     private void UpdateEnergyGaugeVisual()
@@ -5953,6 +6137,20 @@ public class InputOutputModule : InstallationObject,
     protected virtual bool IsRecipeOutputAllowedByItemFilter(int outputItemId)
     {
         return true;
+    }
+
+    protected bool IsRecipeOutputAvailable(int outputItemId)
+    {
+        return HasRequiredCraftingManual(outputItemId)
+               && IsRecipeOutputAllowedByItemFilter(outputItemId);
+    }
+
+    protected static bool HasRequiredCraftingManual(int outputItemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return itemManager != null && itemManager.IsManualRequirementSatisfied(outputItemId);
     }
 
     protected virtual bool ShouldShowObjectInfoEmptyRecipeLine(int outputItemId)

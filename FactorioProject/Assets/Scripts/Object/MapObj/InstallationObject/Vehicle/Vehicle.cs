@@ -1,14 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class Vehicle : InstallationObject
 {
+    private const float VehicleLoadSpeedReductionPerMass = 0.01f;
+    private const float MinimumVehicleLoadSpeedMultiplier = 0.01f;
+
     [SerializeField, Min(0.01f)]
     private float vehicleAccelerationPerSecond = 4f;
     [SerializeField, Min(0.01f)]
     private float vehicleMaxSpeed = 1.5f;
     [SerializeField, Min(0.01f)]
     private float vehicleDecelerationPerSecond = 4f;
+    [FormerlySerializedAs("trainMass")]
+    [SerializeField, Min(0.01f)]
+    private float vehicleMass = 1f;
     [SerializeField]
     private List<Transform> playerPoint;
 
@@ -19,16 +26,46 @@ public class Vehicle : InstallationObject
     [SerializeField]
     private Vector3 wheelLocalRotationAxis = Vector3.right;
     [SerializeField]
+    [Tooltip("미러링된 좌우 바퀴가 같은 방향으로 구르도록 차체 기준 회전축을 사용합니다.")]
+    private bool wheelRotationUsesVehicleSpace;
+    [SerializeField]
     private bool invertWheelRotation;
 
     private float currentVehicleSignedSpeed;
+    private readonly Vector2Int[] runtimeCoordinateBuffer = new Vector2Int[1];
 
     public float VehicleAccelerationPerSecond => Mathf.Max(0.01f, vehicleAccelerationPerSecond);
     public float VehicleDecelerationPerSecond => Mathf.Max(0.01f, vehicleDecelerationPerSecond);
     public float VehicleMaxSpeed => Mathf.Max(0.01f, vehicleMaxSpeed);
+    public float VehicleMass => Mathf.Max(0.01f, vehicleMass);
+    public float VehicleLoadSpeedMultiplier => Mathf.Clamp(
+        1f - VehicleMass * VehicleLoadSpeedReductionPerMass,
+        MinimumVehicleLoadSpeedMultiplier,
+        1f);
     public virtual float EffectiveVehicleMaxSpeed => VehicleMaxSpeed;
     public float CurrentVehicleSpeed => Mathf.Abs(currentVehicleSignedSpeed);
-    protected float CurrentVehicleSignedSpeed => currentVehicleSignedSpeed;
+    public float CurrentVehicleSignedSpeed => currentVehicleSignedSpeed;
+
+    public float ResolveSignedSpeedRelativeToFacing(Transform facingTransform)
+    {
+        if (facingTransform == null || Mathf.Abs(currentVehicleSignedSpeed) <= 0.0001f)
+        {
+            return currentVehicleSignedSpeed;
+        }
+
+        Vector3 vehicleForward = transform.forward;
+        Vector3 facingForward = facingTransform.forward;
+        vehicleForward.y = 0f;
+        facingForward.y = 0f;
+        if (vehicleForward.sqrMagnitude <= 0.0001f || facingForward.sqrMagnitude <= 0.0001f)
+        {
+            return currentVehicleSignedSpeed;
+        }
+
+        return Vector3.Dot(vehicleForward, facingForward) < 0f
+            ? -currentVehicleSignedSpeed
+            : currentVehicleSignedSpeed;
+    }
 
     public virtual void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
     {
@@ -41,6 +78,12 @@ public class Vehicle : InstallationObject
         Player mountedPlayer)
     {
         HandleMountedInput(worldMoveDirection, moveSpeed, deltaTime);
+    }
+
+    public virtual void NotifyPlayerDismounted(Player dismountedPlayer)
+    {
+        ResetVehicleMotion();
+        dismountedPlayer?.ClearMountedVehicleAnimation();
     }
 
     protected float UpdateVehicleSignedSpeed(float inputAxis, float deltaTime)
@@ -107,6 +150,13 @@ public class Vehicle : InstallationObject
         }
 
         rotationAxis.Normalize();
+        Space rotationSpace = Space.Self;
+        if (wheelRotationUsesVehicleSpace)
+        {
+            rotationAxis = transform.TransformDirection(rotationAxis);
+            rotationSpace = Space.World;
+        }
+
         float rotationSign = invertWheelRotation ? -1f : 1f;
         float degrees = signedDistance
                         / (Mathf.PI * 2f * Mathf.Max(0.01f, wheelRadius))
@@ -120,13 +170,41 @@ public class Vehicle : InstallationObject
                 continue;
             }
 
-            wheel.Rotate(rotationAxis, degrees, Space.Self);
+            wheel.Rotate(rotationAxis, degrees, rotationSpace);
         }
+    }
+
+    protected bool RefreshSingleCellRuntimePlacement(
+        Vector3 worldPosition,
+        int quarterTurns)
+    {
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(worldPosition.x),
+            Mathf.RoundToInt(worldPosition.z));
+        int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
+        IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
+        if (RuntimeAnchorCoordinate == coordinate
+            && RuntimeQuarterTurns == normalizedQuarterTurns
+            && occupiedCoordinates != null
+            && occupiedCoordinates.Count == 1
+            && occupiedCoordinates[0] == coordinate)
+        {
+            return false;
+        }
+
+        runtimeCoordinateBuffer[0] = coordinate;
+        ConfigurePlacementRuntime(
+            coordinate,
+            normalizedQuarterTurns,
+            runtimeCoordinateBuffer,
+            RuntimePlacementSequence);
+        RobotArm.WakeAroundCoordinate(coordinate);
+        return true;
     }
 
     public bool TryDockPlayer(Player targetPlayer)
     {
-        if (targetPlayer == null)
+        if (!CanPlayerDock(targetPlayer))
         {
             return false;
         }
@@ -153,9 +231,21 @@ public class Vehicle : InstallationObject
         return DockPlayerToPoint(targetPlayer, targetPoint);
     }
 
+    public virtual bool CanPlayerDock(Player targetPlayer)
+    {
+        return targetPlayer != null;
+    }
+
+    protected virtual bool PreparePlayerForDock(Player targetPlayer)
+    {
+        return true;
+    }
+
     private bool DockPlayerToPoint(Player targetPlayer, Transform targetPoint)
     {
-        if (targetPlayer == null || targetPoint == null)
+        if (!CanPlayerDock(targetPlayer)
+            || targetPoint == null
+            || !PreparePlayerForDock(targetPlayer))
         {
             return false;
         }
@@ -165,11 +255,18 @@ public class Vehicle : InstallationObject
         PlayerController playerController = targetPlayer.GetComponent<PlayerController>();
         if (playerController != null)
         {
-            return playerController.TrySnapBodyToInteractionPoint(targetPoint, this);
+            bool docked = playerController.TrySnapBodyToInteractionPoint(targetPoint, this);
+            if (docked)
+            {
+                targetPlayer.UpdateMountedVehicleAnimation(this);
+            }
+
+            return docked;
         }
 
         targetPlayer.transform.SetPositionAndRotation(targetPoint.position, targetPoint.rotation);
         targetPlayer.StopImmediateActions();
+        targetPlayer.UpdateMountedVehicleAnimation(this);
         Physics.SyncTransforms();
         return true;
     }
@@ -247,4 +344,23 @@ public class Vehicle : InstallationObject
         return deltaX * deltaX + deltaZ * deltaZ;
     }
 
+    public override void PrepareForPool()
+    {
+        ResetVehicleMotion();
+        base.PrepareForPool();
+    }
+
+    protected override void OnDisable()
+    {
+        ResetVehicleMotion();
+        base.OnDisable();
+    }
+
+#if UNITY_EDITOR
+    protected override void OnValidate()
+    {
+        base.OnValidate();
+        vehicleMass = Mathf.Max(0.01f, vehicleMass);
+    }
+#endif
 }

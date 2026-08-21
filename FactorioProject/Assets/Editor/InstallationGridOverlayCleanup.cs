@@ -7,9 +7,7 @@ using UnityEngine.SceneManagement;
 [InitializeOnLoad]
 internal static class InstallationGridOverlayCleanup
 {
-    private static readonly List<GameObject> SceneRoots = new List<GameObject>();
     private static readonly List<GameObject> OverlayCandidates = new List<GameObject>();
-    private static readonly List<Transform> TransformTraversal = new List<Transform>();
 
     static InstallationGridOverlayCleanup()
     {
@@ -38,10 +36,49 @@ internal static class InstallationGridOverlayCleanup
 
     private static void HandlePlayModeStateChanged(PlayModeStateChange state)
     {
-        if (state == PlayModeStateChange.ExitingPlayMode
-            || state == PlayModeStateChange.EnteredEditMode)
+        if (state == PlayModeStateChange.ExitingPlayMode)
         {
-            CleanupInEditMode();
+            ScheduleCleanupAfterPlayMode();
+            return;
+        }
+
+        if (state == PlayModeStateChange.EnteredEditMode)
+        {
+            CleanupAfterPlayMode();
+            // Unity restores Scene view draw settings at the end of the play-mode
+            // transition, so apply the grid state once more on the next editor tick.
+            ScheduleCleanupAfterPlayMode();
+        }
+    }
+
+    private static void ScheduleCleanupAfterPlayMode()
+    {
+        EditorApplication.delayCall -= CleanupAfterPlayMode;
+        EditorApplication.delayCall += CleanupAfterPlayMode;
+    }
+
+    private static void CleanupAfterPlayMode()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            return;
+        }
+
+        CleanupInEditMode();
+        HideSceneViewGrids();
+    }
+
+    private static void HideSceneViewGrids()
+    {
+        foreach (SceneView sceneView in SceneView.sceneViews)
+        {
+            if (sceneView == null || !sceneView.showGrid)
+            {
+                continue;
+            }
+
+            sceneView.showGrid = false;
+            sceneView.Repaint();
         }
     }
 
@@ -116,23 +153,13 @@ internal static class InstallationGridOverlayCleanup
     private static bool CleanupOrphanedOverlays(Scene targetScene, bool markSceneDirty)
     {
         OverlayCandidates.Clear();
-        if (targetScene.IsValid())
-        {
-            CollectRuntimeGridOverlays(targetScene);
-        }
-        else
-        {
-            for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
-            {
-                CollectRuntimeGridOverlays(SceneManager.GetSceneAt(sceneIndex));
-            }
-        }
+        CollectRuntimeGridOverlays(targetScene);
 
         bool removedOverlay = false;
         for (int i = OverlayCandidates.Count - 1; i >= 0; i--)
         {
             GameObject candidate = OverlayCandidates[i];
-            if (!IsLoadedSceneObject(candidate, targetScene))
+            if (candidate == null)
             {
                 continue;
             }
@@ -151,50 +178,32 @@ internal static class InstallationGridOverlayCleanup
         return removedOverlay;
     }
 
-    private static void CollectRuntimeGridOverlays(Scene scene)
+    private static void CollectRuntimeGridOverlays(Scene targetScene)
     {
-        if (!scene.IsValid() || !scene.isLoaded)
+        // Runtime overlays use HideAndDontSave, and can temporarily live outside
+        // SceneManager.sceneCount while play mode is shutting down. Scan editor
+        // objects directly so those hidden orphans cannot survive the transition.
+        GameObject[] candidates = Resources.FindObjectsOfTypeAll<GameObject>();
+        for (int i = 0; i < candidates.Length; i++)
         {
-            return;
-        }
-
-        SceneRoots.Clear();
-        TransformTraversal.Clear();
-        scene.GetRootGameObjects(SceneRoots);
-        for (int i = 0; i < SceneRoots.Count; i++)
-        {
-            GameObject root = SceneRoots[i];
-            if (root != null)
-            {
-                TransformTraversal.Add(root.transform);
-            }
-        }
-
-        while (TransformTraversal.Count > 0)
-        {
-            int lastIndex = TransformTraversal.Count - 1;
-            Transform current = TransformTraversal[lastIndex];
-            TransformTraversal.RemoveAt(lastIndex);
-            if (current == null)
+            GameObject candidate = candidates[i];
+            if (!IsRuntimeGridOverlay(candidate)
+                || EditorUtility.IsPersistent(candidate))
             {
                 continue;
             }
 
-            GameObject candidate = current.gameObject;
-            if (IsRuntimeGridOverlay(candidate))
+            Scene candidateScene = candidate.scene;
+            if (targetScene.IsValid()
+                && (!candidateScene.IsValid()
+                    || !candidateScene.isLoaded
+                    || candidateScene != targetScene))
             {
-                OverlayCandidates.Add(candidate);
                 continue;
             }
 
-            for (int childIndex = 0; childIndex < current.childCount; childIndex++)
-            {
-                TransformTraversal.Add(current.GetChild(childIndex));
-            }
+            OverlayCandidates.Add(candidate);
         }
-
-        SceneRoots.Clear();
-        TransformTraversal.Clear();
     }
 
     private static bool IsLoadedSceneObject(Component candidate, Scene targetScene)

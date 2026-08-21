@@ -52,6 +52,7 @@ public class Pipe : InstallationObject
     private readonly Queue<Vector2Int> objectInfoFluidSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<int> objectInfoFluidItemIds = new HashSet<int>();
+    private readonly List<InstallationObject> objectInfoFluidStorageScratch = new List<InstallationObject>(4);
 
     [SerializeField]
     private MeshRenderer fluidDP;
@@ -60,6 +61,7 @@ public class Pipe : InstallationObject
     private int displayedFluidItemId = NoDisplayedFluidItemId;
     private bool displayedFluidVisible;
     private bool fluidDisplayRendererResolved;
+    private bool fluidDisplaySuppressedForVariantPreview;
     private float nextFluidDisplayRefreshTime;
 
     public Pipe StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
@@ -75,27 +77,62 @@ public class Pipe : InstallationObject
     protected override void OnEnable()
     {
         base.OnEnable();
-        displayedFluidItemId = NoDisplayedFluidItemId;
-        displayedFluidVisible = false;
-        nextFluidDisplayRefreshTime = Time.time + GetFluidDisplayRefreshOffset();
-        RefreshFluidDisplay(true);
+        fluidDisplaySuppressedForVariantPreview = false;
+        Fluidtank.RefreshAllPipeVisuals();
+        RefreshFluidDisplayImmediately();
     }
 
     protected override void OnDisable()
     {
         SetFluidDisplayVisible(false, true);
         base.OnDisable();
+        Fluidtank.RefreshAllPipeVisuals();
     }
 
     private void Update()
     {
-        if (Time.time < nextFluidDisplayRefreshTime)
+        if (Time.unscaledTime < nextFluidDisplayRefreshTime)
         {
             return;
         }
 
-        nextFluidDisplayRefreshTime = Time.time + FluidDisplayRefreshIntervalSeconds;
+        nextFluidDisplayRefreshTime = Time.unscaledTime + FluidDisplayRefreshIntervalSeconds;
         RefreshFluidDisplay(false);
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        base.OnPlacementRuntimeChanged();
+
+        // OnEnable runs before a newly placed pipe is bound to its grid coordinate.
+        // Refresh again after the runtime placement index is registered so the pipe
+        // can resolve adjacent tanks and pipe outputs without requiring a move.
+        RefreshFluidDisplayImmediately();
+    }
+
+    public void RefreshFluidDisplayImmediately()
+    {
+        displayedFluidItemId = NoDisplayedFluidItemId;
+        displayedFluidVisible = false;
+        nextFluidDisplayRefreshTime = Time.unscaledTime + GetFluidDisplayRefreshOffset();
+        RefreshFluidDisplay(true);
+    }
+
+    public void SetVariantPreviewFluidDisplaySuppressed(bool suppressed)
+    {
+        if (fluidDisplaySuppressedForVariantPreview == suppressed)
+        {
+            return;
+        }
+
+        fluidDisplaySuppressedForVariantPreview = suppressed;
+        if (suppressed)
+        {
+            SetFluidDisplayVisible(false, true);
+            return;
+        }
+
+        RefreshFluidDisplayImmediately();
     }
 
     public bool TryGetObjectInfoFluidItemId(out int fluidItemId)
@@ -142,7 +179,7 @@ public class Pipe : InstallationObject
             for (int i = 0; i < CardinalDirections.Length; i++)
             {
                 Vector2Int direction = CardinalDirections[i];
-                if (!pipe.HasConnectionTowards(pipeRotation, direction))
+                if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
                 }
@@ -154,17 +191,22 @@ public class Pipe : InstallationObject
                 }
 
                 if (TryGetPipeAtCoordinate(terrain, neighborCoordinate, out Pipe neighborPipe, out Quaternion neighborRotation)
-                    && neighborPipe.HasConnectionTowards(neighborRotation, -direction))
+                    && neighborPipe.HasConnectionTowardsAt(neighborCoordinate, neighborRotation, -direction))
                 {
                     EnqueueObjectInfoFluidSearchCoordinate(neighborCoordinate);
                 }
+            }
+
+            if (pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+            {
+                EnqueueObjectInfoFluidSearchCoordinate(remoteCoordinate);
             }
         }
 
         return false;
     }
 
-    public bool HasConnectionTowards(Quaternion rotation, Vector2Int direction)
+    public virtual bool HasConnectionTowards(Quaternion rotation, Vector2Int direction)
     {
         if (direction == Vector2Int.zero)
         {
@@ -189,6 +231,36 @@ public class Pipe : InstallationObject
                 return HasResolvedConnection(rotation, localStraightDirection, direction)
                        || HasResolvedConnection(rotation, OppositeFacingDirection(localStraightDirection), direction);
         }
+    }
+
+    public virtual bool HasConnectionTowardsAt(
+        Vector2Int coordinate,
+        Quaternion rotation,
+        Vector2Int direction)
+    {
+        return HasConnectionTowards(rotation, direction);
+    }
+
+    public virtual bool TryGetRemoteConnectionCoordinate(
+        Vector2Int coordinate,
+        out Vector2Int remoteCoordinate)
+    {
+        remoteCoordinate = default;
+        return false;
+    }
+
+    public int GetConnectionMask(Quaternion rotation)
+    {
+        int connectionMask = 0;
+        for (int i = 0; i < CardinalDirections.Length; i++)
+        {
+            if (HasConnectionTowards(rotation, CardinalDirections[i]))
+            {
+                connectionMask |= 1 << i;
+            }
+        }
+
+        return connectionMask;
     }
 
     private bool TryResolveObjectInfoPipeCoordinate(out Vector2Int coordinate)
@@ -276,6 +348,14 @@ public class Pipe : InstallationObject
             return true;
         }
 
+        if (TryGetRuntimeStoredFluidInfoAtCoordinate(
+                coordinate,
+                out fluidItemId,
+                out temperatureCelsius))
+        {
+            return true;
+        }
+
         TerrainGenerator terrain = TerrainGenerator.Active;
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
@@ -291,6 +371,42 @@ public class Pipe : InstallationObject
         fluidItemId = bodyStorage.StoredFluidItemId;
         temperatureCelsius = bodyStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
         return true;
+    }
+
+    private bool TryGetRuntimeStoredFluidInfoAtCoordinate(
+        Vector2Int coordinate,
+        out int fluidItemId,
+        out float temperatureCelsius)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        objectInfoFluidStorageScratch.Clear();
+        if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
+                coordinate,
+                objectInfoFluidStorageScratch))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < objectInfoFluidStorageScratch.Count; i++)
+        {
+            InstallationObject storage = objectInfoFluidStorageScratch[i];
+            if (storage == null
+                || storage is Pipe
+                || storage.StoredFluidItemId < 0
+                || !CanDisplayStoredFluidAtCoordinate(storage, coordinate))
+            {
+                continue;
+            }
+
+            fluidItemId = storage.StoredFluidItemId;
+            temperatureCelsius = storage.GetStoredFluidTemperatureCelsius(fluidItemId);
+            objectInfoFluidStorageScratch.Clear();
+            return true;
+        }
+
+        objectInfoFluidStorageScratch.Clear();
+        return false;
     }
 
     private bool TryGetSourceFluidInfoAtCoordinate(
@@ -457,6 +573,12 @@ public class Pipe : InstallationObject
             return;
         }
 
+        if (fluidDisplaySuppressedForVariantPreview)
+        {
+            SetFluidDisplayVisible(false, force);
+            return;
+        }
+
         if (!TryGetObjectInfoFluidItemId(out int fluidItemId))
         {
             displayedFluidItemId = NoDisplayedFluidItemId;
@@ -464,7 +586,10 @@ public class Pipe : InstallationObject
             return;
         }
 
-        if (!force && displayedFluidVisible && displayedFluidItemId == fluidItemId)
+        if (!force
+            && displayedFluidVisible
+            && renderer.enabled
+            && displayedFluidItemId == fluidItemId)
         {
             return;
         }

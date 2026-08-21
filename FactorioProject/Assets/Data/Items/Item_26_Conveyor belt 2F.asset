@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_26_Conveyor belt 2F
   m_EditorClassIdentifier: 
   itemName: Conveyor belt 2F
-  id: 38
+  id: 41
   mapObject: {fileID: 4923497655988066394, guid: ad2b1061faaacad479734368ff5211cc, type: 3}
   portableMesh: {fileID: 4300000, guid: 0e8c3eb53f7fff043ad76a82eb556561, type: 2}
   portableMat: {fileID: 2100000, guid: 4371f8650831e56448c21e70444e24f1, type: 2}
   icon: {fileID: 21300000, guid: 5074c2111e0cf234f8d8f911cf70fe24, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

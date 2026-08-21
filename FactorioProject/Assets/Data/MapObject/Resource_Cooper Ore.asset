@@ -15,6 +15,7 @@ MonoBehaviour:
   resourceName: Cooper Ore
   prefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   harvestMode: 1
+  placementCategory: 0
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

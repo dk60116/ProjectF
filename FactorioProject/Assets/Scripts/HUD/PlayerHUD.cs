@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class PlayerHUD : BagSlot
+public partial class PlayerHUD : BagSlot
 {
     [SerializeField]
     private List<BagSlot> bagSlots;
@@ -18,10 +18,6 @@ public class PlayerHUD : BagSlot
     private PlayerBag boundInventoryBag;
     private PlayerBag boundHandBag;
     private bool isRefreshing;
-    private RectTransform handItemGaugeRect;
-    private GameObject handItemGaugeRoot;
-    private float handItemGaugeMinAnchorX;
-    private float handItemGaugeMaxAnchorX;
 
     [SerializeField]
     private List<CreatingQueueSlot> craftingWaitingQueue; 
@@ -33,11 +29,15 @@ public class PlayerHUD : BagSlot
     private float craftedPortableMoveInterval = 0.1f;
 
     private const float DefaultCraftingDurationSeconds = 5f;
+    private const float CraftingAccessRefreshInterval = 0.2f;
     private const string NooseItemName = "Noose";
     private const string TorchItemName = "Torch";
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
     private float craftingIngredientRefreshTimer;
+    private float craftingAccessRefreshTimer;
+    private int craftingAccessItemId = -1;
+    private bool craftingAccessBlocked;
     private InstallationPlacementController installationPlacementController;
     private bool wasInventoryEditLocked;
 
@@ -363,7 +363,7 @@ public class PlayerHUD : BagSlot
                 i,
                 slotItemId,
                 slotItemCount,
-                bag.GetSlotMaxCount(i),
+                bag.GetSlotCapacityForItem(i, slotItemId),
                 allowZeroCountDisplay);
         }
 
@@ -565,7 +565,6 @@ public class PlayerHUD : BagSlot
     {
         itemId = handBag != null ? handBag.GetSlotItemId(0) : -1;
         itemCount = handBag != null ? handBag.GetSlotCount(0) : 0;
-        maxItemCount = handBag != null ? handBag.GetSlotMaxCount(0) : 0;
         allowZeroCountDisplay = TryApplyVisualPreservedSlotDisplay(
             handBag,
             0,
@@ -575,6 +574,10 @@ public class PlayerHUD : BagSlot
         {
             allowZeroCountDisplay = TryApplyBlueprintHandSlotDisplay(ref itemId, ref itemCount);
         }
+
+        maxItemCount = handBag != null
+            ? handBag.GetSlotCapacityForItem(0, itemId)
+            : 0;
     }
 
     private bool TryApplyVisualPreservedSlotDisplay(
@@ -1881,6 +1884,11 @@ public class PlayerHUD : BagSlot
             return;
         }
 
+        if (TryActivateBucketWaterInteraction(currentPlayer, playerController))
+        {
+            return;
+        }
+
         ClearContextInteractionButtonState();
     }
 
@@ -1945,16 +1953,23 @@ public class PlayerHUD : BagSlot
     {
         targetButton = InteractionButton;
         icon = null;
+        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerController currentPlayerController = currentPlayer != null
+            ? currentPlayer.GetComponent<PlayerController>()
+            : null;
         if (mapObject == null
             || !mapObject.gameObject.activeInHierarchy
-            || !mapObject.AllowsFocus)
+            || !mapObject.AllowsFocus
+            || (mapObject is Vehicle vehicle
+                && (currentPlayerController == null
+                    || (!currentPlayerController.IsMountedOnVehicle(vehicle)
+                        && !vehicle.CanPlayerDock(currentPlayer)))))
         {
             return false;
         }
 
         if (mapObject is IPlayerMapObjectInteraction playerInteraction)
         {
-            Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
             if (!playerInteraction.CanPlayerInteract(currentPlayer))
             {
                 return false;
@@ -2067,6 +2082,7 @@ public class PlayerHUD : BagSlot
 
     private void ClearInteractionTargets()
     {
+        bucketWaterInteractionActive = false;
         currentInteractionAnimal = null;
         currentInteractionBoxObject = null;
         currentInteractionDoorObject = null;
@@ -2221,17 +2237,17 @@ public class PlayerHUD : BagSlot
         {
             // 접근 및 공격 애니메이션 도중에는 근처의 자동 포커스 후보가
             // 사용자가 선택한 동물의 HUD와 아웃라인을 교체하지 못하게 한다.
+            // 클릭 선택도 유지해야 공격이 끝난 뒤 Knife 버튼이 다시 표시된다.
             lastYellowObjectInfoFocusTarget = null;
+            clickedObjectInfoTarget = knifeFocusAnimal;
             if (currentObjectInfoTarget != knifeFocusAnimal
                 || !objectInfoPanel.IsBoundTo(knifeFocusAnimal)
                 || !objectInfoPanel.gameObject.activeSelf)
             {
-                clickedObjectInfoTarget = null;
                 BindObjectInfoPanel(knifeFocusAnimal, false);
             }
             else
             {
-                clickedObjectInfoTarget = null;
                 currentObjectInfoOpenedByYellowFocus = false;
                 RefreshCurrentObjectInfoPanelTarget();
             }
@@ -2878,58 +2894,6 @@ public class PlayerHUD : BagSlot
         }
     }
 
-    private void UpdateHandItemGauge()
-    {
-        Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        if (currentPlayer == null
-            || !currentPlayer.TryGetActiveTorchEnergy(
-                out _,
-                out float remainingEnergy,
-                out float energyCapacity))
-        {
-            SetHandItemGaugeVisible(false);
-            return;
-        }
-
-        CacheHandItemGaugeReferences();
-        if (handItemGaugeRect == null || energyCapacity <= 0f)
-        {
-            SetHandItemGaugeVisible(false);
-            return;
-        }
-
-        float normalizedEnergy = Mathf.Clamp01(remainingEnergy / energyCapacity);
-        SetHandItemGaugeVisible(true);
-
-        Vector2 anchorMax = handItemGaugeRect.anchorMax;
-        anchorMax.x = Mathf.Lerp(handItemGaugeMinAnchorX, handItemGaugeMaxAnchorX, normalizedEnergy);
-        handItemGaugeRect.anchorMax = anchorMax;
-    }
-
-    private void SetHandItemGaugeVisible(bool visible)
-    {
-        CacheHandItemGaugeReferences();
-        if (handItemGaugeRoot != null && handItemGaugeRoot.activeSelf != visible)
-        {
-            handItemGaugeRoot.SetActive(visible);
-        }
-    }
-
-    private void CacheHandItemGaugeReferences()
-    {
-        if (handItemGauge == null || handItemGaugeRect != null)
-        {
-            return;
-        }
-
-        handItemGaugeRect = handItemGauge.rectTransform;
-        handItemGaugeRoot = handItemGaugeRect.parent != null
-            ? handItemGaugeRect.parent.gameObject
-            : handItemGauge.gameObject;
-        handItemGaugeMinAnchorX = handItemGaugeRect.anchorMin.x;
-        handItemGaugeMaxAnchorX = handItemGaugeRect.anchorMax.x;
-    }
-
     private bool IsItemFilterButtonPanelActive()
     {
         if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
@@ -2987,6 +2951,13 @@ public class PlayerHUD : BagSlot
         }
 
         Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (bucketWaterInteractionActive)
+        {
+            HandleBucketWaterInteraction(currentPlayer);
+            UpdateInteractionButtonState();
+            return;
+        }
+
         if (currentInteractionAnimal != null)
         {
             PlayerController playerController = ResolvePlayerController();
@@ -3150,6 +3121,7 @@ public class PlayerHUD : BagSlot
             ? ResolveDoorInteractionButtonForUse()
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
+                                || bucketWaterInteractionActive
                                 || currentInteractionAnimal != null
                                 || currentInteractionDoorObject != null
                                 || currentInteractionResource != null
@@ -3853,7 +3825,9 @@ public class PlayerHUD : BagSlot
         if (craftingQueue.Count > 0)
         {
             CraftingQueueEntry entry = craftingQueue[0];
-            if (entry.remainingTime > 0f && !IsCraftOutputBlocked(entry.itemId) && !IsCraftingStationBlocked(entry.itemId))
+            if (entry.remainingTime > 0f
+                && !IsCraftOutputBlocked(entry.itemId)
+                && !IsCraftingAccessBlocked(entry.itemId, deltaTime))
             {
                 entry.remainingTime = Mathf.Max(0f, entry.remainingTime - Mathf.Max(0f, deltaTime));
             }
@@ -3872,19 +3846,38 @@ public class PlayerHUD : BagSlot
                 }
             }
         }
+        else
+        {
+            ResetCraftingAccessState();
+        }
 
         RefreshCraftingQueueSlots(craftingQueueDirty);
         craftingQueueDirty = false;
     }
 
-    private bool IsCraftingStationBlocked(int itemId)
+    private bool IsCraftingAccessBlocked(int itemId, float deltaTime)
     {
         if (itemId < 0)
         {
             return true;
         }
 
-        return !CanCraftItem(itemId);
+        craftingAccessRefreshTimer -= Mathf.Max(0f, deltaTime);
+        if (craftingAccessItemId != itemId || craftingAccessRefreshTimer <= 0f)
+        {
+            craftingAccessItemId = itemId;
+            craftingAccessBlocked = !RefreshCraftingAccessAndCanCraftItem(itemId);
+            craftingAccessRefreshTimer = CraftingAccessRefreshInterval;
+        }
+
+        return craftingAccessBlocked;
+    }
+
+    private void ResetCraftingAccessState()
+    {
+        craftingAccessRefreshTimer = 0f;
+        craftingAccessItemId = -1;
+        craftingAccessBlocked = false;
     }
 
     private bool IsCraftOutputBlocked(int itemId)

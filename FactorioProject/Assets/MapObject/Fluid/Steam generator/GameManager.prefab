@@ -1,0 +1,1055 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1093718166876926933
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8599409649045732320}
+  - component: {fileID: 4861424175035856295}
+  m_Layer: 0
+  m_Name: UIManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8599409649045732320
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1093718166876926933}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3329743474650359992}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4861424175035856295
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1093718166876926933}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b525aaa691cfc294da08030c56d73b00, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerHUD: {fileID: 0}
+  arrowImage: {fileID: 21300000, guid: 06b84cb3d4c5a3c4cb3d19f2a2e2ad71, type: 3}
+  energyGauge: {fileID: -1401774017205779571, guid: 1810b78fd6e493446b86673ed0b49c1d, type: 3}
+--- !u!1 &2804644978707800671
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3329743474650359992}
+  - component: {fileID: 2437120368446234287}
+  m_Layer: 0
+  m_Name: GameManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3329743474650359992
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2804644978707800671}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 8599409649045732320}
+  - {fileID: 6154275163256477856}
+  - {fileID: 7806189632672534294}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2437120368446234287
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2804644978707800671}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7e3535c1f892b9f4a9d6afc3b60a5589, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  player: {fileID: 0}
+  debugConveyorInstallGridEnds: 0
+  showConveyorSlotDots: 0
+  showSleepAwake: 0
+  showBeltItemLine: 0
+  hideBeltItems: 0
+  hideBelts: 0
+  showRailLine: 0
+  showDirections: 0
+  freeCamera: 0
+  freeTrain: 0
+  mapObjectTickProfilingEnabled: 0
+  mapObjectTickProfilingMaxRows: 64
+  animalAIActiveRadius: 60
+  showAnimalHerdAreas: 0
+  runtimeItemGiveServerEnabled: 1
+  runtimeItemGiveServerPort: 50877
+--- !u!1 &4753906114207430827
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7806189632672534294}
+  - component: {fileID: 2565191720797544959}
+  m_Layer: 0
+  m_Name: SaveManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7806189632672534294
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4753906114207430827}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3329743474650359992}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2565191720797544959
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4753906114207430827}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0e14cb9268111174eb8fa32bafd69664, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  selectedSlotIndex: 1
+  loadRecentSlotOnStart: 1
+  randomizeEmptySlotMap: 1
+--- !u!1 &8212240191752632788
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6154275163256477856}
+  - component: {fileID: 3978212396375370611}
+  m_Layer: 0
+  m_Name: ItemManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6154275163256477856
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8212240191752632788}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3329743474650359992}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &3978212396375370611
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8212240191752632788}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4db0e56278a1d4469225129e4355dac, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  items:
+  - name: Fire
+    id: 0
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 0}
+    portableMat: {fileID: 0}
+    icon: {fileID: 21300000, guid: a60fbe4ccf4c1a742b5788944597807a, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Water
+    id: 1
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 0}
+    portableMat: {fileID: 0}
+    icon: {fileID: 21300000, guid: 9db5a52bf14d6444398759c739b11413, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Steam
+    id: 2
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 0}
+    portableMat: {fileID: 0}
+    icon: {fileID: 21300000, guid: a023e52e50811cd4bb7c13d0687b4363, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Electricity
+    id: 3
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 0}
+    portableMat: {fileID: 0}
+    icon: {fileID: 21300000, guid: 5d15a580082ae1149900ad7c1a2c8441, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Knife
+    id: 5
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: acab8f7129ef5c74d9a24d364d9b96e0, type: 2}
+    portableMat: {fileID: 2100000, guid: 68f7701a505109c4ba6afb3ae4478f84, type: 2}
+    icon: {fileID: 21300000, guid: 6cdee22ffade48ce82ec6ad5bde22c3f, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Axe
+    id: 6
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: c61c489acd34ed3418df5fa967719096, type: 2}
+    portableMat: {fileID: 2100000, guid: b7692744659c63b4abfd5ec92df85632, type: 2}
+    icon: {fileID: 21300000, guid: 5f1733c3a1774edfb7b43f6211418560, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Pickaxe
+    id: 7
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: b5c4177a92ceccc49ae55f60ecca939c, type: 2}
+    portableMat: {fileID: 2100000, guid: 1e76a268dbe24b2499b4edde6e1e26f8, type: 2}
+    icon: {fileID: 21300000, guid: afca9b1187a77004fa1f37020025714e, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Log
+    id: 8
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: f931e2d250afe8847a0230e25513af2f, type: 2}
+    portableMat: {fileID: 2100000, guid: 2cbb04f1f01402c42bf511527a7bd2ed, type: 2}
+    icon: {fileID: 21300000, guid: f4af5822352a54540ac028e707e6979a, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Reed
+    id: 9
+    prefab: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
+    portableMesh: {fileID: 4300000, guid: 0c2622a1a4ba51d41bca1072c81ca88a, type: 2}
+    portableMat: {fileID: 2100000, guid: 5a00e9aab5c35e2488536bbe962012f8, type: 2}
+    icon: {fileID: 21300000, guid: de1de8772e6bd95418f5e646676e941b, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Coal
+    id: 10
+    prefab: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: c794b4c8f412a824999b84bf29af69ff, type: 2}
+    icon: {fileID: 21300000, guid: 3848f0c230d2b994aad0acd59d1bd901, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Stone
+    id: 11
+    prefab: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: 885ae9d64f67da944a45c9ebcb8e21aa, type: 2}
+    icon: {fileID: 21300000, guid: 7a2374bfb3a01524ebd53c2d4d63d095, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Cooper ore
+    id: 12
+    prefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: 054b13814fa09424ba3aa24a6bf66f86, type: 2}
+    icon: {fileID: 21300000, guid: 5dc246db162925547952152ac9cc4f97, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Iron ore
+    id: 13
+    prefab: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
+    portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
+    portableMat: {fileID: 2100000, guid: 8cc8777321a5b794887580573abb56f0, type: 2}
+    icon: {fileID: 21300000, guid: d830ad6735f87f54499c4772be68650d, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Workbench
+    id: 14
+    prefab: {fileID: 7839628250064023149, guid: 0ed46c02cba6bea47936497891a6fa2b, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 72a2a4ab95c0a9048a321b9a6da85eb6, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Anvil
+    id: 15
+    prefab: {fileID: 7839628250064023149, guid: 5968b61eb9fd64e43862673d6f548d51, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 09ffe49e80fad304cbb3cfcc4f7bf6fb, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Woodplank
+    id: 16
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 0f806f9f95c32154992d249d20b44837, type: 2}
+    portableMat: {fileID: 2100000, guid: 0f45ec8088ab2b84ba32cd0e27b8271a, type: 2}
+    icon: {fileID: 21300000, guid: be417b1028b535648827167f9df9cb1e, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Iron plate
+    id: 17
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
+    portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
+    icon: {fileID: 21300000, guid: f03f9c3cb97d43241ad3e1ac5fdac2c0, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: CooperPlate
+    id: 18
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
+    portableMat: {fileID: 2100000, guid: 0efa5e6334133404ea33edadb00bb5ae, type: 2}
+    icon: {fileID: 21300000, guid: 81e5db3c65898a6409a8fc7873104ac5, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Brick
+    id: 19
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ca65f155f50ccc54b879a07c4f2e724b, type: 2}
+    portableMat: {fileID: 2100000, guid: 31209f3560621654aa483d0d6b57f468, type: 2}
+    icon: {fileID: 21300000, guid: 2df89a6ca7b038141bc380d89e523bfc, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Steel plate
+    id: 20
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
+    portableMat: {fileID: 2100000, guid: a2f041064ed95e54f8543f5af9d0fac3, type: 2}
+    icon: {fileID: 21300000, guid: 0660c0ff81df58b49ad7045794fc3ec9, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Charcoal
+    id: 21
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 984c040f3a6583b4b980d2dabf30525a, type: 2}
+    portableMat: {fileID: 2100000, guid: 18b6e63bb38afe440a0d47b49fdee14d, type: 2}
+    icon: {fileID: 21300000, guid: fea8c20363581a34f8e5c0e8fec58dea, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Rope
+    id: 22
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 24f38b2c87025d445884f269a31a304a, type: 2}
+    portableMat: {fileID: 2100000, guid: 82420e5b9bea8574db85d211db2703f4, type: 2}
+    icon: {fileID: 21300000, guid: 29bf3b2c94e4edb4d8c79242fcbbdf7f, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Noose
+    id: 23
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 2ddc8389f8c16044994e44211ce7f596, type: 2}
+    portableMat: {fileID: 2100000, guid: 52782448e1be6d048abd4ed09d2cd35f, type: 2}
+    icon: {fileID: 21300000, guid: 417ed8f501b12834cabfc9b6e3af3917, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Wooden box
+    id: 24
+    prefab: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
+    portableMesh: {fileID: 4300000, guid: 61d1fbf3e3aa50b4eba9e0b2ce723415, type: 2}
+    portableMat: {fileID: 2100000, guid: 6f753db6549e37b4aac4200155b58547, type: 2}
+    icon: {fileID: 21300000, guid: 0bd95ca2de49cd14d83ea614f3342a1d, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Sturdy wooden box
+    id: 25
+    prefab: {fileID: 6524911674366201629, guid: 4c4bd387a46e24b488d86f0bb4d12e69, type: 3}
+    portableMesh: {fileID: 4300000, guid: 61d1fbf3e3aa50b4eba9e0b2ce723415, type: 2}
+    portableMat: {fileID: 2100000, guid: e20aa7e0e44a58245915fb700c7af2cf, type: 2}
+    icon: {fileID: 21300000, guid: 4952d73823cf76741906d0026fbdfc18, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Torch
+    id: 26
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: a7343e579ca362944b1163ffbdc25937, type: 2}
+    portableMat: {fileID: 2100000, guid: d74849f0c0fe2c24ebc5bb88e35bdc84, type: 2}
+    icon: {fileID: 21300000, guid: 34a4268bdce6005459d21c4440c6858e, type: 3}
+    lightMode: 2
+    lightRange: 10
+    lightIntensityMultiplier: 0.7
+    size: 0
+  - name: Camp fire
+    id: 27
+    prefab: {fileID: 1218127140146215825, guid: d1bcd749f595cfb4b819a990cfe8e6a4, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 279281695dbf1c04c87fe3dac76f17f0, type: 3}
+    lightMode: 2
+    lightRange: 12
+    lightIntensityMultiplier: 0.8
+    size: 0
+  - name: Funance
+    id: 28
+    prefab: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
+    portableMesh: {fileID: 4300000, guid: f470bd3487c41be48bdae19b78255dfa, type: 2}
+    portableMat: {fileID: 2100000, guid: 1630d20689111db41a593bc92cb6d880, type: 2}
+    icon: {fileID: 21300000, guid: bba1f0332c7a84f4ea369cd159b6e1cc, type: 3}
+    lightMode: 4
+    lightRange: 6
+    lightIntensityMultiplier: 0.8
+    size: 0
+  - name: Pipe
+    id: 29
+    prefab: {fileID: 196921536911978296, guid: 32693525afd78b34f9eb8e41424827a3, type: 3}
+    portableMesh: {fileID: 4300000, guid: 6bb8d0c848a71b242b22990fb0455f27, type: 2}
+    portableMat: {fileID: 2100000, guid: a9a615bd1aadb8b49ba09ac2d3750c0c, type: 2}
+    icon: {fileID: 21300000, guid: 556c3ce33690c0c449757ce36fbd1b9c, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Nail
+    id: 30
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 2e0e9e1573ee1714182b19fbe1b8ff62, type: 2}
+    portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    icon: {fileID: 21300000, guid: 8765f545aba38a440a200d53e1e83f73, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Gear
+    id: 31
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: c7420867e7dfa5d4aa7f56cd07b08f96, type: 2}
+    portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    icon: {fileID: 21300000, guid: 5235d604deeadcb4bbca88e21bee4df2, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Drill
+    id: 32
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 6f3a16a67ad54f6eb8d0bfbf3e153bb0, type: 2}
+    portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    icon: {fileID: 21300000, guid: 9892bdf878eea1a43b216b9bee80a13e, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Mortor
+    id: 33
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 9586cb29a055bf546a2af7d7e3224302, type: 2}
+    portableMat: {fileID: 2100000, guid: bef0d89290a73a64d97713298c4dd1a0, type: 2}
+    icon: {fileID: 21300000, guid: 891225c503acd5d48a709aab070d5be9, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Coil
+    id: 34
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: f8f6fe632b6192645ad55463e16606bc, type: 2}
+    portableMat: {fileID: 2100000, guid: 750a1b1cd0486ef40b28f8b42514797f, type: 2}
+    icon: {fileID: 21300000, guid: a6db811d32e4d74498bb391f271afca2, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Utility pole
+    id: 35
+    prefab: {fileID: 2570451748998091923, guid: 7d1bdc86a2c93b7458f5a0d441e08e32, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 671470f31844e554986ab955fd61c80d, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Circuit board
+    id: 36
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
+    portableMat: {fileID: 2100000, guid: 8fa6f2af6d4d327468758c266dd9c9e2, type: 2}
+    icon: {fileID: 21300000, guid: 8454457a4e0f3374d855fc48eabb554f, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Semiconductor
+    id: 37
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
+    portableMat: {fileID: 2100000, guid: 46b1a9b650b78a74487b4e256a8e2514, type: 2}
+    icon: {fileID: 21300000, guid: 124b530442cfc8645ab7c7e2b38602ac, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: CPU
+    id: 38
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 8f957552c378891429b37cfa8a4678d2, type: 2}
+    portableMat: {fileID: 2100000, guid: e18a1b4c03ce71e4b933769d18bbaf03, type: 2}
+    icon: {fileID: 21300000, guid: 20b8294ab69359c4888a20262c65887b, type: 3}
+    lightMode: 0
+    lightRange: 0
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Conveyor belt
+    id: 39
+    prefab: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+    portableMesh: {fileID: 4300000, guid: 5a681cf33b862b849b429a81f94988d1, type: 2}
+    portableMat: {fileID: 2100000, guid: bad2650bb7a3f6e40841d60655395be5, type: 2}
+    icon: {fileID: 21300000, guid: 86c83e332e61b5740ae19381d5fc6843, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Conveyor belt 2F
+    id: 40
+    prefab: {fileID: 4923497655988066394, guid: ad2b1061faaacad479734368ff5211cc, type: 3}
+    portableMesh: {fileID: 4300000, guid: 0e8c3eb53f7fff043ad76a82eb556561, type: 2}
+    portableMat: {fileID: 2100000, guid: 4371f8650831e56448c21e70444e24f1, type: 2}
+    icon: {fileID: 21300000, guid: 5074c2111e0cf234f8d8f911cf70fe24, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Mining machine
+    id: 41
+    prefab: {fileID: 8277338630082605383, guid: 1dd1602260bd3534da753f8f0708df08, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: bedd2a65b52676a4fa821c9211aeafdd, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Electric mining machine
+    id: 42
+    prefab: {fileID: 8277338630082605383, guid: 12170bb063a8276498a87aedd657b542, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: b6c8bfd785901674d9f07965da9cc348, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Water pump
+    id: 43
+    prefab: {fileID: 9182752028908485828, guid: edc0b2a5e8887d64bbe345804ee461f0, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 512cd3b54b628fb4195bbd3675ff322d, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Boiler
+    id: 44
+    prefab: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: a628ddd2a38b95940813b0bb46eec89f, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Steam generator
+    id: 45
+    prefab: {fileID: 7245704639458897854, guid: 51e722e4dbe80d84e91d00b9220f57e0, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: c8e209659c2ed834280db61e53da32f2, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Streetlight
+    id: 46
+    prefab: {fileID: 666971777691185006, guid: ae1df0edda6375e4d8677bb94970dfbf, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: b65ab7f53b1d4e4419213ef5b2ebc86b, type: 3}
+    lightMode: 2
+    lightRange: 15
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Robot arm
+    id: 47
+    prefab: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
+    portableMesh: {fileID: 4300000, guid: 5ce0adc8ea6624a4db404d8419f00a30, type: 2}
+    portableMat: {fileID: 2100000, guid: f25200fb9cd7c5d4f936de1603c185fa, type: 2}
+    icon: {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 10
+  - name: Production machine (Mk1)
+    id: 48
+    prefab: {fileID: 1982885657640665004, guid: e735d910cbfef014488e2c2cd7333b0f, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 1c5af457d79a02240a489621d09a6284, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Production machine (MK2)
+    id: 49
+    prefab: {fileID: 1982885657640665004, guid: 45a90e6ed2798e145ae9c40b00d00502, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 74480ccda121853489572ab7f4fc8dc9, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Wooden fence
+    id: 50
+    prefab: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
+    portableMesh: {fileID: 4300000, guid: aa42873b872750b40a2c314806377503, type: 2}
+    portableMat: {fileID: 2100000, guid: 18982fa21a513704aa4f1f45a1cfaba6, type: 2}
+    icon: {fileID: 21300000, guid: dac4f30093e209d408e04e1efeec296b, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Wooden floor
+    id: 51
+    prefab: {fileID: 7127730791152802602, guid: 11ccb5c2f0d669b4db92fe65a3360904, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 6c26e8bc5e9f0f94eb74fb1de8d78aef, type: 3}
+    lightMode: 0
+    lightRange: 10
+    lightIntensityMultiplier: 3
+    size: 0
+  - name: Leather
+    id: 52
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: a93c1180b6e5c4549b44e7103f3ee726, type: 2}
+    portableMat: {fileID: 2100000, guid: c0de1ea7a6ab4d54b8dd61fd4689fa02, type: 2}
+    icon: {fileID: 21300000, guid: fa63be29f879a9a4ca1d652750263558, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Wooden fence door
+    id: 53
+    prefab: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
+    portableMesh: {fileID: 4300000, guid: a0a021ee9c96c4f478b7465c27ac9ab4, type: 2}
+    portableMat: {fileID: 2100000, guid: 9377881ef4c05c3418f3b5a5bf944caf, type: 2}
+    icon: {fileID: 21300000, guid: f5fe2b95085abff4da2c9efcad11d11b, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Brick wall
+    id: 54
+    prefab: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
+    portableMesh: {fileID: 4300000, guid: b46aa1085ccb5014d954ecc3c6233fc3, type: 2}
+    portableMat: {fileID: 2100000, guid: 2c33df38df1346a40a0c4efc329445b2, type: 2}
+    icon: {fileID: 21300000, guid: b7dedd239a404c34da40467a6f8ae628, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Paper
+    id: 55
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
+    portableMat: {fileID: 2100000, guid: 0c4a043b4dda42944ba6d43e8e105327, type: 2}
+    icon: {fileID: 21300000, guid: 13ea70929caf4234a9304c64fe310ecd, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Manual - Circuit board
+    id: 56
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
+    portableMat: {fileID: 2100000, guid: 80761cc1ad5542b49b8435ef5dea8ead, type: 2}
+    icon: {fileID: 21300000, guid: 2b5228ebfaab968459f6a1d1f10aa3e2, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Manual - Steel plate
+    id: 57
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
+    portableMat: {fileID: 2100000, guid: 73a6386a2d8e28e438ae4681e8e5dd4c, type: 2}
+    icon: {fileID: 21300000, guid: d3d65700a482f9749b375438961352b8, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Manual - Water pump
+    id: 58
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
+    portableMat: {fileID: 2100000, guid: 32f39817d0b2f27419996e7393138f16, type: 2}
+    icon: {fileID: 21300000, guid: 94c672f274af1f945838b16acccd5556, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Book
+    id: 59
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
+    portableMat: {fileID: 2100000, guid: 12ba391bb16020946a1f08da9feb6b6f, type: 2}
+    icon: {fileID: 21300000, guid: 3980a1651bef90140b5a903009c5aeda, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Manual - Semiconductor
+    id: 60
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
+    portableMat: {fileID: 2100000, guid: 828a160850cf9674197f705bffdf20c4, type: 2}
+    icon: {fileID: 21300000, guid: 740997b407e44134995243fefc5cc32e, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Manual - Electric mining machine
+    id: 61
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
+    portableMat: {fileID: 2100000, guid: 5d311cdaab5cd1a4db0ee6bfcfaa4694, type: 2}
+    icon: {fileID: 21300000, guid: 6c8c4ff9ab9188f4aad656cee0ba0cb7, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Manual - Steam train
+    id: 62
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
+    portableMat: {fileID: 2100000, guid: b486575d52816424fad992a10a64323e, type: 2}
+    icon: {fileID: 21300000, guid: 46c58fd024bc9bc4985bd7acbec3938a, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Book desk
+    id: 63
+    prefab: {fileID: 2696065824665056805, guid: 27727148c8ab1b546aa4e1dd6f389261, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: ba721b96533047d419b24c7d7bb7cef4, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Pork
+    id: 64
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
+    portableMat: {fileID: 2100000, guid: 906dd3a0ff9824d45babdf5184d85fea, type: 2}
+    icon: {fileID: 21300000, guid: 19c1820e2004957429a03b8beb333a50, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Beef
+    id: 65
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
+    portableMat: {fileID: 2100000, guid: 458cb467135c11c47be26dc1319e1773, type: 2}
+    icon: {fileID: 21300000, guid: 718b5f6a95dbb194397dc23854de1112, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Pork steak
+    id: 66
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
+    portableMat: {fileID: 2100000, guid: 0d9afe6eaf5c3e64fb06e8c55161eb48, type: 2}
+    icon: {fileID: 21300000, guid: 2f7ffda98d27dcb4096a91463d61f5e1, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Beef steak
+    id: 67
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
+    portableMat: {fileID: 2100000, guid: 0804dd1f3fe5f3f4bb07d25f01714c32, type: 2}
+    icon: {fileID: 21300000, guid: 161f451b97cff754aa9bdf7a064be046, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Wooden wheel
+    id: 68
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 2a5347a55d1f97842aae2067f837f850, type: 2}
+    portableMat: {fileID: 2100000, guid: f393aae6c692dff448f9d9d5f2a0f285, type: 2}
+    icon: {fileID: 21300000, guid: a9a726bb2dab04b4884802cb6f8d2cc5, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Iron wheel
+    id: 69
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: 2a5347a55d1f97842aae2067f837f850, type: 2}
+    portableMat: {fileID: 2100000, guid: 19ec132cdbe29b048b4ddf833c3f1b5a, type: 2}
+    icon: {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Handcart
+    id: 70
+    prefab: {fileID: 1311924932887929831, guid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: f841d00897e24e5cb051871a6cd0abe6, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Railload
+    id: 71
+    prefab: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: 9752cfc4014843b41be1065fbf6c05ab, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Train station
+    id: 72
+    prefab: {fileID: 2696561144136662984, guid: 6e704ffa44d6f8e42a1e28a682f898aa, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: b08fed7a9287fa444ac6aa66d6e19426, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Flatcar
+    id: 73
+    prefab: {fileID: 8246531933118439867, guid: a34b33398bb75a84aaa6febe564ccb3e, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: ba608c03b7cefea4cbc21ecf28f1fbda, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Rail handcar
+    id: 74
+    prefab: {fileID: 9071960459092625129, guid: 607edbe9224f7714e835516083eff7cc, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: cc9c10d28d4d3e740871e74c5b2dd048, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Steam train
+    id: 75
+    prefab: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
+    portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+    portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+    icon: {fileID: 21300000, guid: aff0c0704d440b54f9d91a471d455277, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Bucket
+    id: 76
+    prefab: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
+    portableMesh: {fileID: 4300000, guid: a8daed3521a70e44c93714f5f9b246c6, type: 2}
+    portableMat: {fileID: 2100000, guid: 5e4d29ac17e2fc64eae3a00225731388, type: 2}
+    icon: {fileID: 21300000, guid: a09a003f751c2a044854b9beee232c4f, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Water Bucket
+    id: 77
+    prefab: {fileID: 3525437405879595132, guid: 1bdc2cf4c67c4d27941cd3bbf8ff1f0b, type: 3}
+    portableMesh: {fileID: 4300000, guid: a8daed3521a70e44c93714f5f9b246c6, type: 2}
+    portableMat: {fileID: 2100000, guid: 5e4d29ac17e2fc64eae3a00225731388, type: 2}
+    icon: {fileID: 21300000, guid: 87d2f6fd0c2d4a1181a9b83205a413b0, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  itemDefinitions:
+  - {fileID: 11400000, guid: e9950cff3cab70041b1997e87d6e22b1, type: 2}
+  - {fileID: 11400000, guid: 440d4476f9093b44e948d784c15c0d81, type: 2}
+  - {fileID: 11400000, guid: f40db410eac38e44386c4ef5c3396514, type: 2}
+  - {fileID: 11400000, guid: 763e6b55158c49c4db58cb49480d65f2, type: 2}
+  - {fileID: 11400000, guid: b7f6e746e5fdf2f43a58e92c85c78479, type: 2}
+  - {fileID: 11400000, guid: 228fcd45b59e4994d8b5f8ee23dc4595, type: 2}
+  - {fileID: 11400000, guid: 9524753a56ea05540be3c118174151dd, type: 2}
+  - {fileID: 11400000, guid: 4f88609a6374aaf4098d50e6f0ec5400, type: 2}
+  - {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+  - {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
+  - {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
+  - {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+  - {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+  - {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
+  - {fileID: 11400000, guid: c7d14445b92c7d0468e83d73c68f384f, type: 2}
+  - {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
+  - {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+  - {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+  - {fileID: 11400000, guid: c386ddb4f7fc1904fbb047de3bff6a99, type: 2}
+  - {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
+  - {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+  - {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
+  - {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
+  - {fileID: 11400000, guid: f5afae373c201a7438785dd9cdf2ee6c, type: 2}
+  - {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
+  - {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
+  - {fileID: 11400000, guid: 02c4539254ea62f4d9c50893e24c8f63, type: 2}
+  - {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
+  - {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
+  - {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+  - {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
+  - {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
+  - {fileID: 11400000, guid: 771a4a8c595dbe74b9187ca84001cfcb, type: 2}
+  - {fileID: 11400000, guid: ee57335a932a96a49963ace76adef614, type: 2}
+  - {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
+  - {fileID: 11400000, guid: c0075e53760e0bc4e8a7625ac98e2167, type: 2}
+  - {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
+  - {fileID: 11400000, guid: 6a913ce143edf9c42b1a4c2b72cbdde8, type: 2}
+  - {fileID: 11400000, guid: b683f0f1cfeadca4196e5a3df399b945, type: 2}
+  - {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
+  - {fileID: 11400000, guid: ae10ba0d1a5a35a4f9732630fda54471, type: 2}
+  - {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
+  - {fileID: 11400000, guid: b9735abb8886622408d77bb1f9a1f4c3, type: 2}
+  - {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
+  - {fileID: 11400000, guid: 763440cffdd93a948a7d8e73c541f673, type: 2}
+  - {fileID: 11400000, guid: fde3e14d2afafaf4a9603cedda8d94d6, type: 2}
+  - {fileID: 11400000, guid: f26efb1d776a4df469e75c19a5a1181b, type: 2}
+  - {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
+  - {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
+  - {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
+  - {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
+  - {fileID: 11400000, guid: 5184d5acd736fa943a532c1ee9009150, type: 2}
+  - {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
+  - {fileID: 11400000, guid: e110bd69d6c9d9d49aa13090a2202fd1, type: 2}
+  - {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
+  - {fileID: 11400000, guid: 607f7fef71c969144b6e767e76d193f9, type: 2}
+  - {fileID: 11400000, guid: 75ee9ee3e9a835f45a5e2f7d279a723e, type: 2}
+  - {fileID: 11400000, guid: dc58b0deafc26db4da1f6b763aaac1f2, type: 2}
+  - {fileID: 11400000, guid: 7575e5697a9d4d34da40f1e6a2984c9a, type: 2}
+  - {fileID: 11400000, guid: 5e8eb859a7abfe04b919401e00125622, type: 2}
+  - {fileID: 11400000, guid: 3a602d0ced7a02f4b82752721d640734, type: 2}
+  - {fileID: 11400000, guid: 762e4dd9db91c774ca6004b78fbf6331, type: 2}
+  - {fileID: 11400000, guid: d4748aa7ad1364d4da54a919623a3938, type: 2}
+  - {fileID: 11400000, guid: 9b769dd46a0b9fe4f91ace461114fcd2, type: 2}
+  - {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
+  - {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+  - {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
+  - {fileID: 11400000, guid: 1944e65739557ca4485c86a1309a15c6, type: 2}
+  - {fileID: 11400000, guid: 9807425657e17b14387ed43757f8bbbb, type: 2}
+  - {fileID: 11400000, guid: a10ec264242e79b42b1d48d44ad69394, type: 2}
+  - {fileID: 11400000, guid: e50f8db30407552438483841405afcb2, type: 2}
+  - {fileID: 11400000, guid: ced5cba395785e94897ab6dcb83d274a, type: 2}
+  - {fileID: 11400000, guid: 2cbd885291664af429fdc0ef3784d40d, type: 2}
+  - {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
+  - {fileID: 11400000, guid: e93a970b73b08f348b062a6caa40bc92, type: 2}
+  - {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
+  - {fileID: 11400000, guid: 5e897bd260b82084fb272c968673a461, type: 2}
+  - {fileID: 11400000, guid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2, type: 2}
+  autoMigrateDefinitions: 1

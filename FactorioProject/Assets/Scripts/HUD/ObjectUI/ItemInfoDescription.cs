@@ -19,6 +19,7 @@ public class ItemInfoDescription : MonoBehaviour
     private static readonly Color BurnEnergyGaugeFillColor = new Color(1f, 0.42f, 0.08f, 1f);
     private static readonly Color HealthGaugeFillColor = new Color(0.78f, 0.12f, 0.1f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
+    private static readonly Color WarningSignColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
     private static readonly Dictionary<Image, float> GaugeFillTargets = new Dictionary<Image, float>();
 
@@ -44,6 +45,8 @@ public class ItemInfoDescription : MonoBehaviour
     private ItemSlot energyItemSlot, inputItemSlot, outputItemSlot;
 
     private readonly List<int> conveyorItemIds = new List<int>(2);
+    private readonly List<int> handcartItemIds = new List<int>(6);
+    private readonly List<int> handcartItemCounts = new List<int>(6);
     private readonly List<int> defaultItemOriginalSiblingIndices = new List<int>();
     private int defaultStatusLineIndex;
     private bool defaultItemSiblingIndicesCaptured;
@@ -91,10 +94,11 @@ public class ItemInfoDescription : MonoBehaviour
         ClearItemSlot(outputItem, outputItemSlot);
     }
 
-    public void ShowResourceReserves(int reserves)
+    public void ShowResourceReserves(Resource resource)
     {
         Clear();
-        SetResourceReservesLine(0, reserves);
+        int reserves = resource != null ? resource.RemainingHarvestOutputCount : 0;
+        SetResourceReservesLine(0, reserves, UsesLiterResourceUnit(resource));
     }
 
     public void ShowAnimal(Animal animal)
@@ -182,6 +186,27 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
+    public void ShowHandcart(Handcart handcart, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+
+        int availableSlotCount = Mathf.Min(
+            handcart != null ? handcart.StackCount : 0,
+            defaultItemSlot != null ? defaultItemSlot.Count : 0);
+        int occupiedSlotCount = handcart != null
+            ? handcart.CopyObjectInfoStacks(handcartItemIds, handcartItemCounts, availableSlotCount)
+            : 0;
+        for (int i = 0; i < availableSlotCount; i++)
+        {
+            int itemId = i < occupiedSlotCount ? handcartItemIds[i] : -1;
+            int itemCount = i < occupiedSlotCount ? handcartItemCounts[i] : 0;
+            int capacity = handcart != null
+                ? handcart.GetStackCapacityForItem(itemId)
+                : 0;
+            SetDefaultItemSlot(i, itemId, itemCount, capacity, true, true, true);
+        }
+    }
+
     public void ShowDesk(Desk desk, Resource underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
@@ -207,8 +232,8 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        robotArm.GetObjectInfoStatus(out string statusText, out bool isWorking);
-        SetDefaultStatus(statusText, isWorking);
+        robotArm.GetObjectInfoStatus(out string statusText, out bool isWorking, out bool isWarning);
+        SetDefaultStatus(statusText, isWorking, isWarning);
         TrySetElectricPowerGauge(energyGauge, energyFill, energyText, robotArm);
         bool energyUseDisplayed = robotArm.TryGetElectricPowerRequirement(out float wattsPerSecond)
             && SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity, wattsPerSecond, -1);
@@ -304,8 +329,15 @@ public class ItemInfoDescription : MonoBehaviour
 
     public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)
     {
+        OilDrillingMachine oilDrillingMachine = module as OilDrillingMachine;
         MiningMachine miningMachine = module as MiningMachine;
-        if (miningMachine != null && miningMachine.TryGetObjectInfoResourceReserves(out int miningResourceReserves))
+        if (oilDrillingMachine != null
+            && oilDrillingMachine.TryGetObjectInfoResourceReserves(out int oilResourceReserves))
+        {
+            BeginObjectDisplay(oilResourceReserves, true);
+        }
+        else if (miningMachine != null
+                 && miningMachine.TryGetObjectInfoResourceReserves(out int miningResourceReserves))
         {
             BeginObjectDisplay(miningResourceReserves);
         }
@@ -490,6 +522,14 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        if (TrySetOilDrillingMachineOutputRateItemSlot(
+                outputItem,
+                outputItemSlot,
+                oilDrillingMachine))
+        {
+            return;
+        }
+
         if (module.TryGetObjectInfoOutput(
                 out outputItemId,
                 out outputAreaCount,
@@ -581,10 +621,15 @@ public class ItemInfoDescription : MonoBehaviour
         return displayedAny;
     }
 
-    private void SetDefaultStatus(string text, bool isProducing)
+    private void SetDefaultStatus(string text, bool isProducing, bool isWarning = false)
     {
         SetDefaultText(defaultStatusLineIndex, text, !string.IsNullOrEmpty(text));
-        SetDefaultSign(defaultStatusLineIndex, !string.IsNullOrEmpty(text), isProducing ? ProducingSignColor : StoppedSignColor);
+        Color signColor = isProducing
+            ? ProducingSignColor
+            : isWarning
+                ? WarningSignColor
+                : StoppedSignColor;
+        SetDefaultSign(defaultStatusLineIndex, !string.IsNullOrEmpty(text), signColor);
     }
 
     private void BeginObjectDisplay(Resource underlyingResource)
@@ -595,10 +640,17 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        BeginObjectDisplay(underlyingResource.RemainingHarvestOutputCount);
+        BeginObjectDisplay(
+            underlyingResource.RemainingHarvestOutputCount,
+            UsesLiterResourceUnit(underlyingResource));
     }
 
     private void BeginObjectDisplay(int resourceReserves)
+    {
+        BeginObjectDisplay(resourceReserves, false);
+    }
+
+    private void BeginObjectDisplay(int resourceReserves, bool useLiterUnit)
     {
         Clear();
         if (resourceReserves < 0)
@@ -606,7 +658,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        SetResourceReservesLine(0, resourceReserves);
+        SetResourceReservesLine(0, resourceReserves, useLiterUnit);
         defaultStatusLineIndex = 1;
     }
 
@@ -664,6 +716,11 @@ public class ItemInfoDescription : MonoBehaviour
 
         if (liveGaugeRobotArm != null && liveGaugeRobotArm.gameObject.activeInHierarchy)
         {
+            liveGaugeRobotArm.GetObjectInfoStatus(
+                out string statusText,
+                out bool isWorking,
+                out bool isWarning);
+            SetDefaultStatus(statusText, isWorking, isWarning);
             TrySetElectricPowerGauge(energyGauge, energyFill, energyText, liveGaugeRobotArm);
         }
     }
@@ -688,6 +745,16 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
+        if (module is OilDrillingMachine oilDrillingMachine)
+        {
+            oilDrillingMachine.GetObjectInfoStatus(out string statusText, out bool isProducing);
+            SetDefaultStatus(statusText, isProducing);
+            if (oilDrillingMachine.TryGetObjectInfoResourceReserves(out int reservesLiters))
+            {
+                SetResourceReservesLine(0, reservesLiters, true);
+            }
+        }
+
         if (module is Pump)
         {
             return;
@@ -851,22 +918,23 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    private void SetResourceReservesLine(int index, int reserves)
+    private void SetResourceReservesLine(int index, int reserves, bool useLiterUnit = false)
     {
-        SetDefaultText(index, $"Reserves: {Mathf.Max(0, reserves)}", true);
+        string unitSuffix = useLiterUnit ? " L" : string.Empty;
+        SetDefaultText(index, $"Reserves: {Mathf.Max(0, reserves)}{unitSuffix}", true);
         SetDefaultSign(index, false, Color.white);
+    }
+
+    private static bool UsesLiterResourceUnit(Resource resource)
+    {
+        return resource != null
+               && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil;
     }
 
     private void SetPumpOutputRateDefaultItemSlot(int index, Pump pump)
     {
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
-        SetActiveIfNeeded(root, true);
-        if (slot == null)
-        {
-            return;
-        }
-
         int outputItemId = -1;
         float litersPerSecond = 0f;
         if (pump != null)
@@ -874,12 +942,55 @@ public class ItemInfoDescription : MonoBehaviour
             pump.TryGetObjectInfoOutputRate(out outputItemId, out litersPerSecond);
         }
 
-        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(outputItemId);
-        string displayName = ResolveFluidDisplayName(
-            string.IsNullOrWhiteSpace(fluidItemSet.name) ? DefaultFluidItemName : fluidItemSet.name,
+        SetFluidOutputRateItemSlot(
+            root,
+            slot,
+            outputItemId,
+            litersPerSecond,
             pump != null
                 ? pump.GetStoredFluidTemperatureCelsius(outputItemId)
                 : MapClimate.CurrentWaterTemperatureCelsius);
+    }
+
+    private bool TrySetOilDrillingMachineOutputRateItemSlot(
+        GameObject root,
+        ItemSlot slot,
+        OilDrillingMachine oilDrillingMachine)
+    {
+        if (oilDrillingMachine == null
+            || !oilDrillingMachine.TryGetObjectInfoOutputRate(
+                out int outputItemId,
+                out float litersPerSecond))
+        {
+            return false;
+        }
+
+        SetFluidOutputRateItemSlot(
+            root,
+            slot,
+            outputItemId,
+            litersPerSecond,
+            oilDrillingMachine.GetStoredFluidTemperatureCelsius(outputItemId));
+        return true;
+    }
+
+    private void SetFluidOutputRateItemSlot(
+        GameObject root,
+        ItemSlot slot,
+        int outputItemId,
+        float litersPerSecond,
+        float temperatureCelsius)
+    {
+        SetActiveIfNeeded(root, true);
+        if (slot == null)
+        {
+            return;
+        }
+
+        ItemManager.ItemSet fluidItemSet = ResolveFluidItemSet(outputItemId);
+        string displayName = ResolveFluidDisplayName(
+            string.IsNullOrWhiteSpace(fluidItemSet.name) ? DefaultFluidItemName : fluidItemSet.name,
+            temperatureCelsius);
         slot.SetCustomDisplay(
             outputItemId,
             fluidItemSet.icon,
@@ -970,7 +1081,8 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (installationObject is SteamGenerator && installationObject.StoredFluidItemId < 0)
+        if ((installationObject is SteamGenerator || installationObject is Fluidtank)
+            && installationObject.StoredFluidItemId < 0)
         {
             slot.SetCustomDisplay(-1, null, string.Empty, string.Empty);
             return;

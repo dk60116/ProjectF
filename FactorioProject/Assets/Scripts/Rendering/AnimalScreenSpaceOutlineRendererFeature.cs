@@ -134,7 +134,7 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
 
         private readonly Material maskMaterial;
         private readonly Material compositeMaterial;
-        private readonly Renderer[] maskRenderers = new Renderer[16];
+        private readonly Renderer[] maskRenderers = new Renderer[32];
         private readonly MaterialPropertyBlock compositeProperties = new MaterialPropertyBlock();
         private Renderer targetRenderer;
         private float widthPixels;

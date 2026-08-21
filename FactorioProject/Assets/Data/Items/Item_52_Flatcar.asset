@@ -13,15 +13,16 @@ MonoBehaviour:
   m_Name: Item_52_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Torch
-  id: 25
+  id: 26
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: a7343e579ca362944b1163ffbdc25937, type: 2}
   portableMat: {fileID: 2100000, guid: d74849f0c0fe2c24ebc5bb88e35bdc84, type: 2}
   icon: {fileID: 21300000, guid: 34a4268bdce6005459d21c4440c6858e, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 2
   lightRange: 10
-  lightIntensityMultiplier: 3
+  lightIntensityMultiplier: 0.7
   size: 0
   itemFilter: 0
   ignoreFilter: 0
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 1

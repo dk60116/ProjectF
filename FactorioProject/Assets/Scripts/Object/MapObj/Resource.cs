@@ -107,6 +107,9 @@ public class Resource : MapObject
     public int GetCount => Mathf.Max(1, resourceStatus.getCount);
     public int RemainingHarvestOutputCount => Mathf.Max(0, ResourceCount * GetCount);
     public bool CanHarvest => ResourceCount > 0;
+    public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
+        ? definition.placementCategory
+        : ResourceDefinition.PlacementCategory.Ore;
     public override bool AllowsAnimalTraversal => harvestMode == HarvestMode.Mining;
 
     public HarvestMode ResolvedHarvestMode

@@ -8,6 +8,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
     private int maxCraftIterationsPerSimulation = 256;
 
     private BlockStateStore cachedStateStore;
+    private readonly HashSet<Vector2Int> singleItemOutputVisitedCoordinates = new HashSet<Vector2Int>();
 
     private enum BackgroundRobotArmPickupSource
     {
@@ -718,7 +719,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
-        int capacity = ResolveBlockCenterCapacity(stateStore, dropCoordinate, 10);
+        int capacity = ResolveBlockCenterCapacity(stateStore, dropCoordinate, itemId, 10);
         if (mutate)
         {
             return stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
@@ -739,7 +740,12 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
-        int capacity = boxDefinition != null && boxDefinition.capacity > 0 ? boxDefinition.capacity : 10;
+        int physicalCapacity = boxDefinition != null && boxDefinition.capacity > 0
+            ? boxDefinition.capacity
+            : 10;
+        int capacity = ItemDefinition.ResolveStackCapacity(
+            ResolveItemDefinition(itemId),
+            physicalCapacity);
         return stateStore != null && stateStore.CanAddSavedCenterItems(coordinate, itemId, 1, capacity);
     }
 
@@ -755,7 +761,12 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
-        int capacity = boxDefinition != null && boxDefinition.capacity > 0 ? boxDefinition.capacity : 10;
+        int physicalCapacity = boxDefinition != null && boxDefinition.capacity > 0
+            ? boxDefinition.capacity
+            : 10;
+        int capacity = ItemDefinition.ResolveStackCapacity(
+            ResolveItemDefinition(itemId),
+            physicalCapacity);
         return stateStore != null && stateStore.TryAddSavedCenterItems(coordinate, itemId, 1, capacity);
     }
 
@@ -1069,7 +1080,8 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 continue;
             }
 
-            if (!SavedProductionMachineAcceptsOutput(installationState, templateModule, outputItemId))
+            if (!HasRequiredCraftingManual(outputItemId)
+                || !SavedProductionMachineAcceptsOutput(installationState, templateModule, outputItemId))
             {
                 continue;
             }
@@ -1084,8 +1096,12 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 continue;
             }
 
-            if (InputOutputModule.IsFluidItemId(outputItemId)
-                || !TryResolveOutputCoordinate(stateStore, state, templateModule, outputItemId, outputCount, out _))
+            if (!CanResolveSavedOutput(
+                    stateStore,
+                    state,
+                    templateModule,
+                    outputItemId,
+                    outputCount))
             {
                 continue;
             }
@@ -1143,6 +1159,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             ItemDefinition outputDefinition = outputs[outputIndex].itemDefinition;
             int outputItemId = outputDefinition != null ? outputDefinition.id : -1;
             if (outputItemId < 0
+                || !HasRequiredCraftingManual(outputItemId)
                 || !SavedProductionMachineAcceptsOutput(installationState, productionMachine, outputItemId)
                 || !TryGetProductionMachineRecipe(
                     productionMachine,
@@ -1183,8 +1200,12 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 continue;
             }
 
-            if (InputOutputModule.IsFluidItemId(outputItemId)
-                || !TryResolveOutputCoordinate(stateStore, state, productionMachine, outputItemId, outputCount, out _))
+            if (!CanResolveSavedOutput(
+                    stateStore,
+                    state,
+                    productionMachine,
+                    outputItemId,
+                    outputCount))
             {
                 continue;
             }
@@ -1299,7 +1320,7 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         List<int> targetItemIds = new List<int>();
         if (!productionMachine.TryCollectProductionTargetItemIds(targetItemIds))
         {
-            return true;
+            return false;
         }
 
         if (installationState == null || !installationState.itemFilterMaskInitialized)
@@ -1319,6 +1340,14 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return false;
     }
 
+    private static bool HasRequiredCraftingManual(int outputItemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return itemManager != null && itemManager.IsManualRequirementSatisfied(outputItemId);
+    }
+
     private bool TryCompleteActiveCraft(
         BlockStateStore stateStore,
         InputOutputModule.PersistentState state,
@@ -1330,8 +1359,21 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
-        if (InputOutputModule.IsFluidItemId(state.activeOutputItemId)
-            || !TryResolveOutputCoordinate(
+        if (InputOutputModule.IsFluidItemId(state.activeOutputItemId))
+        {
+            return false;
+        }
+
+        ItemDefinition outputDefinition = ResolveItemDefinition(state.activeOutputItemId);
+        if (outputDefinition != null && outputDefinition.oneItem && state.activeOutputCount > 1)
+        {
+            return TryCompleteSingleItemStackOutputs(
+                stateStore,
+                state,
+                templateModule);
+        }
+
+        if (!TryResolveOutputCoordinate(
                 stateStore,
                 state,
                 templateModule,
@@ -1347,13 +1389,144 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 outputCoordinate,
                 state.activeOutputItemId,
                 state.activeOutputCount,
-                ResolveBlockCenterCapacity(stateStore, outputCoordinate, templateModule.RuntimeAreaMaxObjects)))
+                ResolveBlockCenterCapacity(
+                    stateStore,
+                    outputCoordinate,
+                    state.activeOutputItemId,
+                    templateModule.RuntimeAreaMaxObjects)))
         {
             return false;
         }
 
         ClearActiveCraft(state);
         return true;
+    }
+
+    private bool TryCompleteSingleItemStackOutputs(
+        BlockStateStore stateStore,
+        InputOutputModule.PersistentState state,
+        InputOutputModule templateModule)
+    {
+        int itemId = state.activeOutputItemId;
+        int outputCount = state.activeOutputCount;
+        if (!CanDistributeSavedSingleItemStacks(
+                stateStore,
+                state,
+                itemId,
+                outputCount,
+                templateModule.RuntimeAreaMaxObjects))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < outputCount; i++)
+        {
+            if (!TryResolveOutputCoordinate(
+                    stateStore,
+                    state,
+                    templateModule,
+                    itemId,
+                    1,
+                    out Vector2Int outputCoordinate)
+                || !AddCenterItems(
+                    stateStore,
+                    outputCoordinate,
+                    itemId,
+                    1,
+                    ResolveBlockCenterCapacity(
+                        stateStore,
+                        outputCoordinate,
+                        itemId,
+                        templateModule.RuntimeAreaMaxObjects)))
+            {
+                return false;
+            }
+        }
+
+        ClearActiveCraft(state);
+        return true;
+    }
+
+    private bool CanResolveSavedOutput(
+        BlockStateStore stateStore,
+        InputOutputModule.PersistentState state,
+        InputOutputModule templateModule,
+        int itemId,
+        int count)
+    {
+        if (InputOutputModule.IsFluidItemId(itemId)
+            || stateStore == null
+            || state == null
+            || templateModule == null
+            || itemId < 0
+            || count <= 0)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveItemDefinition(itemId);
+        return definition != null && definition.oneItem && count > 1
+            ? CanDistributeSavedSingleItemStacks(
+                stateStore,
+                state,
+                itemId,
+                count,
+                templateModule.RuntimeAreaMaxObjects)
+            : TryResolveOutputCoordinate(
+                stateStore,
+                state,
+                templateModule,
+                itemId,
+                count,
+                out _);
+    }
+
+    private bool CanDistributeSavedSingleItemStacks(
+        BlockStateStore stateStore,
+        InputOutputModule.PersistentState state,
+        int itemId,
+        int count,
+        int defaultCapacity)
+    {
+        if (stateStore == null
+            || state == null
+            || itemId < 0
+            || count <= 0
+            || state.outputCoordinates == null
+            || GetAreaObjectCount(stateStore, state.outputCoordinates) + count
+               > ResolveAreaCapacity(
+                   stateStore,
+                   state.outputCoordinates,
+                   itemId,
+                   defaultCapacity))
+        {
+            return false;
+        }
+
+        int availableStackCount = 0;
+        singleItemOutputVisitedCoordinates.Clear();
+        for (int i = 0; i < state.outputCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = state.outputCoordinates[i];
+            int capacity = ResolveBlockCenterCapacity(
+                stateStore,
+                coordinate,
+                itemId,
+                defaultCapacity);
+            if (!singleItemOutputVisitedCoordinates.Add(coordinate)
+                || !stateStore.CanAddSavedCenterItems(coordinate, itemId, 1, capacity))
+            {
+                continue;
+            }
+
+            availableStackCount++;
+            if (availableStackCount >= count)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryEnsureCraftStartEnergy(
@@ -1490,7 +1663,11 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return false;
         }
 
-        int totalCapacity = ResolveAreaCapacity(stateStore, state.outputCoordinates, templateModule.RuntimeAreaMaxObjects);
+        int totalCapacity = ResolveAreaCapacity(
+            stateStore,
+            state.outputCoordinates,
+            outputItemId,
+            templateModule.RuntimeAreaMaxObjects);
         if (GetAreaObjectCount(stateStore, state.outputCoordinates) + outputCount > totalCapacity)
         {
             return false;
@@ -1510,7 +1687,11 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                     continue;
                 }
 
-                int blockCapacity = ResolveBlockCenterCapacity(stateStore, coordinate, templateModule.RuntimeAreaMaxObjects);
+                int blockCapacity = ResolveBlockCenterCapacity(
+                    stateStore,
+                    coordinate,
+                    outputItemId,
+                    templateModule.RuntimeAreaMaxObjects);
                 if (stateStore == null
                     || !stateStore.CanAddSavedCenterItems(coordinate, outputItemId, outputCount, blockCapacity))
                 {
@@ -1530,11 +1711,18 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return false;
     }
 
-    private int ResolveAreaCapacity(BlockStateStore stateStore, IReadOnlyList<Vector2Int> coordinates, int defaultCapacity)
+    private int ResolveAreaCapacity(
+        BlockStateStore stateStore,
+        IReadOnlyList<Vector2Int> coordinates,
+        int itemId,
+        int defaultCapacity)
     {
+        ItemDefinition stackedDefinition = ResolveItemDefinition(itemId);
         if (coordinates == null || coordinates.Count <= 0)
         {
-            return Mathf.Max(1, defaultCapacity);
+            return ItemDefinition.ResolveStackCapacity(
+                stackedDefinition,
+                defaultCapacity);
         }
 
         int installedCapacityTotal = 0;
@@ -1553,13 +1741,21 @@ public class InstallationBackgroundSimulator : MonoBehaviour
                 continue;
             }
 
-            installedCapacityTotal += Mathf.Max(1, blockCapacity);
+            installedCapacityTotal += ItemDefinition.ResolveStackCapacity(
+                stackedDefinition,
+                blockCapacity);
             hasInstalledCapacity = true;
         }
 
-        return hasInstalledCapacity
-            ? Mathf.Max(1, installedCapacityTotal)
-            : Mathf.Max(1, defaultCapacity);
+        if (hasInstalledCapacity)
+        {
+            return Mathf.Max(1, installedCapacityTotal);
+        }
+
+        int resolvedDefaultCapacity = Mathf.Max(1, defaultCapacity);
+        return stackedDefinition != null && stackedDefinition.oneItem
+            ? Mathf.Min(resolvedDefaultCapacity, Mathf.Max(1, visitedCoordinates.Count))
+            : resolvedDefaultCapacity;
     }
 
     private bool TryResolveInstalledItemAreaCapacity(BlockStateStore stateStore, Vector2Int coordinate, out int capacity)
@@ -1835,11 +2031,21 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         return stateStore != null ? stateStore.GetSavedCenterTopItemId(coordinate) : -1;
     }
 
-    private static int ResolveBlockCenterCapacity(BlockStateStore stateStore, Vector2Int coordinate, int defaultCapacity)
+    private static int ResolveBlockCenterCapacity(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        int itemId,
+        int defaultCapacity)
     {
-        return TryResolveInstalledItemAreaCapacityStatic(stateStore, coordinate, out int installedCapacity)
+        int physicalCapacity = TryResolveInstalledItemAreaCapacityStatic(
+            stateStore,
+            coordinate,
+            out int installedCapacity)
             ? Mathf.Max(1, installedCapacity)
             : Mathf.Max(1, defaultCapacity);
+        return ItemDefinition.ResolveStackCapacity(
+            ResolveItemDefinition(itemId),
+            physicalCapacity);
     }
 
     private static bool TryResolveInstalledItemAreaCapacityStatic(BlockStateStore stateStore, Vector2Int coordinate, out int capacity)

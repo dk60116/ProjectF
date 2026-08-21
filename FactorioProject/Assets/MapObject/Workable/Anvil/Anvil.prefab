@@ -130,7 +130,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Anvil
-  objId: 14
+  objId: 15
   itemDefinition: {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -144,7 +144,7 @@ MonoBehaviour:
   animator: {fileID: 0}
   particleEffect: {fileID: 0}
   mapFilter: 261
-  rotationFilter: 1
+  rotationFilter: 0
   installationFocusRadius: 1
   installedDirection: 0
   runtimeAnchorCoordinate: {x: 0, y: 0}
@@ -239,7 +239,7 @@ PrefabInstance:
       objectReference: {fileID: 2100000, guid: 6a481f48fdd3956449636bc342234342, type: 2}
     - target: {fileID: 919132149155446097, guid: 89d9604babdce774e987d87ba655b911, type: 3}
       propertyPath: m_Name
-      value: Anvil
+      value: Body
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

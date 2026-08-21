@@ -9,6 +9,8 @@ public class Player : Character
     private static readonly int ThrowHash = Animator.StringToHash("tThrow");
     private static readonly int CarryHash = Animator.StringToHash("fCarry");
     private static readonly int MoveAnimationSpeedHash = Animator.StringToHash("fMoveSpeed");
+    private static readonly int HandcartMountedHash = Animator.StringToHash("bHandcartMounted");
+    private static readonly int HandcartDirectionHash = Animator.StringToHash("fHandcartDirection");
     private const string PickStateName = "Pick";
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
@@ -60,6 +62,7 @@ public class Player : Character
 
     private int pendingPickTriggerCount;
     private bool wasPickStateActiveLastFrame;
+    private bool handcartAnimationActive;
 
     [SerializeField]
     private List<PlayerBag> bagList;
@@ -563,9 +566,76 @@ public class Player : Character
         wasPickStateActiveLastFrame = false;
     }
 
+    public void UpdateMountedVehicleAnimation(Vehicle vehicle)
+    {
+        if (!(vehicle is Handcart))
+        {
+            ClearMountedVehicleAnimation();
+            return;
+        }
+
+        if (animator == null)
+        {
+            animator = GetComponentInChildren<Animator>();
+        }
+
+        if (animator == null)
+        {
+            return;
+        }
+
+        if (!handcartAnimationActive)
+        {
+            ClearQueuedPickAnimations();
+            animator.ResetTrigger(PickHash);
+            animator.ResetTrigger(ThrowHash);
+            animator.SetBool(MoveHash, false);
+            handcartAnimationActive = true;
+            animator.SetBool(HandcartMountedHash, true);
+        }
+
+        Transform animationFacing = BodyTransform != null ? BodyTransform : transform;
+        float playerRelativeSignedSpeed = vehicle.ResolveSignedSpeedRelativeToFacing(animationFacing);
+        float normalizedSignedSpeed = Mathf.Clamp(
+            playerRelativeSignedSpeed / Mathf.Max(0.01f, vehicle.EffectiveVehicleMaxSpeed),
+            -1f,
+            1f);
+        if (Mathf.Abs(normalizedSignedSpeed) <= 0.01f)
+        {
+            normalizedSignedSpeed = 0f;
+        }
+
+        float animationSpeed = Mathf.Lerp(0.65f, 1.15f, Mathf.Abs(normalizedSignedSpeed));
+        animator.SetFloat(HandcartDirectionHash, normalizedSignedSpeed);
+        animator.SetFloat(MoveAnimationSpeedHash, animationSpeed);
+    }
+
+    public void ClearMountedVehicleAnimation()
+    {
+        if (!handcartAnimationActive)
+        {
+            return;
+        }
+
+        handcartAnimationActive = false;
+        if (animator == null)
+        {
+            return;
+        }
+
+        animator.SetBool(HandcartMountedHash, false);
+        animator.SetFloat(HandcartDirectionHash, 0f);
+        animator.SetFloat(MoveAnimationSpeedHash, 1f);
+    }
+
     public bool UpdateAnimationState(bool shouldRun, float movementAnimationSpeed = 1f)
     {
         if (animator == null)
+        {
+            return false;
+        }
+
+        if (handcartAnimationActive)
         {
             return false;
         }
@@ -1043,6 +1113,11 @@ public class Player : Character
             return true;
         }
 
+        if (!HasHandStackCapacityForItem(objectId))
+        {
+            return false;
+        }
+
         for (int i = 0; i < handStack.Count; i++)
         {
             PortableObject portableObject = handStack[i];
@@ -1108,6 +1183,11 @@ public class Player : Character
         if (handBag != null && handBag.HasVisualPreservedObject(0, objectId))
         {
             return true;
+        }
+
+        if (!HasHandStackCapacityForItem(objectId))
+        {
+            return false;
         }
 
         for (int i = 0; i < handStack.Count; i++)
@@ -1239,6 +1319,16 @@ public class Player : Character
             return false;
         }
 
+        if (handBag != null && handBag.HasVisualPreservedObject(0, objectId))
+        {
+            return true;
+        }
+
+        if (!HasHandStackCapacityForItem(objectId))
+        {
+            return false;
+        }
+
         for (int i = 0; i < handStack.Count; i++)
         {
             PortableObject portableObject = handStack[i];
@@ -1256,6 +1346,104 @@ public class Player : Character
         }
 
         return false;
+    }
+
+    public bool CanConvertHeldItem(int sourceItemId, int targetItemId)
+    {
+        if (sourceItemId < 0 || targetItemId < 0 || sourceItemId == targetItemId)
+        {
+            return false;
+        }
+
+        EnsureHandBag();
+        if (handBag == null)
+        {
+            return false;
+        }
+
+        handBag.RefreshExternalStackCounts(false);
+        int handCount = handBag.GetSlotCount(0);
+        if (handCount <= 0 || handBag.GetSlotItemId(0) != sourceItemId)
+        {
+            return false;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        if (itemManager == null || !itemManager.TryGetItemSetById(targetItemId, out _))
+        {
+            return false;
+        }
+
+        if (handCount == 1)
+        {
+            return handBag.GetSlotCapacityForItem(0, targetItemId) >= 1;
+        }
+
+        PlayerBag activeBag = GetBag();
+        return activeBag != null && activeBag.GetAvailableCapacityForItem(targetItemId) >= 1;
+    }
+
+    public bool TryConvertHeldItem(int sourceItemId, int targetItemId)
+    {
+        if (!CanConvertHeldItem(sourceItemId, targetItemId))
+        {
+            return false;
+        }
+
+        int handCount = handBag.GetSlotCount(0);
+        if (handCount == 1)
+        {
+            if (!handBag.SetSlotContents(0, targetItemId, 1, false, false))
+            {
+                return false;
+            }
+
+            handBag.ForceNotifyChanged();
+            UpdateCarryState();
+            return true;
+        }
+
+        PlayerBag activeBag = GetBag();
+        if (activeBag == null || !activeBag.TryAddObject(targetItemId, out _))
+        {
+            return false;
+        }
+
+        if (!handBag.SetSlotContents(0, sourceItemId, handCount - 1, false, false))
+        {
+            activeBag.RemoveItems(targetItemId, 1);
+            return false;
+        }
+
+        handBag.ForceNotifyChanged();
+        UpdateCarryState();
+        return true;
+    }
+
+    private bool HasHandStackCapacityForItem(int itemId)
+    {
+        int physicalCapacity = handStack != null ? handStack.Count : 0;
+        if (physicalCapacity <= 0)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveItemDefinition(itemId);
+        int capacity = ItemDefinition.ResolveStackCapacity(definition, physicalCapacity);
+        int occupiedCount = 0;
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject != null
+                && (portableObject.gameObject.activeSelf || reservedHandStack.Contains(portableObject)))
+            {
+                occupiedCount++;
+            }
+        }
+
+        return occupiedCount < capacity;
     }
 
     public bool HasMatchingHandStackSpace(int objectId)

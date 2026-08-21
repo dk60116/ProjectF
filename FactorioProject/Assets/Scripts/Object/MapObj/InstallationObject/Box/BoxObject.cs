@@ -327,9 +327,6 @@ public class BoxObject : InputOutputModule
             return false;
         }
 
-        capacity = contentBlock.TryGetInstalledItemAreaCapacity(out int installedCapacity)
-            ? Mathf.Max(1, installedCapacity)
-            : 10;
         itemId = contentBlock.GetInputAreaCenterItemId();
         if (itemId >= 0)
         {
@@ -340,6 +337,8 @@ public class BoxObject : InputOutputModule
             itemId = filteredItemId;
             itemCount = contentBlock.GetInputAreaCenterItemCount(filteredItemId);
         }
+
+        capacity = contentBlock.GetInputAreaCenterCapacity(itemId);
 
         return true;
     }

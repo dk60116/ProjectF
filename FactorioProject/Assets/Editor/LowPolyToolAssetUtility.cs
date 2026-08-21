@@ -202,8 +202,28 @@ namespace ProjectF.EditorTools
             string textureName,
             string logContext)
         {
+            return CreateOrUpdatePaletteTexture(
+                assetPath,
+                textureName,
+                logContext,
+                PaletteColors);
+        }
+
+        internal static Texture2D CreateOrUpdatePaletteTexture(
+            string assetPath,
+            string textureName,
+            string logContext,
+            IReadOnlyList<Color32> paletteColors)
+        {
+            if (paletteColors == null || paletteColors.Count == 0)
+            {
+                throw new ArgumentException(
+                    $"{logContext}: palette must contain at least one color.",
+                    nameof(paletteColors));
+            }
+
             Texture2D palette = new Texture2D(
-                (int)ToolPalette.Count,
+                paletteColors.Count,
                 1,
                 TextureFormat.RGBA32,
                 false,
@@ -213,7 +233,13 @@ namespace ProjectF.EditorTools
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp
             };
-            palette.SetPixels32(PaletteColors);
+            Color32[] palettePixels = new Color32[paletteColors.Count];
+            for (int i = 0; i < paletteColors.Count; i++)
+            {
+                palettePixels[i] = paletteColors[i];
+            }
+
+            palette.SetPixels32(palettePixels);
             palette.Apply(false, false);
             byte[] pngBytes = palette.EncodeToPNG();
             UnityEngine.Object.DestroyImmediate(palette);

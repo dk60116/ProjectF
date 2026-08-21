@@ -355,7 +355,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steam train
-  objId: 72
+  objId: 80
   itemDefinition: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -384,6 +384,7 @@ MonoBehaviour:
   vehicleAccelerationPerSecond: 1.5
   vehicleMaxSpeed: 3.5
   vehicleDecelerationPerSecond: 2.5
+  vehicleMass: 10
   playerPoint:
   - {fileID: 473533616803250247}
   wheels:
@@ -391,13 +392,13 @@ MonoBehaviour:
   - {fileID: 6389012983531433523}
   wheelRadius: 0.18
   wheelLocalRotationAxis: {x: 1, y: 0, z: 0}
+  wheelRotationUsesVehicleSpace: 0
   invertWheelRotation: 0
   trainConnectionCenterDistance: 0.9
   trainConnectionGapDistance: 0.35
   trainConnectionSnapMaxDistance: 0.35
   trainConnectionMaxLateralDistance: 0.45
   trainConnectionMinForwardDot: 0.5
-  trainMass: 10
   railMoveSpeedMultiplier: 1
   railMovementSubstepDistance: 0.12
   railSnapMaxDistance: 0.75

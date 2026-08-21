@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_11_Wooden box
   m_EditorClassIdentifier: 
   itemName: Wooden box
-  id: 23
+  id: 24
   mapObject: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
   portableMesh: {fileID: 4300000, guid: 61d1fbf3e3aa50b4eba9e0b2ce723415, type: 2}
   portableMat: {fileID: 2100000, guid: 6f753db6549e37b4aac4200155b58547, type: 2}
   icon: {fileID: 21300000, guid: 0bd95ca2de49cd14d83ea614f3342a1d, type: 3}
+  oneItem: 0
   interactionButtonList:
   - {fileID: 21300000, guid: 409f7c1bb6dbd754d9d62c83be11e03e, type: 3}
   - {fileID: 21300000, guid: 72a1ce6a9d343d3429777b5ee6e1c0e8, type: 3}
@@ -30,10 +31,12 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
-  capacity: 15
+  capacity: 20
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

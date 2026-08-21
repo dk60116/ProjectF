@@ -50,7 +50,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Campfire
   id: 0
   objectName: Camp fire
-  objId: 26
+  objId: 27
   itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

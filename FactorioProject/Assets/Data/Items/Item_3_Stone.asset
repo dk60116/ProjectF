@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_3_Stone
   m_EditorClassIdentifier: 
   itemName: Stone
-  id: 10
+  id: 11
   mapObject: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: 885ae9d64f67da944a45c9ebcb8e21aa, type: 2}
   icon: {fileID: 21300000, guid: 7a2374bfb3a01524ebd53c2d4d63d095, type: 3}
+  oneItem: 0
   interactionButtonList:
   - {fileID: 21300000, guid: c6a06b0d53be27848bf3976a181c4f1b, type: 3}
   lightMode: 0
@@ -33,6 +34,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

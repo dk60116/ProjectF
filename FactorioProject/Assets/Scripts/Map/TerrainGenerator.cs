@@ -25,6 +25,12 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int BackgroundInstallationSimulationIterationsPerTick = 32;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
+    public const float GeneratedOilSurfaceLocalY = -0.15f;
+    private const float GeneratedOilPitDepth = 0.20f;
+    public const float GeneratedOilPitInnerRadius = 0.285f;
+    public const float GeneratedOilPitOuterRadius = 0.3675f;
+    private const float GeneratedOilPitOutlineJitter = 0.005f;
+    private const int GeneratedOilChunkSurfaceSubdivisions = 8;
     private const float GeneratedWaterWallVerticalOverlap = 0.018f;
     private const int GeneratedWaterDepthSearchRadius = 4;
     private const float GeneratedWaterDepthDeepDistance = 2.65f;
@@ -102,6 +108,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private sealed class ChunkSurfaceBuildData
     {
         public Vector2Int origin;
+        public ChunkSurfaceWorkerInput surfaceInput;
         public readonly List<Vector3> vertices = new List<Vector3>();
         public readonly List<Vector2> uvs = new List<Vector2>();
         public readonly List<Color> colors = new List<Color>();
@@ -331,6 +338,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     [SerializeField]
     private List<ResourceEntry> oreResources = new List<ResourceEntry>();
+    [SerializeField]
+    private List<ResourceEntry> oilResources = new List<ResourceEntry>();
     [SerializeField]
     private List<ResourceEntry> treeResources = new List<ResourceEntry>();
     [SerializeField]
@@ -996,6 +1005,7 @@ public partial class TerrainGenerator : MonoBehaviour
             normalOreMaxResourceCount,
             starterOreMinResourceCount,
             starterOreMaxResourceCount);
+        NormalizeOilResourceEntries(oilResources);
         NormalizeResourceEntries(treeResources, 1, 1, 1, 1);
         NormalizeResourceEntries(reedResources, 1, 1, 1, 1);
         SyncResourceEntryDefinitions();
@@ -2818,7 +2828,8 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             chunkSurface = new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount)
             {
-                origin = origin
+                origin = origin,
+                surfaceInput = CreateChunkSurfaceWorkerInput(origin, normalizedChunkSize)
             };
             IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
             while (surfaceRoutine.MoveNext())

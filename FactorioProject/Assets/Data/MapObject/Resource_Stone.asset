@@ -15,6 +15,7 @@ MonoBehaviour:
   resourceName: Stone
   prefab: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
   harvestMode: 1
+  placementCategory: 0
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

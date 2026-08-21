@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_23_Coil
   m_EditorClassIdentifier: 
   itemName: Coil
-  id: 33
+  id: 35
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: f8f6fe632b6192645ad55463e16606bc, type: 2}
   portableMat: {fileID: 2100000, guid: 750a1b1cd0486ef40b28f8b42514797f, type: 2}
   icon: {fileID: 21300000, guid: a6db811d32e4d74498bb391f271afca2, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

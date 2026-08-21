@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class TerrainDataEditorWindow : EditorWindow
 {
@@ -187,10 +188,13 @@ public class TerrainDataEditorWindow : EditorWindow
     {
         InvalidateVisibleGenerators();
         EnsureSelection();
+        EditorApplication.delayCall -= RefreshGeneratorSelection;
+        EditorApplication.delayCall += RefreshGeneratorSelection;
     }
 
     private void OnDisable()
     {
+        EditorApplication.delayCall -= RefreshGeneratorSelection;
         ClearSelectedGeneratorCache();
         visibleGenerators.Clear();
         visibleGeneratorsDirty = true;
@@ -198,6 +202,18 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private void OnFocus()
     {
+        RefreshGeneratorSelection();
+    }
+
+    private void RefreshGeneratorSelection()
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        InvalidateVisibleGenerators();
+        EnsureSelection();
         Repaint();
     }
 
@@ -232,7 +248,7 @@ public class TerrainDataEditorWindow : EditorWindow
         GUILayout.BeginArea(detailRect);
         GUILayout.Space(10f);
 
-        TerrainGenerator generator = GetSelectedGenerator();
+        TerrainGenerator generator = ResolveGeneratorForDrawing();
         if (generator == null)
         {
             EditorGUILayout.HelpBox("선택된 TerrainGenerator가 없습니다.", MessageType.Info);
@@ -262,6 +278,7 @@ public class TerrainDataEditorWindow : EditorWindow
         DrawPropertySection(serializedGenerator, "Ore Resources", "oreResources");
         DrawPropertySection(serializedGenerator, "Tree Resources", "treeResources");
         DrawPropertySection(serializedGenerator, "Reed Resources", "reedResources");
+        DrawPropertySection(serializedGenerator, "Oil Resources", "oilResources");
         DrawPropertySection(serializedGenerator, "Resource Generation", ResourceGenerationPropertyPaths);
         DrawPropertySection(serializedGenerator, "Animal Generation", AnimalGenerationPropertyPaths);
         EditorGUILayout.LabelField(
@@ -770,6 +787,32 @@ public class TerrainDataEditorWindow : EditorWindow
         return selectedGenerator;
     }
 
+    private TerrainGenerator ResolveGeneratorForDrawing()
+    {
+        TerrainGenerator generator = GetSelectedGenerator();
+        if (IsLoadedSceneGenerator(generator))
+        {
+            return generator;
+        }
+
+        generator = GetTerrainGeneratorFromUnitySelection();
+        if (IsLoadedSceneGenerator(generator))
+        {
+            SetSelectedGenerator(generator);
+            return generator;
+        }
+
+        List<TerrainGenerator> generators = GetVisibleGenerators();
+        if (generators.Count <= 0)
+        {
+            return null;
+        }
+
+        generator = generators[0];
+        SetSelectedGenerator(generator);
+        return generator;
+    }
+
     private void EnsureSelection()
     {
         EnsureSelection(GetVisibleGenerators());
@@ -784,14 +827,14 @@ public class TerrainDataEditorWindow : EditorWindow
         }
 
         TerrainGenerator activeSelection = GetTerrainGeneratorFromUnitySelection();
-        if (activeSelection != null && generators.Contains(activeSelection))
+        if (IsLoadedSceneGenerator(activeSelection))
         {
             SetSelectedGenerator(activeSelection);
             return;
         }
 
         TerrainGenerator selectedGenerator = GetSelectedGenerator();
-        if (selectedGenerator != null && generators.Contains(selectedGenerator))
+        if (IsLoadedSceneGenerator(selectedGenerator))
         {
             return;
         }
@@ -818,23 +861,44 @@ public class TerrainDataEditorWindow : EditorWindow
             return visibleGenerators;
         }
 
-        TerrainGenerator[] allGenerators = FindObjectsByType<TerrainGenerator>(FindObjectsInactive.Include);
         visibleGenerators.Clear();
-        for (int i = 0; i < allGenerators.Length; i++)
+        for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
         {
-            TerrainGenerator generator = allGenerators[i];
-            if (generator == null)
+            Scene scene = SceneManager.GetSceneAt(sceneIndex);
+            if (!scene.IsValid() || !scene.isLoaded)
             {
                 continue;
             }
 
-            visibleGenerators.Add(generator);
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                TerrainGenerator[] generators = roots[rootIndex].GetComponentsInChildren<TerrainGenerator>(true);
+                for (int generatorIndex = 0; generatorIndex < generators.Length; generatorIndex++)
+                {
+                    TerrainGenerator generator = generators[generatorIndex];
+                    if (generator != null)
+                    {
+                        visibleGenerators.Add(generator);
+                    }
+                }
+            }
         }
 
         visibleGenerators.Sort(CompareTerrainGenerators);
-        visibleGeneratorsDirty = false;
+        // A domain reload can enable this window before scene objects are restored.
+        // Keep an empty result dirty so the next GUI pass can recover automatically.
+        visibleGeneratorsDirty = visibleGenerators.Count == 0;
 
         return visibleGenerators;
+    }
+
+    private static bool IsLoadedSceneGenerator(TerrainGenerator generator)
+    {
+        return generator != null
+               && !EditorUtility.IsPersistent(generator)
+               && generator.gameObject.scene.IsValid()
+               && generator.gameObject.scene.isLoaded;
     }
 
     private void InvalidateVisibleGenerators()
@@ -933,7 +997,7 @@ public class TerrainDataEditorWindow : EditorWindow
 
         GameObject selectedGameObject = Selection.activeGameObject;
         return selectedGameObject != null
-            ? selectedGameObject.GetComponent<TerrainGenerator>()
+            ? selectedGameObject.GetComponentInParent<TerrainGenerator>(true)
             : null;
     }
 }

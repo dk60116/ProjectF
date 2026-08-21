@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_16_Iron plate
   m_EditorClassIdentifier: 
   itemName: Iron plate
-  id: 16
+  id: 17
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
   portableMat: {fileID: 2100000, guid: ab6d4d3b5e71cfe4f8cc0fd8936fa640, type: 2}
   icon: {fileID: 21300000, guid: f03f9c3cb97d43241ad3e1ac5fdac2c0, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

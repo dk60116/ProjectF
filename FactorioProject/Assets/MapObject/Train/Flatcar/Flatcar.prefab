@@ -177,7 +177,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Flatcar
-  objId: 70
+  objId: 78
   itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -206,6 +206,7 @@ MonoBehaviour:
   vehicleAccelerationPerSecond: 1.5
   vehicleMaxSpeed: 4
   vehicleDecelerationPerSecond: 1.5
+  vehicleMass: 5
   playerPoint:
   - {fileID: 6814276447122548450}
   - {fileID: 2799771002276875272}
@@ -214,13 +215,13 @@ MonoBehaviour:
   - {fileID: 5463916447660863346}
   wheelRadius: 0.18
   wheelLocalRotationAxis: {x: 1, y: 0, z: 0}
+  wheelRotationUsesVehicleSpace: 0
   invertWheelRotation: 0
   trainConnectionCenterDistance: 0.9
   trainConnectionGapDistance: 0.35
   trainConnectionSnapMaxDistance: 0.35
   trainConnectionMaxLateralDistance: 0.45
   trainConnectionMinForwardDot: 0.5
-  trainMass: 5
   railRotationInterpolationSpeed: 10
   itemPointList:
   - {fileID: 1973605188877043926}

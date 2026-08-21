@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_57_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Flatcar
-  id: 70
+  id: 78
   mapObject: {fileID: 8246531933118439867, guid: a34b33398bb75a84aaa6febe564ccb3e, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: ba608c03b7cefea4cbc21ecf28f1fbda, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

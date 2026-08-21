@@ -5,8 +5,6 @@ public class Train : Vehicle
 {
     private const float MinConnectionDistance = 0.05f;
     private const float DefaultConnectionFallbackDistance = 1.4f;
-    private const float TrainLoadSpeedReductionPerMass = 0.01f;
-    private const float MinTrainLoadSpeedMultiplier = 0.01f;
     private const float ConnectionSideEpsilon = 0.01f;
     private const float StoredRailPointDeviationSqr = 0.000001f;
 
@@ -23,9 +21,6 @@ public class Train : Vehicle
     private float trainConnectionMaxLateralDistance = 0.45f;
     [SerializeField, Range(0f, 1f)]
     private float trainConnectionMinForwardDot = 0.5f;
-    [SerializeField, Min(0.01f)]
-    private float trainMass = 1f;
-
     private Rigidbody cachedTrainRigidbody;
     private Railload currentRail;
     private float currentRailDistance;
@@ -45,11 +40,6 @@ public class Train : Vehicle
     public float ConnectionSnapMaxDistance => Mathf.Max(MinConnectionDistance, trainConnectionSnapMaxDistance);
     public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
-    public float TrainMass => Mathf.Max(0.01f, trainMass);
-    public float TrainLoadSpeedMultiplier => Mathf.Clamp(
-        1f - TrainMass * TrainLoadSpeedReductionPerMass,
-        MinTrainLoadSpeedMultiplier,
-        1f);
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
     public static ulong ConnectionGraphRevision => connectionGraphRevision;
 
@@ -475,30 +465,7 @@ public class Train : Vehicle
 
     protected void RefreshRuntimeCoordinate(Vector3 worldPosition)
     {
-        Vector2Int coordinate = new Vector2Int(
-            Mathf.RoundToInt(worldPosition.x),
-            Mathf.RoundToInt(worldPosition.z));
-        var occupiedCoordinates = RuntimeOccupiedCoordinates;
-        if (occupiedCoordinates != null
-            && occupiedCoordinates.Count == 1
-            && occupiedCoordinates[0] == coordinate)
-        {
-            return;
-        }
-
-        ConfigurePlacementRuntime(
-            coordinate,
-            RuntimeQuarterTurns,
-            new[] { coordinate },
-            RuntimePlacementSequence);
-        RobotArm.WakeAroundCoordinate(coordinate);
+        RefreshSingleCellRuntimePlacement(worldPosition, RuntimeQuarterTurns);
     }
 
-#if UNITY_EDITOR
-    protected override void OnValidate()
-    {
-        base.OnValidate();
-        trainMass = Mathf.Max(0.01f, trainMass);
-    }
-#endif
 }

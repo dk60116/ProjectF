@@ -17,7 +17,8 @@ public enum InstallationMapFilter
     Pipe = 1 << 6,
     Railload = 1 << 7,
     Floor = 1 << 8,
-    OtherInstallObject = 1 << 9
+    OtherInstallObject = 1 << 9,
+    Oil = 1 << 10
 }
 
 public enum InstallationRotationFilter
@@ -52,8 +53,49 @@ public interface IPersistentInstallationItemStorage
     void ApplyPersistentStoredItemId(int itemId);
 }
 
+public interface IPersistentInstallationItemCollectionStorage
+{
+    void CapturePersistentStoredItemIds(List<int> destination);
+
+    void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds);
+}
+
+public interface IPlayerItemStorage
+{
+    bool TryAddItemStack(
+        int itemId,
+        int itemCount,
+        Vector3 startWorldPosition,
+        Func<Vector3> startWorldPositionProvider,
+        float moveInterval,
+        out int addedCount);
+
+    bool TryPickupOneItemToBag(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredSlotIndex,
+        int preferredItemId = -1);
+
+    bool TryPickupOneItemToHand(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredItemId = -1);
+
+    bool TryPreviewPickupItems(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount);
+}
+
 public class InstallationObject : MapObject
 {
+    protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
+
     public const InstallationMapFilter DefaultMapFilter =
         InstallationMapFilter.Ground
         | InstallationMapFilter.Ore
@@ -162,7 +204,7 @@ public class InstallationObject : MapObject
 
     public float StoredFluidLiters => Mathf.Max(0f, storedFluidLiters);
     public int StoredFluidItemId => StoredFluidLiters > 0.0001f ? storedFluidItemId : -1;
-    public float FluidStorageCapacityLiters
+    public virtual float FluidStorageCapacityLiters
     {
         get
         {
@@ -175,6 +217,31 @@ public class InstallationObject : MapObject
     public float AvailableFluidStorageLiters => Mathf.Max(0f, FluidStorageCapacityLiters - StoredFluidLiters);
     public bool CanStoreFluid => FluidStorageCapacityLiters > 0f;
     public bool HasFluidStorageSpace => AvailableFluidStorageLiters > 0.0001f;
+
+    protected static float CalculateFluidEqualizationTransferLiters(
+        InstallationObject sourceStorage,
+        InstallationObject targetStorage)
+    {
+        if (sourceStorage == null || targetStorage == null)
+        {
+            return 0f;
+        }
+
+        float sourceCapacity = Mathf.Max(0f, sourceStorage.FluidStorageCapacityLiters);
+        float targetCapacity = Mathf.Max(0f, targetStorage.FluidStorageCapacityLiters);
+        if (sourceCapacity <= 0.0001f || targetCapacity <= 0.0001f)
+        {
+            return 0f;
+        }
+
+        float sourceLiters = Mathf.Clamp(sourceStorage.StoredFluidLiters, 0f, sourceCapacity);
+        float targetLiters = Mathf.Clamp(targetStorage.StoredFluidLiters, 0f, targetCapacity);
+        float equalizingTransfer =
+            ((sourceLiters * targetCapacity) - (targetLiters * sourceCapacity))
+            / (sourceCapacity + targetCapacity);
+        return Mathf.Max(0f, equalizingTransfer);
+    }
+
     public float FluidInLitersPerSecond
     {
         get
@@ -439,7 +506,16 @@ public class InstallationObject : MapObject
 
         float previousStoredLiters = storedFluidLiters;
         int previousStoredFluidItemId = storedFluidItemId;
-        acceptedLiters = Mathf.Min(requestedLiters, availableLiters);
+        float limitedRequestedLiters = Mathf.Clamp(
+            LimitIncomingFluidLiters(fluidItemId, requestedLiters),
+            0f,
+            requestedLiters);
+        if (limitedRequestedLiters <= 0.0001f)
+        {
+            return false;
+        }
+
+        acceptedLiters = Mathf.Min(limitedRequestedLiters, availableLiters);
         storedFluidLiters += acceptedLiters;
         if (acceptedLiters > 0.0001f && fluidItemId >= 0)
         {
@@ -603,6 +679,11 @@ public class InstallationObject : MapObject
         storedFluidTemperatureCelsius = NormalizeFluidTemperatureCelsius(
             ((previousTemperature * previousLiters)
              + (NormalizeFluidTemperatureCelsius(incomingTemperatureCelsius) * acceptedLiters)) / totalLiters);
+    }
+
+    protected virtual float LimitIncomingFluidLiters(int fluidItemId, float requestedLiters)
+    {
+        return requestedLiters;
     }
 
     protected virtual void OnStoredFluidChanged(

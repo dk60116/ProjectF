@@ -208,7 +208,7 @@ public class RailHandcar : Train
                 continue;
             }
 
-            multiplier *= train.TrainLoadSpeedMultiplier;
+            multiplier *= train.VehicleLoadSpeedMultiplier;
         }
 
         if (pushConsistPathSessions.Count > 0)
@@ -232,7 +232,7 @@ public class RailHandcar : Train
                         continue;
                     }
 
-                    multiplier *= train.TrainLoadSpeedMultiplier;
+                    multiplier *= train.VehicleLoadSpeedMultiplier;
                 }
             }
         }
@@ -257,7 +257,7 @@ public class RailHandcar : Train
                 continue;
             }
 
-            float trainMultiplier = train.TrainLoadSpeedMultiplier;
+            float trainMultiplier = train.VehicleLoadSpeedMultiplier;
             groupMultiplier *= trainMultiplier;
             RegisterTrainForCurrentMovementLoad(train, trainMultiplier);
         }
@@ -303,7 +303,7 @@ public class RailHandcar : Train
 
     private void RegisterTrainForCurrentMovementLoad(Train train)
     {
-        RegisterTrainForCurrentMovementLoad(train, train != null ? train.TrainLoadSpeedMultiplier : 1f);
+        RegisterTrainForCurrentMovementLoad(train, train != null ? train.VehicleLoadSpeedMultiplier : 1f);
     }
 
     private void RegisterTrainForCurrentMovementLoad(Train train, float trainMultiplier)

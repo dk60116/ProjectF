@@ -294,7 +294,16 @@ public partial class BlockStateStore
             }
         }
 
-        return Mathf.Max(1, capacity) - inventory.centerItems.Count >= count;
+        int stackCapacity = ResolveSavedCenterStackCapacity(itemId, capacity);
+        return stackCapacity - inventory.centerItems.Count >= count;
+    }
+
+    private static int ResolveSavedCenterStackCapacity(int itemId, int defaultCapacity)
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return ItemDefinition.ResolveStackCapacity(itemManager, itemId, defaultCapacity);
     }
 
     private SavedFloorAreaInventory LoadSavedFloorAreaInventory(Vector2Int worldCoordinate)

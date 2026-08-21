@@ -458,7 +458,7 @@ public class SteamGenerator : InputOutputModule
                 outputWattsPerSecond = outputItemId >= 0
                     ? Mathf.RoundToInt(ItemDefinition.ResolveElectricOutputWatts(outputDefinition, output.count))
                     : 0;
-                if (outputItemId >= 0 && !IsRecipeOutputAllowedByItemFilter(outputItemId))
+                if (outputItemId >= 0 && !IsRecipeOutputAvailable(outputItemId))
                 {
                     continue;
                 }

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class FreightCar : Train
+public class FreightCar : Train, IPlayerItemStorage
 {
     [SerializeField, Min(0.01f)]
     private float railRotationInterpolationSpeed = 10f;
@@ -248,7 +248,6 @@ public class FreightCar : Train
         storageCapacity = 0;
         hasStorage = false;
 
-        int stackCapacity = Mathf.Max(1, maxItemsPerPoint);
         if (itemPointList != null)
         {
             for (int i = 0; i < itemPointList.Count; i++)
@@ -260,11 +259,17 @@ public class FreightCar : Train
                 }
 
                 hasStorage = true;
-                storageCapacity += stackCapacity;
-                if (i < itemPointStacks.Count && itemPointStacks[i] != null)
+                List<PortableObject> stack = i < itemPointStacks.Count
+                    ? itemPointStacks[i]
+                    : null;
+                CleanupItemStack(stack);
+                int storedItemId = stack != null && stack.Count > 0 && stack[0] != null
+                    ? stack[0].ItemId
+                    : -1;
+                storageCapacity += GetStackCapacityForItem(storedItemId);
+                if (stack != null)
                 {
-                    CleanupItemStack(itemPointStacks[i]);
-                    storedItemCount += itemPointStacks[i].Count;
+                    storedItemCount += stack.Count;
                 }
             }
         }
@@ -404,7 +409,7 @@ public class FreightCar : Train
         }
         else
         {
-            DestroyPortableObject(portableObject);
+            PlayerItemStorageUtility.DestroyPortableObject(portableObject);
         }
 
         NotifyRobotArmsAtRuntimeCoordinates();
@@ -418,6 +423,38 @@ public class FreightCar : Train
         float pickupRange,
         int preferredSlotIndex,
         int preferredItemId = -1)
+    {
+        return TryPickupOneItem(
+            player,
+            playerPosition,
+            pickupRange,
+            preferredItemId,
+            preferredSlotIndex,
+            false);
+    }
+
+    public bool TryPickupOneItemToHand(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredItemId = -1)
+    {
+        return TryPickupOneItem(
+            player,
+            playerPosition,
+            pickupRange,
+            preferredItemId,
+            -1,
+            true);
+    }
+
+    private bool TryPickupOneItem(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredItemId,
+        int preferredSlotIndex,
+        bool handOnly)
     {
         if (player == null || pickupRange <= 0f)
         {
@@ -437,18 +474,20 @@ public class FreightCar : Train
             return false;
         }
 
-        if (!TryAddPickupObjectToPlayerStorage(
+        bool accepted = handOnly
+            ? player.TryAddToHand(itemId, out PortableObject storageTarget)
+            : PlayerItemStorageUtility.TryAddToPlayerStorage(
                 player,
                 itemId,
                 preferredSlotIndex,
-                out PortableObject storageTarget,
-                out _))
+                out storageTarget);
+        if (!accepted)
         {
             return false;
         }
 
         stack.RemoveAt(stack.Count - 1);
-        ReleasePickupObjectToPlayerStorage(portableObject, storageTarget);
+        PlayerItemStorageUtility.MoveVisualToPlayerStorage(portableObject, storageTarget);
         NotifyRobotArmsAtRuntimeCoordinates();
         return true;
     }
@@ -647,7 +686,7 @@ public class FreightCar : Train
             return;
         }
 
-        int stackLimit = Mathf.Max(1, maxItemsPerPoint);
+        int stackLimit = GetStackCapacityForItem(itemId);
         for (int i = 0; i < pointList.Count; i++)
         {
             Transform candidatePoint = pointList[i];
@@ -677,6 +716,17 @@ public class FreightCar : Train
             bestPoint = candidatePoint;
             bestStack = candidateStack;
         }
+    }
+
+    public int GetStackCapacityForItem(int itemId)
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return ItemDefinition.ResolveStackCapacity(
+            itemManager,
+            itemId,
+            Mathf.Max(1, maxItemsPerPoint));
     }
 
     private bool TryFindClosestTopItem(
@@ -757,7 +807,7 @@ public class FreightCar : Train
                 if (itemId < 0)
                 {
                     stack.RemoveAt(stack.Count - 1);
-                    DestroyPortableObject(portableObject);
+                    PlayerItemStorageUtility.DestroyPortableObject(portableObject);
                     continue;
                 }
 
@@ -1131,7 +1181,7 @@ public class FreightCar : Train
         portableObject.gameObject.layer = gameObject.layer;
         if (!portableObject.SetItem(itemId))
         {
-            DestroyPortableObject(portableObject);
+            PlayerItemStorageUtility.DestroyPortableObject(portableObject);
             return null;
         }
 
@@ -1219,70 +1269,6 @@ public class FreightCar : Train
         }
 
         return count;
-    }
-
-    private static bool TryAddPickupObjectToPlayerStorage(
-        Player player,
-        int itemId,
-        int preferredSlotIndex,
-        out PortableObject targetPortableObject,
-        out bool addedToHand)
-    {
-        targetPortableObject = null;
-        addedToHand = false;
-        if (player == null || itemId < 0)
-        {
-            return false;
-        }
-
-        if (preferredSlotIndex >= 0)
-        {
-            if (player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out targetPortableObject))
-            {
-                return true;
-            }
-
-            if (player.HasMatchingHandStackSpace(itemId)
-                && player.TryAddToHand(itemId, out targetPortableObject))
-            {
-                addedToHand = true;
-                return true;
-            }
-
-            return false;
-        }
-
-        if (player.HasMatchingHandStackSpace(itemId)
-            && player.TryAddToHand(itemId, out targetPortableObject))
-        {
-            addedToHand = true;
-            return true;
-        }
-
-        return player.TryAddToBag(itemId, out targetPortableObject);
-    }
-
-    private static void ReleasePickupObjectToPlayerStorage(
-        PortableObject portableObject,
-        PortableObject storageTarget)
-    {
-        if (portableObject == null)
-        {
-            return;
-        }
-
-        DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
-        gate?.ClearGate();
-
-        portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(null, true);
-        if (storageTarget != null)
-        {
-            portableObject.MoveTo(storageTarget.transform, () => DestroyPortableObject(portableObject));
-            return;
-        }
-
-        DestroyPortableObject(portableObject);
     }
 
     private static void ReleaseTakenPortableObject(PortableObject portableObject)
@@ -1422,7 +1408,7 @@ public class FreightCar : Train
 
         for (int i = stack.Count - 1; i >= 0; i--)
         {
-            DestroyPortableObject(stack[i]);
+            PlayerItemStorageUtility.DestroyPortableObject(stack[i]);
         }
 
         stack.Clear();
@@ -1445,23 +1431,6 @@ public class FreightCar : Train
         {
             RobotArm.WakeAroundCoordinate(occupiedCoordinates[i]);
         }
-    }
-
-    private static void DestroyPortableObject(PortableObject portableObject)
-    {
-        if (portableObject == null)
-        {
-            return;
-        }
-
-        portableObject.CancelMove();
-        if (Application.isPlaying)
-        {
-            Destroy(portableObject.gameObject);
-            return;
-        }
-
-        DestroyImmediate(portableObject.gameObject);
     }
 
     private static void DestroyAttachedBoxObject(BoxObject boxObject)

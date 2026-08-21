@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_0_Log
   m_EditorClassIdentifier: 
   itemName: Log
-  id: 7
+  id: 8
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: f931e2d250afe8847a0230e25513af2f, type: 2}
   portableMat: {fileID: 2100000, guid: 2cbb04f1f01402c42bf511527a7bd2ed, type: 2}
   icon: {fileID: 21300000, guid: f4af5822352a54540ac028e707e6979a, type: 3}
+  oneItem: 0
   interactionButtonList:
   - {fileID: 21300000, guid: ef2f61a6d6e4ba74d8864a5f8d382e78, type: 3}
   lightMode: 0
@@ -33,6 +34,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 1
   energyAmount: 20
   useEnergyType: 0

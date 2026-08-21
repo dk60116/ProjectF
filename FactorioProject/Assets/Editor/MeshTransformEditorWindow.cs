@@ -18,6 +18,7 @@ public class MeshTransformEditorWindow : EditorWindow
     private const float PreviewSceneGizmoAxisLength = 25f;
     private const float PreviewSceneGizmoCenterRadius = 7f;
     private const float PreviewSceneGizmoAxisPickRadius = 10f;
+    private const float SymmetryPlaneTolerance = 0.0001f;
     private const string UniversalPipelineShaderTag = "UniversalPipeline";
     private const string LegacyLightweightPipelineShaderTag = "LightweightPipeline";
     private const string HdPipelineShaderTag = "HDRenderPipeline";
@@ -81,6 +82,18 @@ public class MeshTransformEditorWindow : EditorWindow
     [SerializeField]
     private Vector3 scale = Vector3.one;
     [SerializeField]
+    private bool mirrorAcrossX;
+    [SerializeField]
+    private MeshSymmetrySide xSourceSide = MeshSymmetrySide.Negative;
+    [SerializeField]
+    private bool mirrorAcrossY;
+    [SerializeField]
+    private MeshSymmetrySide ySourceSide = MeshSymmetrySide.Positive;
+    [SerializeField]
+    private bool mirrorAcrossZ;
+    [SerializeField]
+    private MeshSymmetrySide zSourceSide = MeshSymmetrySide.Negative;
+    [SerializeField]
     private bool fixMirroredWinding = true;
     [SerializeField]
     private bool recalculateNormals = true;
@@ -117,6 +130,7 @@ public class MeshTransformEditorWindow : EditorWindow
     private Vector3 pivotDragStartPointerPreviewPosition;
     private Vector3 pivotDragAxis = Vector3.right;
     private float pivotDragStartAxisParameter;
+    private string symmetryProcessingError = string.Empty;
 
     [MenuItem("Window/ProjectF/Mesh Transform")]
     [MenuItem("Tools/MapObject/Mesh Transform")]
@@ -209,6 +223,13 @@ public class MeshTransformEditorWindow : EditorWindow
                 pivotPosition = Vector3.zero;
                 rotationEuler = Vector3.zero;
                 scale = Vector3.one;
+                mirrorAcrossX = false;
+                mirrorAcrossY = false;
+                mirrorAcrossZ = false;
+                xSourceSide = MeshSymmetrySide.Negative;
+                ySourceSide = MeshSymmetrySide.Positive;
+                zSourceSide = MeshSymmetrySide.Negative;
+                symmetryProcessingError = string.Empty;
                 previewDirty = true;
             }
         }
@@ -236,6 +257,8 @@ public class MeshTransformEditorWindow : EditorWindow
         EditorGUILayout.LabelField("Transform", EditorStyles.boldLabel);
         DrawPivotSection();
         EditorGUILayout.Space(6f);
+        DrawSymmetrySection();
+        EditorGUILayout.Space(6f);
         positionOffset = EditorGUILayout.Vector3Field("Position", positionOffset);
         rotationEuler = EditorGUILayout.Vector3Field("Rotation", rotationEuler);
         scale = EditorGUILayout.Vector3Field("Scale", scale);
@@ -260,6 +283,90 @@ public class MeshTransformEditorWindow : EditorWindow
             DrawPivotPresetButton("바닥", PivotPreset.Bottom);
             DrawPivotPresetButton("중앙", PivotPreset.Center);
             DrawPivotPresetButton("위", PivotPreset.Top);
+        }
+    }
+
+    private void DrawSymmetrySection()
+    {
+        EditorGUILayout.LabelField("Symmetry", EditorStyles.miniBoldLabel);
+        mirrorAcrossX = EditorGUILayout.ToggleLeft("X축 대칭 (좌우)", mirrorAcrossX);
+        if (mirrorAcrossX)
+        {
+            DrawSourceSideSelection(
+                "X Source",
+                "왼쪽",
+                "오른쪽",
+                ref xSourceSide);
+        }
+
+        mirrorAcrossY = EditorGUILayout.ToggleLeft("Y축 대칭 (상하)", mirrorAcrossY);
+        if (mirrorAcrossY)
+        {
+            DrawSourceSideSelection(
+                "Y Source",
+                "아래쪽",
+                "위쪽",
+                ref ySourceSide);
+        }
+
+        mirrorAcrossZ = EditorGUILayout.ToggleLeft("Z축 대칭 (앞뒤)", mirrorAcrossZ);
+        if (mirrorAcrossZ)
+        {
+            DrawSourceSideSelection(
+                "Z Source",
+                "뒤쪽",
+                "앞쪽",
+                ref zSourceSide);
+        }
+
+        int enabledAxisCount = (mirrorAcrossX ? 1 : 0)
+                               + (mirrorAcrossY ? 1 : 0)
+                               + (mirrorAcrossZ ? 1 : 0);
+        if (enabledAxisCount > 0)
+        {
+            string copyDescription = enabledAxisCount switch
+            {
+                3 => "선택한 1/8 영역만 남기고 나머지 일곱 방향을 대칭 복제합니다.",
+                2 => "선택한 1/4 영역만 남기고 나머지 세 방향을 대칭 복제합니다.",
+                _ => "선택한 쪽만 남기고 반대쪽을 대칭 복제합니다."
+            };
+            EditorGUILayout.HelpBox(
+                $"Pivot Position을 대칭 기준으로 사용합니다. {copyDescription} 중앙선 버텍스는 하나로 용접됩니다.",
+                MessageType.Info);
+        }
+
+        if (!string.IsNullOrWhiteSpace(symmetryProcessingError))
+        {
+            EditorGUILayout.HelpBox(symmetryProcessingError, MessageType.Error);
+        }
+    }
+
+    private static void DrawSourceSideSelection(
+        string label,
+        string negativeLabel,
+        string positiveLabel,
+        ref MeshSymmetrySide sourceSide)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.PrefixLabel(label);
+            bool selectNegative = EditorGUILayout.ToggleLeft(
+                negativeLabel,
+                sourceSide == MeshSymmetrySide.Negative,
+                GUILayout.MinWidth(76f));
+            bool selectPositive = EditorGUILayout.ToggleLeft(
+                positiveLabel,
+                sourceSide == MeshSymmetrySide.Positive,
+                GUILayout.MinWidth(76f));
+
+            if (selectNegative && sourceSide != MeshSymmetrySide.Negative)
+            {
+                sourceSide = MeshSymmetrySide.Negative;
+            }
+            else if (selectPositive && sourceSide != MeshSymmetrySide.Positive)
+            {
+                sourceSide = MeshSymmetrySide.Positive;
+            }
         }
     }
 
@@ -709,10 +816,22 @@ public class MeshTransformEditorWindow : EditorWindow
             return;
         }
 
-        Mesh newMesh = Instantiate(sourceMesh);
-        newMesh.name = Path.GetFileNameWithoutExtension(outputPath);
+        Mesh newMesh = CreateEditableMeshCopy(
+            sourceMesh,
+            Path.GetFileNameWithoutExtension(outputPath),
+            HideFlags.None);
+        if (newMesh == null)
+        {
+            ShowSymmetryProcessingError();
+            return;
+        }
 
-        ApplyTransform(newMesh);
+        if (!ApplyTransform(newMesh))
+        {
+            DestroyImmediate(newMesh);
+            ShowSymmetryProcessingError();
+            return;
+        }
 
         AssetDatabase.CreateAsset(newMesh, outputPath);
         AssetDatabase.SaveAssets();
@@ -807,7 +926,11 @@ public class MeshTransformEditorWindow : EditorWindow
         }
 
         Undo.RegisterCompleteObjectUndo(sourceMesh, "Save Mesh Transform");
-        ApplyTransform(sourceMesh);
+        if (!ApplyTransform(sourceMesh))
+        {
+            ShowSymmetryProcessingError();
+            return;
+        }
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         EditorGUIUtility.PingObject(sourceMesh);
@@ -1051,11 +1174,21 @@ public class MeshTransformEditorWindow : EditorWindow
                     continue;
                 }
 
-                Mesh transformedMesh = Instantiate(originalMesh);
-                transformedMesh.name = originalMesh.name;
-                transformedMesh.hideFlags = HideFlags.HideAndDontSave;
+                Mesh transformedMesh = CreateEditableMeshCopy(
+                    originalMesh,
+                    originalMesh.name,
+                    HideFlags.HideAndDontSave);
+                if (transformedMesh == null)
+                {
+                    ShowSymmetryProcessingError();
+                    return false;
+                }
                 Matrix4x4 meshToRoot = GetTransformToRoot(tempRoot.transform, meshFilter.transform);
-                ApplyTransformInRootSpace(transformedMesh, meshToRoot, false, true);
+                if (!ApplyTransformInRootSpace(transformedMesh, meshToRoot, false, true))
+                {
+                    ShowSymmetryProcessingError();
+                    return false;
+                }
                 meshFilter.sharedMesh = transformedMesh;
                 temporaryMeshes.Add(transformedMesh);
             }
@@ -1103,10 +1236,21 @@ public class MeshTransformEditorWindow : EditorWindow
             return null;
         }
 
-        Mesh transformedMesh = Instantiate(sourceMesh);
-        transformedMesh.name = sourceMesh.name;
-        transformedMesh.hideFlags = HideFlags.HideAndDontSave;
-        ApplyTransform(transformedMesh, false);
+        Mesh transformedMesh = CreateEditableMeshCopy(
+            sourceMesh,
+            sourceMesh.name,
+            HideFlags.HideAndDontSave);
+        if (transformedMesh == null)
+        {
+            ShowSymmetryProcessingError();
+            return null;
+        }
+        if (!ApplyTransform(transformedMesh, false))
+        {
+            DestroyImmediate(transformedMesh);
+            ShowSymmetryProcessingError();
+            return null;
+        }
         return transformedMesh;
     }
 
@@ -1210,8 +1354,13 @@ public class MeshTransformEditorWindow : EditorWindow
         }
     }
 
-    private void ApplyTransform(Mesh mesh, bool markDirty = true, bool bakePivotToOrigin = true)
+    private bool ApplyTransform(Mesh mesh, bool markDirty = true, bool bakePivotToOrigin = true)
     {
+        if (!TryApplySymmetry(mesh, Matrix4x4.identity))
+        {
+            return false;
+        }
+
         Quaternion rotation = Quaternion.Euler(rotationEuler);
         Vector3[] vertices = mesh.vertices;
         Vector3[] normals = mesh.normals;
@@ -1286,10 +1435,17 @@ public class MeshTransformEditorWindow : EditorWindow
         {
             EditorUtility.SetDirty(mesh);
         }
+
+        return true;
     }
 
-    private void ApplyTransformInRootSpace(Mesh mesh, Matrix4x4 meshToRoot, bool markDirty = true, bool bakePivotToOrigin = true)
+    private bool ApplyTransformInRootSpace(Mesh mesh, Matrix4x4 meshToRoot, bool markDirty = true, bool bakePivotToOrigin = true)
     {
+        if (!TryApplySymmetry(mesh, meshToRoot))
+        {
+            return false;
+        }
+
         Quaternion rotation = Quaternion.Euler(rotationEuler);
         Matrix4x4 rootToMesh = meshToRoot.inverse;
         Vector3[] vertices = mesh.vertices;
@@ -1368,6 +1524,56 @@ public class MeshTransformEditorWindow : EditorWindow
         {
             EditorUtility.SetDirty(mesh);
         }
+
+        return true;
+    }
+
+    private bool TryApplySymmetry(Mesh mesh, Matrix4x4 meshToSymmetrySpace)
+    {
+        MeshSymmetrySettings settings = new MeshSymmetrySettings(
+            mirrorAcrossX,
+            xSourceSide,
+            mirrorAcrossY,
+            ySourceSide,
+            mirrorAcrossZ,
+            zSourceSide,
+            SymmetryPlaneTolerance);
+        if (MeshSymmetryUtility.TryApply(
+                mesh,
+                meshToSymmetrySpace,
+                pivotPosition,
+                settings,
+                out string error))
+        {
+            symmetryProcessingError = string.Empty;
+            return true;
+        }
+
+        symmetryProcessingError = error;
+        return false;
+    }
+
+    private Mesh CreateEditableMeshCopy(Mesh source, string copyName, HideFlags hideFlags)
+    {
+        Mesh editableCopy = MeshSymmetryUtility.CreateEditableCopy(source, copyName, hideFlags, out string error);
+        if (editableCopy != null)
+        {
+            symmetryProcessingError = string.Empty;
+            return editableCopy;
+        }
+
+        symmetryProcessingError = error;
+        return null;
+    }
+
+    private void ShowSymmetryProcessingError()
+    {
+        if (string.IsNullOrWhiteSpace(symmetryProcessingError))
+        {
+            return;
+        }
+
+        EditorUtility.DisplayDialog("Mesh Transform", symmetryProcessingError, "OK");
     }
 
     private static void ReverseTriangles(Mesh mesh)
@@ -1592,10 +1798,14 @@ public class MeshTransformEditorWindow : EditorWindow
         previewModelSource = sourceModel;
         if (sourceModel != null)
         {
-            previewMesh = CreateCombinedModelPreviewMesh(sourceModel, out previewMaterials);
+            previewMesh = CreateCombinedModelPreviewMesh(sourceModel, out previewMaterials, out string previewError);
             if (previewMesh != null)
             {
                 ApplyTransform(previewMesh, false, false);
+            }
+            else if (!string.IsNullOrWhiteSpace(previewError))
+            {
+                symmetryProcessingError = previewError;
             }
 
             previewDirty = false;
@@ -1609,9 +1819,16 @@ public class MeshTransformEditorWindow : EditorWindow
             return;
         }
 
-        previewMesh = Instantiate(sourceMesh);
-        previewMesh.name = $"{sourceMesh.name}_Preview";
-        previewMesh.hideFlags = HideFlags.HideAndDontSave;
+        previewMesh = CreateEditableMeshCopy(
+            sourceMesh,
+            $"{sourceMesh.name}_Preview",
+            HideFlags.HideAndDontSave);
+        if (previewMesh == null)
+        {
+            previewMaterials = new Material[0];
+            previewDirty = false;
+            return;
+        }
         previewMaterials = GetPreviewMaterialsForSourceMesh(sourceMesh);
         ApplyTransform(previewMesh, false, false);
         previewDirty = false;
@@ -1708,9 +1925,13 @@ public class MeshTransformEditorWindow : EditorWindow
             && shaderName.StartsWith("Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static Mesh CreateCombinedModelPreviewMesh(GameObject modelRoot, out Material[] materials)
+    private static Mesh CreateCombinedModelPreviewMesh(
+        GameObject modelRoot,
+        out Material[] materials,
+        out string error)
     {
         materials = new Material[0];
+        error = string.Empty;
         if (modelRoot == null)
         {
             return null;
@@ -1730,39 +1951,58 @@ public class MeshTransformEditorWindow : EditorWindow
                 continue;
             }
 
-            Matrix4x4 meshToRoot = GetTransformToRoot(modelRoot.transform, meshFilter.transform);
-            Vector3[] meshVertices = mesh.vertices;
-            Vector2[] meshUv = mesh.uv;
-            bool hasUv = meshUv != null && meshUv.Length == meshVertices.Length;
-            int vertexOffset = vertices.Count;
-            for (int vertexIndex = 0; vertexIndex < meshVertices.Length; vertexIndex++)
+            Mesh readableMesh = MeshSymmetryUtility.CreateEditableCopy(
+                mesh,
+                $"{mesh.name}_PreviewSource",
+                HideFlags.HideAndDontSave,
+                out error);
+            if (readableMesh == null)
             {
-                vertices.Add(meshToRoot.MultiplyPoint3x4(meshVertices[vertexIndex]));
-                uv.Add(hasUv ? meshUv[vertexIndex] : Vector2.zero);
+                return null;
             }
 
-            MeshRenderer meshRenderer = meshFilter.GetComponent<MeshRenderer>();
-            Material[] renderMaterials = BuildRenderPassMaterials(
-                mesh,
-                meshRenderer != null ? meshRenderer.sharedMaterials : null);
-            int renderPassCount = Mathf.Max(mesh.subMeshCount, renderMaterials.Length);
-            for (int passIndex = 0; passIndex < renderPassCount; passIndex++)
+            try
             {
-                int subMeshIndex = Mathf.Min(passIndex, mesh.subMeshCount - 1);
-                int[] subMeshTriangles = mesh.GetTriangles(subMeshIndex);
-                if (subMeshTriangles == null || subMeshTriangles.Length == 0)
+                Matrix4x4 meshToRoot = GetTransformToRoot(modelRoot.transform, meshFilter.transform);
+                Vector3[] meshVertices = readableMesh.vertices;
+                Vector2[] meshUv = readableMesh.uv;
+                bool hasUv = meshUv != null && meshUv.Length == meshVertices.Length;
+                int vertexOffset = vertices.Count;
+                for (int vertexIndex = 0; vertexIndex < meshVertices.Length; vertexIndex++)
                 {
-                    continue;
+                    vertices.Add(meshToRoot.MultiplyPoint3x4(meshVertices[vertexIndex]));
+                    uv.Add(hasUv ? meshUv[vertexIndex] : Vector2.zero);
                 }
 
-                List<int> triangles = new List<int>(subMeshTriangles.Length);
-                for (int triangleIndex = 0; triangleIndex < subMeshTriangles.Length; triangleIndex++)
+                MeshRenderer meshRenderer = meshFilter.GetComponent<MeshRenderer>();
+                Material[] renderMaterials = BuildRenderPassMaterials(
+                    mesh,
+                    meshRenderer != null ? meshRenderer.sharedMaterials : null);
+                int renderPassCount = Mathf.Max(readableMesh.subMeshCount, renderMaterials.Length);
+                for (int passIndex = 0; passIndex < renderPassCount; passIndex++)
                 {
-                    triangles.Add(vertexOffset + subMeshTriangles[triangleIndex]);
-                }
+                    int subMeshIndex = Mathf.Min(passIndex, readableMesh.subMeshCount - 1);
+                    int[] subMeshTriangles = readableMesh.GetTriangles(subMeshIndex);
+                    if (subMeshTriangles == null || subMeshTriangles.Length == 0)
+                    {
+                        continue;
+                    }
 
-                trianglesBySubMesh.Add(triangles);
-                materialList.Add(renderMaterials.Length > 0 ? renderMaterials[Mathf.Min(passIndex, renderMaterials.Length - 1)] : null);
+                    List<int> triangles = new List<int>(subMeshTriangles.Length);
+                    for (int triangleIndex = 0; triangleIndex < subMeshTriangles.Length; triangleIndex++)
+                    {
+                        triangles.Add(vertexOffset + subMeshTriangles[triangleIndex]);
+                    }
+
+                    trianglesBySubMesh.Add(triangles);
+                    materialList.Add(renderMaterials.Length > 0
+                        ? renderMaterials[Mathf.Min(passIndex, renderMaterials.Length - 1)]
+                        : null);
+                }
+            }
+            finally
+            {
+                DestroyImmediate(readableMesh);
             }
         }
 

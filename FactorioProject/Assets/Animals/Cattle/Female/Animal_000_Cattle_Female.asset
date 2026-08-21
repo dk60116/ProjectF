@@ -20,13 +20,13 @@ MonoBehaviour:
   spawnWeight: 5
   maxHealth: 100
   dropItems:
-  - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
     minAmount: 1
     maxAmount: 1
     dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
     minAmount: 1
-    maxAmount: 3
+    maxAmount: 1
     dropChance: 1
   animalPrefab: {fileID: 6074222046392736189, guid: a64177c54513ae744acbb2e8e4cfe377, type: 3}
   adultIcon: {fileID: 21300000, guid: f715c08f2799d984096afaa775bf5792, type: 3}

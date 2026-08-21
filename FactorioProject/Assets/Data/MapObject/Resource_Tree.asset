@@ -15,6 +15,7 @@ MonoBehaviour:
   resourceName: Tree
   prefab: {fileID: 5596077993400562758, guid: 9cd3537bce10e37418fc097fe29cef7f, type: 3}
   harvestMode: 2
+  placementCategory: 0
   defaultResourceCount: 1
   defaultGetCount: 4
   defaultMaxGauge: 10

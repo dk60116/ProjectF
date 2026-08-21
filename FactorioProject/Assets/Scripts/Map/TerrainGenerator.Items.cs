@@ -314,7 +314,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (TryGetFocusedConveyorBeltBlock(GetActivePlayer(), out _, out Block focusedConveyorBlock))
+        Player activePlayer = GetActivePlayer();
+        if (TryGetFocusedConveyorBeltBlock(activePlayer, out _, out Block focusedConveyorBlock))
         {
             dropCoordinate = focusedConveyorBlock.Coordinate;
             int acceptedCount = Mathf.Min(itemCount, Block.ConveyorCellItemUnit);
@@ -348,8 +349,14 @@ public partial class TerrainGenerator : MonoBehaviour
             return droppedCount > 0;
         }
 
-        if (TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock))
+        if (TryGetFocusedBoxObject(activePlayer, out BoxObject focusedBoxObject))
         {
+            if (focusedBoxObject == null
+                || !TryResolveFocusedGroundBoxDropBlock(worldPosition, itemId, 1, out Block focusedBoxBlock))
+            {
+                return false;
+            }
+
             dropCoordinate = focusedBoxBlock.Coordinate;
             for (int i = 0; i < itemCount; i++)
             {

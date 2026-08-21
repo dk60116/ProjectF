@@ -839,7 +839,7 @@ public class Boiler : InputOutputModule
             }
 
             hasRecipe = true;
-            if (!IsRecipeOutputAllowedByItemFilter(candidateOutputItemId))
+            if (!IsRecipeOutputAvailable(candidateOutputItemId))
             {
                 blockedByTargetFilter = true;
                 continue;

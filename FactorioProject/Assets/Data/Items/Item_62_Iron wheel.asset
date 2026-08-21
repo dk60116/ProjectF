@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_62_Iron wheel
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Iron wheel
-  id: 67
+  id: 74
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 2a5347a55d1f97842aae2067f837f850, type: 2}
   portableMat: {fileID: 2100000, guid: 19ec132cdbe29b048b4ddf833c3f1b5a, type: 2}
   icon: {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

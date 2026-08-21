@@ -128,7 +128,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Coal
-  objId: 9
+  objId: 10
   itemDefinition: {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -142,7 +142,7 @@ MonoBehaviour:
   harvestMode: 1
   definition: {fileID: 11400000, guid: 261c163cbac37f741ba53b8eaf059547, type: 2}
   resourceStatus:
-    outputId: 9
+    outputId: 10
     outputItemName: Coal
     resourceCount: 1
     getCount: 1

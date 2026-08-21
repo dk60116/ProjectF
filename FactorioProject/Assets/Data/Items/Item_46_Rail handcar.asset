@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_46_Rail handcar
   m_EditorClassIdentifier: 
   itemName: Axe
-  id: 5
+  id: 6
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: c61c489acd34ed3418df5fa967719096, type: 2}
   portableMat: {fileID: 2100000, guid: b7692744659c63b4abfd5ec92df85632, type: 2}
   icon: {fileID: 21300000, guid: 5f1733c3a1774edfb7b43f6211418560, type: 3}
+  oneItem: 0
   interactionButtonList:
   - {fileID: 21300000, guid: 4fade2dbe45025648acb64b3e0bfe229, type: 3}
   - {fileID: 21300000, guid: 7b654ce797ed8754f8f5bfc320ab51fb, type: 3}
@@ -34,6 +35,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

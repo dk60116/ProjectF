@@ -15,6 +15,7 @@ MonoBehaviour:
   resourceName: Coal
   prefab: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
   harvestMode: 1
+  placementCategory: 0
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

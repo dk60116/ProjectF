@@ -20,11 +20,11 @@ MonoBehaviour:
   spawnWeight: 5
   maxHealth: 100
   dropItems:
-  - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
     minAmount: 1
     maxAmount: 1
     dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
+  - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
     minAmount: 1
     maxAmount: 2
     dropChance: 1

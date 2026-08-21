@@ -379,7 +379,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 8;
+        public int version = 11;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -402,6 +402,8 @@ public class ItemDataEditorWindow : EditorWindow
         public bool itemFilter;
         public bool hasIgnoreFilter;
         public bool ignoreFilter;
+        public bool hasOneItem;
+        public bool oneItem;
         public bool hasManual;
         public bool isManual;
         public InputOutputJsonEntry manualTargetItem;
@@ -410,8 +412,11 @@ public class ItemDataEditorWindow : EditorWindow
         public int capacity = -1;
         public bool storesFluid;
         public float fluidStorageLiters;
+        public float fluidOutputLitersPerSecond = -1f;
+        public int undergroundPipeMaxDistance = -1;
         public bool hasFluidDisplayColor;
         public Color fluidDisplayColor = Color.white;
+        public float bucketFillDurationSeconds = -1f;
         public float craftingDurationSeconds = -1f;
         public string energyType;
         public int energyTypeValue = -1;
@@ -432,7 +437,7 @@ public class ItemDataEditorWindow : EditorWindow
         public float vehicleAccelerationPerSecond = -1f;
         public float vehicleDecelerationPerSecond = -1f;
         public float vehicleMaxSpeed = -1f;
-        public float trainMass = -1f;
+        public float vehicleMass = -1f;
         public float waterLitersPerSecond = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
@@ -3138,6 +3143,8 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "itemFilter");
         SerializedProperty ignoreFilterProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "ignoreFilter");
+        SerializedProperty oneItemProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "oneItem");
         SerializedProperty isManualProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "isManual");
         SerializedProperty manualTargetItemProperty =
@@ -3150,8 +3157,12 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
+        SerializedProperty fluidOutputLitersPerSecondProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "fluidOutputLitersPerSecond");
         SerializedProperty fluidDisplayColorProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "fluidDisplayColor");
+        SerializedProperty bucketFillDurationSecondsProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "bucketFillDurationSeconds");
         SerializedProperty energyTypeProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "energyType");
         SerializedProperty energyAmountProperty =
@@ -3171,6 +3182,14 @@ public class ItemDataEditorWindow : EditorWindow
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Common Item Fields", EditorStyles.boldLabel);
+
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField("References", EditorStyles.boldLabel);
+        DrawMultiPropertyField(
+            oneItemProperty,
+            new GUIContent(
+                "One Item",
+                "체크하면 모든 보관 컨텐츠에서 스택 하나당 이 아이템을 하나만 보관할 수 있습니다."));
 
         if (interactionButtonListProperty != null)
         {
@@ -3247,7 +3266,9 @@ public class ItemDataEditorWindow : EditorWindow
             DrawMultiClampedLongProperty(capacityProperty, new GUIContent("Capacity"), 1L);
         }
 
-        if (storesFluidProperty != null || fluidDisplayColorProperty != null)
+        if (storesFluidProperty != null
+            || fluidDisplayColorProperty != null
+            || (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreOilDrillingMachines()))
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
@@ -3279,6 +3300,24 @@ public class ItemDataEditorWindow : EditorWindow
                         new GUIContent("Fluid Storage Liters"),
                         0f);
                 }
+            }
+
+            if (bucketFillDurationSecondsProperty != null && AllSelectedDefinitionsAreEmptyBuckets())
+            {
+                DrawMultiClampedFloatProperty(
+                    bucketFillDurationSecondsProperty,
+                    new GUIContent(
+                        "Fill Duration (sec)",
+                        "Pipe 출구에서 빈 Bucket이 Water Bucket으로 완전히 차는 시간입니다."),
+                    0.1f);
+            }
+
+            if (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreOilDrillingMachines())
+            {
+                DrawMultiClampedFloatProperty(
+                    fluidOutputLitersPerSecondProperty,
+                    new GUIContent("Output Rate (L/s)", "시추기의 초당 Oil 출력량입니다."),
+                    0f);
             }
         }
 
@@ -3492,6 +3531,24 @@ public class ItemDataEditorWindow : EditorWindow
         return true;
     }
 
+    private bool AllSelectedDefinitionsAreEmptyBuckets()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!Bucket.IsEmptyBucketDefinition(selectedItemDefinitionsInOrder[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private bool AllSelectedDefinitionsAreUtilityPoles()
     {
         if (selectedItemDefinitionsInOrder.Count <= 0)
@@ -3502,6 +3559,24 @@ public class ItemDataEditorWindow : EditorWindow
         for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
         {
             if (!(selectedItemDefinitionsInOrder[i].mapObject is UtilityPole))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool AllSelectedDefinitionsAreOilDrillingMachines()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!(selectedItemDefinitionsInOrder[i].mapObject is OilDrillingMachine))
             {
                 return false;
             }
@@ -3533,13 +3608,17 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty sizeProperty = GetSelectedDefinitionProperty(serializedObject, "size");
         SerializedProperty itemFilterProperty = GetSelectedDefinitionProperty(serializedObject, "itemFilter");
         SerializedProperty ignoreFilterProperty = GetSelectedDefinitionProperty(serializedObject, "ignoreFilter");
+        SerializedProperty oneItemProperty = GetSelectedDefinitionProperty(serializedObject, "oneItem");
         SerializedProperty isManualProperty = GetSelectedDefinitionProperty(serializedObject, "isManual");
         SerializedProperty manualTargetItemProperty = GetSelectedDefinitionProperty(serializedObject, "manualTargetItem");
         SerializedProperty upgradeableProperty = GetSelectedDefinitionProperty(serializedObject, "upgradeable");
         SerializedProperty capacityProperty = GetSelectedDefinitionProperty(serializedObject, "capacity");
         SerializedProperty storesFluidProperty = GetSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty = GetSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
+        SerializedProperty fluidOutputLitersPerSecondProperty = GetSelectedDefinitionProperty(serializedObject, "fluidOutputLitersPerSecond");
         SerializedProperty fluidDisplayColorProperty = GetSelectedDefinitionProperty(serializedObject, "fluidDisplayColor");
+        SerializedProperty bucketFillDurationSecondsProperty = GetSelectedDefinitionProperty(serializedObject, "bucketFillDurationSeconds");
+        SerializedProperty undergroundPipeMaxDistanceProperty = GetSelectedDefinitionProperty(serializedObject, "undergroundPipeMaxDistance");
         SerializedProperty energyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "energyType");
         SerializedProperty energyAmountProperty = GetSelectedDefinitionProperty(serializedObject, "energyAmount");
         SerializedProperty useEnergyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyType");
@@ -3564,6 +3643,14 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(portableMatProperty, new GUIContent("Portable Material"));
         EditorGUILayout.PropertyField(iconProperty, new GUIContent("Icon"));
         EditorGUI.EndDisabledGroup();
+        if (oneItemProperty != null)
+        {
+            EditorGUILayout.PropertyField(
+                oneItemProperty,
+                new GUIContent(
+                    "One Item",
+                    "체크하면 모든 보관 컨텐츠에서 스택 하나당 이 아이템을 하나만 보관할 수 있습니다."));
+        }
         DrawMapObjectFields(mapObjectProperty.objectReferenceValue as MapObject, definitions);
 
         if (interactionButtonListProperty != null)
@@ -3652,7 +3739,9 @@ public class ItemDataEditorWindow : EditorWindow
 
             EditorGUILayout.PropertyField(capacityProperty, new GUIContent("Capacity"));
         }
-        if (storesFluidProperty != null || fluidDisplayColorProperty != null)
+        if (storesFluidProperty != null
+            || fluidDisplayColorProperty != null
+            || (fluidOutputLitersPerSecondProperty != null && definition.mapObject is OilDrillingMachine))
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
@@ -3678,6 +3767,41 @@ public class ItemDataEditorWindow : EditorWindow
                     fluidStorageLitersProperty.floatValue = 0f;
                 }
             }
+
+            if (bucketFillDurationSecondsProperty != null && Bucket.IsEmptyBucketDefinition(definition))
+            {
+                bucketFillDurationSecondsProperty.floatValue = Mathf.Max(
+                    0.1f,
+                    bucketFillDurationSecondsProperty.floatValue);
+                EditorGUILayout.PropertyField(
+                    bucketFillDurationSecondsProperty,
+                    new GUIContent(
+                        "Fill Duration (sec)",
+                        "Pipe 출구에서 빈 Bucket이 Water Bucket으로 완전히 차는 시간입니다."));
+            }
+
+            if (fluidOutputLitersPerSecondProperty != null && definition.mapObject is OilDrillingMachine)
+            {
+                fluidOutputLitersPerSecondProperty.floatValue = Mathf.Max(
+                    0f,
+                    fluidOutputLitersPerSecondProperty.floatValue);
+                EditorGUILayout.PropertyField(
+                    fluidOutputLitersPerSecondProperty,
+                    new GUIContent("Output Rate (L/s)", "시추기의 초당 Oil 출력량입니다."));
+            }
+        }
+        if (definition.mapObject is UndergroundPipe && undergroundPipeMaxDistanceProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Underground Pipe", EditorStyles.boldLabel);
+            undergroundPipeMaxDistanceProperty.intValue = Mathf.Max(
+                2,
+                undergroundPipeMaxDistanceProperty.intValue);
+            EditorGUILayout.PropertyField(
+                undergroundPipeMaxDistanceProperty,
+                new GUIContent(
+                    "Max Distance",
+                    "입구와 출구를 포함한 최대 설치 거리입니다."));
         }
         if (craftingDurationSecondsProperty != null)
         {
@@ -3803,6 +3927,7 @@ public class ItemDataEditorWindow : EditorWindow
                     break;
                 }
             }
+
         }
 
         if (cacheMatchesSelection)
@@ -3981,6 +4106,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         return installationObject is BoxObject
+               || installationObject is Handcart
                || (installationObject.MapFilter & InstallationMapFilter.ItemArea) != 0;
     }
 
@@ -4118,14 +4244,9 @@ public class ItemDataEditorWindow : EditorWindow
             DrawPumpFields(mapObjectSerializedObject);
         }
 
-        if (ShouldExposeVehicleStats(mapObject))
+        if (mapObject is Vehicle)
         {
-            DrawVehicleFields(mapObjectSerializedObject);
-        }
-
-        if (mapObject is Train)
-        {
-            DrawTrainFields(mapObjectSerializedObject);
+            DrawVehicleFields(mapObjectSerializedObject, ShouldExposeVehicleStats(mapObject));
         }
 
         if (mapObject is InstallationObject)
@@ -4218,7 +4339,9 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(waterLitersPerSecondProperty, new GUIContent("Water Liters / s"));
     }
 
-    private static void DrawVehicleFields(SerializedObject mapObjectSerializedObject)
+    private static void DrawVehicleFields(
+        SerializedObject mapObjectSerializedObject,
+        bool exposeMovementStats)
     {
         if (mapObjectSerializedObject == null)
         {
@@ -4228,54 +4351,44 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty accelerationProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleAccelerationPerSecond");
         SerializedProperty decelerationProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleDecelerationPerSecond");
         SerializedProperty maxSpeedProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleMaxSpeed");
-        if (accelerationProperty == null && decelerationProperty == null && maxSpeedProperty == null)
+        SerializedProperty massProperty = FindSerializedProperty(mapObjectSerializedObject, "vehicleMass");
+        if ((!exposeMovementStats
+             || (accelerationProperty == null && decelerationProperty == null && maxSpeedProperty == null))
+            && massProperty == null)
         {
             return;
         }
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Vehicle", EditorStyles.miniBoldLabel);
-        if (accelerationProperty != null)
+        if (exposeMovementStats && accelerationProperty != null)
         {
             accelerationProperty.floatValue = Mathf.Max(0.01f, accelerationProperty.floatValue);
             EditorGUILayout.PropertyField(accelerationProperty, new GUIContent("Acceleration / s"));
         }
 
-        if (decelerationProperty != null)
+        if (exposeMovementStats && decelerationProperty != null)
         {
             decelerationProperty.floatValue = Mathf.Max(0.01f, decelerationProperty.floatValue);
             EditorGUILayout.PropertyField(decelerationProperty, new GUIContent("Deceleration / s"));
         }
 
-        if (maxSpeedProperty != null)
+        if (exposeMovementStats && maxSpeedProperty != null)
         {
             maxSpeedProperty.floatValue = Mathf.Max(0.01f, maxSpeedProperty.floatValue);
             EditorGUILayout.PropertyField(maxSpeedProperty, new GUIContent("Max Speed"));
+        }
+
+        if (massProperty != null)
+        {
+            massProperty.floatValue = Mathf.Max(0.01f, massProperty.floatValue);
+            EditorGUILayout.PropertyField(massProperty, new GUIContent("Mass"));
         }
     }
 
     private static bool ShouldExposeVehicleStats(MapObject mapObject)
     {
         return mapObject is Vehicle && !(mapObject is FreightCar);
-    }
-
-    private static void DrawTrainFields(SerializedObject mapObjectSerializedObject)
-    {
-        if (mapObjectSerializedObject == null)
-        {
-            return;
-        }
-
-        SerializedProperty massProperty = FindSerializedProperty(mapObjectSerializedObject, "trainMass");
-        if (massProperty == null)
-        {
-            return;
-        }
-
-        EditorGUILayout.Space(4f);
-        EditorGUILayout.LabelField("Train", EditorStyles.miniBoldLabel);
-        massProperty.floatValue = Mathf.Max(0.01f, massProperty.floatValue);
-        EditorGUILayout.PropertyField(massProperty, new GUIContent("Mass"));
     }
 
     private void DrawPlacementCenterGridFields(
@@ -5028,19 +5141,11 @@ public class ItemDataEditorWindow : EditorWindow
         {
             maxSpeedProperty.floatValue = Mathf.Max(0.01f, entry.vehicleMaxSpeed);
         }
-    }
 
-    private static void ApplyTrainJson(SerializedObject serializedMapObject, ItemDataJsonEntry entry)
-    {
-        if (serializedMapObject == null || entry == null)
+        SerializedProperty massProperty = FindSerializedProperty(serializedMapObject, "vehicleMass");
+        if (massProperty != null && entry.vehicleMass > 0f)
         {
-            return;
-        }
-
-        SerializedProperty massProperty = FindSerializedProperty(serializedMapObject, "trainMass");
-        if (massProperty != null && entry.trainMass > 0f)
-        {
-            massProperty.floatValue = Mathf.Max(0.01f, entry.trainMass);
+            massProperty.floatValue = Mathf.Max(0.01f, entry.vehicleMass);
         }
     }
 
@@ -6728,6 +6833,8 @@ public class ItemDataEditorWindow : EditorWindow
             itemFilter = definition.itemFilter,
             hasIgnoreFilter = true,
             ignoreFilter = definition.ignoreFilter,
+            hasOneItem = true,
+            oneItem = definition.oneItem,
             hasManual = true,
             isManual = definition.isManual,
             manualTargetItem = definition.isManual
@@ -6738,8 +6845,17 @@ public class ItemDataEditorWindow : EditorWindow
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             storesFluid = definition.storesFluid,
             fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
+            fluidOutputLitersPerSecond = definition.mapObject is OilDrillingMachine
+                ? definition.FluidOutputLitersPerSecond
+                : -1f,
+            undergroundPipeMaxDistance = definition.mapObject is UndergroundPipe
+                ? definition.UndergroundPipeMaxDistance
+                : -1,
             hasFluidDisplayColor = InputOutputModule.IsFluidItemDefinition(definition),
             fluidDisplayColor = definition.fluidDisplayColor,
+            bucketFillDurationSeconds = Bucket.IsEmptyBucketDefinition(definition)
+                ? definition.BucketFillDurationSeconds
+                : -1f,
             craftingDurationSeconds = definition.CraftingDurationSeconds,
             energyType = definition.energyType.ToString(),
             energyTypeValue = (int)definition.energyType,
@@ -6810,9 +6926,9 @@ public class ItemDataEditorWindow : EditorWindow
                 entry.vehicleMaxSpeed = vehicle.VehicleMaxSpeed;
             }
 
-            if (definition.mapObject is Train train)
+            if (definition.mapObject is Vehicle massVehicle)
             {
-                entry.trainMass = train.TrainMass;
+                entry.vehicleMass = massVehicle.VehicleMass;
             }
 
             if (definition.mapObject is InstallationObject installationObject)
@@ -6975,6 +7091,10 @@ public class ItemDataEditorWindow : EditorWindow
         {
             definition.ignoreFilter = entry.ignoreFilter;
         }
+        if (entry.hasOneItem)
+        {
+            definition.oneItem = entry.oneItem;
+        }
         if (entry.hasManual)
         {
             definition.isManual = entry.isManual;
@@ -6992,9 +7112,21 @@ public class ItemDataEditorWindow : EditorWindow
         }
         definition.storesFluid = entry.storesFluid;
         definition.fluidStorageLiters = entry.storesFluid ? Mathf.Max(0f, entry.fluidStorageLiters) : 0f;
+        if (entry.fluidOutputLitersPerSecond >= 0f)
+        {
+            definition.fluidOutputLitersPerSecond = Mathf.Max(0f, entry.fluidOutputLitersPerSecond);
+        }
+        if (entry.undergroundPipeMaxDistance >= 2)
+        {
+            definition.undergroundPipeMaxDistance = Mathf.Max(2, entry.undergroundPipeMaxDistance);
+        }
         if (entry.hasFluidDisplayColor)
         {
             definition.fluidDisplayColor = entry.fluidDisplayColor;
+        }
+        if (entry.bucketFillDurationSeconds > 0f)
+        {
+            definition.bucketFillDurationSeconds = Mathf.Max(0.1f, entry.bucketFillDurationSeconds);
         }
         if (entry.craftingDurationSeconds > 0f)
         {
@@ -7217,14 +7349,9 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (ShouldExposeVehicleStats(mapObject))
+        if (mapObject is Vehicle)
         {
             ApplyVehicleJson(serializedMapObject, entry);
-        }
-
-        if (mapObject is Train)
-        {
-            ApplyTrainJson(serializedMapObject, entry);
         }
 
         if (mapObject is InputOutputModule)

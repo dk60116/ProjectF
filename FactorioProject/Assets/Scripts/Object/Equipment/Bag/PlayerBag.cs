@@ -340,6 +340,12 @@ public class PlayerBag : MonoBehaviour
             return true;
         }
 
+        if (objectId >= 0
+            && GetSlotCapacityOccupancy(index) >= ResolveSlotCapacityForItem(index, objectId))
+        {
+            return false;
+        }
+
         int nextIndex = GetNextAvailableIndex(index);
         if (nextIndex < 0 || nextIndex >= stack.stack.Count)
         {
@@ -490,7 +496,8 @@ public class PlayerBag : MonoBehaviour
         }
 
         PortableStack stack = portableStack[index];
-        int maxCount = stack != null && stack.stack != null ? stack.stack.Count : 0;
+        int itemId = GetSlotItemId(index);
+        int maxCount = ResolveSlotCapacityForItem(index, itemId);
         int clamped = Mathf.Clamp(count, 0, maxCount);
         clamped = Mathf.Max(
             clamped,
@@ -531,7 +538,7 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
-        int clamped = Mathf.Clamp(count, 0, stack.stack.Count);
+        int clamped = Mathf.Clamp(count, 0, ResolveSlotCapacityForItem(index, itemId));
         if (clamped > 0 && itemId < 0)
         {
             return false;
@@ -542,7 +549,8 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
-        bool changed = currentStack[index] != clamped;
+        int previousCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
+        bool changed = previousCount != clamped;
         currentStack[index] = clamped;
         if (index < visualPreservedStackCounts.Count && visualPreservedStackCounts[index] != 0)
         {
@@ -565,14 +573,12 @@ public class PlayerBag : MonoBehaviour
                 if (portableObject.ItemId != itemId)
                 {
                     changed = true;
-                }
-
-                if (!portableObject.SetItem(itemId))
-                {
-                    return false;
+                    if (!portableObject.SetItem(itemId))
+                    {
+                        return false;
+                    }
                 }
             }
-
             if (portableObject.gameObject.activeSelf != shouldBeActive)
             {
                 portableObject.gameObject.SetActive(shouldBeActive);
@@ -671,7 +677,9 @@ public class PlayerBag : MonoBehaviour
                 continue;
             }
 
-            totalCapacity += Mathf.Max(0, GetSlotMaxCount(i) - GetSlotCount(i));
+            totalCapacity += Mathf.Max(
+                0,
+                ResolveSlotCapacityForItem(i, objectId) - GetSlotCapacityOccupancy(i));
         }
 
         return totalCapacity;
@@ -1055,7 +1063,7 @@ public class PlayerBag : MonoBehaviour
             }
 
             int targetCount = GetSlotCount(targetIndex);
-            int targetMaxCount = GetSlotMaxCount(targetIndex);
+            int targetMaxCount = ResolveSlotCapacityForItem(targetIndex, itemId);
             if (targetCount <= 0 || targetMaxCount <= targetCount)
             {
                 continue;
@@ -1119,9 +1127,10 @@ public class PlayerBag : MonoBehaviour
 
         int sourceCount = Mathf.Clamp(currentStack[sourceIndex], 0, sourceStack.stack.Count);
         int targetCount = Mathf.Clamp(currentStack[targetIndex], 0, targetStack.stack.Count);
+        int targetCapacity = ResolveSlotCapacityForItem(targetIndex, itemId);
         if (sourceCount < moveCount
             || GetSlotRemovableCount(sourceIndex) < moveCount
-            || targetCount + moveCount > targetStack.stack.Count)
+            || targetCount + moveCount > targetCapacity)
         {
             return false;
         }
@@ -1143,7 +1152,6 @@ public class PlayerBag : MonoBehaviour
         {
             PortableObject targetPortableObject = targetStack.stack[targetCount + i];
             PortableObject sourcePortableObject = sourceStack.stack[sourceCount - 1 - i];
-
             if (!targetPortableObject.SetItem(itemId))
             {
                 return false;
@@ -1569,7 +1577,7 @@ public class PlayerBag : MonoBehaviour
                 slotIndex = slotIndex,
                 itemId = GetSlotItemId(slotIndex),
                 count = GetSlotCount(slotIndex),
-                capacity = GetSlotMaxCount(slotIndex)
+                capacity = GetSlotCapacityForItem(slotIndex, GetSlotItemId(slotIndex))
             });
         }
     }
@@ -1589,7 +1597,7 @@ public class PlayerBag : MonoBehaviour
                     continue;
                 }
 
-                ApplySaveSlot(slot.slotIndex, slot.itemId, slot.count);
+                ApplySaveSlot(slot);
             }
         }
 
@@ -1615,7 +1623,11 @@ public class PlayerBag : MonoBehaviour
                 for (int objectIndex = 0; objectIndex < stack.stack.Count; objectIndex++)
                 {
                     PortableObject portableObject = stack.stack[objectIndex];
-                    if (portableObject != null && portableObject.gameObject.activeSelf)
+                    if (portableObject == null)
+                    {
+                        continue;
+                    }
+                    if (portableObject.gameObject.activeSelf)
                     {
                         portableObject.gameObject.SetActive(false);
                     }
@@ -1639,8 +1651,11 @@ public class PlayerBag : MonoBehaviour
         }
     }
 
-    private void ApplySaveSlot(int slotIndex, int itemId, int count)
+    private void ApplySaveSlot(PlayerInventorySlotSaveState saveSlot)
     {
+        int slotIndex = saveSlot.slotIndex;
+        int itemId = saveSlot.itemId;
+        int count = saveSlot.count;
         if (portableStack == null
             || currentStack == null
             || slotIndex < 0
@@ -1656,7 +1671,7 @@ public class PlayerBag : MonoBehaviour
             return;
         }
 
-        int clampedCount = Mathf.Clamp(count, 0, stack.stack.Count);
+        int clampedCount = Mathf.Clamp(count, 0, ResolveSlotCapacityForItem(slotIndex, itemId));
         for (int objectIndex = 0; objectIndex < stack.stack.Count; objectIndex++)
         {
             PortableObject portableObject = stack.stack[objectIndex];
@@ -1878,6 +1893,66 @@ public class PlayerBag : MonoBehaviour
 
         PortableStack stack = portableStack[index];
         return stack != null && stack.stack != null ? stack.stack.Count : 0;
+    }
+
+    public int GetSlotCapacityForItem(int index, int itemId)
+    {
+        EnsureInitialized();
+        return ResolveSlotCapacityForItem(index, itemId);
+    }
+
+    private int ResolveSlotCapacityForItem(int index, int itemId)
+    {
+        if (portableStack == null || index < 0 || index >= portableStack.Count)
+        {
+            return 0;
+        }
+
+        PortableStack stack = portableStack[index];
+        int physicalCapacity = stack != null && stack.stack != null
+            ? stack.stack.Count
+            : 0;
+        if (physicalCapacity <= 0 || itemId < 0)
+        {
+            return physicalCapacity;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return Mathf.Min(
+            physicalCapacity,
+            ItemDefinition.ResolveStackCapacity(itemManager, itemId, physicalCapacity));
+    }
+
+    private int GetSlotCapacityOccupancy(int index)
+    {
+        if (portableStack == null
+            || currentStack == null
+            || index < 0
+            || index >= portableStack.Count
+            || index >= currentStack.Count)
+        {
+            return 0;
+        }
+
+        int occupancy = Mathf.Max(0, currentStack[index]);
+        PortableStack stack = portableStack[index];
+        if (stack?.stack == null || reservedObjects.Count == 0)
+        {
+            return occupancy;
+        }
+
+        for (int i = 0; i < stack.stack.Count; i++)
+        {
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject != null && reservedObjects.Contains(portableObject))
+            {
+                occupancy++;
+            }
+        }
+
+        return occupancy;
     }
 
     public int GetSlotItemId(int index)

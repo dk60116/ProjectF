@@ -533,6 +533,8 @@ public static class SaveGameBinarySerializer
         writer.Write(state.steamTrainAutoDriveLastArrivedStationName ?? string.Empty);
         writer.Write(state.steamTrainAutoDriveStationWaitTimer);
         writer.Write(state.storedInstallationItemId);
+        WriteIntList(writer, state.storedInstallationItemIds);
+        writer.Write(state.pipeConnectionMask);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -653,6 +655,14 @@ public static class SaveGameBinarySerializer
         {
             state.storedInstallationItemId = reader.ReadInt32();
         }
+        if (version >= 30)
+        {
+            state.storedInstallationItemIds = ReadIntList(reader);
+        }
+        if (version >= 34)
+        {
+            state.pipeConnectionMask = reader.ReadInt32();
+        }
 
         return state;
     }
@@ -681,6 +691,7 @@ public static class SaveGameBinarySerializer
         writer.Write(state.activeOutputCount);
         writer.Write(state.boilerWaterTemperatureCelsius);
         writer.Write(state.boilerSteamLiterAccumulator);
+        writer.Write(state.oilDrillingProgressLiters);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -712,6 +723,11 @@ public static class SaveGameBinarySerializer
         {
             state.boilerWaterTemperatureCelsius = reader.ReadSingle();
             state.boilerSteamLiterAccumulator = reader.ReadSingle();
+        }
+
+        if (version >= 33)
+        {
+            state.oilDrillingProgressLiters = reader.ReadSingle();
         }
 
         return state;
@@ -862,8 +878,8 @@ public static class SaveGameBinarySerializer
 
         player.bagLevel = reader.ReadInt32();
         player.stats = ReadPlayerStats(reader);
-        player.bagSlots = ReadList(reader, () => ReadPlayerSlot(reader));
-        player.handSlots = ReadList(reader, () => ReadPlayerSlot(reader));
+        player.bagSlots = ReadList(reader, () => ReadPlayerSlot(reader, version));
+        player.handSlots = ReadList(reader, () => ReadPlayerSlot(reader, version));
 
         if (version >= 4)
         {
@@ -915,15 +931,23 @@ public static class SaveGameBinarySerializer
         writer.Write(slot.capacity);
     }
 
-    private static PlayerInventorySlotSaveState ReadPlayerSlot(BinaryReader reader)
+    private static PlayerInventorySlotSaveState ReadPlayerSlot(BinaryReader reader, int version)
     {
-        return new PlayerInventorySlotSaveState
+        PlayerInventorySlotSaveState slot = new PlayerInventorySlotSaveState
         {
             slotIndex = reader.ReadInt32(),
             itemId = reader.ReadInt32(),
             count = reader.ReadInt32(),
             capacity = reader.ReadInt32()
         };
+
+        if (version == 31)
+        {
+            reader.ReadInt32();
+            reader.ReadSingle();
+        }
+
+        return slot;
     }
 
     private static void WritePlayerCraftingQueueEntry(BinaryWriter writer, PlayerCraftingQueueEntrySaveData entry)

@@ -783,7 +783,7 @@ public class Block : BaseObject
             return false;
         }
 
-        return ResolveInputAreaCenterCapacity() - inputAreaCenterStack.Count >= count;
+        return ResolveInputAreaCenterCapacity(itemId) - inputAreaCenterStack.Count >= count;
     }
 
     public bool HasInputAreaCenterObjects()
@@ -1068,6 +1068,51 @@ public class Block : BaseObject
         return consumed;
     }
 
+    public bool PlayVirtualInputAreaConsumeAnimation(
+        int itemId,
+        Vector3 targetWorldPosition,
+        float delay = 0f)
+    {
+        EnsureFloorObjectsInitialized();
+        EnsureInputAreaCenterAnchorInitialized();
+        if (!Application.isPlaying
+            || itemId < 0
+            || inputAreaCenterAnchor == null
+            || !ResolveFloorObjectPool())
+        {
+            return false;
+        }
+
+        PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+        if (portableObject == null || !TryInitializePooledPortableObject(portableObject, itemId))
+        {
+            if (portableObject != null)
+            {
+                floorObjectPool.Release(portableObject);
+            }
+
+            return false;
+        }
+
+        portableObject.SetBatchedRendering(false);
+        portableObject.transform.SetParent(inputAreaCenterAnchor, true);
+        portableObject.transform.position = inputAreaCenterAnchor.position;
+        portableObject.transform.rotation = Quaternion.identity;
+        portableObject.transform.localScale = Vector3.one;
+        portableObject.gameObject.SetActive(true);
+        portableObject.MoveTo(
+            targetWorldPosition,
+            Mathf.Max(0f, delay),
+            () =>
+            {
+                if (portableObject != null && floorObjectPool != null && floorObjectPool.CanRelease)
+                {
+                    floorObjectPool.Release(portableObject);
+                }
+            });
+        return true;
+    }
+
     public bool TryAddInputAreaCenterObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, bool useJumpArc = true, float moveDuration = PortableObject.MoveToDuration)
     {
         targetPortableObject = null;
@@ -1087,7 +1132,7 @@ public class Block : BaseObject
 
         EnsureInputAreaCenterAnchorInitialized();
         if (inputAreaCenterAnchor == null
-            || inputAreaCenterStack.Count >= ResolveInputAreaCenterCapacity()
+            || inputAreaCenterStack.Count >= ResolveInputAreaCenterCapacity(objectId)
             || !IsStackCompatible(inputAreaCenterStack, objectId))
         {
             return false;
@@ -1138,6 +1183,17 @@ public class Block : BaseObject
     public bool CanAddFloorObjects(int count)
     {
         return CanAddFloorObjects(count, -1);
+    }
+
+    public bool SupportsFloorObjectDrops
+    {
+        get
+        {
+            EnsureFloorObjectsInitialized();
+            return type == BlockType.Ground
+                   && !BlocksFloorObjectStacking()
+                   && ResolveFloorObjectDropAnchor() != null;
+        }
     }
 
     public bool CanAddFloorObjects(int count, int itemId)
@@ -5776,7 +5832,7 @@ public class Block : BaseObject
             for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
             {
                 Vector2Int direction = ConveyorNeighborDirections[i];
-                if (!currentPipe.HasConnectionTowards(currentPipeRotation, direction))
+                if (!currentPipe.HasConnectionTowardsAt(node.coordinate, currentPipeRotation, direction))
                 {
                     continue;
                 }
@@ -5800,7 +5856,7 @@ public class Block : BaseObject
                     || nextBlock == null
                     || !(nextBlock.MapObject is Pipe nextPipe)
                     || !nextPipe.gameObject.activeInHierarchy
-                    || !nextPipe.HasConnectionTowards(nextPipe.transform.rotation, -direction)
+                    || !nextPipe.HasConnectionTowardsAt(nextCoordinate, nextPipe.transform.rotation, -direction)
                     || !fluidDirectionSourceSearchVisited.Add(nextCoordinate))
                 {
                     continue;
@@ -5810,6 +5866,15 @@ public class Block : BaseObject
                     ? node.firstDirection
                     : direction;
                 fluidDirectionSourceSearchQueue.Enqueue(new FluidSourceSearchNode(nextCoordinate, firstDirection));
+            }
+
+            if (currentPipe.TryGetRemoteConnectionCoordinate(
+                    node.coordinate,
+                    out Vector2Int remoteCoordinate)
+                && fluidDirectionSourceSearchVisited.Add(remoteCoordinate))
+            {
+                fluidDirectionSourceSearchQueue.Enqueue(
+                    new FluidSourceSearchNode(remoteCoordinate, node.firstDirection));
             }
         }
 
@@ -5867,7 +5932,7 @@ public class Block : BaseObject
         for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
         {
             Vector2Int direction = ConveyorNeighborDirections[i];
-            if (!pipe.HasConnectionTowards(pipeRotation, direction)
+            if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction)
                 || !IsFluidConnectedDirection(pipe, terrainGenerator, direction))
             {
                 continue;
@@ -5913,7 +5978,10 @@ public class Block : BaseObject
         if (neighborBlock.MapObject is Pipe neighborPipe)
         {
             return neighborPipe.gameObject.activeInHierarchy
-                   && neighborPipe.HasConnectionTowards(neighborPipe.transform.rotation, -direction);
+                   && neighborPipe.HasConnectionTowardsAt(
+                       neighborCoordinate,
+                       neighborPipe.transform.rotation,
+                       -direction);
         }
 
         if (neighborBlock.MapObject is Pump pump)
@@ -6809,7 +6877,7 @@ public class Block : BaseObject
             return 0;
         }
 
-        int maxPerStack = Mathf.Max(1, maxFloorObjectsPerStack);
+        int maxPerStack = ResolveFloorStackCapacity(itemId);
         List<PortableObject> stack = floorStacks[0];
         if (stack == null
             || (itemId >= 0 && !IsStackCompatible(stack, itemId) && stack.Count > 0))
@@ -6831,7 +6899,21 @@ public class Block : BaseObject
                && anchor != null
                && stack != null
                && IsStackCompatible(stack, objectId)
-               && stack.Count < Mathf.Max(1, maxFloorObjectsPerStack);
+               && stack.Count < ResolveFloorStackCapacity(objectId);
+    }
+
+    private int ResolveFloorStackCapacity(int itemId)
+    {
+        int defaultCapacity = Mathf.Max(1, maxFloorObjectsPerStack);
+        if (itemId < 0)
+        {
+            return defaultCapacity;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return ItemDefinition.ResolveStackCapacity(itemManager, itemId, defaultCapacity);
     }
 
     private Transform ResolveFloorObjectDropAnchor()
@@ -12988,7 +13070,7 @@ public class Block : BaseObject
 
         EnsureInputAreaCenterAnchorInitialized();
         if (inputAreaCenterAnchor == null
-            || inputAreaCenterStack.Count >= ResolveInputAreaCenterCapacity()
+            || inputAreaCenterStack.Count >= ResolveInputAreaCenterCapacity(objectId)
             || !IsStackCompatible(inputAreaCenterStack, objectId))
         {
             return false;
@@ -13245,14 +13327,32 @@ public class Block : BaseObject
         return cachedInputAreaCenterHeight;
     }
 
-    private int ResolveInputAreaCenterCapacity()
+    public int GetInputAreaCenterCapacity(int itemId = -1)
     {
+        return ResolveInputAreaCenterCapacity(itemId);
+    }
+
+    private int ResolveInputAreaCenterCapacity(int itemId = -1)
+    {
+        int defaultCapacity;
         if (TryGetInstalledItemAreaCapacity(out int capacity))
         {
-            return capacity;
+            defaultCapacity = capacity;
+        }
+        else
+        {
+            defaultCapacity = Mathf.Max(1, inputAreaCenterMaxObjects);
         }
 
-        return Mathf.Max(1, inputAreaCenterMaxObjects);
+        if (itemId < 0)
+        {
+            itemId = GetInputAreaCenterItemId();
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return ItemDefinition.ResolveStackCapacity(itemManager, itemId, defaultCapacity);
     }
 
     private ItemDefinition ResolveInstalledItemAreaDefinition()

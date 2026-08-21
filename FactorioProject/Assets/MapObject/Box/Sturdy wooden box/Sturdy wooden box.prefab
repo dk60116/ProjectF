@@ -619,7 +619,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Sturdy wooden box
-  objId: 24
+  objId: 25
   itemDefinition: {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -645,7 +645,7 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
-  parentInputOutputModuleItem: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
+  parentInputOutputModuleItem: {fileID: 0}
   inputList: []
   outputList: []
   output:

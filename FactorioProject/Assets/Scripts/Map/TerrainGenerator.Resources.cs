@@ -51,6 +51,11 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 return true;
             }
+
+            if (TryGetOilResourcePrefab(worldCoordinate, out prefab))
+            {
+                return true;
+            }
         }
 
         if (TryGetReedResourcePrefab(worldCoordinate, biome, out prefab))
@@ -78,6 +83,115 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return prefab != null;
+    }
+
+    private bool IsInsideOreVeinArea(Vector2Int worldCoordinate)
+    {
+        if (oreResources == null)
+        {
+            return false;
+        }
+
+        int starterPatchSize = Mathf.Max(2, starterPatchHalfSize * 2);
+        for (int i = 0; i < oreResources.Count; i++)
+        {
+            ResourceEntry entry = oreResources[i];
+            if (entry.Prefab == null)
+            {
+                continue;
+            }
+
+            if (generateStarterResourcePatches
+                && entry.useStarterPatch
+                && EvaluatePatchBaseShape(
+                    worldCoordinate,
+                    GetStarterPatchCenter(entry, i),
+                    starterPatchSize,
+                    starterPatchSize,
+                    entry.salt + 4000) > 0f)
+            {
+                return true;
+            }
+
+            if (entry.spawnChance > 0f
+                && entry.placementMode == ResourcePlacementMode.Clustered
+                && IsInsideResourcePatchEnvelope(worldCoordinate, entry))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsInsideResourcePatchEnvelope(Vector2Int worldCoordinate, ResourceEntry entry)
+    {
+        int baseCellSize = Mathf.Max(maximumResourcePatchSize + 4, resourcePatchCellSize);
+        float spacing = Mathf.Max(1f, resourcePatchSpacing * Mathf.Max(1f, entry.spacingMultiplier));
+        int cellSize = Mathf.Max(baseCellSize, Mathf.RoundToInt(baseCellSize * spacing));
+        int baseCellX = FloorDivide(worldCoordinate.x, cellSize);
+        int baseCellY = FloorDivide(worldCoordinate.y, cellSize);
+        ResourceRule rule = ToResourceRule(entry);
+
+        for (int cellY = baseCellY - 1; cellY <= baseCellY + 1; cellY++)
+        {
+            for (int cellX = baseCellX - 1; cellX <= baseCellX + 1; cellX++)
+            {
+                if (!TryBuildResourcePatch(
+                    rule,
+                    cellX,
+                    cellY,
+                    cellSize,
+                    spacing,
+                    1f,
+                    out Vector2 center,
+                    out int width,
+                    out int height,
+                    out int salt))
+                {
+                    continue;
+                }
+
+                if (EvaluatePatchBaseShape(worldCoordinate, center, width, height, salt) > 0f)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetOilResourcePrefab(Vector2Int worldCoordinate, out Resource prefab)
+    {
+        prefab = null;
+        if (oilResources == null || oilResources.Count <= 0)
+        {
+            return false;
+        }
+
+        float bestScore = float.MinValue;
+        for (int i = 0; i < oilResources.Count; i++)
+        {
+            if (!TryEvaluateClusteredSingleResource(worldCoordinate, oilResources[i], out float score))
+            {
+                continue;
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                prefab = oilResources[i].Prefab;
+            }
+        }
+
+        if (prefab == null || IsInsideOreVeinArea(worldCoordinate))
+        {
+            prefab = null;
+            return false;
+        }
+
+        return true;
     }
 
     private bool TryGetReedResourcePrefab(Vector2Int worldCoordinate, TerrainBiome biome, out Resource prefab)
@@ -201,7 +315,7 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (entry.placementMode == ResourcePlacementMode.Clustered)
             {
-                return TryEvaluateSingleTreeResource(worldCoordinate, entry, out score);
+                return TryEvaluateClusteredSingleResource(worldCoordinate, entry, out score);
             }
 
             return TryEvaluateTreePatchResource(worldCoordinate, entry, out score);
@@ -237,6 +351,11 @@ public partial class TerrainGenerator : MonoBehaviour
             return GetDeterministicRandomRange(worldCoordinate, prefab, minCount, maxCount);
         }
 
+        if (TryGetMatchingResourceEntry(prefab, oilResources, out ResourceEntry oilEntry, out _))
+        {
+            return GetDeterministicRandomRange(worldCoordinate, prefab, oilEntry.minResourceCount, oilEntry.maxResourceCount);
+        }
+
         if (TryGetMatchingResourceEntry(prefab, treeResources, out ResourceEntry treeEntry, out _))
         {
             return GetDeterministicRandomRange(worldCoordinate, prefab, treeEntry.minResourceCount, treeEntry.maxResourceCount);
@@ -252,6 +371,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private int GetResourceBodyYawStep(Resource prefab, Vector2Int worldCoordinate)
     {
+        if (IsOilResourcePrefab(prefab))
+        {
+            return 0;
+        }
+
         int prefabSalt = GetStableStringHash(prefab != null ? prefab.name : string.Empty);
         return Mathf.Clamp(Mathf.FloorToInt(Hash01(worldCoordinate.x, worldCoordinate.y, prefabSalt ^ 7349) * 8f), 0, 7);
     }
@@ -278,6 +402,17 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return false;
+    }
+
+    private bool IsOilResourcePrefab(Resource prefab)
+    {
+        return TryGetMatchingResourceEntry(prefab, oilResources, out _, out _);
+    }
+
+    private bool IsGeneratedOilCoordinate(Vector2Int worldCoordinate)
+    {
+        return TryGetResourcePrefab(worldCoordinate, out Resource prefab)
+               && IsOilResourcePrefab(prefab);
     }
 
     private static bool TryGetMatchingResourceEntry(
@@ -622,9 +757,13 @@ public partial class TerrainGenerator : MonoBehaviour
         return true;
     }
 
-    private bool TryEvaluateSingleTreeResource(Vector2Int worldCoordinate, ResourceEntry entry, out float score)
+    private bool TryEvaluateClusteredSingleResource(Vector2Int worldCoordinate, ResourceEntry entry, out float score)
     {
         score = float.MinValue;
+        if (entry.Prefab == null || entry.spawnChance <= 0f)
+        {
+            return false;
+        }
 
         int baseCellSize = 1;
         float spacing = Mathf.Max(1f, Mathf.Lerp(1f, 3.2f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, entry.spacingMultiplier * 0.7f))));
@@ -635,8 +774,8 @@ public partial class TerrainGenerator : MonoBehaviour
         float normalizedChance = Mathf.Clamp01(entry.spawnChance);
         float chanceWeight = Mathf.Pow(normalizedChance, 1.35f);
         float densityBoost = Mathf.Lerp(1.2f, 2.6f, Mathf.Clamp01(resourceDensityMultiplier));
-        float treeDensityWeight = Mathf.Lerp(0.85f, 1.35f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treeSingleDensityMultiplier)));
-        float density = Mathf.Clamp01(chanceWeight * densityBoost * treeDensityWeight * (1.55f / spacing));
+        float singleDensityWeight = Mathf.Lerp(0.85f, 1.35f, Mathf.InverseLerp(1f, 6f, Mathf.Max(1f, treeSingleDensityMultiplier)));
+        float density = Mathf.Clamp01(chanceWeight * densityBoost * singleDensityWeight * (1.55f / spacing));
         if (Hash01(cellX, cellY, entry.salt) > density)
         {
             return false;
@@ -736,6 +875,30 @@ public partial class TerrainGenerator : MonoBehaviour
         int salt,
         out float score)
     {
+        float best = EvaluatePatchBaseShape(worldCoordinate, center, width, height, salt);
+
+        float breakup = SampleNoise(
+            worldCoordinate,
+            resourcePatchScale * Mathf.Max(0.2f, resourceClusterBreakupScale),
+            detailOffset + new Vector2(salt * 0.013f, salt * 0.021f));
+        float micro = SampleNoise(
+            worldCoordinate,
+            resourceDetailScale * 2.1f,
+            detailOffset + new Vector2(salt * 0.031f, salt * 0.017f));
+        float holeThreshold = Mathf.Lerp(0.18f, 0.72f, resourceClusterSparsity);
+        float breakupPenalty = breakup < holeThreshold ? (holeThreshold - breakup) * 1.15f : -0.04f;
+        float microPenalty = micro < holeThreshold * 0.92f ? (holeThreshold * 0.92f - micro) * 0.45f : -0.015f;
+        score = best - breakupPenalty - microPenalty;
+        return score > 0f;
+    }
+
+    private float EvaluatePatchBaseShape(
+        Vector2Int worldCoordinate,
+        Vector2 center,
+        int width,
+        int height,
+        int salt)
+    {
         float baseHalfWidth = Mathf.Max(1.2f, width * 0.5f);
         float baseHalfHeight = Mathf.Max(1.2f, height * 0.5f);
         float best = EvaluateEllipse(worldCoordinate, center, baseHalfWidth, baseHalfHeight);
@@ -752,19 +915,7 @@ public partial class TerrainGenerator : MonoBehaviour
             best = Mathf.Max(best, EvaluateEllipse(worldCoordinate, lobeCenter, lobeHalfWidth, lobeHalfHeight));
         }
 
-        float breakup = SampleNoise(
-            worldCoordinate,
-            resourcePatchScale * Mathf.Max(0.2f, resourceClusterBreakupScale),
-            detailOffset + new Vector2(salt * 0.013f, salt * 0.021f));
-        float micro = SampleNoise(
-            worldCoordinate,
-            resourceDetailScale * 2.1f,
-            detailOffset + new Vector2(salt * 0.031f, salt * 0.017f));
-        float holeThreshold = Mathf.Lerp(0.18f, 0.72f, resourceClusterSparsity);
-        float breakupPenalty = breakup < holeThreshold ? (holeThreshold - breakup) * 1.15f : -0.04f;
-        float microPenalty = micro < holeThreshold * 0.92f ? (holeThreshold * 0.92f - micro) * 0.45f : -0.015f;
-        score = best - breakupPenalty - microPenalty;
-        return score > 0f;
+        return best;
     }
 
     private static float EvaluateEllipse(Vector2 point, Vector2 center, float halfWidth, float halfHeight)
@@ -1112,6 +1263,22 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private static void NormalizeOilResourceEntries(List<ResourceEntry> entries)
+    {
+        NormalizeResourceEntries(entries, 1, 1, 1, 1);
+        if (entries == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            ResourceEntry entry = entries[i];
+            entry.placementMode = ResourcePlacementMode.Clustered;
+            entries[i] = entry;
+        }
+    }
+
     private static ResourceRule ToResourceRule(ResourceEntry entry)
     {
         return new ResourceRule(entry.Prefab, entry.spawnChance, entry.patchOffset, entry.detailOffset, entry.salt);
@@ -1122,6 +1289,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
 #if UNITY_EDITOR
         SyncResourceEntryDefinitions(oreResources);
+        SyncResourceEntryDefinitions(oilResources);
         SyncResourceEntryDefinitions(treeResources);
         SyncResourceEntryDefinitions(reedResources);
 #endif

@@ -1088,7 +1088,10 @@ public class SteamTrain : RailHandcar
                    lockedWaterPipeDockCoordinate,
                    out Pipe pipe,
                    out Quaternion pipeRotation)
-               && pipe.HasConnectionTowards(pipeRotation, -lockedWaterPipeDockDirectionFromTrainToPipe);
+               && pipe.HasConnectionTowardsAt(
+                   lockedWaterPipeDockCoordinate,
+                   pipeRotation,
+                   -lockedWaterPipeDockDirectionFromTrainToPipe);
     }
 
     private void LockWaterPipeDock(
@@ -1186,7 +1189,10 @@ public class SteamTrain : RailHandcar
                 for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
                 {
                     Vector2Int directionFromPipeToTrain = CardinalDirections[directionIndex];
-                    if (!pipe.HasConnectionTowards(pipeRotation, directionFromPipeToTrain))
+                    if (!pipe.HasConnectionTowardsAt(
+                            candidatePipeCoordinate,
+                            pipeRotation,
+                            directionFromPipeToTrain))
                     {
                         continue;
                     }
@@ -3573,7 +3579,7 @@ public class SteamTrain : RailHandcar
             for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = CardinalDirections[directionIndex];
-                if (!pipe.HasConnectionTowards(pipeRotation, direction))
+                if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
                 }
@@ -3593,10 +3599,20 @@ public class SteamTrain : RailHandcar
                         nextCoordinate,
                         out Pipe nextPipe,
                         out Quaternion nextPipeRotation)
-                    && nextPipe.HasConnectionTowards(nextPipeRotation, -direction))
+                    && nextPipe.HasConnectionTowardsAt(
+                        nextCoordinate,
+                        nextPipeRotation,
+                        -direction))
                 {
                     EnqueueWaterPipeSearchCoordinate(nextCoordinate);
                 }
+            }
+
+            if (pipe.TryGetRemoteConnectionCoordinate(
+                    coordinate,
+                    out Vector2Int remoteCoordinate))
+            {
+                EnqueueWaterPipeSearchCoordinate(remoteCoordinate);
             }
         }
 

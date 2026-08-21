@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_10_Rope
   m_EditorClassIdentifier: 
   itemName: Rope
-  id: 21
+  id: 22
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 24f38b2c87025d445884f269a31a304a, type: 2}
   portableMat: {fileID: 2100000, guid: 82420e5b9bea8574db85d211db2703f4, type: 2}
   icon: {fileID: 21300000, guid: 29bf3b2c94e4edb4d8c79242fcbbdf7f, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

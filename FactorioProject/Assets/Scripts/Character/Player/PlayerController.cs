@@ -76,10 +76,12 @@ public class PlayerController : MonoBehaviour
     private NooseThrowVisual activeNooseThrowVisual;
     private readonly HashSet<Block> currentFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> combinedInteractionFocusBlocks = new List<Block>();
+    private Block standaloneInteractionAreaFocusBlock;
     private readonly List<Block> nearbyInputOutputModuleFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyInstallationFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyWorkableFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyBoxFocusBlocks = new List<Block>();
+    private readonly List<InputOutputModule> standingAreaModuleCandidates = new List<InputOutputModule>(4);
     private readonly List<MapObject> interactionButtonFocusTargets = new List<MapObject>(8);
     private readonly List<Block> interactionButtonFocusTargetBlocks = new List<Block>(8);
     private readonly List<Resource> nearbyResourceCandidates = new List<Resource>(16);
@@ -404,6 +406,19 @@ public class PlayerController : MonoBehaviour
 
     public Vehicle MountedVehicle => interactionPointSnapTarget != null ? interactionPointSnapVehicle : null;
 
+    public bool IsNearWaterForPortableInteraction()
+    {
+        if (MountedVehicle != null || ResolveTerrainGenerator() == null)
+        {
+            return false;
+        }
+
+        Vector3 rootPosition = cachedRigidbody != null
+            ? cachedRigidbody.position
+            : transform.position;
+        return HasNearbyWaterBiome(GetPlayerCollisionCenterXZ(rootPosition));
+    }
+
     public bool IsMountedOnVehicle(Vehicle vehicle)
     {
         return vehicle != null
@@ -593,7 +608,9 @@ public class PlayerController : MonoBehaviour
 
         Quaternion exitRotation = transform.rotation;
         Vector3 exitPosition = ResolveInteractionPointExitPosition();
+        Vehicle dismountedVehicle = interactionPointSnapVehicle;
         ClearInteractionPointSnap(true);
+        dismountedVehicle?.NotifyPlayerDismounted(player);
 
         pendingMoveDirection = Vector3.zero;
         pendingFacingDirection = Vector3.zero;
@@ -844,6 +861,7 @@ public class PlayerController : MonoBehaviour
             {
                 float mountedMoveSpeed = player != null ? player.Stat.currentMoveSpeed : 0f;
                 interactionPointSnapVehicle.HandleMountedInput(moveDirection, mountedMoveSpeed, Time.deltaTime, player);
+                player?.UpdateMountedVehicleAnimation(interactionPointSnapVehicle);
                 ApplyInteractionPointSnap();
             }
 
@@ -2267,6 +2285,7 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshInteractionFocus()
     {
+        standaloneInteractionAreaFocusBlock = null;
         if (MountedVehicle != null)
         {
             RefreshMountedPinnedInteractionFocus();
@@ -2293,7 +2312,8 @@ public class PlayerController : MonoBehaviour
         }
 
         bool hasStandingAreaFocusBlock = TryGetStandingInputOutputAreaFocusBlock(
-            out Block standingAreaFocusBlock);
+            out Block standingAreaFocusBlock,
+            out InputOutputModule standingAreaOwnerModule);
         if (FindCurrentInputOutputModuleFocusBlocks(nearbyInputOutputModuleFocusBlocks))
         {
             AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInputOutputModuleFocusBlocks);
@@ -2317,7 +2337,10 @@ public class PlayerController : MonoBehaviour
         KeepClosestInteractionFocusTarget(combinedInteractionFocusBlocks);
         if (hasStandingAreaFocusBlock)
         {
-            AppendUniqueBlock(combinedInteractionFocusBlocks, standingAreaFocusBlock);
+            BuildStandingAreaAndObjectFocusBlocks(
+                standingAreaFocusBlock,
+                standingAreaOwnerModule,
+                combinedInteractionFocusBlocks);
         }
 
         SetFocusedBlocks(combinedInteractionFocusBlocks);
@@ -2325,6 +2348,7 @@ public class PlayerController : MonoBehaviour
 
     private void RefreshMountedPinnedInteractionFocus()
     {
+        standaloneInteractionAreaFocusBlock = null;
         ResetInteractionButtonFocusTargets();
         interactionFocusTargetOverrides.Clear();
         mountedPinnedFocusBlocks.Clear();
@@ -3593,9 +3617,12 @@ public class PlayerController : MonoBehaviour
         return results.Count > 0;
     }
 
-    private bool TryGetStandingInputOutputAreaFocusBlock(out Block focusBlock)
+    private bool TryGetStandingInputOutputAreaFocusBlock(
+        out Block focusBlock,
+        out InputOutputModule ownerModule)
     {
         focusBlock = null;
+        ownerModule = null;
         if (player == null || ResolveTerrainGenerator() == null)
         {
             return false;
@@ -3606,54 +3633,294 @@ public class PlayerController : MonoBehaviour
         Vector2Int centerCoordinate = new Vector2Int(
             Mathf.RoundToInt(sampleCenter.x),
             Mathf.RoundToInt(sampleCenter.y));
-        float overlapRadius = Mathf.Max(0.05f, GetPlayerWaterCollisionRadius());
-        float maxDistanceSqr = overlapRadius * overlapRadius;
-        float bestDistanceSqr = float.MaxValue;
-
-        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        if (!IsInputOutputRuntimeFocusAreaCoordinate(centerCoordinate)
+            || !cachedTerrainGenerator.TryGetLoadedBlock(centerCoordinate, out focusBlock)
+            || focusBlock == null)
         {
-            for (int offsetX = -1; offsetX <= 1; offsetX++)
+            return false;
+        }
+
+        TryResolveStandingAreaOwnerModule(focusBlock.Coordinate, out ownerModule);
+        return true;
+    }
+
+    private void BuildStandingAreaAndObjectFocusBlocks(
+        Block areaBlock,
+        InputOutputModule ownerModule,
+        List<Block> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        if (areaBlock == null)
+        {
+            return;
+        }
+
+        if (ownerModule != null)
+        {
+            AppendInputOutputModuleObjectFocusBlocks(ownerModule, results);
+            SetInteractionFocusTargetOverride(areaBlock, ownerModule);
+        }
+
+        standaloneInteractionAreaFocusBlock = ownerModule == null
+                                              || !ModuleOwnsObjectFocusCoordinate(
+                                                  ownerModule,
+                                                  areaBlock.Coordinate)
+            ? areaBlock
+            : null;
+        AppendUniqueBlock(results, areaBlock);
+    }
+
+    private static bool ModuleOwnsObjectFocusCoordinate(
+        InputOutputModule module,
+        Vector2Int coordinate)
+    {
+        if (module == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates != null)
+        {
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
             {
-                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!IsInputOutputRuntimeFocusAreaCoordinate(coordinate)
-                    || !cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block)
-                    || block == null)
+                if (occupiedCoordinates[i] == coordinate)
                 {
-                    continue;
+                    return true;
                 }
-
-                float distanceSqr = GetDistanceSqrToGridCell(sampleCenter, coordinate);
-                if (distanceSqr > maxDistanceSqr || distanceSqr >= bestDistanceSqr)
-                {
-                    continue;
-                }
-
-                bestDistanceSqr = distanceSqr;
-                focusBlock = block;
             }
         }
 
-        return focusBlock != null;
+        return false;
+    }
+
+    private bool TryResolveStandingAreaOwnerModule(
+        Vector2Int coordinate,
+        out InputOutputModule ownerModule)
+    {
+        ownerModule = null;
+        standingAreaModuleCandidates.Clear();
+        InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(
+            coordinate,
+            standingAreaModuleCandidates);
+        InputOutputModule.CollectModulesAtRuntimeGridCoordinate(
+            coordinate,
+            standingAreaModuleCandidates);
+
+        int bestScore = int.MinValue;
+        long bestPlacementSequence = long.MinValue;
+        for (int i = 0; i < standingAreaModuleCandidates.Count; i++)
+        {
+            InputOutputModule candidate = standingAreaModuleCandidates[i];
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int score = GetStandingAreaOwnershipScore(candidate, coordinate);
+            long placementSequence = candidate.RuntimePlacementSequence;
+            if (score < bestScore
+                || (score == bestScore && placementSequence <= bestPlacementSequence))
+            {
+                continue;
+            }
+
+            bestScore = score;
+            bestPlacementSequence = placementSequence;
+            ownerModule = candidate;
+        }
+
+        standingAreaModuleCandidates.Clear();
+        return ownerModule != null;
+    }
+
+    private static int GetStandingAreaOwnershipScore(
+        InputOutputModule module,
+        Vector2Int coordinate)
+    {
+        if (module == null)
+        {
+            return int.MinValue;
+        }
+
+        int areaKindScore = 0;
+        if ((InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate)
+             || InputOutputModule.CoordinateIsRuntimeOutputBlock(coordinate))
+            && ModuleOwnsOutputAreaCoordinate(module, coordinate))
+        {
+            areaKindScore = 400;
+        }
+        else if ((InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
+                  || InputOutputModule.CoordinateIsRuntimeInputItemBlock(coordinate))
+                 && ModuleOwnsInputItemAreaCoordinate(module, coordinate))
+        {
+            areaKindScore = 300;
+        }
+        else if ((InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
+                  || InputOutputModule.CoordinateIsRuntimeInputEnergyBlock(coordinate))
+                 && ModuleOwnsInputEnergyAreaCoordinate(module, coordinate))
+        {
+            areaKindScore = 200;
+        }
+        else if (InputOutputModule.CoordinateIsRuntimePipeInputBlock(coordinate)
+                 && module.ContainsRuntimeRectGridBlockType(
+                     coordinate,
+                     InputOutputModule.RectGridBlockType.PipeInput))
+        {
+            areaKindScore = 100;
+        }
+
+        int objectCoordinateCount = GetModuleObjectFocusCoordinateCount(module);
+        return areaKindScore + Mathf.Min(objectCoordinateCount, 99);
+    }
+
+    private void AppendInputOutputModuleObjectFocusBlocks(
+        InputOutputModule module,
+        List<Block> results)
+    {
+        if (module == null || results == null)
+        {
+            return;
+        }
+
+        bool appended = false;
+        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates != null)
+        {
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                appended |= TryAppendFocusBlock(results, occupiedCoordinates[i], module);
+            }
+        }
+
+        if (!appended)
+        {
+            IReadOnlyList<Vector2Int> focusCoordinates = module.RuntimeFocusCoordinates;
+            if (focusCoordinates != null)
+            {
+                for (int i = 0; i < focusCoordinates.Count; i++)
+                {
+                    Vector2Int coordinate = focusCoordinates[i];
+                    if (ModuleOwnsAnyAreaCoordinate(module, coordinate))
+                    {
+                        continue;
+                    }
+
+                    appended |= TryAppendFocusBlock(results, coordinate, module);
+                }
+            }
+        }
+
+        if (!appended)
+        {
+            TryAppendFocusBlock(results, module.RuntimeAnchorCoordinate, module);
+        }
+    }
+
+    private static int GetModuleObjectFocusCoordinateCount(InputOutputModule module)
+    {
+        if (module == null)
+        {
+            return 0;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates != null && occupiedCoordinates.Count > 0)
+        {
+            return occupiedCoordinates.Count;
+        }
+
+        int count = 0;
+        IReadOnlyList<Vector2Int> focusCoordinates = module.RuntimeFocusCoordinates;
+        if (focusCoordinates == null)
+        {
+            return count;
+        }
+
+        for (int i = 0; i < focusCoordinates.Count; i++)
+        {
+            if (!ModuleOwnsAnyAreaCoordinate(module, focusCoordinates[i]))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static bool ModuleOwnsAnyAreaCoordinate(
+        InputOutputModule module,
+        Vector2Int coordinate)
+    {
+        return ModuleOwnsInputEnergyAreaCoordinate(module, coordinate)
+               || ModuleOwnsInputItemAreaCoordinate(module, coordinate)
+               || ModuleOwnsOutputAreaCoordinate(module, coordinate)
+               || (module != null
+                   && module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.PipeInput));
+    }
+
+    private static bool ModuleOwnsInputEnergyAreaCoordinate(
+        InputOutputModule module,
+        Vector2Int coordinate)
+    {
+        return module != null
+               && (module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.InputEnergy)
+                   || module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.PipeInputEnergy)
+                   || module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.DoubleEnergy));
+    }
+
+    private static bool ModuleOwnsInputItemAreaCoordinate(
+        InputOutputModule module,
+        Vector2Int coordinate)
+    {
+        return module != null
+               && (module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.InputItem)
+                   || module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.PipeInputItem)
+                   || module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.DoubleInputItem));
+    }
+
+    private static bool ModuleOwnsOutputAreaCoordinate(
+        InputOutputModule module,
+        Vector2Int coordinate)
+    {
+        return module != null
+               && (module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.Output)
+                   || module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.PipeOutputItem)
+                   || module.ContainsRuntimeRectGridBlockType(
+                       coordinate,
+                       InputOutputModule.RectGridBlockType.DoublePipeOutputItem));
     }
 
     private static bool IsInputOutputRuntimeFocusAreaCoordinate(Vector2Int coordinate)
     {
         return InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
                || InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
-               || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate);
-    }
-
-    private static float GetDistanceSqrToGridCell(Vector2 point, Vector2Int coordinate)
-    {
-        float minX = coordinate.x - 0.5f;
-        float maxX = coordinate.x + 0.5f;
-        float minY = coordinate.y - 0.5f;
-        float maxY = coordinate.y + 0.5f;
-        float closestX = Mathf.Clamp(point.x, minX, maxX);
-        float closestY = Mathf.Clamp(point.y, minY, maxY);
-        float dx = point.x - closestX;
-        float dy = point.y - closestY;
-        return (dx * dx) + (dy * dy);
+               || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate)
+               || InputOutputModule.TryGetModuleAtRuntimeAreaCoordinate(coordinate, out _)
+               || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate);
     }
 
     private bool TryResolveStandingInputOutputModule(
@@ -4999,13 +5266,14 @@ public class PlayerController : MonoBehaviour
             }
 
             SetBlockFocusVisible(block, focusKind, false);
-            if (IsInputOutputRuntimeFocusAreaCoordinate(block.Coordinate))
+            if (focusKind == FocusMarkerKind.Interaction
+                && block == standaloneInteractionAreaFocusBlock)
             {
                 SetBlockFocusVisible(block, focusKind, true);
                 continue;
             }
 
-            MapObject focusedMapObject = block.MapObject;
+            MapObject focusedMapObject = ResolveInteractionFocusTarget(block);
             if (focusedMapObject == null)
             {
                 SetBlockFocusVisible(block, focusKind, true);

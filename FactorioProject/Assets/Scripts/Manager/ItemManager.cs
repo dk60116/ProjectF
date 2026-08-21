@@ -31,6 +31,10 @@ public class ItemManager : MonoBehaviour
     [SerializeField]
     private List<ItemDefinition> itemDefinitions;
 
+    private readonly Dictionary<int, ItemDefinition> requiredManualByTargetItemId =
+        new Dictionary<int, ItemDefinition>();
+    private int requiredManualLookupSourceCount = -1;
+
 #if UNITY_EDITOR
     [SerializeField]
     private bool autoMigrateDefinitions = true;
@@ -60,25 +64,59 @@ public class ItemManager : MonoBehaviour
 
     public bool TryGetRequiredManualForTarget(int targetItemId, out ItemDefinition manualDefinition)
     {
-        if (targetItemId >= 0 && itemDefinitions != null)
+        RefreshRequiredManualLookupIfNeeded();
+        if (targetItemId >= 0
+            && requiredManualByTargetItemId.TryGetValue(targetItemId, out manualDefinition)
+            && manualDefinition != null)
         {
-            for (int i = 0; i < itemDefinitions.Count; i++)
-            {
-                ItemDefinition candidate = itemDefinitions[i];
-                ItemDefinition target = candidate != null ? candidate.ManualTargetItem : null;
-                if (candidate != null
-                    && candidate.id >= 0
-                    && target != null
-                    && target.id == targetItemId)
-                {
-                    manualDefinition = candidate;
-                    return true;
-                }
-            }
+            return true;
         }
 
         manualDefinition = null;
         return false;
+    }
+
+    private void RefreshRequiredManualLookupIfNeeded()
+    {
+        int sourceCount = itemDefinitions != null ? itemDefinitions.Count : 0;
+        if (requiredManualLookupSourceCount == sourceCount)
+        {
+            return;
+        }
+
+        requiredManualByTargetItemId.Clear();
+        requiredManualLookupSourceCount = sourceCount;
+        for (int i = 0; i < sourceCount; i++)
+        {
+            ItemDefinition candidate = itemDefinitions[i];
+            ItemDefinition target = candidate != null ? candidate.ManualTargetItem : null;
+            if (candidate == null
+                || candidate.id < 0
+                || target == null
+                || target.id < 0
+                || requiredManualByTargetItemId.ContainsKey(target.id))
+            {
+                continue;
+            }
+
+            requiredManualByTargetItemId.Add(target.id, candidate);
+        }
+    }
+
+    public bool IsManualRequirementSatisfied(int targetItemId)
+    {
+        if (targetItemId < 0)
+        {
+            return false;
+        }
+
+        if (!TryGetRequiredManualForTarget(targetItemId, out ItemDefinition requiredManual))
+        {
+            return true;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        return player != null && player.HasCraftingManual(requiredManual.id);
     }
 
     public bool RegisterRuntimeItemDefinition(ItemDefinition definition)
@@ -163,10 +201,13 @@ public class ItemManager : MonoBehaviour
     private const string SharedWheelPortableMeshPath = "Assets/Items/Train/Wheel/Wheel_P.mesh";
     private const string IronWheelPortableMaterialPath = "Assets/Items/Train/Wheel/M_IronWheel_P.mat";
     private const string WoodenWheelPortableMaterialPath = "Assets/Items/Train/Wheel/M_WoodenWheel_P.mat";
+    private const string BucketPortableMeshPath = "Assets/Items/Fluid/Bucket/Bucket_P.mesh";
+    private const string BucketPortableMaterialPath = "Assets/Items/Fluid/Bucket/M_Bucket_P.mat";
     private static readonly string[] ItemIconAssetFilters = { "t:Sprite", "t:Texture2D" };
 
     private void OnValidate()
     {
+        requiredManualLookupSourceCount = -1;
         if (!autoMigrateDefinitions)
         {
             return;
@@ -1857,6 +1898,7 @@ public class ItemManager : MonoBehaviour
 
         TryOverrideAnimalMeatPortableMesh(itemName, ref portableMesh);
         TryOverrideWheelPortableAssets(itemName, ref portableMesh, ref portableMaterial);
+        TryOverrideBucketPortableAssets(itemName, ref portableMesh, ref portableMaterial);
     }
 
     private static void TryOverrideAnimalMeatPortableMesh(string itemName, ref Mesh portableMesh)
@@ -1919,6 +1961,38 @@ public class ItemManager : MonoBehaviour
         else
         {
             Debug.LogWarning($"ItemManager: Wheel portable material was not found at '{materialPath}'.");
+        }
+    }
+
+    private static void TryOverrideBucketPortableAssets(
+        string itemName,
+        ref Mesh portableMesh,
+        ref Material portableMaterial)
+    {
+        string itemKey = NormalizePortableLookupName(itemName);
+        if (itemKey != "bucket" && itemKey != "waterbucket")
+        {
+            return;
+        }
+
+        Mesh bucketMesh = AssetDatabase.LoadAssetAtPath<Mesh>(BucketPortableMeshPath);
+        Material bucketMaterial = AssetDatabase.LoadAssetAtPath<Material>(BucketPortableMaterialPath);
+        if (bucketMesh != null)
+        {
+            portableMesh = bucketMesh;
+        }
+        else
+        {
+            Debug.LogWarning($"ItemManager: Bucket portable mesh was not found at '{BucketPortableMeshPath}'.");
+        }
+
+        if (bucketMaterial != null)
+        {
+            portableMaterial = bucketMaterial;
+        }
+        else
+        {
+            Debug.LogWarning($"ItemManager: Bucket portable material was not found at '{BucketPortableMaterialPath}'.");
         }
     }
 

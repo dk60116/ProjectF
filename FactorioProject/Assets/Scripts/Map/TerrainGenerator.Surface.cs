@@ -232,13 +232,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private ChunkSurfaceBuildData BuildCurvedChunkSurface(Vector2Int origin, int chunkSizeInBlocks)
     {
-        ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount);
-        IEnumerator routine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, chunkSizeInBlocks, false);
-        while (routine.MoveNext())
-        {
-        }
-
-        return chunkSurface;
+        return BuildCurvedChunkSurfaceFromSnapshot(CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks));
     }
 
     private Task<ChunkSurfaceBuildData> CreateChunkSurfaceBuildTask(Vector2Int origin, int chunkSizeInBlocks)
@@ -249,7 +243,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private ChunkSurfaceWorkerInput CreateChunkSurfaceWorkerInput(Vector2Int origin, int chunkSizeInBlocks)
     {
-        int resolution = Mathf.Max(2, terrainSurfaceSubdivisions);
+        int resolution = GetChunkSurfaceResolution(origin, chunkSizeInBlocks);
         int margin = 4;
         int gridSize = chunkSizeInBlocks + (margin * 2) + 1;
         ChunkSurfaceWorkerInput input = new ChunkSurfaceWorkerInput
@@ -268,6 +262,7 @@ public partial class TerrainGenerator : MonoBehaviour
             mapMaxExclusiveY = GetMapMaxExclusiveCoordinate(),
             biomeGrid = new TerrainBiome[gridSize * gridSize],
             blockedWaterGrid = new bool[gridSize * gridSize],
+            oilGrid = new bool[gridSize * gridSize],
             generatedSurfaceYOffset = generatedSurfaceYOffset,
             waterSurfaceDepth = waterSurfaceDepth,
             generateWaterFoamOverlay = generateWaterFoamOverlay,
@@ -289,17 +284,38 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2Int coordinate = new Vector2Int(worldX, worldY);
                 input.biomeGrid[index] = GetTileBiome(coordinate);
                 input.blockedWaterGrid[index] = IsBlockedForWater(coordinate);
+                input.oilGrid[index] = IsCoordinateInsideMapBounds(coordinate)
+                                       && IsGeneratedOilCoordinate(coordinate);
             }
         }
 
         return input;
     }
 
+    private int GetChunkSurfaceResolution(Vector2Int origin, int chunkSizeInBlocks)
+    {
+        int resolution = Mathf.Max(2, terrainSurfaceSubdivisions);
+        for (int localY = 0; localY < chunkSizeInBlocks; localY++)
+        {
+            for (int localX = 0; localX < chunkSizeInBlocks; localX++)
+            {
+                Vector2Int coordinate = new Vector2Int(origin.x + localX, origin.y + localY);
+                if (IsCoordinateInsideMapBounds(coordinate) && IsGeneratedOilCoordinate(coordinate))
+                {
+                    return Mathf.Max(resolution, GeneratedOilChunkSurfaceSubdivisions);
+                }
+            }
+        }
+
+        return resolution;
+    }
+
     private static ChunkSurfaceBuildData BuildCurvedChunkSurfaceFromSnapshot(ChunkSurfaceWorkerInput input)
     {
         ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount)
         {
-            origin = input.origin
+            origin = input.origin,
+            surfaceInput = input
         };
 
         AppendDominantBiomeBaseSurfaceFromSnapshot(chunkSurface, input);
@@ -583,7 +599,12 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < polygon.Count; i++)
         {
             Vector2 point = polygon[i];
-            chunkSurface.vertices.Add(new Vector3(point.x, y, point.y));
+            float vertexY = biome == TerrainBiome.Water
+                ? y
+                : y - GetOilPitDepthFromSnapshot(
+                    input,
+                    new Vector2(input.origin.x + point.x, input.origin.y + point.y));
+            chunkSurface.vertices.Add(new Vector3(point.x, vertexY, point.y));
             chunkSurface.uvs.Add(point);
             chunkSurface.colors.Add(
                 biome == TerrainBiome.Water
@@ -906,6 +927,54 @@ public partial class TerrainGenerator : MonoBehaviour
         return input.blockedWaterGrid[localX + (localY * input.biomeGridWidth)];
     }
 
+    private static float GetOilPitDepthFromSnapshot(ChunkSurfaceWorkerInput input, Vector2 worldPosition)
+    {
+        if (input == null || input.oilGrid == null)
+        {
+            return 0f;
+        }
+
+        Vector2Int oilCoordinate = new Vector2Int(
+            Mathf.RoundToInt(worldPosition.x),
+            Mathf.RoundToInt(worldPosition.y));
+        int localX = oilCoordinate.x - input.biomeGridMinX;
+        int localY = oilCoordinate.y - input.biomeGridMinY;
+        if (localX < 0
+            || localY < 0
+            || localX >= input.biomeGridWidth
+            || localY >= input.biomeGridHeight
+            || !input.oilGrid[localX + (localY * input.biomeGridWidth)])
+        {
+            return 0f;
+        }
+
+        Vector2 delta = worldPosition - new Vector2(oilCoordinate.x, oilCoordinate.y);
+        float angle = Mathf.Atan2(delta.y, delta.x);
+        float phase = Hash01WithSeed(input.seed, oilCoordinate.x, oilCoordinate.y, 9127) * Mathf.PI * 2f;
+        float outlineNoise =
+            (Mathf.Sin((angle * 3f) + phase) * 0.55f)
+            + (Mathf.Sin((angle * 5f) - (phase * 0.7f)) * 0.3f)
+            + (Mathf.Sin((angle * 7f) + (phase * 1.3f)) * 0.15f);
+        float outerRadius = Mathf.Min(
+            0.495f,
+            GeneratedOilPitOuterRadius + (outlineNoise * GeneratedOilPitOutlineJitter));
+        float distance = delta.magnitude;
+        if (distance >= outerRadius)
+        {
+            return 0f;
+        }
+
+        float innerRadius = GeneratedOilPitInnerRadius + (outlineNoise * 0.008f);
+        if (distance <= innerRadius)
+        {
+            return GeneratedOilPitDepth;
+        }
+
+        float slope = Mathf.InverseLerp(outerRadius, innerRadius, distance);
+        slope = slope * slope * (3f - (2f * slope));
+        return GeneratedOilPitDepth * slope;
+    }
+
     private static Vector2 GetBiomeBlendJitterFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
     {
         float jitterX = Mathf.Lerp(
@@ -942,7 +1011,9 @@ public partial class TerrainGenerator : MonoBehaviour
         int chunkSizeInBlocks,
         bool allowYield)
     {
-        int resolution = Mathf.Max(2, terrainSurfaceSubdivisions);
+        int resolution = chunkSurface != null && chunkSurface.surfaceInput != null
+            ? chunkSurface.surfaceInput.resolution
+            : Mathf.Max(2, terrainSurfaceSubdivisions);
         int cellCount = Mathf.Max(1, chunkSizeInBlocks * resolution);
         IEnumerator baseRoutine = AppendDominantBiomeBaseSurfaceRoutine(chunkSurface, origin, cellCount, resolution, allowYield);
         while (baseRoutine.MoveNext())
@@ -1273,7 +1344,12 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < polygon.Count; i++)
         {
             Vector2 point = polygon[i];
-            chunkSurface.vertices.Add(new Vector3(point.x, y, point.y));
+            float vertexY = biome == TerrainBiome.Water || chunkSurface.surfaceInput == null
+                ? y
+                : y - GetOilPitDepthFromSnapshot(
+                    chunkSurface.surfaceInput,
+                    new Vector2(chunkSurface.origin.x + point.x, chunkSurface.origin.y + point.y));
+            chunkSurface.vertices.Add(new Vector3(point.x, vertexY, point.y));
             chunkSurface.uvs.Add(point);
             chunkSurface.colors.Add(
                 biome == TerrainBiome.Water
@@ -1305,7 +1381,9 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        int resolution = Mathf.Max(2, terrainSurfaceSubdivisions);
+        int resolution = chunkSurface.surfaceInput != null
+            ? chunkSurface.surfaceInput.resolution
+            : Mathf.Max(2, terrainSurfaceSubdivisions);
         float waterY = GetBiomeSurfaceY(TerrainBiome.Water);
         float probeDistance = GetWaterWallProbeDistance(resolution);
 

@@ -27,6 +27,7 @@ public class PortableObject : MonoBehaviour
 
     private MeshRenderer bodyRenderer;
     private PortableItemRenderer portableItemRenderer;
+    private PortableBucketWaterVisual bucketWaterVisual;
     private Tween moveTween;
     private Transform cachedTransform;
     private GameObject cachedGameObject;
@@ -50,6 +51,8 @@ public class PortableObject : MonoBehaviour
     private Color32 beltItemLineDebugColor = Color.white;
     private Color32 lastBeltItemLineDebugColor;
     private int lastConveyorMoveFrame = -1;
+    private ItemDefinition cachedItemDefinition;
+    private bool bodyRendererTemporarilyHidden;
 
     public int ItemId => id;
     public bool IsMovingToTarget => isMovingToTarget;
@@ -259,9 +262,15 @@ public class PortableObject : MonoBehaviour
     
     public bool SetItem(int id)
     {
+        if (this.id != id)
+        {
+            cachedItemDefinition = null;
+        }
+
         if (InputOutputModule.IsFluidItemId(id))
         {
             this.id = -1;
+            cachedItemDefinition = null;
             ItemLightController.Configure(
                 CachedGameObject,
                 -1,
@@ -300,6 +309,7 @@ public class PortableObject : MonoBehaviour
         if (bodyRenderer == null || portableMesh == null || portableMat == null)
         {
             this.id = -1;
+            cachedItemDefinition = null;
             ClearItemLight();
             body.sharedMesh = null;
             if (bodyRenderer != null)
@@ -319,6 +329,7 @@ public class PortableObject : MonoBehaviour
         }
 
         this.id = id;
+        itemManager.TryGetItemDefinitionById(id, out cachedItemDefinition);
         SetVisualRenderingSuppressed(false);
         if (portableMat != null && !portableMat.enableInstancing)
         {
@@ -332,6 +343,50 @@ public class PortableObject : MonoBehaviour
         UpdateRendererVisibility();
         RefreshSleepAwakeVisual(true);
         return true;
+    }
+
+    private ItemDefinition ResolveItemDefinition()
+    {
+        if (cachedItemDefinition != null && cachedItemDefinition.id == id)
+        {
+            return cachedItemDefinition;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
+        if (itemManager != null)
+        {
+            itemManager.TryGetItemDefinitionById(id, out cachedItemDefinition);
+        }
+
+        return cachedItemDefinition;
+    }
+
+    private void RefreshBucketWaterVisual()
+    {
+        ItemDefinition definition = ResolveItemDefinition();
+        Bucket bucket = definition != null ? definition.mapObject as Bucket : null;
+        if (bucket == null && bucketWaterVisual == null)
+        {
+            return;
+        }
+
+        if (bucketWaterVisual == null)
+        {
+            bucketWaterVisual = GetComponent<PortableBucketWaterVisual>();
+            if (bucketWaterVisual == null)
+            {
+                bucketWaterVisual = CachedGameObject.AddComponent<PortableBucketWaterVisual>();
+            }
+        }
+
+        bool ownerVisualVisible = CachedGameObject.activeInHierarchy
+            && !suppressVisualRendering
+            && !bodyRendererTemporarilyHidden;
+        bucketWaterVisual.Refresh(
+            bucket,
+            Bucket.IsWaterBucketDefinition(definition),
+            body,
+            ownerVisualVisible);
     }
 
     private void ConfigureItemLight(ItemManager.ItemSet itemSet)
@@ -598,15 +653,18 @@ public class PortableObject : MonoBehaviour
 
     private void SetBodyRendererVisible(bool isVisible)
     {
+        bodyRendererTemporarilyHidden = !isVisible;
         ResolveBodyRenderer();
         if (bodyRenderer == null)
         {
+            RefreshBucketWaterVisual();
             return;
         }
 
         if (!isVisible)
         {
             bodyRenderer.enabled = false;
+            RefreshBucketWaterVisual();
             return;
         }
 
@@ -735,22 +793,27 @@ public class PortableObject : MonoBehaviour
                     continue;
                 }
 
-                member.ResolveBodyRenderer();
-                Renderer renderer = member.bodyRenderer;
-                if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy)
-                {
-                    destination[count++] = renderer;
-                }
+                count = member.CopyOwnOutlineMaskRenderers(destination, count);
             }
         }
 
         if (count == 0)
         {
-            ResolveBodyRenderer();
-            if (bodyRenderer != null && bodyRenderer.enabled && bodyRenderer.gameObject.activeInHierarchy)
-            {
-                destination[count++] = bodyRenderer;
-            }
+            count = CopyOwnOutlineMaskRenderers(destination, count);
+        }
+
+        return count;
+    }
+
+    private int CopyOwnOutlineMaskRenderers(Renderer[] destination, int count)
+    {
+        ResolveBodyRenderer();
+        if (bodyRenderer != null
+            && bodyRenderer.enabled
+            && bodyRenderer.gameObject.activeInHierarchy
+            && count < destination.Length)
+        {
+            destination[count++] = bodyRenderer;
         }
 
         return count;
@@ -911,6 +974,7 @@ public class PortableObject : MonoBehaviour
     {
         liveObjects.Remove(this);
         isMovingToTarget = false;
+        bodyRendererTemporarilyHidden = false;
         ClearFocusOutlines(false);
         UnregisterFromPortableItemRenderer();
     }
@@ -991,10 +1055,15 @@ public class PortableObject : MonoBehaviour
         ResolveBodyRenderer();
         if (bodyRenderer == null)
         {
+            RefreshBucketWaterVisual();
             return;
         }
 
-        bodyRenderer.enabled = CachedGameObject.activeInHierarchy && !useBatchedRendering && !suppressVisualRendering;
+        bodyRenderer.enabled = CachedGameObject.activeInHierarchy
+            && !useBatchedRendering
+            && !suppressVisualRendering
+            && !bodyRendererTemporarilyHidden;
+        RefreshBucketWaterVisual();
         RefreshSleepAwakeVisual();
     }
 

@@ -4,7 +4,7 @@ using UnityEngine;
 public class Pump : InputOutputModule
 {
     private const string DefaultWaterItemName = "Water";
-    private const int DefaultWaterItemId = 6;
+    private const int DefaultWaterItemId = 1;
     private const int MaxWaterEmitAttemptsPerTick = 32;
     private static readonly Vector2Int[] CardinalDirections =
     {
@@ -234,7 +234,7 @@ public class Pump : InputOutputModule
             for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = CardinalDirections[directionIndex];
-                if (hasPipe && !pipe.HasConnectionTowards(pipeRotation, direction))
+                if (hasPipe && !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
                 }
@@ -263,6 +263,12 @@ public class Pump : InputOutputModule
 
                 EnqueueFluidSearchCoordinate(nextCoordinate);
             }
+
+            if (hasPipe
+                && pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+            {
+                EnqueueFluidSearchCoordinate(remoteCoordinate);
+            }
         }
 
         return TryUseFluidStorage(targetStorage, requestedLiters, commit, out acceptedLiters);
@@ -288,7 +294,7 @@ public class Pump : InputOutputModule
 
         if (TryGetPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation))
         {
-            if (!pipe.HasConnectionTowards(pipeRotation, directionToPrevious))
+            if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, directionToPrevious))
             {
                 return false;
             }

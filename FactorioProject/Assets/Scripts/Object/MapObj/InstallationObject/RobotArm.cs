@@ -56,6 +56,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
         SavedInputArea
     }
 
+    private enum ObjectInfoStatusLevel
+    {
+        Error,
+        Warning,
+        Working
+    }
+
     [System.Serializable]
     public sealed class PersistentState
     {
@@ -162,8 +169,8 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
     {
         get
         {
-            ResolveObjectInfoStatus(out bool isWorking);
-            return isWorking;
+            ResolveObjectInfoStatus(out ObjectInfoStatusLevel statusLevel);
+            return statusLevel == ObjectInfoStatusLevel.Working;
         }
     }
 
@@ -210,17 +217,34 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             return true;
         }
 
+        // A valid inserter waiting only for an input item remains part of the power demand.
+        if (state == RobotArmState.WaitingForPickup
+            && TryResolvePickupCoordinate(out _)
+            && TryResolveDropCoordinate(out _))
+        {
+            wattsPerSecond = configuredWatts;
+            return true;
+        }
+
         return false;
     }
 
     public void GetObjectInfoStatus(out string statusText, out bool isWorking)
     {
-        statusText = ResolveObjectInfoStatus(out isWorking);
+        statusText = ResolveObjectInfoStatus(out ObjectInfoStatusLevel statusLevel);
+        isWorking = statusLevel == ObjectInfoStatusLevel.Working;
     }
 
-    private string ResolveObjectInfoStatus(out bool isWorking)
+    public void GetObjectInfoStatus(out string statusText, out bool isWorking, out bool isWarning)
     {
-        isWorking = false;
+        statusText = ResolveObjectInfoStatus(out ObjectInfoStatusLevel statusLevel);
+        isWorking = statusLevel == ObjectInfoStatusLevel.Working;
+        isWarning = statusLevel == ObjectInfoStatusLevel.Warning;
+    }
+
+    private string ResolveObjectInfoStatus(out ObjectInfoStatusLevel statusLevel)
+    {
+        statusLevel = ObjectInfoStatusLevel.Error;
         EnsureRuntimeStateInitialized();
 
         if (!HasPlacementRuntime())
@@ -245,13 +269,13 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
                 return "Output full";
             }
 
-            isWorking = true;
+            statusLevel = ObjectInfoStatusLevel.Working;
             return "Working";
         }
 
         if (IsActiveTransferState(state))
         {
-            isWorking = true;
+            statusLevel = ObjectInfoStatusLevel.Working;
             return "Working";
         }
 
@@ -262,7 +286,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
 
         if (CanPickupOneItem())
         {
-            isWorking = true;
+            statusLevel = ObjectInfoStatusLevel.Working;
             return "Working";
         }
 
@@ -271,6 +295,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             return "No input area";
         }
 
+        statusLevel = ObjectInfoStatusLevel.Warning;
         return "No input item";
     }
 
@@ -1852,7 +1877,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             return false;
         }
 
-        int capacity = ResolveSavedCenterCapacity(stateStore, dropCoordinate, 10);
+        int capacity = ResolveSavedCenterCapacity(stateStore, dropCoordinate, itemId, 10);
         return mutate
             ? stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity)
             : stateStore.CanAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
@@ -2053,13 +2078,21 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
                || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out _);
     }
 
-    private static int ResolveSavedCenterCapacity(BlockStateStore stateStore, Vector2Int coordinate, int defaultCapacity)
+    private static int ResolveSavedCenterCapacity(
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        int itemId,
+        int defaultCapacity)
     {
+        int physicalCapacity;
         if (stateStore == null
             || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
             || !stateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState))
         {
-            return Mathf.Max(1, defaultCapacity);
+            physicalCapacity = Mathf.Max(1, defaultCapacity);
+            return ItemDefinition.ResolveStackCapacity(
+                InputOutputModule.ResolveItemDefinition(itemId),
+                physicalCapacity);
         }
 
         ItemDefinition installedDefinition = InputOutputModule.ResolveItemDefinition(installationState.itemId);
@@ -2067,10 +2100,18 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             || !(installedDefinition.mapObject is InstallationObject installationObject)
             || (installationObject.MapFilter & InstallationMapFilter.ItemArea) == 0)
         {
-            return Mathf.Max(1, defaultCapacity);
+            physicalCapacity = Mathf.Max(1, defaultCapacity);
+        }
+        else
+        {
+            physicalCapacity = installedDefinition.capacity > 0
+                ? installedDefinition.capacity
+                : Mathf.Max(1, defaultCapacity);
         }
 
-        return installedDefinition.capacity > 0 ? installedDefinition.capacity : Mathf.Max(1, defaultCapacity);
+        return ItemDefinition.ResolveStackCapacity(
+            InputOutputModule.ResolveItemDefinition(itemId),
+            physicalCapacity);
     }
 
     private static bool HasBlockingDropMapObject(Block dropBlock)

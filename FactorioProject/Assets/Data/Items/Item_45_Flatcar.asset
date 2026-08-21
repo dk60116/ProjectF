@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: Item_48_Flatcar
   m_EditorClassIdentifier: 
   itemName: Beef steak
-  id: 65
+  id: 72
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
   portableMat: {fileID: 2100000, guid: 0804dd1f3fe5f3f4bb07d25f01714c32, type: 2}
   icon: {fileID: 21300000, guid: 161f451b97cff754aa9bdf7a064be046, type: 3}
+  oneItem: 0
   interactionButtonList:
   - {fileID: 21300000, guid: 4fade2dbe45025648acb64b3e0bfe229, type: 3}
   - {fileID: 21300000, guid: 7b654ce797ed8754f8f5bfc320ab51fb, type: 3}
@@ -34,6 +35,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

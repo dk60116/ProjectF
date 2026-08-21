@@ -18,6 +18,7 @@ MonoBehaviour:
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
   icon: {fileID: 21300000, guid: 9db5a52bf14d6444398759c739b11413, type: 3}
+  oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
@@ -32,6 +33,8 @@ MonoBehaviour:
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 0.45882356, g: 0.6627451, b: 0.7490196, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

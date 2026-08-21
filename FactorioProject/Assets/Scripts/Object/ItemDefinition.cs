@@ -6,6 +6,8 @@ using UnityEngine;
 public class ItemDefinition : ScriptableObject
 {
     private const float DefaultCraftingDurationSeconds = 5f;
+    private const float DefaultBucketFillDurationSeconds = 10f;
+    private const int DefaultUndergroundPipeMaxDistance = 5;
     private const float KilowattsToWatts = 1000f;
     private const float DefaultItemLightRange = 6f;
 
@@ -26,6 +28,8 @@ public class ItemDefinition : ScriptableObject
     public Mesh portableMesh;
     public Material portableMat;
     public Sprite icon;
+    [Tooltip("체크하면 가방·손·바닥·설치물·차량을 포함한 모든 아이템 스택의 용량이 1개로 제한됩니다. 서로 다른 스택에는 같은 아이템을 보관할 수 있습니다.")]
+    public bool oneItem;
     public List<Sprite> interactionButtonList = new List<Sprite>();
     public ItemLightMode lightMode = ItemLightMode.None;
     [Min(0.1f)]
@@ -48,6 +52,15 @@ public class ItemDefinition : ScriptableObject
     [Min(0f)]
     public float fluidStorageLiters = 0f;
     public Color fluidDisplayColor = Color.white;
+    [Min(0f)]
+    [Tooltip("Oil drilling machine 등 유체 생산 설치물의 초당 출력량(L/s)입니다.")]
+    public float fluidOutputLitersPerSecond = 1f;
+    [Min(0.1f)]
+    [Tooltip("빈 Bucket을 물이 나오는 Pipe 출구에 설치했을 때 Water Bucket이 될 때까지의 시간(초)입니다.")]
+    public float bucketFillDurationSeconds = DefaultBucketFillDurationSeconds;
+    [Min(2)]
+    [Tooltip("Underground Pipe의 입구와 출구를 포함한 최대 설치 거리입니다.")]
+    public int undergroundPipeMaxDistance = DefaultUndergroundPipeMaxDistance;
     public EnergyType energyType = EnergyType.None;
     [Min(0)]
     public int energyAmount = 0;
@@ -66,6 +79,11 @@ public class ItemDefinition : ScriptableObject
     public float CraftingDurationSeconds => craftingDurationSeconds > 0f ? craftingDurationSeconds : DefaultCraftingDurationSeconds;
     public float LightRange => Mathf.Max(0.1f, lightRange);
     public float LightIntensityMultiplier => lightIntensityMultiplier > 0f ? lightIntensityMultiplier : 1f;
+    public float BucketFillDurationSeconds => bucketFillDurationSeconds > 0f
+        ? bucketFillDurationSeconds
+        : DefaultBucketFillDurationSeconds;
+    public float FluidOutputLitersPerSecond => Mathf.Max(0f, fluidOutputLitersPerSecond);
+    public int UndergroundPipeMaxDistance => Mathf.Max(2, undergroundPipeMaxDistance);
     public ItemDefinition ManualTargetItem => isManual ? manualTargetItem : null;
     public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
     public float ElectricUseWatts => ResolveElectricUseWatts(this);
@@ -81,6 +99,24 @@ public class ItemDefinition : ScriptableObject
         return definition.useEnergyType == EnergyType.Electricity
             ? amount * KilowattsToWatts
             : amount;
+    }
+
+    public static int ResolveStackCapacity(ItemDefinition definition, int defaultCapacity)
+    {
+        return definition != null && definition.oneItem
+            ? 1
+            : Mathf.Max(1, defaultCapacity);
+    }
+
+    public static int ResolveStackCapacity(ItemManager itemManager, int itemId, int defaultCapacity)
+    {
+        ItemDefinition definition = null;
+        if (itemManager != null && itemId >= 0)
+        {
+            itemManager.TryGetItemDefinitionById(itemId, out definition);
+        }
+
+        return ResolveStackCapacity(definition, defaultCapacity);
     }
 
     public static float ResolveCompleteEnergyAmount(ItemDefinition definition)
@@ -146,8 +182,11 @@ public class ItemDefinition : ScriptableObject
 
         utilityPoleConnectionRadius = Mathf.Max(0, utilityPoleConnectionRadius);
         utilityPoleSupplyRadius = Mathf.Max(0, utilityPoleSupplyRadius);
+        undergroundPipeMaxDistance = Mathf.Max(2, undergroundPipeMaxDistance);
         lightRange = Mathf.Max(0.1f, lightRange);
         lightIntensityMultiplier = Mathf.Max(0.01f, lightIntensityMultiplier);
+        bucketFillDurationSeconds = Mathf.Max(0.1f, bucketFillDurationSeconds);
+        fluidOutputLitersPerSecond = Mathf.Max(0f, fluidOutputLitersPerSecond);
     }
 #endif
 }

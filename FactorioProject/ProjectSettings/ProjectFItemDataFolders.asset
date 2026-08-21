@@ -16,7 +16,7 @@ MonoBehaviour:
   - id: 839eaa9b00424dc59d967a096e100401
     displayName: Energy
     expanded: 1
-    anchorItemGuid: cc54448c2b8e64c40a4458e259ad7222
+    anchorItemGuid: 228fcd45b59e4994d8b5f8ee23dc4595
   - id: 061b1e1292114fabaa190654551cea7c
     displayName: Tools
     expanded: 1
@@ -63,11 +63,11 @@ MonoBehaviour:
     anchorItemGuid: 347029aa316390a4982b64441c83789c
   - id: abe4f914cb684037afb8c746f6debe44
     displayName: Water & Steam
-    expanded: 0
-    anchorItemGuid: 21883f622876a3f47a1c1f90a4b0004e
+    expanded: 1
+    anchorItemGuid: f26efb1d776a4df469e75c19a5a1181b
   - id: c0a50a74f8524258abc5a4b4fcd867b6
     displayName: Light
-    expanded: 0
+    expanded: 1
     anchorItemGuid: 21883f622876a3f47a1c1f90a4b0004e
   - id: 719b89eaec88471098afae6081a59668
     displayName: Machine
@@ -75,7 +75,7 @@ MonoBehaviour:
     anchorItemGuid: fde3e14d2afafaf4a9603cedda8d94d6
   - id: 9e4995f6600f4c04ad51a59b2550be3b
     displayName: Wooden building
-    expanded: 0
+    expanded: 1
     anchorItemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
   - id: b66e74eb3909437e98f5ea9b777676a9
     displayName: Animal
@@ -92,7 +92,7 @@ MonoBehaviour:
   - id: 63b13fc99f8747da9db46e2210011669
     displayName: Book
     expanded: 1
-    anchorItemGuid: 75ee9ee3e9a835f45a5e2f7d279a723e
+    anchorItemGuid: 9b769dd46a0b9fe4f91ace461114fcd2
   - id: 4b700d33e3bf4bfda1fc4dee7c89b691
     displayName: Meet
     expanded: 1
@@ -100,7 +100,7 @@ MonoBehaviour:
   - id: c46f2864503448c084f910219612a1ce
     displayName: Car
     expanded: 1
-    anchorItemGuid: 1944e65739557ca4485c86a1309a15c6
+    anchorItemGuid: ced5cba395785e94897ab6dcb83d274a
   - id: 7ed056f29f76442ca214403bfb035b36
     displayName: Train
     expanded: 1
@@ -109,6 +109,10 @@ MonoBehaviour:
     displayName: Manual
     expanded: 1
     anchorItemGuid: d4748aa7ad1364d4da54a919623a3938
+  - id: 396fb7fc138646ebbfad2b1ca8b35460
+    displayName: Fluid
+    expanded: 1
+    anchorItemGuid: 
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -202,8 +206,6 @@ MonoBehaviour:
     folderId: 9e4995f6600f4c04ad51a59b2550be3b
   - itemGuid: 5184d5acd736fa943a532c1ee9009150
     folderId: 9e4995f6600f4c04ad51a59b2550be3b
-  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
-    folderId: 9e4995f6600f4c04ad51a59b2550be3b
   - itemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
     folderId: 85aa68b4dba945dcb9adac06984edd46
   - itemGuid: 09af47ed2a67de34dad96a547b0f030b
@@ -252,7 +254,29 @@ MonoBehaviour:
     folderId: 7ed056f29f76442ca214403bfb035b36
   - itemGuid: f26efb1d776a4df469e75c19a5a1181b
     folderId: c0a50a74f8524258abc5a4b4fcd867b6
-  - itemGuid: 762e4dd9db91c774ca6004b78fbf6331
-    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
   - itemGuid: 9b769dd46a0b9fe4f91ace461114fcd2
     folderId: d4d72b0cf2fb491db21ccbc3248c91b8
+  - itemGuid: e50f8db30407552438483841405afcb2
+    folderId: c46f2864503448c084f910219612a1ce
+  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
+    folderId: b66e74eb3909437e98f5ea9b777676a9
+  - itemGuid: 5e897bd260b82084fb272c968673a461
+    folderId: 396fb7fc138646ebbfad2b1ca8b35460
+  - itemGuid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2
+    folderId: 396fb7fc138646ebbfad2b1ca8b35460
+  - itemGuid: 762e4dd9db91c774ca6004b78fbf6331
+    folderId: 63b13fc99f8747da9db46e2210011669
+  - itemGuid: b683f0f1cfeadca4196e5a3df399b945
+    folderId: c7e077eece684be7b0fce1115e350081
+  - itemGuid: b7f6e746e5fdf2f43a58e92c85c78479
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: d4d9ce93c017a2e4d8c5891bb4f4e91c
+    folderId: 7f82e0373dbd406ba0fd649748577b61
+  - itemGuid: 2080084437a224f4790c7bab867b56c5
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7
+  - itemGuid: 0fff3b18f5681864380d5935d5e1cd08
+    folderId: a6f688d669d74bd985df11be9ee89c0c
+  - itemGuid: 8b08ee1c220ce654abcb75d3541c7312
+    folderId: abe4f914cb684037afb8c746f6debe44
+  - itemGuid: c18fd5542121a734f9c3199b5e56920f
+    folderId: 6dc3503fe92247e6803d4e2740a6bcf7

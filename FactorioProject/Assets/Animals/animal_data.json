@@ -60,19 +60,19 @@
             },
             "dropItems": [
                 {
-                    "itemId": 43,
-                    "itemName": "Leather",
-                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
+                    "itemId": 63,
+                    "itemName": "Beef",
+                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
                     "minAmount": 1,
                     "maxAmount": 1,
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 46,
-                    "itemName": "Beef",
-                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
+                    "itemId": 50,
+                    "itemName": "Leather",
+                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
-                    "maxAmount": 3,
+                    "maxAmount": 1,
                     "dropChance": 1.0
                 }
             ],
@@ -140,19 +140,19 @@
             },
             "dropItems": [
                 {
-                    "itemId": 43,
-                    "itemName": "Leather",
-                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
+                    "itemId": 63,
+                    "itemName": "Beef",
+                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
                     "minAmount": 1,
                     "maxAmount": 1,
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 46,
-                    "itemName": "Beef",
-                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
+                    "itemId": 50,
+                    "itemName": "Leather",
+                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
-                    "maxAmount": 3,
+                    "maxAmount": 1,
                     "dropChance": 1.0
                 }
             ],
@@ -220,17 +220,17 @@
             },
             "dropItems": [
                 {
-                    "itemId": 43,
-                    "itemName": "Leather",
-                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
+                    "itemId": 62,
+                    "itemName": "Pork",
+                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
                     "minAmount": 1,
                     "maxAmount": 1,
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 41,
-                    "itemName": "Pork",
-                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
+                    "itemId": 50,
+                    "itemName": "Leather",
+                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
                     "maxAmount": 2,
                     "dropChance": 1.0
@@ -300,17 +300,17 @@
             },
             "dropItems": [
                 {
-                    "itemId": 43,
-                    "itemName": "Leather",
-                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
+                    "itemId": 62,
+                    "itemName": "Pork",
+                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
                     "minAmount": 1,
                     "maxAmount": 1,
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 41,
-                    "itemName": "Pork",
-                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
+                    "itemId": 50,
+                    "itemName": "Leather",
+                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
                     "maxAmount": 2,
                     "dropChance": 1.0

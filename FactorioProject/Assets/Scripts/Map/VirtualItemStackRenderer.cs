@@ -221,7 +221,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
         }
     }
 
-    private static bool TryGetBestLegacyFloorSlot(
+    private bool TryGetBestLegacyFloorSlot(
         int itemId,
         bool requireExisting,
         IReadOnlyList<int> slotCounts,
@@ -231,6 +231,10 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
         bestSlotIndex = -1;
         float bestDistanceSqr = float.MaxValue;
         int slotCount = Mathf.Min(DefaultFloorSlotOffsets.Length, slotCounts.Count);
+        int stackCapacity = ItemDefinition.ResolveStackCapacity(
+            itemManager,
+            itemId,
+            LegacyFloorStackCapacity);
 
         for (int slotIndex = 0; slotIndex < slotCount; slotIndex++)
         {
@@ -240,7 +244,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
                 continue;
             }
 
-            if (slotItemCount >= LegacyFloorStackCapacity)
+            if (slotItemCount >= stackCapacity)
             {
                 continue;
             }

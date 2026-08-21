@@ -123,7 +123,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Reed
-  objId: 8
+  objId: 9
   itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -137,7 +137,7 @@ MonoBehaviour:
   harvestMode: 3
   definition: {fileID: 11400000, guid: cc5b7e0c7fd0cc94fa7e1bae7db8cda6, type: 2}
   resourceStatus:
-    outputId: 8
+    outputId: 9
     outputItemName: Reed
     resourceCount: 1
     getCount: 2

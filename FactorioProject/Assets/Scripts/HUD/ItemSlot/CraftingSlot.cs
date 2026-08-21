@@ -853,12 +853,10 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
         int[] slotItemIds = new int[slotCount];
         int[] slotCounts = new int[slotCount];
-        int[] slotCapacities = new int[slotCount];
         for (int i = 0; i < slotCount; i++)
         {
             slotItemIds[i] = bag.GetSlotItemId(i);
             slotCounts[i] = bag.GetSlotCount(i);
-            slotCapacities[i] = bag.GetSlotMaxCount(i);
         }
 
         for (int ingredientIndex = 0; ingredientIndex < ingredientBuffer.Count; ingredientIndex++)
@@ -891,7 +889,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
             if (removedFromBag)
             {
-                SimulateBagDuplicateStackMerge(slotItemIds, slotCounts, slotCapacities);
+                SimulateBagDuplicateStackMerge(bag, slotItemIds, slotCounts);
             }
 
             if (remaining > 0 && ingredient.itemId == handItemId)
@@ -905,20 +903,21 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             }
         }
 
-        return GetProjectedBagCapacityForItem(slotItemIds, slotCounts, slotCapacities, handItemId) >= projectedHandCount;
+        return GetProjectedBagCapacityForItem(bag, slotItemIds, slotCounts, handItemId)
+               >= projectedHandCount;
     }
 
     private static void SimulateBagDuplicateStackMerge(
+        PlayerBag bag,
         int[] slotItemIds,
-        int[] slotCounts,
-        int[] slotCapacities)
+        int[] slotCounts)
     {
-        if (slotItemIds == null || slotCounts == null || slotCapacities == null)
+        if (bag == null || slotItemIds == null || slotCounts == null)
         {
             return;
         }
 
-        int slotCount = Mathf.Min(slotItemIds.Length, Mathf.Min(slotCounts.Length, slotCapacities.Length));
+        int slotCount = Mathf.Min(bag.SlotCount, Mathf.Min(slotItemIds.Length, slotCounts.Length));
         for (int targetIndex = 0; targetIndex < slotCount; targetIndex++)
         {
             int itemId = slotItemIds[targetIndex];
@@ -927,7 +926,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
                 continue;
             }
 
-            int targetCapacity = Mathf.Max(0, slotCapacities[targetIndex]);
+            int targetCapacity = Mathf.Max(0, bag.GetSlotCapacityForItem(targetIndex, itemId));
             int targetCount = Mathf.Clamp(slotCounts[targetIndex], 0, targetCapacity);
             for (int sourceIndex = targetIndex + 1; sourceIndex < slotCount && targetCount < targetCapacity; sourceIndex++)
             {
@@ -951,21 +950,21 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     }
 
     private static int GetProjectedBagCapacityForItem(
+        PlayerBag bag,
         int[] slotItemIds,
         int[] slotCounts,
-        int[] slotCapacities,
         int itemId)
     {
-        if (slotItemIds == null || slotCounts == null || slotCapacities == null || itemId < 0)
+        if (bag == null || slotItemIds == null || slotCounts == null || itemId < 0)
         {
             return 0;
         }
 
         int totalCapacity = 0;
-        int slotCount = Mathf.Min(slotItemIds.Length, Mathf.Min(slotCounts.Length, slotCapacities.Length));
+        int slotCount = Mathf.Min(bag.SlotCount, Mathf.Min(slotItemIds.Length, slotCounts.Length));
         for (int i = 0; i < slotCount; i++)
         {
-            int capacity = Mathf.Max(0, slotCapacities[i]);
+            int capacity = Mathf.Max(0, bag.GetSlotCapacityForItem(i, itemId));
             int count = Mathf.Clamp(slotCounts[i], 0, capacity);
             if (count <= 0)
             {
@@ -1251,11 +1250,6 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
         bool hasRevealTarget = false;
         int safeVisibleCount = Mathf.Max(0, visibleCount);
-        bool placeCreateButtonFirst = ShouldPlaceCreateButtonFirst();
-        if (placeCreateButtonFirst)
-        {
-            AppendCreateButtonRevealTarget(sequence, ref hasRevealTarget);
-        }
 
         for (int i = 0; i < ingredientSlots.Count; i++)
         {
@@ -1276,10 +1270,9 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             }
         }
 
-        if (!placeCreateButtonFirst)
-        {
-            AppendCreateButtonRevealTarget(sequence, ref hasRevealTarget);
-        }
+        // The create button belongs at the outer end of the expanded row.
+        // This is the screen-left edge for Hand and the screen-right edge for bag slots.
+        AppendCreateButtonRevealTarget(sequence, ref hasRevealTarget);
 
         if (!hasRevealTarget)
         {
@@ -1601,16 +1594,6 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         int safeVisibleCount = Mathf.Max(0, visibleIngredientCount);
 
         RectTransform createRect = createButton != null ? createButton.transform as RectTransform : null;
-        bool placeCreateButtonFirst = ShouldPlaceCreateButtonFirst();
-        if (placeCreateButtonFirst)
-        {
-            PositionCreateButtonIfVisible(
-                createRect,
-                directionSign,
-                ref nextX,
-                ref maxHeight,
-                applyCreateButtonSize);
-        }
 
         if (ingredientSlots != null)
         {
@@ -1630,15 +1613,12 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             }
         }
 
-        if (!placeCreateButtonFirst)
-        {
-            PositionCreateButtonIfVisible(
-                createRect,
-                directionSign,
-                ref nextX,
-                ref maxHeight,
-                applyCreateButtonSize);
-        }
+        PositionCreateButtonIfVisible(
+            createRect,
+            directionSign,
+            ref nextX,
+            ref maxHeight,
+            applyCreateButtonSize);
 
         float width = Mathf.Max(0f, nextX - ingredientsSpacing);
         ingredientsRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
@@ -1659,11 +1639,6 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             nextX += childSize.x + ingredientsSpacing;
             maxHeight = Mathf.Max(maxHeight, childSize.y);
         }
-    }
-
-    private bool ShouldPlaceCreateButtonFirst()
-    {
-        return GetComponentInParent<HandSlot>() != null;
     }
 
     private void CacheStableIngredientLayoutSizes()
@@ -1902,9 +1877,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             && itemManager.TryGetRequiredManualForTarget(ItemId, out ItemDefinition requiredManual))
         {
             requiredManualItemId = requiredManual.id;
-            Player player = GameManager.Instance.Player;
-            blockedByRequiredManual = player == null
-                                      || !player.HasCraftingManual(requiredManualItemId);
+            blockedByRequiredManual = !itemManager.IsManualRequirementSatisfied(ItemId);
         }
 
         if (!CraftingTreeRuntime.TryGetRequiredCraftingMapObjectIds(ItemId, requiredCraftingMapObjectIds))
