@@ -14,6 +14,11 @@ namespace ProjectF.EditorTools
         private const string BookPortableMeshPath = "Assets/Items/Book/Book_P.mesh";
         private const string PaperIconTemplatePath = PaperPortableMeshGenerator.PaperItemFolder + "/Paper/Paper_Icon.png";
         private const string BookItemFolder = "Assets/Items/Book";
+        private const string CdItemFolder = "Assets/Items/CD";
+        private const string CdTemplateFolder = CdItemFolder + "/CD";
+        private const string CdIconTemplatePath = CdTemplateFolder + "/CD_Icon.png";
+        private const string CdPortableTextureTemplatePath = CdTemplateFolder + "/CD_P_TB.png";
+        internal const string CdPortableMeshPath = CdTemplateFolder + "/CD_P.asset";
         private const float IconEmblemScaleMultiplier = 1.15f;
         private const float UiIconEmblemCenterX = 0.5078125f;
         private const float UiIconEmblemCenterY = 0.40625f;
@@ -27,6 +32,7 @@ namespace ProjectF.EditorTools
         private const int BackgroundOpaqueThreshold = 36;
         private const string BookSourceIconGuidUserDataPrefix = "ProjectF.BookSourceIconGuid=";
         private const string PaperSourceIconGuidUserDataPrefix = "ProjectF.PaperSourceIconGuid=";
+        private const string CdSourceIconGuidUserDataPrefix = "ProjectF.CdSourceIconGuid=";
         private const string TargetItemNamePrefix = "Manual - ";
         private const string LegacyBookItemNamePrefix = "Book - ";
         private const string LegacyPaperItemNamePrefix = "Paper - ";
@@ -53,6 +59,7 @@ namespace ProjectF.EditorTools
             internal float IconEmblemRotationDegrees;
             internal float PortableEmblemSizeRatio;
             internal bool UsesPaperSurface;
+            internal bool UsesCdSurface;
         }
 
         private static readonly GenerationProfile BookProfile = new GenerationProfile
@@ -83,6 +90,21 @@ namespace ProjectF.EditorTools
             IconEmblemRotationDegrees = PaperIconEmblemRotationDegrees,
             PortableEmblemSizeRatio = 0.18f,
             UsesPaperSurface = true
+        };
+
+        private static readonly GenerationProfile CdProfile = new GenerationProfile
+        {
+            DisplayName = "CD",
+            IconTemplatePath = CdIconTemplatePath,
+            PortableMeshPath = CdPortableMeshPath,
+            OutputFolder = CdItemFolder,
+            SourceIconGuidUserDataPrefix = CdSourceIconGuidUserDataPrefix,
+            IconEmblemCenterX = 0.5f,
+            IconEmblemCenterY = 0.5f,
+            IconEmblemSizeRatio = 0.45f,
+            IconEmblemRotationDegrees = 0f,
+            PortableEmblemSizeRatio = 0f,
+            UsesCdSurface = true
         };
 
         internal sealed class Result
@@ -153,6 +175,20 @@ namespace ProjectF.EditorTools
                 selectedDefinition,
                 definitions,
                 PaperProfile,
+                out result,
+                out errorMessage);
+        }
+
+        internal static bool TryCreateCd(
+            ItemDefinition selectedDefinition,
+            IReadOnlyList<ItemDefinition> definitions,
+            out Result result,
+            out string errorMessage)
+        {
+            return TryCreate(
+                selectedDefinition,
+                definitions,
+                CdProfile,
                 out result,
                 out errorMessage);
         }
@@ -267,6 +303,12 @@ namespace ProjectF.EditorTools
                 return true;
             }
 
+            if (userData.StartsWith(CdSourceIconGuidUserDataPrefix, StringComparison.Ordinal))
+            {
+                profile = CdProfile;
+                return true;
+            }
+
             return false;
         }
 
@@ -313,8 +355,11 @@ namespace ProjectF.EditorTools
 
             string sourceIconGuid = AssetDatabase.AssetPathToGUID(sourceIconPath);
 
+            string portableTextureTemplatePath = profile.UsesCdSurface
+                ? CdPortableTextureTemplatePath
+                : BookPortableTextureTemplatePath;
             if (!AssetExists(profile.IconTemplatePath)
-                || !AssetExists(BookPortableTextureTemplatePath))
+                || !AssetExists(portableTextureTemplatePath))
             {
                 errorMessage = $"{profile.DisplayName} 아이콘 또는 P 텍스처 템플릿을 찾을 수 없습니다.";
                 return false;
@@ -327,7 +372,7 @@ namespace ProjectF.EditorTools
             {
                 sourceIconTexture = LoadPng(sourceIconPath);
                 documentIconTemplate = LoadPng(profile.IconTemplatePath);
-                portableTextureTemplate = LoadPng(BookPortableTextureTemplatePath);
+                portableTextureTemplate = LoadPng(portableTextureTemplatePath);
                 if (sourceIconTexture == null || documentIconTemplate == null || portableTextureTemplate == null)
                 {
                     errorMessage = $"{profile.DisplayName} 에셋 생성에 필요한 PNG를 읽지 못했습니다.";
@@ -358,19 +403,34 @@ namespace ProjectF.EditorTools
                     icon.Width * profile.IconEmblemSizeRatio,
                     profile.IconEmblemRotationDegrees);
 
-                PixelBuffer portableTexture = profile.UsesPaperSurface
-                    ? BuildPaperPortableTexture(
-                        ToTopLeftBuffer(documentIconTemplate),
-                        portableTextureTemplate.width,
-                        portableTextureTemplate.height)
-                    : BuildPortableTexture(ToTopLeftBuffer(portableTextureTemplate));
-                PixelBuffer rotatedPortableEmblem = RotateCounterClockwise(emblem);
-                CompositeCentered(
-                    portableTexture,
-                    rotatedPortableEmblem,
-                    portableTexture.Width * 0.25f,
-                    portableTexture.Height * PortableFrontFaceCenterY,
-                    portableTexture.Width * profile.PortableEmblemSizeRatio);
+                PixelBuffer portableTexture;
+                if (profile.UsesCdSurface)
+                {
+                    portableTexture = ToTopLeftBuffer(portableTextureTemplate);
+                    CompositeCentered(
+                        portableTexture,
+                        emblem,
+                        portableTexture.Width * profile.IconEmblemCenterX,
+                        portableTexture.Height * profile.IconEmblemCenterY,
+                        portableTexture.Width * profile.IconEmblemSizeRatio,
+                        profile.IconEmblemRotationDegrees);
+                }
+                else
+                {
+                    portableTexture = profile.UsesPaperSurface
+                        ? BuildPaperPortableTexture(
+                            ToTopLeftBuffer(documentIconTemplate),
+                            portableTextureTemplate.width,
+                            portableTextureTemplate.height)
+                        : BuildPortableTexture(ToTopLeftBuffer(portableTextureTemplate));
+                    PixelBuffer rotatedPortableEmblem = RotateCounterClockwise(emblem);
+                    CompositeCentered(
+                        portableTexture,
+                        rotatedPortableEmblem,
+                        portableTexture.Width * 0.25f,
+                        portableTexture.Height * PortableFrontFaceCenterY,
+                        portableTexture.Width * profile.PortableEmblemSizeRatio);
+                }
 
                 WritePng(iconPath, icon, true);
                 WritePng(portableTexturePath, portableTexture, false);
@@ -528,7 +588,8 @@ namespace ProjectF.EditorTools
             }
 
             if (string.Equals(itemName, "Book", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(itemName, "Paper", StringComparison.OrdinalIgnoreCase))
+                || string.Equals(itemName, "Paper", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(itemName, "CD", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -574,7 +635,8 @@ namespace ProjectF.EditorTools
         {
             return !string.IsNullOrWhiteSpace(userData)
                 && (userData.StartsWith(BookSourceIconGuidUserDataPrefix, StringComparison.Ordinal)
-                    || userData.StartsWith(PaperSourceIconGuidUserDataPrefix, StringComparison.Ordinal));
+                    || userData.StartsWith(PaperSourceIconGuidUserDataPrefix, StringComparison.Ordinal)
+                    || userData.StartsWith(CdSourceIconGuidUserDataPrefix, StringComparison.Ordinal));
         }
 
         private static bool IsDocumentPortableMeshPath(string assetPath)
@@ -583,7 +645,8 @@ namespace ProjectF.EditorTools
                 || string.Equals(
                     assetPath,
                     PaperPortableMeshGenerator.PaperPortableMeshPath,
-                    StringComparison.OrdinalIgnoreCase);
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(assetPath, CdPortableMeshPath, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool TryResolveNamedSourceDefinition(
@@ -754,6 +817,12 @@ namespace ProjectF.EditorTools
                     definitions,
                     PaperSourceIconGuidUserDataPrefix,
                     out sourceDefinition,
+                    out sourceIcon)
+                || TryResolveStoredSourceIcon(
+                    currentIcon,
+                    definitions,
+                    CdSourceIconGuidUserDataPrefix,
+                    out sourceDefinition,
                     out sourceIcon);
         }
 
@@ -863,6 +932,10 @@ namespace ProjectF.EditorTools
                 || string.Equals(
                     userData,
                     $"{PaperSourceIconGuidUserDataPrefix}{sourceIconGuid}",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    userData,
+                    $"{CdSourceIconGuidUserDataPrefix}{sourceIconGuid}",
                     StringComparison.Ordinal);
         }
 
@@ -1653,6 +1726,23 @@ namespace ProjectF.EditorTools
         {
             PaperPortableMeshGenerator.EnsureAssetAndBindings();
             return BookItemAssetGenerator.TryCreatePaper(
+                selectedDefinition,
+                definitions,
+                out result,
+                out errorMessage);
+        }
+    }
+
+    internal static class CdItemAssetGenerator
+    {
+        internal static bool TryCreate(
+            ItemDefinition selectedDefinition,
+            IReadOnlyList<ItemDefinition> definitions,
+            out BookItemAssetGenerator.Result result,
+            out string errorMessage)
+        {
+            CdPortableMeshGenerator.EnsureAssetAndBindings();
+            return BookItemAssetGenerator.TryCreateCd(
                 selectedDefinition,
                 definitions,
                 out result,

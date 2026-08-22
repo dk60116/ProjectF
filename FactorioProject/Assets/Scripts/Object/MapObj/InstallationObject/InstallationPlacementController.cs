@@ -7470,6 +7470,28 @@ public class InstallationPlacementController : MonoBehaviour
         return coordinates;
     }
 
+    private IReadOnlyList<Vector2Int> ResolveInstalledObjectRuntimeOccupiedCoordinates(
+        MapObject installedObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        IReadOnlyList<Vector2Int> occupiedCoordinatesOverride)
+    {
+        // 지하 파이프 쌍과 열차는 설치 계획이 계산한 명시적 점유 좌표가 실제 본체 좌표다.
+        if (occupiedCoordinatesOverride != null
+            && occupiedCoordinatesOverride.Count > 0
+            && (installedObject is UndergroundPipe || installedObject is Train))
+        {
+            return occupiedCoordinatesOverride;
+        }
+
+        // 일반 설치물의 RuntimeOccupiedCoordinates에는 Object 칸만 저장한다.
+        // Input/Output/Energy Area까지 포함하면 포커싱에서 본체와 Area가 한 그룹으로 합쳐진다.
+        return GetInstalledObjectBlockingCoordinates(
+            anchorCoordinate,
+            installedObject,
+            quarterTurns);
+    }
+
     public void ConfigureInstalledObjectRuntime(
         MapObject installedObject,
         Vector2Int anchorCoordinate,
@@ -7490,9 +7512,11 @@ public class InstallationPlacementController : MonoBehaviour
         if (installedObject is InstallationObject installationObject)
         {
             IReadOnlyList<Vector2Int> occupiedCoordinates =
-                occupiedCoordinatesOverride != null && occupiedCoordinatesOverride.Count > 0
-                    ? occupiedCoordinatesOverride
-                    : GetInstalledObjectBlockingCoordinates(anchorCoordinate, installedObject, quarterTurns);
+                ResolveInstalledObjectRuntimeOccupiedCoordinates(
+                    installedObject,
+                    anchorCoordinate,
+                    quarterTurns,
+                    occupiedCoordinatesOverride);
 
             installationObject.ConfigurePlacementRuntime(
                 anchorCoordinate,

@@ -3062,6 +3062,14 @@ public class ItemDataEditorWindow : EditorWindow
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
+            GUIContent createPaperIconContent = new GUIContent(
+                "Create Paper Icon",
+                "일반 아이템을 선택하면 원본 ItemDefinition을 변경하지 않고 Assets/Items/Paper 아래의 대응 Paper 아이콘과 P 텍스처를 생성합니다.");
+            if (GUILayout.Button(createPaperIconContent, GUILayout.Width(135f)))
+            {
+                CreatePaperIcon(definition);
+            }
+
             GUIContent createBookIconContent = new GUIContent(
                 "Create Book Icon",
                 "일반 아이템을 선택하면 원본 ItemDefinition을 변경하지 않고 Assets/Items/Book 아래의 대응 Book 아이콘과 P 텍스처를 생성합니다.");
@@ -3070,12 +3078,16 @@ public class ItemDataEditorWindow : EditorWindow
                 CreateBookIcon(definition);
             }
 
-            GUIContent createPaperIconContent = new GUIContent(
-                "Create Paper Icon",
-                "일반 아이템을 선택하면 원본 ItemDefinition을 변경하지 않고 Assets/Items/Paper 아래의 대응 Paper 아이콘과 P 텍스처를 생성합니다.");
-            if (GUILayout.Button(createPaperIconContent, GUILayout.Width(135f)))
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUIContent createCdIconContent = new GUIContent(
+                "Create CD Icon",
+                "일반 아이템을 선택하면 원본 ItemDefinition을 변경하지 않고 Assets/Items/CD 아래의 대응 CD 아이콘과 P 텍스처를 생성합니다.");
+            if (GUILayout.Button(createCdIconContent, GUILayout.Width(120f)))
             {
-                CreatePaperIcon(definition);
+                CreateCdIcon(definition);
             }
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
@@ -6240,6 +6252,11 @@ public class ItemDataEditorWindow : EditorWindow
     private void CreatePaperIcon(ItemDefinition definition)
     {
         CreateDocumentIcon(definition, "Paper", PaperItemAssetGenerator.TryCreate);
+    }
+
+    private void CreateCdIcon(ItemDefinition definition)
+    {
+        CreateDocumentIcon(definition, "CD", CdItemAssetGenerator.TryCreate);
     }
 
     private void CreateDocumentIcon(

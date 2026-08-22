@@ -3684,12 +3684,13 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
-        if (occupiedCoordinates != null)
+        IReadOnlyList<Vector2Int> focusCoordinates = module.RuntimeFocusCoordinates;
+        if (focusCoordinates != null)
         {
-            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            for (int i = 0; i < focusCoordinates.Count; i++)
             {
-                if (occupiedCoordinates[i] == coordinate)
+                if (focusCoordinates[i] == coordinate
+                    && !ModuleOwnsAnyAreaCoordinate(module, coordinate))
                 {
                     return true;
                 }
@@ -3789,23 +3790,29 @@ public class PlayerController : MonoBehaviour
         }
 
         bool appended = false;
-        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
-        if (occupiedCoordinates != null)
+        IReadOnlyList<Vector2Int> focusCoordinates = module.RuntimeFocusCoordinates;
+        if (focusCoordinates != null)
         {
-            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            for (int i = 0; i < focusCoordinates.Count; i++)
             {
-                appended |= TryAppendFocusBlock(results, occupiedCoordinates[i], module);
+                Vector2Int coordinate = focusCoordinates[i];
+                if (ModuleOwnsAnyAreaCoordinate(module, coordinate))
+                {
+                    continue;
+                }
+
+                appended |= TryAppendFocusBlock(results, coordinate, module);
             }
         }
 
         if (!appended)
         {
-            IReadOnlyList<Vector2Int> focusCoordinates = module.RuntimeFocusCoordinates;
-            if (focusCoordinates != null)
+            IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
+            if (occupiedCoordinates != null)
             {
-                for (int i = 0; i < focusCoordinates.Count; i++)
+                for (int i = 0; i < occupiedCoordinates.Count; i++)
                 {
-                    Vector2Int coordinate = focusCoordinates[i];
+                    Vector2Int coordinate = occupiedCoordinates[i];
                     if (ModuleOwnsAnyAreaCoordinate(module, coordinate))
                     {
                         continue;
@@ -3829,22 +3836,33 @@ public class PlayerController : MonoBehaviour
             return 0;
         }
 
-        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
-        if (occupiedCoordinates != null && occupiedCoordinates.Count > 0)
-        {
-            return occupiedCoordinates.Count;
-        }
-
         int count = 0;
         IReadOnlyList<Vector2Int> focusCoordinates = module.RuntimeFocusCoordinates;
-        if (focusCoordinates == null)
+        if (focusCoordinates != null)
+        {
+            for (int i = 0; i < focusCoordinates.Count; i++)
+            {
+                if (!ModuleOwnsAnyAreaCoordinate(module, focusCoordinates[i]))
+                {
+                    count++;
+                }
+            }
+
+            if (count > 0)
+            {
+                return count;
+            }
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = module.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null)
         {
             return count;
         }
 
-        for (int i = 0; i < focusCoordinates.Count; i++)
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
         {
-            if (!ModuleOwnsAnyAreaCoordinate(module, focusCoordinates[i]))
+            if (!ModuleOwnsAnyAreaCoordinate(module, occupiedCoordinates[i]))
             {
                 count++;
             }

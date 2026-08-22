@@ -807,7 +807,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::OilDrillingMachine
   id: 0
   objectName: Oil drilling machine
-  objId: 44
+  objId: 46
   itemDefinition: {fileID: 11400000, guid: d4d9ce93c017a2e4d8c5891bb4f4e91c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

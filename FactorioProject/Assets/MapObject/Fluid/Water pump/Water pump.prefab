@@ -139,7 +139,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 45
+  objId: 47
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

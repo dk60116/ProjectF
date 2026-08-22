@@ -86,6 +86,9 @@ MonoBehaviour:
   localTeeSecondDirection: 1
   localTeeThirdDirection: 2
   fluidDP: {fileID: 0}
+  primaryEndpointVisual: {fileID: 0}
+  previewRouteHeight: 0.12
+  previewRouteWidth: 0.08
 --- !u!65 &7989361200139579577
 BoxCollider:
   m_ObjectHideFlags: 0

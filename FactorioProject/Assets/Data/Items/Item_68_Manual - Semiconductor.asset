@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_68_Manual - Semiconductor
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Semiconductor
-  id: 65
+  id: 67
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
   portableMat: {fileID: 2100000, guid: 828a160850cf9674197f705bffdf20c4, type: 2}
@@ -35,6 +35,7 @@ MonoBehaviour:
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
   bucketFillDurationSeconds: 10
+  undergroundPipeMaxDistance: 5
   energyType: 0
   energyAmount: 0
   useEnergyType: 0

@@ -36,6 +36,7 @@ MonoBehaviour:
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
   bucketFillDurationSeconds: 10
+  undergroundPipeMaxDistance: 5
   energyType: 1
   energyAmount: 40
   useEnergyType: 0

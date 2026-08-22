@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_50_Leather
   m_EditorClassIdentifier: 
   itemName: Leather
-  id: 55
+  id: 57
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: a93c1180b6e5c4549b44e7103f3ee726, type: 2}
   portableMat: {fileID: 2100000, guid: c0de1ea7a6ab4d54b8dd61fd4689fa02, type: 2}
@@ -35,6 +35,7 @@ MonoBehaviour:
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
   bucketFillDurationSeconds: 10
+  undergroundPipeMaxDistance: 5
   energyType: 0
   energyAmount: 0
   useEnergyType: 0
