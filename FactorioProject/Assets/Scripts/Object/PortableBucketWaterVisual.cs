@@ -23,33 +23,40 @@ public sealed class PortableBucketWaterVisual : MonoBehaviour
     public Renderer OutlineFillRenderer => null;
     public int SurfaceVertexCount => sharedCircleMesh != null ? sharedCircleMesh.vertexCount : 0;
     public float FillRatio => fillRatio;
+    public Material SurfaceMaterial => surfaceRenderer != null
+        ? surfaceRenderer.sharedMaterial
+        : null;
     public float SurfaceLocalY => surfaceTransform != null
         ? surfaceTransform.localPosition.y
         : float.NaN;
 
     public void Refresh(
         Bucket bucket,
-        bool containsWater,
+        int fluidItemId,
         MeshFilter body,
         bool ownerVisualVisible)
     {
-        Refresh(bucket, containsWater, body, ownerVisualVisible, containsWater ? 1f : 0f, false);
+        bool containsFluid = fluidItemId >= 0;
+        Refresh(bucket, fluidItemId, body, ownerVisualVisible, containsFluid ? 1f : 0f, false);
     }
 
     public void Refresh(
         Bucket bucket,
-        bool containsWater,
+        int fluidItemId,
         MeshFilter body,
         bool ownerVisualVisible,
         float requestedFillRatio,
         bool animateInstalledFill)
     {
         fillRatio = Mathf.Clamp01(requestedFillRatio);
+        Material surfaceMaterial = bucket != null
+            ? bucket.ResolveFluidSurfaceMaterial(fluidItemId)
+            : null;
         bool shouldShow = bucket != null
-                          && containsWater
+                          && fluidItemId >= 0
                           && fillRatio > 0.0001f
                           && body != null
-                          && bucket.PortableWaterSurfaceMaterial != null;
+                          && surfaceMaterial != null;
         if (!shouldShow)
         {
             SetVisible(false);
@@ -61,9 +68,10 @@ public sealed class PortableBucketWaterVisual : MonoBehaviour
             body.transform,
             TryGetComponent(out PortableObject _),
             animateInstalledFill,
-            fillRatio);
+            fillRatio,
+            fluidItemId);
         surfaceTransform.gameObject.layer = body.gameObject.layer;
-        surfaceRenderer.sharedMaterial = bucket.PortableWaterSurfaceMaterial;
+        surfaceRenderer.sharedMaterial = surfaceMaterial;
         SetVisible(ownerVisualVisible);
     }
 
@@ -72,7 +80,8 @@ public sealed class PortableBucketWaterVisual : MonoBehaviour
         Transform bodyTransform,
         bool usePortableTransform,
         bool animateInstalledFill,
-        float requestedFillRatio)
+        float requestedFillRatio,
+        int fluidItemId)
     {
         if (surfaceTransform == null)
         {
@@ -119,7 +128,8 @@ public sealed class PortableBucketWaterVisual : MonoBehaviour
         else if (animateInstalledFill)
         {
             float normalizedFill = Mathf.Clamp01(requestedFillRatio);
-            bucket.TryGetInstalledFullWaterSurfaceTransform(
+            bucket.TryGetInstalledFullSurfaceTransform(
+                fluidItemId,
                 out Vector3 fullLocalPosition,
                 out Quaternion fullLocalRotation,
                 out Vector3 fullLocalScale);

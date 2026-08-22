@@ -1081,7 +1081,9 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if ((installationObject is SteamGenerator || installationObject is Fluidtank)
+        if ((installationObject is SteamGenerator
+             || installationObject is Fluidtank
+             || installationObject is Bucket)
             && installationObject.StoredFluidItemId < 0)
         {
             slot.SetCustomDisplay(-1, null, string.Empty, string.Empty);

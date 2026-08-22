@@ -1970,7 +1970,7 @@ public class ItemManager : MonoBehaviour
         ref Material portableMaterial)
     {
         string itemKey = NormalizePortableLookupName(itemName);
-        if (itemKey != "bucket" && itemKey != "waterbucket")
+        if (itemKey != "bucket" && itemKey != "waterbucket" && itemKey != "oilbucket")
         {
             return;
         }

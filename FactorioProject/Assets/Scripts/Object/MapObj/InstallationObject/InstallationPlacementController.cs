@@ -130,15 +130,27 @@ public class InstallationPlacementController : MonoBehaviour
     private Vector2Int installGridLastPreviewAnchorCoordinate;
     private int installGridLastPreviewQuarterTurns;
     private MapObject installGridLastPreview;
+    private bool installGridMeshBuildInitialized;
+    private readonly List<Vector2Int> installGridBlockedCoordinates =
+        new List<Vector2Int>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis);
+    private readonly Dictionary<Vector2Int, bool> installGridPlacementValidityCache =
+        new Dictionary<Vector2Int, bool>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis);
+    private readonly Dictionary<Vector3Int, bool> installGridRectAnchorValidityCache =
+        new Dictionary<Vector3Int, bool>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis * 4);
+    private readonly Dictionary<Vector2Int, bool> installGridSimpleClearCellCache =
+        new Dictionary<Vector2Int, bool>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis);
+    private bool installGridValidationInProgress;
+    private bool installGridValidationUsesSimpleRectGridFastPath;
+    private InstallationMapFilter installGridSimpleAllowedFilter;
     private MapObject installPreviewVisualSyncPreview;
     private bool installPreviewVisualSyncHasAnchor;
     private Vector2Int installPreviewVisualSyncAnchorCoordinate;
     private int installPreviewVisualSyncQuarterTurns;
     private Vector3 installPreviewVisualSyncPosition;
     private Quaternion installPreviewVisualSyncRotation = Quaternion.identity;
-    private readonly List<Vector3> installGridVertices = new List<Vector3>(4096);
-    private readonly List<int> installGridTriangles = new List<int>(6144);
-    private readonly List<Color> installGridColors = new List<Color>(4096);
+    private readonly List<Vector3> installGridVertices = new List<Vector3>(40000);
+    private readonly List<int> installGridTriangles = new List<int>(60000);
+    private readonly List<Color> installGridColors = new List<Color>(40000);
     private readonly RaycastHit[] pointerRaycastHits = new RaycastHit[128];
     private EventSystem pointerRaycastEventSystem;
     private PointerEventData pointerRaycastEventData;
@@ -285,6 +297,11 @@ public class InstallationPlacementController : MonoBehaviour
     private static readonly int ZWritePropertyId = Shader.PropertyToID("_ZWrite");
     private static readonly int CullPropertyId = Shader.PropertyToID("_Cull");
     private static readonly HashSet<Material> runtimeBlueprintPreviewMaterials = new HashSet<Material>();
+    private static readonly HashSet<Material> blueprintPreviewMaterialReleaseScratch = new HashSet<Material>();
+    private readonly Dictionary<Material, Material> blueprintPreviewMaterialCache =
+        new Dictionary<Material, Material>();
+    private readonly Dictionary<Material, Material> doubleSidedBlueprintPreviewMaterialCache =
+        new Dictionary<Material, Material>();
     private const int ConveyorRotationSequenceCount = 12;
     private static readonly Vector2Int[] WaterPumpCardinalProbeDirections =
     {
@@ -1022,7 +1039,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         int handItemId = handBag != null ? handBag.GetSlotItemId(0) : -1;
-        SetInstallButtonVisible(IsInstallationItem(handItemId));
+        bool hasHandItem = handBag != null && handBag.GetSlotCount(0) > 0;
+        SetInstallButtonVisible(
+            hasHandItem && TryGetInventoryInstallationDefinition(handItemId, out _));
     }
 
     private void RefreshInstallButton()
@@ -1050,7 +1069,9 @@ public class InstallationPlacementController : MonoBehaviour
 
         int handItemId = handBag != null ? handBag.GetSlotItemId(0) : -1;
         int handItemCount = handBag != null ? handBag.GetSlotCount(0) : 0;
-        if (handItemId >= 0 && handItemCount > 0 && !TryGetInstallationDefinition(handItemId, out _))
+        if (handItemId >= 0
+            && handItemCount > 0
+            && !TryGetInventoryInstallationDefinition(handItemId, out _))
         {
             ClearInstallPreview();
             return;
@@ -1069,23 +1090,38 @@ public class InstallationPlacementController : MonoBehaviour
         return activeInstallationEditSession != null;
     }
 
-    private bool IsInstallationItem(int itemId)
-    {
-        return TryGetInstallationDefinition(itemId, out _);
-    }
-
     private bool TryGetHandInstallationDefinition(out ItemDefinition definition)
     {
         definition = null;
 
         PlayerBag handBag = GetPlayerHandBag();
-        if (handBag == null)
+        if (handBag == null || handBag.GetSlotCount(0) <= 0)
         {
             return false;
         }
 
         int handItemId = handBag.GetSlotItemId(0);
-        return TryGetInstallationDefinition(handItemId, out definition);
+        return TryGetInventoryInstallationDefinition(handItemId, out definition);
+    }
+
+    private bool TryGetInventoryInstallationDefinition(int itemId, out ItemDefinition definition)
+    {
+        definition = null;
+
+        if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.ItemManger == null)
+        {
+            return false;
+        }
+
+        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        definition = ItemDefinitionLookup.ResolveExactById(definitions, itemId);
+        if (!ItemDefinitionLookup.IsInstallationDefinition(definition))
+        {
+            definition = null;
+            return false;
+        }
+
+        return true;
     }
 
     private bool TryGetInstallationDefinition(int itemId, out ItemDefinition definition)
@@ -2677,6 +2713,13 @@ public class InstallationPlacementController : MonoBehaviour
         if (installPreviewPropertyBlock == null)
         {
             installPreviewPropertyBlock = new MaterialPropertyBlock();
+        }
+
+        if (preview is UndergroundPipe undergroundPipePreview)
+        {
+            // The route is created after the endpoint renderers. Bind its preview
+            // material before collecting renderers so it receives the same property block.
+            undergroundPipePreview.SetPreviewRouteColor(tint);
         }
 
         Renderer[] renderers = preview.GetComponentsInChildren<Renderer>(true);
@@ -15355,7 +15398,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool IsPipeConnectorObject(MapObject mapObject)
     {
-        if (mapObject is Pipe || mapObject is Fluidtank)
+        if (mapObject is Pipe || mapObject is Fluidtank || mapObject is Bucket)
         {
             return true;
         }
@@ -17363,6 +17406,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        blueprintPreviewMaterialReleaseScratch.Clear();
         Renderer[] renderers = preview.GetComponentsInChildren<Renderer>(true);
         for (int i = 0; i < renderers.Length; i++)
         {
@@ -17387,20 +17431,26 @@ public class InstallationPlacementController : MonoBehaviour
                 }
 
                 materials[materialIndex] = null;
-                if (Application.isPlaying)
-                {
-                    runtimeBlueprintPreviewMaterials.Remove(material);
-                    Destroy(material);
-                }
-                else
-                {
-                    runtimeBlueprintPreviewMaterials.Remove(material);
-                    DestroyImmediate(material);
-                }
+                blueprintPreviewMaterialReleaseScratch.Add(material);
             }
 
             renderer.sharedMaterials = materials;
         }
+
+        foreach (Material material in blueprintPreviewMaterialReleaseScratch)
+        {
+            runtimeBlueprintPreviewMaterials.Remove(material);
+            if (Application.isPlaying)
+            {
+                Destroy(material);
+            }
+            else
+            {
+                DestroyImmediate(material);
+            }
+        }
+
+        blueprintPreviewMaterialReleaseScratch.Clear();
     }
 
     private static bool IsRuntimeBlueprintPreviewMaterial(Material material)
@@ -18887,6 +18937,8 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        blueprintPreviewMaterialCache.Clear();
+        doubleSidedBlueprintPreviewMaterialCache.Clear();
         ApplyConveyorVariantSharedInstallationSettings(preview);
         ApplyPipeVariantSharedMapObjectSettings(preview);
         bool containsRobotArmPreview = ConfigurePreviewOnlyRuntimeRendering(preview);
@@ -18993,10 +19045,12 @@ public class InstallationPlacementController : MonoBehaviour
             ConfigurePreviewOnlyRuntimeRendering(preview);
         }
 
+        blueprintPreviewMaterialCache.Clear();
+        doubleSidedBlueprintPreviewMaterialCache.Clear();
         SetInstallPreviewSelectionVisual(preview, false);
     }
 
-    private static void ApplyBlueprintPreviewMaterial(Renderer renderer, Color previewTint, bool forceDoubleSided = false)
+    private void ApplyBlueprintPreviewMaterial(Renderer renderer, Color previewTint, bool forceDoubleSided = false)
     {
         if (renderer == null
             || renderer.GetComponentInParent<WorkableObjectRangeVisual>() != null)
@@ -19010,13 +19064,27 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        Material[] previewMaterials = new Material[sourceMaterials.Length];
-        for (int i = 0; i < previewMaterials.Length; i++)
+        Dictionary<Material, Material> materialCache = forceDoubleSided
+            ? doubleSidedBlueprintPreviewMaterialCache
+            : blueprintPreviewMaterialCache;
+        for (int i = 0; i < sourceMaterials.Length; i++)
         {
-            previewMaterials[i] = CreateBlueprintPreviewMaterial(sourceMaterials[i], previewTint, forceDoubleSided);
+            Material sourceMaterial = sourceMaterials[i];
+            if (sourceMaterial == null)
+            {
+                continue;
+            }
+
+            if (!materialCache.TryGetValue(sourceMaterial, out Material previewMaterial))
+            {
+                previewMaterial = CreateBlueprintPreviewMaterial(sourceMaterial, previewTint, forceDoubleSided);
+                materialCache[sourceMaterial] = previewMaterial;
+            }
+
+            sourceMaterials[i] = previewMaterial;
         }
 
-        renderer.sharedMaterials = previewMaterials;
+        renderer.sharedMaterials = sourceMaterials;
     }
 
     private static Material CreateBlueprintPreviewMaterial(Material sourceMaterial, Color previewTint, bool forceDoubleSided = false)
@@ -19256,6 +19324,14 @@ public class InstallationPlacementController : MonoBehaviour
         Vector3? railReferenceWorldPosition = null)
     {
         if (activeInstallPreview == null || block == null)
+        {
+            return false;
+        }
+
+        if (activeInstallPreview is UndergroundPipe committedUndergroundPipe
+            && committedUndergroundPipe.IsPreviewPairCommitted
+            && (activeInstallationEditSession == null
+                || !activeInstallationEditSession.editsUndergroundPipeEndpoint))
         {
             return false;
         }
@@ -19817,6 +19893,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             installGridDirty = true;
             installGridPreviewDirty = true;
+            ResetInstallGridMeshBuild(true);
             installGridLastShowFullGrid = showFullGrid;
             installGridLastShowConveyorDebugOnly = showConveyorDebugOnly;
         }
@@ -19828,11 +19905,13 @@ public class InstallationPlacementController : MonoBehaviour
         {
             installGridDirty = true;
             installGridPreviewDirty = true;
+            ResetInstallGridMeshBuild(true);
         }
 
         if (HaveInstallGridBoundsChanged())
         {
             installGridDirty = true;
+            ResetInstallGridMeshBuild();
         }
 
         if (HaveInstallGridPreviewStateChanged())
@@ -19842,8 +19921,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (installGridDirty)
         {
-            RebuildInstallGridMesh();
-            installGridDirty = false;
+            installGridDirty = !RebuildInstallGridMesh();
         }
 
         if (installGridPreviewDirty)
@@ -19864,6 +19942,19 @@ public class InstallationPlacementController : MonoBehaviour
         installGridLastPreviewAnchorCoordinate = Vector2Int.zero;
         installGridLastPreviewQuarterTurns = 0;
         installGridLastPreview = null;
+        ResetInstallGridMeshBuild(true);
+    }
+
+    private void ResetInstallGridMeshBuild(bool clearValidityCache = false)
+    {
+        installGridMeshBuildInitialized = false;
+        installGridBlockedCoordinates.Clear();
+        if (clearValidityCache)
+        {
+            installGridPlacementValidityCache.Clear();
+            installGridRectAnchorValidityCache.Clear();
+            installGridSimpleClearCellCache.Clear();
+        }
     }
 
     private bool HaveInstallGridBoundsChanged()
@@ -20194,13 +20285,13 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private void RebuildInstallGridMesh()
+    private bool RebuildInstallGridMesh()
     {
         EnsureInstallGridResources();
 
         if (installGridMesh == null)
         {
-            return;
+            return true;
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
@@ -20208,17 +20299,34 @@ public class InstallationPlacementController : MonoBehaviour
         {
             installGridMesh.Clear();
             installGridBoundsInitialized = false;
-            return;
+            ResetInstallGridMeshBuild();
+            return true;
         }
-
-        installGridMinCoordinate = minCoordinate;
-        installGridMaxCoordinate = maxCoordinate;
-        installGridBoundsInitialized = true;
 
         bool showFullGrid = IsInstallGridModeActive();
         bool showConveyorDebugOnly = !showFullGrid
             && GameManager.Instance != null
             && GameManager.Instance.DebugConveyorInstallGridEnds;
+
+        if (!installGridMeshBuildInitialized
+            || installGridMinCoordinate != minCoordinate
+            || installGridMaxCoordinate != maxCoordinate)
+        {
+            installGridMinCoordinate = minCoordinate;
+            installGridMaxCoordinate = maxCoordinate;
+            installGridBoundsInitialized = true;
+            installGridMeshBuildInitialized = true;
+            installGridBlockedCoordinates.Clear();
+            RestoreCachedInstallGridBlockedCoordinates(minCoordinate, maxCoordinate);
+        }
+
+        bool shouldValidateBlockedCells = showFullGrid
+                                          && activeInstallDefinition != null
+                                          && activeInstallDefinition.mapObject != null;
+        if (shouldValidateBlockedCells)
+        {
+            ValidateInstallGridBlockedCells(terrain, minCoordinate, maxCoordinate);
+        }
 
         float lineY = terrain.transform.position.y + installGridVerticalOffset;
         float fillY = lineY - 0.002f;
@@ -20235,37 +20343,17 @@ public class InstallationPlacementController : MonoBehaviour
         triangles.Clear();
         colors.Clear();
 
-        if (showFullGrid && activeInstallDefinition != null && activeInstallDefinition.mapObject != null)
+        if (showFullGrid)
         {
-            MapObject activeGridSource = activeInstallDefinition.mapObject;
-            bool useFastBoilerGridCheck = IsBoilerSource(activeGridSource);
-            bool useFastSteamGeneratorGridCheck = IsSteamGeneratorSource(activeGridSource);
-            for (int z = minCoordinate.y; z <= maxCoordinate.y; z++)
+            for (int i = 0; i < installGridBlockedCoordinates.Count; i++)
             {
-                for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
-                {
-                    Vector2Int coordinate = new Vector2Int(x, z);
-                    if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
-                    {
-                        continue;
-                    }
-
-                    if (CanPlaceActiveDefinitionFromGridCoordinate(
-                            block,
-                            useFastBoilerGridCheck,
-                            useFastSteamGeneratorGridCheck))
-                    {
-                        continue;
-                    }
-
-                    AddGridCellQuad(
-                        vertices,
-                        triangles,
-                        colors,
-                        coordinate,
-                        fillY,
-                        installGridBlockedFillColor);
-                }
+                AddGridCellQuad(
+                    vertices,
+                    triangles,
+                    colors,
+                    installGridBlockedCoordinates[i],
+                    fillY,
+                    installGridBlockedFillColor);
             }
         }
 
@@ -20306,6 +20394,81 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMesh.SetTriangles(triangles, 0, true);
         installGridMesh.SetColors(colors);
         installGridMesh.RecalculateBounds();
+        return true;
+    }
+
+    private void ValidateInstallGridBlockedCells(
+        TerrainGenerator terrain,
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate)
+    {
+        MapObject activeGridSource = activeInstallDefinition != null
+            ? activeInstallDefinition.mapObject
+            : null;
+        if (terrain == null || activeGridSource == null)
+        {
+            return;
+        }
+
+        bool useFastBoilerGridCheck = IsBoilerSource(activeGridSource);
+        bool useFastSteamGeneratorGridCheck = IsSteamGeneratorSource(activeGridSource);
+        CleanupInstallPreviewReferences();
+        installGridValidationInProgress = true;
+        installGridValidationUsesSimpleRectGridFastPath =
+            CanUseSimpleRectGridInstallGridCheck(activeGridSource);
+        installGridSimpleAllowedFilter = activeGridSource is InstallationObject activeGridInstallation
+            ? ResolvePlacementMapFilter(activeGridSource, activeGridInstallation)
+            : InstallationMapFilter.Ground;
+        try
+        {
+            for (int z = minCoordinate.y; z <= maxCoordinate.y; z++)
+            {
+                for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
+                {
+                    Vector2Int coordinate = new Vector2Int(x, z);
+                    if (installGridPlacementValidityCache.ContainsKey(coordinate))
+                    {
+                        continue;
+                    }
+
+                    bool canPlace = !terrain.TryGetLoadedBlock(coordinate, out Block block)
+                                    || block == null
+                                    || CanPlaceActiveDefinitionFromGridCoordinate(
+                                        block,
+                                        useFastBoilerGridCheck,
+                                        useFastSteamGeneratorGridCheck);
+                    installGridPlacementValidityCache[coordinate] = canPlace;
+                    if (!canPlace)
+                    {
+                        installGridBlockedCoordinates.Add(coordinate);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            installGridSimpleAllowedFilter = InstallationMapFilter.None;
+            installGridValidationUsesSimpleRectGridFastPath = false;
+            installGridValidationInProgress = false;
+        }
+    }
+
+    private void RestoreCachedInstallGridBlockedCoordinates(
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate)
+    {
+        for (int z = minCoordinate.y; z <= maxCoordinate.y; z++)
+        {
+            for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
+            {
+                Vector2Int coordinate = new Vector2Int(x, z);
+                if (installGridPlacementValidityCache.TryGetValue(coordinate, out bool canPlace)
+                    && !canPlace)
+                {
+                    installGridBlockedCoordinates.Add(coordinate);
+                }
+            }
+        }
     }
 
     private void RebuildInstallGridPreviewMesh()
@@ -20531,7 +20694,13 @@ public class InstallationPlacementController : MonoBehaviour
                     placement.y - objectAnchorCell.y);
                 Vector2Int candidateAnchorCoordinate =
                     clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
-                if (CanPlaceSimpleRectGridAtAnchorFast(
+                Vector3Int cacheKey = new Vector3Int(
+                    candidateAnchorCoordinate.x,
+                    candidateAnchorCoordinate.y,
+                    candidateQuarterTurns);
+                if (!installGridRectAnchorValidityCache.TryGetValue(cacheKey, out bool canPlaceAtAnchor))
+                {
+                    canPlaceAtAnchor = CanPlaceSimpleRectGridAtAnchorFast(
                         terrain,
                         candidateAnchorCoordinate,
                         footprintSource,
@@ -20540,7 +20709,11 @@ public class InstallationPlacementController : MonoBehaviour
                         placements,
                         rectGridWidth,
                         rectGridHeight,
-                        objectAnchorCell))
+                        objectAnchorCell);
+                    installGridRectAnchorValidityCache[cacheKey] = canPlaceAtAnchor;
+                }
+
+                if (canPlaceAtAnchor)
                 {
                     return true;
                 }
@@ -20725,7 +20898,11 @@ public class InstallationPlacementController : MonoBehaviour
                 return false;
             }
 
-            if (!CanPlacePreviewOnTargetBlockType(
+            if (!IsInstallGridSimpleClearCell(
+                    footprintBlock,
+                    footprintSource,
+                    previewToIgnore)
+                && !CanPlacePreviewOnTargetBlockType(
                     footprintBlock,
                     footprintSource,
                     placement.blockType,
@@ -20754,6 +20931,45 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return checkedAnyPlacement;
+    }
+
+    private bool IsInstallGridSimpleClearCell(
+        Block block,
+        MapObject footprintSource,
+        MapObject previewToIgnore)
+    {
+        if (!installGridValidationInProgress
+            || !installGridValidationUsesSimpleRectGridFastPath
+            || block == null
+            || footprintSource == null)
+        {
+            return false;
+        }
+
+        Vector2Int coordinate = block.Coordinate;
+        if (installGridSimpleClearCellCache.TryGetValue(coordinate, out bool isClear))
+        {
+            return isClear;
+        }
+
+        MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
+        bool hasOtherPreview = TryGetInstallPreviewAtCoordinate(
+                                   coordinate,
+                                   out MapObject existingPreview)
+                               && existingPreview != null
+                               && existingPreview != previewToIgnore;
+        isClear = occupyingObject == null
+                  && block.Resource == null
+                  && !hasOtherPreview
+                  && CanPlaceOnTerrainBiome(block, installGridSimpleAllowedFilter)
+                  && !CoordinateHasNormalInputOutputAreaBlockForPlacement(
+                      coordinate,
+                      previewToIgnore)
+                  && !InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate)
+                  && !HasPipeAreaFluidStorageAtCoordinate(coordinate)
+                  && !IsPumpOutputCoordinateForPlacement(coordinate);
+        installGridSimpleClearCellCache[coordinate] = isClear;
+        return isClear;
     }
 
     private bool CanPlaceBoilerFromGridCoordinateFast(Block block, MapObject footprintSource)
@@ -23924,6 +24140,11 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void CleanupInstallPreviewReferences()
     {
+        if (installGridValidationInProgress)
+        {
+            return;
+        }
+
         for (int i = installPreviewInstances.Count - 1; i >= 0; i--)
         {
             if (installPreviewInstances[i] != null)
@@ -24384,7 +24605,9 @@ public class InstallationPlacementController : MonoBehaviour
             straightFirstConveyorPreviews.Add(preview);
         }
 
-        SelectInstallPreview(preview);
+        // 새 프리뷰의 풋프린트는 전용 오버레이에서 바로 그린다. 설치 가능 배경 그리드는
+        // 아이템 종류와 방향이 바뀌지 않았으므로 전체 맵을 다시 검사할 필요가 없다.
+        SelectInstallPreview(preview, true, false);
         if (sourcePreview != null)
         {
             installPreviewConveyorVariantMode = GetConveyorPreviewVariantMode(sourcePreview);
@@ -24637,6 +24860,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void InvalidateInstallGrid()
     {
+        ResetInstallGridMeshBuild(true);
         installGridDirty = true;
         installGridPreviewDirty = true;
     }
@@ -27595,6 +27819,11 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            if (IsInstallGridSimpleClearCell(block, footprintSource, previewToIgnore))
+            {
+                continue;
+            }
+
             MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
 
             if (TryGetPipePlacementAtBlock(block, occupyingObject, out _, out _))
@@ -28504,6 +28733,98 @@ public class InstallationPlacementController : MonoBehaviour
             previewToIgnore,
             out _,
             ignoreOtherPreviews);
+    }
+
+    public bool CanCollectInstalledBucketToHand(Bucket bucket, Player player)
+    {
+        return TryResolveInstalledBucketCollection(
+                   bucket,
+                   out int itemId,
+                   out _,
+                   out _,
+                   out _)
+               && player != null
+               && (player.CanAcceptHandObject(itemId) || player.CanClearHandIntoBag());
+    }
+
+    public bool TryCollectInstalledBucketToHand(Bucket bucket, Player player)
+    {
+        if (player == null
+            || !TryResolveInstalledBucketCollection(
+                bucket,
+                out int itemId,
+                out ItemDefinition definition,
+                out TerrainGenerator terrain,
+                out IReadOnlyList<Vector2Int> runtimeOccupiedCoordinates))
+        {
+            return false;
+        }
+
+        if (!player.CanAcceptHandObject(itemId)
+            && !player.TryStoreHandItemsInBag())
+        {
+            return false;
+        }
+
+        if (!player.TryAddToHand(itemId, out _))
+        {
+            return false;
+        }
+
+        MapObject sourcePrefab = ResolveInstallationSourcePrefab(
+            definition,
+            GetInstallationVariantKind(bucket));
+        List<Vector2Int> occupiedCoordinates = new List<Vector2Int>(runtimeOccupiedCoordinates);
+        terrain.RemoveInstallationPersistence(bucket);
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block)
+                && block != null
+                && block.MapObject == bucket)
+            {
+                block.SetMapObject(null);
+            }
+        }
+
+        ReleaseInstalledObjectInstance(bucket, sourcePrefab, terrain);
+        RefreshInstalledConnectorVariantsAroundCoordinates(
+            occupiedCoordinates,
+            sourcePrefab,
+            true,
+            null);
+        player.UpdateCarryState();
+        return true;
+    }
+
+    private bool TryResolveInstalledBucketCollection(
+        Bucket bucket,
+        out int itemId,
+        out ItemDefinition definition,
+        out TerrainGenerator terrain,
+        out IReadOnlyList<Vector2Int> occupiedCoordinates)
+    {
+        itemId = -1;
+        definition = null;
+        terrain = ResolveInstallPreviewTerrain();
+        occupiedCoordinates = null;
+        if (bucket == null
+            || !bucket.gameObject.activeInHierarchy
+            || terrain == null
+            || !bucket.TryGetPlacementRuntime(out _, out _)
+            || !TryGetInstallationDefinitionForEditableObject(bucket, out definition)
+            || definition == null)
+        {
+            return false;
+        }
+
+        itemId = bucket.ResolveItemId();
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        occupiedCoordinates = bucket.RuntimeOccupiedCoordinates;
+        return occupiedCoordinates != null && occupiedCoordinates.Count > 0;
     }
 
     public bool TryUpgradeInstalledObject(

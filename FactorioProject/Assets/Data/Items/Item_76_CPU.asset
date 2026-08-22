@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_76_CPU
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: CPU
-  id: 39
+  id: 40
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 8f957552c378891429b37cfa8a4678d2, type: 2}
   portableMat: {fileID: 2100000, guid: e18a1b4c03ce71e4b933769d18bbaf03, type: 2}

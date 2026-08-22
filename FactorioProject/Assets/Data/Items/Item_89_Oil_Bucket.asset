@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_89_Oil_Bucket
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  itemName: Oil Bucket
+  id: 90
+  mapObject: {fileID: 3525437405879595132, guid: 8d2fb53ebe5fa2d448cf0d63b521f261, type: 3}
+  portableMesh: {fileID: 4300000, guid: a8daed3521a70e44c93714f5f9b246c6, type: 2}
+  portableMat: {fileID: 2100000, guid: 5e4d29ac17e2fc64eae3a00225731388, type: 2}
+  icon: {fileID: 21300000, guid: 685a1db047292834aaf9b094a210649e, type: 3}
+  oneItem: 0
+  interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
+  lightIntensityMultiplier: 1
+  size: 0
+  itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
+  capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
+  undergroundPipeMaxDistance: 5
+  energyType: 0
+  energyAmount: 0
+  useEnergyType: 0
+  useEnergyAmount: 0
+  completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
+  craftingDurationSeconds: 5

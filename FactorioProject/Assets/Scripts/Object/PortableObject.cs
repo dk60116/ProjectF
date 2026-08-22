@@ -27,7 +27,7 @@ public class PortableObject : MonoBehaviour
 
     private MeshRenderer bodyRenderer;
     private PortableItemRenderer portableItemRenderer;
-    private PortableBucketWaterVisual bucketWaterVisual;
+    private PortableBucketWaterVisual bucketFluidVisual;
     private Tween moveTween;
     private Transform cachedTransform;
     private GameObject cachedGameObject;
@@ -361,30 +361,30 @@ public class PortableObject : MonoBehaviour
         return cachedItemDefinition;
     }
 
-    private void RefreshBucketWaterVisual()
+    private void RefreshBucketFluidVisual()
     {
         ItemDefinition definition = ResolveItemDefinition();
         Bucket bucket = definition != null ? definition.mapObject as Bucket : null;
-        if (bucket == null && bucketWaterVisual == null)
+        if (bucket == null && bucketFluidVisual == null)
         {
             return;
         }
 
-        if (bucketWaterVisual == null)
+        if (bucketFluidVisual == null)
         {
-            bucketWaterVisual = GetComponent<PortableBucketWaterVisual>();
-            if (bucketWaterVisual == null)
+            bucketFluidVisual = GetComponent<PortableBucketWaterVisual>();
+            if (bucketFluidVisual == null)
             {
-                bucketWaterVisual = CachedGameObject.AddComponent<PortableBucketWaterVisual>();
+                bucketFluidVisual = CachedGameObject.AddComponent<PortableBucketWaterVisual>();
             }
         }
 
         bool ownerVisualVisible = CachedGameObject.activeInHierarchy
             && !suppressVisualRendering
             && !bodyRendererTemporarilyHidden;
-        bucketWaterVisual.Refresh(
+        bucketFluidVisual.Refresh(
             bucket,
-            Bucket.IsWaterBucketDefinition(definition),
+            Bucket.ResolveContainedFluidItemId(definition),
             body,
             ownerVisualVisible);
     }
@@ -657,14 +657,14 @@ public class PortableObject : MonoBehaviour
         ResolveBodyRenderer();
         if (bodyRenderer == null)
         {
-            RefreshBucketWaterVisual();
+            RefreshBucketFluidVisual();
             return;
         }
 
         if (!isVisible)
         {
             bodyRenderer.enabled = false;
-            RefreshBucketWaterVisual();
+            RefreshBucketFluidVisual();
             return;
         }
 
@@ -1055,7 +1055,7 @@ public class PortableObject : MonoBehaviour
         ResolveBodyRenderer();
         if (bodyRenderer == null)
         {
-            RefreshBucketWaterVisual();
+            RefreshBucketFluidVisual();
             return;
         }
 
@@ -1063,7 +1063,7 @@ public class PortableObject : MonoBehaviour
             && !useBatchedRendering
             && !suppressVisualRendering
             && !bodyRendererTemporarilyHidden;
-        RefreshBucketWaterVisual();
+        RefreshBucketFluidVisual();
         RefreshSleepAwakeVisual();
     }
 

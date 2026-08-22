@@ -283,10 +283,17 @@ public static class ItemDefinitionLookup
             return null;
         }
 
-        ItemDefinition exactDefinition = FindByExactId(definitions, itemId);
+        ItemDefinition exactDefinition = ResolveExactById(definitions, itemId);
         return exactDefinition != null
             ? exactDefinition
             : ResolveLegacyDefinition(definitions, itemId);
+    }
+
+    public static ItemDefinition ResolveExactById(IReadOnlyList<ItemDefinition> definitions, int itemId)
+    {
+        return definitions != null && itemId >= 0
+            ? FindByExactId(definitions, itemId)
+            : null;
     }
 
     public static ItemDefinition ResolveInstallationById(IReadOnlyList<ItemDefinition> definitions, int itemId)

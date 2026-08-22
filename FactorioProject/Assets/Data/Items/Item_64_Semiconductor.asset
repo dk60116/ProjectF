@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_64_Semiconductor
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Semiconductor
-  id: 38
+  id: 39
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
   portableMat: {fileID: 2100000, guid: 46b1a9b650b78a74487b4e256a8e2514, type: 2}

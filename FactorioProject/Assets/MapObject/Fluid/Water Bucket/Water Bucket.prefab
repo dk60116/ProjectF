@@ -278,7 +278,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Bucket
   id: 0
   objectName: Water Bucket
-  objId: 88
+  objId: 89
   itemDefinition: {fileID: 11400000, guid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -305,6 +305,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   portableWaterSurfaceMaterial: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+  portableOilSurfaceMaterial: {fileID: 0}
 --- !u!135 &3452091605187860613
 SphereCollider:
   m_ObjectHideFlags: 0

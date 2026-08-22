@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_69_Manual - Steam train
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Steam train
-  id: 70
+  id: 71
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
   portableMat: {fileID: 2100000, guid: b486575d52816424fad992a10a64323e, type: 2}

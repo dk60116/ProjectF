@@ -162,7 +162,7 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
 
 #if defined(_ADDITIONAL_LIGHTS_VERTEX)
                 color += baseColor * input.vertexLighting;
-#elif defined(_ADDITIONAL_LIGHTS)
+#elif defined(_ADDITIONAL_LIGHTS) || defined(_CLUSTER_LIGHT_LOOP)
                 InputData inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);

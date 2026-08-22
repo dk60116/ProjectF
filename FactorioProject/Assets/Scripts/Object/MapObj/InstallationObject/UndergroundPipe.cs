@@ -8,6 +8,9 @@ public class UndergroundPipe : Pipe
     private const int MinimumPairDistance = 2;
     private const string GeneratedExitVisualName = "__UndergroundPipeExit";
     private const string GeneratedRouteVisualName = "__UndergroundPipeRoute";
+    private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
+    private static readonly int BlueprintPreviewPropertyId = Shader.PropertyToID("_BlueprintPreview");
     private static readonly List<UndergroundPipe> ActivePipes = new List<UndergroundPipe>();
 
     [SerializeField]
@@ -15,11 +18,12 @@ public class UndergroundPipe : Pipe
     [SerializeField, Min(0f)]
     private float previewRouteHeight = 0.12f;
     [SerializeField, Min(0.01f)]
-    private float previewRouteWidth = 0.08f;
+    private float previewRouteWidth = 0.48f;
 
     private Transform secondaryEndpointVisual;
     private LineRenderer previewRouteRenderer;
     private Material previewRouteMaterial;
+    private Color previewRouteColor = new Color(0.45f, 0.95f, 1f, 0.85f);
     private Vector2Int previewFirstCoordinate;
     private Vector2Int previewSecondCoordinate;
     private bool previewPairConfigured;
@@ -30,6 +34,15 @@ public class UndergroundPipe : Pipe
     public bool HasCompletePair => TryGetPairCoordinates(out _, out _);
     public bool HasPreviewCandidate => previewPairConfigured;
     public bool IsPreviewPairCommitted => previewPairConfigured && previewPairCommitted;
+
+    public void SetPreviewRouteColor(Color color)
+    {
+        previewRouteColor = color;
+        if (previewRouteRenderer != null)
+        {
+            ApplyPreviewRouteMaterial();
+        }
+    }
 
     public int MaxPairDistance
     {
@@ -492,7 +505,7 @@ public class UndergroundPipe : Pipe
 
         start.y += previewRouteHeight;
         end.y += previewRouteHeight;
-        route.startColor = route.endColor = new Color(0.2f, 0.9f, 1f, 0.9f);
+        ApplyPreviewRouteMaterial();
         route.positionCount = 2;
         route.SetPosition(0, start);
         route.SetPosition(1, end);
@@ -537,8 +550,82 @@ public class UndergroundPipe : Pipe
             }
         }
 
-        previewRouteRenderer.sharedMaterial = previewRouteMaterial;
+        ApplyPreviewRouteMaterial();
         return previewRouteRenderer;
+    }
+
+    private void ApplyPreviewRouteMaterial()
+    {
+        if (previewRouteRenderer == null)
+        {
+            return;
+        }
+
+        Material blueprintMaterial = ResolvePrimaryBlueprintMaterial();
+        if (blueprintMaterial != null)
+        {
+            // The endpoint has already been converted to the placement-preview material.
+            // Reusing it keeps the route's brightness, contrast, alpha and rim identical.
+            if (previewRouteRenderer.sharedMaterial != blueprintMaterial)
+            {
+                previewRouteRenderer.SetPropertyBlock(null);
+            }
+            previewRouteRenderer.sharedMaterial = blueprintMaterial;
+        }
+        else
+        {
+            previewRouteRenderer.sharedMaterial = previewRouteMaterial;
+            ApplyFallbackRouteMaterialColor(previewRouteMaterial, previewRouteColor);
+        }
+
+        // URP Lit/Unlit and the project's toon shader do not consume LineRenderer's
+        // vertex tint consistently. Keep vertex color neutral and tint the material.
+        previewRouteRenderer.startColor = Color.white;
+        previewRouteRenderer.endColor = Color.white;
+    }
+
+    private Material ResolvePrimaryBlueprintMaterial()
+    {
+        Transform primaryVisual = ResolvePrimaryEndpointVisual();
+        if (primaryVisual == null)
+        {
+            return null;
+        }
+
+        MeshRenderer[] renderers = primaryVisual.GetComponentsInChildren<MeshRenderer>(true);
+        for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+        {
+            Material[] materials = renderers[rendererIndex].sharedMaterials;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                if (material != null
+                    && material.HasProperty(BlueprintPreviewPropertyId)
+                    && material.GetFloat(BlueprintPreviewPropertyId) > 0.5f)
+                {
+                    return material;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static void ApplyFallbackRouteMaterialColor(Material material, Color color)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        if (material.HasProperty(BaseColorPropertyId))
+        {
+            material.SetColor(BaseColorPropertyId, color);
+        }
+        else if (material.HasProperty(ColorPropertyId))
+        {
+            material.SetColor(ColorPropertyId, color);
+        }
     }
 
     private void SetSecondaryEndpointVisible(bool visible)

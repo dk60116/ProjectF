@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_79_Manual - Oil drilling machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Oil drilling machine
-  id: 65
+  id: 66
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
   portableMat: {fileID: 2100000, guid: 881b0fddbbc95294db78a287ac5c1c8f, type: 2}

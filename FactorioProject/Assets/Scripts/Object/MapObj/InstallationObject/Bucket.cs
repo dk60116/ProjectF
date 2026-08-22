@@ -1,32 +1,61 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
-public class Bucket : InstallationObject, IMapObjectUpdateTick
+public class Bucket : InstallationObject,
+    IMapObjectUpdateTick,
+    IMapObjectUpdateTickInterval,
+    IPlayerMapObjectInteraction
 {
     private const string EmptyBucketItemName = "Bucket";
     private const string WaterBucketItemName = "Water Bucket";
+    private const string OilBucketItemName = "Oil Bucket";
+    private const string OilItemName = "Oil";
+    private const int DefaultOilItemId = 4;
     private const float PipeFillReferenceLitersPerSecond = 1f;
     private const float FullEpsilonLiters = 0.0001f;
-    private const float FluidInputBudgetIdleResetSeconds = 1f;
+    private const float FluidInputBudgetMaximumAccrualSeconds = 1f;
+    private const float FluidInputBudgetIdleResetSeconds = 2f;
+    private const float ConnectedFluidPullIntervalSeconds = 0.1f;
+    private const float MissingFluidSourceRetrySeconds = 1f;
+    private const int MaximumPipeSearchNodes = 1024;
+    private static readonly Vector2Int[] FluidCardinalDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
 
-    [Header("Portable Water Surface")]
+    [Header("Portable Fluid Surface")]
     [SerializeField]
     private Material portableWaterSurfaceMaterial;
+    [SerializeField]
+    private Material portableOilSurfaceMaterial;
     private MeshFilter installedBody;
-    private PortableBucketWaterVisual installedWaterVisual;
-    private bool waterBucketConversionPending;
+    private PortableBucketWaterVisual installedFluidVisual;
+    private bool bucketConversionPending;
     private int cachedWaterItemId = int.MinValue;
-    private bool fullWaterSurfaceTransformResolved;
-    private Vector3 fullWaterSurfaceLocalPosition;
-    private Quaternion fullWaterSurfaceLocalRotation;
-    private Vector3 fullWaterSurfaceLocalScale;
+    private int cachedOilItemId = int.MinValue;
+    private int fullSurfaceTransformFluidItemId = int.MinValue;
+    private bool fullSurfaceTransformResolved;
+    private Vector3 fullSurfaceLocalPosition;
+    private Quaternion fullSurfaceLocalRotation;
+    private Vector3 fullSurfaceLocalScale;
     private float fluidInputBudgetLiters;
     private float lastFluidInputBudgetTime = -1f;
+    private readonly Queue<Vector2Int> connectedPipeSearchQueue = new Queue<Vector2Int>();
+    private readonly HashSet<Vector2Int> connectedPipeSearchVisited = new HashSet<Vector2Int>();
+    private readonly List<InstallationObject> connectedPipeInstallationsScratch =
+        new List<InstallationObject>(4);
+    private InstallationObject cachedConnectedFluidSource;
+    private InstallationPlacementController cachedPlacementController;
+    private float nextConnectedFluidSourceSearchTime;
 
-    public Material PortableWaterSurfaceMaterial => portableWaterSurfaceMaterial;
-    public bool IsInstalledWaterSurfaceVisible => installedWaterVisual != null
-                                                  && installedWaterVisual.IsSurfaceVisible;
-    public float InstalledWaterFillRatio => IsWaterBucketDefinition(ResolveBucketDefinition())
+    public float ManagedUpdateTickIntervalSeconds => ConnectedFluidPullIntervalSeconds;
+    public bool IsInstalledFluidSurfaceVisible => installedFluidVisual != null
+                                                  && installedFluidVisual.IsSurfaceVisible;
+    public float InstalledFluidFillRatio => ResolveContainedFluidItemId(ResolveBucketDefinition()) >= 0
         ? 1f
         : GetEmptyBucketFillRatio();
     public override float FluidStorageCapacityLiters => IsEmptyBucketDefinition(ResolveBucketDefinition())
@@ -49,14 +78,21 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
 
         if (Application.isPlaying)
         {
+            PlacementRuntimeChanged += HandleFluidTopologyChanged;
+            PlacementRuntimeCleared += HandleFluidTopologyChanged;
             ResetFluidInputBudget(true);
-            RefreshInstalledWaterVisual();
+            InvalidateConnectedFluidSource();
+            MapObjectTickManager.RegisterUpdateTick(this);
+            RefreshInstalledFluidVisual();
         }
     }
 
     protected override void OnDisable()
     {
-        waterBucketConversionPending = false;
+        PlacementRuntimeChanged -= HandleFluidTopologyChanged;
+        PlacementRuntimeCleared -= HandleFluidTopologyChanged;
+        bucketConversionPending = false;
+        InvalidateConnectedFluidSource();
         ResetFluidInputBudget(false);
         MapObjectTickManager.UnregisterUpdateTick(this);
         base.OnDisable();
@@ -64,68 +100,102 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
 
     public override void PrepareForPool()
     {
-        waterBucketConversionPending = false;
+        bucketConversionPending = false;
         MapObjectTickManager.UnregisterUpdateTick(this);
         installedBody = null;
-        installedWaterVisual = null;
+        installedFluidVisual = null;
         cachedWaterItemId = int.MinValue;
-        fullWaterSurfaceTransformResolved = false;
+        cachedOilItemId = int.MinValue;
+        fullSurfaceTransformFluidItemId = int.MinValue;
+        fullSurfaceTransformResolved = false;
+        cachedPlacementController = null;
+        InvalidateConnectedFluidSource();
         ResetFluidInputBudget(false);
         base.PrepareForPool();
     }
 
-    public bool TryGetInstalledFullWaterSurfaceTransform(
+    public bool TryGetInstalledFullSurfaceTransform(
+        int fluidItemId,
         out Vector3 localPosition,
         out Quaternion localRotation,
         out Vector3 localScale)
     {
-        if (!fullWaterSurfaceTransformResolved)
+        if (!fullSurfaceTransformResolved || fullSurfaceTransformFluidItemId != fluidItemId)
         {
-            fullWaterSurfaceTransformResolved = TryResolveFullWaterSurfaceTransform(
-                out fullWaterSurfaceLocalPosition,
-                out fullWaterSurfaceLocalRotation,
-                out fullWaterSurfaceLocalScale);
+            fullSurfaceTransformFluidItemId = fluidItemId;
+            fullSurfaceTransformResolved = TryResolveFullSurfaceTransform(
+                fluidItemId,
+                out fullSurfaceLocalPosition,
+                out fullSurfaceLocalRotation,
+                out fullSurfaceLocalScale);
         }
 
-        localPosition = fullWaterSurfaceTransformResolved
-            ? fullWaterSurfaceLocalPosition
+        localPosition = fullSurfaceTransformResolved
+            ? fullSurfaceLocalPosition
             : new Vector3(0f, 0.255f, 0f);
-        localRotation = fullWaterSurfaceTransformResolved
-            ? fullWaterSurfaceLocalRotation
+        localRotation = fullSurfaceTransformResolved
+            ? fullSurfaceLocalRotation
             : Quaternion.identity;
-        localScale = fullWaterSurfaceTransformResolved
-            ? fullWaterSurfaceLocalScale
+        localScale = fullSurfaceTransformResolved
+            ? fullSurfaceLocalScale
             : new Vector3(0.157573f, 1f, 0.157573f);
-        return fullWaterSurfaceTransformResolved;
+        return fullSurfaceTransformResolved;
     }
 
     public void ManagedUpdateTick(float deltaTime)
     {
-        if (!waterBucketConversionPending)
-        {
-            MapObjectTickManager.UnregisterUpdateTick(this);
-            return;
-        }
-
         if (!isActiveAndEnabled || !TryGetPlacementRuntime(out _, out _))
         {
-            waterBucketConversionPending = false;
+            bucketConversionPending = false;
             MapObjectTickManager.UnregisterUpdateTick(this);
             return;
         }
 
-        if (!TryCompleteWaterBucketConversion())
+        if (IsEmptyBucketDefinition(ResolveBucketDefinition()))
         {
+            TryPullFluidFromConnectedPipeNetwork(deltaTime);
+        }
+
+        if (bucketConversionPending)
+        {
+            if (!TryCompleteBucketConversion())
+            {
+                return;
+            }
+
+            bucketConversionPending = false;
+            MapObjectTickManager.UnregisterUpdateTick(this);
             return;
         }
 
-        waterBucketConversionPending = false;
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        if (!IsEmptyBucketDefinition(ResolveBucketDefinition()))
+        {
+            MapObjectTickManager.UnregisterUpdateTick(this);
+        }
     }
 
     public static bool IsBucketDefinition(ItemDefinition definition)
     {
         return definition != null && definition.mapObject is Bucket;
+    }
+
+    public bool CanPlayerInteract(Player player)
+    {
+        InstallationPlacementController placementController = ResolvePlacementController();
+        return placementController != null
+               && placementController.CanCollectInstalledBucketToHand(this, player);
+    }
+
+    public bool TryPlayerInteract(Player player)
+    {
+        InstallationPlacementController placementController = ResolvePlacementController();
+        return placementController != null
+               && placementController.TryCollectInstalledBucketToHand(this, player);
+    }
+
+    public int GetInteractionIconItemId(Player player)
+    {
+        return ResolveItemId();
     }
 
     public static bool IsEmptyBucketDefinition(ItemDefinition definition)
@@ -140,11 +210,72 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
                && NameMatches(definition, WaterBucketItemName);
     }
 
+    public static bool IsOilBucketDefinition(ItemDefinition definition)
+    {
+        return IsBucketDefinition(definition)
+               && NameMatches(definition, OilBucketItemName);
+    }
+
+    public static int ResolveContainedFluidItemId(ItemDefinition definition)
+    {
+        if (IsWaterBucketDefinition(definition))
+        {
+            return Pump.ResolveWaterItemId(null);
+        }
+
+        if (IsOilBucketDefinition(definition))
+        {
+            return ResolveOilItemId(null);
+        }
+
+        return -1;
+    }
+
     public static bool TryResolveWaterBucketDefinition(
         ItemManager itemManager,
         out ItemDefinition waterBucketDefinition)
     {
-        waterBucketDefinition = null;
+        return TryResolveBucketDefinition(
+            itemManager,
+            WaterBucketItemName,
+            out waterBucketDefinition);
+    }
+
+    public static bool TryResolveOilBucketDefinition(
+        ItemManager itemManager,
+        out ItemDefinition oilBucketDefinition)
+    {
+        return TryResolveBucketDefinition(
+            itemManager,
+            OilBucketItemName,
+            out oilBucketDefinition);
+    }
+
+    private static bool TryResolveFilledBucketDefinition(
+        ItemManager itemManager,
+        int fluidItemId,
+        out ItemDefinition filledBucketDefinition)
+    {
+        if (fluidItemId == Pump.ResolveWaterItemId(null))
+        {
+            return TryResolveWaterBucketDefinition(itemManager, out filledBucketDefinition);
+        }
+
+        if (fluidItemId == ResolveOilItemId(itemManager))
+        {
+            return TryResolveOilBucketDefinition(itemManager, out filledBucketDefinition);
+        }
+
+        filledBucketDefinition = null;
+        return false;
+    }
+
+    private static bool TryResolveBucketDefinition(
+        ItemManager itemManager,
+        string expectedName,
+        out ItemDefinition bucketDefinition)
+    {
+        bucketDefinition = null;
         if (itemManager == null || itemManager.ItemDefinitions == null)
         {
             return false;
@@ -153,12 +284,12 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
         for (int i = 0; i < itemManager.ItemDefinitions.Count; i++)
         {
             ItemDefinition definition = itemManager.ItemDefinitions[i];
-            if (!IsWaterBucketDefinition(definition))
+            if (!IsBucketDefinition(definition) || !NameMatches(definition, expectedName))
             {
                 continue;
             }
 
-            waterBucketDefinition = definition;
+            bucketDefinition = definition;
             return true;
         }
 
@@ -174,10 +305,16 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
                    StringComparison.OrdinalIgnoreCase);
     }
 
+    public Material ResolveFluidSurfaceMaterial(int fluidItemId)
+    {
+        return fluidItemId == ResolveOilItemId()
+            ? portableOilSurfaceMaterial
+            : portableWaterSurfaceMaterial;
+    }
+
     public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
     {
-        return fluidItemId >= 0
-               && fluidItemId == ResolveWaterItemId()
+        return IsSupportedFluidItemId(fluidItemId)
                && base.CanAcceptFluidItem(fluidItemId, requestedLiters);
     }
 
@@ -205,16 +342,29 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
 
         float elapsedSeconds = currentTime - lastFluidInputBudgetTime;
         lastFluidInputBudgetTime = currentTime;
-        if (elapsedSeconds < 0f || elapsedSeconds > FluidInputBudgetIdleResetSeconds)
+        if (elapsedSeconds < 0f)
         {
             fluidInputBudgetLiters = 0f;
             return 0f;
         }
 
         float maxLitersPerSecond = MaximumFluidInputLitersPerSecond;
+        float maximumBudgetLiters =
+            maxLitersPerSecond * FluidInputBudgetMaximumAccrualSeconds;
+        if (elapsedSeconds > FluidInputBudgetIdleResetSeconds)
+        {
+            // Oil producers commonly emit one-liter batches at intervals instead of
+            // sending tiny amounts every frame. Treat the first request after an idle
+            // interval as one second of available flow so that the batch is not lost,
+            // while still preventing an inactive Bucket from accumulating its full
+            // capacity and filling instantly when reconnected.
+            fluidInputBudgetLiters = maximumBudgetLiters;
+            return Mathf.Min(requestedLiters, fluidInputBudgetLiters);
+        }
+
         fluidInputBudgetLiters = Mathf.Min(
             fluidInputBudgetLiters + maxLitersPerSecond * elapsedSeconds,
-            maxLitersPerSecond * FluidInputBudgetIdleResetSeconds);
+            maximumBudgetLiters);
         return Mathf.Min(requestedLiters, fluidInputBudgetLiters);
     }
 
@@ -250,57 +400,59 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
             currentFluidItemId,
             currentStoredLiters);
 
-        RefreshInstalledWaterVisual();
+        RefreshInstalledFluidVisual();
         if (!IsEmptyBucketDefinition(ResolveBucketDefinition())
-            || currentFluidItemId != ResolveWaterItemId()
+            || !IsSupportedFluidItemId(currentFluidItemId)
             || currentStoredLiters + FullEpsilonLiters < FluidStorageCapacityLiters
             || !TryGetPlacementRuntime(out _, out _))
         {
             return;
         }
 
-        waterBucketConversionPending = true;
+        bucketConversionPending = true;
         MapObjectTickManager.RegisterUpdateTick(this);
     }
 
-    private void RefreshInstalledWaterVisual()
+    private void RefreshInstalledFluidVisual()
     {
         ItemDefinition definition = ResolveBucketDefinition();
-        bool isWaterBucket = IsWaterBucketDefinition(definition);
-        float currentFillRatio = isWaterBucket ? 1f : GetEmptyBucketFillRatio();
-        bool containsWater = isWaterBucket || currentFillRatio > 0.0001f;
-        if (!containsWater && installedWaterVisual == null)
+        int containedFluidItemId = ResolveContainedFluidItemId(definition);
+        bool isFilledBucket = containedFluidItemId >= 0;
+        int visibleFluidItemId = isFilledBucket ? containedFluidItemId : StoredFluidItemId;
+        float currentFillRatio = isFilledBucket ? 1f : GetEmptyBucketFillRatio();
+        bool containsFluid = visibleFluidItemId >= 0 && currentFillRatio > FullEpsilonLiters;
+        if (!containsFluid && installedFluidVisual == null)
         {
             return;
         }
 
-        if (installedBody == null && containsWater)
+        if (installedBody == null && containsFluid)
         {
             installedBody = ResolveInstalledBody();
         }
 
         if (installedBody == null)
         {
-            installedWaterVisual?.Refresh(this, false, null, true);
+            installedFluidVisual?.Refresh(this, -1, null, true);
             return;
         }
 
-        if (installedWaterVisual == null && containsWater)
+        if (installedFluidVisual == null && containsFluid)
         {
-            installedWaterVisual = GetComponent<PortableBucketWaterVisual>();
-            if (installedWaterVisual == null)
+            installedFluidVisual = GetComponent<PortableBucketWaterVisual>();
+            if (installedFluidVisual == null)
             {
-                installedWaterVisual = gameObject.AddComponent<PortableBucketWaterVisual>();
+                installedFluidVisual = gameObject.AddComponent<PortableBucketWaterVisual>();
             }
         }
 
-        installedWaterVisual?.Refresh(
+        installedFluidVisual?.Refresh(
             this,
-            containsWater,
+            containsFluid ? visibleFluidItemId : -1,
             installedBody,
             true,
             currentFillRatio,
-            !isWaterBucket);
+            !isFilledBucket);
     }
 
     private float GetEmptyBucketFillRatio()
@@ -324,6 +476,245 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
             ResolveItemId());
     }
 
+    private void HandleFluidTopologyChanged(InstallationObject changedInstallation)
+    {
+        if (!Application.isPlaying || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        InvalidateConnectedFluidSource();
+        if (IsEmptyBucketDefinition(ResolveBucketDefinition()))
+        {
+            if (changedInstallation == this)
+            {
+                ResetFluidInputBudget(true);
+            }
+
+            MapObjectTickManager.RegisterUpdateTick(this);
+        }
+    }
+
+    private void InvalidateConnectedFluidSource()
+    {
+        cachedConnectedFluidSource = null;
+        nextConnectedFluidSourceSearchTime = 0f;
+        connectedPipeSearchQueue.Clear();
+        connectedPipeSearchVisited.Clear();
+        connectedPipeInstallationsScratch.Clear();
+    }
+
+    private void TryPullFluidFromConnectedPipeNetwork(float deltaTime)
+    {
+        if (deltaTime <= 0f
+            || AvailableFluidStorageLiters <= FullEpsilonLiters
+            || !TryResolveConnectedFluidSource(out InstallationObject source, out int fluidItemId))
+        {
+            return;
+        }
+
+        float requestedLiters = Mathf.Min(
+            MaximumFluidInputLitersPerSecond * deltaTime,
+            AvailableFluidStorageLiters,
+            source.StoredFluidLiters);
+        float temperatureCelsius = source.GetStoredFluidTemperatureCelsius(fluidItemId);
+        if (requestedLiters <= FullEpsilonLiters
+            || !source.TryConsumeFluidLiters(fluidItemId, requestedLiters, out float consumedLiters)
+            || consumedLiters <= FullEpsilonLiters)
+        {
+            return;
+        }
+
+        TryAddFluidLiters(
+            fluidItemId,
+            consumedLiters,
+            temperatureCelsius,
+            out float acceptedLiters);
+        float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
+        if (rejectedLiters > FullEpsilonLiters)
+        {
+            source.TryAddFluidLiters(
+                fluidItemId,
+                rejectedLiters,
+                temperatureCelsius,
+                out _);
+        }
+    }
+
+    private bool TryResolveConnectedFluidSource(
+        out InstallationObject source,
+        out int fluidItemId)
+    {
+        fluidItemId = StoredFluidItemId;
+        if (CanUseConnectedFluidSource(cachedConnectedFluidSource, fluidItemId, out int cachedFluidItemId))
+        {
+            source = cachedConnectedFluidSource;
+            fluidItemId = cachedFluidItemId;
+            return true;
+        }
+
+        cachedConnectedFluidSource = null;
+        source = null;
+        if (Time.time < nextConnectedFluidSourceSearchTime
+            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+        {
+            return false;
+        }
+
+        nextConnectedFluidSourceSearchTime = Time.time + MissingFluidSourceRetrySeconds;
+        connectedPipeSearchQueue.Clear();
+        connectedPipeSearchVisited.Clear();
+
+        for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+        {
+            Vector2Int direction = FluidCardinalDirections[directionIndex];
+            Vector2Int pipeCoordinate = anchorCoordinate + direction;
+            if (TryGetConnectedPipeAtCoordinate(pipeCoordinate, -direction, out _)
+                && connectedPipeSearchVisited.Add(pipeCoordinate))
+            {
+                connectedPipeSearchQueue.Enqueue(pipeCoordinate);
+            }
+        }
+
+        int searchedNodeCount = 0;
+        while (connectedPipeSearchQueue.Count > 0 && searchedNodeCount < MaximumPipeSearchNodes)
+        {
+            Vector2Int pipeCoordinate = connectedPipeSearchQueue.Dequeue();
+            searchedNodeCount++;
+            if (!TryGetPipeAtCoordinate(pipeCoordinate, out Pipe pipe))
+            {
+                continue;
+            }
+
+            Quaternion pipeRotation = pipe.transform.rotation;
+            for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int direction = FluidCardinalDirections[directionIndex];
+                if (!pipe.HasConnectionTowardsAt(pipeCoordinate, pipeRotation, direction))
+                {
+                    continue;
+                }
+
+                Vector2Int neighborCoordinate = pipeCoordinate + direction;
+                if (TryGetConnectedPipeAtCoordinate(neighborCoordinate, -direction, out _))
+                {
+                    if (connectedPipeSearchVisited.Add(neighborCoordinate))
+                    {
+                        connectedPipeSearchQueue.Enqueue(neighborCoordinate);
+                    }
+
+                    continue;
+                }
+
+                if (TryGetFluidSourceAtCoordinate(
+                        neighborCoordinate,
+                        fluidItemId,
+                        out source,
+                        out int sourceFluidItemId))
+                {
+                    cachedConnectedFluidSource = source;
+                    fluidItemId = sourceFluidItemId;
+                    return true;
+                }
+            }
+
+            if (pipe.TryGetRemoteConnectionCoordinate(pipeCoordinate, out Vector2Int remoteCoordinate)
+                && connectedPipeSearchVisited.Add(remoteCoordinate))
+            {
+                connectedPipeSearchQueue.Enqueue(remoteCoordinate);
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetConnectedPipeAtCoordinate(
+        Vector2Int coordinate,
+        Vector2Int requiredConnectionDirection,
+        out Pipe pipe)
+    {
+        if (!TryGetPipeAtCoordinate(coordinate, out pipe))
+        {
+            return false;
+        }
+
+        return pipe.HasConnectionTowardsAt(
+            coordinate,
+            pipe.transform.rotation,
+            requiredConnectionDirection);
+    }
+
+    private bool TryGetPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe)
+    {
+        pipe = null;
+        connectedPipeInstallationsScratch.Clear();
+        CollectActiveInstallationsAtRuntimeGridCoordinate(
+            coordinate,
+            connectedPipeInstallationsScratch);
+        for (int i = 0; i < connectedPipeInstallationsScratch.Count; i++)
+        {
+            if (connectedPipeInstallationsScratch[i] is Pipe candidatePipe
+                && candidatePipe.gameObject.activeInHierarchy)
+            {
+                pipe = candidatePipe;
+                connectedPipeInstallationsScratch.Clear();
+                return true;
+            }
+        }
+
+        connectedPipeInstallationsScratch.Clear();
+        return false;
+    }
+
+    private bool TryGetFluidSourceAtCoordinate(
+        Vector2Int coordinate,
+        int requiredFluidItemId,
+        out InstallationObject source,
+        out int fluidItemId)
+    {
+        source = null;
+        fluidItemId = -1;
+        connectedPipeInstallationsScratch.Clear();
+        CollectActiveInstallationsAtRuntimeGridCoordinate(
+            coordinate,
+            connectedPipeInstallationsScratch);
+        for (int i = 0; i < connectedPipeInstallationsScratch.Count; i++)
+        {
+            InstallationObject candidate = connectedPipeInstallationsScratch[i];
+            if (!CanUseConnectedFluidSource(
+                    candidate,
+                    requiredFluidItemId,
+                    out int candidateFluidItemId))
+            {
+                continue;
+            }
+
+            source = candidate;
+            fluidItemId = candidateFluidItemId;
+            connectedPipeInstallationsScratch.Clear();
+            return true;
+        }
+
+        connectedPipeInstallationsScratch.Clear();
+        return false;
+    }
+
+    private bool CanUseConnectedFluidSource(
+        InstallationObject source,
+        int requiredFluidItemId,
+        out int fluidItemId)
+    {
+        fluidItemId = requiredFluidItemId >= 0
+            ? requiredFluidItemId
+            : source != null ? source.StoredFluidItemId : -1;
+        return source != null
+               && source != this
+               && !(source is Pipe)
+               && source.gameObject.activeInHierarchy
+               && IsSupportedFluidItemId(fluidItemId)
+               && source.CanProvideFluidItem(fluidItemId, FullEpsilonLiters);
+    }
+
     private int ResolveWaterItemId()
     {
         if (cachedWaterItemId >= 0)
@@ -340,6 +731,49 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
         return resolvedItemId;
     }
 
+    private int ResolveOilItemId()
+    {
+        if (cachedOilItemId >= 0)
+        {
+            return cachedOilItemId;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        int resolvedItemId = ResolveOilItemId(itemManager);
+        if (itemManager != null)
+        {
+            cachedOilItemId = resolvedItemId;
+        }
+
+        return resolvedItemId;
+    }
+
+    private static int ResolveOilItemId(ItemManager itemManager)
+    {
+        if (itemManager != null && itemManager.ItemDefinitions != null)
+        {
+            for (int i = 0; i < itemManager.ItemDefinitions.Count; i++)
+            {
+                ItemDefinition definition = itemManager.ItemDefinitions[i];
+                if (definition != null && NameMatches(definition, OilItemName))
+                {
+                    return definition.id;
+                }
+            }
+        }
+
+        return DefaultOilItemId;
+    }
+
+    private bool IsSupportedFluidItemId(int fluidItemId)
+    {
+        return fluidItemId >= 0
+               && (fluidItemId == ResolveWaterItemId()
+                   || fluidItemId == ResolveOilItemId());
+    }
+
     private float ResolveFillDurationSeconds()
     {
         ItemDefinition definition = ResolveBucketDefinition();
@@ -354,7 +788,8 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
             : -1f;
     }
 
-    private bool TryResolveFullWaterSurfaceTransform(
+    private bool TryResolveFullSurfaceTransform(
+        int fluidItemId,
         out Vector3 localPosition,
         out Quaternion localRotation,
         out Vector3 localScale)
@@ -363,13 +798,13 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
         localRotation = Quaternion.identity;
         localScale = Vector3.one;
         ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
-        if (!TryResolveWaterBucketDefinition(itemManager, out ItemDefinition waterBucketDefinition)
-            || !(waterBucketDefinition.mapObject is Bucket waterBucketPrefab))
+        if (!TryResolveFilledBucketDefinition(itemManager, fluidItemId, out ItemDefinition bucketDefinition)
+            || !(bucketDefinition.mapObject is Bucket bucketPrefab))
         {
             return false;
         }
 
-        Transform[] prefabTransforms = waterBucketPrefab.GetComponentsInChildren<Transform>(true);
+        Transform[] prefabTransforms = bucketPrefab.GetComponentsInChildren<Transform>(true);
         for (int i = 0; i < prefabTransforms.Length; i++)
         {
             Transform candidate = prefabTransforms[i];
@@ -391,21 +826,31 @@ public class Bucket : InstallationObject, IMapObjectUpdateTick
         return false;
     }
 
-    private bool TryCompleteWaterBucketConversion()
+    private bool TryCompleteBucketConversion()
     {
         ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
-        if (!TryResolveWaterBucketDefinition(itemManager, out ItemDefinition waterBucketDefinition))
+        int fluidItemId = StoredFluidItemId;
+        if (!TryResolveFilledBucketDefinition(itemManager, fluidItemId, out ItemDefinition filledBucketDefinition))
         {
             return false;
         }
 
-        InstallationPlacementController placementController =
-            FindFirstObjectByType<InstallationPlacementController>();
+        InstallationPlacementController placementController = ResolvePlacementController();
         return placementController != null
                && placementController.TryUpgradeInstalledObject(
                    this,
-                   waterBucketDefinition,
+                   filledBucketDefinition,
                    out _);
+    }
+
+    private InstallationPlacementController ResolvePlacementController()
+    {
+        if (cachedPlacementController == null)
+        {
+            cachedPlacementController = FindFirstObjectByType<InstallationPlacementController>();
+        }
+
+        return cachedPlacementController;
     }
 
     private MeshFilter ResolveInstalledBody()

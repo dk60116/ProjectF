@@ -65,11 +65,13 @@ void AdditionalLighting_half(half3 positionWS, half3 normalWS, half3 viewWS, hal
         normalWS = normalize(normalWS);
         viewWS = SafeNormalize(viewWS);
 
-        // additional lights
-        int pixelLightCount = GetAdditionalLightsCount();
-        for (int i = 0; i < pixelLightCount; ++i)
-        {
-            Light light = GetAdditionalLight(i, positionWS);
+        InputData inputData = (InputData)0;
+        inputData.positionWS = positionWS;
+        inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(TransformWorldToHClip(positionWS));
+
+        uint pixelLightCount = GetAdditionalLightsCount();
+        LIGHT_LOOP_BEGIN(pixelLightCount)
+            Light light = GetAdditionalLight(lightIndex, positionWS);
             half3 attenuatedLight = light.color * light.distanceAttenuation * light.shadowAttenuation;
 
             diffuse += LightingLambert(attenuatedLight, light.direction, normalWS);
@@ -79,7 +81,7 @@ void AdditionalLighting_half(half3 positionWS, half3 normalWS, half3 viewWS, hal
             half specular_term = lerp(specular_soft, specular_hard, hardness);
 
             specular += specular_term * attenuatedLight;
-        }
+        LIGHT_LOOP_END
     #endif
 }
 

@@ -83,6 +83,7 @@ Shader "Custom/ConveyorBeltScroll"
             #pragma shader_feature_local _RECEIVE_SHADOWS_OFF
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #pragma multi_compile _ EVALUATE_SH_MIXED EVALUATE_SH_VERTEX
             #pragma multi_compile _ LIGHTMAP_SHADOW_MIXING
             #pragma multi_compile _ SHADOWS_SHADOWMASK
@@ -350,15 +351,14 @@ Shader "Custom/ConveyorBeltScroll"
                 half3 ambient = inputData.bakedGI * baseSample.rgb;
                 half3 additional = inputData.vertexLighting * baseSample.rgb;
 
-#if defined(_ADDITIONAL_LIGHTS)
+#if defined(_ADDITIONAL_LIGHTS) || defined(_CLUSTER_LIGHT_LOOP)
                 uint pixelLightCount = GetAdditionalLightsCount();
-                for (uint lightIndex = 0u; lightIndex < pixelLightCount; ++lightIndex)
-                {
+                LIGHT_LOOP_BEGIN(pixelLightCount)
                     Light light = GetAdditionalLight(lightIndex, inputData.positionWS);
                     half additionalNdotL = saturate(dot(inputData.normalWS, light.direction));
                     half additionalBand = smoothstep(_ShadeThreshold - _ShadeSmoothness, _ShadeThreshold + _ShadeSmoothness, additionalNdotL * light.shadowAttenuation);
                     additional += lerp(baseSample.rgb * _ShadowColor.rgb, baseSample.rgb, additionalBand) * light.color * light.distanceAttenuation;
-                }
+                LIGHT_LOOP_END
 #endif
 
                 half3 finalColor = ambient + direct + additional;

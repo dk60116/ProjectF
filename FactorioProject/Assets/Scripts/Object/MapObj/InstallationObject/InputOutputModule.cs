@@ -216,8 +216,12 @@ public class InputOutputModule : InstallationObject,
     private int rectGridHeight = 1;
     [SerializeField]
     private List<RectGridCell> rectGridCells = new List<RectGridCell>();
+    [System.NonSerialized]
+    private bool rectGridDataInitialized;
     [SerializeField]
     private List<RectGridBlockPlacement> rectGridPlacements = new List<RectGridBlockPlacement>();
+    [System.NonSerialized]
+    private bool rectGridPlacementDataInitialized;
     [SerializeField, Min(0.1f)]
     private float craftDuration = 5f;
     [SerializeField, Min(0f)]
@@ -2442,11 +2446,15 @@ public class InputOutputModule : InstallationObject,
         RegisterRuntimeAreaCoordinates();
         WakeRuntimeUpdate();
         RefreshWorkAnimatorState(true);
-        RuntimePipeTopologyChanged?.Invoke(this);
+        if (HasRuntimePipeTopologyCoordinates())
+        {
+            RuntimePipeTopologyChanged?.Invoke(this);
+        }
     }
 
     protected override void OnDisable()
     {
+        bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
         SetRuntimeUpdateTickRegistered(false);
@@ -2454,9 +2462,19 @@ public class InputOutputModule : InstallationObject,
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
-        RuntimePipeTopologyChanged?.Invoke(this);
+        if (hadRuntimePipeTopologyCoordinates)
+        {
+            RuntimePipeTopologyChanged?.Invoke(this);
+        }
         ReleaseEnergyGaugeVisual();
         base.OnDisable();
+    }
+
+    private bool HasRuntimePipeTopologyCoordinates()
+    {
+        return (runtimeGridCoordinates != null && runtimeGridCoordinates.Count > 0)
+               || (runtimeOutputCoordinates != null && runtimeOutputCoordinates.Count > 0)
+               || (runtimePipeInputCoordinates != null && runtimePipeInputCoordinates.Count > 0);
     }
 
     protected override void OnPlacementRuntimeChanged()
@@ -2658,7 +2676,10 @@ public class InputOutputModule : InstallationObject,
         slotLayoutType = SlotLayoutType.RectGrid;
         rectGridWidth = Mathf.Max(1, width);
         rectGridHeight = Mathf.Max(1, height);
+        rectGridDataInitialized = false;
+        rectGridPlacementDataInitialized = false;
         RebuildRectGridCells();
+        rectGridDataInitialized = true;
         EnsureRectGridPlacementData();
     }
 
@@ -2667,6 +2688,8 @@ public class InputOutputModule : InstallationObject,
         slotLayoutType = SlotLayoutType.None;
         rectGridCells.Clear();
         rectGridPlacements.Clear();
+        rectGridDataInitialized = true;
+        rectGridPlacementDataInitialized = true;
     }
 
     public RectGridBlockType GetRectGridBlockAt(int x, int y)
@@ -3931,6 +3954,11 @@ public class InputOutputModule : InstallationObject,
 
     private void EnsureRectGridData()
     {
+        if (rectGridDataInitialized && Application.isPlaying)
+        {
+            return;
+        }
+
         rectGridWidth = Mathf.Max(1, rectGridWidth);
         rectGridHeight = Mathf.Max(1, rectGridHeight);
 
@@ -3946,6 +3974,7 @@ public class InputOutputModule : InstallationObject,
                 rectGridCells.Clear();
             }
 
+            rectGridDataInitialized = true;
             return;
         }
 
@@ -3973,10 +4002,17 @@ public class InputOutputModule : InstallationObject,
         {
             RebuildRectGridCells();
         }
+
+        rectGridDataInitialized = true;
     }
 
     private void EnsureRectGridPlacementData()
     {
+        if (rectGridPlacementDataInitialized && Application.isPlaying)
+        {
+            return;
+        }
+
         if (rectGridPlacements == null)
         {
             rectGridPlacements = new List<RectGridBlockPlacement>();
@@ -3989,6 +4025,7 @@ public class InputOutputModule : InstallationObject,
                 rectGridPlacements.Clear();
             }
 
+            rectGridPlacementDataInitialized = true;
             return;
         }
 
@@ -4046,6 +4083,7 @@ public class InputOutputModule : InstallationObject,
         }
 
         rectGridPlacements = normalizedPlacements;
+        rectGridPlacementDataInitialized = true;
     }
 
     private void RebuildRectGridCells()
@@ -6474,6 +6512,8 @@ public class InputOutputModule : InstallationObject,
         }
 
         effectivePairDataInitialized = false;
+        rectGridDataInitialized = false;
+        rectGridPlacementDataInitialized = false;
         EnsureEffectivePairData();
         EnsureRectGridData();
         EnsureRectGridPlacementData();

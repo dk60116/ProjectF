@@ -30,11 +30,13 @@ void AdditionalLighting_float(float3 normalWS, float3 positionWS, float3 viewWS,
     normalWS = normalize(normalWS);
     viewWS = SafeNormalize(viewWS);
 
-    // additional lights
-    int pixelLightCount = GetAdditionalLightsCount();
-    for (int i = 0; i < pixelLightCount; ++i)
-    {
-        Light light = GetAdditionalLight(i, positionWS);
+    InputData inputData = (InputData)0;
+    inputData.positionWS = positionWS;
+    inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(TransformWorldToHClip(positionWS));
+
+    uint pixelLightCount = GetAdditionalLightsCount();
+    LIGHT_LOOP_BEGIN(pixelLightCount)
+        Light light = GetAdditionalLight(lightIndex, positionWS);
         float3 attenuatedLight = light.color * light.distanceAttenuation * light.shadowAttenuation;
 
         float specular_soft = LightingSpecular(light.direction, normalWS, viewWS, smoothness);
@@ -42,6 +44,6 @@ void AdditionalLighting_float(float3 normalWS, float3 positionWS, float3 viewWS,
         float specular_term = lerp(specular_soft, specular_hard, hardness);
 
         specular += specular_term * attenuatedLight;
-    }
+    LIGHT_LOOP_END
     #endif
 }

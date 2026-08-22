@@ -1145,6 +1145,17 @@ public sealed class AnimalAIController : MonoBehaviour
             // 다른 동물은 지형 장애물이 아니다. 경로를 다시 만들면
             // RepathCooldown 주기마다 목표 각도가 바뀌므로 제자리에서 양보한다.
             navigationBlockedTime = 0f;
+            PauseNavigationProgress(movementTarget, transform.position);
+        }
+        else if (IsNavigationProgressStalled(
+                     movementTarget,
+                     transform.position,
+                     deltaTime))
+        {
+            // 로컬 회피가 옆이나 뒤 방향을 계속 선택하면 물리 이동 자체는 성공해도
+            // 탈출 경로의 다음 웨이포인트에는 가까워지지 않을 수 있다. 도망 중에는
+            // 목표를 포기하지 않고 다음 탈출 각도로 경로를 다시 찾는다.
+            TryRepathFlee(awayDirection, useLiveCollision);
         }
 
         ApplyAnimation(
@@ -1200,9 +1211,23 @@ public sealed class AnimalAIController : MonoBehaviour
             return;
         }
 
+        TryRepathFlee(awayDirection, requireLoadedGround);
+    }
+
+    private void TryRepathFlee(
+        Vector3 awayDirection,
+        bool requireLoadedGround)
+    {
+        if (navigationRepathCooldown > 0f)
+        {
+            return;
+        }
+
         fleeRouteAttemptOffset =
             (fleeRouteAttemptOffset + 1) % FleeTargetAngles.Length;
-        TryPrepareFleeNavigation(awayDirection, requireLoadedGround);
+        TryPrepareFleeNavigation(
+            awayDirection,
+            requireLoadedGround);
         navigationRepathCooldown = RepathCooldown;
     }
 

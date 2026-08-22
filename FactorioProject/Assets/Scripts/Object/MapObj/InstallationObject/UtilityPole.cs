@@ -577,8 +577,7 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        MarkElectricNetworkDirty();
-        RefreshConnectionLineRenderersIfDirty();
+        RefreshNetworkParticipantPlacement(installationObject, false);
     }
 
     private static void HandleInstallationPlacementRuntimeCleared(InstallationObject installationObject)
@@ -592,8 +591,90 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        MarkElectricNetworkDirty();
-        RefreshConnectionLineRenderersIfDirty();
+        RefreshNetworkParticipantPlacement(installationObject, true);
+    }
+
+    private static void RefreshNetworkParticipantPlacement(
+        InstallationObject installationObject,
+        bool placementCleared)
+    {
+        if (!IsElectricNetworkParticipant(installationObject))
+        {
+            return;
+        }
+
+        // 전봇대 연결 구조는 그대로이므로 소비자 하나의 설치/회수 때문에 모든 전봇대의
+        // 공급 범위를 다시 스캔하지 않는다. 초기 로드나 전봇대 변경으로 네트워크 자체가
+        // dirty인 경우에만 기존 전체 재구축 경로를 사용한다.
+        if (networksDirty)
+        {
+            connectionLineVisualsDirty = true;
+            RequestDeferredConnectionLineVisualRefresh();
+            return;
+        }
+
+        bool membershipChanged = false;
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            ElectricNetwork network = networks[networkIndex];
+            if (network == null)
+            {
+                continue;
+            }
+
+            bool shouldBelong = !placementCleared
+                                && IsInstallationSuppliedByNetwork(network, installationObject);
+            bool belongs = network.SuppliedInstallations.Contains(installationObject);
+            if (shouldBelong == belongs)
+            {
+                continue;
+            }
+
+            if (shouldBelong)
+            {
+                network.SuppliedInstallations.Add(installationObject);
+            }
+            else
+            {
+                network.SuppliedInstallations.Remove(installationObject);
+            }
+
+            RefreshNetworkTopologyRuntimeValues(network);
+            membershipChanged = true;
+        }
+
+        suppliedConsumerNetworks.Remove(installationObject);
+        if (membershipChanged)
+        {
+            networkRuntimeEvaluatedFrame = -1;
+            RefreshNetworkRuntimeValues(true);
+            suppliedConsumerNetworks.Clear();
+            RegisterSuppliedConsumerNetworks();
+            InputOutputModule.WakeElectricRuntimeModules();
+        }
+
+        connectionLineVisualsDirty = true;
+        RequestDeferredConnectionLineVisualRefresh();
+    }
+
+    private static bool IsInstallationSuppliedByNetwork(
+        ElectricNetwork network,
+        InstallationObject installationObject)
+    {
+        if (network == null || installationObject == null)
+        {
+            return false;
+        }
+
+        for (int poleIndex = 0; poleIndex < network.Poles.Count; poleIndex++)
+        {
+            if (PoleSuppliesInstallation(network.Poles[poleIndex], installationObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private ItemDefinition ResolvePoleDefinition()
@@ -2691,7 +2772,7 @@ public class UtilityPole : InstallationObject
                 for (int i = 0; i < installationScratch.Count; i++)
                 {
                     InstallationObject installationObject = installationScratch[i];
-                    if (installationObject != null)
+                    if (IsElectricNetworkParticipant(installationObject))
                     {
                         suppliedInstallations.Add(installationObject);
                     }
@@ -2700,6 +2781,23 @@ public class UtilityPole : InstallationObject
         }
 
         installationScratch.Clear();
+    }
+
+    private static bool IsElectricNetworkParticipant(InstallationObject installationObject)
+    {
+        if (installationObject == null)
+        {
+            return false;
+        }
+
+        if (TryGetElectricPowerRequirement(installationObject, out _))
+        {
+            return true;
+        }
+
+        return installationObject is SteamGenerator steamGenerator
+               && steamGenerator.TryGetObjectInfoOutputRate(out _, out float configuredGeneratorWatts)
+               && configuredGeneratorWatts > EnergyEpsilon;
     }
 
     private static void RegisterSuppliedConsumerNetworks()

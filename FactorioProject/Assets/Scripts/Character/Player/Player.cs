@@ -17,7 +17,6 @@ public class Player : Character
     private const string TorchLightAnchorName = "_TorchLightAnchor";
     private const float PlayerRootY = 0f;
     private const float TorchEnergyEpsilon = 0.0001f;
-    private const float TorchLightFallbackHeight = 2f;
 
     [Serializable]
     public struct PlayerState
@@ -94,7 +93,6 @@ public class Player : Character
 
     private PlayerController playerController;
     private Transform torchLightAnchor;
-    private Transform torchHeadTransform;
     private int toggledLightItemId = -1;
     private ItemDefinition toggledLightDefinition;
     private bool itemLightToggleRequested;
@@ -213,10 +211,6 @@ public class Player : Character
     {
         UpdateActiveTorchEnergy(Time.deltaTime);
         RefreshEquipVisual();
-        if (torchEquipVisualActive)
-        {
-            UpdateTorchLightAnchorPosition();
-        }
     }
 
     public bool ToggleTorchEquip(int torchItemId)
@@ -434,35 +428,11 @@ public class Player : Character
             torchLightAnchor.SetParent(transform, false);
         }
 
-        UpdateTorchLightAnchorPosition();
+        // Match installed-object lights: the owner origin is the zero-height reference,
+        // and ItemLightController applies the shared range-based height offset.
+        torchLightAnchor.localPosition = Vector3.zero;
+        torchLightAnchor.localRotation = Quaternion.identity;
         return torchLightAnchor;
-    }
-
-    private void UpdateTorchLightAnchorPosition()
-    {
-        if (torchLightAnchor == null)
-        {
-            return;
-        }
-
-        if (torchHeadTransform == null)
-        {
-            if (animator == null)
-            {
-                animator = GetComponentInChildren<Animator>();
-            }
-
-            if (animator != null && animator.isHuman)
-            {
-                torchHeadTransform = animator.GetBoneTransform(HumanBodyBones.Head);
-            }
-        }
-
-        Vector3 anchorPosition = torchHeadTransform != null
-            ? torchHeadTransform.position
-            : transform.position + Vector3.up * TorchLightFallbackHeight;
-        torchLightAnchor.position = anchorPosition;
-        torchLightAnchor.rotation = Quaternion.identity;
     }
 
     private void SetHeldPortableLightToggled(int itemId, bool active)

@@ -182,7 +182,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Bucket
   id: 0
   objectName: Bucket
-  objId: 87
+  objId: 88
   itemDefinition: {fileID: 11400000, guid: 5e897bd260b82084fb272c968673a461, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -209,6 +209,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   portableWaterSurfaceMaterial: {fileID: 2100000, guid: 8d4ab8be24874db09522d2800d15d6e2, type: 2}
+  portableOilSurfaceMaterial: {fileID: 2100000, guid: da65524428c7f5b4d92e53c6caf9a822, type: 2}
 --- !u!4 &8553229865070038503 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 2705861293071220046, guid: e3226a70b8693db4f9da19d47abe9153, type: 3}

@@ -52,7 +52,7 @@ MonoBehaviour:
   - id: c7e077eece684be7b0fce1115e350081
     displayName: Electro
     expanded: 1
-    anchorItemGuid: add9dc54988936d4ab2eec894a7447f2
+    anchorItemGuid: 7a8ea2c79da84f048815b5cbfe397fd1
   - id: fdd0cac64fda415abc3134f009e1f9ab
     displayName: Belt
     expanded: 1
@@ -117,6 +117,10 @@ MonoBehaviour:
     displayName: CD
     expanded: 1
     anchorItemGuid: 9b769dd46a0b9fe4f91ace461114fcd2
+  - id: 078e4ec60eaf46649c771cf6f5f19606
+    displayName: New Folder
+    expanded: 1
+    anchorItemGuid: c0075e53760e0bc4e8a7625ac98e2167
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -179,10 +183,6 @@ MonoBehaviour:
   - itemGuid: c0075e53760e0bc4e8a7625ac98e2167
     folderId: c7e077eece684be7b0fce1115e350081
   - itemGuid: e38b0f871b2a4ef4b80c9d5864a2b5e0
-    folderId: c7e077eece684be7b0fce1115e350081
-  - itemGuid: 7a8ea2c79da84f048815b5cbfe397fd1
-    folderId: c7e077eece684be7b0fce1115e350081
-  - itemGuid: 6a913ce143edf9c42b1a4c2b72cbdde8
     folderId: c7e077eece684be7b0fce1115e350081
   - itemGuid: add9dc54988936d4ab2eec894a7447f2
     folderId: fdd0cac64fda415abc3134f009e1f9ab
@@ -270,8 +270,6 @@ MonoBehaviour:
     folderId: 396fb7fc138646ebbfad2b1ca8b35460
   - itemGuid: 762e4dd9db91c774ca6004b78fbf6331
     folderId: 63b13fc99f8747da9db46e2210011669
-  - itemGuid: b683f0f1cfeadca4196e5a3df399b945
-    folderId: c7e077eece684be7b0fce1115e350081
   - itemGuid: b7f6e746e5fdf2f43a58e92c85c78479
     folderId: 839eaa9b00424dc59d967a096e100401
   - itemGuid: d4d9ce93c017a2e4d8c5891bb4f4e91c
@@ -290,9 +288,19 @@ MonoBehaviour:
     folderId: c2ff1d1024d34b038c46326dedd7a5d0
   - itemGuid: bba87764d2aea6d4793edef65f0ef693
     folderId: 63b13fc99f8747da9db46e2210011669
-  - itemGuid: cce9d703937340a4f9af3353e88cb536
-    folderId: c7e077eece684be7b0fce1115e350081
-  - itemGuid: 4e5db4429e6e85349a42d61a719268e4
-    folderId: c7e077eece684be7b0fce1115e350081
   - itemGuid: 7f3c8451f322f974e9a3e31abdcce243
     folderId: c2ff1d1024d34b038c46326dedd7a5d0
+  - itemGuid: 639f657a2950b1444bd7dbb5bee0719a
+    folderId: 396fb7fc138646ebbfad2b1ca8b35460
+  - itemGuid: 7a8ea2c79da84f048815b5cbfe397fd1
+    folderId: 078e4ec60eaf46649c771cf6f5f19606
+  - itemGuid: 6a913ce143edf9c42b1a4c2b72cbdde8
+    folderId: 078e4ec60eaf46649c771cf6f5f19606
+  - itemGuid: b683f0f1cfeadca4196e5a3df399b945
+    folderId: 078e4ec60eaf46649c771cf6f5f19606
+  - itemGuid: cce9d703937340a4f9af3353e88cb536
+    folderId: 078e4ec60eaf46649c771cf6f5f19606
+  - itemGuid: 4e5db4429e6e85349a42d61a719268e4
+    folderId: 078e4ec60eaf46649c771cf6f5f19606
+  - itemGuid: 8780f845ccb846a4197150948b3297b2
+    folderId: c7e077eece684be7b0fce1115e350081
