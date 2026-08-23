@@ -21,6 +21,7 @@ public class UndergroundPipe : Pipe
     private float previewRouteWidth = 0.48f;
 
     private Transform secondaryEndpointVisual;
+    private MeshRenderer secondaryFluidDisplayRenderer;
     private LineRenderer previewRouteRenderer;
     private Material previewRouteMaterial;
     private Color previewRouteColor = new Color(0.45f, 0.95f, 1f, 0.85f);
@@ -30,6 +31,8 @@ public class UndergroundPipe : Pipe
     private bool previewPairCommitted;
     private Quaternion initialPreviewRootRotation = Quaternion.identity;
     private bool hasInitialPreviewRootRotation;
+    private bool secondaryFluidDisplayVisible;
+    private Color secondaryFluidDisplayColor;
 
     public bool HasCompletePair => TryGetPairCoordinates(out _, out _);
     public bool HasPreviewCandidate => previewPairConfigured;
@@ -422,6 +425,7 @@ public class UndergroundPipe : Pipe
         exitVisual.SetPositionAndRotation(
             secondWorldPosition + exitRootRotation * endpointLocalPosition,
             exitRootRotation * endpointLocalRotation);
+        ApplySecondaryFluidDisplayState();
     }
 
     private Transform EnsureSecondaryEndpointVisual()
@@ -447,7 +451,55 @@ public class UndergroundPipe : Pipe
         secondaryEndpointVisual = Instantiate(source.gameObject, transform).transform;
         secondaryEndpointVisual.name = GeneratedExitVisualName;
         RemoveNestedUndergroundPipeComponents(secondaryEndpointVisual.gameObject);
+        secondaryFluidDisplayRenderer = null;
         return secondaryEndpointVisual;
+    }
+
+    protected override void OnFluidDisplayStateChanged(bool visible, Color color)
+    {
+        secondaryFluidDisplayVisible = visible;
+        secondaryFluidDisplayColor = color;
+        ApplySecondaryFluidDisplayState();
+    }
+
+    private void ApplySecondaryFluidDisplayState()
+    {
+        MeshRenderer renderer = ResolveSecondaryFluidDisplayRenderer();
+        if (renderer == null)
+        {
+            return;
+        }
+
+        ApplyFluidDisplayState(
+            renderer,
+            secondaryFluidDisplayVisible,
+            secondaryFluidDisplayColor);
+    }
+
+    private MeshRenderer ResolveSecondaryFluidDisplayRenderer()
+    {
+        if (secondaryFluidDisplayRenderer != null)
+        {
+            return secondaryFluidDisplayRenderer;
+        }
+
+        if (secondaryEndpointVisual == null)
+        {
+            return null;
+        }
+
+        MeshRenderer[] renderers = secondaryEndpointVisual.GetComponentsInChildren<MeshRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            MeshRenderer renderer = renderers[i];
+            if (renderer != null && renderer.name == "Fluid DP")
+            {
+                secondaryFluidDisplayRenderer = renderer;
+                break;
+            }
+        }
+
+        return secondaryFluidDisplayRenderer;
     }
 
     private Transform ResolvePrimaryEndpointVisual()

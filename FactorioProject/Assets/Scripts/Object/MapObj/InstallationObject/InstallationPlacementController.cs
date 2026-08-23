@@ -25101,7 +25101,12 @@ public class InstallationPlacementController : MonoBehaviour
             return pumpOutputDirectionMatches;
         }
 
-        if (!CanProposedFluidStoragePipeAreaConnectionsMatchExisting(
+        if (!CanProposedFluidTankAndPumpConnectionsMatchExisting(
+                block.Coordinate,
+                footprintSource,
+                quarterTurns,
+                previewToIgnore)
+            || !CanProposedFluidStoragePipeAreaConnectionsMatchExisting(
                 block.Coordinate,
                 footprintSource,
                 quarterTurns,
@@ -29994,8 +29999,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
             || installationObject is Pipe
-            || installationObject is Pump
-            || !installationObject.CanStoreFluid
+            || (!(installationObject is Pump) && !installationObject.CanStoreFluid)
             || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
         {
             return true;
@@ -30113,6 +30117,406 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private bool CanProposedFluidTankAndPumpConnectionsMatchExisting(
+        Vector2Int anchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
+        {
+            return true;
+        }
+
+        HashSet<int> compatibleFluidItemIds = new HashSet<int>();
+        bool hasFluidConstraint = false;
+        if (installationObject is Fluidtank)
+        {
+            int proposedStoredFluidItemId = ResolveProposedStoredFluidItemId(
+                installationObject,
+                previewToIgnore);
+            if (!TryMergeSingleFluidCompatibilityConstraint(
+                    proposedStoredFluidItemId,
+                    compatibleFluidItemIds,
+                    ref hasFluidConstraint))
+            {
+                return false;
+            }
+
+            return TryMergeConnectedFluidTankConstraints(
+                       anchorCoordinate,
+                       previewToIgnore,
+                       compatibleFluidItemIds,
+                       ref hasFluidConstraint)
+                   && TryMergeConnectedPumpOutputConstraints(
+                       anchorCoordinate,
+                       previewToIgnore,
+                       compatibleFluidItemIds,
+                       ref hasFluidConstraint)
+                   && TryMergeConnectedPipeNetworkConstraints(
+                       anchorCoordinate,
+                       previewToIgnore,
+                       compatibleFluidItemIds,
+                       ref hasFluidConstraint);
+        }
+
+        if (installationObject is not Pump proposedPump)
+        {
+            return true;
+        }
+
+        HashSet<int> proposedPumpFluidItemIds = new HashSet<int>();
+        if (!TryGetCandidateOutputItemIds(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns,
+                proposedPumpFluidItemIds)
+            || !RemoveNonFluidItemIds(proposedPumpFluidItemIds)
+            || !TryMergeFluidCompatibilityConstraint(
+                compatibleFluidItemIds,
+                ref hasFluidConstraint,
+                proposedPumpFluidItemIds))
+        {
+            return false;
+        }
+
+        return TryMergeTanksConnectedToProposedPump(
+            anchorCoordinate,
+            footprintSource,
+            quarterTurns,
+            proposedPump,
+            previewToIgnore,
+            compatibleFluidItemIds,
+            ref hasFluidConstraint);
+    }
+
+    private int ResolveProposedStoredFluidItemId(
+        InstallationObject footprintInstallation,
+        MapObject previewToIgnore)
+    {
+        if (TryResolveInstallationObject(
+                previewToIgnore,
+                out InstallationObject previewInstallation)
+            && previewInstallation.StoredFluidItemId >= 0)
+        {
+            return previewInstallation.StoredFluidItemId;
+        }
+
+        return footprintInstallation != null
+            ? footprintInstallation.StoredFluidItemId
+            : -1;
+    }
+
+    private bool TryMergeConnectedFluidTankConstraints(
+        Vector2Int proposedTankCoordinate,
+        MapObject previewToIgnore,
+        HashSet<int> compatibleFluidItemIds,
+        ref bool hasFluidConstraint)
+    {
+        for (int directionIndex = 0; directionIndex < PipeCardinalDirections.Length; directionIndex++)
+        {
+            Vector2Int neighborCoordinate =
+                proposedTankCoordinate + PipeCardinalDirections[directionIndex];
+            if (!TryGetFluidTankPlacementSnapshotAtCoordinate(
+                    neighborCoordinate,
+                    previewToIgnore,
+                    out PlacementSnapshot tankSnapshot))
+            {
+                continue;
+            }
+
+            if (!TryMergeSingleFluidCompatibilityConstraint(
+                    ResolveSnapshotStoredFluidItemId(tankSnapshot),
+                    compatibleFluidItemIds,
+                    ref hasFluidConstraint))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryMergeConnectedPumpOutputConstraints(
+        Vector2Int proposedTankCoordinate,
+        MapObject previewToIgnore,
+        HashSet<int> compatibleFluidItemIds,
+        ref bool hasFluidConstraint)
+    {
+        for (int coordinateIndex = -1;
+             coordinateIndex < PipeCardinalDirections.Length;
+             coordinateIndex++)
+        {
+            Vector2Int outputCoordinate = coordinateIndex < 0
+                ? proposedTankCoordinate
+                : proposedTankCoordinate + PipeCardinalDirections[coordinateIndex];
+            pipeAreaBlockCandidateScratchA.Clear();
+            CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+                outputCoordinate,
+                previewToIgnore,
+                pipeAreaBlockCandidateScratchA);
+
+            for (int candidateIndex = 0;
+                 candidateIndex < pipeAreaBlockCandidateScratchA.Count;
+                 candidateIndex++)
+            {
+                PipeAreaBlockCandidate pumpOutputCandidate =
+                    pipeAreaBlockCandidateScratchA[candidateIndex];
+                if (!PumpOutputCandidateConnectsTank(
+                        proposedTankCoordinate,
+                        outputCoordinate,
+                        pumpOutputCandidate))
+                {
+                    continue;
+                }
+
+                HashSet<int> pumpFluidItemIds = new HashSet<int>();
+                PipeAreaFluidResolution resolution = ResolvePipeAreaCandidateFluidItemIds(
+                    outputCoordinate,
+                    pumpOutputCandidate,
+                    pumpFluidItemIds);
+                if (resolution != PipeAreaFluidResolution.Resolved
+                    || !TryMergeFluidCompatibilityConstraint(
+                        compatibleFluidItemIds,
+                        ref hasFluidConstraint,
+                        pumpFluidItemIds))
+                {
+                    pipeAreaBlockCandidateScratchA.Clear();
+                    return false;
+                }
+            }
+
+            pipeAreaBlockCandidateScratchA.Clear();
+        }
+
+        return true;
+    }
+
+    private bool TryMergeConnectedPipeNetworkConstraints(
+        Vector2Int proposedTankCoordinate,
+        MapObject previewToIgnore,
+        HashSet<int> compatibleFluidItemIds,
+        ref bool hasFluidConstraint)
+    {
+        for (int directionIndex = 0; directionIndex < PipeCardinalDirections.Length; directionIndex++)
+        {
+            Vector2Int direction = PipeCardinalDirections[directionIndex];
+            Vector2Int pipeCoordinate = proposedTankCoordinate + direction;
+            if (!TryGetPipePlacementAtCoordinate(
+                    pipeCoordinate,
+                    previewToIgnore,
+                    out Pipe pipe,
+                    out Quaternion pipeRotation)
+                || pipe == null
+                || !pipe.HasConnectionTowardsAt(pipeCoordinate, pipeRotation, -direction))
+            {
+                continue;
+            }
+
+            HashSet<int> pipeNetworkFluidItemIds = new HashSet<int>();
+            bool hasPipeNetworkFluidConstraint = false;
+            if (!TryCollectPipeNetworkFluidConstraints(
+                    pipeCoordinate,
+                    pipe,
+                    pipeRotation,
+                    previewToIgnore,
+                    pipeNetworkFluidItemIds,
+                    ref hasPipeNetworkFluidConstraint)
+                || hasPipeNetworkFluidConstraint
+                && !TryMergeFluidCompatibilityConstraint(
+                    compatibleFluidItemIds,
+                    ref hasFluidConstraint,
+                    pipeNetworkFluidItemIds))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryMergeTanksConnectedToProposedPump(
+        Vector2Int pumpAnchorCoordinate,
+        MapObject footprintSource,
+        int quarterTurns,
+        Pump proposedPump,
+        MapObject previewToIgnore,
+        HashSet<int> compatibleFluidItemIds,
+        ref bool hasFluidConstraint)
+    {
+        if (proposedPump == null
+            || !proposedPump.TryGetPipeConnectionDirection(
+                GetPlacementObjectRotation(footprintSource, quarterTurns),
+                out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements =
+            inputOutputModule.RectGridPlacements;
+        if (placements == null)
+        {
+            return false;
+        }
+
+        for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+        {
+            InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+            if (!InputOutputModule.IsOutputBlockType(placement.blockType)
+                || !TryGetRectGridCoordinate(
+                    pumpAnchorCoordinate,
+                    footprintSource,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int outputCoordinate))
+            {
+                continue;
+            }
+
+            if (!TryMergeFluidTankAtCoordinate(
+                    outputCoordinate,
+                    previewToIgnore,
+                    compatibleFluidItemIds,
+                    ref hasFluidConstraint)
+                || !TryMergeFluidTankAtCoordinate(
+                    outputCoordinate + outputDirection,
+                    previewToIgnore,
+                    compatibleFluidItemIds,
+                    ref hasFluidConstraint))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryMergeFluidTankAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        HashSet<int> compatibleFluidItemIds,
+        ref bool hasFluidConstraint)
+    {
+        return !TryGetFluidTankPlacementSnapshotAtCoordinate(
+                   coordinate,
+                   previewToIgnore,
+                   out PlacementSnapshot tankSnapshot)
+               || TryMergeSingleFluidCompatibilityConstraint(
+                   ResolveSnapshotStoredFluidItemId(tankSnapshot),
+                   compatibleFluidItemIds,
+                   ref hasFluidConstraint);
+    }
+
+    private bool TryGetFluidTankPlacementSnapshotAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore,
+        out PlacementSnapshot snapshot)
+    {
+        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out snapshot)
+            && SnapshotIsActiveFluidTank(snapshot, previewToIgnore))
+        {
+            return true;
+        }
+
+        if (TryGetInstalledPlacementSnapshot(coordinate, out snapshot)
+            && SnapshotIsActiveFluidTank(snapshot, previewToIgnore))
+        {
+            return true;
+        }
+
+        if (TryGetSavedPlacementSnapshot(coordinate, out snapshot)
+            && SnapshotIsActiveFluidTank(snapshot, previewToIgnore))
+        {
+            return true;
+        }
+
+        snapshot = null;
+        return false;
+    }
+
+    private bool SnapshotIsActiveFluidTank(
+        PlacementSnapshot snapshot,
+        MapObject previewToIgnore)
+    {
+        return snapshot?.mapObject is Fluidtank
+               && !IsIgnoredFluidConnectorSnapshot(snapshot, previewToIgnore);
+    }
+
+    private static int ResolveSnapshotStoredFluidItemId(PlacementSnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return -1;
+        }
+
+        if (snapshot.storedFluidItemId >= 0)
+        {
+            return snapshot.storedFluidItemId;
+        }
+
+        return snapshot.mapObject is InstallationObject installationObject
+            ? installationObject.StoredFluidItemId
+            : -1;
+    }
+
+    private static bool TryMergeSingleFluidCompatibilityConstraint(
+        int fluidItemId,
+        HashSet<int> compatibleFluidItemIds,
+        ref bool hasFluidConstraint)
+    {
+        if (fluidItemId < 0 || !InputOutputModule.IsFluidItemId(fluidItemId))
+        {
+            return true;
+        }
+
+        if (compatibleFluidItemIds == null)
+        {
+            return false;
+        }
+
+        if (hasFluidConstraint && !compatibleFluidItemIds.Contains(fluidItemId))
+        {
+            return false;
+        }
+
+        compatibleFluidItemIds.Clear();
+        compatibleFluidItemIds.Add(fluidItemId);
+        hasFluidConstraint = true;
+        return true;
+    }
+
+    private bool PumpOutputCandidateConnectsTank(
+        Vector2Int tankCoordinate,
+        Vector2Int outputCoordinate,
+        PipeAreaBlockCandidate candidate)
+    {
+        if (candidate.snapshot?.mapObject is not Pump pump
+            || !InputOutputModule.IsOutputBlockType(candidate.blockType)
+            || !pump.TryGetPipeConnectionDirection(
+                candidate.snapshot.rotation,
+                out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        return outputCoordinate == tankCoordinate
+               || outputCoordinate + outputDirection == tankCoordinate;
+    }
+
+    private static bool RemoveNonFluidItemIds(HashSet<int> itemIds)
+    {
+        if (itemIds == null || itemIds.Count <= 0)
+        {
+            return false;
+        }
+
+        itemIds.RemoveWhere(itemId => !InputOutputModule.IsFluidItemId(itemId));
+        return itemIds.Count > 0;
     }
 
     private bool TryGetSteamGeneratorDirectBoilerOutputPlacement(
