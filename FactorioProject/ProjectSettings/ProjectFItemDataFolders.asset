@@ -79,11 +79,11 @@ MonoBehaviour:
     anchorItemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
   - id: b66e74eb3909437e98f5ea9b777676a9
     displayName: Animal
-    expanded: 0
+    expanded: 1
     anchorItemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
   - id: 85aa68b4dba945dcb9adac06984edd46
     displayName: Brick building
-    expanded: 0
+    expanded: 1
     anchorItemGuid: 607f7fef71c969144b6e767e76d193f9
   - id: 6dc3503fe92247e6803d4e2740a6bcf7
     displayName: Paper

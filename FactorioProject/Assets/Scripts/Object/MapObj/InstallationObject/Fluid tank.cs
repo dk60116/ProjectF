@@ -6,6 +6,13 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private const float PipeDirectionEpsilon = 0.0001f;
     private const float FluidFillRatioEpsilon = 0.001f;
     private const float FluidTankUpdateIntervalSeconds = 0.1f;
+    private static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
+
+    [SerializeField]
+    private MeshRenderer fluidColor;
+
+    private MaterialPropertyBlock fluidColorPropertyBlock;
 
     private static readonly Vector2Int[] FluidCardinalDirections =
     {
@@ -46,6 +53,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         InvalidateFluidNetworkTopology();
         MapObjectTickManager.RegisterUpdateTick(this);
         RefreshAllPipeVisuals();
+        RefreshFluidColor();
     }
 
     protected override void OnDisable()
@@ -111,6 +119,46 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 transferTemperatureCelsius,
                 out _);
         }
+    }
+
+    protected override void OnStoredFluidChanged(
+        int previousFluidItemId,
+        float previousStoredLiters,
+        int currentFluidItemId,
+        float currentStoredLiters)
+    {
+        base.OnStoredFluidChanged(
+            previousFluidItemId,
+            previousStoredLiters,
+            currentFluidItemId,
+            currentStoredLiters);
+
+        RefreshFluidColor();
+    }
+
+    private void RefreshFluidColor()
+    {
+        if (fluidColor == null)
+        {
+            return;
+        }
+
+        int fluidItemId = StoredFluidItemId;
+        ItemDefinition definition = fluidItemId >= 0
+            ? InputOutputModule.ResolveItemDefinition(fluidItemId)
+            : null;
+        if (definition == null)
+        {
+            fluidColor.SetPropertyBlock(null);
+            return;
+        }
+
+        fluidColorPropertyBlock ??= new MaterialPropertyBlock();
+        fluidColor.GetPropertyBlock(fluidColorPropertyBlock);
+        Color displayColor = definition.fluidDisplayColor;
+        fluidColorPropertyBlock.SetColor(BaseColorShaderId, displayColor);
+        fluidColorPropertyBlock.SetColor(ColorShaderId, displayColor);
+        fluidColor.SetPropertyBlock(fluidColorPropertyBlock);
     }
 
     public static void RefreshAllPipeVisuals()

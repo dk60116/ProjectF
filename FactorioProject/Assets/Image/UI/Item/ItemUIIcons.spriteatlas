@@ -297,7 +297,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 7a2374bfb3a01524ebd53c2d4d63d095, type: 3}
   - {fileID: 21300000, guid: 0660c0ff81df58b49ad7045794fc3ec9, type: 3}
   m_PackedSpriteNamesToIndex:
-  - Wooden fecne_Icon
+  - Wooden Fecne_Icon
   - Manual - Steel plate_Icon
   - Woodplank_Icon
   - Steam train_Icon
@@ -308,14 +308,14 @@ SpriteAtlas:
   - Log_Icon
   - Station
   - Paper_Icon
-  - Wooden box_Icon
+  - Wooden Box_Icon
   - Coal_Icon
   - Rail handcar_Icon
   - Boiler_Icon
   - Manual - Water pump_Icon
   - Charcoal_Icon
   - Flatcar_Icon
-  - Brick wall_Icon
+  - Brick Wall_Icon
   - Funance_Icon
   - Conveyor belt_Icon
   - Axe_Icon
@@ -328,8 +328,8 @@ SpriteAtlas:
   - Nail_Icon
   - Book_Icon
   - Steam generator_Icon
-  - Mining machine_Icon
-  - Wooden fecne door_Icon
+  - Mining Machine_Icon
+  - Wooden Fecne Door_Icon
   - Water pump_Icon
   - Mortor_Icon
   - Streetlight_Icon
