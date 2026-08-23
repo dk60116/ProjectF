@@ -25,11 +25,12 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private static readonly HashSet<Fluidtank> ActiveFluidTanks = new HashSet<Fluidtank>();
     private static int fluidNetworkTopologyVersion = 1;
 
-    [SerializeField, Tooltip("탱크 측면 연결 파이프입니다. 목록 순서와 무관하게 자식 위치로 방향을 판정합니다.")]
+    [SerializeField, Tooltip("탱크 측면 연결 파이프입니다. 목록 순서와 무관하게 탱크 로컬 위치로 방향을 판정합니다.")]
     private List<GameObject> pipeList = new List<GameObject>();
 
     private readonly List<InstallationObject> adjacentInstallationScratch = new List<InstallationObject>(4);
     private readonly List<InputOutputModule> adjacentModuleScratch = new List<InputOutputModule>(2);
+    private readonly HashSet<int> adjacentOutputFluidItemIdsScratch = new HashSet<int>();
     private readonly List<Fluidtank> connectedTankCache = new List<Fluidtank>(4);
     private readonly Queue<Vector2Int> fluidNetworkSearchQueue = new Queue<Vector2Int>();
     private readonly HashSet<Vector2Int> fluidNetworkSearchVisited = new HashSet<Vector2Int>();
@@ -134,6 +135,11 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             currentStoredLiters);
 
         RefreshFluidColor();
+        if (previousFluidItemId != currentFluidItemId)
+        {
+            InvalidateFluidNetworkTopology();
+            RefreshAllPipeVisuals();
+        }
     }
 
     private void RefreshFluidColor()
@@ -256,15 +262,25 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (pipe != null
-                    && !pipe.HasConnectionTowardsAt(coordinate, pipe.transform.rotation, direction))
+                if ((tank != null
+                     && !tank.HasFluidNetworkConnectionTowards(coordinate, direction))
+                    || (pipe != null
+                        && !pipe.HasConnectionTowardsAt(
+                            coordinate,
+                            pipe.transform.rotation,
+                            direction)))
                 {
                     continue;
                 }
 
                 Vector2Int nextCoordinate = coordinate + direction;
                 if (fluidNetworkSearchVisited.Contains(nextCoordinate)
-                    || !TryResolveFluidNetworkNode(nextCoordinate, out _, out Pipe nextPipe)
+                    || !TryResolveFluidNetworkNode(
+                        nextCoordinate,
+                        out Fluidtank nextTank,
+                        out Pipe nextPipe)
+                    || nextTank != null
+                    && !nextTank.HasFluidNetworkConnectionTowards(nextCoordinate, -direction)
                     || (nextPipe != null
                         && !nextPipe.HasConnectionTowardsAt(
                             nextCoordinate,
@@ -384,8 +400,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
 
             bool connected = hasPlacement
                              && TryResolvePipeVisualDirection(pipeVisual, out Vector2Int direction)
-                             && (HasConnectedNeighbor(anchorCoordinate + direction, direction)
-                                 || HasPipeOutputAreaConnection(anchorCoordinate, direction));
+                             && HasFluidNetworkConnectionTowards(anchorCoordinate, direction);
             if (pipeVisual.activeSelf != connected)
             {
                 pipeVisual.SetActive(connected);
@@ -393,40 +408,91 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
     }
 
-    private bool HasConnectedNeighbor(Vector2Int neighborCoordinate, Vector2Int directionFromTank)
+    public bool HasFluidNetworkConnectionTowards(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank)
     {
-        adjacentInstallationScratch.Clear();
-        if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
-                neighborCoordinate,
-                adjacentInstallationScratch))
+        if (directionFromTank == Vector2Int.zero
+            || !TryResolveConnectionTowards(
+                tankCoordinate,
+                directionFromTank,
+                out Fluidtank neighborTank,
+                out int neighborFluidItemId))
         {
             return false;
         }
 
-        for (int i = 0; i < adjacentInstallationScratch.Count; i++)
+        // Adjacent tanks form one storage bank regardless of which individual
+        // tank currently owns the liters. Fluid compatibility only closes a tank
+        // side against an external pipe/output network; applying it between tanks
+        // makes equalized banks visually fragment as their contents move.
+        if (neighborTank != null)
         {
-            InstallationObject neighbor = adjacentInstallationScratch[i];
-            if (neighbor == null || neighbor == this)
+            return true;
+        }
+
+        int preferredFluidItemId = StoredFluidItemId;
+        return preferredFluidItemId < 0
+               || neighborFluidItemId < 0
+               || preferredFluidItemId == neighborFluidItemId;
+    }
+
+    private bool TryResolveConnectionTowards(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        out Fluidtank neighborTank,
+        out int neighborFluidItemId)
+    {
+        neighborTank = null;
+        neighborFluidItemId = -1;
+        Vector2Int neighborCoordinate = tankCoordinate + directionFromTank;
+
+        adjacentInstallationScratch.Clear();
+        if (CollectActiveInstallationsAtRuntimeGridCoordinate(
+                neighborCoordinate,
+                adjacentInstallationScratch))
+        {
+            Pipe connectedPipe = null;
+            for (int i = 0; i < adjacentInstallationScratch.Count; i++)
             {
-                continue;
+                InstallationObject neighbor = adjacentInstallationScratch[i];
+                if (neighbor == null || neighbor == this)
+                {
+                    continue;
+                }
+
+                if (neighbor is Fluidtank candidateTank)
+                {
+                    neighborTank = candidateTank;
+                    neighborFluidItemId = candidateTank.StoredFluidItemId;
+                    adjacentInstallationScratch.Clear();
+                    return true;
+                }
+
+                if (neighbor is Pipe pipe
+                    && pipe.HasConnectionTowardsAt(
+                        neighborCoordinate,
+                        pipe.transform.rotation,
+                        -directionFromTank))
+                {
+                    connectedPipe = pipe;
+                }
             }
 
-            if (neighbor is Fluidtank)
+            adjacentInstallationScratch.Clear();
+            if (connectedPipe != null)
             {
-                return true;
-            }
-
-            if (neighbor is Pipe pipe
-                && pipe.HasConnectionTowardsAt(
-                    neighborCoordinate,
-                    pipe.transform.rotation,
-                    -directionFromTank))
-            {
+                connectedPipe.TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
+                    tankCoordinate,
+                    out neighborFluidItemId);
                 return true;
             }
         }
 
-        return false;
+        return TryGetPipeOutputAreaConnectionFluidItemId(
+            tankCoordinate,
+            directionFromTank,
+            out neighborFluidItemId);
     }
 
     private bool HasPipeOutputAreaConnection(Vector2Int tankCoordinate, Vector2Int directionFromTank)
@@ -436,6 +502,76 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                    tankCoordinate + directionFromTank,
                    requiredOutputDirection)
                || HasPipeOutputAreaAtCoordinate(tankCoordinate, requiredOutputDirection);
+    }
+
+    private bool TryGetPipeOutputAreaConnectionFluidItemId(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        out int fluidItemId)
+    {
+        fluidItemId = -1;
+        Vector2Int requiredOutputDirection = -directionFromTank;
+        Vector2Int neighborCoordinate = tankCoordinate + directionFromTank;
+        return TryGetPipeOutputAreaFluidItemIdAtCoordinate(
+                   neighborCoordinate,
+                   requiredOutputDirection,
+                   out fluidItemId)
+               || TryGetPipeOutputAreaFluidItemIdAtCoordinate(
+                   tankCoordinate,
+                   requiredOutputDirection,
+                   out fluidItemId)
+               || HasPipeOutputAreaConnection(tankCoordinate, directionFromTank);
+    }
+
+    private bool TryGetPipeOutputAreaFluidItemIdAtCoordinate(
+        Vector2Int coordinate,
+        Vector2Int requiredOutputDirection,
+        out int fluidItemId)
+    {
+        fluidItemId = -1;
+        adjacentModuleScratch.Clear();
+        if (!InputOutputModule.CollectModulesAtRuntimeGridCoordinate(
+                coordinate,
+                adjacentModuleScratch))
+        {
+            return false;
+        }
+
+        bool hasConnection = false;
+        for (int i = 0; i < adjacentModuleScratch.Count; i++)
+        {
+            InputOutputModule module = adjacentModuleScratch[i];
+            if (module == null
+                || !module.TryGetRuntimePipeOutputExternalDirection(
+                    coordinate,
+                    out Vector2Int outputDirection)
+                || outputDirection != requiredOutputDirection)
+            {
+                continue;
+            }
+
+            hasConnection = true;
+            adjacentOutputFluidItemIdsScratch.Clear();
+            if (!module.TryGetRuntimeOutputItemIdsAtCoordinate(
+                    coordinate,
+                    adjacentOutputFluidItemIdsScratch))
+            {
+                continue;
+            }
+
+            foreach (int outputItemId in adjacentOutputFluidItemIdsScratch)
+            {
+                if (InputOutputModule.IsFluidItemId(outputItemId)
+                    && (fluidItemId < 0 || outputItemId < fluidItemId))
+                {
+                    fluidItemId = outputItemId;
+                }
+            }
+        }
+
+        adjacentModuleScratch.Clear();
+        adjacentOutputFluidItemIdsScratch.Clear();
+        return hasConnection;
     }
 
     private bool HasPipeOutputAreaAtCoordinate(
@@ -469,27 +605,58 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private bool TryResolvePipeVisualDirection(GameObject pipeVisual, out Vector2Int direction)
     {
         direction = Vector2Int.zero;
-        if (pipeVisual == null)
+        if (pipeVisual == null
+            || !TryGetPipeVisualLocalOffset(pipeVisual.transform, out Vector3 localOffset))
         {
             return false;
         }
 
-        Vector3 worldOffset = pipeVisual.transform.position - transform.position;
-        if (worldOffset.x * worldOffset.x + worldOffset.z * worldOffset.z <= PipeDirectionEpsilon)
-        {
-            return false;
-        }
+        // Installation animation temporarily scales the whole tank to zero.
+        // Child world positions collapse onto the tank origin in that state, so
+        // derive the grid direction from the hierarchy below the tank instead.
+        // Applying only the tank rotation preserves the placed orientation while
+        // deliberately excluding its animated scale and world position.
+        Vector3 directionOffset = transform.rotation * localOffset;
 
-        if (Mathf.Abs(worldOffset.x) >= Mathf.Abs(worldOffset.z))
+        if (Mathf.Abs(directionOffset.x) >= Mathf.Abs(directionOffset.z))
         {
-            direction.x = worldOffset.x >= 0f ? 1 : -1;
+            direction.x = directionOffset.x >= 0f ? 1 : -1;
         }
         else
         {
-            direction.y = worldOffset.z >= 0f ? 1 : -1;
+            direction.y = directionOffset.z >= 0f ? 1 : -1;
         }
 
         return true;
+    }
+
+    private bool TryGetPipeVisualLocalOffset(Transform pipeVisualTransform, out Vector3 localOffset)
+    {
+        localOffset = Vector3.zero;
+        if (pipeVisualTransform == null || pipeVisualTransform == transform)
+        {
+            return false;
+        }
+
+        Matrix4x4 pipeToTankLocal = Matrix4x4.identity;
+        Transform current = pipeVisualTransform;
+        while (current != null && current != transform)
+        {
+            pipeToTankLocal = Matrix4x4.TRS(
+                                  current.localPosition,
+                                  current.localRotation,
+                                  current.localScale)
+                              * pipeToTankLocal;
+            current = current.parent;
+        }
+
+        if (current != transform)
+        {
+            return false;
+        }
+
+        localOffset = pipeToTankLocal.MultiplyPoint3x4(Vector3.zero);
+        return localOffset.x * localOffset.x + localOffset.z * localOffset.z > PipeDirectionEpsilon;
     }
 
     private static bool ContainsDirection(IReadOnlyList<Vector2Int> directions, Vector2Int direction)

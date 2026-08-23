@@ -2179,6 +2179,15 @@ public class InputOutputModule : InstallationObject,
                 out storage,
                 out bool storageIsPipeArea))
         {
+            if (storage is Fluidtank fluidTank
+                && !fluidTank.HasFluidNetworkConnectionTowards(
+                    coordinate,
+                    directionToPrevious))
+            {
+                storage = null;
+                return false;
+            }
+
             if (storageIsPipeArea
                 && !CanFluidStorageConnectToDirection(storage, coordinate, directionToPrevious))
             {
@@ -2294,6 +2303,11 @@ public class InputOutputModule : InstallationObject,
         if (storageIsPipeArea)
         {
             return CanFluidStorageConnectToDirection(storage, coordinate, direction);
+        }
+
+        if (storage is Fluidtank fluidTank)
+        {
+            return fluidTank.HasFluidNetworkConnectionTowards(coordinate, direction);
         }
 
         if (isSeedCoordinate && TryGetRuntimePipeAreaExternalDirection(coordinate, out Vector2Int seedDirection))

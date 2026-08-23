@@ -158,13 +158,36 @@ public class Pipe : InstallationObject
         return TrySearchFluidNetwork(
             startCoordinate,
             false,
+            false,
+            Vector2Int.zero,
             out fluidItemId,
             out temperatureCelsius);
+    }
+
+    public bool TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
+        Vector2Int ignoredStorageCoordinate,
+        out int fluidItemId)
+    {
+        fluidItemId = -1;
+        if (!TryResolveObjectInfoPipeCoordinate(out Vector2Int startCoordinate))
+        {
+            return false;
+        }
+
+        return TrySearchFluidNetwork(
+            startCoordinate,
+            false,
+            true,
+            ignoredStorageCoordinate,
+            out fluidItemId,
+            out _);
     }
 
     private bool TrySearchFluidNetwork(
         Vector2Int startCoordinate,
         bool cacheDisplayNetwork,
+        bool hasIgnoredStorageCoordinate,
+        Vector2Int ignoredStorageCoordinate,
         out int fluidItemId,
         out float temperatureCelsius)
     {
@@ -184,6 +207,7 @@ public class Pipe : InstallationObject
             searchedNodeCount++;
 
             if (!foundFluid
+                && (!hasIgnoredStorageCoordinate || coordinate != ignoredStorageCoordinate)
                 && TryGetFluidInfoAtPipeNetworkCoordinate(
                     coordinate,
                     out fluidItemId,
@@ -216,6 +240,7 @@ public class Pipe : InstallationObject
 
                 Vector2Int neighborCoordinate = coordinate + direction;
                 if (!foundFluid
+                    && (!hasIgnoredStorageCoordinate || neighborCoordinate != ignoredStorageCoordinate)
                     && TryGetFluidInfoAtPipeNetworkCoordinate(
                         neighborCoordinate,
                         out fluidItemId,
@@ -657,6 +682,8 @@ public class Pipe : InstallationObject
         return TrySearchFluidNetwork(
             startCoordinate,
             true,
+            false,
+            Vector2Int.zero,
             out fluidItemId,
             out _);
     }
