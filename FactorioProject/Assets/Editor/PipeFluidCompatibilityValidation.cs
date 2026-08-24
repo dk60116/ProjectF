@@ -549,6 +549,20 @@ public static class PipeFluidCompatibilityValidation
         MethodInfo rotationMethod = GetControllerMethod("RotateInstallPreviewClockwise");
         MethodInfo fullBlueprintTopologyMethod = GetControllerMethod(
             "RefreshAllPipeBlueprintTopology");
+        MethodInfo manualMaskByCoordinateMethod = GetControllerMethod(
+            "TryGetManualPipeConnectionMask",
+            typeof(Vector2Int),
+            typeof(MapObject),
+            typeof(int).MakeByRefType());
+        MethodInfo manualMaskByPreviewMethod = GetControllerMethod(
+            "TryGetManualPipeConnectionMask",
+            typeof(Pipe),
+            typeof(Vector2Int),
+            typeof(int).MakeByRefType());
+        FieldInfo blueprintResolutionStateField =
+            typeof(InstallationPlacementController).GetField(
+                "isResolvingInstalledPipeVariantPreviewPlans",
+                BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo captureBlueprintPlansMethod = GetControllerMethod(
             "CaptureInstalledPipeVariantPreviewPlans");
         MethodInfo applyBlueprintPlansMethod = installedPipePlanListType != null
@@ -588,6 +602,18 @@ public static class PipeFluidCompatibilityValidation
             rotationMethod,
             fullBlueprintTopologyMethod,
             "pipe rotation immediately resolves the same complete blueprint topology");
+        ValidateFixtureMethodDoesNotAccessField(
+            report,
+            result,
+            manualMaskByCoordinateMethod,
+            blueprintResolutionStateField,
+            "full blueprint resolution preserves the selected manual connection mask");
+        ValidateFixtureMethodDoesNotAccessField(
+            report,
+            result,
+            manualMaskByPreviewMethod,
+            blueprintResolutionStateField,
+            "blueprint neighbour checks preserve manually selected pipe ports");
         ValidateFixtureMethodCall(
             report,
             result,
@@ -994,6 +1020,86 @@ public static class PipeFluidCompatibilityValidation
 
         result.failureCount++;
         report.Append("  FAIL forbidden wiring: ").AppendLine(label);
+    }
+
+    private static void ValidateFixtureMethodDoesNotAccessField(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        MethodInfo method,
+        FieldInfo field,
+        string label)
+    {
+        if (!TryMethodAccessesField(method, field, out bool accessesField, out string errorMessage))
+        {
+            result.errorCount++;
+            report.Append("  ERROR state wiring ").Append(label).Append(": ").AppendLine(errorMessage);
+            return;
+        }
+
+        result.wiringChecks++;
+        if (!accessesField)
+        {
+            return;
+        }
+
+        result.failureCount++;
+        report.Append("  FAIL forbidden state gate: ").AppendLine(label);
+    }
+
+    private static bool TryMethodAccessesField(
+        MethodInfo method,
+        FieldInfo field,
+        out bool accessesField,
+        out string errorMessage)
+    {
+        accessesField = false;
+        errorMessage = string.Empty;
+        if (method == null || field == null)
+        {
+            errorMessage = "method or field is unavailable";
+            return false;
+        }
+
+        MethodBody body = method.GetMethodBody();
+        byte[] il = body?.GetILAsByteArray();
+        if (il == null)
+        {
+            errorMessage = $"{method.Name} has no readable IL body";
+            return false;
+        }
+
+        try
+        {
+            int offset = 0;
+            while (offset < il.Length)
+            {
+                OpCode opCode = ReadOpCode(il, ref offset);
+                if (opCode.OperandType == OperandType.InlineField)
+                {
+                    int metadataToken = ReadInt32(il, offset);
+                    FieldInfo accessedField = method.Module.ResolveField(
+                        metadataToken,
+                        method.DeclaringType?.GetGenericArguments(),
+                        method.GetGenericArguments());
+                    if (accessedField != null
+                        && accessedField.Module == field.Module
+                        && accessedField.MetadataToken == field.MetadataToken)
+                    {
+                        accessesField = true;
+                        return true;
+                    }
+                }
+
+                offset += GetOperandSize(opCode.OperandType, il, offset);
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            errorMessage = SanitizeMessage(exception.GetBaseException().Message);
+            return false;
+        }
     }
 
     private static bool TryMethodCalls(

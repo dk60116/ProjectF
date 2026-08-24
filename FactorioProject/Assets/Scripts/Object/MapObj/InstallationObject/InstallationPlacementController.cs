@@ -11661,11 +11661,9 @@ public class InstallationPlacementController : MonoBehaviour
         out int connectionMask)
     {
         connectionMask = 0;
-        if (isResolvingInstalledPipeVariantPreviewPlans)
-        {
-            return false;
-        }
-
+        // A rotation selection is part of the authoritative blueprint snapshot.
+        // Virtual installed-neighbour resolution must read it as well; suppressing
+        // it here immediately overwrites the button result with automatic topology.
         if (previewToIgnore != null
             && TryGetPreviewAnchorCoordinate(previewToIgnore, out Vector2Int ignoredPreviewCoordinate)
             && ignoredPreviewCoordinate == anchorCoordinate
@@ -11691,8 +11689,7 @@ public class InstallationPlacementController : MonoBehaviour
         out int connectionMask)
     {
         connectionMask = 0;
-        return !isResolvingInstalledPipeVariantPreviewPlans
-               && previewPipe != null
+        return previewPipe != null
                && installPreviewPipeConnectionMasksByPreview.TryGetValue(
                    previewPipe,
                    out connectionMask)
