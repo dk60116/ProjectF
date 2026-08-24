@@ -182,6 +182,25 @@ public static class PipeFluidCompatibilityValidation
             typeof(HashSet<int>),
             typeof(bool).MakeByRefType(),
             typeof(ISet<int>));
+        MethodInfo compatibleAdjacencyResolutionMethod = GetControllerMethod(
+            "TryResolvePipePlacementVariantWithCompatibleAdjacency",
+            typeof(Pipe),
+            typeof(Vector2Int),
+            typeof(int),
+            typeof(MapObject),
+            typeof(int),
+            typeof(MapObject).MakeByRefType(),
+            typeof(int).MakeByRefType());
+        MethodInfo runtimePipeNormalizationMethod = GetControllerMethod(
+            "TryNormalizePipeVariantAtCoordinate",
+            typeof(Vector2Int),
+            typeof(MapObject),
+            typeof(IReadOnlyCollection<Vector2Int>));
+        MethodInfo previewPipeNormalizationMethod = GetControllerMethod(
+            "RefreshSinglePipePreviewVariant",
+            typeof(MapObject),
+            typeof(Vector2Int),
+            typeof(MapObject));
 
         JunctionInvariantFixtureResult fixtureResult = RunDeterministicJunctionInvariantFixture(
             details,
@@ -196,7 +215,10 @@ public static class PipeFluidCompatibilityValidation
             pipeAreaCandidateFluidMethod,
             candidateOutputMethod,
             configuredOutputMethod,
-            constraintMergeMethod);
+            constraintMergeMethod,
+            compatibleAdjacencyResolutionMethod,
+            runtimePipeNormalizationMethod,
+            previewPipeNormalizationMethod);
 
         if (controller == null
             || compatibilityMethod == null
@@ -211,7 +233,10 @@ public static class PipeFluidCompatibilityValidation
             || pipeAreaCandidateFluidMethod == null
             || candidateOutputMethod == null
             || configuredOutputMethod == null
-            || constraintMergeMethod == null)
+            || constraintMergeMethod == null
+            || compatibleAdjacencyResolutionMethod == null
+            || runtimePipeNormalizationMethod == null
+            || previewPipeNormalizationMethod == null)
         {
             details.AppendLine("ERROR: one or more pipe compatibility diagnostic entry points are unavailable.");
             AppendAvailability(details, "Controller", controller != null);
@@ -231,6 +256,12 @@ public static class PipeFluidCompatibilityValidation
             AppendAvailability(details, "TryGetCandidateOutputItemIds", candidateOutputMethod != null);
             AppendAvailability(details, "TryAppendConfiguredOutputItemIds", configuredOutputMethod != null);
             AppendAvailability(details, "TryMergeFluidCompatibilityConstraint", constraintMergeMethod != null);
+            AppendAvailability(
+                details,
+                "TryResolvePipePlacementVariantWithCompatibleAdjacency",
+                compatibleAdjacencyResolutionMethod != null);
+            AppendAvailability(details, "TryNormalizePipeVariantAtCoordinate", runtimePipeNormalizationMethod != null);
+            AppendAvailability(details, "RefreshSinglePipePreviewVariant", previewPipeNormalizationMethod != null);
             WriteReport(reportPath, details.ToString());
             Debug.LogError($"[Pipe Fluid Audit] Validator unavailable. Report: {reportPath}");
             return;
@@ -387,7 +418,10 @@ public static class PipeFluidCompatibilityValidation
         MethodInfo pipeAreaCandidateFluidMethod,
         MethodInfo candidateOutputMethod,
         MethodInfo configuredOutputMethod,
-        MethodInfo constraintMergeMethod)
+        MethodInfo constraintMergeMethod,
+        MethodInfo compatibleAdjacencyResolutionMethod,
+        MethodInfo runtimePipeNormalizationMethod,
+        MethodInfo previewPipeNormalizationMethod)
     {
         JunctionInvariantFixtureResult result = new JunctionInvariantFixtureResult();
         report.AppendLine("DETERMINISTIC JUNCTION FIXTURE Water(1) <> Oil(4)");
@@ -492,6 +526,104 @@ public static class PipeFluidCompatibilityValidation
             candidateOutputMethod,
             configuredOutputMethod,
             "configured output identity -> virtual module output");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            runtimePipeNormalizationMethod,
+            compatibleAdjacencyResolutionMethod,
+            "runtime pipe normalization is order-independent");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            previewPipeNormalizationMethod,
+            compatibleAdjacencyResolutionMethod,
+            "preview pipe normalization is order-independent");
+
+        Type installedPipePlanType = typeof(InstallationPlacementController).GetNestedType(
+            "InstalledPipeVariantPreviewPlan",
+            BindingFlags.NonPublic);
+        Type installedPipePlanListType = installedPipePlanType != null
+            ? typeof(IReadOnlyList<>).MakeGenericType(installedPipePlanType)
+            : null;
+        MethodInfo commitMethod = GetControllerMethod("HandleInstallCompleteClicked");
+        MethodInfo rotationMethod = GetControllerMethod("RotateInstallPreviewClockwise");
+        MethodInfo fullBlueprintTopologyMethod = GetControllerMethod(
+            "RefreshAllPipeBlueprintTopology");
+        MethodInfo captureBlueprintPlansMethod = GetControllerMethod(
+            "CaptureInstalledPipeVariantPreviewPlans");
+        MethodInfo applyBlueprintPlansMethod = installedPipePlanListType != null
+            ? GetControllerMethod(
+                "ApplyInstalledPipeBlueprintPlans",
+                installedPipePlanListType)
+            : null;
+        MethodInfo validateBlueprintPlansMethod = installedPipePlanListType != null
+            ? GetControllerMethod(
+                "CanApplyInstalledPipeBlueprintPlans",
+                installedPipePlanListType)
+            : null;
+        MethodInfo applyInstalledVariantPlanMethod = installedPipePlanType != null
+            ? GetControllerMethod(
+                "ApplyInstalledPipeVariantPlan",
+                installedPipePlanType)
+            : null;
+        MethodInfo postInstallNormalizationMethod = GetControllerMethod(
+            "NormalizePipeVariantsAroundCoordinates",
+            typeof(IReadOnlyList<Vector2Int>),
+            typeof(bool),
+            typeof(MapObject),
+            typeof(IReadOnlyCollection<Vector2Int>));
+        MethodInfo blueprintRefreshMethod = GetControllerMethod(
+            "RefreshPipeBlueprintTopology",
+            typeof(IReadOnlyCollection<Vector2Int>),
+            typeof(MapObject));
+        ValidateFixtureMethodDoesNotCall(
+            report,
+            result,
+            commitMethod,
+            fullBlueprintTopologyMethod,
+            "pipe commit does not recalculate or advance the visible blueprint topology");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            rotationMethod,
+            fullBlueprintTopologyMethod,
+            "pipe rotation immediately resolves the same complete blueprint topology");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            commitMethod,
+            captureBlueprintPlansMethod,
+            "pipe commit captures the visible installed-neighbour blueprint plans");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            commitMethod,
+            applyBlueprintPlansMethod,
+            "pipe commit applies the captured blueprint plans");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            commitMethod,
+            validateBlueprintPlansMethod,
+            "pipe commit rejects an installed-neighbour snapshot that cannot be applied exactly");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            applyBlueprintPlansMethod,
+            applyInstalledVariantPlanMethod,
+            "captured blueprint plans materialize installed-neighbour variants");
+        ValidateFixtureMethodDoesNotCall(
+            report,
+            result,
+            applyBlueprintPlansMethod,
+            postInstallNormalizationMethod,
+            "captured blueprint application does not recalculate installed topology");
+        ValidateFixtureMethodDoesNotCall(
+            report,
+            result,
+            applyBlueprintPlansMethod,
+            blueprintRefreshMethod,
+            "captured blueprint application does not refresh/rewrite the final shape");
 
         Pipe teePipe = LoadFixturePipe(TeePipePrefabPath);
         Pipe crossPipe = LoadFixturePipe(CrossPipePrefabPath);
@@ -838,6 +970,30 @@ public static class PipeFluidCompatibilityValidation
 
         result.failureCount++;
         report.Append("  FAIL wiring missing: ").AppendLine(label);
+    }
+
+    private static void ValidateFixtureMethodDoesNotCall(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        MethodInfo caller,
+        MethodInfo target,
+        string label)
+    {
+        if (!TryMethodCalls(caller, target, out bool callsTarget, out string errorMessage))
+        {
+            result.errorCount++;
+            report.Append("  ERROR wiring ").Append(label).Append(": ").AppendLine(errorMessage);
+            return;
+        }
+
+        result.wiringChecks++;
+        if (!callsTarget)
+        {
+            return;
+        }
+
+        result.failureCount++;
+        report.Append("  FAIL forbidden wiring: ").AppendLine(label);
     }
 
     private static bool TryMethodCalls(
