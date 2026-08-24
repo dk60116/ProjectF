@@ -27,6 +27,20 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
 
     [SerializeField, Tooltip("탱크 측면 연결 파이프입니다. 목록 순서와 무관하게 탱크 로컬 위치로 방향을 판정합니다.")]
     private List<GameObject> pipeList = new List<GameObject>();
+    [SerializeField, Tooltip("FlatCar 적재 시 숨길 다리 오브젝트입니다.")]
+    private GameObject legs;
+    [SerializeField, Min(0f), Tooltip("FlatCar 적재 시 탱크를 아래로 내릴 로컬 높이입니다.")]
+    private float flatCarMountedLowering = 0.1f;
+    [SerializeField, Min(0f), Tooltip("FlatCar 적재 시 일반 파이프와 도킹할 측면 파이프의 탱크 로컬 높이입니다.")]
+    private float flatCarMountedPipeHeight = 0.199f;
+    [SerializeField, Min(0f), Tooltip("FlatCar 적재 파이프가 탱크 안쪽에서 바깥으로 전개되는 거리입니다.")]
+    private float flatCarMountedPipeRetractDistance = 0.3f;
+    [SerializeField, Min(0.01f), Tooltip("FlatCar 적재 파이프의 전개/복귀 보간 속도입니다.")]
+    private float flatCarMountedPipeInterpolationSpeed = 8f;
+    [SerializeField, Min(0f), Tooltip("FlatCar가 멈춘 뒤 측면 파이프 전개를 시작할 때까지의 대기 시간입니다.")]
+    private float flatCarMountedPipeDeployDelay = 1f;
+    [SerializeField, Min(0f), Tooltip("FlatCar 적재 탱크 파이프가 도킹 지점으로 판정되는 최대 수평 오차입니다.")]
+    private float flatCarMountedPipeDockingTolerance = 0.2f;
 
     private readonly List<InstallationObject> adjacentInstallationScratch = new List<InstallationObject>(4);
     private readonly List<InputOutputModule> adjacentModuleScratch = new List<InputOutputModule>(2);
@@ -34,9 +48,215 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private readonly List<Fluidtank> connectedTankCache = new List<Fluidtank>(4);
     private readonly Queue<Vector2Int> fluidNetworkSearchQueue = new Queue<Vector2Int>();
     private readonly HashSet<Vector2Int> fluidNetworkSearchVisited = new HashSet<Vector2Int>();
+    private readonly List<Vector3> defaultPipeLocalPositions = new List<Vector3>(4);
+    private readonly List<bool> mountedPipeTargetActiveStates = new List<bool>(4);
     private int connectedTankCacheTopologyVersion;
+    private bool hasCachedDefaultPipeLocalPositions;
+    private bool hasFlatCarMountedPresentationState;
+    private bool isFlatCarMountedPresentation;
 
     public float ManagedUpdateTickIntervalSeconds => FluidTankUpdateIntervalSeconds;
+    public Vector3 FlatCarMountedLocalPosition => Vector3.down * flatCarMountedLowering;
+
+    public void SetFlatCarMountedPresentation(bool mounted)
+    {
+        if (hasFlatCarMountedPresentationState && isFlatCarMountedPresentation == mounted)
+        {
+            return;
+        }
+
+        if (legs != null)
+        {
+            bool shouldShowLegs = !mounted;
+            if (legs.activeSelf != shouldShowLegs)
+            {
+                legs.SetActive(shouldShowLegs);
+            }
+        }
+
+        CacheDefaultPipeLocalPositions();
+        hasFlatCarMountedPresentationState = true;
+        isFlatCarMountedPresentation = mounted;
+        ApplyFlatCarMountedPipePresentationImmediate(mounted);
+        RefreshPipeVisuals();
+    }
+
+    private void CacheDefaultPipeLocalPositions()
+    {
+        if (hasCachedDefaultPipeLocalPositions)
+        {
+            return;
+        }
+
+        defaultPipeLocalPositions.Clear();
+        if (pipeList != null)
+        {
+            for (int i = 0; i < pipeList.Count; i++)
+            {
+                GameObject pipeVisual = pipeList[i];
+                defaultPipeLocalPositions.Add(
+                    pipeVisual != null ? pipeVisual.transform.localPosition : Vector3.zero);
+            }
+        }
+
+        hasCachedDefaultPipeLocalPositions = true;
+    }
+
+    private void ApplyFlatCarMountedPipePresentationImmediate(bool mounted)
+    {
+        if (pipeList == null)
+        {
+            return;
+        }
+
+        EnsureMountedPipeTargetStateCapacity();
+        int pipeCount = Mathf.Min(pipeList.Count, defaultPipeLocalPositions.Count);
+        for (int i = 0; i < pipeCount; i++)
+        {
+            GameObject pipeVisual = pipeList[i];
+            if (pipeVisual == null)
+            {
+                continue;
+            }
+
+            if (mounted)
+            {
+                mountedPipeTargetActiveStates[i] = pipeVisual.activeSelf;
+                pipeVisual.transform.localPosition = GetMountedPipeRetractedLocalPosition(i);
+                continue;
+            }
+
+            mountedPipeTargetActiveStates[i] = false;
+            pipeVisual.transform.localPosition = defaultPipeLocalPositions[i];
+        }
+    }
+
+    public void UpdateFlatCarMountedPipeVisuals(float deltaTime, float carrierStationarySeconds)
+    {
+        if (!isFlatCarMountedPresentation || pipeList == null)
+        {
+            return;
+        }
+
+        CacheDefaultPipeLocalPositions();
+        EnsureMountedPipeTargetStateCapacity();
+        float interpolation = deltaTime > 0f
+            ? 1f - Mathf.Exp(-Mathf.Max(0.01f, flatCarMountedPipeInterpolationSpeed) * deltaTime)
+            : 1f;
+        bool deploymentReady = carrierStationarySeconds >= Mathf.Max(0f, flatCarMountedPipeDeployDelay);
+        bool hasPlacement = TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _);
+        int pipeCount = Mathf.Min(pipeList.Count, defaultPipeLocalPositions.Count);
+        for (int i = 0; i < pipeCount; i++)
+        {
+            GameObject pipeVisual = pipeList[i];
+            if (pipeVisual == null || pipeVisual == gameObject)
+            {
+                continue;
+            }
+
+            bool withinDockingRange = hasPlacement
+                                      && TryResolvePipeVisualDirection(pipeVisual, out Vector2Int direction)
+                                      && IsMountedPipeWithinDockingRange(
+                                          i,
+                                          pipeVisual,
+                                          anchorCoordinate,
+                                          direction);
+            bool targetActive = mountedPipeTargetActiveStates[i]
+                                && deploymentReady
+                                && withinDockingRange;
+            if (!pipeVisual.activeSelf)
+            {
+                if (!targetActive)
+                {
+                    continue;
+                }
+
+                pipeVisual.transform.localPosition = GetMountedPipeRetractedLocalPosition(i);
+                pipeVisual.SetActive(true);
+            }
+
+            Vector3 targetPosition = targetActive
+                ? GetMountedPipeExtendedLocalPosition(i)
+                : GetMountedPipeRetractedLocalPosition(i);
+            pipeVisual.transform.localPosition = Vector3.Lerp(
+                pipeVisual.transform.localPosition,
+                targetPosition,
+                interpolation);
+            if ((pipeVisual.transform.localPosition - targetPosition).sqrMagnitude > 0.000001f)
+            {
+                continue;
+            }
+
+            pipeVisual.transform.localPosition = targetPosition;
+            if (!targetActive)
+            {
+                pipeVisual.SetActive(false);
+            }
+        }
+    }
+
+    private void SetMountedPipeTarget(int index, GameObject pipeVisual, bool connected)
+    {
+        EnsureMountedPipeTargetStateCapacity();
+        if (index < 0
+            || index >= mountedPipeTargetActiveStates.Count
+            || pipeVisual == null
+            || pipeVisual == gameObject)
+        {
+            return;
+        }
+
+        mountedPipeTargetActiveStates[index] = connected;
+        if (connected && !pipeVisual.activeSelf)
+        {
+            pipeVisual.transform.localPosition = GetMountedPipeRetractedLocalPosition(index);
+            pipeVisual.SetActive(true);
+        }
+        else if (!connected && !pipeVisual.activeSelf)
+        {
+            pipeVisual.transform.localPosition = GetMountedPipeRetractedLocalPosition(index);
+        }
+    }
+
+    private Vector3 GetMountedPipeExtendedLocalPosition(int index)
+    {
+        Vector3 localPosition = index >= 0 && index < defaultPipeLocalPositions.Count
+            ? defaultPipeLocalPositions[index]
+            : Vector3.zero;
+        localPosition.y = flatCarMountedPipeHeight;
+        return localPosition;
+    }
+
+    private Vector3 GetMountedPipeRetractedLocalPosition(int index)
+    {
+        Vector3 extendedPosition = GetMountedPipeExtendedLocalPosition(index);
+        Vector3 outwardDirection = new Vector3(extendedPosition.x, 0f, extendedPosition.z);
+        float outwardDistance = outwardDirection.magnitude;
+        if (outwardDistance <= PipeDirectionEpsilon)
+        {
+            return extendedPosition;
+        }
+
+        outwardDirection /= outwardDistance;
+        float retractDistance = Mathf.Min(
+            Mathf.Max(0f, flatCarMountedPipeRetractDistance),
+            Mathf.Max(0f, outwardDistance - PipeDirectionEpsilon));
+        return extendedPosition - outwardDirection * retractDistance;
+    }
+
+    private void EnsureMountedPipeTargetStateCapacity()
+    {
+        int pipeCount = pipeList != null ? pipeList.Count : 0;
+        while (mountedPipeTargetActiveStates.Count < pipeCount)
+        {
+            mountedPipeTargetActiveStates.Add(false);
+        }
+
+        while (mountedPipeTargetActiveStates.Count > pipeCount)
+        {
+            mountedPipeTargetActiveStates.RemoveAt(mountedPipeTargetActiveStates.Count - 1);
+        }
+    }
 
     protected override void OnEnable()
     {
@@ -196,6 +416,16 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             }
 
             bool connected = ContainsDirection(connectedDirections, direction);
+            if (isFlatCarMountedPresentation)
+            {
+                CacheDefaultPipeLocalPositions();
+                EnsureMountedPipeTargetStateCapacity();
+                mountedPipeTargetActiveStates[i] = connected;
+                pipeVisual.transform.localPosition = connected
+                    ? GetMountedPipeExtendedLocalPosition(i)
+                    : GetMountedPipeRetractedLocalPosition(i);
+            }
+
             if (pipeVisual.activeSelf != connected)
             {
                 pipeVisual.SetActive(connected);
@@ -401,11 +631,46 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             bool connected = hasPlacement
                              && TryResolvePipeVisualDirection(pipeVisual, out Vector2Int direction)
                              && HasFluidNetworkConnectionTowards(anchorCoordinate, direction);
+            if (isFlatCarMountedPresentation)
+            {
+                SetMountedPipeTarget(i, pipeVisual, connected);
+                continue;
+            }
+
             if (pipeVisual.activeSelf != connected)
             {
                 pipeVisual.SetActive(connected);
             }
         }
+    }
+
+    private bool IsMountedPipeWithinDockingRange(
+        int pipeIndex,
+        GameObject pipeVisual,
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank)
+    {
+        if (!isFlatCarMountedPresentation)
+        {
+            return true;
+        }
+
+        Transform pipeParent = pipeVisual != null ? pipeVisual.transform.parent : null;
+        if (pipeParent == null)
+        {
+            return false;
+        }
+
+        Vector3 extendedPipeWorldPosition = pipeParent.TransformPoint(
+            GetMountedPipeExtendedLocalPosition(pipeIndex));
+        Vector2 expectedDockPosition = new Vector2(
+            tankCoordinate.x + directionFromTank.x * 0.5f,
+            tankCoordinate.y + directionFromTank.y * 0.5f);
+        Vector2 dockingOffset = new Vector2(
+            extendedPipeWorldPosition.x - expectedDockPosition.x,
+            extendedPipeWorldPosition.z - expectedDockPosition.y);
+        float tolerance = Mathf.Max(0f, flatCarMountedPipeDockingTolerance);
+        return dockingOffset.sqrMagnitude <= tolerance * tolerance;
     }
 
     public bool HasFluidNetworkConnectionTowards(

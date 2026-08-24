@@ -4,6 +4,9 @@ using UnityEngine;
 
 public class FreightCar : Train, IPlayerItemStorage
 {
+    private const float MountedTankMotionPositionEpsilonSqr = 0.000001f;
+    private const float MountedTankMotionRotationEpsilonDegrees = 0.05f;
+
     [SerializeField, Min(0.01f)]
     private float railRotationInterpolationSpeed = 10f;
     [SerializeField]
@@ -18,10 +21,14 @@ public class FreightCar : Train, IPlayerItemStorage
     private float itemStackVerticalSpacing = 0.05f;
 
     private readonly List<List<PortableObject>> itemPointStacks = new List<List<PortableObject>>();
-    private readonly List<BoxObject> boxPointBoxes = new List<BoxObject>();
+    private readonly List<InstallationObject> boxPointLoads = new List<InstallationObject>();
     private readonly List<List<PortableObject>> boxPointItemStacks = new List<List<PortableObject>>();
-    private bool hasLastSyncedBoxRuntimeCoordinate;
-    private Vector2Int lastSyncedBoxRuntimeCoordinate;
+    private bool hasLastSyncedLoadRuntimeCoordinate;
+    private Vector2Int lastSyncedLoadRuntimeCoordinate;
+    private bool hasMountedTankMotionSample;
+    private Vector3 lastMountedTankMotionPosition;
+    private Quaternion lastMountedTankMotionRotation;
+    private float mountedTankCarrierStationarySeconds;
 
     public override void ApplyPlacedRailSample(
         Railload rail,
@@ -148,6 +155,12 @@ public class FreightCar : Train, IPlayerItemStorage
         return TryGetBestAvailableBoxPoint(referenceWorldPosition, out _);
     }
 
+    public bool CanAttachLoadObject(InstallationObject loadObject)
+    {
+        return IsSupportedLoadObject(loadObject)
+               && (!(loadObject is Fluidtank) || !HasStoredItems());
+    }
+
     public bool TryGetBestAvailableBoxPoint(Vector3 referenceWorldPosition, out Transform boxPoint)
     {
         return TryGetBestAvailableBoxPoint(referenceWorldPosition, null, out boxPoint);
@@ -202,20 +215,20 @@ public class FreightCar : Train, IPlayerItemStorage
     {
         boxObject = null;
         EnsureBoxPointBoxes();
-        if (boxPointBoxes.Count <= 0)
+        if (boxPointLoads.Count <= 0)
         {
             return false;
         }
 
         float bestDistanceSqr = float.MaxValue;
-        for (int i = 0; i < boxPointBoxes.Count; i++)
+        for (int i = 0; i < boxPointLoads.Count; i++)
         {
             if (!IsBoxPointStorageActive(i))
             {
                 continue;
             }
 
-            BoxObject candidate = boxPointBoxes[i];
+            BoxObject candidate = boxPointLoads[i] as BoxObject;
             if (candidate == null || !candidate.gameObject.activeInHierarchy)
             {
                 continue;
@@ -241,12 +254,15 @@ public class FreightCar : Train, IPlayerItemStorage
         out int storageCapacity,
         out bool hasStorage)
     {
-        EnsureItemPointStacks();
-        EnsureBoxPointBoxes();
-
         storedItemCount = 0;
         storageCapacity = 0;
         hasStorage = false;
+        if (HasAttachedFluidTank())
+        {
+            return;
+        }
+
+        EnsureItemPointStacks();
 
         if (itemPointList != null)
         {
@@ -289,7 +305,9 @@ public class FreightCar : Train, IPlayerItemStorage
 
             hasStorage = true;
             CleanupBoxPointSlot(i);
-            BoxObject attachedBox = i < boxPointBoxes.Count ? boxPointBoxes[i] : null;
+            BoxObject attachedBox = i < boxPointLoads.Count
+                ? boxPointLoads[i] as BoxObject
+                : null;
             if (attachedBox != null
                 && attachedBox.gameObject.activeInHierarchy
                 && attachedBox.TryGetObjectInfoItem(out _, out int itemCount, out int capacity))
@@ -302,33 +320,48 @@ public class FreightCar : Train, IPlayerItemStorage
 
     public bool TryAttachBoxObject(BoxObject boxObject, Vector3 referenceWorldPosition)
     {
-        if (boxObject == null
+        return TryAttachLoadObject(boxObject, referenceWorldPosition);
+    }
+
+    public bool TryAttachLoadObject(
+        InstallationObject loadObject,
+        Vector3 referenceWorldPosition)
+    {
+        if (!CanAttachLoadObject(loadObject)
             || !TryGetBestAvailableBoxPoint(referenceWorldPosition, out Transform boxPoint))
         {
             return false;
         }
 
-        return TryAttachBoxObjectToPoint(boxObject, boxPoint);
+        return TryAttachLoadObjectToPoint(loadObject, boxPoint);
     }
 
     public bool TryAttachBoxObjectToPoint(BoxObject boxObject, Transform boxPoint)
     {
-        if (boxObject == null
+        return TryAttachLoadObjectToPoint(boxObject, boxPoint);
+    }
+
+    public bool TryAttachLoadObjectToPoint(
+        InstallationObject loadObject,
+        Transform boxPoint)
+    {
+        if (!CanAttachLoadObject(loadObject)
             || boxPoint == null
             || !TryGetBoxPointIndex(boxPoint, out int pointIndex)
-            || IsBoxPointOccupiedByOther(pointIndex, boxObject))
+            || IsBoxPointOccupiedByOther(pointIndex, loadObject))
         {
             return false;
         }
 
-        boxPointBoxes[pointIndex] = boxObject;
-        boxObject.SetExcludeFromTerrainPersistence(true);
-        boxObject.transform.SetParent(boxPoint, false);
-        boxObject.transform.localPosition = Vector3.zero;
-        boxObject.transform.localRotation = Quaternion.identity;
-        boxObject.transform.localScale = Vector3.one;
-        boxObject.gameObject.SetActive(true);
-        SyncAttachedBoxRuntime(boxObject);
+        boxPointLoads[pointIndex] = loadObject;
+        loadObject.SetExcludeFromTerrainPersistence(true);
+        loadObject.transform.SetParent(boxPoint, false);
+        loadObject.transform.localPosition = GetAttachedLoadLocalPosition(loadObject);
+        loadObject.transform.localRotation = Quaternion.identity;
+        loadObject.transform.localScale = Vector3.one;
+        loadObject.gameObject.SetActive(true);
+        ApplyAttachedLoadPresentation(loadObject);
+        SyncAttachedLoadRuntime(loadObject);
         return true;
     }
 
@@ -538,27 +571,63 @@ public class FreightCar : Train, IPlayerItemStorage
 
     protected override void OnDisable()
     {
+        ResetMountedTankMotionTracking();
         ClearLoadedItems();
         base.OnDisable();
     }
 
     public override void PrepareForPool()
     {
+        ResetMountedTankMotionTracking();
         ClearLoadedItems();
-        ClearAttachedBoxes();
+        ClearAttachedLoads();
         base.PrepareForPool();
     }
 
     protected override void OnPlacementRuntimeCleared()
     {
+        ResetMountedTankMotionTracking();
         ClearLoadedItems();
-        ClearAttachedBoxes();
+        ClearAttachedLoads();
         base.OnPlacementRuntimeCleared();
     }
 
     private void LateUpdate()
     {
-        SyncAttachedBoxesRuntime();
+        UpdateMountedTankMotionTracking(Time.deltaTime);
+        SyncAttachedLoadsRuntime();
+    }
+
+    private void UpdateMountedTankMotionTracking(float deltaTime)
+    {
+        Vector3 currentPosition = transform.position;
+        Quaternion currentRotation = transform.rotation;
+        if (!hasMountedTankMotionSample)
+        {
+            hasMountedTankMotionSample = true;
+            lastMountedTankMotionPosition = currentPosition;
+            lastMountedTankMotionRotation = currentRotation;
+            mountedTankCarrierStationarySeconds = 0f;
+            return;
+        }
+
+        bool moved = (currentPosition - lastMountedTankMotionPosition).sqrMagnitude
+                     > MountedTankMotionPositionEpsilonSqr
+                     || Quaternion.Angle(currentRotation, lastMountedTankMotionRotation)
+                     > MountedTankMotionRotationEpsilonDegrees;
+        mountedTankCarrierStationarySeconds = moved
+            ? 0f
+            : mountedTankCarrierStationarySeconds + Mathf.Max(0f, deltaTime);
+        lastMountedTankMotionPosition = currentPosition;
+        lastMountedTankMotionRotation = currentRotation;
+    }
+
+    private void ResetMountedTankMotionTracking()
+    {
+        hasMountedTankMotionSample = false;
+        lastMountedTankMotionPosition = Vector3.zero;
+        lastMountedTankMotionRotation = Quaternion.identity;
+        mountedTankCarrierStationarySeconds = 0f;
     }
 
     private bool TryAddItem(
@@ -633,8 +702,12 @@ public class FreightCar : Train, IPlayerItemStorage
     {
         itemPoint = null;
         stack = null;
+        if (HasAttachedFluidTank())
+        {
+            return false;
+        }
+
         EnsureItemPointStacks();
-        EnsureBoxPointBoxes();
 
         for (int pass = 0; pass < 2; pass++)
         {
@@ -1015,9 +1088,9 @@ public class FreightCar : Train, IPlayerItemStorage
             }
         }
 
-        while (boxPointBoxes.Count < boxPointList.Count)
+        while (boxPointLoads.Count < boxPointList.Count)
         {
-            boxPointBoxes.Add(null);
+            boxPointLoads.Add(null);
         }
 
         while (boxPointItemStacks.Count < boxPointList.Count)
@@ -1025,9 +1098,9 @@ public class FreightCar : Train, IPlayerItemStorage
             boxPointItemStacks.Add(new List<PortableObject>());
         }
 
-        for (int i = boxPointBoxes.Count - 1; i >= boxPointList.Count; i--)
+        for (int i = boxPointLoads.Count - 1; i >= boxPointList.Count; i--)
         {
-            boxPointBoxes.RemoveAt(i);
+            boxPointLoads.RemoveAt(i);
         }
 
         for (int i = boxPointItemStacks.Count - 1; i >= boxPointList.Count; i--)
@@ -1121,51 +1194,106 @@ public class FreightCar : Train, IPlayerItemStorage
     private bool IsBoxPointStorageActive(int pointIndex)
     {
         CleanupBoxPointSlot(pointIndex);
-        if (pointIndex < 0 || pointIndex >= boxPointBoxes.Count)
+        if (pointIndex < 0 || pointIndex >= boxPointLoads.Count)
         {
             return false;
         }
 
-        BoxObject attachedBox = boxPointBoxes[pointIndex];
+        BoxObject attachedBox = boxPointLoads[pointIndex] as BoxObject;
         return attachedBox != null && attachedBox.gameObject.activeInHierarchy;
     }
 
-    private bool IsBoxPointOccupiedByOther(int pointIndex, BoxObject allowedBoxObject)
+    private bool HasAttachedFluidTank()
+    {
+        EnsureBoxPointBoxes();
+        for (int i = 0; i < boxPointLoads.Count; i++)
+        {
+            CleanupBoxPointSlot(i);
+            Fluidtank attachedTank = boxPointLoads[i] as Fluidtank;
+            if (attachedTank != null && attachedTank.gameObject.activeInHierarchy)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasStoredItems()
+    {
+        EnsureItemPointStacks();
+        EnsureBoxPointBoxes();
+        for (int i = 0; i < itemPointStacks.Count; i++)
+        {
+            List<PortableObject> stack = itemPointStacks[i];
+            CleanupItemStack(stack);
+            if (stack != null && stack.Count > 0)
+            {
+                return true;
+            }
+        }
+
+        for (int i = 0; i < boxPointItemStacks.Count; i++)
+        {
+            List<PortableObject> stack = boxPointItemStacks[i];
+            CleanupItemStack(stack);
+            if (stack != null && stack.Count > 0)
+            {
+                return true;
+            }
+        }
+
+        for (int i = 0; i < boxPointLoads.Count; i++)
+        {
+            CleanupBoxPointSlot(i);
+            BoxObject attachedBox = boxPointLoads[i] as BoxObject;
+            if (attachedBox != null
+                && attachedBox.gameObject.activeInHierarchy
+                && attachedBox.TryGetObjectInfoItem(out _, out int itemCount, out _)
+                && itemCount > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsBoxPointOccupiedByOther(
+        int pointIndex,
+        InstallationObject allowedLoadObject)
     {
         CleanupBoxPointSlot(pointIndex);
-        if (pointIndex < 0 || pointIndex >= boxPointBoxes.Count)
+        if (pointIndex < 0 || pointIndex >= boxPointLoads.Count)
         {
             return true;
         }
 
-        BoxObject attachedBox = boxPointBoxes[pointIndex];
-        return attachedBox != null && attachedBox != allowedBoxObject;
+        InstallationObject attachedLoad = boxPointLoads[pointIndex];
+        return attachedLoad != null && attachedLoad != allowedLoadObject;
     }
 
     private void CleanupBoxPointSlot(int pointIndex)
     {
-        if (pointIndex < 0 || pointIndex >= boxPointBoxes.Count)
+        if (pointIndex < 0 || pointIndex >= boxPointLoads.Count)
         {
             return;
         }
 
-        BoxObject attachedBox = boxPointBoxes[pointIndex];
-        if (attachedBox != null
-            && attachedBox.gameObject.activeInHierarchy
-            && attachedBox.transform != null
+        InstallationObject attachedLoad = boxPointLoads[pointIndex];
+        if (attachedLoad != null
+            && attachedLoad.gameObject.activeInHierarchy
+            && attachedLoad.transform != null
             && boxPointList != null
             && pointIndex < boxPointList.Count
             && boxPointList[pointIndex] != null
-            && attachedBox.transform.IsChildOf(boxPointList[pointIndex]))
+            && attachedLoad.transform.IsChildOf(boxPointList[pointIndex]))
         {
             return;
         }
 
         Transform boxPoint = boxPointList != null && pointIndex < boxPointList.Count ? boxPointList[pointIndex] : null;
-        BoxObject existingChildBox = boxPoint != null
-            ? boxPoint.GetComponentInChildren<BoxObject>(true)
-            : null;
-        boxPointBoxes[pointIndex] = existingChildBox;
+        boxPointLoads[pointIndex] = FindSupportedLoadObject(boxPoint);
     }
 
     private PortableObject CreateItemPortableObject(int itemId)
@@ -1307,12 +1435,12 @@ public class FreightCar : Train, IPlayerItemStorage
         boxPointItemStacks.Clear();
     }
 
-    private void SyncAttachedBoxesRuntime()
+    private void SyncAttachedLoadsRuntime()
     {
         EnsureBoxPointBoxes();
-        if (boxPointBoxes.Count <= 0)
+        if (boxPointLoads.Count <= 0)
         {
-            hasLastSyncedBoxRuntimeCoordinate = false;
+            hasLastSyncedLoadRuntimeCoordinate = false;
             return;
         }
 
@@ -1321,67 +1449,68 @@ public class FreightCar : Train, IPlayerItemStorage
             return;
         }
 
-        if (hasLastSyncedBoxRuntimeCoordinate && lastSyncedBoxRuntimeCoordinate == anchorCoordinate)
+        if (hasLastSyncedLoadRuntimeCoordinate && lastSyncedLoadRuntimeCoordinate == anchorCoordinate)
         {
-            for (int i = 0; i < boxPointBoxes.Count; i++)
+            for (int i = 0; i < boxPointLoads.Count; i++)
             {
-                if (boxPointBoxes[i] == null)
+                if (boxPointLoads[i] == null)
                 {
                     continue;
                 }
 
-                SyncAttachedBoxTransform(boxPointBoxes[i], i);
+                SyncAttachedLoadTransform(boxPointLoads[i], i);
             }
 
             return;
         }
 
-        hasLastSyncedBoxRuntimeCoordinate = true;
-        lastSyncedBoxRuntimeCoordinate = anchorCoordinate;
-        for (int i = 0; i < boxPointBoxes.Count; i++)
+        hasLastSyncedLoadRuntimeCoordinate = true;
+        lastSyncedLoadRuntimeCoordinate = anchorCoordinate;
+        for (int i = 0; i < boxPointLoads.Count; i++)
         {
-            BoxObject attachedBox = boxPointBoxes[i];
-            if (attachedBox == null)
+            InstallationObject attachedLoad = boxPointLoads[i];
+            if (attachedLoad == null)
             {
                 continue;
             }
 
-            SyncAttachedBoxTransform(attachedBox, i);
-            SyncAttachedBoxRuntime(attachedBox);
+            SyncAttachedLoadTransform(attachedLoad, i);
+            SyncAttachedLoadRuntime(attachedLoad);
         }
     }
 
-    private void SyncAttachedBoxTransform(BoxObject attachedBox, int pointIndex)
+    private void SyncAttachedLoadTransform(InstallationObject attachedLoad, int pointIndex)
     {
         Transform boxPoint = boxPointList != null && pointIndex >= 0 && pointIndex < boxPointList.Count
             ? boxPointList[pointIndex]
             : null;
-        if (attachedBox == null || boxPoint == null || attachedBox.transform.parent != boxPoint)
+        if (attachedLoad == null || boxPoint == null || attachedLoad.transform.parent != boxPoint)
         {
             return;
         }
 
-        attachedBox.transform.localPosition = Vector3.zero;
-        attachedBox.transform.localRotation = Quaternion.identity;
-        attachedBox.transform.localScale = Vector3.one;
+        attachedLoad.transform.localPosition = GetAttachedLoadLocalPosition(attachedLoad);
+        attachedLoad.transform.localRotation = Quaternion.identity;
+        attachedLoad.transform.localScale = Vector3.one;
+        ApplyAttachedLoadPresentation(attachedLoad);
     }
 
-    private void SyncAttachedBoxRuntime(BoxObject attachedBox)
+    private void SyncAttachedLoadRuntime(InstallationObject attachedLoad)
     {
-        if (attachedBox == null || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        if (attachedLoad == null || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
         {
             return;
         }
 
-        attachedBox.SetExcludeFromTerrainPersistence(true);
-        attachedBox.ConfigurePlacementRuntime(
+        attachedLoad.SetExcludeFromTerrainPersistence(true);
+        attachedLoad.ConfigurePlacementRuntime(
             anchorCoordinate,
             quarterTurns,
             new[] { anchorCoordinate },
-            attachedBox.RuntimePlacementSequence);
+            attachedLoad.RuntimePlacementSequence);
     }
 
-    private void ClearAttachedBoxes()
+    private void ClearAttachedLoads()
     {
         for (int i = 0; i < boxPointItemStacks.Count; i++)
         {
@@ -1390,13 +1519,13 @@ public class FreightCar : Train, IPlayerItemStorage
 
         boxPointItemStacks.Clear();
 
-        for (int i = 0; i < boxPointBoxes.Count; i++)
+        for (int i = 0; i < boxPointLoads.Count; i++)
         {
-            DestroyAttachedBoxObject(boxPointBoxes[i]);
+            DestroyAttachedLoadObject(boxPointLoads[i]);
         }
 
-        boxPointBoxes.Clear();
-        hasLastSyncedBoxRuntimeCoordinate = false;
+        boxPointLoads.Clear();
+        hasLastSyncedLoadRuntimeCoordinate = false;
     }
 
     private void ClearItemStack(List<PortableObject> stack)
@@ -1433,19 +1562,58 @@ public class FreightCar : Train, IPlayerItemStorage
         }
     }
 
-    private static void DestroyAttachedBoxObject(BoxObject boxObject)
+    private static bool IsSupportedLoadObject(InstallationObject loadObject)
     {
-        if (boxObject == null)
+        return loadObject is BoxObject || loadObject is Fluidtank;
+    }
+
+    private static Vector3 GetAttachedLoadLocalPosition(InstallationObject loadObject)
+    {
+        return loadObject is Fluidtank fluidTank
+            ? fluidTank.FlatCarMountedLocalPosition
+            : Vector3.zero;
+    }
+
+    private void ApplyAttachedLoadPresentation(InstallationObject loadObject)
+    {
+        if (loadObject is Fluidtank fluidTank)
+        {
+            fluidTank.SetFlatCarMountedPresentation(true);
+            fluidTank.UpdateFlatCarMountedPipeVisuals(
+                Time.deltaTime,
+                mountedTankCarrierStationarySeconds);
+        }
+    }
+
+    private static InstallationObject FindSupportedLoadObject(Transform boxPoint)
+    {
+        if (boxPoint == null)
+        {
+            return null;
+        }
+
+        BoxObject attachedBox = boxPoint.GetComponentInChildren<BoxObject>(true);
+        if (attachedBox != null)
+        {
+            return attachedBox;
+        }
+
+        return boxPoint.GetComponentInChildren<Fluidtank>(true);
+    }
+
+    private static void DestroyAttachedLoadObject(InstallationObject loadObject)
+    {
+        if (loadObject == null)
         {
             return;
         }
 
         if (Application.isPlaying)
         {
-            Destroy(boxObject.gameObject);
+            Destroy(loadObject.gameObject);
             return;
         }
 
-        DestroyImmediate(boxObject.gameObject);
+        DestroyImmediate(loadObject.gameObject);
     }
 }

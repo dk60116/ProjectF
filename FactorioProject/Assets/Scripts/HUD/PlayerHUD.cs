@@ -72,8 +72,16 @@ public partial class PlayerHUD : BagSlot
     private InteractionButton DoorInteractionButton;
     [SerializeField]
     private InteractionButton ThrowInteractionButton;
+    [SerializeField]
+    private InteractionButton TrainConnectInteractionButton;
+    [SerializeField]
+    private InteractionButton TrainDisconnectInteractionButton;
     [SerializeField, Min(0f)]
     private float parallelInteractionButtonSpacing = 10f;
+    [SerializeField]
+    private Sprite trainConnectInteractionIcon;
+    [SerializeField]
+    private Sprite trainDisconnectInteractionIcon;
     [SerializeField]
     private Sprite animalInteractionIcon;
     [SerializeField]
@@ -124,6 +132,8 @@ public partial class PlayerHUD : BagSlot
     private InteractionButton boundInteractionButton;
     private InteractionButton boundDoorInteractionButton;
     private InteractionButton boundThrowInteractionButton;
+    private InteractionButton boundTrainConnectInteractionButton;
+    private InteractionButton boundTrainDisconnectInteractionButton;
     private Vector2 interactionButtonAnchorPosition;
     private bool interactionButtonAnchorPositionCached;
     private readonly Dictionary<Button, Vector2> cachedInstallButtonPositions = new Dictionary<Button, Vector2>();
@@ -213,12 +223,15 @@ public partial class PlayerHUD : BagSlot
             boundInteractionButton = null;
             boundDoorInteractionButton = null;
             boundThrowInteractionButton = null;
+            boundTrainConnectInteractionButton = null;
+            boundTrainDisconnectInteractionButton = null;
         }
 
         ResolveInstallModeButtons();
         ResolveInteractionButton();
         ResolveDoorInteractionButton();
         ResolveThrowInteractionButton();
+        ResolveTrainConnectionInteractionButtons();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
         ResolveTrainStationFilter();
@@ -757,31 +770,54 @@ public partial class PlayerHUD : BagSlot
 
     private void ResolveThrowInteractionButton()
     {
-        if (ThrowInteractionButton == null)
+        ResolveParallelInteractionButton(
+            ref ThrowInteractionButton,
+            "ThrowInteractionButton",
+            "ThrowButton");
+
+        BindThrowInteractionButton();
+        UpdateInteractionButtonLayout();
+    }
+
+    private void ResolveTrainConnectionInteractionButtons()
+    {
+        ResolveParallelInteractionButton(
+            ref TrainConnectInteractionButton,
+            "TrainConnectInteractionButton");
+        ResolveParallelInteractionButton(
+            ref TrainDisconnectInteractionButton,
+            "TrainDisconnectInteractionButton");
+        BindTrainConnectionInteractionButtons();
+        UpdateInteractionButtonLayout();
+    }
+
+    private void ResolveParallelInteractionButton(
+        ref InteractionButton targetButton,
+        string objectName,
+        string legacyObjectName = null)
+    {
+        if (targetButton == null)
         {
-            Transform buttonTransform = FindDescendantByName(transform, "ThrowInteractionButton");
-            if (buttonTransform == null)
+            Transform buttonTransform = FindDescendantByName(transform, objectName);
+            if (buttonTransform == null && !string.IsNullOrEmpty(legacyObjectName))
             {
-                buttonTransform = FindDescendantByName(transform, "ThrowButton");
+                buttonTransform = FindDescendantByName(transform, legacyObjectName);
             }
 
             if (buttonTransform != null)
             {
-                ThrowInteractionButton = buttonTransform.GetComponent<InteractionButton>();
+                targetButton = buttonTransform.GetComponent<InteractionButton>();
             }
         }
 
-        if (ThrowInteractionButton == null && InteractionButton != null)
+        if (targetButton != null || InteractionButton == null)
         {
-            ThrowInteractionButton = Instantiate(
-                InteractionButton,
-                InteractionButton.transform.parent);
-            ThrowInteractionButton.name = "ThrowInteractionButton";
-            ThrowInteractionButton.SetVisible(false);
+            return;
         }
 
-        BindThrowInteractionButton();
-        UpdateInteractionButtonLayout();
+        targetButton = Instantiate(InteractionButton, InteractionButton.transform.parent);
+        targetButton.name = objectName;
+        targetButton.SetVisible(false);
     }
 
     private void CacheInteractionButtonAnchorPosition()
@@ -1852,6 +1888,7 @@ public partial class PlayerHUD : BagSlot
                 : (hasHeldLightItem ? heldLightItem.icon : null));
 
         Vehicle mountedVehicle = playerController != null ? playerController.MountedVehicle : null;
+        SetTrainConnectionInteractionButtonState(mountedVehicle as SteamTrain);
         if (mountedVehicle != null)
         {
             ClearInteractionTargets();
@@ -2077,6 +2114,9 @@ public partial class PlayerHUD : BagSlot
             HideInteractionButton(DoorInteractionButton);
         }
 
+        HideInteractionButton(TrainConnectInteractionButton);
+        HideInteractionButton(TrainDisconnectInteractionButton);
+
         UpdateInteractionButtonLayout();
     }
 
@@ -2132,36 +2172,110 @@ public partial class PlayerHUD : BagSlot
         UpdateInteractionButtonLayout();
     }
 
-    private void UpdateInteractionButtonLayout()
+    private void SetTrainConnectionInteractionButtonState(SteamTrain steamTrain)
     {
-        CacheInteractionButtonAnchorPosition();
-        if (ThrowInteractionButton == null
-            || !(ThrowInteractionButton.transform is RectTransform throwRect))
+        bool canConnect = steamTrain != null
+                          && trainConnectInteractionIcon != null
+                          && steamTrain.TryGetTouchingUnconnectedTrain(out _);
+        bool canDisconnect = steamTrain != null
+                             && trainDisconnectInteractionIcon != null
+                             && steamTrain.TryGetConnectedTrain(out _);
+
+        SetParallelInteractionButtonState(
+            TrainConnectInteractionButton,
+            trainConnectInteractionIcon,
+            canConnect);
+        SetParallelInteractionButtonState(
+            TrainDisconnectInteractionButton,
+            trainDisconnectInteractionIcon,
+            canDisconnect);
+        UpdateInteractionButtonLayout();
+    }
+
+    private static void SetParallelInteractionButtonState(
+        InteractionButton interactionButton,
+        Sprite icon,
+        bool visible)
+    {
+        if (interactionButton == null)
         {
             return;
         }
 
-        throwRect.anchoredPosition = interactionButtonAnchorPosition;
-        if (!IsInteractionButtonVisible(ThrowInteractionButton))
+        if (!visible)
         {
+            HideInteractionButton(interactionButton);
             return;
         }
+
+        interactionButton.SetIcon(icon);
+        interactionButton.SetVisible(true);
+    }
+
+    private void UpdateInteractionButtonLayout()
+    {
+        CacheInteractionButtonAnchorPosition();
+        ResetParallelInteractionButtonPosition(TrainConnectInteractionButton);
+        ResetParallelInteractionButtonPosition(TrainDisconnectInteractionButton);
+        ResetParallelInteractionButtonPosition(ThrowInteractionButton);
 
         InteractionButton contextButton = IsInteractionButtonVisible(DoorInteractionButton)
             ? DoorInteractionButton
             : (IsInteractionButtonVisible(InteractionButton) ? InteractionButton : null);
         if (contextButton == null
-            || contextButton == ThrowInteractionButton
-            || contextButton.transform.parent != ThrowInteractionButton.transform.parent
             || !(contextButton.transform is RectTransform contextRect))
         {
             return;
         }
 
-        float separation = contextButton.LayoutWidth * 0.5f
-                           + ThrowInteractionButton.LayoutWidth * 0.5f
+        RectTransform previousRect = contextRect;
+        float previousWidth = contextButton.LayoutWidth;
+        PositionParallelInteractionButton(
+            TrainConnectInteractionButton,
+            contextButton.transform.parent,
+            ref previousRect,
+            ref previousWidth);
+        PositionParallelInteractionButton(
+            TrainDisconnectInteractionButton,
+            contextButton.transform.parent,
+            ref previousRect,
+            ref previousWidth);
+        PositionParallelInteractionButton(
+            ThrowInteractionButton,
+            contextButton.transform.parent,
+            ref previousRect,
+            ref previousWidth);
+    }
+
+    private void ResetParallelInteractionButtonPosition(InteractionButton interactionButton)
+    {
+        if (interactionButton != null
+            && interactionButton.transform is RectTransform rectTransform)
+        {
+            rectTransform.anchoredPosition = interactionButtonAnchorPosition;
+        }
+    }
+
+    private void PositionParallelInteractionButton(
+        InteractionButton interactionButton,
+        Transform expectedParent,
+        ref RectTransform previousRect,
+        ref float previousWidth)
+    {
+        if (!IsInteractionButtonVisible(interactionButton)
+            || interactionButton.transform.parent != expectedParent
+            || !(interactionButton.transform is RectTransform rectTransform))
+        {
+            return;
+        }
+
+        float buttonWidth = interactionButton.LayoutWidth;
+        float separation = previousWidth * 0.5f
+                           + buttonWidth * 0.5f
                            + Mathf.Max(0f, parallelInteractionButtonSpacing);
-        throwRect.anchoredPosition = contextRect.anchoredPosition + Vector2.left * separation;
+        rectTransform.anchoredPosition = previousRect.anchoredPosition + Vector2.left * separation;
+        previousRect = rectTransform;
+        previousWidth = buttonWidth;
     }
 
     private static bool IsInteractionButtonVisible(InteractionButton interactionButton)
@@ -2853,6 +2967,23 @@ public partial class PlayerHUD : BagSlot
         boundThrowInteractionButton = ThrowInteractionButton;
     }
 
+    private void BindTrainConnectionInteractionButtons()
+    {
+        if (TrainConnectInteractionButton != null
+            && boundTrainConnectInteractionButton != TrainConnectInteractionButton)
+        {
+            TrainConnectInteractionButton.SetClickAction(HandleTrainConnectInteractionButtonClicked);
+            boundTrainConnectInteractionButton = TrainConnectInteractionButton;
+        }
+
+        if (TrainDisconnectInteractionButton != null
+            && boundTrainDisconnectInteractionButton != TrainDisconnectInteractionButton)
+        {
+            TrainDisconnectInteractionButton.SetClickAction(HandleTrainDisconnectInteractionButtonClicked);
+            boundTrainDisconnectInteractionButton = TrainDisconnectInteractionButton;
+        }
+    }
+
     private void BindItemFilterButton()
     {
         if (ItemFilterButton == null)
@@ -2941,6 +3072,34 @@ public partial class PlayerHUD : BagSlot
             UpdateInteractionButtonState();
             UpdateHandItemGauge();
         }
+    }
+
+    private void HandleTrainConnectInteractionButtonClicked()
+    {
+        if (IsPlacementOrMapEditModeActive())
+        {
+            return;
+        }
+
+        ResolveMountedSteamTrain()?.TryConnectTouchingTrain();
+        UpdateInteractionButtonState();
+    }
+
+    private void HandleTrainDisconnectInteractionButtonClicked()
+    {
+        if (IsPlacementOrMapEditModeActive())
+        {
+            return;
+        }
+
+        ResolveMountedSteamTrain()?.TryDisconnectConnectedTrain();
+        UpdateInteractionButtonState();
+    }
+
+    private SteamTrain ResolveMountedSteamTrain()
+    {
+        PlayerController playerController = ResolvePlayerController();
+        return playerController != null ? playerController.MountedVehicle as SteamTrain : null;
     }
 
     private void HandleInteractionButtonClicked()
@@ -3538,7 +3697,9 @@ public partial class PlayerHUD : BagSlot
     {
         return IsPointerOverInteractionButtonArea(InteractionButton, pointerPosition)
                || IsPointerOverInteractionButtonArea(DoorInteractionButton, pointerPosition)
-               || IsPointerOverInteractionButtonArea(ThrowInteractionButton, pointerPosition);
+               || IsPointerOverInteractionButtonArea(ThrowInteractionButton, pointerPosition)
+               || IsPointerOverInteractionButtonArea(TrainConnectInteractionButton, pointerPosition)
+               || IsPointerOverInteractionButtonArea(TrainDisconnectInteractionButton, pointerPosition);
     }
 
     private static bool IsPointerOverInteractionButtonArea(InteractionButton interactionButton, Vector2 pointerPosition)

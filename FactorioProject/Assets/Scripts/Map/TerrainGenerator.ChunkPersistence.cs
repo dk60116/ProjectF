@@ -1116,6 +1116,20 @@ public partial class TerrainGenerator : MonoBehaviour
             : placementController != null
                 ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, sourcePrefab, restoreQuarterTurns)
                 : new List<Vector2Int> { savedState.anchorCoordinate };
+        if (restoredInstallation is Railload)
+        {
+            List<Vector2Int> rebuiltRailOccupiedCoordinates = new List<Vector2Int>(occupiedCoordinates.Count);
+            if (RailloadInstallationController.TryBuildRailCoordinatesFromVisualPath(
+                    savedState.railVisualPathPoints,
+                    savedState.railVisualPathExtendsStart,
+                    savedState.railVisualPathExtendsEnd,
+                    null,
+                    rebuiltRailOccupiedCoordinates))
+            {
+                occupiedCoordinates = rebuiltRailOccupiedCoordinates;
+            }
+        }
+
         savedState.occupiedCoordinates = occupiedCoordinates;
 
         if (placementController != null)

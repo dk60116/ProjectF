@@ -29,6 +29,7 @@ public class UndergroundPipe : Pipe
     private Vector2Int previewSecondCoordinate;
     private bool previewPairConfigured;
     private bool previewPairCommitted;
+    private bool previewPairValid;
     private Quaternion initialPreviewRootRotation = Quaternion.identity;
     private bool hasInitialPreviewRootRotation;
     private bool secondaryFluidDisplayVisible;
@@ -36,6 +37,7 @@ public class UndergroundPipe : Pipe
 
     public bool HasCompletePair => TryGetPairCoordinates(out _, out _);
     public bool HasPreviewCandidate => previewPairConfigured;
+    public bool HasValidPreviewCandidate => previewPairConfigured && previewPairValid;
     public bool IsPreviewPairCommitted => previewPairConfigured && previewPairCommitted;
 
     public void SetPreviewRouteColor(Color color)
@@ -115,11 +117,30 @@ public class UndergroundPipe : Pipe
     public bool TryGetOutwardDirection(Vector2Int coordinate, out Vector2Int outwardDirection)
     {
         outwardDirection = Vector2Int.zero;
+        if (HasValidPreviewCandidate)
+        {
+            return TryResolveOutwardDirection(
+                previewFirstCoordinate,
+                previewSecondCoordinate,
+                coordinate,
+                out outwardDirection);
+        }
+
         if (!TryGetPairCoordinates(out Vector2Int first, out Vector2Int second))
         {
             return false;
         }
 
+        return TryResolveOutwardDirection(first, second, coordinate, out outwardDirection);
+    }
+
+    private static bool TryResolveOutwardDirection(
+        Vector2Int first,
+        Vector2Int second,
+        Vector2Int coordinate,
+        out Vector2Int outwardDirection)
+    {
+        outwardDirection = Vector2Int.zero;
         Vector2Int tunnelDirection;
         if (coordinate == first)
         {
@@ -140,6 +161,11 @@ public class UndergroundPipe : Pipe
 
     public override bool HasConnectionTowards(Quaternion rotation, Vector2Int direction)
     {
+        if (HasValidPreviewCandidate)
+        {
+            return HasConnectionTowardsAt(previewFirstCoordinate, rotation, direction);
+        }
+
         if (TryGetPairCoordinates(out Vector2Int first, out _))
         {
             return HasConnectionTowardsAt(first, rotation, direction);
@@ -162,11 +188,30 @@ public class UndergroundPipe : Pipe
         out Vector2Int remoteCoordinate)
     {
         remoteCoordinate = default;
+        if (HasValidPreviewCandidate)
+        {
+            return TryResolveRemoteCoordinate(
+                previewFirstCoordinate,
+                previewSecondCoordinate,
+                coordinate,
+                out remoteCoordinate);
+        }
+
         if (!TryGetPairCoordinates(out Vector2Int first, out Vector2Int second))
         {
             return false;
         }
 
+        return TryResolveRemoteCoordinate(first, second, coordinate, out remoteCoordinate);
+    }
+
+    private static bool TryResolveRemoteCoordinate(
+        Vector2Int first,
+        Vector2Int second,
+        Vector2Int coordinate,
+        out Vector2Int remoteCoordinate)
+    {
+        remoteCoordinate = default;
         if (coordinate == first)
         {
             remoteCoordinate = second;
@@ -193,6 +238,7 @@ public class UndergroundPipe : Pipe
         previewFirstCoordinate = firstCoordinate;
         previewSecondCoordinate = secondCoordinate;
         previewPairConfigured = firstCoordinate != secondCoordinate;
+        previewPairValid = previewPairConfigured && isValid;
         previewPairCommitted = previewPairConfigured && commitPair && isValid;
         if (!hasInitialPreviewRootRotation)
         {
@@ -224,6 +270,7 @@ public class UndergroundPipe : Pipe
     {
         previewPairConfigured = false;
         previewPairCommitted = false;
+        previewPairValid = false;
         previewFirstCoordinate = default;
         previewSecondCoordinate = default;
         initialPreviewRootRotation = transform.rotation;
@@ -315,6 +362,7 @@ public class UndergroundPipe : Pipe
     {
         previewPairConfigured = false;
         previewPairCommitted = false;
+        previewPairValid = false;
         hasInitialPreviewRootRotation = false;
         base.OnPlacementRuntimeChanged();
         RefreshEndpointVisuals(false);
@@ -324,6 +372,7 @@ public class UndergroundPipe : Pipe
     {
         previewPairConfigured = false;
         previewPairCommitted = false;
+        previewPairValid = false;
         hasInitialPreviewRootRotation = false;
         SetSecondaryEndpointVisible(false);
         SetPreviewRouteVisible(false);
@@ -334,6 +383,7 @@ public class UndergroundPipe : Pipe
     {
         previewPairConfigured = false;
         previewPairCommitted = false;
+        previewPairValid = false;
         hasInitialPreviewRootRotation = false;
         SetSecondaryEndpointVisible(false);
         SetPreviewRouteVisible(false);

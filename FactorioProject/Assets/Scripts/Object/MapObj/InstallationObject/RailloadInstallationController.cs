@@ -320,22 +320,12 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return;
         }
 
-        List<Vector2> renderedCenterPath = new List<Vector2>(plan.visualPathPoints.Count);
-        BuildRenderedVisualPath(
+        TryBuildRailCoordinatesFromVisualPath(
             plan.visualPathPoints,
             plan.extendStartEndpoint,
             plan.extendEndEndpoint,
-            renderedCenterPath);
-
-        plan.pathCoordinates.Clear();
-        AddCoordinatesTraversedByPath(plan.pathCoordinates, renderedCenterPath, null);
-
-        plan.occupiedCoordinates.Clear();
-        AddRailFootprintCoordinates(plan.occupiedCoordinates, renderedCenterPath);
-        if (plan.occupiedCoordinates.Count <= 0)
-        {
-            plan.occupiedCoordinates.AddRange(plan.pathCoordinates);
-        }
+            plan.pathCoordinates,
+            plan.occupiedCoordinates);
     }
 
     internal static int ResolveRequiredItemCountFromVisualPath(
@@ -348,16 +338,59 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return 0;
         }
 
+        List<Vector2Int> pathCoordinates = new List<Vector2Int>(visualPathPoints.Count);
+        TryBuildRailCoordinatesFromVisualPath(
+            visualPathPoints,
+            extendStartEndpoint,
+            extendEndEndpoint,
+            pathCoordinates,
+            null);
+        return Railload.ResolveRequiredItemCount(pathCoordinates);
+    }
+
+    internal static bool TryBuildRailCoordinatesFromVisualPath(
+        IReadOnlyList<Vector2> visualPathPoints,
+        bool extendStartEndpoint,
+        bool extendEndEndpoint,
+        List<Vector2Int> pathCoordinates,
+        List<Vector2Int> occupiedCoordinates)
+    {
+        pathCoordinates?.Clear();
+        occupiedCoordinates?.Clear();
+        if ((pathCoordinates == null && occupiedCoordinates == null)
+            || visualPathPoints == null
+            || visualPathPoints.Count < 2)
+        {
+            return false;
+        }
+
         List<Vector2> renderedCenterPath = new List<Vector2>(visualPathPoints.Count);
         BuildRenderedVisualPath(
             visualPathPoints,
             extendStartEndpoint,
             extendEndEndpoint,
             renderedCenterPath);
+        if (renderedCenterPath.Count < 2)
+        {
+            return false;
+        }
 
-        List<Vector2Int> pathCoordinates = new List<Vector2Int>(renderedCenterPath.Count);
-        AddCoordinatesTraversedByPath(pathCoordinates, renderedCenterPath, null);
-        return Railload.ResolveRequiredItemCount(pathCoordinates);
+        if (pathCoordinates != null)
+        {
+            AddCoordinatesTraversedByPath(pathCoordinates, renderedCenterPath, null);
+        }
+
+        if (occupiedCoordinates != null)
+        {
+            AddRailFootprintCoordinates(occupiedCoordinates, renderedCenterPath);
+            if (occupiedCoordinates.Count <= 0)
+            {
+                AddCoordinatesTraversedByPath(occupiedCoordinates, renderedCenterPath, null);
+            }
+        }
+
+        return (pathCoordinates != null && pathCoordinates.Count > 0)
+               || (occupiedCoordinates != null && occupiedCoordinates.Count > 0);
     }
 
     private static void BuildRenderedVisualPath(

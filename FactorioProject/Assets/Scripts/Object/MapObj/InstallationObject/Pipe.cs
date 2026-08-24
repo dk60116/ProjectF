@@ -334,6 +334,13 @@ public class Pipe : InstallationObject
         return connectionMask;
     }
 
+    public bool TryGetPrimaryConnectionDirection(
+        Quaternion rotation,
+        out Vector2Int direction)
+    {
+        return TryResolveDirection(rotation, localStraightDirection, out direction);
+    }
+
     private bool TryResolveObjectInfoPipeCoordinate(out Vector2Int coordinate)
     {
         if (TryGetPlacementRuntime(out coordinate, out _))

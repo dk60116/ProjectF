@@ -33,6 +33,8 @@ public class Train : Vehicle
     private float currentRailConnectionPathDistance;
     private float currentRailConnectionProgress;
     private readonly HashSet<Train> connectedTrains = new HashSet<Train>();
+    private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
+    private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();
 
     public float ConnectionCenterDistance => Mathf.Max(
         MinConnectionDistance,
@@ -65,6 +67,108 @@ public class Train : Vehicle
             }
 
             results.Add(train);
+        }
+    }
+
+    public bool TryGetTouchingUnconnectedTrain(out Train target)
+    {
+        target = null;
+        if (!gameObject.activeInHierarchy || !TryGetPlacementRuntime(out _, out _))
+        {
+            return false;
+        }
+
+        CollectConnectionActionGroup();
+        float nearestDistanceSqr = float.MaxValue;
+        foreach (Train candidate in ActiveRuntimeTrains)
+        {
+            if (candidate == null
+                || connectionActionGroupVisited.Contains(candidate)
+                || !CanConnectTo(candidate))
+            {
+                continue;
+            }
+
+            Vector3 offset = candidate.transform.position - transform.position;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            target = candidate;
+            nearestDistanceSqr = distanceSqr;
+        }
+
+        connectionActionGroupQueue.Clear();
+        connectionActionGroupVisited.Clear();
+        return target != null;
+    }
+
+    public bool TryConnectTouchingTrain()
+    {
+        return TryGetTouchingUnconnectedTrain(out Train target) && ConnectTo(target);
+    }
+
+    public bool TryGetConnectedTrain(out Train target)
+    {
+        target = null;
+        float nearestDistanceSqr = float.MaxValue;
+        foreach (Train candidate in connectedTrains)
+        {
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            Vector3 offset = candidate.transform.position - transform.position;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            target = candidate;
+            nearestDistanceSqr = distanceSqr;
+        }
+
+        return target != null;
+    }
+
+    public bool TryDisconnectConnectedTrain()
+    {
+        if (!TryGetConnectedTrain(out Train target))
+        {
+            return false;
+        }
+
+        DisconnectFrom(target);
+        return true;
+    }
+
+    private void CollectConnectionActionGroup()
+    {
+        connectionActionGroupQueue.Clear();
+        connectionActionGroupVisited.Clear();
+        connectionActionGroupQueue.Enqueue(this);
+        connectionActionGroupVisited.Add(this);
+
+        while (connectionActionGroupQueue.Count > 0)
+        {
+            Train current = connectionActionGroupQueue.Dequeue();
+            foreach (Train connectedTrain in current.connectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !connectionActionGroupVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                connectionActionGroupQueue.Enqueue(connectedTrain);
+            }
         }
     }
 
