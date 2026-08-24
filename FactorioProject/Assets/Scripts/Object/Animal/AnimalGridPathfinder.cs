@@ -224,6 +224,16 @@ public static class AnimalGridPathfinder
                 if (offsetX * offsetX + offsetZ * offsetZ >= minimumDistanceSqr
                     && (!requireWaterEdge || terrain.IsAnimalDrinkLocation(candidate)))
                 {
+                    if (requireWaterEdge)
+                    {
+                        // The queue expands in step order. The first reachable
+                        // shoreline is therefore the nearest drink location; do not
+                        // make an animal cross its whole herd area for a random edge.
+                        selectedIndex = currentIndex;
+                        destination = candidate;
+                        break;
+                    }
+
                     uint score = HashCoordinate(currentX, currentZ, selectionSeed);
                     if (selectedIndex < 0 || score > selectedScore)
                     {

@@ -200,7 +200,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   vehicleAccelerationPerSecond: 2
-  vehicleMaxSpeed: 0.9
+  vehicleMaxSpeed: 1.2
   vehicleDecelerationPerSecond: 2.5
   vehicleMass: 10
   playerPoint:

@@ -8,6 +8,13 @@ using UnityEditor;
 public partial class TerrainGenerator : MonoBehaviour
 {
     private const float AnimalSpawnFrequencyScale = 0.01f;
+    private static readonly Vector2Int[] AnimalDrinkDirectionOffsets =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
 
     [Header("Animal Generation")]
     [SerializeField] private bool generateAnimals = true;
@@ -990,6 +997,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool IsAnimalDrinkLocation(Vector3 worldPosition)
     {
+        return TryGetAnimalDrinkDirection(worldPosition, out _);
+    }
+
+    public bool TryGetAnimalDrinkDirection(
+        Vector3 worldPosition,
+        out Vector3 direction)
+    {
+        direction = Vector3.zero;
         Vector2Int coordinate = new Vector2Int(
             Mathf.RoundToInt(worldPosition.x),
             Mathf.RoundToInt(worldPosition.z));
@@ -999,10 +1014,17 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        return GetTileBiome(coordinate + Vector2Int.up) == TerrainBiome.Water
-               || GetTileBiome(coordinate + Vector2Int.right) == TerrainBiome.Water
-               || GetTileBiome(coordinate + Vector2Int.down) == TerrainBiome.Water
-               || GetTileBiome(coordinate + Vector2Int.left) == TerrainBiome.Water;
+        for (int i = 0; i < AnimalDrinkDirectionOffsets.Length; i++)
+        {
+            Vector2Int offset = AnimalDrinkDirectionOffsets[i];
+            if (GetTileBiome(coordinate + offset) == TerrainBiome.Water)
+            {
+                direction = new Vector3(offset.x, 0f, offset.y);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public int CreateAnimalAIStressTest(int requestedCount)

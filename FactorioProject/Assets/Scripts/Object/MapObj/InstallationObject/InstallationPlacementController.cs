@@ -333,7 +333,10 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int.down,
         Vector2Int.left
     };
-    private static readonly int[] ExplicitPipeRotationSecondDirectionOffsets = { 1, 3, 2 };
+    // A selected set with one real endpoint needs one visual continuation.
+    // Continue through the opposite side first; use a bend only when that side
+    // is occupied by another selectable pipe set or cannot be represented.
+    private static readonly int[] ExplicitPipeRotationSecondDirectionOffsets = { 2, 1, 3 };
     private static readonly InputOutputModule.RectGridBlockType[] InputEnergyRectGridBlockTypes =
     {
         InputOutputModule.RectGridBlockType.InputEnergy,
@@ -23536,9 +23539,26 @@ public class InstallationPlacementController : MonoBehaviour
             pipeRotationCurrentSetIdsScratch);
         if (selectedCandidateIndex < 0)
         {
-            // Every reachable endpoint belongs to the pipe set already selected.
-            // Rotation is intentionally a no-op in this case.
-            return false;
+            // A stale two-port manual mask can remain after separately resolved
+            // branches become one fluid-compatible set. Rebuild that sole set so
+            // the blueprint immediately materializes the required tee/cross.
+            if (candidateCount < 2)
+            {
+                return false;
+            }
+
+            int soleSetId = pipeRotationSetIdsScratch[0];
+            for (int candidateIndex = 1;
+                 candidateIndex < candidateCount;
+                 candidateIndex++)
+            {
+                if (pipeRotationSetIdsScratch[candidateIndex] != soleSetId)
+                {
+                    return false;
+                }
+            }
+
+            selectedCandidateIndex = 0;
         }
 
         bool resolved = TryBuildExplicitPipeRotationConnectionMask(
@@ -23688,6 +23708,20 @@ public class InstallationPlacementController : MonoBehaviour
         PipeRotationSetEndpoint first,
         PipeRotationSetEndpoint second)
     {
+        if (ExplicitPipeRotationFluidIdentitiesShareSet(
+                first.hasFluidIdentity,
+                first.fluidItemId,
+                second.hasFluidIdentity,
+                second.fluidItemId))
+        {
+            return true;
+        }
+
+        if (first.hasFluidIdentity && second.hasFluidIdentity)
+        {
+            return false;
+        }
+
         if (first.hasConnectorRoot
             && second.hasConnectorRoot
             && first.connectorOwner == second.connectorOwner
@@ -23703,6 +23737,28 @@ public class InstallationPlacementController : MonoBehaviour
                    second.pipeRootCoordinate,
                    activePipeCoordinate,
                    previewToIgnore);
+    }
+
+    private static bool ExplicitPipeRotationFluidIdentitiesShareSet(
+        bool firstHasFluidIdentity,
+        int firstFluidItemId,
+        bool secondHasFluidIdentity,
+        int secondFluidItemId)
+    {
+        return firstHasFluidIdentity == secondHasFluidIdentity
+               && (!firstHasFluidIdentity
+                   || firstFluidItemId == secondFluidItemId);
+    }
+
+    private static bool CanShareExplicitPipeRotationFluidSelection(
+        bool selectedHasFluidIdentity,
+        int selectedFluidItemId,
+        bool candidateHasFluidIdentity,
+        int candidateFluidItemId)
+    {
+        return selectedHasFluidIdentity
+               && (!candidateHasFluidIdentity
+                   || selectedFluidItemId == candidateFluidItemId);
     }
 
     private bool ExplicitPipeRotationPipeRootsAreConnected(
@@ -23890,6 +23946,8 @@ public class InstallationPlacementController : MonoBehaviour
         int selectedSetId = setIds[selectedCandidateIndex];
         int selectedSetConnectionMask = 0;
         int selectedSetEndpointCount = 0;
+        bool selectedSetHasFluidIdentity = false;
+        int selectedSetFluidItemId = -1;
         for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
         {
             if (setIds[candidateIndex] != selectedSetId)
@@ -23900,6 +23958,69 @@ public class InstallationPlacementController : MonoBehaviour
             selectedSetConnectionMask |= GetPipeConnectionDirectionBit(
                 endpoints[candidateIndex].direction);
             selectedSetEndpointCount++;
+            if (endpoints[candidateIndex].hasFluidIdentity)
+            {
+                selectedSetHasFluidIdentity = true;
+                selectedSetFluidItemId = endpoints[candidateIndex].fluidItemId;
+            }
+        }
+
+        // Empty branches can adopt the selected fluid and must not remain visually
+        // detached. They join this selection without allowing one empty branch to
+        // merge two different known-fluid sets during set-ID construction.
+        if (selectedSetHasFluidIdentity)
+        {
+            for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
+            {
+                if (setIds[candidateIndex] == selectedSetId
+                    || !CanShareExplicitPipeRotationFluidSelection(
+                        true,
+                        selectedSetFluidItemId,
+                        endpoints[candidateIndex].hasFluidIdentity,
+                        endpoints[candidateIndex].fluidItemId))
+                {
+                    continue;
+                }
+
+                selectedSetConnectionMask |= GetPipeConnectionDirectionBit(
+                    endpoints[candidateIndex].direction);
+                selectedSetEndpointCount++;
+            }
+        }
+        else
+        {
+            int compatibleKnownFluidItemId = -1;
+            bool hasConflictingKnownFluids = false;
+            for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
+            {
+                if (!endpoints[candidateIndex].hasFluidIdentity)
+                {
+                    continue;
+                }
+
+                int candidateFluidItemId = endpoints[candidateIndex].fluidItemId;
+                if (compatibleKnownFluidItemId < 0)
+                {
+                    compatibleKnownFluidItemId = candidateFluidItemId;
+                }
+                else if (compatibleKnownFluidItemId != candidateFluidItemId)
+                {
+                    hasConflictingKnownFluids = true;
+                    break;
+                }
+            }
+
+            if (!hasConflictingKnownFluids)
+            {
+                selectedSetConnectionMask = 0;
+                selectedSetEndpointCount = 0;
+                for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++)
+                {
+                    selectedSetConnectionMask |= GetPipeConnectionDirectionBit(
+                        endpoints[candidateIndex].direction);
+                    selectedSetEndpointCount++;
+                }
+            }
         }
 
         // One selected pipe set can surround the active cell from multiple sides.
@@ -23919,8 +24040,8 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         // A set with only one endpoint still needs a second open side so a physical
-        // straight/corner pipe can be represented. Never borrow that side from a
-        // different pipe set.
+        // pipe can be represented. Prefer a straight continuation and never borrow
+        // the second side from a different pipe set.
         for (int offsetIndex = 0;
              offsetIndex < ExplicitPipeRotationSecondDirectionOffsets.Length;
              offsetIndex++)

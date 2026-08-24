@@ -549,6 +549,24 @@ public static class PipeFluidCompatibilityValidation
             : null;
         MethodInfo commitMethod = GetControllerMethod("HandleInstallCompleteClicked");
         MethodInfo rotationMethod = GetControllerMethod("RotateInstallPreviewClockwise");
+        FieldInfo explicitPipeSecondDirectionOffsetsField =
+            typeof(InstallationPlacementController).GetField(
+                "ExplicitPipeRotationSecondDirectionOffsets",
+                BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo explicitPipeFluidSelectionMethod =
+            typeof(InstallationPlacementController).GetMethod(
+                "CanShareExplicitPipeRotationFluidSelection",
+                BindingFlags.Static | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(bool), typeof(int), typeof(bool), typeof(int) },
+                null);
+        MethodInfo explicitPipeFluidSetMethod =
+            typeof(InstallationPlacementController).GetMethod(
+                "ExplicitPipeRotationFluidIdentitiesShareSet",
+                BindingFlags.Static | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(bool), typeof(int), typeof(bool), typeof(int) },
+                null);
         MethodInfo fullBlueprintTopologyMethod = GetControllerMethod(
             "RefreshAllPipeBlueprintTopology");
         MethodInfo manualMaskByCoordinateMethod = GetControllerMethod(
@@ -684,6 +702,15 @@ public static class PipeFluidCompatibilityValidation
             rotationMethod,
             fullBlueprintTopologyMethod,
             "pipe rotation immediately resolves the same complete blueprint topology");
+        ValidateFixtureExplicitPipeSecondDirectionPriority(
+            report,
+            result,
+            explicitPipeSecondDirectionOffsetsField);
+        ValidateFixtureExplicitPipeFluidSelection(
+            report,
+            result,
+            explicitPipeFluidSelectionMethod,
+            explicitPipeFluidSetMethod);
         ValidateFixtureMethodDoesNotAccessField(
             report,
             result,
@@ -904,6 +931,153 @@ public static class PipeFluidCompatibilityValidation
                 .Append(storedFluidItemId)
                 .Append(", pipe=")
                 .Append(pipeFluidItemId)
+                .Append(", expected=")
+                .Append(expected)
+                .Append(", actual=")
+                .Append(actual)
+                .AppendLine();
+        }
+    }
+
+    private static void ValidateFixtureExplicitPipeSecondDirectionPriority(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        FieldInfo offsetsField)
+    {
+        int[] offsets = offsetsField?.GetValue(null) as int[];
+        if (offsets == null)
+        {
+            result.errorCount++;
+            report.AppendLine("  ERROR explicit pipe second-direction priority fixture unavailable");
+            return;
+        }
+
+        result.identityChecks++;
+        if (offsets.Length == 3
+            && offsets[0] == 2
+            && offsets[1] == 1
+            && offsets[2] == 3)
+        {
+            return;
+        }
+
+        result.failureCount++;
+        report.Append("  FAIL explicit pipe second-direction priority expected=[2,1,3], actual=[");
+        for (int index = 0; index < offsets.Length; index++)
+        {
+            if (index > 0)
+            {
+                report.Append(',');
+            }
+
+            report.Append(offsets[index]);
+        }
+
+        report.AppendLine("]");
+    }
+
+    private static void ValidateFixtureExplicitPipeFluidSelection(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        MethodInfo compatibilityMethod,
+        MethodInfo setCompatibilityMethod)
+    {
+        if (compatibilityMethod == null || setCompatibilityMethod == null)
+        {
+            result.errorCount++;
+            report.AppendLine("  ERROR explicit pipe fluid-selection fixture unavailable");
+            return;
+        }
+
+        int[,] fluidCases =
+        {
+            { 1, WaterFluidItemId, 1, WaterFluidItemId, 1 },
+            { 1, WaterFluidItemId, 1, OilFluidItemId, 0 },
+            { 1, WaterFluidItemId, 0, -1, 1 },
+            { 0, -1, 1, WaterFluidItemId, 0 }
+        };
+        for (int caseIndex = 0; caseIndex < fluidCases.GetLength(0); caseIndex++)
+        {
+            bool actual;
+            try
+            {
+                actual = InvokeBoolean(
+                    compatibilityMethod,
+                    null,
+                    new object[]
+                    {
+                        fluidCases[caseIndex, 0] != 0,
+                        fluidCases[caseIndex, 1],
+                        fluidCases[caseIndex, 2] != 0,
+                        fluidCases[caseIndex, 3]
+                    });
+            }
+            catch (Exception exception)
+            {
+                result.errorCount++;
+                report.Append("  ERROR explicit pipe fluid-selection fixture: ")
+                    .AppendLine(SanitizeMessage(exception.GetBaseException().Message));
+                return;
+            }
+
+            bool expected = fluidCases[caseIndex, 4] != 0;
+            result.identityChecks++;
+            if (actual == expected)
+            {
+                continue;
+            }
+
+            result.failureCount++;
+            report.Append("  FAIL explicit pipe fluid-selection case=")
+                .Append(caseIndex)
+                .Append(", expected=")
+                .Append(expected)
+                .Append(", actual=")
+                .Append(actual)
+                .AppendLine();
+        }
+
+        int[,] setCases =
+        {
+            { 0, -1, 0, -1, 1 },
+            { 1, WaterFluidItemId, 1, WaterFluidItemId, 1 },
+            { 1, WaterFluidItemId, 1, OilFluidItemId, 0 },
+            { 1, WaterFluidItemId, 0, -1, 0 }
+        };
+        for (int caseIndex = 0; caseIndex < setCases.GetLength(0); caseIndex++)
+        {
+            bool actual;
+            try
+            {
+                actual = InvokeBoolean(
+                    setCompatibilityMethod,
+                    null,
+                    new object[]
+                    {
+                        setCases[caseIndex, 0] != 0,
+                        setCases[caseIndex, 1],
+                        setCases[caseIndex, 2] != 0,
+                        setCases[caseIndex, 3]
+                    });
+            }
+            catch (Exception exception)
+            {
+                result.errorCount++;
+                report.Append("  ERROR explicit pipe fluid-set fixture: ")
+                    .AppendLine(SanitizeMessage(exception.GetBaseException().Message));
+                return;
+            }
+
+            bool expected = setCases[caseIndex, 4] != 0;
+            result.identityChecks++;
+            if (actual == expected)
+            {
+                continue;
+            }
+
+            result.failureCount++;
+            report.Append("  FAIL explicit pipe fluid-set case=")
+                .Append(caseIndex)
                 .Append(", expected=")
                 .Append(expected)
                 .Append(", actual=")

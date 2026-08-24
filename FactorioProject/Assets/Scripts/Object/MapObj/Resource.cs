@@ -110,7 +110,15 @@ public class Resource : MapObject
     public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
         ? definition.placementCategory
         : ResourceDefinition.PlacementCategory.Ore;
-    public override bool AllowsAnimalTraversal => harvestMode == HarvestMode.Mining;
+    public override bool AllowsAnimalTraversal
+    {
+        get
+        {
+            HarvestMode resolvedMode = ResolvedHarvestMode;
+            return resolvedMode == HarvestMode.Mining
+                   || resolvedMode == HarvestMode.Cut;
+        }
+    }
 
     public HarvestMode ResolvedHarvestMode
     {

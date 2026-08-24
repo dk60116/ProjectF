@@ -854,7 +854,10 @@ public sealed class AnimalAIController : MonoBehaviour
             return;
         }
 
-        bool returningToHerdArea = TryBeginHerdAreaReturn(useLiveCollision);
+        // A drink target can be outside the herd's ordinary roaming circle.
+        // Finish reaching and using the shoreline before normal herd return resumes.
+        bool returningToHerdArea = currentState != AnimalAIState.Drink
+                                   && TryBeginHerdAreaReturn(useLiveCollision);
         if (!returningToHerdArea && stateTimeRemaining <= 0f)
         {
             BeginNextBehavior(useLiveCollision);
@@ -871,12 +874,38 @@ public sealed class AnimalAIController : MonoBehaviour
             moved = MoveTowardTarget(deltaTime, useLiveCollision);
         }
 
+        if (currentState == AnimalAIState.Drink
+            && !movingToActivity
+            && !hasTarget)
+        {
+            FaceDrinkWater(deltaTime);
+        }
+
         if (!movingToActivity)
         {
             stateTimeRemaining -= deltaTime;
         }
 
         ApplyAnimation(moved ? GetEffectiveMoveSpeed() : 0f);
+    }
+
+    private void FaceDrinkWater(float deltaTime)
+    {
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain == null
+            || !terrain.TryGetAnimalDrinkDirection(
+                transform.position,
+                out Vector3 direction)
+            || direction.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction, Vector3.up);
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            targetRotation,
+            settings.TurnSpeed * Mathf.Min(deltaTime, MaximumRotationDeltaTime));
     }
 
     private bool WaitForStandUpBeforeMovement(bool useLiveCollision)
@@ -928,7 +957,9 @@ public sealed class AnimalAIController : MonoBehaviour
                 movingToActivity = hasTarget;
                 break;
             case AnimalAIState.Drink:
-                hasTarget = TryChooseTarget(true, requireLoadedGround, out targetPosition);
+                hasTarget = TryChooseDrinkTarget(
+                    requireLoadedGround,
+                    out targetPosition);
                 movingToActivity = hasTarget;
                 if (!hasTarget)
                 {
@@ -937,6 +968,52 @@ public sealed class AnimalAIController : MonoBehaviour
                 }
                 break;
         }
+    }
+
+    private bool TryChooseDrinkTarget(
+        bool requireLoadedGround,
+        out Vector3 result)
+    {
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        Vector3 position = transform.position;
+        if (terrain == null)
+        {
+            result = position;
+            return false;
+        }
+
+        if (terrain.IsAnimalDrinkLocation(position))
+        {
+            result = position;
+            PrepareDirectNavigation(result);
+            return true;
+        }
+
+        if (TryBuildReachableFallbackPath(
+                true,
+                requireLoadedGround,
+                out result))
+        {
+            reachableFallbackTargetCount++;
+            return true;
+        }
+
+        // Water is not guaranteed to exist inside a herd's roaming circle. Search
+        // the connected walkable region around the animal so Drink remains a real
+        // activity instead of repeatedly degrading to Idle.
+        navigationWaypoints ??= new Vector3[MaxNavigationWaypoints];
+        int waypointCount = AnimalGridPathfinder.FindReachableTargetPath(
+            terrain,
+            position,
+            position,
+            MaxExtendedNavigationRadius,
+            requireLoadedGround,
+            true,
+            0f,
+            NextRandomUInt(),
+            navigationWaypoints,
+            out result);
+        return StoreNavigationPath(result, waypointCount);
     }
 
     private bool TryBeginHerdAreaReturn(bool requireLoadedGround)
@@ -1142,10 +1219,14 @@ public sealed class AnimalAIController : MonoBehaviour
         }
         else if (movementAvailability == MovementAvailability.BlockedByAnimal)
         {
-            // 다른 동물은 지형 장애물이 아니다. 경로를 다시 만들면
-            // RepathCooldown 주기마다 목표 각도가 바뀌므로 제자리에서 양보한다.
             navigationBlockedTime = 0f;
-            PauseNavigationProgress(movementTarget, transform.position);
+            if (IsNavigationProgressStalled(
+                    movementTarget,
+                    transform.position,
+                    deltaTime))
+            {
+                TryRepathFlee(awayDirection, useLiveCollision);
+            }
         }
         else if (IsNavigationProgressStalled(
                      movementTarget,
@@ -1567,7 +1648,8 @@ public sealed class AnimalAIController : MonoBehaviour
         out Vector3 areaCenter,
         out float areaRadius)
     {
-        if (IsOutsideHerdArea(transform.position))
+        if (currentState == AnimalAIState.Drink
+            || IsOutsideHerdArea(transform.position))
         {
             GetExtendedNavigationArea(destination, out areaCenter, out areaRadius);
             return;
@@ -1810,16 +1892,6 @@ public sealed class AnimalAIController : MonoBehaviour
         return navigationNoProgressTime >= AbandonBlockedTargetDelay;
     }
 
-    private void PauseNavigationProgress(Vector3 movementTarget, Vector3 position)
-    {
-        navigationProgressTracked = true;
-        navigationProgressTarget = movementTarget;
-        Vector3 remaining = movementTarget - position;
-        remaining.y = 0f;
-        navigationBestDistance = remaining.magnitude;
-        navigationNoProgressTime = 0f;
-    }
-
     private void ResetNavigation()
     {
         navigationWaypointCount = 0;
@@ -1911,7 +1983,10 @@ public sealed class AnimalAIController : MonoBehaviour
         AnimalAIWorld world = escapingTerrain ? null : AnimalAIWorld.Instance;
         if (world != null)
         {
-            if (world.TryGetHerdCenter(HerdId, out Vector3 currentHerdCenter))
+            if (currentState != AnimalAIState.Drink
+                && world.TryGetHerdCenter(
+                    HerdId,
+                    out Vector3 currentHerdCenter))
             {
                 Vector3 cohesion = currentHerdCenter - position;
                 cohesion.y = 0f;
@@ -1930,8 +2005,9 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         float areaRadius = HerdAreaRadius;
+        bool restrictToHerdArea = currentState != AnimalAIState.Drink;
         bool startedOutsideHerdArea = false;
-        if (!escapingTerrain)
+        if (!escapingTerrain && restrictToHerdArea)
         {
             Vector3 areaOffset = position - HerdAreaCenter;
             areaOffset.y = 0f;
@@ -1974,9 +2050,13 @@ public sealed class AnimalAIController : MonoBehaviour
             if (availability == MovementAvailability.BlockedByAnimal)
             {
                 navigationBlockedTime = 0f;
-                if (!escapingTerrain)
+                if (!escapingTerrain
+                    && IsNavigationProgressStalled(
+                        movementTarget,
+                        position,
+                        deltaTime))
                 {
-                    PauseNavigationProgress(movementTarget, position);
+                    AbandonCurrentNavigationTarget();
                 }
 
                 return false;
@@ -2000,7 +2080,9 @@ public sealed class AnimalAIController : MonoBehaviour
 
         Vector3 candidate = position + direction * (speed * deltaTime);
         candidate.y = position.y;
-        if (!escapingTerrain && !startedOutsideHerdArea)
+        if (!escapingTerrain
+            && restrictToHerdArea
+            && !startedOutsideHerdArea)
         {
             Vector3 clampedOffset = candidate - HerdAreaCenter;
             clampedOffset.y = 0f;
@@ -2033,7 +2115,14 @@ public sealed class AnimalAIController : MonoBehaviour
                     if (boundaryAvailability == MovementAvailability.BlockedByAnimal)
                     {
                         navigationBlockedTime = 0f;
-                        PauseNavigationProgress(movementTarget, position);
+                        if (IsNavigationProgressStalled(
+                                movementTarget,
+                                position,
+                                deltaTime))
+                        {
+                            AbandonCurrentNavigationTarget();
+                        }
+
                         return false;
                     }
 

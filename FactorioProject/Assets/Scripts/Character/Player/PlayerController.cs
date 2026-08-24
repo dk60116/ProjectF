@@ -25,6 +25,7 @@ public class PlayerController : MonoBehaviour
     private const float WaterBoundaryNormalProbeDistance = 0.05f;
     private const float WaterBoundarySlideScoreTolerance = 0.01f;
     private const float TemporaryDropFocusDuration = 0.18f;
+    private const int TrainDismountSearchPadding = 4;
     private const float MinimumAnimalKnifeInteractionRange = 0.75f;
     private const float AnimalKnifeInteractionTimeout = 1.5f;
     private const float PickAnimationDuration = 1.1666666f;
@@ -606,9 +607,15 @@ public class PlayerController : MonoBehaviour
             player = GetComponent<Player>();
         }
 
-        Quaternion exitRotation = transform.rotation;
-        Vector3 exitPosition = ResolveInteractionPointExitPosition();
         Vehicle dismountedVehicle = interactionPointSnapVehicle;
+        if (!TryResolveInteractionPointExitPosition(
+                dismountedVehicle,
+                out Vector3 exitPosition))
+        {
+            return false;
+        }
+
+        Quaternion exitRotation = transform.rotation;
         ClearInteractionPointSnap(true);
         dismountedVehicle?.NotifyPlayerDismounted(player);
 
@@ -673,13 +680,15 @@ public class PlayerController : MonoBehaviour
         mountedPinnedFocusBlocks.Clear();
     }
 
-    private Vector3 ResolveInteractionPointExitPosition()
+    private bool TryResolveInteractionPointExitPosition(
+        Vehicle vehicle,
+        out Vector3 exitPosition)
     {
         Transform snapTarget = interactionPointSnapTarget;
-        Vehicle vehicle = interactionPointSnapVehicle;
         if (snapTarget == null)
         {
-            return ClampRootPositionToGroundY(transform.position);
+            exitPosition = ClampRootPositionToGroundY(transform.position);
+            return true;
         }
 
         Vector3 center = vehicle != null ? vehicle.transform.position : transform.position;
@@ -709,7 +718,117 @@ public class PlayerController : MonoBehaviour
             exitDistance = Mathf.Max(1, Mathf.Max(status.mapSizeX, status.mapSizeY)) * 0.5f + 0.55f;
         }
 
-        return ClampRootPositionToGroundY(center + direction.normalized * exitDistance);
+        Vector3 preferredExitPosition = ClampRootPositionToGroundY(
+            center + direction.normalized * exitDistance);
+        if (!(vehicle is Train train))
+        {
+            exitPosition = preferredExitPosition;
+            return true;
+        }
+
+        return TryResolveClearTrainDismountPosition(
+            train,
+            preferredExitPosition,
+            out exitPosition);
+    }
+
+    private bool TryResolveClearTrainDismountPosition(
+        Train train,
+        Vector3 preferredExitPosition,
+        out Vector3 exitPosition)
+    {
+        exitPosition = default;
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (train == null || terrain == null)
+        {
+            return false;
+        }
+
+        Vector3 trainPosition = train.transform.position;
+        MapObject.MapObjectStatus status = train.Status;
+        float trainHalfExtent = Mathf.Max(
+            1,
+            Mathf.Max(status.mapSizeX, status.mapSizeY)) * 0.5f;
+        float minimumDistance = trainHalfExtent + GetPlayerCollisionRadius();
+        float minimumDistanceSqr = minimumDistance * minimumDistance;
+        int searchRadius = Mathf.CeilToInt(minimumDistance)
+                           + TrainDismountSearchPadding;
+        Vector2Int centerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(trainPosition.x),
+            Mathf.RoundToInt(trainPosition.z));
+
+        bool found = false;
+        float bestPreferredDistanceSqr = float.MaxValue;
+        Vector2Int bestCoordinate = default;
+        Vector3 bestPosition = default;
+        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        {
+            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate
+                                        + new Vector2Int(offsetX, offsetY);
+                if (!terrain.TryGetLoadedBlock(coordinate, out Block block)
+                    || !IsClearTrainDismountBlock(block))
+                {
+                    continue;
+                }
+
+                Vector3 candidatePosition = ClampRootPositionToGroundY(
+                    block.transform.position);
+                float trainDeltaX = candidatePosition.x - trainPosition.x;
+                float trainDeltaZ = candidatePosition.z - trainPosition.z;
+                if (trainDeltaX * trainDeltaX + trainDeltaZ * trainDeltaZ
+                    < minimumDistanceSqr
+                    || IsPlayerBlockedByWaterAtPosition(candidatePosition))
+                {
+                    continue;
+                }
+
+                float preferredDeltaX = candidatePosition.x
+                                        - preferredExitPosition.x;
+                float preferredDeltaZ = candidatePosition.z
+                                        - preferredExitPosition.z;
+                float preferredDistanceSqr = preferredDeltaX * preferredDeltaX
+                                             + preferredDeltaZ * preferredDeltaZ;
+                if (found
+                    && (preferredDistanceSqr > bestPreferredDistanceSqr
+                        || Mathf.Approximately(
+                               preferredDistanceSqr,
+                               bestPreferredDistanceSqr)
+                           && !CoordinatePrecedes(
+                               coordinate,
+                               bestCoordinate)))
+                {
+                    continue;
+                }
+
+                found = true;
+                bestPreferredDistanceSqr = preferredDistanceSqr;
+                bestCoordinate = coordinate;
+                bestPosition = candidatePosition;
+            }
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        exitPosition = bestPosition;
+        return true;
+    }
+
+    private static bool IsClearTrainDismountBlock(Block block)
+    {
+        return block != null && block.MapObject == null;
+    }
+
+    private static bool CoordinatePrecedes(
+        Vector2Int candidate,
+        Vector2Int current)
+    {
+        return candidate.x < current.x
+               || candidate.x == current.x && candidate.y < current.y;
     }
 
     private void ApplyInteractionPointSnap()

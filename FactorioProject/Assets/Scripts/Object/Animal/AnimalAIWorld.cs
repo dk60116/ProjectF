@@ -14,6 +14,7 @@ public sealed class AnimalAIWorld : MonoBehaviour
     private const float DetailedVisualDistance = 8f;
     private const int NormalSimulationTickBudget = 24;
     private const int FleeSimulationTickBonus = 8;
+    private const float CrowdOverlapTolerance = 0.0001f;
 
     private struct HerdFrame
     {
@@ -384,6 +385,7 @@ public sealed class AnimalAIWorld : MonoBehaviour
 
         float radiusSqr = radius * radius;
         Vector3 result = Vector3.zero;
+        int contributingNeighborCount = 0;
         Vector3 sourcePosition = source.CrowdSnapshotPosition;
         int minimumX = Mathf.FloorToInt((sourcePosition.x - radius) / SpatialCellSize);
         int maximumX = Mathf.FloorToInt((sourcePosition.x + radius) / SpatialCellSize);
@@ -413,11 +415,12 @@ public sealed class AnimalAIWorld : MonoBehaviour
                     Vector3 offset = sourcePosition - neighbor.CrowdSnapshotPosition;
                     offset.y = 0f;
                     float distanceSqr = offset.sqrMagnitude;
-                    if (distanceSqr > radiusSqr)
+                    if (distanceSqr >= radiusSqr)
                     {
                         continue;
                     }
 
+                    contributingNeighborCount++;
                     if (distanceSqr <= 0.0001f)
                     {
                         offset = GetStableOverlapDirection(source, neighbor);
@@ -431,7 +434,24 @@ public sealed class AnimalAIWorld : MonoBehaviour
             }
         }
 
+        // A symmetric cluster can cancel every pairwise separation vector.
+        // Give each animal a stable personal escape direction so the group can
+        // break symmetry without frame-to-frame jitter or random allocations.
+        if (contributingNeighborCount > 0 && result.sqrMagnitude <= 0.0001f)
+        {
+            result = GetStableCrowdDirection(source);
+        }
+
         return Vector3.ClampMagnitude(result, 1f);
+    }
+
+    private static Vector3 GetStableCrowdDirection(AnimalAIController source)
+    {
+        long sourceId = source.TerrainInstance != null
+            ? source.TerrainInstance.DeterministicId
+            : source.GetHashCode();
+        uint hash = unchecked((uint)((ulong)sourceId ^ ((ulong)sourceId >> 32)));
+        return GetStableHorizontalDirection(hash);
     }
 
     private static Vector3 GetStableOverlapDirection(
@@ -457,12 +477,17 @@ public sealed class AnimalAIWorld : MonoBehaviour
         ulong first = unchecked((ulong)(invert ? neighborId : sourceId));
         ulong second = unchecked((ulong)(invert ? sourceId : neighborId));
         uint hash = unchecked((uint)(first ^ (first >> 32) ^ second ^ (second >> 32)));
+        Vector3 direction = GetStableHorizontalDirection(hash);
+        return invert ? -direction : direction;
+    }
+
+    private static Vector3 GetStableHorizontalDirection(uint hash)
+    {
         hash ^= hash << 13;
         hash ^= hash >> 17;
         hash ^= hash << 5;
         float angle = (hash & 0xFFFFu) * (Mathf.PI * 2f / 65536f);
-        Vector3 direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
-        return invert ? -direction : direction;
+        return new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
     }
 
     public bool IsAnimalPositionClearOrEscaping(
@@ -543,8 +568,14 @@ public sealed class AnimalAIWorld : MonoBehaviour
             return true;
         }
 
+        // In a packed group the first useful step is often tangential: it keeps
+        // total overlap equal before later steps reduce it. Reject only movement
+        // that materially worsens an existing overlap so animals cannot deadlock
+        // on that flat part of the crowd-avoidance field.
         return allowEscape
-               && candidateOverlapDepth + 0.0001f < originOverlapDepth;
+               && originOverlapDepth > 0f
+               && candidateOverlapDepth
+               <= originOverlapDepth + CrowdOverlapTolerance;
     }
 
     public int PushAnimalsAlongPath(
