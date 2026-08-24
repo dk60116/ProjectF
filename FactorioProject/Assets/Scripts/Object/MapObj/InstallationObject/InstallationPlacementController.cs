@@ -9785,8 +9785,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         // A junction can be formed by both newly previewed pipes and an already
-        // installed compatible branch. Keep collecting after the preview pass;
-        // fluid constraints, not preview ownership, decide which branches merge.
+        // installed compatible branch. Only previews may rotate toward a potential
+        // connection; installed branches must already expose a real port, matching
+        // the post-install normalizer.
         for (int i = 0; i < PipeCardinalDirections.Length; i++)
         {
             Vector2Int sideDirection = PipeCardinalDirections[i];
@@ -9800,7 +9801,7 @@ public class InstallationPlacementController : MonoBehaviour
                     anchorCoordinate + sideDirection,
                     previewToIgnore,
                     -sideDirection,
-                    allowPotentialConnections,
+                    false,
                     acceptedFluidItemIds,
                     ref hasAcceptedFluidConstraint,
                     PipeNeighborConnectionSearchMode.NonPreviewOnly))
@@ -19030,7 +19031,7 @@ public class InstallationPlacementController : MonoBehaviour
                 baselineConnectionMask,
                 out MapObject desiredPrefab,
                 out int resolvedQuarterTurns,
-                false)
+                true)
             || desiredPrefab == null)
         {
             return false;
