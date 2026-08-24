@@ -199,6 +199,9 @@ public class Pipe : InstallationObject
         EnqueueObjectInfoFluidSearchCoordinate(startCoordinate);
 
         bool foundFluid = false;
+        bool foundMobileStorageFallbackFluid = false;
+        int mobileStorageFallbackFluidItemId = -1;
+        float mobileStorageFallbackTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         int searchedNodeCount = 0;
         while (objectInfoFluidSearchQueue.Count > 0
                && searchedNodeCount < MaxObjectInfoFluidSearchNodes)
@@ -208,8 +211,11 @@ public class Pipe : InstallationObject
 
             if (!foundFluid
                 && (!hasIgnoredStorageCoordinate || coordinate != ignoredStorageCoordinate)
-                && TryGetFluidInfoAtPipeNetworkCoordinate(
+                && TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
                     coordinate,
+                    ref foundMobileStorageFallbackFluid,
+                    ref mobileStorageFallbackFluidItemId,
+                    ref mobileStorageFallbackTemperatureCelsius,
                     out fluidItemId,
                     out temperatureCelsius))
             {
@@ -241,8 +247,11 @@ public class Pipe : InstallationObject
                 Vector2Int neighborCoordinate = coordinate + direction;
                 if (!foundFluid
                     && (!hasIgnoredStorageCoordinate || neighborCoordinate != ignoredStorageCoordinate)
-                    && TryGetFluidInfoAtPipeNetworkCoordinate(
+                    && TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
                         neighborCoordinate,
+                        ref foundMobileStorageFallbackFluid,
+                        ref mobileStorageFallbackFluidItemId,
+                        ref mobileStorageFallbackTemperatureCelsius,
                         out fluidItemId,
                         out temperatureCelsius))
                 {
@@ -266,6 +275,16 @@ public class Pipe : InstallationObject
             }
         }
 
+        // Mobile fluid storage may establish the identity of an empty pipe
+        // network, but it must never replace an identity already supplied by a
+        // pump, fixed tank, or other connected fluid endpoint.
+        if (!foundFluid && foundMobileStorageFallbackFluid)
+        {
+            fluidItemId = mobileStorageFallbackFluidItemId;
+            temperatureCelsius = mobileStorageFallbackTemperatureCelsius;
+            foundFluid = true;
+        }
+
         if (cacheDisplayNetwork)
         {
             foreach (Vector2Int coordinate in objectInfoFluidSearchVisited)
@@ -275,6 +294,44 @@ public class Pipe : InstallationObject
         }
 
         return foundFluid;
+    }
+
+    private bool TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
+        Vector2Int coordinate,
+        ref bool foundMobileStorageFallbackFluid,
+        ref int mobileStorageFallbackFluidItemId,
+        ref float mobileStorageFallbackTemperatureCelsius,
+        out int fluidItemId,
+        out float temperatureCelsius)
+    {
+        if (!TryGetFluidInfoAtPipeNetworkCoordinate(
+                coordinate,
+                out int candidateFluidItemId,
+                out float candidateTemperatureCelsius,
+                out bool isMobileStorageFallbackFluid))
+        {
+            fluidItemId = -1;
+            temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+            return false;
+        }
+
+        if (!isMobileStorageFallbackFluid)
+        {
+            fluidItemId = candidateFluidItemId;
+            temperatureCelsius = candidateTemperatureCelsius;
+            return true;
+        }
+
+        if (!foundMobileStorageFallbackFluid)
+        {
+            foundMobileStorageFallbackFluid = true;
+            mobileStorageFallbackFluidItemId = candidateFluidItemId;
+            mobileStorageFallbackTemperatureCelsius = candidateTemperatureCelsius;
+        }
+
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        return false;
     }
 
     public virtual bool HasConnectionTowards(Quaternion rotation, Vector2Int direction)
@@ -385,23 +442,49 @@ public class Pipe : InstallationObject
     private bool TryGetFluidInfoAtPipeNetworkCoordinate(
         Vector2Int coordinate,
         out int fluidItemId,
-        out float temperatureCelsius)
+        out float temperatureCelsius,
+        out bool isMobileStorageFallbackFluid)
     {
-        if (TryGetStoredFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius))
+        if (TryGetStoredFluidInfoAtCoordinate(
+                coordinate,
+                out fluidItemId,
+                out temperatureCelsius,
+                out isMobileStorageFallbackFluid))
         {
+            if (!isMobileStorageFallbackFluid)
+            {
+                return true;
+            }
+
+            int mobileStorageFluidItemId = fluidItemId;
+            float mobileStorageTemperatureCelsius = temperatureCelsius;
+            if (TryGetSourceFluidInfoAtCoordinate(
+                    coordinate,
+                    out fluidItemId,
+                    out temperatureCelsius))
+            {
+                isMobileStorageFallbackFluid = false;
+                return true;
+            }
+
+            fluidItemId = mobileStorageFluidItemId;
+            temperatureCelsius = mobileStorageTemperatureCelsius;
             return true;
         }
 
+        isMobileStorageFallbackFluid = false;
         return TryGetSourceFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius);
     }
 
     private bool TryGetStoredFluidInfoAtCoordinate(
         Vector2Int coordinate,
         out int fluidItemId,
-        out float temperatureCelsius)
+        out float temperatureCelsius,
+        out bool isMobileStorageFallbackFluid)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        isMobileStorageFallbackFluid = false;
         if (InputOutputModule.TryGetRuntimePipeFluidStorageAtCoordinate(
                 coordinate,
                 null,
@@ -413,13 +496,15 @@ public class Pipe : InstallationObject
         {
             fluidItemId = areaStorage.StoredFluidItemId;
             temperatureCelsius = areaStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
+            isMobileStorageFallbackFluid = IsMobileFluidStorageFallback(areaStorage);
             return true;
         }
 
         if (TryGetRuntimeStoredFluidInfoAtCoordinate(
                 coordinate,
                 out fluidItemId,
-                out temperatureCelsius))
+                out temperatureCelsius,
+                out isMobileStorageFallbackFluid))
         {
             return true;
         }
@@ -438,16 +523,19 @@ public class Pipe : InstallationObject
 
         fluidItemId = bodyStorage.StoredFluidItemId;
         temperatureCelsius = bodyStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
+        isMobileStorageFallbackFluid = IsMobileFluidStorageFallback(bodyStorage);
         return true;
     }
 
     private bool TryGetRuntimeStoredFluidInfoAtCoordinate(
         Vector2Int coordinate,
         out int fluidItemId,
-        out float temperatureCelsius)
+        out float temperatureCelsius,
+        out bool isMobileStorageFallbackFluid)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        isMobileStorageFallbackFluid = false;
         objectInfoFluidStorageScratch.Clear();
         if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
                 coordinate,
@@ -456,6 +544,8 @@ public class Pipe : InstallationObject
             return false;
         }
 
+        int mobileStorageFluidItemId = -1;
+        float mobileStorageTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         for (int i = 0; i < objectInfoFluidStorageScratch.Count; i++)
         {
             InstallationObject storage = objectInfoFluidStorageScratch[i];
@@ -467,14 +557,42 @@ public class Pipe : InstallationObject
                 continue;
             }
 
-            fluidItemId = storage.StoredFluidItemId;
-            temperatureCelsius = storage.GetStoredFluidTemperatureCelsius(fluidItemId);
+            int candidateFluidItemId = storage.StoredFluidItemId;
+            float candidateTemperatureCelsius = storage.GetStoredFluidTemperatureCelsius(
+                candidateFluidItemId);
+            if (IsMobileFluidStorageFallback(storage))
+            {
+                if (mobileStorageFluidItemId < 0)
+                {
+                    mobileStorageFluidItemId = candidateFluidItemId;
+                    mobileStorageTemperatureCelsius = candidateTemperatureCelsius;
+                }
+
+                continue;
+            }
+
+            fluidItemId = candidateFluidItemId;
+            temperatureCelsius = candidateTemperatureCelsius;
             objectInfoFluidStorageScratch.Clear();
             return true;
         }
 
         objectInfoFluidStorageScratch.Clear();
-        return false;
+        if (mobileStorageFluidItemId < 0)
+        {
+            return false;
+        }
+
+        fluidItemId = mobileStorageFluidItemId;
+        temperatureCelsius = mobileStorageTemperatureCelsius;
+        isMobileStorageFallbackFluid = true;
+        return true;
+    }
+
+    private static bool IsMobileFluidStorageFallback(InstallationObject storage)
+    {
+        return storage is SteamTrain
+               || storage is Fluidtank fluidTank && fluidTank.IsFlatCarMounted;
     }
 
     private bool TryGetSourceFluidInfoAtCoordinate(
@@ -485,8 +603,13 @@ public class Pipe : InstallationObject
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
 
-        if (TryResolvePumpSourceAtCoordinate(coordinate, out Pump pump)
+        // A pump is a source only on its registered pipe-output cell. Looking up
+        // the MapObject occupying this coordinate would also match the pump body
+        // and its input side, making any pipe that merely faces the pump display
+        // the pump's fluid.
+        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump pump)
             && pump != null
+            && pump.gameObject.activeInHierarchy
             && pump.TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
             && outputItemId >= 0
             && litersPerSecond > 0.0001f)
@@ -496,30 +619,6 @@ public class Pipe : InstallationObject
             return true;
         }
 
-        return false;
-    }
-
-    private static bool TryResolvePumpSourceAtCoordinate(Vector2Int coordinate, out Pump pump)
-    {
-        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out pump)
-            && pump != null
-            && pump.gameObject.activeInHierarchy)
-        {
-            return true;
-        }
-
-        TerrainGenerator terrain = TerrainGenerator.Active;
-        if (terrain != null
-            && terrain.TryGetLoadedBlock(coordinate, out Block block)
-            && block != null
-            && block.MapObject is Pump directPump
-            && directPump.gameObject.activeInHierarchy)
-        {
-            pump = directPump;
-            return true;
-        }
-
-        pump = null;
         return false;
     }
 

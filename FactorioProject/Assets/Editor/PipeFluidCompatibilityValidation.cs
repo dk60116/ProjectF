@@ -15,6 +15,8 @@ public static class PipeFluidCompatibilityValidation
     private const string WaterPumpPrefabPath = "Assets/MapObject/Fluid/Water pump/Water pump.prefab";
     private const string OilDrillingMachinePrefabPath =
         "Assets/MapObject/InputOutputModule/Oil drilling machine/Oil drilling machine.prefab";
+    private const string SteamTrainPrefabPath = "Assets/MapObject/Train/Steam train/Steam train.prefab";
+    private const string FluidTankPrefabPath = "Assets/MapObject/Fluid/Fluid tank/Fluid tank.prefab";
     private const int WaterFluidItemId = 1;
     private const int OilFluidItemId = 4;
 
@@ -590,6 +592,86 @@ public static class PipeFluidCompatibilityValidation
             "RefreshPipeBlueprintTopology",
             typeof(IReadOnlyCollection<Vector2Int>),
             typeof(MapObject));
+        MethodInfo pipeSourceFluidMethod = typeof(Pipe).GetMethod(
+            "TryGetSourceFluidInfoAtCoordinate",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            new[]
+            {
+                typeof(Vector2Int),
+                typeof(int).MakeByRefType(),
+                typeof(float).MakeByRefType()
+            },
+            null);
+        MethodInfo runtimePipeSourceMethod = typeof(InputOutputModule).GetMethod(
+            "TryGetRuntimePipeSourceAtCoordinate",
+            BindingFlags.Static | BindingFlags.Public,
+            null,
+            new[] { typeof(Vector2Int), typeof(Pump).MakeByRefType() },
+            null);
+        MethodInfo runtimePipeSourceCandidateMethod = typeof(InputOutputModule).GetMethod(
+            "TryGetRuntimePipeSourceAtCoordinate",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            null,
+            new[]
+            {
+                typeof(IEnumerable<InputOutputModule>),
+                typeof(Vector2Int),
+                typeof(ISet<InputOutputModule>),
+                typeof(Pump).MakeByRefType()
+            },
+            null);
+        MethodInfo runtimeOutputCoordinateMethod = typeof(InputOutputModule).GetMethod(
+            "ContainsRuntimeOutputCoordinate",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            new[] { typeof(Vector2Int) },
+            null);
+        MethodInfo pipeFluidSearchMethod = typeof(Pipe).GetMethod(
+            "TrySearchFluidNetwork",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo authoritativePipeFluidMethod = typeof(Pipe).GetMethod(
+            "TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mobileStorageFallbackMethod = typeof(Pipe).GetMethod(
+            "IsMobileFluidStorageFallback",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo mountedTankStateGetter = typeof(Fluidtank).GetProperty(
+            "IsFlatCarMounted",
+            BindingFlags.Instance | BindingFlags.Public)?.GetMethod;
+        MethodInfo mountedTankPipeDeploymentMethod = typeof(Fluidtank).GetMethod(
+            "CanDeployMountedPipeForFluid",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo trainDockSearchMethod = typeof(SteamTrain).GetMethod(
+            "TryFindWaterPipeDockSample",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo trainLockedDockValidationMethod = typeof(SteamTrain).GetMethod(
+            "TryValidateLockedWaterPipeDock",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo trainPipeDeploymentMethod = typeof(SteamTrain).GetMethod(
+            "CanDeployWaterPipeToNetwork",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo idleDockingMethod = typeof(RailHandcar).GetMethod(
+            "TryApplyIdleDocking",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo stationDockingMethod = typeof(RailHandcar).GetMethod(
+            "TryApplyStationDocking",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo customIdleDockingMethod = typeof(RailHandcar).GetMethod(
+            "TryApplyCustomIdleDocking",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+        MethodInfo mountedTankDockingMethod = typeof(RailHandcar).GetMethod(
+            "TryApplyMountedTankDocking",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankConnectionMethod = typeof(Fluidtank).GetMethod(
+            "CanDockMountedPipeTowards",
+            BindingFlags.Instance | BindingFlags.Public);
+        MethodInfo attachedTankGetterMethod = typeof(FreightCar).GetMethod(
+            "TryGetAttachedFluidTank",
+            BindingFlags.Instance | BindingFlags.Public);
+        MethodInfo steamCustomIdleDockingMethod = typeof(SteamTrain).GetMethod(
+            "TryApplyCustomIdleDocking",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
         ValidateFixtureMethodDoesNotCall(
             report,
             result,
@@ -650,6 +732,91 @@ public static class PipeFluidCompatibilityValidation
             applyBlueprintPlansMethod,
             blueprintRefreshMethod,
             "captured blueprint application does not refresh/rewrite the final shape");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            pipeSourceFluidMethod,
+            runtimePipeSourceMethod,
+            "pipe fluid identity reads pumps only through the registered runtime pipe source");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            runtimePipeSourceCandidateMethod,
+            runtimeOutputCoordinateMethod,
+            "runtime pump source lookup requires the exact configured output coordinate");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            pipeFluidSearchMethod,
+            authoritativePipeFluidMethod,
+            "pipe network search defers carried-tank fluid until authoritative sources are exhausted");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mobileStorageFallbackMethod,
+            mountedTankStateGetter,
+            "pipe fluid fallback recognizes mobile storage without changing fixed-storage priority");
+        ValidateFixtureMobileStorageFallback(
+            report,
+            result,
+            mobileStorageFallbackMethod,
+            SteamTrainPrefabPath,
+            true,
+            "steam locomotive");
+        ValidateFixtureMobileStorageFallback(
+            report,
+            result,
+            mobileStorageFallbackMethod,
+            FluidTankPrefabPath,
+            false,
+            "fixed fluid tank");
+        ValidateFixtureMountedTankPipeDeployment(
+            report,
+            result,
+            mountedTankPipeDeploymentMethod);
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            trainDockSearchMethod,
+            trainPipeDeploymentMethod,
+            "steam locomotive dock search rejects pipe networks without a water source");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            trainLockedDockValidationMethod,
+            trainPipeDeploymentMethod,
+            "steam locomotive retracts a locked pipe when its water source disappears");
+        ValidateFixtureMethodCallOrder(
+            report,
+            result,
+            idleDockingMethod,
+            stationDockingMethod,
+            customIdleDockingMethod,
+            "powered-train station docking precedes fluid docking");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            customIdleDockingMethod,
+            mountedTankDockingMethod,
+            "idle train docking searches connected mounted tanks");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankDockingMethod,
+            attachedTankGetterMethod,
+            "mounted-tank docking searches carried tanks in the consist");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankDockingMethod,
+            mountedTankConnectionMethod,
+            "mounted-tank docking requires a compatible pipe connection");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamCustomIdleDockingMethod,
+            customIdleDockingMethod,
+            "steam locomotive water docking falls back to consist tank docking");
 
         Pipe teePipe = LoadFixturePipe(TeePipePrefabPath);
         Pipe crossPipe = LoadFixturePipe(CrossPipePrefabPath);
@@ -682,6 +849,124 @@ public static class PipeFluidCompatibilityValidation
             .AppendLine();
         report.AppendLine();
         return result;
+    }
+
+    private static void ValidateFixtureMountedTankPipeDeployment(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        MethodInfo deploymentMethod)
+    {
+        if (deploymentMethod == null)
+        {
+            result.errorCount++;
+            report.AppendLine("  ERROR mounted tank pipe deployment fixture unavailable");
+            return;
+        }
+
+        int[,] fluidCases =
+        {
+            { WaterFluidItemId, WaterFluidItemId, 1 },
+            { WaterFluidItemId, -1, 0 },
+            { WaterFluidItemId, OilFluidItemId, 0 },
+            { -1, WaterFluidItemId, 1 },
+            { -1, OilFluidItemId, 1 },
+            { -1, -1, 0 }
+        };
+        for (int caseIndex = 0; caseIndex < fluidCases.GetLength(0); caseIndex++)
+        {
+            int storedFluidItemId = fluidCases[caseIndex, 0];
+            int pipeFluidItemId = fluidCases[caseIndex, 1];
+            bool expected = fluidCases[caseIndex, 2] != 0;
+            bool actual;
+            try
+            {
+                actual = InvokeBoolean(
+                    deploymentMethod,
+                    null,
+                    new object[] { storedFluidItemId, pipeFluidItemId });
+            }
+            catch (Exception exception)
+            {
+                result.errorCount++;
+                report.Append("  ERROR mounted tank pipe deployment: ")
+                    .AppendLine(SanitizeMessage(exception.GetBaseException().Message));
+                return;
+            }
+
+            result.identityChecks++;
+            if (actual == expected)
+            {
+                continue;
+            }
+
+            result.failureCount++;
+            report.Append("  FAIL mounted tank pipe deployment stored=")
+                .Append(storedFluidItemId)
+                .Append(", pipe=")
+                .Append(pipeFluidItemId)
+                .Append(", expected=")
+                .Append(expected)
+                .Append(", actual=")
+                .Append(actual)
+                .AppendLine();
+        }
+    }
+
+    private static void ValidateFixtureMobileStorageFallback(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        MethodInfo fallbackMethod,
+        string prefabPath,
+        bool expectedFallback,
+        string label)
+    {
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+        InstallationObject storage = prefab != null
+            ? prefab.GetComponent<InstallationObject>()
+              ?? prefab.GetComponentInChildren<InstallationObject>(true)
+            : null;
+        if (fallbackMethod == null || storage == null)
+        {
+            result.errorCount++;
+            report.Append("  ERROR mobile storage fixture unavailable: ")
+                .Append(label)
+                .Append(" path=")
+                .AppendLine(prefabPath);
+            return;
+        }
+
+        bool actualFallback;
+        try
+        {
+            actualFallback = InvokeBoolean(
+                fallbackMethod,
+                null,
+                new object[] { storage });
+        }
+        catch (Exception exception)
+        {
+            result.errorCount++;
+            report.Append("  ERROR mobile storage fixture ")
+                .Append(label)
+                .Append(": ")
+                .AppendLine(SanitizeMessage(exception.GetBaseException().Message));
+            return;
+        }
+
+        result.identityChecks++;
+        if (actualFallback == expectedFallback)
+        {
+            return;
+        }
+
+        result.failureCount++;
+        report.Append("  FAIL mobile storage fallback ")
+            .Append(label)
+            .Append(", expected=")
+            .Append(expectedFallback)
+            .Append(", actual=")
+            .Append(actualFallback)
+            .AppendLine();
     }
 
     private static void ValidateFixtureFluidDefinition(
@@ -1022,6 +1307,42 @@ public static class PipeFluidCompatibilityValidation
         report.Append("  FAIL forbidden wiring: ").AppendLine(label);
     }
 
+    private static void ValidateFixtureMethodCallOrder(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        MethodInfo caller,
+        MethodInfo firstTarget,
+        MethodInfo secondTarget,
+        string label)
+    {
+        bool resolvedFirst = TryGetFirstMethodCallOffset(
+            caller,
+            firstTarget,
+            out int firstOffset,
+            out string firstError);
+        bool resolvedSecond = TryGetFirstMethodCallOffset(
+            caller,
+            secondTarget,
+            out int secondOffset,
+            out string secondError);
+        if (!resolvedFirst || !resolvedSecond)
+        {
+            result.errorCount++;
+            string errorMessage = !string.IsNullOrEmpty(firstError) ? firstError : secondError;
+            report.Append("  ERROR wiring order ").Append(label).Append(": ").AppendLine(errorMessage);
+            return;
+        }
+
+        result.wiringChecks++;
+        if (firstOffset >= 0 && secondOffset >= 0 && firstOffset < secondOffset)
+        {
+            return;
+        }
+
+        result.failureCount++;
+        report.Append("  FAIL wiring order: ").AppendLine(label);
+    }
+
     private static void ValidateFixtureMethodDoesNotAccessField(
         StringBuilder report,
         JunctionInvariantFixtureResult result,
@@ -1108,7 +1429,27 @@ public static class PipeFluidCompatibilityValidation
         out bool callsTarget,
         out string errorMessage)
     {
-        callsTarget = false;
+        if (!TryGetFirstMethodCallOffset(
+                caller,
+                target,
+                out int callOffset,
+                out errorMessage))
+        {
+            callsTarget = false;
+            return false;
+        }
+
+        callsTarget = callOffset >= 0;
+        return true;
+    }
+
+    private static bool TryGetFirstMethodCallOffset(
+        MethodInfo caller,
+        MethodInfo target,
+        out int callOffset,
+        out string errorMessage)
+    {
+        callOffset = -1;
         errorMessage = string.Empty;
         if (caller == null || target == null)
         {
@@ -1129,6 +1470,7 @@ public static class PipeFluidCompatibilityValidation
             int offset = 0;
             while (offset < il.Length)
             {
+                int instructionOffset = offset;
                 OpCode opCode = ReadOpCode(il, ref offset);
                 if (opCode.OperandType == OperandType.InlineMethod)
                 {
@@ -1141,7 +1483,7 @@ public static class PipeFluidCompatibilityValidation
                         && calledMethod.Module == target.Module
                         && calledMethod.MetadataToken == target.MetadataToken)
                     {
-                        callsTarget = true;
+                        callOffset = instructionOffset;
                         return true;
                     }
                 }

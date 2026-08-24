@@ -57,6 +57,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
 
     public float ManagedUpdateTickIntervalSeconds => FluidTankUpdateIntervalSeconds;
     public Vector3 FlatCarMountedLocalPosition => Vector3.down * flatCarMountedLowering;
+    public bool IsFlatCarMounted => isFlatCarMountedPresentation;
 
     public void SetFlatCarMountedPresentation(bool mounted)
     {
@@ -677,34 +678,96 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         Vector2Int tankCoordinate,
         Vector2Int directionFromTank)
     {
+        return HasFluidNetworkConnectionTowardsIgnoringStorageCoordinate(
+            tankCoordinate,
+            directionFromTank,
+            tankCoordinate);
+    }
+
+    private bool HasFluidNetworkConnectionTowardsIgnoringStorageCoordinate(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        Vector2Int ignoredStorageCoordinate)
+    {
         if (directionFromTank == Vector2Int.zero
             || !TryResolveConnectionTowards(
                 tankCoordinate,
                 directionFromTank,
+                ignoredStorageCoordinate,
                 out Fluidtank neighborTank,
                 out int neighborFluidItemId))
         {
             return false;
         }
 
-        // Adjacent tanks form one storage bank regardless of which individual
-        // tank currently owns the liters. Fluid compatibility only closes a tank
-        // side against an external pipe/output network; applying it between tanks
-        // makes equalized banks visually fragment as their contents move.
+        int preferredFluidItemId = StoredFluidItemId;
+        if (isFlatCarMountedPresentation)
+        {
+            return CanDeployMountedPipeForFluid(
+                preferredFluidItemId,
+                neighborFluidItemId);
+        }
+
+        // Adjacent fixed tanks form one storage bank regardless of which
+        // individual tank currently owns the liters. Mobile tanks are checked
+        // above because their docking pipe requires a pipe-side fluid identity
+        // and must reject a different fluid once the tank contains fluid.
         if (neighborTank != null)
         {
             return true;
         }
 
-        int preferredFluidItemId = StoredFluidItemId;
         return preferredFluidItemId < 0
                || neighborFluidItemId < 0
                || preferredFluidItemId == neighborFluidItemId;
     }
 
+    public bool CanDockMountedPipeTowards(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank)
+    {
+        if (!isFlatCarMountedPresentation
+            || pipeList == null
+            || directionFromTank == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < pipeList.Count; i++)
+        {
+            GameObject pipeVisual = pipeList[i];
+            if (pipeVisual != null
+                && pipeVisual != gameObject
+                && TryResolvePipeVisualDirection(pipeVisual, out Vector2Int pipeDirection)
+                && pipeDirection == directionFromTank)
+            {
+                Vector2Int ignoredStorageCoordinate = TryGetPlacementRuntime(
+                    out Vector2Int currentTankCoordinate,
+                    out _)
+                    ? currentTankCoordinate
+                    : tankCoordinate;
+                return HasFluidNetworkConnectionTowardsIgnoringStorageCoordinate(
+                    tankCoordinate,
+                    directionFromTank,
+                    ignoredStorageCoordinate);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool CanDeployMountedPipeForFluid(
+        int storedFluidItemId,
+        int pipeFluidItemId)
+    {
+        return pipeFluidItemId >= 0
+               && (storedFluidItemId < 0 || storedFluidItemId == pipeFluidItemId);
+    }
+
     private bool TryResolveConnectionTowards(
         Vector2Int tankCoordinate,
         Vector2Int directionFromTank,
+        Vector2Int ignoredStorageCoordinate,
         out Fluidtank neighborTank,
         out int neighborFluidItemId)
     {
@@ -748,7 +811,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             if (connectedPipe != null)
             {
                 connectedPipe.TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
-                    tankCoordinate,
+                    ignoredStorageCoordinate,
                     out neighborFluidItemId);
                 return true;
             }

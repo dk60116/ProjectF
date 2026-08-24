@@ -77,6 +77,13 @@ public class RailHandcar : Train
     private const float StationDockRailCoordinateSampleMaxDistance = 0.8f;
     private const float RailConnectionDistanceEpsilon = 0.000001f;
     private const float RailConnectionBridgePointTolerance = 0.0001f;
+    private static readonly Vector2Int[] MountedTankDockDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
 
     private readonly List<InstallationObject> railSearchScratch = new List<InstallationObject>(16);
     private readonly List<InstallationObject> stationSearchScratch = new List<InstallationObject>(16);
@@ -625,6 +632,8 @@ public class RailHandcar : Train
         Vector2 currentFacing,
         float deltaTime)
     {
+        // A powered consist must keep its locomotive aligned to the station;
+        // fluid docks may move the consist only when no station dock applies.
         if (TryApplyStationDocking(currentSample, currentFacing, deltaTime))
         {
             return true;
@@ -638,7 +647,202 @@ public class RailHandcar : Train
         Vector2 currentFacing,
         float deltaTime)
     {
-        return false;
+        return TryApplyMountedTankDocking(currentSample, currentFacing, deltaTime);
+    }
+
+    private bool TryApplyMountedTankDocking(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        float deltaTime)
+    {
+        if (deltaTime <= 0f || currentSample.Rail == null)
+        {
+            return false;
+        }
+
+        CollectConnectedTrainGroupForMovement(this);
+        float captureDistance = ResolveDockCaptureDistance();
+        float captureSqrDistance = captureDistance * captureDistance;
+        float bestScore = float.MaxValue;
+        Vector2Int bestTankCoordinate = default;
+        Vector2Int bestPipeDirection = default;
+        RailSample bestTankSample = default;
+        RailSample bestDockSample = default;
+        bool found = false;
+
+        for (int trainIndex = 0; trainIndex < connectedTrainGroupScratch.Count; trainIndex++)
+        {
+            if (connectedTrainGroupScratch[trainIndex] is not FreightCar freightCar
+                || !freightCar.TryGetAttachedFluidTank(out Fluidtank tank)
+                || !TryBuildCurrentRailSample(freightCar, out RailSample tankSample))
+            {
+                continue;
+            }
+
+            int searchCells = Mathf.CeilToInt(captureDistance);
+            Vector2Int centerCoordinate = new Vector2Int(
+                Mathf.RoundToInt(tankSample.Point.x),
+                Mathf.RoundToInt(tankSample.Point.y));
+            for (int offsetY = -searchCells; offsetY <= searchCells; offsetY++)
+            {
+                for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
+                {
+                    Vector2Int candidateTankCoordinate = centerCoordinate
+                                                        + new Vector2Int(offsetX, offsetY);
+                    if (!TryFindRailDockSampleAtCoordinate(
+                            candidateTankCoordinate,
+                            tankSample.Rail,
+                            out RailSample candidateDockSample))
+                    {
+                        continue;
+                    }
+
+                    float signedPathDelta = candidateDockSample.DistanceAlongPath
+                                            - tankSample.DistanceAlongPath;
+                    float pathDistance = Mathf.Abs(signedPathDelta);
+                    float sqrDistance = (candidateDockSample.Point - tankSample.Point).sqrMagnitude;
+                    if (pathDistance > captureDistance || sqrDistance > captureSqrDistance)
+                    {
+                        continue;
+                    }
+
+                    for (int directionIndex = 0;
+                         directionIndex < MountedTankDockDirections.Length;
+                         directionIndex++)
+                    {
+                        Vector2Int pipeDirection = MountedTankDockDirections[directionIndex];
+                        if (!tank.CanDockMountedPipeTowards(candidateTankCoordinate, pipeDirection))
+                        {
+                            continue;
+                        }
+
+                        float score = pathDistance + sqrDistance * 0.25f;
+                        if (found
+                            && !IsBetterMountedTankDockCandidate(
+                                score,
+                                candidateTankCoordinate,
+                                pipeDirection,
+                                bestScore,
+                                bestTankCoordinate,
+                                bestPipeDirection))
+                        {
+                            continue;
+                        }
+
+                        bestScore = score;
+                        bestTankCoordinate = candidateTankCoordinate;
+                        bestPipeDirection = pipeDirection;
+                        bestTankSample = tankSample;
+                        bestDockSample = candidateDockSample;
+                        found = true;
+                    }
+                }
+            }
+        }
+
+        return found
+               && TryApplyConnectedTrainMemberDocking(
+                   currentSample,
+                   currentFacing,
+                   bestTankSample,
+                   bestDockSample,
+                   deltaTime);
+    }
+
+    private static bool IsBetterMountedTankDockCandidate(
+        float score,
+        Vector2Int tankCoordinate,
+        Vector2Int pipeDirection,
+        float bestScore,
+        Vector2Int bestTankCoordinate,
+        Vector2Int bestPipeDirection)
+    {
+        const float scoreEpsilon = 0.000001f;
+        if (score < bestScore - scoreEpsilon)
+        {
+            return true;
+        }
+
+        if (Mathf.Abs(score - bestScore) > scoreEpsilon)
+        {
+            return false;
+        }
+
+        if (tankCoordinate.x != bestTankCoordinate.x)
+        {
+            return tankCoordinate.x < bestTankCoordinate.x;
+        }
+
+        if (tankCoordinate.y != bestTankCoordinate.y)
+        {
+            return tankCoordinate.y < bestTankCoordinate.y;
+        }
+
+        if (pipeDirection.x != bestPipeDirection.x)
+        {
+            return pipeDirection.x < bestPipeDirection.x;
+        }
+
+        return pipeDirection.y < bestPipeDirection.y;
+    }
+
+    private static bool TryBuildCurrentRailSample(Train train, out RailSample sample)
+    {
+        sample = default;
+        if (train == null
+            || !train.TryGetCurrentRailPose(
+                out Railload rail,
+                out float distanceAlongPath,
+                out Vector2 pathPoint,
+                out Vector2 tangent)
+            || rail == null)
+        {
+            return false;
+        }
+
+        sample.Rail = rail;
+        sample.DistanceAlongPath = distanceAlongPath;
+        sample.Point = pathPoint;
+        sample.Tangent = tangent;
+        sample.SqrDistance = 0f;
+        return true;
+    }
+
+    private bool TryApplyConnectedTrainMemberDocking(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        RailSample memberSample,
+        RailSample dockSample,
+        float deltaTime)
+    {
+        float signedPathDelta = dockSample.DistanceAlongPath - memberSample.DistanceAlongPath;
+        float remainingDistance = Mathf.Abs(signedPathDelta);
+        if (remainingDistance <= 0.0001f)
+        {
+            return true;
+        }
+
+        if (!TryResolveDockTravelDirection(
+                memberSample,
+                dockSample,
+                signedPathDelta,
+                out Vector2 travelDirection))
+        {
+            return false;
+        }
+
+        float dockStep = remainingDistance <= ResolveDockCompleteDistance()
+            ? remainingDistance
+            : Mathf.Min(
+                remainingDistance,
+                Mathf.Max(0.01f, stationDockSpeed) * Mathf.Max(0f, deltaTime));
+        return TryMoveConnectedTrainGroupForDocking(
+            currentSample,
+            currentFacing,
+            travelDirection,
+            dockStep,
+            deltaTime,
+            true);
     }
 
     private bool TryApplyStationDocking(
@@ -656,12 +860,15 @@ public class RailHandcar : Train
             return false;
         }
 
-        return TryApplyDockingToSample(
+        // Keep the station reservation even when this frame's movement is
+        // blocked, so a fluid dock cannot pull the consist away instead.
+        TryApplyDockingToSample(
             currentSample,
             currentFacing,
             dockSample,
             signedPathDelta,
             deltaTime);
+        return true;
     }
 
     protected bool TryApplyDockingToSample(

@@ -257,7 +257,7 @@ public class FreightCar : Train, IPlayerItemStorage
         storedItemCount = 0;
         storageCapacity = 0;
         hasStorage = false;
-        if (HasAttachedFluidTank())
+        if (TryGetAttachedFluidTank(out _))
         {
             return;
         }
@@ -702,7 +702,7 @@ public class FreightCar : Train, IPlayerItemStorage
     {
         itemPoint = null;
         stack = null;
-        if (HasAttachedFluidTank())
+        if (TryGetAttachedFluidTank(out _))
         {
             return false;
         }
@@ -1203,8 +1203,9 @@ public class FreightCar : Train, IPlayerItemStorage
         return attachedBox != null && attachedBox.gameObject.activeInHierarchy;
     }
 
-    private bool HasAttachedFluidTank()
+    public bool TryGetAttachedFluidTank(out Fluidtank fluidTank)
     {
+        fluidTank = null;
         EnsureBoxPointBoxes();
         for (int i = 0; i < boxPointLoads.Count; i++)
         {
@@ -1212,6 +1213,7 @@ public class FreightCar : Train, IPlayerItemStorage
             Fluidtank attachedTank = boxPointLoads[i] as Fluidtank;
             if (attachedTank != null && attachedTank.gameObject.activeInHierarchy)
             {
+                fluidTank = attachedTank;
                 return true;
             }
         }
