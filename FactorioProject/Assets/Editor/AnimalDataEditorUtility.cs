@@ -227,8 +227,11 @@ internal static class AnimalDataEditorUtility
                 SerializedProperty element = dropItemsProperty.GetArrayElementAtIndex(i);
                 element.FindPropertyRelative("itemDefinition").objectReferenceValue =
                     entry.ItemDefinition;
-                element.FindPropertyRelative("minAmount").intValue = entry.MinAmount;
-                element.FindPropertyRelative("maxAmount").intValue = entry.MaxAmount;
+                element.FindPropertyRelative("amount").intValue = entry.Amount;
+                element.FindPropertyRelative("genderCondition").enumValueIndex =
+                    (int)entry.GenderCondition;
+                element.FindPropertyRelative("minimumAge").intValue = entry.MinimumAge;
+                element.FindPropertyRelative("maximumAge").intValue = entry.MaximumAge;
                 element.FindPropertyRelative("dropChance").floatValue = entry.DropChance;
             }
         }

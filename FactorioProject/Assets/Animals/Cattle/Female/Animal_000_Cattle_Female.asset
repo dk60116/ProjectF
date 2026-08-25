@@ -24,12 +24,28 @@ MonoBehaviour:
   strength: 30
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
-    minAmount: 1
-    maxAmount: 1
+    amount: 1
+    genderCondition: 0
+    minimumAge: 1
+    maximumAge: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+    amount: 1
+    genderCondition: 0
+    minimumAge: 7
+    maximumAge: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+    amount: 1
+    genderCondition: 0
+    minimumAge: 10
+    maximumAge: 10
     dropChance: 1
   - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
-    minAmount: 1
-    maxAmount: 1
+    amount: 1
+    genderCondition: 0
+    minimumAge: 1
+    maximumAge: 10
     dropChance: 1
   animalPrefab: {fileID: 6074222046392736189, guid: a64177c54513ae744acbb2e8e4cfe377, type: 3}
   adultIcon: {fileID: 21300000, guid: f715c08f2799d984096afaa775bf5792, type: 3}
@@ -40,6 +56,7 @@ MonoBehaviour:
     separationWeight: 1.5
     cohesionWeight: 0.65
     moveSpeed: 1.25
+    runSpeedRatio: 1.2
     turnSpeed: 220
     obstacleProbeDistance: 1.5
     arrivalDistance: 0.35

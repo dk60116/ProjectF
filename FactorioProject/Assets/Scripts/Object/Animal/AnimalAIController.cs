@@ -40,7 +40,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private const float MaximumCrowdSteering = 0.65f;
     private const float NavigationProgressEpsilon = 0.04f;
     private const float HerdReturnRetryDelay = 5f;
-    private const float MountedRunSpeedMultiplier = 1.5f;
+    private const float AgeGenderSpeedMultiplierInfluence = 1f / 3f;
     private const float MountedMovementDirectionEpsilonSqr = 0.0000001f;
     private const float HealthRecoveryFractionPerSecond = 0.05f;
     private const float PostAggroHealthRecoveryDelay = 1f;
@@ -641,9 +641,11 @@ public sealed class AnimalAIController : MonoBehaviour
 
         worldMoveDirection /= rawInputMagnitude;
         bool isRunning = runRequested;
+        // 탑승 이동에도 야생 이동과 동일한 나이/성별 보정 속도를 사용한다.
+        // RunSpeedRatio는 보정된 걷기 속도에 대한 달리기 비율이다.
         float movementSpeed = GetEffectiveMoveSpeed()
                               * inputMagnitude
-                              * (isRunning ? MountedRunSpeedMultiplier : 1f);
+                              * (isRunning ? settings.RunSpeedRatio : 1f);
         if (draftAttached && animal.IsAttachedToHandcart)
         {
             bool moved = animal.TryMoveAttachedHandcart(
@@ -2982,11 +2984,18 @@ public sealed class AnimalAIController : MonoBehaviour
     private float GetEffectiveMoveSpeed()
     {
         float age = animal != null ? Mathf.Clamp01(animal.Age * 0.1f) : 1f;
-        float ageMultiplier = Mathf.Lerp(settings.YoungSpeedMultiplier, 1f, age);
-        float genderMultiplier = animal != null && animal.Gender == Animal.AnimalGender.Male
+        float configuredAgeMultiplier = Mathf.Lerp(settings.YoungSpeedMultiplier, 1f, age);
+        float configuredGenderMultiplier = animal != null && animal.Gender == Animal.AnimalGender.Male
             ? settings.MaleSpeedMultiplier
             : settings.FemaleSpeedMultiplier;
+        float ageMultiplier = ResolveReducedSpeedMultiplierInfluence(configuredAgeMultiplier);
+        float genderMultiplier = ResolveReducedSpeedMultiplierInfluence(configuredGenderMultiplier);
         return settings.MoveSpeed * ageMultiplier * genderMultiplier;
+    }
+
+    private static float ResolveReducedSpeedMultiplierInfluence(float configuredMultiplier)
+    {
+        return Mathf.Lerp(1f, configuredMultiplier, AgeGenderSpeedMultiplierInfluence);
     }
 
     private void ApplyAnimation(float speed, bool isRunning = false)

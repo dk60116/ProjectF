@@ -4,6 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public sealed class AnimalDataEditorWindow : EditorWindow
 {
@@ -27,7 +28,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private sealed class AnimalJsonFile
     {
         public string format = "ProjectF.AnimalData";
-        public int version = 11;
+        public int version = 13;
         public List<AnimalJsonEntry> animals = new List<AnimalJsonEntry>();
     }
 
@@ -37,8 +38,11 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int itemId = -1;
         public string itemName = string.Empty;
         public string itemAssetPath = string.Empty;
-        public int minAmount = 1;
-        public int maxAmount = 1;
+        [FormerlySerializedAs("minAmount")]
+        public int amount = 1;
+        public AnimalDropGenderCondition genderCondition;
+        public int minimumAge = AnimalDefinition.MinSpawnAge;
+        public int maximumAge = AnimalDefinition.MaxSpawnAge;
         public float dropChance = 1f;
     }
 
@@ -141,6 +145,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         private readonly int selectedOptionIndex;
         private readonly Action<int> selectionCallback;
         private Vector2 scrollPosition;
+        private GUIStyle itemNameStyle;
 
         public DropItemPopupContent(
             GUIContent[] options,
@@ -201,7 +206,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     rowRect.y,
                     rowRect.width - textOffset - 4f,
                     rowRect.height);
-                EditorGUI.LabelField(textRect, options[i].text);
+                itemNameStyle ??= CreateWhiteTextStyle(EditorStyles.label);
+                GUI.Label(textRect, options[i].text, itemNameStyle);
 
                 if (currentEvent.type == EventType.MouseDown
                     && currentEvent.button == 0
@@ -239,7 +245,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private HierarchyNode hierarchyRoot = new HierarchyNode("Animals", string.Empty);
     private GUIContent[] dropItemOptions = { new GUIContent("None") };
+    private GUIStyle dropItemPopupStyle;
     private GUIStyle dropItemPopupWithIconStyle;
+    private GUIStyle dropItemNameStyle;
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedDefinitionInstanceId;
@@ -972,6 +980,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUILayout.Space(3f);
         EditorGUILayout.LabelField("Movement", EditorStyles.miniBoldLabel);
         float moveSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Move Speed", current.MoveSpeed));
+        float runSpeedRatio = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent(
+                    "Run Speed Ratio",
+                    "탑승 달리기 속도 비율입니다. 실제 달리기 속도는 Move Speed × 이 값입니다."),
+                current.RunSpeedRatio));
         float turnSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Turn Speed", current.TurnSpeed));
         float obstacleProbeDistance = Mathf.Max(
             0.1f,
@@ -994,6 +1009,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         EditorGUILayout.Space(3f);
         EditorGUILayout.LabelField("Age / Gender Multipliers", EditorStyles.miniBoldLabel);
+        EditorGUILayout.LabelField(
+            "속도 배율은 1.0에서 벗어난 효과의 1/3만 야생 이동과 탑승 이동에 적용됩니다.",
+            EditorStyles.miniLabel);
         float youngSpeedMultiplier =
             EditorGUILayout.Slider("Young Speed", current.YoungSpeedMultiplier, 0.1f, 2f);
         float maleSpeedMultiplier =
@@ -1036,6 +1054,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             next.SeparationWeight = separationWeight;
             next.CohesionWeight = cohesionWeight;
             next.MoveSpeed = moveSpeed;
+            next.RunSpeedRatio = runSpeedRatio;
             next.TurnSpeed = turnSpeed;
             next.ObstacleProbeDistance = obstacleProbeDistance;
             next.ArrivalDistance = arrivalDistance;
@@ -1256,9 +1275,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         EditorGUILayout.BeginVertical("box");
-        EditorGUILayout.LabelField("Gender Common Drop Items", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Conditional Drop Items", EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "이 객체의 Female/Male 변형에 동일하게 저장됩니다.",
+            "목록은 Female/Male 변형에 공통 저장되며 각 항목의 Gender 조건으로 분기됩니다.",
             EditorStyles.miniLabel);
         if (hasMixedDropItems)
         {
@@ -1268,6 +1287,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         int removeIndex = -1;
+        int moveFromIndex = -1;
+        int moveToIndex = -1;
         bool changed = false;
         for (int i = 0; i < firstDraft.dropItems.Count; i++)
         {
@@ -1276,6 +1297,20 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField($"Entry {i + 1}", EditorStyles.miniBoldLabel);
+            EditorGUI.BeginDisabledGroup(i <= 0);
+            if (GUILayout.Button(new GUIContent("▲", "Move Up"), GUILayout.Width(28f)))
+            {
+                moveFromIndex = i;
+                moveToIndex = i - 1;
+            }
+            EditorGUI.EndDisabledGroup();
+            EditorGUI.BeginDisabledGroup(i >= firstDraft.dropItems.Count - 1);
+            if (GUILayout.Button(new GUIContent("▼", "Move Down"), GUILayout.Width(28f)))
+            {
+                moveFromIndex = i;
+                moveToIndex = i + 1;
+            }
+            EditorGUI.EndDisabledGroup();
             if (GUILayout.Button("Remove", GUILayout.Width(65f)))
             {
                 removeIndex = i;
@@ -1286,12 +1321,23 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             DrawDropItemPopup(i, entry);
 
             EditorGUI.BeginChangeCheck();
-            int minAmount = Mathf.Max(
+            int amount = Mathf.Max(
                 0,
-                EditorGUILayout.IntField("Minimum Amount", entry.MinAmount));
-            int maxAmount = Mathf.Max(
-                minAmount,
-                EditorGUILayout.IntField("Maximum Amount", entry.MaxAmount));
+                EditorGUILayout.IntField("Amount", entry.Amount));
+            AnimalDropGenderCondition genderCondition =
+                (AnimalDropGenderCondition)EditorGUILayout.EnumPopup(
+                    new GUIContent("Gender", "Any는 성별에 관계없이 적용됩니다."),
+                    entry.GenderCondition);
+            int minimumAge = EditorGUILayout.IntSlider(
+                "Minimum Age",
+                entry.MinimumAge,
+                AnimalDefinition.MinSpawnAge,
+                AnimalDefinition.MaxSpawnAge);
+            int maximumAge = EditorGUILayout.IntSlider(
+                "Maximum Age",
+                entry.MaximumAge,
+                minimumAge,
+                AnimalDefinition.MaxSpawnAge);
             float chancePercent = EditorGUILayout.Slider(
                 "Drop Chance (%)",
                 entry.DropChance * 100f,
@@ -1299,8 +1345,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 100f);
             if (EditorGUI.EndChangeCheck())
             {
-                entry.MinAmount = minAmount;
-                entry.MaxAmount = maxAmount;
+                entry.Amount = amount;
+                entry.GenderCondition = genderCondition;
+                entry.MinimumAge = minimumAge;
+                entry.MaximumAge = maximumAge;
                 entry.DropChance = chancePercent * 0.01f;
                 changed = true;
             }
@@ -1309,7 +1357,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             {
                 EditorGUILayout.LabelField(
                     $"Item ID {entry.ItemDefinition.id} · {entry.ItemDefinition.itemName}",
-                    EditorStyles.miniLabel);
+                    GetDropItemNameStyle());
             }
 
             EditorGUILayout.EndVertical();
@@ -1318,6 +1366,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         if (removeIndex >= 0)
         {
             firstDraft.dropItems.RemoveAt(removeIndex);
+            changed = true;
+        }
+        else if (moveFromIndex >= 0 && moveToIndex >= 0)
+        {
+            AnimalDropEntry movedEntry = firstDraft.dropItems[moveFromIndex];
+            firstDraft.dropItems[moveFromIndex] = firstDraft.dropItems[moveToIndex];
+            firstDraft.dropItems[moveToIndex] = movedEntry;
             changed = true;
         }
 
@@ -1339,7 +1394,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         EditorGUILayout.HelpBox(
-            "동물 시체를 채집하면 이 목록 순서대로 아이템이 지급됩니다.",
+            "성별과 나이 조건을 모두 만족한 항목만 확률 판정 후 고정 수량으로 지급됩니다.",
             MessageType.Info);
         EditorGUILayout.EndVertical();
     }
@@ -1361,12 +1416,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         bool hasIcon = selectedIcon != null;
         GUIStyle popupStyle = hasIcon
             ? GetDropItemPopupWithIconStyle()
-            : EditorStyles.popup;
+            : GetDropItemPopupStyle();
         bool openDropdown = EditorGUI.DropdownButton(
                 popupRect,
-                new GUIContent(selectedContent.text),
+                GUIContent.none,
                 FocusType.Keyboard,
                 popupStyle);
+        float textLeft = popupRect.x + 5f;
         if (hasIcon)
         {
             const float iconSize = 16f;
@@ -1376,7 +1432,15 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 iconSize,
                 iconSize);
             DrawSprite(iconRect, selectedIcon);
+            textLeft += iconSize + 5f;
         }
+
+        Rect textRect = new Rect(
+            textLeft,
+            popupRect.y,
+            Mathf.Max(0f, popupRect.xMax - textLeft - 18f),
+            popupRect.height);
+        GUI.Label(textRect, selectedContent.text, GetDropItemNameStyle());
 
         if (openDropdown)
         {
@@ -1394,11 +1458,51 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     {
         if (dropItemPopupWithIconStyle == null)
         {
-            dropItemPopupWithIconStyle = new GUIStyle(EditorStyles.popup);
+            dropItemPopupWithIconStyle = CreateWhiteTextStyle(EditorStyles.popup);
             dropItemPopupWithIconStyle.padding.left = 23;
         }
 
         return dropItemPopupWithIconStyle;
+    }
+
+    private GUIStyle GetDropItemPopupStyle()
+    {
+        dropItemPopupStyle ??= CreateWhiteTextStyle(EditorStyles.popup);
+        return dropItemPopupStyle;
+    }
+
+    private GUIStyle GetDropItemNameStyle()
+    {
+        if (dropItemNameStyle == null)
+        {
+            dropItemNameStyle = CreateWhiteTextStyle(EditorStyles.label);
+            dropItemNameStyle.alignment = TextAnchor.MiddleLeft;
+            dropItemNameStyle.clipping = TextClipping.Clip;
+        }
+
+        return dropItemNameStyle;
+    }
+
+    private static GUIStyle CreateWhiteTextStyle(GUIStyle source)
+    {
+        GUIStyle style = new GUIStyle(source);
+        SetTextColor(style.normal, Color.white);
+        SetTextColor(style.hover, Color.white);
+        SetTextColor(style.active, Color.white);
+        SetTextColor(style.focused, Color.white);
+        SetTextColor(style.onNormal, Color.white);
+        SetTextColor(style.onHover, Color.white);
+        SetTextColor(style.onActive, Color.white);
+        SetTextColor(style.onFocused, Color.white);
+        return style;
+    }
+
+    private static void SetTextColor(GUIStyleState state, Color color)
+    {
+        if (state != null)
+        {
+            state.textColor = color;
+        }
     }
 
     private void ApplyDropItemSelection(int entryIndex, int optionIndex)
@@ -1466,8 +1570,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             if (leftEntry == null
                 || rightEntry == null
                 || leftEntry.ItemDefinition != rightEntry.ItemDefinition
-                || leftEntry.MinAmount != rightEntry.MinAmount
-                || leftEntry.MaxAmount != rightEntry.MaxAmount
+                || leftEntry.Amount != rightEntry.Amount
+                || leftEntry.GenderCondition != rightEntry.GenderCondition
+                || leftEntry.MinimumAge != rightEntry.MinimumAge
+                || leftEntry.MaximumAge != rightEntry.MaximumAge
                 || !Mathf.Approximately(
                     leftEntry.DropChance,
                     rightEntry.DropChance))
@@ -2174,13 +2280,20 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                         AnimalAISettings.DefaultFleeSpeedMultiplier;
                 }
 
+                if (file.version < 12)
+                {
+                    draft.aiSettings.RunSpeedRatio =
+                        AnimalAISettings.DefaultRunSpeedRatio;
+                }
+
                 draft.aiSettings.Normalize();
             }
             if (file.version >= 8)
             {
                 draft.dropItems = ImportDropItems(
                     entry.dropItems,
-                    itemDefinitions);
+                    itemDefinitions,
+                    file.version);
             }
 
             draft.prefab = AssetDatabase.LoadAssetAtPath<GameObject>(entry.prefabAssetPath);
@@ -2273,8 +2386,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     ? itemDefinition.itemName ?? string.Empty
                     : string.Empty,
                 itemAssetPath = AssetDatabase.GetAssetPath(itemDefinition),
-                minAmount = entry.MinAmount,
-                maxAmount = entry.MaxAmount,
+                amount = entry.Amount,
+                genderCondition = entry.GenderCondition,
+                minimumAge = entry.MinimumAge,
+                maximumAge = entry.MaximumAge,
                 dropChance = entry.DropChance
             });
         }
@@ -2284,7 +2399,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private static List<AnimalDropEntry> ImportDropItems(
         IReadOnlyList<AnimalDropJsonEntry> source,
-        IReadOnlyList<ItemDefinition> itemDefinitions)
+        IReadOnlyList<ItemDefinition> itemDefinitions,
+        int fileVersion)
     {
         List<AnimalDropEntry> result = new List<AnimalDropEntry>(
             source != null ? source.Count : 0);
@@ -2311,8 +2427,16 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             AnimalDropEntry entry = new AnimalDropEntry
             {
                 ItemDefinition = itemDefinition,
-                MinAmount = jsonEntry.minAmount,
-                MaxAmount = jsonEntry.maxAmount,
+                Amount = jsonEntry.amount,
+                GenderCondition = fileVersion >= 13
+                    ? jsonEntry.genderCondition
+                    : AnimalDropGenderCondition.Any,
+                MinimumAge = fileVersion >= 13
+                    ? jsonEntry.minimumAge
+                    : AnimalDefinition.MinSpawnAge,
+                MaximumAge = fileVersion >= 13
+                    ? jsonEntry.maximumAge
+                    : AnimalDefinition.MaxSpawnAge,
                 DropChance = jsonEntry.dropChance
             };
             result.Add(entry);

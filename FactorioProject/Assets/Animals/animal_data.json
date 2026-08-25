@@ -1,6 +1,6 @@
 {
     "format": "ProjectF.AnimalData",
-    "version": 11,
+    "version": 13,
     "animals": [
         {
             "id": 0,
@@ -19,6 +19,7 @@
                 "separationWeight": 1.5,
                 "cohesionWeight": 0.6499999761581421,
                 "moveSpeed": 1.25,
+                "runSpeedRatio": 1.2000000476837159,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -66,16 +67,40 @@
                     "itemId": 78,
                     "itemName": "Beef",
                     "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
-                    "minAmount": 1,
-                    "maxAmount": 1,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 78,
+                    "itemName": "Beef",
+                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 7,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 78,
+                    "itemName": "Beef",
+                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 10,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 },
                 {
                     "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
-                    "minAmount": 1,
-                    "maxAmount": 1,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 }
             ],
@@ -102,6 +127,7 @@
                 "separationWeight": 1.5,
                 "cohesionWeight": 0.6499999761581421,
                 "moveSpeed": 1.25,
+                "runSpeedRatio": 1.2000000476837159,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -149,16 +175,40 @@
                     "itemId": 78,
                     "itemName": "Beef",
                     "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
-                    "minAmount": 1,
-                    "maxAmount": 1,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 78,
+                    "itemName": "Beef",
+                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 7,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 78,
+                    "itemName": "Beef",
+                    "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 10,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 },
                 {
                     "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
-                    "minAmount": 1,
-                    "maxAmount": 1,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 }
             ],
@@ -182,9 +232,10 @@
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
-                "separationWeight": 1.5,
+                "separationWeight": 1.2000000476837159,
                 "cohesionWeight": 0.6499999761581421,
                 "moveSpeed": 1.25,
+                "runSpeedRatio": 1.5,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -232,16 +283,40 @@
                     "itemId": 77,
                     "itemName": "Pork",
                     "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
-                    "minAmount": 1,
-                    "maxAmount": 1,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 77,
+                    "itemName": "Pork",
+                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 7,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 77,
+                    "itemName": "Pork",
+                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 },
                 {
                     "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
-                    "minAmount": 1,
-                    "maxAmount": 2,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 }
             ],
@@ -265,9 +340,10 @@
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
-                "separationWeight": 1.5,
+                "separationWeight": 1.2000000476837159,
                 "cohesionWeight": 0.6499999761581421,
                 "moveSpeed": 1.25,
+                "runSpeedRatio": 1.5,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -315,16 +391,40 @@
                     "itemId": 77,
                     "itemName": "Pork",
                     "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
-                    "minAmount": 1,
-                    "maxAmount": 1,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 77,
+                    "itemName": "Pork",
+                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 7,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 77,
+                    "itemName": "Pork",
+                    "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 },
                 {
                     "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
-                    "minAmount": 1,
-                    "maxAmount": 2,
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
                     "dropChance": 1.0
                 }
             ],

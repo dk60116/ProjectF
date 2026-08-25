@@ -11,6 +11,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     private const float ConnectionSideEpsilon = 0.01f;
     private const float ExistingConnectionPositionTolerance = 0.05f;
     private const float ExistingConnectionRotationToleranceDegrees = 1f;
+    private const float EscapePenetrationEpsilon = 0.0001f;
     private const float HandleApproachMinimumFraction = 0.25f;
     private const int HandleConnectionSide = 1;
     private const int ObstacleBufferSize = 32;
@@ -67,6 +68,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     private LayerMask obstacleLayers = 393;
     [SerializeField, Min(0f)]
     private float collisionSkinWidth = 0.03f;
+    [SerializeField, Range(0.5f, 1f)]
+    [Tooltip("옆 장애물 검사에 사용하는 차체 폭 비율입니다. 실제 콜라이더와 물 판정 크기는 바뀌지 않습니다.")]
+    private float obstacleCollisionWidthRatio = 0.75f;
     [SerializeField]
     private bool blockWater = true;
 
@@ -2074,7 +2078,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                     currentPosition,
                     steeredRotation,
                     mountedPlayer != null ? mountedPlayer : draftAnimalRider,
-                    draftAnimalDriveActive ? DraftAnimal : null))
+                    draftAnimalDriveActive ? DraftAnimal : null,
+                    currentPosition,
+                    startRotation))
             {
                 currentRotation = steeredRotation;
             }
@@ -2179,7 +2185,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                     candidatePosition,
                     rotation,
                     mountedPlayer,
-                    ignoredDraftAnimal))
+                    ignoredDraftAnimal,
+                    resolvedPosition,
+                    rotation))
             {
                 movementBlocked = true;
                 break;
@@ -2198,32 +2206,46 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Player mountedPlayer,
         IReadOnlyList<Handcart> ignoredHandcarts,
         Animal ignoredDraftAnimal = null,
-        IReadOnlyList<Handcart> additionalIgnoredHandcarts = null)
+        IReadOnlyList<Handcart> additionalIgnoredHandcarts = null,
+        Vector3? escapeFromPosition = null,
+        Quaternion? escapeFromRotation = null)
     {
         ResolveDrivingCollisionBox(
             worldPosition,
             worldRotation,
             out Vector3 boxCenter,
             out Vector3 halfExtents);
+        Vector3 obstacleHalfExtents = halfExtents;
+        obstacleHalfExtents.x = Mathf.Max(
+            0.01f,
+            obstacleHalfExtents.x * obstacleCollisionWidthRatio);
         return IsBlockedByObstacle(
                    boxCenter,
-                   halfExtents,
+                   obstacleHalfExtents,
                    worldRotation,
                    mountedPlayer,
                    ignoredHandcarts,
                    ignoredDraftAnimal,
-                   additionalIgnoredHandcarts)
+                   additionalIgnoredHandcarts,
+                   worldPosition,
+                   worldRotation,
+                   escapeFromPosition,
+                   escapeFromRotation)
                || IsBlockedByWater(boxCenter, halfExtents, worldRotation);
     }
 
     private bool IsBlockedByObstacle(
         Vector3 boxCenter,
         Vector3 halfExtents,
-        Quaternion worldRotation,
+        Quaternion boxRotation,
         Player mountedPlayer,
         IReadOnlyList<Handcart> ignoredHandcarts,
         Animal ignoredDraftAnimal,
-        IReadOnlyList<Handcart> additionalIgnoredHandcarts)
+        IReadOnlyList<Handcart> additionalIgnoredHandcarts,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Vector3? escapeFromPosition,
+        Quaternion? escapeFromRotation)
     {
         if (obstacleLayers.value == 0)
         {
@@ -2234,7 +2256,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             boxCenter,
             halfExtents,
             obstacleBuffer,
-            worldRotation,
+            boxRotation,
             obstacleLayers,
             QueryTriggerInteraction.Ignore);
         if (overlapCount >= obstacleBuffer.Length)
@@ -2263,6 +2285,18 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                 continue;
             }
 
+            if (escapeFromPosition.HasValue
+                && escapeFromRotation.HasValue
+                && IsObstaclePenetrationReduced(
+                    obstacle,
+                    worldPosition,
+                    worldRotation,
+                    escapeFromPosition.Value,
+                    escapeFromRotation.Value))
+            {
+                continue;
+            }
+
             return true;
         }
 
@@ -2275,7 +2309,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Vector3 leaderTargetPosition,
         Quaternion leaderTargetRotation,
         Player mountedPlayer,
-        Animal ignoredDraftAnimal = null)
+        Animal ignoredDraftAnimal = null,
+        Vector3? leaderEscapePosition = null,
+        Quaternion? leaderEscapeRotation = null)
     {
         for (int i = 0; i < connectedGroupScratch.Count; i++)
         {
@@ -2293,12 +2329,30 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                 leaderTargetRotation,
                 out Vector3 targetPosition,
                 out Quaternion targetRotation);
+            Vector3? escapePosition = null;
+            Quaternion? escapeRotation = null;
+            if (leaderEscapePosition.HasValue && leaderEscapeRotation.HasValue)
+            {
+                ResolveConnectedPose(
+                    handcart,
+                    leaderStartPosition,
+                    leaderStartRotation,
+                    leaderEscapePosition.Value,
+                    leaderEscapeRotation.Value,
+                    out Vector3 resolvedEscapePosition,
+                    out Quaternion resolvedEscapeRotation);
+                escapePosition = resolvedEscapePosition;
+                escapeRotation = resolvedEscapeRotation;
+            }
+
             if (handcart.IsDrivePoseBlocked(
                     targetPosition,
                     targetRotation,
                     mountedPlayer,
                     connectedGroupScratch,
-                    ignoredDraftAnimal))
+                    ignoredDraftAnimal,
+                    escapeFromPosition: escapePosition,
+                    escapeFromRotation: escapeRotation))
             {
                 return true;
             }
@@ -2368,6 +2422,47 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         return false;
+    }
+
+    private bool IsObstaclePenetrationReduced(
+        Collider obstacle,
+        Vector3 candidatePosition,
+        Quaternion candidateRotation,
+        Vector3 currentPosition,
+        Quaternion currentRotation)
+    {
+        CacheDrivingCollider();
+        if (drivingCollider == null || obstacle == null)
+        {
+            return false;
+        }
+
+        bool candidatePenetrates = Physics.ComputePenetration(
+            drivingCollider,
+            candidatePosition,
+            candidateRotation,
+            obstacle,
+            obstacle.transform.position,
+            obstacle.transform.rotation,
+            out _,
+            out float candidatePenetration);
+        if (!candidatePenetrates)
+        {
+            return true;
+        }
+
+        bool currentPenetrates = Physics.ComputePenetration(
+            drivingCollider,
+            currentPosition,
+            currentRotation,
+            obstacle,
+            obstacle.transform.position,
+            obstacle.transform.rotation,
+            out _,
+            out float currentPenetration);
+        return currentPenetrates
+               && candidatePenetration
+               < currentPenetration - EscapePenetrationEpsilon;
     }
 
     private void ApplyConnectedGroupPose(
@@ -2634,6 +2729,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         connectionCenterDistance = Mathf.Max(MinimumConnectionDistance, connectionCenterDistance);
         connectionSnapMaxDistance = Mathf.Max(MinimumConnectionDistance, connectionSnapMaxDistance);
         collisionSkinWidth = Mathf.Max(0f, collisionSkinWidth);
+        obstacleCollisionWidthRatio = Mathf.Clamp(obstacleCollisionWidthRatio, 0.5f, 1f);
         itemStackVerticalSpacing = Mathf.Max(0.001f, itemStackVerticalSpacing);
         CacheDrivingCollider();
     }

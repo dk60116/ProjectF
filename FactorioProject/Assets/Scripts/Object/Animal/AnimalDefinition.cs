@@ -1,13 +1,26 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
+
+public enum AnimalDropGenderCondition
+{
+    Any,
+    Male,
+    Female
+}
 
 [Serializable]
 public sealed class AnimalDropEntry
 {
     [SerializeField] private ItemDefinition itemDefinition;
-    [SerializeField, Min(0)] private int minAmount = 1;
-    [SerializeField, Min(0)] private int maxAmount = 1;
+    [FormerlySerializedAs("minAmount")]
+    [SerializeField, Min(0)] private int amount = 1;
+    [SerializeField] private AnimalDropGenderCondition genderCondition;
+    [SerializeField, Range(AnimalDefinition.MinSpawnAge, AnimalDefinition.MaxSpawnAge)]
+    private int minimumAge = AnimalDefinition.MinSpawnAge;
+    [SerializeField, Range(AnimalDefinition.MinSpawnAge, AnimalDefinition.MaxSpawnAge)]
+    private int maximumAge = AnimalDefinition.MaxSpawnAge;
     [SerializeField, Range(0f, 1f)] private float dropChance = 1f;
 
     public ItemDefinition ItemDefinition
@@ -16,20 +29,44 @@ public sealed class AnimalDropEntry
         set => itemDefinition = value;
     }
 
-    public int MinAmount
+    public int Amount
     {
-        get => Mathf.Max(0, minAmount);
+        get => Mathf.Max(0, amount);
+        set => amount = Mathf.Max(0, value);
+    }
+
+    public AnimalDropGenderCondition GenderCondition
+    {
+        get => NormalizeGenderCondition(genderCondition);
+        set => genderCondition = NormalizeGenderCondition(value);
+    }
+
+    public int MinimumAge
+    {
+        get => Mathf.Clamp(
+            minimumAge,
+            AnimalDefinition.MinSpawnAge,
+            AnimalDefinition.MaxSpawnAge);
         set
         {
-            minAmount = Mathf.Max(0, value);
-            maxAmount = Mathf.Max(minAmount, maxAmount);
+            minimumAge = Mathf.Clamp(
+                value,
+                AnimalDefinition.MinSpawnAge,
+                AnimalDefinition.MaxSpawnAge);
+            maximumAge = Mathf.Max(minimumAge, maximumAge);
         }
     }
 
-    public int MaxAmount
+    public int MaximumAge
     {
-        get => Mathf.Max(MinAmount, maxAmount);
-        set => maxAmount = Mathf.Max(MinAmount, value);
+        get => Mathf.Clamp(
+            maximumAge,
+            MinimumAge,
+            AnimalDefinition.MaxSpawnAge);
+        set => maximumAge = Mathf.Clamp(
+            value,
+            MinimumAge,
+            AnimalDefinition.MaxSpawnAge);
     }
 
     public float DropChance
@@ -43,17 +80,41 @@ public sealed class AnimalDropEntry
         return new AnimalDropEntry
         {
             itemDefinition = itemDefinition,
-            minAmount = MinAmount,
-            maxAmount = MaxAmount,
+            amount = Amount,
+            genderCondition = GenderCondition,
+            minimumAge = MinimumAge,
+            maximumAge = MaximumAge,
             dropChance = DropChance
         };
     }
 
+    public bool Matches(Animal.AnimalGender gender, float age)
+    {
+        AnimalDropGenderCondition condition = GenderCondition;
+        bool genderMatches = condition == AnimalDropGenderCondition.Any
+                             || (condition == AnimalDropGenderCondition.Male
+                                 && gender == Animal.AnimalGender.Male)
+                             || (condition == AnimalDropGenderCondition.Female
+                                 && gender == Animal.AnimalGender.Female);
+        return genderMatches && age >= MinimumAge && age <= MaximumAge;
+    }
+
     public void Normalize()
     {
-        MinAmount = minAmount;
-        MaxAmount = maxAmount;
+        Amount = amount;
+        GenderCondition = genderCondition;
+        MinimumAge = minimumAge;
+        MaximumAge = maximumAge;
         DropChance = dropChance;
+    }
+
+    private static AnimalDropGenderCondition NormalizeGenderCondition(
+        AnimalDropGenderCondition value)
+    {
+        return value == AnimalDropGenderCondition.Male
+               || value == AnimalDropGenderCondition.Female
+            ? value
+            : AnimalDropGenderCondition.Any;
     }
 
     public static List<AnimalDropEntry> CloneList(

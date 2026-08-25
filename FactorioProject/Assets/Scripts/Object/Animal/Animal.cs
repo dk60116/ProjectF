@@ -726,16 +726,13 @@ public class Animal : MonoBehaviour
             ItemDefinition itemDefinition = entry?.ItemDefinition;
             if (itemDefinition == null
                 || itemDefinition.id < 0
+                || !entry.Matches(Gender, Age)
                 || random.NextDouble() >= entry.DropChance)
             {
                 continue;
             }
 
-            int minAmount = entry.MinAmount;
-            int maxAmount = entry.MaxAmount;
-            int amount = maxAmount > minAmount
-                ? minAmount + (int)(random.NextDouble() * ((long)maxAmount - minAmount + 1L))
-                : minAmount;
+            int amount = entry.Amount;
             if (amount <= 0)
             {
                 continue;

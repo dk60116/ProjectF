@@ -658,6 +658,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private float currentFps;
     private float currentFrameMs;
     private Player trackedSpeedPlayer;
+    private PlayerController trackedSpeedPlayerController;
+    private Transform trackedPlayerSpeedSource;
     private Vector3 lastPlayerSpeedPosition;
     private float playerSpeedSampleDistance;
     private float playerSpeedSampleElapsed;
@@ -957,14 +959,23 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         Player currentPlayer = gameManager != null ? gameManager.Player : null;
         if (currentPlayer == null || !currentPlayer.gameObject.activeInHierarchy)
         {
-            ResetPlayerSpeedSample(null, Vector3.zero);
+            ResetPlayerSpeedSample(null, null, Vector3.zero);
             return;
         }
 
-        Vector3 currentPosition = currentPlayer.transform.position;
         if (trackedSpeedPlayer != currentPlayer)
         {
-            ResetPlayerSpeedSample(currentPlayer, currentPosition);
+            trackedSpeedPlayerController = currentPlayer.GetComponent<PlayerController>();
+        }
+
+        Transform currentSpeedSource = ResolvePlayerSpeedSource(
+            currentPlayer,
+            trackedSpeedPlayerController);
+        Vector3 currentPosition = currentSpeedSource.position;
+        if (trackedSpeedPlayer != currentPlayer
+            || trackedPlayerSpeedSource != currentSpeedSource)
+        {
+            ResetPlayerSpeedSample(currentPlayer, currentSpeedSource, currentPosition);
             return;
         }
 
@@ -994,9 +1005,50 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         hasPlayerSpeedSample = true;
     }
 
-    private void ResetPlayerSpeedSample(Player currentPlayer, Vector3 currentPosition)
+    private static Transform ResolvePlayerSpeedSource(
+        Player currentPlayer,
+        PlayerController playerController)
+    {
+        Vehicle mountedVehicle = playerController != null
+            ? playerController.MountedVehicle
+            : null;
+        if (mountedVehicle != null)
+        {
+            return mountedVehicle.transform;
+        }
+
+        Animal mountedAnimal = playerController != null
+            ? playerController.MountedAnimal
+            : null;
+        if (mountedAnimal != null)
+        {
+            Handcart attachedHandcart = mountedAnimal.AttachedDraftHandcart;
+            if (attachedHandcart != null)
+            {
+                return attachedHandcart.transform;
+            }
+
+            Transform movementRoot = mountedAnimal.MovementRoot;
+            if (movementRoot != null)
+            {
+                return movementRoot;
+            }
+        }
+
+        return currentPlayer.transform;
+    }
+
+    private void ResetPlayerSpeedSample(
+        Player currentPlayer,
+        Transform speedSource,
+        Vector3 currentPosition)
     {
         trackedSpeedPlayer = currentPlayer;
+        trackedPlayerSpeedSource = speedSource;
+        if (currentPlayer == null)
+        {
+            trackedSpeedPlayerController = null;
+        }
         lastPlayerSpeedPosition = currentPosition;
         playerSpeedSampleDistance = 0f;
         playerSpeedSampleElapsed = 0f;

@@ -6,6 +6,7 @@ public sealed class AnimalAISettings
 {
     public const float DefaultHerdAreaRadius = 30f;
     public const float DefaultMoveSpeed = 0.625f;
+    public const float DefaultRunSpeedRatio = 1.5f;
     public const float DefaultTurnSpeed = 220f;
     public const float DefaultLookAroundWeight = 2f;
     public const float DefaultFleeSafeDistance = 12f;
@@ -21,6 +22,7 @@ public sealed class AnimalAISettings
 
     [Header("Movement")]
     [SerializeField, Min(0f)] private float moveSpeed = DefaultMoveSpeed;
+    [SerializeField, Min(0f)] private float runSpeedRatio = DefaultRunSpeedRatio;
     [SerializeField, Min(0f)] private float turnSpeed = DefaultTurnSpeed;
     [SerializeField, Min(0.1f)] private float obstacleProbeDistance = 1.5f;
     [SerializeField, Min(0.05f)] private float arrivalDistance = 0.35f;
@@ -81,6 +83,12 @@ public sealed class AnimalAISettings
     {
         get => Mathf.Max(0f, moveSpeed);
         set => moveSpeed = Mathf.Max(0f, value);
+    }
+
+    public float RunSpeedRatio
+    {
+        get => Mathf.Max(0f, runSpeedRatio);
+        set => runSpeedRatio = Mathf.Max(0f, value);
     }
 
     public float TurnSpeed
@@ -230,6 +238,7 @@ public sealed class AnimalAISettings
             separationWeight = SeparationWeight,
             cohesionWeight = CohesionWeight,
             moveSpeed = MoveSpeed,
+            runSpeedRatio = RunSpeedRatio,
             turnSpeed = TurnSpeed,
             obstacleProbeDistance = ObstacleProbeDistance,
             arrivalDistance = ArrivalDistance,
@@ -263,6 +272,7 @@ public sealed class AnimalAISettings
         SeparationWeight = separationWeight;
         CohesionWeight = cohesionWeight;
         MoveSpeed = moveSpeed;
+        RunSpeedRatio = runSpeedRatio;
         TurnSpeed = turnSpeed;
         ObstacleProbeDistance = obstacleProbeDistance;
         ArrivalDistance = arrivalDistance;

@@ -238,6 +238,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 393
   collisionSkinWidth: 0.03
+  obstacleCollisionWidthRatio: 0.75
   blockWater: 1
 --- !u!65 &8817530847774380614
 BoxCollider:
