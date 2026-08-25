@@ -202,7 +202,7 @@ MonoBehaviour:
   vehicleAccelerationPerSecond: 2
   vehicleMaxSpeed: 1
   vehicleDecelerationPerSecond: 3
-  vehicleMass: 20
+  vehicleMass: 25
   playerPoint:
   - {fileID: 473533616803250247}
   wheels:

@@ -623,6 +623,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int MaxRequestsPerFrameDuringChunkStreaming = 1;
     private const float StatusWorldStatsRefreshInterval = 1f;
     private const float StatusSaveSlotRefreshInterval = 5f;
+    private const float PlayerSpeedSampleInterval = 0.2f;
+    private const float PlayerTeleportDistanceThreshold = 5f;
     private const int RuntimeProfilerRecorderCapacity = 128;
     private const int RuntimeProfilerRecorderRelevantNamesMaxLength = 360;
     private const ProfilerRecorderOptions RuntimeProfilerRecorderBaseOptions =
@@ -655,6 +657,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private int fpsSampleFrames;
     private float currentFps;
     private float currentFrameMs;
+    private Player trackedSpeedPlayer;
+    private Vector3 lastPlayerSpeedPosition;
+    private float playerSpeedSampleDistance;
+    private float playerSpeedSampleElapsed;
+    private float currentPlayerSpeed;
+    private bool hasPlayerSpeedSample;
     private float cachedStatusWorldStatsTime = float.NegativeInfinity;
     private int cachedInstalledObjectTotal;
     private int cachedConveyorItemTotal;
@@ -815,6 +823,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private void Update()
     {
         UpdateFrameStats();
+        UpdatePlayerSpeed();
 
         int processedCount = 0;
         int maxRequestsThisFrame = IsTerrainChunkStreamingBusy()
@@ -940,6 +949,59 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         currentFrameMs = 1000f / Mathf.Max(currentFps, 0.0001f);
         fpsSampleElapsed = 0f;
         fpsSampleFrames = 0;
+    }
+
+    private void UpdatePlayerSpeed()
+    {
+        GameManager gameManager = GameManager.Instance;
+        Player currentPlayer = gameManager != null ? gameManager.Player : null;
+        if (currentPlayer == null || !currentPlayer.gameObject.activeInHierarchy)
+        {
+            ResetPlayerSpeedSample(null, Vector3.zero);
+            return;
+        }
+
+        Vector3 currentPosition = currentPlayer.transform.position;
+        if (trackedSpeedPlayer != currentPlayer)
+        {
+            ResetPlayerSpeedSample(currentPlayer, currentPosition);
+            return;
+        }
+
+        float deltaTime = Time.deltaTime;
+        Vector3 movement = currentPosition - lastPlayerSpeedPosition;
+        lastPlayerSpeedPosition = currentPosition;
+        movement.y = 0f;
+        if (deltaTime <= 0f || movement.sqrMagnitude > PlayerTeleportDistanceThreshold * PlayerTeleportDistanceThreshold)
+        {
+            playerSpeedSampleDistance = 0f;
+            playerSpeedSampleElapsed = 0f;
+            currentPlayerSpeed = 0f;
+            hasPlayerSpeedSample = true;
+            return;
+        }
+
+        playerSpeedSampleDistance += movement.magnitude;
+        playerSpeedSampleElapsed += deltaTime;
+        if (playerSpeedSampleElapsed < PlayerSpeedSampleInterval)
+        {
+            return;
+        }
+
+        currentPlayerSpeed = playerSpeedSampleDistance / playerSpeedSampleElapsed;
+        playerSpeedSampleDistance = 0f;
+        playerSpeedSampleElapsed = 0f;
+        hasPlayerSpeedSample = true;
+    }
+
+    private void ResetPlayerSpeedSample(Player currentPlayer, Vector3 currentPosition)
+    {
+        trackedSpeedPlayer = currentPlayer;
+        lastPlayerSpeedPosition = currentPosition;
+        playerSpeedSampleDistance = 0f;
+        playerSpeedSampleElapsed = 0f;
+        currentPlayerSpeed = 0f;
+        hasPlayerSpeedSample = false;
     }
 
     private void StartServer()
@@ -2566,7 +2628,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildFreeTrainExtraTokens(GameManager.Instance),
             BuildAnimalAIExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance),
+            BuildPlayerSpeedExtraTokens(),
             BuildWorldTimeExtraTokens(ResolveWorldTime()));
+    }
+
+    private string BuildPlayerSpeedExtraTokens()
+    {
+        float playerSpeed = hasPlayerSpeedSample ? currentPlayerSpeed : -1f;
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "playerSpeed={0:0.###}",
+            playerSpeed);
     }
 
     private static string BuildCameraSizeExtraTokens(PlayerCamera playerCamera)

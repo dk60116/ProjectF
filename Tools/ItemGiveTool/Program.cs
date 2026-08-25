@@ -83,6 +83,7 @@ internal sealed class EditorToolForm : Form
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
     private readonly Label fpsLabel = new Label();
+    private readonly Label playerSpeedLabel = new Label();
     private readonly Label runtimeStatsLabel = new Label();
     private readonly TextBox runtimeStatsTextBox = new TextBox();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
@@ -149,11 +150,17 @@ internal sealed class EditorToolForm : Form
         fpsLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
         fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
         fpsLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        playerSpeedLabel.Text = "플레이어 속도: -- m/s";
+        playerSpeedLabel.AutoSize = true;
+        playerSpeedLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
+        playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
+        playerSpeedLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         headerPanel.Controls.Add(titleLabel);
         headerPanel.Controls.Add(descriptionLabel);
+        headerPanel.Controls.Add(playerSpeedLabel);
         headerPanel.Controls.Add(fpsLabel);
-        headerPanel.Resize += (_, _) => PositionFpsLabel(headerPanel);
-        PositionFpsLabel(headerPanel);
+        headerPanel.Resize += (_, _) => PositionHeaderStats(headerPanel);
+        PositionHeaderStats(headerPanel);
         layout.Controls.Add(headerPanel, 0, 0);
         layout.SetColumnSpan(headerPanel, 2);
 
@@ -741,10 +748,13 @@ internal sealed class EditorToolForm : Form
         input.Margin = new Padding(0, 5, 0, 0);
     }
 
-    private void PositionFpsLabel(Control parent)
+    private void PositionHeaderStats(Control parent)
     {
         fpsLabel.Location = new Point(
             Math.Max(0, parent.ClientSize.Width - fpsLabel.Width),
+            8);
+        playerSpeedLabel.Location = new Point(
+            Math.Max(0, fpsLabel.Left - playerSpeedLabel.Width - 24),
             8);
     }
 
@@ -1153,6 +1163,17 @@ internal sealed class EditorToolForm : Form
                     : fps >= 30f
                         ? Color.FromArgb(235, 189, 92)
                         : Color.FromArgb(236, 104, 94);
+                if (TryReadProtocolFloat(response, "playerSpeed", out float playerSpeed)
+                    && playerSpeed >= 0f)
+                {
+                    playerSpeedLabel.Text = $"플레이어 속도: {playerSpeed:0.00} m/s";
+                    playerSpeedLabel.ForeColor = Color.FromArgb(126, 218, 126);
+                }
+                else
+                {
+                    playerSpeedLabel.Text = "플레이어 속도: -- m/s";
+                    playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
+                }
                 UpdateRuntimeStatsFromResponse(response);
                 UpdateSaveSlotsFromResponse(response, false);
             }
@@ -1160,19 +1181,23 @@ internal sealed class EditorToolForm : Form
             {
                 fpsLabel.Text = "FPS: --";
                 fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+                playerSpeedLabel.Text = "플레이어 속도: -- m/s";
+                playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
                 SetRuntimeStatsUnavailable("상태 응답 없음");
                 SetWorldTimeUnavailable("상태 응답 없음");
             }
 
-            PositionFpsLabel(fpsLabel.Parent ?? this);
+            PositionHeaderStats(fpsLabel.Parent ?? this);
         }
         catch (Exception exception) when (exception is SocketException || exception is IOException || exception is TimeoutException)
         {
             fpsLabel.Text = "FPS: offline";
             fpsLabel.ForeColor = Color.FromArgb(236, 104, 94);
+            playerSpeedLabel.Text = "플레이어 속도: offline";
+            playerSpeedLabel.ForeColor = Color.FromArgb(236, 104, 94);
             SetRuntimeStatsUnavailable("게임 연결 안 됨");
             SetWorldTimeUnavailable("게임 연결 안 됨");
-            PositionFpsLabel(fpsLabel.Parent ?? this);
+            PositionHeaderStats(fpsLabel.Parent ?? this);
         }
         finally
         {

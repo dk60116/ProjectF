@@ -18,6 +18,7 @@ public static class HandcartDrivingValidation
         GameObject connectedInstance = null;
         GameObject obstacle = null;
         GameObject connectionRegistrationObstacle = null;
+        GameObject connectionSourceOverlapObstacle = null;
         GameObject pickupPlayerObject = null;
         GameObject draftAnimalInstance = null;
         GameObject thirdConnectionInstance = null;
@@ -418,6 +419,16 @@ public static class HandcartDrivingValidation
             Require(
                 handcart.TryAttachDraftAnimal(draftAnimal),
                 "수레 연결 전 동물 견인 상태를 구성하지 못했습니다.");
+            GameObject draftAnimalConnectionBlocker = new GameObject(
+                "Draft Animal Handcart Connection Blocker");
+            draftAnimalConnectionBlocker.transform.SetParent(
+                draftAnimal.MovementRoot,
+                true);
+            draftAnimalConnectionBlocker.transform.position = connectedStartPosition + Vector3.up * 0.5f;
+            BoxCollider draftAnimalConnectionBlockerCollider =
+                draftAnimalConnectionBlocker.AddComponent<BoxCollider>();
+            draftAnimalConnectionBlockerCollider.size = Vector3.one * 0.8f;
+            Physics.SyncTransforms();
             Require(handcart.ConnectTo(connectedHandcart), "Handcart끼리 연결하지 못했습니다.");
             Require(
                 connectedHandcart.DraftAnimal == draftAnimal
@@ -473,6 +484,25 @@ public static class HandcartDrivingValidation
                 "Handcart 연결 전체 해제 후 연결부 HandleObject가 복원되지 않았습니다.");
             UnityEngine.Object.DestroyImmediate(connectionRegistrationObstacle);
             connectionRegistrationObstacle = null;
+
+            connectionSourceOverlapObstacle = new GameObject(
+                "Handcart Connection Source Group Overlap");
+            connectionSourceOverlapObstacle.layer = LayerMask.NameToLayer("Object");
+            connectionSourceOverlapObstacle.transform.SetParent(handcart.transform, true);
+            connectionSourceOverlapObstacle.transform.position = connectedStartPosition + Vector3.up * 0.5f;
+            BoxCollider connectionSourceOverlapCollider =
+                connectionSourceOverlapObstacle.AddComponent<BoxCollider>();
+            connectionSourceOverlapCollider.size = Vector3.one;
+            connectedInstance.transform.SetPositionAndRotation(
+                connectedPlacementPosition,
+                Quaternion.Euler(0f, 110f, 0f));
+            Physics.SyncTransforms();
+            Require(
+                handcart.ConnectTo(connectedHandcart),
+                "연결 기준 Handcart 묶음의 Collider가 최종 연결 정렬을 막았습니다.");
+            handcart.ClearHandcartConnections();
+            UnityEngine.Object.DestroyImmediate(connectionSourceOverlapObstacle);
+            connectionSourceOverlapObstacle = null;
             handcart.ConnectToNearbyActiveHandcarts();
             Require(
                 handcart.ConnectedHandcarts.Count == 1
@@ -550,6 +580,27 @@ public static class HandcartDrivingValidation
             Require(
                 !firstHandleObject.activeSelf && connectedHandleObject.activeSelf,
                 "청크 휴면 복귀 후 연결면 HandleObject 상태가 바뀌었습니다.");
+            Vector3 connectedPoseBeforeDrop = connectedHandcart.transform.position;
+            connectedHandcart.transform.position += connectedHandcart.transform.right * 0.25f;
+            connectedHandcart.ConfigurePlacementRuntime(
+                connectedCoordinate,
+                0,
+                new[] { connectedCoordinate },
+                2);
+            Require(
+                handcart.ConnectedHandcarts.Count == 0
+                && connectedHandcart.ConnectedHandcarts.Count == 0,
+                "연결된 Handcart를 연결 자세 밖에 떨어뜨린 뒤에도 연결이 유지됩니다.");
+            connectedHandcart.transform.position = connectedPoseBeforeDrop;
+            connectedHandcart.ConfigurePlacementRuntime(
+                connectedCoordinate,
+                0,
+                new[] { connectedCoordinate },
+                2);
+            Physics.SyncTransforms();
+            Require(
+                handcart.ConnectTo(connectedHandcart),
+                "떨어뜨리기 연결 해제 검증 후 Handcart 재연결에 실패했습니다.");
             Require(
                 Mathf.Approximately(
                     handcart.EffectiveVehicleMaxSpeed,
@@ -592,6 +643,26 @@ public static class HandcartDrivingValidation
                         -100f),
                     0.6f),
                 "Animal Strength가 Handcart Mass 감속량에 올바르게 적용되지 않았습니다.");
+            Require(
+                Mathf.Approximately(
+                    Handcart.ResolveTurningMovementSpeedMultiplier(0.8f, 0f),
+                    1f)
+                && Mathf.Approximately(
+                    Handcart.ResolveTurningMovementSpeedMultiplier(0.8f, 0.5f),
+                    0.9f)
+                && Mathf.Approximately(
+                    Handcart.ResolveTurningMovementSpeedMultiplier(0.8f, 1f),
+                    0.8f)
+                && Handcart.ResolveTurningMovementSpeedMultiplier(0.6f, 1f)
+                < Handcart.ResolveTurningMovementSpeedMultiplier(0.8f, 1f),
+                "Handcart 조향 이동 감속이 조향량과 연결 묶음 Mass에 비례하지 않습니다.");
+            Require(
+                Mathf.Approximately(
+                    Handcart.ResolveSteeringDegreesPerSecond(180f, 0.8f),
+                    115.2f)
+                && Handcart.ResolveSteeringDegreesPerSecond(180f, 0.6f)
+                < Handcart.ResolveSteeringDegreesPerSecond(180f, 0.8f),
+                "Handcart 회전 속도에 연결 묶음 Mass 감속이 중첩 적용되지 않았습니다.");
 
             Vector3 initialConnectedOffset = connectedHandcart.transform.position - handcart.transform.position;
             Vector3 straightDriveDirection = connectedHandcart.transform.forward;
@@ -795,6 +866,11 @@ public static class HandcartDrivingValidation
             if (connectionRegistrationObstacle != null)
             {
                 UnityEngine.Object.DestroyImmediate(connectionRegistrationObstacle);
+            }
+
+            if (connectionSourceOverlapObstacle != null)
+            {
+                UnityEngine.Object.DestroyImmediate(connectionSourceOverlapObstacle);
             }
 
             if (pickupPlayerObject != null)

@@ -242,6 +242,20 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly List<Train> trainConnectionInstalledScratch = new List<Train>(32);
     private readonly List<Handcart> handcartConnectionInstalledScratch = new List<Handcart>(16);
     private readonly HashSet<Handcart> handcartConnectionPreviewHandleOverrides = new HashSet<Handcart>();
+    private readonly Dictionary<MapObject, Color> handcartConnectionPreviewTints =
+        new Dictionary<MapObject, Color>();
+    private readonly Dictionary<Handcart, List<RendererPropertyBlockState>> installedHandcartConnectionTintStates =
+        new Dictionary<Handcart, List<RendererPropertyBlockState>>();
+    private readonly List<HandcartPreviewConnection> handcartConnectionPreviewConnections =
+        new List<HandcartPreviewConnection>(24);
+    private readonly Dictionary<Handcart, Handcart> installedHandcartsByPreview =
+        new Dictionary<Handcart, Handcart>();
+    private readonly List<Handcart> handcartConnectionPreviewScratch = new List<Handcart>(16);
+    private readonly List<Handcart> handcartConnectionNodeScratch = new List<Handcart>(32);
+    private readonly List<Handcart> handcartConnectionComponentScratch = new List<Handcart>(16);
+    private readonly HashSet<Handcart> handcartConnectionNodeSet = new HashSet<Handcart>();
+    private readonly HashSet<Handcart> handcartConnectionVisited = new HashSet<Handcart>();
+    private readonly Queue<Handcart> handcartConnectionQueue = new Queue<Handcart>(32);
     private readonly List<Train> trainConnectionNodeScratch = new List<Train>(48);
     private readonly List<Train> trainConnectionComponentScratch = new List<Train>(16);
     private readonly Queue<Train> trainConnectionQueue = new Queue<Train>(32);
@@ -380,7 +394,7 @@ public class InstallationPlacementController : MonoBehaviour
     };
     private static readonly List<Renderer> ResourceRendererScratch = new List<Renderer>(8);
     private static readonly Dictionary<int, float> ResourceMarkerSurfaceYCache = new Dictionary<int, float>();
-    private static readonly Color[] TrainConnectionGroupTints =
+    private static readonly Color[] ConnectionGroupTints =
     {
         new Color(0.16f, 0.78f, 1f, 0.9f),
         new Color(1f, 0.72f, 0.22f, 0.9f),
@@ -396,6 +410,7 @@ public class InstallationPlacementController : MonoBehaviour
         public ItemDefinition definition;
         public Vector2Int originalAnchorCoordinate;
         public int originalQuarterTurns;
+        public Vector3 originalPosition;
         public Quaternion originalRotation = Quaternion.identity;
         public int originalConveyorVariantKind = -1;
         public int originalRailRequiredItemCount;
@@ -482,6 +497,46 @@ public class InstallationPlacementController : MonoBehaviour
         public Transform freightCarBoxPoint;
         public Vector3 position;
         public Quaternion rotation = Quaternion.identity;
+    }
+
+    private readonly struct HandcartPreviewConnection
+    {
+        public readonly Handcart first;
+        public readonly Handcart second;
+        public readonly int firstSide;
+        public readonly int secondSide;
+
+        public HandcartPreviewConnection(
+            Handcart first,
+            Handcart second,
+            int firstSide,
+            int secondSide)
+        {
+            this.first = first;
+            this.second = second;
+            this.firstSide = firstSide;
+            this.secondSide = secondSide;
+        }
+    }
+
+    private readonly struct HandcartBlueprintState
+    {
+        public readonly Handcart handcart;
+        public readonly Vector3 position;
+        public readonly Quaternion rotation;
+        public readonly bool handleVisible;
+
+        public HandcartBlueprintState(
+            Handcart handcart,
+            Vector3 position,
+            Quaternion rotation,
+            bool handleVisible)
+        {
+            this.handcart = handcart;
+            this.position = position;
+            this.rotation = rotation;
+            this.handleVisible = handleVisible;
+        }
     }
 
     private sealed class InstallPreviewPlacementReservation
@@ -2900,6 +2955,12 @@ public class InstallationPlacementController : MonoBehaviour
             return connectionTint;
         }
 
+        if (preview != null
+            && handcartConnectionPreviewTints.TryGetValue(preview, out connectionTint))
+        {
+            return connectionTint;
+        }
+
         return installPreviewTint;
     }
 
@@ -2970,7 +3031,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            Color groupTint = ResolveTrainConnectionGroupTint(groupTintIndex++);
+            Color groupTint = ResolveConnectionGroupTint(groupTintIndex++);
             for (int componentIndex = 0; componentIndex < trainConnectionComponentScratch.Count; componentIndex++)
             {
                 Train train = trainConnectionComponentScratch[componentIndex];
@@ -3073,29 +3134,43 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private static Color ResolveTrainConnectionGroupTint(int groupIndex)
+    private static Color ResolveConnectionGroupTint(int groupIndex)
     {
-        if (TrainConnectionGroupTints.Length <= 0)
+        if (ConnectionGroupTints.Length <= 0)
         {
             return Color.white;
         }
 
-        int index = ((groupIndex % TrainConnectionGroupTints.Length) + TrainConnectionGroupTints.Length)
-                    % TrainConnectionGroupTints.Length;
-        return TrainConnectionGroupTints[index];
+        int index = ((groupIndex % ConnectionGroupTints.Length) + ConnectionGroupTints.Length)
+                    % ConnectionGroupTints.Length;
+        return ConnectionGroupTints[index];
     }
 
     private void ApplyInstalledTrainConnectionTint(Train train, Color tint)
     {
-        if (train == null)
+        ApplyInstalledConnectionTint(train, tint, installedTrainConnectionTintStates);
+    }
+
+    private void ApplyInstalledHandcartConnectionTint(Handcart handcart, Color tint)
+    {
+        ApplyInstalledConnectionTint(handcart, tint, installedHandcartConnectionTintStates);
+    }
+
+    private void ApplyInstalledConnectionTint<TMapObject>(
+        TMapObject mapObject,
+        Color tint,
+        Dictionary<TMapObject, List<RendererPropertyBlockState>> tintStates)
+        where TMapObject : MapObject
+    {
+        if (mapObject == null)
         {
             return;
         }
 
-        if (!installedTrainConnectionTintStates.TryGetValue(train, out List<RendererPropertyBlockState> rendererStates))
+        if (!tintStates.TryGetValue(mapObject, out List<RendererPropertyBlockState> rendererStates))
         {
             rendererStates = new List<RendererPropertyBlockState>();
-            Renderer[] renderers = train.GetComponentsInChildren<Renderer>(true);
+            Renderer[] renderers = mapObject.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer renderer = renderers[i];
@@ -3115,7 +3190,7 @@ public class InstallationPlacementController : MonoBehaviour
                 });
             }
 
-            installedTrainConnectionTintStates[train] = rendererStates;
+            tintStates[mapObject] = rendererStates;
         }
 
         for (int i = 0; i < rendererStates.Count; i++)
@@ -3171,12 +3246,24 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void ClearInstalledTrainConnectionTints()
     {
-        if (installedTrainConnectionTintStates.Count <= 0)
+        ClearInstalledConnectionTints(installedTrainConnectionTintStates);
+    }
+
+    private void ClearInstalledHandcartConnectionTints()
+    {
+        ClearInstalledConnectionTints(installedHandcartConnectionTintStates);
+    }
+
+    private static void ClearInstalledConnectionTints<TMapObject>(
+        Dictionary<TMapObject, List<RendererPropertyBlockState>> tintStates)
+        where TMapObject : MapObject
+    {
+        if (tintStates.Count <= 0)
         {
             return;
         }
 
-        foreach (KeyValuePair<Train, List<RendererPropertyBlockState>> entry in installedTrainConnectionTintStates)
+        foreach (KeyValuePair<TMapObject, List<RendererPropertyBlockState>> entry in tintStates)
         {
             List<RendererPropertyBlockState> rendererStates = entry.Value;
             if (rendererStates == null)
@@ -3196,7 +3283,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        installedTrainConnectionTintStates.Clear();
+        tintStates.Clear();
     }
 
     private static void RefreshInstallPreviewConveyorShaderProperties(MapObject preview)
@@ -4120,6 +4207,7 @@ public class InstallationPlacementController : MonoBehaviour
             definition = definition,
             originalAnchorCoordinate = anchorCoordinate,
             originalQuarterTurns = resolvedQuarterTurns,
+            originalPosition = installationObject.transform.position,
             originalRotation = installationObject.transform.rotation,
             originalConveyorVariantKind = GetInstallationVariantKind(installationObject),
             originalRailRequiredItemCount = installationObject is Railload railload
@@ -4885,7 +4973,9 @@ public class InstallationPlacementController : MonoBehaviour
                     : editSession.originalAnchorCoordinate,
                 editSession.originalQuarterTurns,
                 editSession.originalConveyorVariantKind,
-                editSession.originalRotation);
+                editSession.originalRotation,
+                editSession.originalPosition,
+                preserveExistingRuntimeState: true);
         }
 
         ClearInstallPreview();
@@ -4924,6 +5014,8 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        List<HandcartBlueprintState> handcartBlueprintStates =
+            CaptureHandcartBlueprintStates();
         Quaternion previewRotation = activeInstallPreview.transform.rotation;
         Vector3 previewPosition = activeInstallPreview.transform.position;
         int quarterTurns = GetPreviewQuarterTurns(activeInstallPreview);
@@ -4947,6 +5039,15 @@ public class InstallationPlacementController : MonoBehaviour
             conveyorVariantKind,
             previewRotation,
             previewPosition);
+        installedHandcartsByPreview.Clear();
+        RegisterInstalledHandcartPreview(
+            restoredObject as Handcart,
+            activeInstallPreview as Handcart);
+        List<HandcartPreviewConnection> committedHandcartConnections =
+            ResolveCommittedHandcartConnections();
+        List<HandcartBlueprintState> committedHandcartStates =
+            ResolveCommittedHandcartStates(handcartBlueprintStates);
+        installedHandcartsByPreview.Clear();
         if (restoredObject != null)
         {
             RememberLastInstalledRotation(editSession.definition, quarterTurns);
@@ -4962,6 +5063,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ClearInstallPreview();
+        ApplyCommittedHandcartBlueprintPoses(committedHandcartStates);
+        CommitInstalledHandcartConnections(committedHandcartConnections);
+        ApplyCommittedHandcartBlueprintHandles(committedHandcartStates);
         SetMapEditModeActive(false);
         return true;
     }
@@ -5237,7 +5341,8 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns,
         int conveyorVariantKind = -1,
         Quaternion? previewRotationOverride = null,
-        Vector3? previewPositionOverride = null)
+        Vector3? previewPositionOverride = null,
+        bool preserveExistingRuntimeState = false)
     {
         if (editSession == null || editSession.originalInstallation == null || editSession.definition == null)
         {
@@ -5275,11 +5380,15 @@ public class InstallationPlacementController : MonoBehaviour
         {
             desiredSourcePrefab = ResolveInstalledObjectSourcePrefab(editSession.definition, anchorCoordinate, quarterTurns);
         }
+        InstallationObject originalInstallation = editSession.originalInstallation;
         MapObject restoredObject = ResolveRestoredInstallationObject(editSession, desiredSourcePrefab, terrain);
         if (restoredObject == null)
         {
             return null;
         }
+        bool reusesUnchangedRuntimeState = preserveExistingRuntimeState
+                                          && !placementChanged
+                                          && restoredObject == originalInstallation;
 
         Transform installParent = terrain != null ? terrain.transform : transform;
         Quaternion restoredRotation = previewRotationOverride
@@ -5320,31 +5429,36 @@ public class InstallationPlacementController : MonoBehaviour
             }
         }
 
-        ConfigureInstalledObjectRuntime(
-            restoredObject,
-            anchorCoordinate,
-            quarterTurns,
-            editSession.inputOutputState,
-            occupiedCoordinatesOverride: occupiedCoordinates);
-        restoredObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
-        if (restoredObject is InstallationObject restoredInstallationObject)
+        if (!reusesUnchangedRuntimeState)
         {
-            restoredInstallationObject.SetStoredFluid(
-                editSession.storedFluidItemId,
-                editSession.storedFluidLiters,
-                editSession.storedFluidTemperatureCelsius);
-            if (restoredInstallationObject is IPersistentInstallationItemStorage itemStorage)
+            ConfigureInstalledObjectRuntime(
+                restoredObject,
+                anchorCoordinate,
+                quarterTurns,
+                editSession.inputOutputState,
+                occupiedCoordinatesOverride: occupiedCoordinates);
+            restoredObject.ApplyItemFilterMask(
+                editSession.itemFilterMaskWords,
+                editSession.itemFilterMaskInitialized);
+            if (restoredObject is InstallationObject restoredInstallationObject)
             {
-                itemStorage.ApplyPersistentStoredItemId(editSession.storedInstallationItemId);
+                restoredInstallationObject.SetStoredFluid(
+                    editSession.storedFluidItemId,
+                    editSession.storedFluidLiters,
+                    editSession.storedFluidTemperatureCelsius);
+                if (restoredInstallationObject is IPersistentInstallationItemStorage itemStorage)
+                {
+                    itemStorage.ApplyPersistentStoredItemId(editSession.storedInstallationItemId);
+                }
+                if (restoredInstallationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
+                {
+                    collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds);
+                }
             }
-            if (restoredInstallationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
+            if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
             {
-                collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds);
+                restoredBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
             }
-        }
-        if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
-        {
-            restoredBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
         }
 
         ApplyEditedInstallationBlockStates(editSession, anchorCoordinate, quarterTurns);
@@ -5737,10 +5851,11 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        RefreshHandcartInstallPreviewConnectionPoses();
         ItemDefinition placementDefinition = activeInstallDefinition;
         MapObject placementMapObject = placementDefinition.mapObject;
         bool isPipeBlueprintPlacement = placementMapObject is Pipe;
+        List<HandcartBlueprintState> handcartBlueprintStates =
+            CaptureHandcartBlueprintStates();
 
         // Commit must never advance or reinterpret pipe topology. The visible
         // blueprint is already final; preserve newly placed previews and virtual
@@ -5803,6 +5918,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        installedHandcartsByPreview.Clear();
         for (int i = 0; i < placementPlans.Count; i++)
         {
             InstallPreviewPlacementPlan placementPlan = placementPlans[i];
@@ -5867,7 +5983,9 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate, placementPlan);
-            ConnectHandcartToNearbyHandcarts(installedObject as Handcart);
+            RegisterInstalledHandcartPreview(
+                installedObject as Handcart,
+                placementPlan.preview as Handcart);
             if (placementPlan.registerTerrainPersistence)
             {
                 RegisterInstalledObjectPersistence(installedObject);
@@ -5915,6 +6033,12 @@ public class InstallationPlacementController : MonoBehaviour
             placedCount++;
         }
 
+        List<HandcartPreviewConnection> committedHandcartConnections =
+            ResolveCommittedHandcartConnections();
+        List<HandcartBlueprintState> committedHandcartStates =
+            ResolveCommittedHandcartStates(handcartBlueprintStates);
+        installedHandcartsByPreview.Clear();
+
         if (placedCount > 0)
         {
             List<PortableObject> handPortableSources = unreservedPlacedCount > 0
@@ -5949,6 +6073,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         RemovePlacedInstallPreviews(placedPreviews);
+        ApplyCommittedHandcartBlueprintPoses(committedHandcartStates);
+        CommitInstalledHandcartConnections(committedHandcartConnections);
+        ApplyCommittedHandcartBlueprintHandles(committedHandcartStates);
         if (placedCount > 0)
         {
             WorkableObject.RefreshAllRangeVisuals();
@@ -14691,6 +14818,9 @@ public class InstallationPlacementController : MonoBehaviour
     private void RefreshHandcartInstallPreviewConnectionPoses()
     {
         ClearHandcartConnectionPreviewHandleOverrides();
+        ClearInstalledHandcartConnectionTints();
+        handcartConnectionPreviewTints.Clear();
+        handcartConnectionPreviewConnections.Clear();
         if (installPreviewInstances.Count <= 0)
         {
             return;
@@ -14754,12 +14884,9 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            bool foundConnection = false;
             float bestDistanceSqr = float.MaxValue;
             Vector3 snappedPosition = gridPosition;
             Quaternion snappedRotation = gridRotation;
-            Handcart bestConnectionSource = null;
-            int bestConnectionSourceSide = 0;
             for (int sourceIndex = 0; sourceIndex < handcartConnectionInstalledScratch.Count; sourceIndex++)
             {
                 TryUseHandcartPreviewConnectionSource(
@@ -14767,12 +14894,9 @@ public class InstallationPlacementController : MonoBehaviour
                     handcartConnectionInstalledScratch[sourceIndex],
                     anchorCoordinate,
                     gridPosition,
-                    ref foundConnection,
                     ref bestDistanceSqr,
                     ref snappedPosition,
-                    ref snappedRotation,
-                    ref bestConnectionSource,
-                    ref bestConnectionSourceSide);
+                    ref snappedRotation);
             }
 
             long previewSequence = installPreviewPlacementSequencesByPreview.TryGetValue(
@@ -14798,24 +14922,219 @@ public class InstallationPlacementController : MonoBehaviour
                     previewSource,
                     anchorCoordinate,
                     gridPosition,
-                    ref foundConnection,
                     ref bestDistanceSqr,
                     ref snappedPosition,
-                    ref snappedRotation,
-                    ref bestConnectionSource,
-                    ref bestConnectionSourceSide);
+                    ref snappedRotation);
             }
 
             previewHandcart.transform.SetPositionAndRotation(snappedPosition, snappedRotation);
-            if (foundConnection)
-            {
-                ApplyHandcartConnectionPreviewSide(bestConnectionSource, bestConnectionSourceSide);
-                ApplyHandcartConnectionPreviewSide(previewHandcart, -bestConnectionSourceSide);
-            }
             previewHandcart.RefreshInstalledDirectionFromCurrentTransform();
         }
 
+        CaptureVisibleHandcartPreviewConnections();
+        RefreshHandcartInstallPreviewTints();
         handcartConnectionInstalledScratch.Clear();
+    }
+
+    private void CaptureVisibleHandcartPreviewConnections()
+    {
+        handcartConnectionPreviewConnections.Clear();
+        for (int previewIndex = 0; previewIndex < installPreviewInstances.Count; previewIndex++)
+        {
+            if (!(installPreviewInstances[previewIndex] is Handcart previewHandcart))
+            {
+                continue;
+            }
+
+            for (int installedIndex = 0;
+                 installedIndex < handcartConnectionInstalledScratch.Count;
+                 installedIndex++)
+            {
+                Handcart installedHandcart = handcartConnectionInstalledScratch[installedIndex];
+                TryCaptureVisibleHandcartPreviewConnection(previewHandcart, installedHandcart);
+            }
+
+            for (int otherPreviewIndex = previewIndex + 1;
+                 otherPreviewIndex < installPreviewInstances.Count;
+                 otherPreviewIndex++)
+            {
+                TryCaptureVisibleHandcartPreviewConnection(
+                    previewHandcart,
+                    installPreviewInstances[otherPreviewIndex] as Handcart);
+            }
+        }
+    }
+
+    private void TryCaptureVisibleHandcartPreviewConnection(Handcart first, Handcart second)
+    {
+        if (first == null
+            || second == null
+            || first == second
+            || !Handcart.CanConnectByPose(first, second))
+        {
+            return;
+        }
+
+        int firstSide = first.ResolveConnectionSideForPreview(second);
+        int secondSide = second.ResolveConnectionSideForPreview(first);
+        if (firstSide == 0 || secondSide == 0)
+        {
+            return;
+        }
+
+        handcartConnectionPreviewConnections.Add(
+            new HandcartPreviewConnection(
+                first,
+                second,
+                firstSide,
+                secondSide));
+        ApplyHandcartConnectionPreviewSide(first, firstSide);
+        ApplyHandcartConnectionPreviewSide(second, secondSide);
+    }
+
+    private void RefreshHandcartInstallPreviewTints()
+    {
+        handcartConnectionPreviewScratch.Clear();
+        handcartConnectionNodeScratch.Clear();
+        handcartConnectionNodeSet.Clear();
+        handcartConnectionComponentScratch.Clear();
+        handcartConnectionVisited.Clear();
+        handcartConnectionQueue.Clear();
+
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            if (!(installPreviewInstances[i] is Handcart previewHandcart))
+            {
+                continue;
+            }
+
+            handcartConnectionPreviewScratch.Add(previewHandcart);
+            AddHandcartConnectionNode(previewHandcart);
+        }
+
+        for (int i = 0; i < handcartConnectionInstalledScratch.Count; i++)
+        {
+            AddHandcartConnectionNode(handcartConnectionInstalledScratch[i]);
+        }
+
+        int groupTintIndex = 0;
+        for (int i = 0; i < handcartConnectionNodeScratch.Count; i++)
+        {
+            Handcart startHandcart = handcartConnectionNodeScratch[i];
+            if (startHandcart == null || handcartConnectionVisited.Contains(startHandcart))
+            {
+                continue;
+            }
+
+            CollectHandcartConnectionComponent(startHandcart);
+            if (handcartConnectionComponentScratch.Count <= 1)
+            {
+                continue;
+            }
+
+            Color groupTint = ResolveConnectionGroupTint(groupTintIndex++);
+            for (int componentIndex = 0;
+                 componentIndex < handcartConnectionComponentScratch.Count;
+                 componentIndex++)
+            {
+                Handcart handcart = handcartConnectionComponentScratch[componentIndex];
+                if (handcart == null)
+                {
+                    continue;
+                }
+
+                if (!handcart.TryGetPlacementRuntime(out _, out _))
+                {
+                    handcartConnectionPreviewTints[handcart] = groupTint;
+                    continue;
+                }
+
+                ApplyInstalledHandcartConnectionTint(handcart, groupTint);
+            }
+        }
+
+        for (int i = 0; i < handcartConnectionPreviewScratch.Count; i++)
+        {
+            Handcart previewHandcart = handcartConnectionPreviewScratch[i];
+            if (previewHandcart == null)
+            {
+                continue;
+            }
+
+            ApplyInstallPreviewTint(
+                previewHandcart,
+                previewHandcart == activeInstallPreview,
+                ResolveInstallPreviewTint(previewHandcart));
+        }
+
+        handcartConnectionPreviewScratch.Clear();
+        handcartConnectionNodeScratch.Clear();
+        handcartConnectionNodeSet.Clear();
+        handcartConnectionComponentScratch.Clear();
+        handcartConnectionVisited.Clear();
+        handcartConnectionQueue.Clear();
+    }
+
+    private void AddHandcartConnectionNode(Handcart handcart)
+    {
+        if (handcart != null && handcartConnectionNodeSet.Add(handcart))
+        {
+            handcartConnectionNodeScratch.Add(handcart);
+        }
+    }
+
+    private void CollectHandcartConnectionComponent(Handcart startHandcart)
+    {
+        handcartConnectionComponentScratch.Clear();
+        if (startHandcart == null)
+        {
+            return;
+        }
+
+        handcartConnectionQueue.Enqueue(startHandcart);
+        handcartConnectionVisited.Add(startHandcart);
+        while (handcartConnectionQueue.Count > 0)
+        {
+            Handcart currentHandcart = handcartConnectionQueue.Dequeue();
+            if (currentHandcart == null)
+            {
+                continue;
+            }
+
+            handcartConnectionComponentScratch.Add(currentHandcart);
+            foreach (Handcart connectedHandcart in currentHandcart.ConnectedHandcarts)
+            {
+                if (connectedHandcart == null
+                    || !handcartConnectionNodeSet.Contains(connectedHandcart)
+                    || !handcartConnectionVisited.Add(connectedHandcart))
+                {
+                    continue;
+                }
+
+                handcartConnectionQueue.Enqueue(connectedHandcart);
+            }
+
+            for (int connectionIndex = 0;
+                 connectionIndex < handcartConnectionPreviewConnections.Count;
+                 connectionIndex++)
+            {
+                HandcartPreviewConnection previewConnection =
+                    handcartConnectionPreviewConnections[connectionIndex];
+                Handcart prospectiveNeighbour = previewConnection.first == currentHandcart
+                    ? previewConnection.second
+                    : previewConnection.second == currentHandcart
+                        ? previewConnection.first
+                        : null;
+                if (prospectiveNeighbour == null
+                    || !handcartConnectionNodeSet.Contains(prospectiveNeighbour)
+                    || !handcartConnectionVisited.Add(prospectiveNeighbour))
+                {
+                    continue;
+                }
+
+                handcartConnectionQueue.Enqueue(prospectiveNeighbour);
+            }
+        }
     }
 
     private bool TryResolveHandcartPreviewGridPose(
@@ -14859,12 +15178,9 @@ public class InstallationPlacementController : MonoBehaviour
         Handcart connectionSource,
         Vector2Int anchorCoordinate,
         Vector3 gridPosition,
-        ref bool foundConnection,
         ref float bestDistanceSqr,
         ref Vector3 bestPosition,
-        ref Quaternion bestRotation,
-        ref Handcart bestConnectionSource,
-        ref int bestConnectionSourceSide)
+        ref Quaternion bestRotation)
     {
         if (connectionSource == null
             || connectionSource == preview
@@ -14872,7 +15188,7 @@ public class InstallationPlacementController : MonoBehaviour
                 preview,
                 connectionSource,
                 gridPosition,
-                out int candidateSourceSide,
+                out _,
                 out Vector3 candidatePosition,
                 out Quaternion candidateRotation)
             || RoundWorldPositionToCoordinate(candidatePosition) != anchorCoordinate)
@@ -14886,12 +15202,9 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        foundConnection = true;
         bestDistanceSqr = distanceSqr;
         bestPosition = candidatePosition;
         bestRotation = candidateRotation;
-        bestConnectionSource = connectionSource;
-        bestConnectionSourceSide = candidateSourceSide;
     }
 
     private void ApplyHandcartConnectionPreviewSide(Handcart handcart, int connectionSide)
@@ -14915,6 +15228,187 @@ public class InstallationPlacementController : MonoBehaviour
     private void ConnectHandcartToNearbyHandcarts(Handcart handcart)
     {
         handcart?.ConnectToNearbyActiveHandcarts();
+    }
+
+    private void RegisterInstalledHandcartPreview(
+        Handcart installedHandcart,
+        Handcart previewHandcart)
+    {
+        if (installedHandcart == null || previewHandcart == null)
+        {
+            return;
+        }
+
+        installedHandcartsByPreview[previewHandcart] = installedHandcart;
+    }
+
+    private List<HandcartBlueprintState> CaptureHandcartBlueprintStates()
+    {
+        List<HandcartBlueprintState> states =
+            new List<HandcartBlueprintState>(installPreviewInstances.Count);
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            if (!(installPreviewInstances[i] is Handcart previewHandcart))
+            {
+                continue;
+            }
+
+            states.Add(
+                new HandcartBlueprintState(
+                    previewHandcart,
+                    previewHandcart.transform.position,
+                    previewHandcart.transform.rotation,
+                    previewHandcart.IsConnectionHandleVisible));
+        }
+
+        return states;
+    }
+
+    private List<HandcartBlueprintState> ResolveCommittedHandcartStates(
+        IReadOnlyList<HandcartBlueprintState> blueprintStates)
+    {
+        int stateCount = blueprintStates != null ? blueprintStates.Count : 0;
+        List<HandcartBlueprintState> committedStates =
+            new List<HandcartBlueprintState>(stateCount);
+        for (int i = 0; i < stateCount; i++)
+        {
+            HandcartBlueprintState blueprintState = blueprintStates[i];
+            if (!TryResolveCommittedHandcart(
+                    blueprintState.handcart,
+                    out Handcart installedHandcart))
+            {
+                continue;
+            }
+
+            committedStates.Add(
+                new HandcartBlueprintState(
+                    installedHandcart,
+                    blueprintState.position,
+                    blueprintState.rotation,
+                    blueprintState.handleVisible));
+        }
+
+        return committedStates;
+    }
+
+    private static void ApplyCommittedHandcartBlueprintPoses(
+        IReadOnlyList<HandcartBlueprintState> committedStates)
+    {
+        if (committedStates == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < committedStates.Count; i++)
+        {
+            HandcartBlueprintState state = committedStates[i];
+            state.handcart?.transform.SetPositionAndRotation(
+                state.position,
+                state.rotation);
+        }
+    }
+
+    private static void ApplyCommittedHandcartBlueprintHandles(
+        IReadOnlyList<HandcartBlueprintState> committedStates)
+    {
+        if (committedStates == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < committedStates.Count; i++)
+        {
+            HandcartBlueprintState state = committedStates[i];
+            state.handcart?.ApplyCommittedBlueprintHandleVisibility(
+                state.handleVisible);
+        }
+    }
+
+    private List<HandcartPreviewConnection> ResolveCommittedHandcartConnections()
+    {
+        List<HandcartPreviewConnection> committedConnections =
+            new List<HandcartPreviewConnection>(handcartConnectionPreviewConnections.Count);
+        if (installedHandcartsByPreview.Count <= 0
+            || handcartConnectionPreviewConnections.Count <= 0)
+        {
+            return committedConnections;
+        }
+
+        for (int i = 0; i < handcartConnectionPreviewConnections.Count; i++)
+        {
+            HandcartPreviewConnection previewConnection =
+                handcartConnectionPreviewConnections[i];
+            if (!TryResolveCommittedHandcart(
+                    previewConnection.first,
+                    out Handcart firstInstalled)
+                || !TryResolveCommittedHandcart(
+                    previewConnection.second,
+                    out Handcart secondInstalled)
+                || firstInstalled == secondInstalled)
+            {
+                continue;
+            }
+
+            committedConnections.Add(
+                new HandcartPreviewConnection(
+                    firstInstalled,
+                    secondInstalled,
+                    previewConnection.firstSide,
+                    previewConnection.secondSide));
+        }
+
+        return committedConnections;
+    }
+
+    private static void CommitInstalledHandcartConnections(
+        IReadOnlyList<HandcartPreviewConnection> committedConnections)
+    {
+        if (committedConnections == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < committedConnections.Count; i++)
+        {
+            HandcartPreviewConnection connection = committedConnections[i];
+            if (connection.first == null
+                || connection.second == null
+                || connection.first.CommitBlueprintConnection(
+                    connection.second,
+                    connection.firstSide,
+                    connection.secondSide))
+            {
+                continue;
+            }
+
+            Debug.LogError(
+                $"Handcart blueprint connection commit failed: "
+                + $"{connection.first.name} <-> {connection.second.name}");
+        }
+    }
+
+    private bool TryResolveCommittedHandcart(
+        Handcart previewOrInstalled,
+        out Handcart committedHandcart)
+    {
+        committedHandcart = null;
+        if (previewOrInstalled == null)
+        {
+            return false;
+        }
+
+        if (installedHandcartsByPreview.TryGetValue(
+                previewOrInstalled,
+                out committedHandcart)
+            && committedHandcart != null)
+        {
+            return true;
+        }
+
+        committedHandcart = previewOrInstalled.TryGetPlacementRuntime(out _, out _)
+            ? previewOrInstalled
+            : null;
+        return committedHandcart != null;
     }
 
     private static void ApplyTrainPlacementPose(Train train, Vector3 position, Quaternion rotation)
@@ -27330,6 +27824,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InvalidateInstallGrid();
+        RefreshHandcartInstallPreviewConnectionPoses();
         RefreshTrainInstallPreviewTints();
     }
 
@@ -27382,6 +27877,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InvalidateInstallGrid();
+        RefreshHandcartInstallPreviewConnectionPoses();
         RefreshTrainInstallPreviewTints();
     }
 
@@ -38224,6 +38720,10 @@ public class InstallationPlacementController : MonoBehaviour
     {
         InvalidateInstallPreviewMoveCache();
         ClearHandcartConnectionPreviewHandleOverrides();
+        ClearInstalledHandcartConnectionTints();
+        handcartConnectionPreviewTints.Clear();
+        handcartConnectionPreviewConnections.Clear();
+        installedHandcartsByPreview.Clear();
         railloadInstallationController?.Cancel();
         RefundAllInstallPreviewReservations();
         ClearInstalledTrainConnectionTints();
