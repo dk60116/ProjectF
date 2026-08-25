@@ -34,6 +34,7 @@ public class PlayerController : MonoBehaviour
         PickAnimationDuration * AnimalKnifeDamageNormalizedTime;
     private const float AnimalKnifeDamage = 20f;
     private const float AnimalPushClearance = 0.05f;
+    private const float AutomaticAnimalInteractionRefreshInterval = 0.1f;
     private const int CrowdedAnimalPathThreshold = 3;
     private const float NooseThrowDistance = 3.5f;
     private const float NooseThrowWindupDuration = 0.8f;
@@ -41,6 +42,8 @@ public class PlayerController : MonoBehaviour
     private const float NooseThrowHoldDuration = 0.12f;
     private const float NooseThrowReturnDuration = 0.4f;
     private const float NooseThrowArcHeight = 0.45f;
+    private const float MountedAnimalRunJoystickThreshold = 0.85f;
+    private const int AutomaticAnimalInteractionOverlapCapacity = 32;
     private const int InitialMouseFocusRaycastHitBufferSize = 32;
     private const int MaxMouseFocusRaycastHitBufferSize = 128;
     private static readonly Vector2[] WaterBoundarySampleDirections =
@@ -68,8 +71,14 @@ public class PlayerController : MonoBehaviour
     private Animal currentKnifeTargetAnimal;
     private Animal pendingKnifeTargetAnimal;
     private Animal currentCorpseHarvestTarget;
+    private Animal cachedAutomaticInteractionAnimal;
+    private float nextAutomaticAnimalInteractionRefreshTime;
+    private bool cachedAutomaticInteractionIncludesCorpses;
+    private readonly Collider[] automaticAnimalInteractionOverlapBuffer =
+        new Collider[AutomaticAnimalInteractionOverlapCapacity];
     private readonly Queue<Animal> pendingCorpseHarvestAnimals = new Queue<Animal>();
     private bool animalKnifePickPending;
+    private bool animalKnifeAnimationStarted;
     private bool animalKnifeDamageApplied;
     private float animalKnifeDamageTime;
     private float animalKnifeInteractionEndTime;
@@ -134,6 +143,7 @@ public class PlayerController : MonoBehaviour
     private Vector3 pendingFacingDirection;
     private Transform interactionPointSnapTarget;
     private Vehicle interactionPointSnapVehicle;
+    private Animal interactionPointSnapAnimal;
     private MapObject mountedPinnedFocusTarget;
     private Block mountedPinnedFocusFallbackBlock;
     private Block temporaryDropFocusBlock;
@@ -268,8 +278,13 @@ public class PlayerController : MonoBehaviour
 
     private void OnDisable()
     {
+        interactionPointSnapAnimal?.NotifyRiderDismounted(player);
+        player?.SetRidingAnimation(false);
         interactionPointSnapTarget = null;
         interactionPointSnapVehicle = null;
+        interactionPointSnapAnimal = null;
+        cachedAutomaticInteractionAnimal = null;
+        nextAutomaticAnimalInteractionRefreshTime = 0f;
         RestoreStandingVisualOffset();
         currentConveyorCarryVelocity = Vector3.zero;
         hasPendingFacingDirection = false;
@@ -406,10 +421,12 @@ public class PlayerController : MonoBehaviour
     }
 
     public Vehicle MountedVehicle => interactionPointSnapTarget != null ? interactionPointSnapVehicle : null;
+    public Animal MountedAnimal => interactionPointSnapTarget != null ? interactionPointSnapAnimal : null;
+    public bool IsMounted => interactionPointSnapTarget != null;
 
     public bool IsNearWaterForPortableInteraction()
     {
-        if (MountedVehicle != null || ResolveTerrainGenerator() == null)
+        if (IsMounted || ResolveTerrainGenerator() == null)
         {
             return false;
         }
@@ -457,8 +474,69 @@ public class PlayerController : MonoBehaviour
         return vehicle.TryDockPlayerAtPoint(player, playerPointIndex);
     }
 
+    public bool IsMountedOnAnimal(Animal animal)
+    {
+        return animal != null
+               && interactionPointSnapTarget != null
+               && interactionPointSnapAnimal == animal;
+    }
+
+    public bool TryGetMountedAnimalId(out long deterministicId)
+    {
+        deterministicId = 0L;
+        TerrainAnimalInstance instance = MountedAnimal != null
+            ? MountedAnimal.GetComponentInParent<TerrainAnimalInstance>()
+            : null;
+        if (instance == null || instance.DeterministicId == 0L)
+        {
+            return false;
+        }
+
+        deterministicId = instance.DeterministicId;
+        return true;
+    }
+
+    public bool TryRestoreMountedAnimal(long deterministicId)
+    {
+        if (deterministicId == 0L || player == null)
+        {
+            ClearInteractionPointSnapForLoad();
+            return false;
+        }
+
+        AnimalAIWorld world = AnimalAIWorld.Instance;
+        if (world == null
+            || !world.TryGetControllerByDeterministicId(
+                deterministicId,
+                out AnimalAIController animalController)
+            || animalController.Animal == null)
+        {
+            ClearInteractionPointSnapForLoad();
+            return false;
+        }
+
+        ClearInteractionPointSnapForLoad();
+        return animalController.Animal.TryMount(player, this);
+    }
+
+    public bool TryMountSaddledAnimal(Animal animal)
+    {
+        if (animal == null
+            || player == null
+            || IsMounted
+            || !animal.CanBeMounted
+            || !IsAnimalWithinInteractionRange(animal))
+        {
+            return false;
+        }
+
+        CancelNooseThrow();
+        return animal.TryMount(player, this);
+    }
+
     public void ClearInteractionPointSnapForLoad()
     {
+        interactionPointSnapAnimal?.NotifyRiderDismounted(player);
         ClearInteractionPointSnap(true);
         pendingMoveDirection = Vector3.zero;
         pendingFacingDirection = Vector3.zero;
@@ -476,6 +554,26 @@ public class PlayerController : MonoBehaviour
         deterministicId = 0L;
         return activeNooseThrowVisual != null
                && activeNooseThrowVisual.TryGetAttachedAnimalId(out deterministicId);
+    }
+
+    public bool TryGetNooseLeashedAnimal(out Animal animal)
+    {
+        animal = null;
+        return activeNooseThrowVisual != null
+               && activeNooseThrowVisual.TryGetAttachedAnimal(out animal);
+    }
+
+    public bool TryConsumeNooseLeash(Animal expectedAnimal)
+    {
+        if (expectedAnimal == null
+            || !TryGetNooseLeashedAnimal(out Animal leashedAnimal)
+            || leashedAnimal != expectedAnimal)
+        {
+            return false;
+        }
+
+        CancelNooseThrow(true);
+        return true;
     }
 
     public bool TryRestoreNooseLeashedAnimal(long deterministicId)
@@ -546,6 +644,19 @@ public class PlayerController : MonoBehaviour
 
     public bool TrySnapBodyToInteractionPoint(Transform targetPoint, Vehicle vehicle = null)
     {
+        return TrySnapBodyToMountPoint(targetPoint, vehicle, null);
+    }
+
+    public bool TrySnapBodyToAnimalMountPoint(Transform targetPoint, Animal animal)
+    {
+        return animal != null && TrySnapBodyToMountPoint(targetPoint, null, animal);
+    }
+
+    private bool TrySnapBodyToMountPoint(
+        Transform targetPoint,
+        Vehicle vehicle,
+        Animal animal)
+    {
         if (targetPoint == null)
         {
             return false;
@@ -586,6 +697,8 @@ public class PlayerController : MonoBehaviour
 
         interactionPointSnapTarget = targetPoint;
         interactionPointSnapVehicle = vehicle;
+        interactionPointSnapAnimal = animal;
+        player.SetRidingAnimation(animal != null);
         mountedPinnedFocusTarget = vehicle;
         mountedPinnedFocusFallbackBlock = null;
         ApplyInteractionPointSnap();
@@ -596,6 +709,11 @@ public class PlayerController : MonoBehaviour
     }
 
     public bool TryDismountFromVehicle()
+    {
+        return TryDismount();
+    }
+
+    public bool TryDismount()
     {
         if (interactionPointSnapTarget == null)
         {
@@ -608,8 +726,10 @@ public class PlayerController : MonoBehaviour
         }
 
         Vehicle dismountedVehicle = interactionPointSnapVehicle;
+        Animal dismountedAnimal = interactionPointSnapAnimal;
         if (!TryResolveInteractionPointExitPosition(
                 dismountedVehicle,
+                dismountedAnimal,
                 out Vector3 exitPosition))
         {
             return false;
@@ -618,6 +738,7 @@ public class PlayerController : MonoBehaviour
         Quaternion exitRotation = transform.rotation;
         ClearInteractionPointSnap(true);
         dismountedVehicle?.NotifyPlayerDismounted(player);
+        dismountedAnimal?.NotifyRiderDismounted(player);
 
         pendingMoveDirection = Vector3.zero;
         pendingFacingDirection = Vector3.zero;
@@ -660,12 +781,24 @@ public class PlayerController : MonoBehaviour
     {
         if (interactionPointSnapTarget == null)
         {
+            if (interactionPointSnapAnimal != null)
+            {
+                player?.SetRidingAnimation(false);
+                interactionPointSnapAnimal = null;
+            }
+
             ClearMountedPinnedFocus();
             return;
         }
 
+        bool wasAnimalMount = interactionPointSnapAnimal != null;
         interactionPointSnapTarget = null;
         interactionPointSnapVehicle = null;
+        interactionPointSnapAnimal = null;
+        if (wasAnimalMount)
+        {
+            player?.SetRidingAnimation(false);
+        }
         ClearMountedPinnedFocus();
         if (restoreVisualOffset)
         {
@@ -682,6 +815,7 @@ public class PlayerController : MonoBehaviour
 
     private bool TryResolveInteractionPointExitPosition(
         Vehicle vehicle,
+        Animal animal,
         out Vector3 exitPosition)
     {
         Transform snapTarget = interactionPointSnapTarget;
@@ -691,12 +825,16 @@ public class PlayerController : MonoBehaviour
             return true;
         }
 
-        Vector3 center = vehicle != null ? vehicle.transform.position : transform.position;
+        Vector3 center = vehicle != null
+            ? vehicle.transform.position
+            : animal != null
+                ? animal.transform.position
+                : transform.position;
         Vector3 direction = snapTarget.position - center;
         direction.y = 0f;
         if (direction.sqrMagnitude <= 0.0001f)
         {
-            direction = snapTarget.right;
+            direction = animal != null ? animal.transform.right : snapTarget.right;
             direction.y = 0f;
         }
 
@@ -716,6 +854,10 @@ public class PlayerController : MonoBehaviour
         {
             MapObject.MapObjectStatus status = vehicle.Status;
             exitDistance = Mathf.Max(1, Mathf.Max(status.mapSizeX, status.mapSizeY)) * 0.5f + 0.55f;
+        }
+        else if (animal != null)
+        {
+            exitDistance = Mathf.Max(0.85f, animal.GetWorldRadius() + GetPlayerCollisionRadius());
         }
 
         Vector3 preferredExitPosition = ClampRootPositionToGroundY(
@@ -845,8 +987,10 @@ public class PlayerController : MonoBehaviour
 
         if (player == null)
         {
+            interactionPointSnapAnimal?.NotifyRiderDismounted(null);
             interactionPointSnapTarget = null;
             interactionPointSnapVehicle = null;
+            interactionPointSnapAnimal = null;
             return;
         }
 
@@ -861,8 +1005,12 @@ public class PlayerController : MonoBehaviour
         hasStandingConveyorCoordinate = false;
         standingConveyorCoordinate = default;
 
-        Vector3 targetPosition = interactionPointSnapTarget.position;
-        Quaternion targetRotation = interactionPointSnapTarget.rotation;
+        Vector3 targetPosition = interactionPointSnapAnimal != null
+            ? interactionPointSnapAnimal.RiderMountPosition
+            : interactionPointSnapTarget.position;
+        Quaternion targetRotation = interactionPointSnapAnimal != null
+            ? interactionPointSnapAnimal.transform.rotation
+            : interactionPointSnapTarget.rotation;
 
         if (cachedRigidbody != null)
         {
@@ -897,6 +1045,18 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        if (interactionPointSnapTarget == null && interactionPointSnapAnimal != null)
+        {
+            interactionPointSnapAnimal.NotifyRiderDismounted(player);
+            interactionPointSnapAnimal = null;
+            player?.SetRidingAnimation(false);
+        }
+
+        if (interactionPointSnapAnimal != null && !interactionPointSnapAnimal.IsAlive)
+        {
+            TryDismount();
+        }
+
         if (interactionPointSnapTarget != null)
         {
             ApplyInteractionPointSnap();
@@ -914,6 +1074,7 @@ public class PlayerController : MonoBehaviour
         bool isKeyboardMoveLocked = gameManager != null && gameManager.FreeCamera;
 
         Vector2 input = Vector2.zero;
+        Vector2 joystickInput = Vector2.zero;
 
         if (joystick == null)
         {
@@ -927,7 +1088,8 @@ public class PlayerController : MonoBehaviour
 
         if (joystick != null && !isInteractionLocked)
         {
-            input = joystick.InputDirection;
+            joystickInput = joystick.InputDirection;
+            input = joystickInput;
         }
 
         if (!isInteractionLocked && !isKeyboardMoveLocked)
@@ -981,6 +1143,14 @@ public class PlayerController : MonoBehaviour
                 float mountedMoveSpeed = player != null ? player.Stat.currentMoveSpeed : 0f;
                 interactionPointSnapVehicle.HandleMountedInput(moveDirection, mountedMoveSpeed, Time.deltaTime, player);
                 player?.UpdateMountedVehicleAnimation(interactionPointSnapVehicle);
+                ApplyInteractionPointSnap();
+            }
+            else if (interactionPointSnapAnimal != null)
+            {
+                interactionPointSnapAnimal.HandleMountedInput(
+                    moveDirection,
+                    IsMountedAnimalRunRequested(joystickInput),
+                    Time.deltaTime);
                 ApplyInteractionPointSnap();
             }
 
@@ -1040,7 +1210,9 @@ public class PlayerController : MonoBehaviour
         bool finishedPickThisFrame = player.UpdateAnimationState(
             hasMovement,
             GetCurrentWalkAnimationSpeed());
+        TryStartPendingAnimalKnifeAttack();
         if (animalKnifePickPending
+            && animalKnifeAnimationStarted
             && !animalKnifeDamageApplied
             && Time.time >= animalKnifeDamageTime)
         {
@@ -1048,8 +1220,10 @@ public class PlayerController : MonoBehaviour
         }
 
         if (animalKnifePickPending
-            && (Time.time >= animalKnifeInteractionEndTime
-                || Time.time >= animalKnifeInteractionTimeout))
+            && (animalKnifeAnimationStarted
+                ? Time.time >= animalKnifeInteractionEndTime
+                  || Time.time >= animalKnifeInteractionTimeout
+                : Time.time >= animalKnifeInteractionTimeout))
         {
             ClearPendingAnimalKnifeAttack();
         }
@@ -2086,7 +2260,8 @@ public class PlayerController : MonoBehaviour
 
     private void HandleInstallationPlacementLock()
     {
-        if (interactionPointSnapTarget != null && interactionPointSnapVehicle != null)
+        if (interactionPointSnapTarget != null
+            && (interactionPointSnapVehicle != null || interactionPointSnapAnimal != null))
         {
             ApplyInteractionPointSnap();
         }
@@ -2982,7 +3157,7 @@ public class PlayerController : MonoBehaviour
             return RequestCorpseHarvest(animal);
         }
 
-        if (player.IsCarrying)
+        if (!animal.CanBeAttacked || player.IsCarrying)
         {
             return false;
         }
@@ -3141,6 +3316,11 @@ public class PlayerController : MonoBehaviour
 
     public bool IsAnimalWithinKnifeInteractionRange(Animal animal)
     {
+        return IsAnimalWithinInteractionRange(animal);
+    }
+
+    public bool IsAnimalWithinInteractionRange(Animal animal)
+    {
         if (animal == null
             || !animal.gameObject.activeInHierarchy
             || player == null
@@ -3158,6 +3338,105 @@ public class PlayerController : MonoBehaviour
             MinimumAnimalKnifeInteractionRange,
             player.State.HarvestRange);
         return offset.sqrMagnitude <= interactionRange * interactionRange;
+    }
+
+    public bool TryGetNearestAutomaticInteractionAnimal(
+        bool includeCorpses,
+        out Animal animal)
+    {
+        animal = null;
+        if (player == null || interactionPointSnapTarget != null)
+        {
+            return false;
+        }
+
+        bool cachedAnimalIsValid = cachedAutomaticInteractionAnimal != null
+                                   && cachedAutomaticInteractionAnimal.gameObject.activeInHierarchy
+                                   && (cachedAutomaticInteractionAnimal.CanBeMounted
+                                       || (includeCorpses
+                                           && cachedAutomaticInteractionAnimal.CanHarvestCorpse))
+                                   && IsAnimalWithinInteractionRange(cachedAutomaticInteractionAnimal);
+        bool cachedAnimalNeedsRefresh = cachedAutomaticInteractionAnimal != null
+                                        && !cachedAnimalIsValid;
+        if (cachedAutomaticInteractionIncludesCorpses != includeCorpses
+            || Time.unscaledTime >= nextAutomaticAnimalInteractionRefreshTime
+            || cachedAnimalNeedsRefresh)
+        {
+            Transform bodyTransform = player.BodyTransform;
+            Vector3 origin = bodyTransform != null ? bodyTransform.position : transform.position;
+            float interactionRange = Mathf.Max(
+                MinimumAnimalKnifeInteractionRange,
+                player.State.HarvestRange);
+            TryFindNearestAutomaticInteractionAnimal(
+                origin,
+                interactionRange,
+                includeCorpses,
+                out cachedAutomaticInteractionAnimal);
+            cachedAutomaticInteractionIncludesCorpses = includeCorpses;
+            nextAutomaticAnimalInteractionRefreshTime =
+                Time.unscaledTime + AutomaticAnimalInteractionRefreshInterval;
+        }
+
+        animal = cachedAutomaticInteractionAnimal;
+        return animal != null;
+    }
+
+    private bool TryFindNearestAutomaticInteractionAnimal(
+        Vector3 origin,
+        float maximumDistance,
+        bool includeCorpses,
+        out Animal nearestAnimal)
+    {
+        nearestAnimal = null;
+        float resolvedDistance = Mathf.Max(0f, maximumDistance);
+        int hitCount = Physics.OverlapSphereNonAlloc(
+            origin,
+            resolvedDistance,
+            automaticAnimalInteractionOverlapBuffer,
+            Physics.AllLayers,
+            QueryTriggerInteraction.Collide);
+
+        Animal nearestRideableAnimal = null;
+        Animal nearestCorpse = null;
+        float maximumDistanceSqr = resolvedDistance * resolvedDistance;
+        float nearestRideableDistanceSqr = maximumDistanceSqr;
+        float nearestCorpseDistanceSqr = maximumDistanceSqr;
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider hit = automaticAnimalInteractionOverlapBuffer[i];
+            Animal candidate = hit != null ? hit.GetComponentInParent<Animal>() : null;
+            if (candidate == null || !candidate.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            Vector3 offset = candidate.transform.position - origin;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (candidate.CanBeMounted)
+            {
+                if (distanceSqr <= nearestRideableDistanceSqr)
+                {
+                    nearestRideableAnimal = candidate;
+                    nearestRideableDistanceSqr = distanceSqr;
+                }
+
+                continue;
+            }
+
+            if (includeCorpses
+                && candidate.CanHarvestCorpse
+                && distanceSqr <= nearestCorpseDistanceSqr)
+            {
+                nearestCorpse = candidate;
+                nearestCorpseDistanceSqr = distanceSqr;
+            }
+        }
+
+        nearestAnimal = nearestRideableAnimal != null
+            ? nearestRideableAnimal
+            : nearestCorpse;
+        return nearestAnimal != null;
     }
 
     private bool RequestCorpseHarvest(Animal corpse)
@@ -3222,7 +3501,7 @@ public class PlayerController : MonoBehaviour
         Animal targetAnimal = currentKnifeTargetAnimal;
         if (targetAnimal == null
             || !targetAnimal.gameObject.activeInHierarchy
-            || !targetAnimal.IsAlive
+            || !targetAnimal.CanBeAttacked
             || player == null
             || player.IsCarrying)
         {
@@ -3253,12 +3532,31 @@ public class PlayerController : MonoBehaviour
 
         pendingKnifeTargetAnimal = targetAnimal;
         animalKnifePickPending = true;
+        animalKnifeAnimationStarted = false;
         animalKnifeDamageApplied = false;
-        animalKnifeDamageTime = Time.time + AnimalKnifeDamageDelay;
-        animalKnifeInteractionEndTime = Time.time + PickAnimationDuration;
+        animalKnifeDamageTime = 0f;
+        animalKnifeInteractionEndTime = 0f;
         animalKnifeInteractionTimeout = Time.time + AnimalKnifeInteractionTimeout;
         player.QueuePickAnimation();
         return false;
+    }
+
+    private void TryStartPendingAnimalKnifeAttack()
+    {
+        if (!animalKnifePickPending
+            || animalKnifeAnimationStarted
+            || player == null
+            || !player.PickAnimationStartedThisFrame)
+        {
+            return;
+        }
+
+        animalKnifeAnimationStarted = true;
+        float animationStartTime = Time.time;
+        animalKnifeDamageTime = animationStartTime + AnimalKnifeDamageDelay;
+        animalKnifeInteractionEndTime = animationStartTime + PickAnimationDuration;
+        animalKnifeInteractionTimeout = animationStartTime + AnimalKnifeInteractionTimeout;
+        pendingKnifeTargetAnimal?.NotifyAttackAnimationStarted();
     }
 
     private void ApplyPendingAnimalKnifeDamage()
@@ -3269,7 +3567,7 @@ public class PlayerController : MonoBehaviour
         }
 
         animalKnifeDamageApplied = true;
-        if (pendingKnifeTargetAnimal != null && pendingKnifeTargetAnimal.IsAlive)
+        if (pendingKnifeTargetAnimal != null && pendingKnifeTargetAnimal.CanBeAttacked)
         {
             pendingKnifeTargetAnimal.TakeDamage(
                 AnimalKnifeDamage,
@@ -3286,6 +3584,7 @@ public class PlayerController : MonoBehaviour
     {
         pendingKnifeTargetAnimal = null;
         animalKnifePickPending = false;
+        animalKnifeAnimationStarted = false;
         animalKnifeDamageApplied = false;
         animalKnifeDamageTime = 0f;
         animalKnifeInteractionEndTime = 0f;
@@ -5744,6 +6043,14 @@ public class PlayerController : MonoBehaviour
         }
 
         return input.sqrMagnitude > 1f ? input.normalized : input;
+    }
+
+    private static bool IsMountedAnimalRunRequested(Vector2 joystickInput)
+    {
+        return joystickInput.sqrMagnitude
+                   >= MountedAnimalRunJoystickThreshold * MountedAnimalRunJoystickThreshold
+               || Input.GetKey(KeyCode.LeftShift)
+               || Input.GetKey(KeyCode.RightShift);
     }
 
 }

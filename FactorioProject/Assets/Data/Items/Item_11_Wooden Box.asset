@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_11_Wooden box
   m_EditorClassIdentifier: 
-  itemName: Wooden box
+  itemName: Wooden Box
   id: 24
   mapObject: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
   portableMesh: {fileID: 4300000, guid: 61d1fbf3e3aa50b4eba9e0b2ce723415, type: 2}

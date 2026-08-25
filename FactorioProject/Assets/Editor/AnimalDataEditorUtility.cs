@@ -166,6 +166,7 @@ internal static class AnimalDataEditorUtility
         int maxHerdSize,
         int spawnWeight,
         float maxHealth,
+        float riderHeight,
         AnimalAISettings aiSettings,
         IReadOnlyList<AnimalDropEntry> dropItems,
         string undoName)
@@ -196,6 +197,7 @@ internal static class AnimalDataEditorUtility
             normalizedMinHerdSize,
             normalizedMaxHerdSize);
         serializedDefinition.FindProperty("maxHealth").floatValue = Mathf.Max(1f, maxHealth);
+        serializedDefinition.FindProperty("riderHeight").floatValue = Mathf.Max(0f, riderHeight);
         SerializedProperty dropItemsProperty = serializedDefinition.FindProperty("dropItems");
         if (dropItemsProperty != null)
         {
@@ -306,6 +308,14 @@ internal static class AnimalDataEditorUtility
         else if (animal != null)
         {
             ValidateAnimalReferences(animal, issues);
+            if (definition.TryGetDeclaredGender(out Animal.AnimalGender expectedGender)
+                && animal.Gender != expectedGender)
+            {
+                issues.Add(new AnimalValidationIssue(
+                    AnimalValidationSeverity.Error,
+                    $"동물 이름의 성별({expectedGender})과 프리팹 성별({animal.Gender})이 다릅니다.",
+                    definition.AnimalPrefab));
+            }
         }
 
         return issues;

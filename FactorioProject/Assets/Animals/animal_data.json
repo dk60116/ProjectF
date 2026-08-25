@@ -1,6 +1,6 @@
 {
     "format": "ProjectF.AnimalData",
-    "version": 8,
+    "version": 9,
     "animals": [
         {
             "id": 0,
@@ -10,6 +10,7 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
+            "riderHeight": 0.699999988079071,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -60,7 +61,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 63,
+                    "itemId": 77,
                     "itemName": "Beef",
                     "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
                     "minAmount": 1,
@@ -68,7 +69,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 50,
+                    "itemId": 58,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
@@ -90,6 +91,7 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
+            "riderHeight": 0.5,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -140,7 +142,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 63,
+                    "itemId": 77,
                     "itemName": "Beef",
                     "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
                     "minAmount": 1,
@@ -148,7 +150,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 50,
+                    "itemId": 58,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
@@ -170,6 +172,7 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
+            "riderHeight": 0.5,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -220,7 +223,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 62,
+                    "itemId": 76,
                     "itemName": "Pork",
                     "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
                     "minAmount": 1,
@@ -228,7 +231,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 50,
+                    "itemId": 58,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
@@ -250,6 +253,7 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
+            "riderHeight": 0.5,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -300,7 +304,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 62,
+                    "itemId": 76,
                     "itemName": "Pork",
                     "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
                     "minAmount": 1,
@@ -308,7 +312,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 50,
+                    "itemId": 58,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,

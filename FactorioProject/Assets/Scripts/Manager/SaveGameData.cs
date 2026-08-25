@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 34;
+    public const int CurrentVersion = 36;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -69,6 +69,7 @@ public sealed class AnimalSaveEntry
     public int randomState;
     public bool hasHealth;
     public float currentHealth;
+    public bool hasSaddle;
     public bool corpseLootInitialized;
     public List<int> corpseRemainingItemIds = new List<int>();
 }
@@ -247,6 +248,7 @@ public sealed class PlayerSaveData
     public long mountedVehiclePlacementSequence;
     public Vector2Int mountedVehicleAnchorCoordinate;
     public int mountedVehiclePlayerPointIndex = -1;
+    public long mountedAnimalId;
     public long nooseLeashedAnimalId;
     public int activeTorchItemId = -1;
     public float activeTorchRemainingEnergy;

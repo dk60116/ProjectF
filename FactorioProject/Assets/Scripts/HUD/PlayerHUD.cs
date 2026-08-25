@@ -31,6 +31,7 @@ public partial class PlayerHUD : BagSlot
     private const float DefaultCraftingDurationSeconds = 5f;
     private const float CraftingAccessRefreshInterval = 0.2f;
     private const string NooseItemName = "Noose";
+    private const string SaddleItemName = "Saddle";
     private const string TorchItemName = "Torch";
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
@@ -107,6 +108,10 @@ public partial class PlayerHUD : BagSlot
     private float objectInfoPanelRefreshInterval = 0.2f;
 
     private TerrainGenerator cachedTerrainGenerator;
+    private ItemManager cachedSaddleItemManager;
+    private ItemDefinition cachedSaddleItemDefinition;
+    private Animal currentSaddleInteractionAnimal;
+    private Animal currentRideableInteractionAnimal;
     private Animal currentInteractionAnimal;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
@@ -1897,6 +1902,32 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
+        Animal mountedAnimal = playerController != null ? playerController.MountedAnimal : null;
+        if (mountedAnimal != null)
+        {
+            ClearInteractionTargets();
+            currentRideableInteractionAnimal = mountedAnimal;
+            SetActiveInteractionButton(InteractionButton, ResolveSaddleInteractionIcon(1));
+            return;
+        }
+
+        if (TryActivateSaddleInteraction(currentPlayer, playerController))
+        {
+            return;
+        }
+
+        if (TryActivateSelectedRideableAnimalInteraction(playerController))
+        {
+            return;
+        }
+
+        if (TryActivateNearestAutomaticAnimalInteraction(
+                playerController,
+                !hasHeldNoose))
+        {
+            return;
+        }
+
         if (!hasHeldNoose
             && animalInteractionIcon != null
             && TryGetClickedObjectInfoFocusedAnimal(out Animal selectedAnimal)
@@ -1927,6 +1958,138 @@ public partial class PlayerHUD : BagSlot
         }
 
         ClearContextInteractionButtonState();
+    }
+
+    private bool TryActivateSaddleInteraction(
+        Player currentPlayer,
+        PlayerController playerController)
+    {
+        if (!TryResolveSaddleEquipTarget(
+                currentPlayer,
+                playerController,
+                out Animal animal,
+                out ItemDefinition saddleDefinition))
+        {
+            return false;
+        }
+
+        ClearInteractionTargets();
+        currentSaddleInteractionAnimal = animal;
+        SetActiveInteractionButton(InteractionButton, saddleDefinition.icon);
+        return true;
+    }
+
+    private bool TryResolveSaddleEquipTarget(
+        Player currentPlayer,
+        PlayerController playerController,
+        out Animal animal,
+        out ItemDefinition saddleDefinition)
+    {
+        animal = null;
+        saddleDefinition = null;
+        if (currentPlayer == null
+            || playerController == null
+            || !playerController.TryGetNooseLeashedAnimal(out Animal leashedAnimal)
+            || !leashedAnimal.CanEquipSaddle)
+        {
+            return false;
+        }
+
+        ItemDefinition resolvedSaddle = ResolveSaddleItemDefinition();
+        PlayerBag inventoryBag = currentPlayer.GetBag();
+        if (resolvedSaddle == null
+            || inventoryBag == null
+            || inventoryBag.GetTotalItemCount(resolvedSaddle.id) <= 0)
+        {
+            return false;
+        }
+
+        animal = leashedAnimal;
+        saddleDefinition = resolvedSaddle;
+        return true;
+    }
+
+    private ItemDefinition ResolveSaddleItemDefinition()
+    {
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        if (itemManager == null)
+        {
+            cachedSaddleItemManager = null;
+            cachedSaddleItemDefinition = null;
+            return null;
+        }
+
+        if (cachedSaddleItemManager != itemManager || cachedSaddleItemDefinition == null)
+        {
+            cachedSaddleItemManager = itemManager;
+            cachedSaddleItemDefinition = ItemDefinitionLookup.ResolveByStableName(
+                itemManager.ItemDefinitions,
+                SaddleItemName);
+        }
+
+        return cachedSaddleItemDefinition;
+    }
+
+    private bool TryActivateSelectedRideableAnimalInteraction(PlayerController playerController)
+    {
+        if (playerController == null
+            || !TryGetSelectedAnimal(out Animal animal)
+            || !animal.CanBeMounted
+            || !playerController.IsAnimalWithinInteractionRange(animal))
+        {
+            return false;
+        }
+
+        ClearInteractionTargets();
+        currentRideableInteractionAnimal = animal;
+        SetActiveInteractionButton(InteractionButton, ResolveSaddleInteractionIcon(0));
+        return true;
+    }
+
+    private bool TryGetSelectedAnimal(out Animal selectedAnimal)
+    {
+        selectedAnimal = clickedObjectInfoTarget as Animal;
+        return selectedAnimal != null && selectedAnimal.gameObject.activeInHierarchy;
+    }
+
+    private bool TryActivateNearestAutomaticAnimalInteraction(
+        PlayerController playerController,
+        bool includeCorpses)
+    {
+        if (playerController == null
+            || !playerController.TryGetNearestAutomaticInteractionAnimal(
+                includeCorpses,
+                out Animal animal))
+        {
+            return false;
+        }
+
+        ClearInteractionTargets();
+        if (animal.CanBeMounted)
+        {
+            currentRideableInteractionAnimal = animal;
+            SetActiveInteractionButton(InteractionButton, ResolveSaddleInteractionIcon(0));
+            return true;
+        }
+
+        if (includeCorpses && animal.CanHarvestCorpse && animalInteractionIcon != null)
+        {
+            currentInteractionAnimal = animal;
+            SetActiveInteractionButton(InteractionButton, animalInteractionIcon);
+            return true;
+        }
+
+        return false;
+    }
+
+    private Sprite ResolveSaddleInteractionIcon(int preferredIconIndex)
+    {
+        return ResolveInteractionIcon(
+            ResolveSaddleItemDefinition(),
+            preferredIconIndex,
+            true);
     }
 
     private bool TryActivateMapObjectInteraction(MapObject mapObject)
@@ -2092,7 +2255,7 @@ public partial class PlayerHUD : BagSlot
     private static bool CanUseAnimalInteractionTarget(Animal animal, PlayerController playerController)
     {
         return animal != null
-               && (animal.IsAlive
+               && (animal.CanBeAttacked
                    || (playerController != null
                        && animal.CanHarvestCorpse
                        && playerController.IsAnimalWithinKnifeInteractionRange(animal)));
@@ -2123,6 +2286,8 @@ public partial class PlayerHUD : BagSlot
     private void ClearInteractionTargets()
     {
         bucketWaterInteractionActive = false;
+        currentSaddleInteractionAnimal = null;
+        currentRideableInteractionAnimal = null;
         currentInteractionAnimal = null;
         currentInteractionBoxObject = null;
         currentInteractionDoorObject = null;
@@ -3102,6 +3267,38 @@ public partial class PlayerHUD : BagSlot
         return playerController != null ? playerController.MountedVehicle as SteamTrain : null;
     }
 
+    private void HandleSaddleEquipInteraction(Player currentPlayer)
+    {
+        Animal expectedAnimal = currentSaddleInteractionAnimal;
+        PlayerController playerController = currentPlayer != null
+            ? currentPlayer.GetComponent<PlayerController>()
+            : null;
+        if (!TryResolveSaddleEquipTarget(
+                currentPlayer,
+                playerController,
+                out Animal leashedAnimal,
+                out ItemDefinition saddleDefinition)
+            || leashedAnimal != expectedAnimal)
+        {
+            return;
+        }
+
+        PlayerBag inventoryBag = currentPlayer.GetBag();
+        if (inventoryBag.RemoveItems(saddleDefinition.id, 1) != 1)
+        {
+            return;
+        }
+
+        if (leashedAnimal.TryEquipSaddle())
+        {
+            playerController.TryConsumeNooseLeash(leashedAnimal);
+        }
+        else
+        {
+            inventoryBag.TryAddObject(saddleDefinition.id, out _);
+        }
+    }
+
     private void HandleInteractionButtonClicked()
     {
         if (IsPlacementOrMapEditModeActive())
@@ -3113,6 +3310,30 @@ public partial class PlayerHUD : BagSlot
         if (bucketWaterInteractionActive)
         {
             HandleBucketWaterInteraction(currentPlayer);
+            UpdateInteractionButtonState();
+            return;
+        }
+
+        if (currentSaddleInteractionAnimal != null)
+        {
+            HandleSaddleEquipInteraction(currentPlayer);
+            UpdateInteractionButtonState();
+            return;
+        }
+
+        if (currentRideableInteractionAnimal != null)
+        {
+            PlayerController playerController = ResolvePlayerController();
+            if (playerController != null
+                && playerController.IsMountedOnAnimal(currentRideableInteractionAnimal))
+            {
+                playerController.TryDismount();
+            }
+            else
+            {
+                playerController?.TryMountSaddledAnimal(currentRideableInteractionAnimal);
+            }
+
             UpdateInteractionButtonState();
             return;
         }
@@ -3281,6 +3502,8 @@ public partial class PlayerHUD : BagSlot
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
                                 || bucketWaterInteractionActive
+                                || currentSaddleInteractionAnimal != null
+                                || currentRideableInteractionAnimal != null
                                 || currentInteractionAnimal != null
                                 || currentInteractionDoorObject != null
                                 || currentInteractionResource != null

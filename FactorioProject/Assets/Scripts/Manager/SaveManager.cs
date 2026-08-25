@@ -282,7 +282,7 @@ public class SaveManager : MonoBehaviour
         if (player != null && data.player != null && data.player.hasPlayer)
         {
             player.ApplyTransformState(data.player);
-            RestorePlayerMountedVehicleState(player, data.player);
+            RestorePlayerMountedState(player, data.player);
         }
 
         if (player != null && data.player != null && data.player.hasPlayer)
@@ -314,7 +314,7 @@ public class SaveManager : MonoBehaviour
         }
     }
 
-    private void RestorePlayerMountedVehicleState(Player player, PlayerSaveData playerSaveData)
+    private void RestorePlayerMountedState(Player player, PlayerSaveData playerSaveData)
     {
         if (player == null || playerSaveData == null)
         {
@@ -324,6 +324,16 @@ public class SaveManager : MonoBehaviour
         PlayerController playerController = player.GetComponent<PlayerController>();
         if (playerController == null)
         {
+            return;
+        }
+
+        if (playerSaveData.mountedAnimalId != 0L)
+        {
+            if (!playerController.TryRestoreMountedAnimal(playerSaveData.mountedAnimalId))
+            {
+                playerController.ClearInteractionPointSnapForLoad();
+            }
+
             return;
         }
 

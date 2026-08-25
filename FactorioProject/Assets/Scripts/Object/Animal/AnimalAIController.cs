@@ -40,6 +40,10 @@ public sealed class AnimalAIController : MonoBehaviour
     private const float MaximumCrowdSteering = 0.65f;
     private const float NavigationProgressEpsilon = 0.04f;
     private const float HerdReturnRetryDelay = 5f;
+    private const float MountedRunSpeedMultiplier = 1.5f;
+    private const float MountedMovementDirectionEpsilonSqr = 0.0000001f;
+    private const float HealthRecoveryFractionPerSecond = 0.05f;
+    private const float PostAggroHealthRecoveryDelay = 1f;
 
     private static readonly float[] AvoidanceAngles =
     {
@@ -94,7 +98,9 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool configured;
     private bool executionActive;
     private bool nooseLeashed;
+    private Player mountedRider;
     private float scheduledTickAccumulator;
+    private float scheduledRecoveryElapsedTime;
     private float scheduledTickPhase;
     private bool scheduledTickPhaseApplied;
     private Vector3 presentationStartPosition;
@@ -126,6 +132,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private Vector3 terrainEscapeTarget;
     private Vector3 fleeThreatPosition;
     private bool hasFleeThreat;
+    private float postAggroHealthRecoveryDelayRemaining = -1f;
     private int fleeRouteAttemptOffset;
     private int forcedThreatPulseCount;
     private Collider[] animalColliders;
@@ -163,6 +170,8 @@ public sealed class AnimalAIController : MonoBehaviour
     public bool IsInteracted => terrainInstance != null && terrainInstance.HasInteracted;
     public bool IsExecuting => executionActive;
     public bool IsNooseLeashed => nooseLeashed;
+    public bool HasMountedRider => mountedRider != null;
+    private bool IsExternallyControlled => nooseLeashed || mountedRider != null;
     public float NooseMovementSpeed => configured && animal != null && animal.IsAlive
         ? GetEffectiveMoveSpeed()
         : 0f;
@@ -223,6 +232,11 @@ public sealed class AnimalAIController : MonoBehaviour
         AnimalAIWorld.Register(this);
     }
 
+    private void LateUpdate()
+    {
+        ApplyMountedRotation();
+    }
+
     private void OnDestroy()
     {
         AnimalAIWorld.Unregister(this);
@@ -280,8 +294,10 @@ public sealed class AnimalAIController : MonoBehaviour
         smoothedSeparation = Vector3.zero;
         crowdSnapshotValid = false;
         nooseLeashed = false;
+        mountedRider = null;
         waitingForStandUp = false;
         hasFleeThreat = false;
+        postAggroHealthRecoveryDelayRemaining = -1f;
         herdReturnRetryCooldown = 0f;
         herdReturnTargetActive = false;
         preferReachableFallbackTarget = false;
@@ -306,7 +322,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public bool QueueScheduledTick(float deltaTime, float interval)
     {
-        if (!configured || !executionActive || nooseLeashed || deltaTime <= 0f)
+        if (!configured || !executionActive || IsExternallyControlled || deltaTime <= 0f)
         {
             return false;
         }
@@ -319,6 +335,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         scheduledTickAccumulator += deltaTime;
+        scheduledRecoveryElapsedTime += deltaTime;
         if (scheduledTickAccumulator < resolvedInterval)
         {
             return false;
@@ -329,18 +346,20 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public bool ExecuteScheduledTick()
     {
-        if (!configured || !executionActive || nooseLeashed || scheduledTickAccumulator <= 0f)
+        if (!configured || !executionActive || IsExternallyControlled || scheduledTickAccumulator <= 0f)
         {
             return false;
         }
 
         float simulationDelta = Mathf.Min(scheduledTickAccumulator, 0.2f);
+        float recoveryElapsedTime = scheduledRecoveryElapsedTime;
         scheduledTickAccumulator = 0f;
+        scheduledRecoveryElapsedTime = 0f;
         EnsureSimulationPoseInitialized();
         Vector3 framePosition = transform.position;
         Quaternion frameRotation = transform.rotation;
         transform.SetPositionAndRotation(simulationPosition, simulationRotation);
-        TickSimulation(simulationDelta, true);
+        TickSimulation(simulationDelta, recoveryElapsedTime, true);
         Vector3 nextSimulationPosition = transform.position;
         Quaternion nextSimulationRotation = transform.rotation;
         simulationPosition = nextSimulationPosition;
@@ -367,7 +386,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public void TickPresentation(float deltaTime)
     {
-        if (nooseLeashed || !presentationActive || deltaTime <= 0f)
+        if (IsExternallyControlled || !presentationActive || deltaTime <= 0f)
         {
             return;
         }
@@ -400,21 +419,21 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public void TickBackground(float deltaTime)
     {
-        if (!configured || nooseLeashed || !IsInteracted || deltaTime <= 0f)
+        if (!configured || IsExternallyControlled || !IsInteracted || deltaTime <= 0f)
         {
             return;
         }
 
         EnsureSimulationPoseInitialized();
         transform.SetPositionAndRotation(simulationPosition, simulationRotation);
-        TickSimulation(deltaTime, false);
+        TickSimulation(deltaTime, deltaTime, false);
         simulationPosition = transform.position;
         simulationRotation = transform.rotation;
     }
 
     public void SetBehaviorExecutionActive(bool active)
     {
-        active &= !nooseLeashed;
+        active &= !IsExternallyControlled;
         if (executionActive == active)
         {
             return;
@@ -454,7 +473,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return true;
         }
 
-        if (!configured || animal == null || !animal.IsAlive)
+        if (!configured || animal == null || !animal.IsAlive || mountedRider != null)
         {
             return false;
         }
@@ -483,6 +502,139 @@ public sealed class AnimalAIController : MonoBehaviour
         }
         animal.MarkTerrainInteraction();
         return true;
+    }
+
+    public bool SetMountedRider(Player rider)
+    {
+        if (rider == null)
+        {
+            if (mountedRider == null)
+            {
+                return true;
+            }
+
+            mountedRider = null;
+            currentState = AnimalAIState.Idle;
+            stateTimeRemaining = 0f;
+            hasTarget = false;
+            movingToActivity = false;
+            hasFleeThreat = false;
+            waitingForStandUp = false;
+            ResetNavigation();
+            ResetScheduledTick();
+            ResetPresentation();
+            InitializeSimulationPose();
+            ApplyAnimation(0f);
+            return true;
+        }
+
+        if (!configured
+            || animal == null
+            || !animal.IsAlive
+            || nooseLeashed
+            || (mountedRider != null && mountedRider != rider))
+        {
+            return false;
+        }
+
+        bool wasResting = currentState == AnimalAIState.Rest || waitingForStandUp;
+        mountedRider = rider;
+        executionActive = false;
+        currentState = AnimalAIState.Idle;
+        stateTimeRemaining = 0f;
+        hasTarget = false;
+        movingToActivity = false;
+        hasFleeThreat = false;
+        waitingForStandUp = wasResting;
+        smoothedSeparation = Vector3.zero;
+        ResetNavigation();
+        ResetScheduledTick();
+        ResetPresentation();
+        InitializeSimulationPose();
+        if (wasResting)
+        {
+            animal.WakeFromRest();
+        }
+        else
+        {
+            ApplyAnimation(0f);
+        }
+
+        animal.MarkTerrainInteraction();
+        return true;
+    }
+
+    public bool TryMoveMounted(
+        Vector3 worldMoveDirection,
+        bool runRequested,
+        float deltaTime)
+    {
+        if (mountedRider == null
+            || !configured
+            || animal == null
+            || !animal.IsAlive
+            || deltaTime <= 0f)
+        {
+            return false;
+        }
+
+        EnsureSimulationPoseInitialized();
+        if (WaitForStandUpBeforeMovement(true))
+        {
+            ApplyAnimation(0f);
+            return false;
+        }
+
+        worldMoveDirection.y = 0f;
+        float rawInputMagnitude = worldMoveDirection.magnitude;
+        float inputMagnitude = Mathf.Clamp01(rawInputMagnitude);
+        if (inputMagnitude <= 0.01f)
+        {
+            ApplyAnimation(0f);
+            return false;
+        }
+
+        worldMoveDirection /= rawInputMagnitude;
+        bool isRunning = runRequested;
+        float movementSpeed = GetEffectiveMoveSpeed()
+                              * inputMagnitude
+                              * (isRunning ? MountedRunSpeedMultiplier : 1f);
+        Vector3 previousPosition = simulationPosition;
+        if (!TryApplyPlayerPush(
+                previousPosition - worldMoveDirection,
+                worldMoveDirection,
+                movementSpeed * deltaTime))
+        {
+            ApplyAnimation(0f);
+            return false;
+        }
+
+        Vector3 movedDirection = simulationPosition - previousPosition;
+        movedDirection.y = 0f;
+        if (movedDirection.sqrMagnitude > MountedMovementDirectionEpsilonSqr)
+        {
+            movedDirection.Normalize();
+            Quaternion targetRotation = Quaternion.LookRotation(movedDirection, Vector3.up);
+            float turnSpeed = settings != null ? settings.TurnSpeed : 360f;
+            // Mounted movement is frame-driven, so capping delta time would slow
+            // real-time turning whenever a player build runs below 30 FPS.
+            simulationRotation = Quaternion.RotateTowards(
+                simulationRotation,
+                targetRotation,
+                Mathf.Max(90f, turnSpeed) * deltaTime);
+            ApplyMountedRotation();
+        }
+
+        ApplyAnimation(movementSpeed, isRunning);
+        return true;
+    }
+
+    private void ApplyMountedRotation()
+    {
+        if (mountedRider != null && simulationPoseInitialized)
+        {
+            transform.rotation = simulationRotation;
+        }
     }
 
     public bool TryPullNooseToward(
@@ -550,6 +702,7 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         RestoreAnimalColliderLayers();
         nooseLeashed = false;
+        mountedRider = null;
         configured = false;
         executionActive = false;
         waitingForStandUp = false;
@@ -567,6 +720,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private void ResetScheduledTick()
     {
         scheduledTickAccumulator = 0f;
+        scheduledRecoveryElapsedTime = 0f;
         scheduledTickPhaseApplied = false;
         uint phaseHash = randomState * 2654435761u;
         scheduledTickPhase = (phaseHash & 1023u) / 1024f;
@@ -828,7 +982,10 @@ public sealed class AnimalAIController : MonoBehaviour
         entry.randomState = unchecked((int)randomState);
     }
 
-    private void TickSimulation(float deltaTime, bool useLiveCollision)
+    private void TickSimulation(
+        float deltaTime,
+        float elapsedTime,
+        bool useLiveCollision)
     {
         if (animal != null && !animal.IsAlive)
         {
@@ -863,6 +1020,8 @@ public sealed class AnimalAIController : MonoBehaviour
             BeginNextBehavior(useLiveCollision);
         }
 
+        RecoverHealthWhenCalm(elapsedTime);
+
         if (WaitForStandUpBeforeMovement(useLiveCollision))
         {
             return;
@@ -887,6 +1046,56 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         ApplyAnimation(moved ? GetEffectiveMoveSpeed() : 0f);
+    }
+
+    private void RecoverHealthWhenCalm(float elapsedTime)
+    {
+        if (elapsedTime <= 0f
+            || animal == null
+            || !animal.IsAlive
+            || currentState == AnimalAIState.Flee)
+        {
+            return;
+        }
+
+        if (animal.CurrentHealth >= animal.MaxHealth)
+        {
+            postAggroHealthRecoveryDelayRemaining = -1f;
+            return;
+        }
+
+        bool activelyResting = currentState == AnimalAIState.Rest
+                               && !movingToActivity
+                               && !hasTarget
+                               && IsNightTime();
+        float recoveryElapsedTime = 0f;
+        if (postAggroHealthRecoveryDelayRemaining >= 0f)
+        {
+            float delayBeforeTick = postAggroHealthRecoveryDelayRemaining;
+            postAggroHealthRecoveryDelayRemaining = Mathf.Max(
+                0f,
+                delayBeforeTick - elapsedTime);
+            recoveryElapsedTime = Mathf.Max(0f, elapsedTime - delayBeforeTick);
+        }
+
+        if (activelyResting)
+        {
+            recoveryElapsedTime = elapsedTime;
+        }
+
+        if (recoveryElapsedTime <= 0f)
+        {
+            return;
+        }
+
+        float recovery = animal.MaxHealth
+                         * HealthRecoveryFractionPerSecond
+                         * recoveryElapsedTime;
+        animal.Heal(recovery, markTerrainInteraction: false);
+        if (animal.CurrentHealth >= animal.MaxHealth)
+        {
+            postAggroHealthRecoveryDelayRemaining = -1f;
+        }
     }
 
     private void FaceDrinkWater(float deltaTime)
@@ -1122,6 +1331,7 @@ public sealed class AnimalAIController : MonoBehaviour
         fleeThreatPosition = threatPosition;
         fleeThreatPosition.y = transform.position.y;
         hasFleeThreat = true;
+        postAggroHealthRecoveryDelayRemaining = PostAggroHealthRecoveryDelay;
         fleeRouteAttemptOffset = 0;
         waitingForStandUp = wasResting;
         movingToActivity = false;
@@ -2632,7 +2842,10 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         if (hit == null
             || hit.transform.IsChildOf(transform)
-            || transform.IsChildOf(hit.transform))
+            || transform.IsChildOf(hit.transform)
+            || mountedRider != null
+               && (hit.transform.IsChildOf(mountedRider.transform)
+                   || mountedRider.transform.IsChildOf(hit.transform)))
         {
             return true;
         }
@@ -2718,7 +2931,7 @@ public sealed class AnimalAIController : MonoBehaviour
         return settings.MoveSpeed * ageMultiplier * genderMultiplier;
     }
 
-    private void ApplyAnimation(float speed)
+    private void ApplyAnimation(float speed, bool isRunning = false)
     {
         if (animal == null)
         {
@@ -2733,7 +2946,8 @@ public sealed class AnimalAIController : MonoBehaviour
             performingActivity && currentState == AnimalAIState.Drink,
             performingActivity && currentState == AnimalAIState.Rest && IsNightTime(),
             performingActivity && currentState == AnimalAIState.LookAround,
-            currentState == AnimalAIState.Flee && resolvedSpeed > 0.01f);
+            currentState == AnimalAIState.Flee && resolvedSpeed > 0.01f,
+            isRunning);
     }
 
     private static bool IsNightTime()

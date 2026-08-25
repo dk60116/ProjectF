@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_48_Paper
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Paper
-  id: 61
+  id: 62
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
   portableMat: {fileID: 2100000, guid: 0c4a043b4dda42944ba6d43e8e105327, type: 2}

@@ -68,6 +68,12 @@ public sealed class NooseThrowVisual : MonoBehaviour
         return true;
     }
 
+    public bool TryGetAttachedAnimal(out Animal animal)
+    {
+        animal = HasAttachedAnimal ? leashedAnimal : null;
+        return animal != null;
+    }
+
     public bool TryAttachExisting(
         Animal animal,
         AnimalAIController controller)
@@ -98,7 +104,7 @@ public sealed class NooseThrowVisual : MonoBehaviour
         attachedAnimalMoved = false;
         if (hadRetainedTetherItem)
         {
-            tetherBag.ClearSlotMinimumRetainedCount(0, !shouldConsumeTetherItem);
+            tetherBag.ClearSlotMinimumRetainedCount(0);
         }
 
         retainsHandItem = false;

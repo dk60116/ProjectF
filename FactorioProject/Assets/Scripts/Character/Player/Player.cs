@@ -11,6 +11,7 @@ public class Player : Character
     private static readonly int MoveAnimationSpeedHash = Animator.StringToHash("fMoveSpeed");
     private static readonly int HandcartMountedHash = Animator.StringToHash("bHandcartMounted");
     private static readonly int HandcartDirectionHash = Animator.StringToHash("fHandcartDirection");
+    private static readonly int RidingHash = Animator.StringToHash("bRiding");
     private const string PickStateName = "Pick";
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
@@ -62,6 +63,7 @@ public class Player : Character
     private int pendingPickTriggerCount;
     private bool wasPickStateActiveLastFrame;
     private bool handcartAnimationActive;
+    private bool ridingAnimationActive;
 
     [SerializeField]
     private List<PlayerBag> bagList;
@@ -598,14 +600,45 @@ public class Player : Character
         animator.SetFloat(MoveAnimationSpeedHash, 1f);
     }
 
+    public void SetRidingAnimation(bool active)
+    {
+        if (ridingAnimationActive == active && animator != null)
+        {
+            return;
+        }
+
+        if (animator == null)
+        {
+            animator = GetComponentInChildren<Animator>();
+        }
+
+        ridingAnimationActive = active;
+        if (animator == null)
+        {
+            return;
+        }
+
+        if (active)
+        {
+            ClearMountedVehicleAnimation();
+            ClearQueuedPickAnimations();
+            animator.ResetTrigger(PickHash);
+            animator.ResetTrigger(ThrowHash);
+            animator.SetBool(MoveHash, false);
+        }
+
+        animator.SetBool(RidingHash, active);
+    }
+
     public bool UpdateAnimationState(bool shouldRun, float movementAnimationSpeed = 1f)
     {
+        PickAnimationStartedThisFrame = false;
         if (animator == null)
         {
             return false;
         }
 
-        if (handcartAnimationActive)
+        if (handcartAnimationActive || ridingAnimationActive)
         {
             return false;
         }
@@ -614,9 +647,11 @@ public class Player : Character
             MoveAnimationSpeedHash,
             Mathf.Max(0f, movementAnimationSpeed));
         bool isPickActive = IsPickStateActive();
+        PickAnimationStartedThisFrame = isPickActive && !wasPickStateActiveLastFrame;
 
         if (shouldRun && isPickActive)
         {
+            PickAnimationStartedThisFrame = false;
             InterruptPickAnimation(true);
             wasPickStateActiveLastFrame = false;
             animator.SetBool(MoveHash, true);
@@ -653,6 +688,7 @@ public class Player : Character
     }
 
     public bool IsCarrying => isCarrying;
+    public bool PickAnimationStartedThisFrame { get; private set; }
 
     private bool HasVisibleHandObject()
     {
@@ -773,6 +809,11 @@ public class Player : Character
             saveData.mountedVehiclePlacementSequence = mountedVehicle.RuntimePlacementSequence;
             saveData.mountedVehicleAnchorCoordinate = mountedVehicle.RuntimeAnchorCoordinate;
             saveData.mountedVehiclePlayerPointIndex = playerPointIndex;
+        }
+        else if (playerController != null
+                 && playerController.TryGetMountedAnimalId(out long mountedAnimalId))
+        {
+            saveData.mountedAnimalId = mountedAnimalId;
         }
 
         if (playerController != null

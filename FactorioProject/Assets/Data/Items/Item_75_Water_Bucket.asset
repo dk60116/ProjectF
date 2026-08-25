@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_75_Water_Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Water Bucket
-  id: 89
+  id: 90
   mapObject: {fileID: 3525437405879595132, guid: 1bdc2cf4c67c4d27941cd3bbf8ff1f0b, type: 3}
   portableMesh: {fileID: 4300000, guid: a8daed3521a70e44c93714f5f9b246c6, type: 2}
   portableMat: {fileID: 2100000, guid: 5e4d29ac17e2fc64eae3a00225731388, type: 2}

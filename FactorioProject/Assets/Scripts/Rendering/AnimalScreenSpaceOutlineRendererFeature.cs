@@ -88,7 +88,9 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
         compositeMaterial = compositeShader != null ? CoreUtils.CreateEngineMaterial(compositeShader) : null;
         outlinePass = new AnimalOutlinePass(maskMaterial, compositeMaterial)
         {
-            renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing
+            // World-space health bars are transparent UI. Composite the outline
+            // first so the health bar is rendered above it.
+            renderPassEvent = RenderPassEvent.BeforeRenderingTransparents
         };
     }
 

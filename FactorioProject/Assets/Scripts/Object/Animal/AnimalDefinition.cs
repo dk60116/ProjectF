@@ -81,6 +81,7 @@ public sealed class AnimalDefinition : ScriptableObject
     public const int DefaultMaxHerdSize = 6;
     public const int DefaultSpawnWeight = DefaultMinHerdSize;
     public const float DefaultMaxHealth = 100f;
+    public const float DefaultRiderHeight = 0.5f;
 
     [SerializeField, Min(-1)] private int id = -1;
     [SerializeField] private string animalName = string.Empty;
@@ -89,6 +90,9 @@ public sealed class AnimalDefinition : ScriptableObject
     [SerializeField, Min(1)] private int maxHerdSize = DefaultMaxHerdSize;
     [SerializeField, Min(1)] private int spawnWeight = DefaultSpawnWeight;
     [SerializeField, Min(1f)] private float maxHealth = DefaultMaxHealth;
+    [SerializeField, Min(0f)]
+    [Tooltip("Age 10 동물의 루트 위치를 기준으로 한 플레이어 탑승 높이입니다. 실제 높이는 BabyScale부터 성체 배율까지의 성장값에 맞춰 적용됩니다.")]
+    private float riderHeight = DefaultRiderHeight;
     [SerializeField] private List<AnimalDropEntry> dropItems = new List<AnimalDropEntry>();
     [SerializeField] private GameObject animalPrefab;
     [SerializeField] private Sprite adultIcon;
@@ -102,12 +106,72 @@ public sealed class AnimalDefinition : ScriptableObject
     public int MaxHerdSize => maxHerdSize;
     public int SpawnWeight => spawnWeight;
     public float MaxHealth => Mathf.Max(1f, maxHealth);
+    public float RiderHeight => Mathf.Max(0f, riderHeight);
     public IReadOnlyList<AnimalDropEntry> DropItems =>
         dropItems ??= new List<AnimalDropEntry>();
     public GameObject AnimalPrefab => animalPrefab;
     public Sprite AdultIcon => adultIcon;
     public Sprite ChildIcon => childIcon;
     public AnimalAISettings AISettings => aiSettings ??= new AnimalAISettings();
+    public string SpeciesName
+    {
+        get
+        {
+            string resolvedName = animalName?.Trim() ?? string.Empty;
+            return TryGetGenderSuffix(
+                    resolvedName,
+                    out _,
+                    out int suffixLength)
+                ? resolvedName.Substring(0, resolvedName.Length - suffixLength).Trim()
+                : resolvedName;
+        }
+    }
+
+    public bool TryGetDeclaredGender(out Animal.AnimalGender gender)
+    {
+        return TryGetGenderSuffix(
+            animalName?.Trim() ?? string.Empty,
+            out gender,
+            out _);
+    }
+
+    private static bool TryGetGenderSuffix(
+        string value,
+        out Animal.AnimalGender gender,
+        out int suffixLength)
+    {
+        if (value.EndsWith(" Female", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = Animal.AnimalGender.Female;
+            suffixLength = " Female".Length;
+            return true;
+        }
+
+        if (value.EndsWith("_Female", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = Animal.AnimalGender.Female;
+            suffixLength = "_Female".Length;
+            return true;
+        }
+
+        if (value.EndsWith(" Male", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = Animal.AnimalGender.Male;
+            suffixLength = " Male".Length;
+            return true;
+        }
+
+        if (value.EndsWith("_Male", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = Animal.AnimalGender.Male;
+            suffixLength = "_Male".Length;
+            return true;
+        }
+
+        gender = default;
+        suffixLength = 0;
+        return false;
+    }
 
     public static float EvaluateSpawnAgeWeight(int age, int preferredAge)
     {
@@ -140,6 +204,7 @@ public sealed class AnimalDefinition : ScriptableObject
         maxHerdSize = Mathf.Max(minHerdSize, maxHerdSize);
         spawnWeight = Mathf.Clamp(spawnWeight, minHerdSize, maxHerdSize);
         maxHealth = Mathf.Max(1f, maxHealth);
+        riderHeight = Mathf.Max(0f, riderHeight);
         dropItems ??= new List<AnimalDropEntry>();
         for (int i = 0; i < dropItems.Count; i++)
         {

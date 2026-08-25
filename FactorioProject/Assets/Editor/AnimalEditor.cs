@@ -31,6 +31,7 @@ public sealed class AnimalEditor : Editor
         EditorGUILayout.LabelField("Components", EditorStyles.boldLabel);
         DrawEditableProperty("anim", "Animator");
         DrawEditableProperty("capsuleCollider", "Capsule Collider");
+        DrawEditableProperty("saddleObject", "Saddle Object");
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Identity", EditorStyles.boldLabel);
@@ -39,6 +40,7 @@ public sealed class AnimalEditor : Editor
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Growth Preview", EditorStyles.boldLabel);
         DrawEditableProperty("DinoAge", "Age");
+        DrawUniformScaleProperty("adultScale", "Adult Scale");
         DrawEditableProperty("BaseScale", "Base Scale");
         DrawEditableProperty("BabyScale", "Baby Scale");
         serializedObject.ApplyModifiedProperties();
@@ -99,6 +101,25 @@ public sealed class AnimalEditor : Editor
         if (property != null)
         {
             EditorGUILayout.PropertyField(property, new GUIContent(label));
+        }
+    }
+
+    private void DrawUniformScaleProperty(string propertyName, string label)
+    {
+        SerializedProperty property = serializedObject.FindProperty(propertyName);
+        if (property == null)
+        {
+            return;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        float scale = EditorGUILayout.FloatField(
+            new GUIContent(label, "Age 10 기준으로 X, Y, Z에 동일하게 적용되는 모델 크기입니다."),
+            property.vector3Value.x);
+        if (EditorGUI.EndChangeCheck())
+        {
+            scale = Mathf.Max(0f, scale);
+            property.vector3Value = Vector3.one * scale;
         }
     }
 }

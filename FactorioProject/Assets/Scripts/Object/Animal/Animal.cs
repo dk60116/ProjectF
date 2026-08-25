@@ -7,8 +7,16 @@ using UnityEditor;
 
 public class Animal : MonoBehaviour
 {
+    [SerializeField]
+    private GameObject saddleObject;
+
     private const int DeathAnimationState = 6;
+    private const int FleeAnimationState = 8;
+    private const int WalkAnimationState = 12;
+    private const int RunAnimationState = 15;
     private const int WakeAnimationState = 17;
+    private const float MinimumAttackAge = 4f;
+    private const float MinimumSaddleAge = 7f;
     private const float StandUpCompletionNormalizedTime = 0.95f;
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int IsEatingHash = Animator.StringToHash("IsEating");
@@ -49,6 +57,7 @@ public class Animal : MonoBehaviour
     [SerializeField] private SkinnedMeshRenderer dinoRenderer;
 
     private SkinnedMeshRenderer outlineRenderer;
+    private Renderer[] saddleOutlineRenderers;
     private bool hoverOutlineVisible;
     private bool focusedOutlineVisible;
     private MaterialPropertyBlock herdDebugPropertyBlock;
@@ -62,6 +71,9 @@ public class Animal : MonoBehaviour
     private int corpseLootIndex;
     private bool corpseLootInitialized;
     private bool corpseHarvestStepPrepared;
+    private bool saddleEquipped;
+    private Player mountedRider;
+    private AnimalAIController cachedAIController;
 
     public GameObject Eye;
     private GameObject eyeLeftGO;
@@ -82,7 +94,8 @@ public class Animal : MonoBehaviour
     [SerializeField] private Transform oldDinoLeftEye;
     [SerializeField] private Transform oldDinoRightEye;
 
-    [SerializeField, HideInInspector] private Vector3 adultScale;
+    [Tooltip("The model scale used when the animal reaches age 10.")]
+    [SerializeField] private Vector3 adultScale;
     private bool growthInitialized;
 
     public AnimalGender Gender => animalGender;
@@ -102,6 +115,40 @@ public class Animal : MonoBehaviour
     }
     public float NormalizedHealth => MaxHealth > 0f ? CurrentHealth / MaxHealth : 0f;
     public bool IsAlive => CurrentHealth > 0f && !deathHandled;
+    public bool CanBeAttacked => IsAlive && DinoAge >= MinimumAttackAge;
+    public bool IsSaddleEquipped => saddleEquipped;
+    public bool CanEquipSaddle => saddleObject != null
+                                  && IsAlive
+                                  && !saddleEquipped
+                                  && DinoAge >= MinimumSaddleAge;
+    public bool CanBeMounted => saddleEquipped && IsAlive && mountedRider == null;
+    public Transform SaddleMountPoint => saddleObject != null ? saddleObject.transform : null;
+    public Vector3 RiderMountPosition
+    {
+        get
+        {
+            Transform mountPoint = SaddleMountPoint;
+            if (mountPoint == null)
+            {
+                return transform.position;
+            }
+
+            Vector3 mountPosition = mountPoint.position;
+            mountPosition.y = transform.position.y + RiderHeight;
+            return mountPosition;
+        }
+    }
+    private float RiderHeight
+    {
+        get
+        {
+            float adultRiderHeight = animalDefinition != null
+                ? animalDefinition.RiderHeight
+                : AnimalDefinition.DefaultRiderHeight;
+            float normalizedAge = Mathf.Clamp01(DinoAge / AnimalDefinition.MaxSpawnAge);
+            return adultRiderHeight * EvaluateGrowthScale(normalizedAge);
+        }
+    }
     public bool CanHarvestCorpse => !IsAlive && gameObject.activeInHierarchy;
     public bool HasTerrainInteraction
     {
@@ -126,6 +173,10 @@ public class Animal : MonoBehaviour
         if (definition != null)
         {
             animalDefinition = definition;
+            if (definition.TryGetDeclaredGender(out AnimalGender declaredGender))
+            {
+                animalGender = declaredGender;
+            }
         }
 
         RestoreCorpseLootState(restoredState);
@@ -135,6 +186,7 @@ public class Animal : MonoBehaviour
         healthInitialized = true;
         deathHandled = false;
         wakeFromRestRequested = false;
+        SetSaddleEquipped(restoredState != null && restoredState.hasSaddle);
         EnsureWorldHealthBar();
         if (currentHealth <= 0f)
         {
@@ -192,7 +244,7 @@ public class Animal : MonoBehaviour
         return previousHealth - currentHealth;
     }
 
-    public float Heal(float amount)
+    public float Heal(float amount, bool markTerrainInteraction = true)
     {
         EnsureHealthInitialized();
         if (amount <= 0f || currentHealth <= 0f || deathHandled)
@@ -204,7 +256,11 @@ public class Animal : MonoBehaviour
         currentHealth = Mathf.Min(MaxHealth, currentHealth + amount);
         if (currentHealth > previousHealth)
         {
-            MarkTerrainInteraction();
+            if (markTerrainInteraction)
+            {
+                MarkTerrainInteraction();
+            }
+
             if (worldHealthBar != null)
             {
                 worldHealthBar.Refresh();
@@ -224,12 +280,102 @@ public class Animal : MonoBehaviour
         EnsureHealthInitialized();
         entry.hasHealth = true;
         entry.currentHealth = currentHealth;
+        entry.hasSaddle = saddleEquipped;
         entry.corpseLootInitialized = corpseLootInitialized;
         entry.corpseRemainingItemIds ??= new List<int>();
         entry.corpseRemainingItemIds.Clear();
         for (int i = corpseLootIndex; corpseLootItemIds != null && i < corpseLootItemIds.Count; i++)
         {
             entry.corpseRemainingItemIds.Add(corpseLootItemIds[i]);
+        }
+    }
+
+    public bool TryEquipSaddle()
+    {
+        if (!CanEquipSaddle)
+        {
+            return false;
+        }
+
+        SetSaddleEquipped(true);
+        MarkTerrainInteraction();
+        return true;
+    }
+
+    public bool TryMount(Player targetPlayer, PlayerController playerController)
+    {
+        Transform mountPoint = SaddleMountPoint;
+        AnimalAIController aiController = ResolveAIController();
+        if (!CanBeMounted
+            || targetPlayer == null
+            || playerController == null
+            || mountPoint == null
+            || aiController == null
+            || !aiController.SetMountedRider(targetPlayer))
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        terrain?.PinMountedAnimal(this);
+        if (!playerController.TrySnapBodyToAnimalMountPoint(mountPoint, this))
+        {
+            aiController.SetMountedRider(null);
+            terrain?.ReleaseMountedAnimal(this);
+            return false;
+        }
+
+        mountedRider = targetPlayer;
+        MarkTerrainInteraction();
+        return true;
+    }
+
+    public void HandleMountedInput(
+        Vector3 worldMoveDirection,
+        bool runRequested,
+        float deltaTime)
+    {
+        ResolveAIController()?.TryMoveMounted(worldMoveDirection, runRequested, deltaTime);
+    }
+
+    public void NotifyRiderDismounted(Player rider)
+    {
+        if (mountedRider != null && rider != null && mountedRider != rider)
+        {
+            return;
+        }
+
+        mountedRider = null;
+        ResolveAIController()?.SetMountedRider(null);
+        TerrainGenerator.ResolveActive()?.ReleaseMountedAnimal(this);
+    }
+
+    private AnimalAIController ResolveAIController()
+    {
+        if (cachedAIController == null)
+        {
+            cachedAIController = GetComponentInParent<AnimalAIController>();
+        }
+
+        return cachedAIController;
+    }
+
+    private void SetSaddleEquipped(bool equipped)
+    {
+        saddleEquipped = equipped && saddleObject != null;
+        if (saddleObject != null && saddleObject.activeSelf != saddleEquipped)
+        {
+            saddleObject.SetActive(saddleEquipped);
+        }
+
+        CacheSaddleOutlineRenderers();
+    }
+
+    private void CacheSaddleOutlineRenderers()
+    {
+        if (saddleObject != null && saddleOutlineRenderers == null)
+        {
+            saddleOutlineRenderers = saddleObject.GetComponentsInChildren<Renderer>(true);
         }
     }
 
@@ -325,6 +471,22 @@ public class Animal : MonoBehaviour
         return dinoRenderer != null ? dinoRenderer.bounds.center : transform.position;
     }
 
+    public float GetWorldRadius()
+    {
+        if (dinoRenderer == null)
+        {
+            dinoRenderer = FindGrowthRenderer();
+        }
+
+        if (dinoRenderer == null)
+        {
+            return 0.5f;
+        }
+
+        Vector3 extents = dinoRenderer.bounds.extents;
+        return Mathf.Max(0.25f, Mathf.Max(extents.x, extents.z));
+    }
+
     private void EnsureHealthInitialized()
     {
         if (healthInitialized)
@@ -343,7 +505,6 @@ public class Animal : MonoBehaviour
         if (worldHealthBar != null)
         {
             worldHealthBar.Refresh();
-            worldHealthBar.SetVisible(focusedOutlineVisible);
             return;
         }
 
@@ -353,10 +514,17 @@ public class Animal : MonoBehaviour
         }
 
         worldHealthBar = AnimalWorldHealthBar.Create(this, dinoRenderer);
-        if (worldHealthBar != null)
+    }
+
+    public void NotifyAttackAnimationStarted()
+    {
+        if (!IsAlive)
         {
-            worldHealthBar.SetVisible(focusedOutlineVisible);
+            return;
         }
+
+        EnsureWorldHealthBar();
+        worldHealthBar?.NotifyAttackAnimationStarted();
     }
 
     private void HandleDeath()
@@ -525,6 +693,13 @@ public class Animal : MonoBehaviour
 
     private void Awake()
     {
+        if (saddleObject == null)
+        {
+            Transform saddleTransform = FindDescendantByExactName(transform, "Saddle");
+            saddleObject = saddleTransform != null ? saddleTransform.gameObject : null;
+        }
+
+        SetSaddleEquipped(false);
         anim = GetComponent<Animator>();
         if (anim != null)
         {
@@ -620,7 +795,7 @@ public class Animal : MonoBehaviour
         focusedOutlineVisible = false;
         if (worldHealthBar != null)
         {
-            worldHealthBar.SetVisible(false);
+            worldHealthBar.HideImmediately();
         }
     }
 
@@ -655,10 +830,6 @@ public class Animal : MonoBehaviour
         }
 
         focusedOutlineVisible = visible;
-        if (worldHealthBar != null)
-        {
-            worldHealthBar.SetVisible(visible);
-        }
         if (!TryResolveOutlineRenderer())
         {
             return;
@@ -697,6 +868,14 @@ public class Animal : MonoBehaviour
         count = AddOutlineMaskRenderer(destination, count, outlineRenderer);
         count = AddOutlineMaskRenderer(destination, count, eyeLeft);
         count = AddOutlineMaskRenderer(destination, count, eyeRight);
+
+        CacheSaddleOutlineRenderers();
+        for (int i = 0; saddleOutlineRenderers != null && i < saddleOutlineRenderers.Length; i++)
+        {
+            // 동물과 안장을 같은 마스크에 합쳐 접촉면이 아닌 전체 외곽선만 그린다.
+            count = AddOutlineMaskRenderer(destination, count, saddleOutlineRenderers[i]);
+        }
+
         return count;
     }
 
@@ -746,7 +925,8 @@ public class Animal : MonoBehaviour
         bool isDrinking,
         bool isResting,
         bool isLookingAround,
-        bool isFleeing)
+        bool isFleeing,
+        bool isRunning = false)
     {
         if (!IsAlive)
         {
@@ -775,7 +955,8 @@ public class Animal : MonoBehaviour
                              | (isDrinking ? 2 : 0)
                              | (isResting ? 4 : 0)
                              | (isLookingAround ? 8 : 0)
-                             | (isFleeing ? 16 : 0);
+                             | (isFleeing ? 16 : 0)
+                             | (isRunning ? 32 : 0);
         if (aiAnimationStateInitialized
             && Mathf.Abs(lastAIAnimationSpeed - speed) <= 0.001f
             && lastAIAnimationFlags == animationFlags)
@@ -795,16 +976,18 @@ public class Animal : MonoBehaviour
         SetAnimatorBoolIfAvailable(IsFleeingHash, isFleeing, 16);
 
         int legacyState = isFleeing
-            ? 8
-            : speed > 0.01f
-                ? 12
-                : isEating || isDrinking
-                    ? 11
-                    : isResting
-                        ? 16
-                        : isLookingAround
-                            ? 14
-                            : 0;
+            ? FleeAnimationState
+            : isRunning && speed > 0.01f
+                ? RunAnimationState
+                : speed > 0.01f
+                    ? WalkAnimationState
+                    : isEating || isDrinking
+                        ? 11
+                        : isResting
+                            ? 16
+                            : isLookingAround
+                                ? 14
+                                : 0;
         SwitchAnimation(legacyState);
     }
 
@@ -977,7 +1160,7 @@ public class Animal : MonoBehaviour
     {
         t = Mathf.Clamp01(t);
         Vector3 baseAdultScale = adultScale * BaseScale;
-        dinoTransform.localScale = Vector3.Lerp(baseAdultScale * BabyScale, baseAdultScale, t);
+        dinoTransform.localScale = baseAdultScale * EvaluateGrowthScale(t);
 
         if (eyeLeft != null
             && eyeRight != null
@@ -1002,6 +1185,11 @@ public class Animal : MonoBehaviour
         {
             dinoRenderer.SetBlendShapeWeight(0, (1f - t) * 100f);
         }
+    }
+
+    private float EvaluateGrowthScale(float normalizedAge)
+    {
+        return Mathf.Lerp(BabyScale, 1f, normalizedAge);
     }
 
     private void SwitchAnimation(int targetState)

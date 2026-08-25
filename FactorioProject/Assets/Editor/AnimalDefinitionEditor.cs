@@ -11,6 +11,7 @@ public sealed class AnimalDefinitionEditor : Editor
     private Sprite draftAdultIcon;
     private Sprite draftChildIcon;
     private float draftMaxHealth;
+    private float draftRiderHeight;
     private bool dirty;
 
     private void OnEnable()
@@ -34,6 +35,13 @@ public sealed class AnimalDefinitionEditor : Editor
         Sprite nextAdultIcon = (Sprite)EditorGUILayout.ObjectField("Adult Icon", draftAdultIcon, typeof(Sprite), false);
         Sprite nextChildIcon = (Sprite)EditorGUILayout.ObjectField("Child Icon", draftChildIcon, typeof(Sprite), false);
         float nextMaxHealth = Mathf.Max(1f, EditorGUILayout.FloatField("Max Health", draftMaxHealth));
+        float nextRiderHeight = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent(
+                    "Rider Height",
+                    "Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
+                draftRiderHeight));
         if (EditorGUI.EndChangeCheck())
         {
             draftId = Mathf.Max(-1, nextId);
@@ -42,6 +50,7 @@ public sealed class AnimalDefinitionEditor : Editor
             draftAdultIcon = nextAdultIcon;
             draftChildIcon = nextChildIcon;
             draftMaxHealth = nextMaxHealth;
+            draftRiderHeight = nextRiderHeight;
             dirty = true;
         }
 
@@ -65,6 +74,7 @@ public sealed class AnimalDefinitionEditor : Editor
                 definition.MaxHerdSize,
                 definition.SpawnWeight,
                 draftMaxHealth,
+                draftRiderHeight,
                 definition.AISettings,
                 definition.DropItems,
                 "Save Animal Definition");
@@ -121,6 +131,7 @@ public sealed class AnimalDefinitionEditor : Editor
         draftAdultIcon = definition.AdultIcon;
         draftChildIcon = definition.ChildIcon;
         draftMaxHealth = definition.MaxHealth;
+        draftRiderHeight = definition.RiderHeight;
         dirty = false;
         Repaint();
     }

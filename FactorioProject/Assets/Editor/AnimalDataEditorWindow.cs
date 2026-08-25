@@ -27,7 +27,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private sealed class AnimalJsonFile
     {
         public string format = "ProjectF.AnimalData";
-        public int version = 8;
+        public int version = 9;
         public List<AnimalJsonEntry> animals = new List<AnimalJsonEntry>();
     }
 
@@ -52,6 +52,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int maxHerdSize = AnimalDefinition.DefaultMaxHerdSize;
         public int spawnWeight = AnimalDefinition.DefaultSpawnWeight;
         public float maxHealth = AnimalDefinition.DefaultMaxHealth;
+        public float riderHeight = AnimalDefinition.DefaultRiderHeight;
         public AnimalAISettings aiSettings = new AnimalAISettings();
         public List<AnimalDropJsonEntry> dropItems = new List<AnimalDropJsonEntry>();
         public string hierarchyPath = string.Empty;
@@ -71,6 +72,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int maxHerdSize;
         public int spawnWeight;
         public float maxHealth;
+        public float riderHeight;
         public AnimalAISettings aiSettings;
         public List<AnimalDropEntry> dropItems;
         public GameObject prefab;
@@ -93,6 +95,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             maxHerdSize = definition != null ? definition.MaxHerdSize : AnimalDefinition.DefaultMaxHerdSize;
             spawnWeight = definition != null ? definition.SpawnWeight : AnimalDefinition.DefaultSpawnWeight;
             maxHealth = definition != null ? definition.MaxHealth : AnimalDefinition.DefaultMaxHealth;
+            riderHeight = definition != null ? definition.RiderHeight : AnimalDefinition.DefaultRiderHeight;
             aiSettings = definition != null && definition.AISettings != null
                 ? definition.AISettings.Clone()
                 : new AnimalAISettings();
@@ -760,6 +763,21 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         EditorGUILayout.EndHorizontal();
+
+        EditorGUI.BeginChangeCheck();
+        float nextRiderHeight = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent(
+                    "Rider Height",
+                    "이 성별 변형의 Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
+                draft.riderHeight));
+        if (EditorGUI.EndChangeCheck())
+        {
+            draft.riderHeight = nextRiderHeight;
+            draft.dirty = true;
+        }
+
         EditorGUILayout.EndVertical();
     }
 
@@ -1114,6 +1132,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         GameObject nextPrefab = (GameObject)EditorGUILayout.ObjectField("Animal Prefab", draft.prefab, typeof(GameObject), false);
         Sprite nextAdultIcon = (Sprite)EditorGUILayout.ObjectField("Adult Icon", draft.adultIcon, typeof(Sprite), false);
         Sprite nextChildIcon = (Sprite)EditorGUILayout.ObjectField("Child Icon", draft.childIcon, typeof(Sprite), false);
+        float nextRiderHeight = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent(
+                    "Rider Height",
+                    "Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
+                draft.riderHeight));
         if (EditorGUI.EndChangeCheck())
         {
             bool prefabChanged = nextPrefab != draft.prefab;
@@ -1122,6 +1147,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             draft.prefab = nextPrefab;
             draft.adultIcon = nextAdultIcon;
             draft.childIcon = nextChildIcon;
+            draft.riderHeight = nextRiderHeight;
             draft.dirty = true;
             if (prefabChanged)
             {
@@ -1771,6 +1797,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 draft.maxHerdSize,
                 draft.spawnWeight,
                 draft.maxHealth,
+                draft.riderHeight,
                 draft.aiSettings,
                 draft.dropItems,
                 "Save Animal Data");
@@ -1911,6 +1938,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                         AnimalDefinition.DefaultMaxHerdSize,
                         AnimalDefinition.DefaultSpawnWeight,
                         AnimalDefinition.DefaultMaxHealth,
+                        AnimalDefinition.DefaultRiderHeight,
                         new AnimalAISettings(),
                         new List<AnimalDropEntry>(),
                         "Create Animal Definition");
@@ -1944,6 +1972,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     definition.MaxHerdSize,
                     definition.SpawnWeight,
                     definition.MaxHealth,
+                    definition.RiderHeight,
                     definition.AISettings,
                     definition.DropItems,
                     "Rebuild Animal Definition");
@@ -2032,6 +2061,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             draft.maxHealth = file.version >= 5
                 ? Mathf.Max(1f, entry.maxHealth)
                 : AnimalDefinition.DefaultMaxHealth;
+            draft.riderHeight = file.version >= 9
+                ? Mathf.Max(0f, entry.riderHeight)
+                : AnimalDefinition.DefaultRiderHeight;
             if (file.version >= 4 && entry.aiSettings != null)
             {
                 draft.aiSettings = entry.aiSettings.Clone();
@@ -2094,6 +2126,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 maxHerdSize = definition.MaxHerdSize,
                 spawnWeight = definition.SpawnWeight,
                 maxHealth = definition.MaxHealth,
+                riderHeight = definition.RiderHeight,
                 aiSettings = definition.AISettings != null
                     ? definition.AISettings.Clone()
                     : new AnimalAISettings(),

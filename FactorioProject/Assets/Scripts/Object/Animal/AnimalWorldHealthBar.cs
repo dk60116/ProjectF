@@ -8,12 +8,17 @@ public sealed class AnimalWorldHealthBar : MonoBehaviour
     private static readonly Color HealthColor = new Color(0.78f, 0.12f, 0.1f, 1f);
     private static readonly Vector2 BarSize = new Vector2(0.9f, 0.1f);
     private const float HeightPadding = 0.25f;
+    private const float FullHealthHideDelay = 1f;
+    private const float FullHealthThreshold = 0.9999f;
 
     private Animal animal;
     private Image healthFill;
     private RectTransform healthFillRect;
     private Camera targetCamera;
     private float heightOffset = 1f;
+    private float fullHealthHideTime = -1f;
+    private bool healthStateInitialized;
+    private bool wasAtFullHealth;
 
     public static AnimalWorldHealthBar Create(Animal animal, Renderer modelRenderer)
     {
@@ -65,14 +70,34 @@ public sealed class AnimalWorldHealthBar : MonoBehaviour
         fill.raycastTarget = false;
 
         AnimalWorldHealthBar healthBar = root.AddComponent<AnimalWorldHealthBar>();
+        root.SetActive(false);
         healthBar.Initialize(animal, modelRenderer, fill, fillRect);
-        healthBar.SetVisible(false);
         return healthBar;
     }
 
-    public void SetVisible(bool visible)
+    public void NotifyAttackAnimationStarted()
     {
-        visible = visible && animal != null && animal.IsAlive;
+        if (animal == null || !animal.IsAlive)
+        {
+            return;
+        }
+
+        bool atFullHealth = animal.NormalizedHealth >= FullHealthThreshold;
+        fullHealthHideTime = atFullHealth
+            ? Time.unscaledTime + FullHealthHideDelay
+            : -1f;
+        SetRenderedVisible(true);
+    }
+
+    public void HideImmediately()
+    {
+        fullHealthHideTime = -1f;
+        SetRenderedVisible(false);
+    }
+
+    private void SetRenderedVisible(bool visible)
+    {
+        visible &= animal != null && animal.IsAlive;
         if (gameObject.activeSelf != visible)
         {
             gameObject.SetActive(visible);
@@ -80,7 +105,6 @@ public sealed class AnimalWorldHealthBar : MonoBehaviour
 
         if (visible)
         {
-            Refresh();
             UpdateTransform();
         }
     }
@@ -97,6 +121,39 @@ public sealed class AnimalWorldHealthBar : MonoBehaviour
             Mathf.Lerp(0.04f, 0.96f, normalizedHealth),
             0.82f);
         healthFill.enabled = normalizedHealth > 0f;
+        RefreshVisibility(normalizedHealth);
+    }
+
+    private void RefreshVisibility(float normalizedHealth)
+    {
+        if (!animal.IsAlive)
+        {
+            HideImmediately();
+            return;
+        }
+
+        bool atFullHealth = normalizedHealth >= FullHealthThreshold;
+        if (!atFullHealth)
+        {
+            fullHealthHideTime = -1f;
+            SetRenderedVisible(true);
+        }
+        else if (healthStateInitialized && !wasAtFullHealth)
+        {
+            fullHealthHideTime = Time.unscaledTime + FullHealthHideDelay;
+            SetRenderedVisible(true);
+        }
+
+        if (atFullHealth
+            && fullHealthHideTime >= 0f
+            && Time.unscaledTime >= fullHealthHideTime)
+        {
+            fullHealthHideTime = -1f;
+            SetRenderedVisible(false);
+        }
+
+        wasAtFullHealth = atFullHealth;
+        healthStateInitialized = true;
     }
 
     private void Initialize(

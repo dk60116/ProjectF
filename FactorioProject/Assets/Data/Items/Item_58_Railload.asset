@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_58_Railload
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Railload
-  id: 83
+  id: 84
   mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}

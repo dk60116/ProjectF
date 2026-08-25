@@ -76,7 +76,7 @@ MonoBehaviour:
   - id: 9e4995f6600f4c04ad51a59b2550be3b
     displayName: Wooden building
     expanded: 1
-    anchorItemGuid: 7795dfaf3b2a492cae3ffb24dfc67efb
+    anchorItemGuid: 09af47ed2a67de34dad96a547b0f030b
   - id: b66e74eb3909437e98f5ea9b777676a9
     displayName: Animal
     expanded: 1
@@ -262,8 +262,6 @@ MonoBehaviour:
     folderId: d4d72b0cf2fb491db21ccbc3248c91b8
   - itemGuid: e50f8db30407552438483841405afcb2
     folderId: c46f2864503448c084f910219612a1ce
-  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
-    folderId: b66e74eb3909437e98f5ea9b777676a9
   - itemGuid: 5e897bd260b82084fb272c968673a461
     folderId: 396fb7fc138646ebbfad2b1ca8b35460
   - itemGuid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2
@@ -304,3 +302,7 @@ MonoBehaviour:
     folderId: 078e4ec60eaf46649c771cf6f5f19606
   - itemGuid: 8780f845ccb846a4197150948b3297b2
     folderId: c7e077eece684be7b0fce1115e350081
+  - itemGuid: 3bdd8115056e76d4a878ff2231e3340c
+    folderId: b66e74eb3909437e98f5ea9b777676a9
+  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
+    folderId: 9e4995f6600f4c04ad51a59b2550be3b

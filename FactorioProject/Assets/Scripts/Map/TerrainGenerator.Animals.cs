@@ -646,6 +646,43 @@ public partial class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    public bool PinMountedAnimal(Animal animal)
+    {
+        TerrainAnimalInstance instance = animal != null
+            ? animal.GetComponentInParent<TerrainAnimalInstance>()
+            : null;
+        if (instance == null)
+        {
+            return false;
+        }
+
+        instance.MarkInteracted();
+        if (instance.transform.parent != transform)
+        {
+            instance.transform.SetParent(transform, true);
+        }
+
+        return true;
+    }
+
+    public void ReleaseMountedAnimal(Animal animal)
+    {
+        TerrainAnimalInstance instance = animal != null
+            ? animal.GetComponentInParent<TerrainAnimalInstance>()
+            : null;
+        if (instance == null || instance.transform.parent != transform)
+        {
+            return;
+        }
+
+        Vector2Int chunkCoordinate = GetAnimalChunkCoordinate(instance.transform.position);
+        if (loadedChunks.TryGetValue(chunkCoordinate, out Transform chunkTransform)
+            && chunkTransform != null)
+        {
+            instance.transform.SetParent(GetOrCreateAnimalRoot(chunkTransform), true);
+        }
+    }
+
     public bool RemoveAnimal(Animal animal, bool preserveRemoval)
     {
         TerrainAnimalInstance instance = animal != null
@@ -818,7 +855,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            string speciesKey = GetAnimalSpeciesKey(definition.AnimalName);
+            string speciesKey = definition.SpeciesName;
             if (!pairsByKey.TryGetValue(speciesKey, out AnimalSpeciesPair pair))
             {
                 pair = new AnimalSpeciesPair();
@@ -826,7 +863,11 @@ public partial class TerrainGenerator : MonoBehaviour
                 animalSpeciesCache.Add(pair);
             }
 
-            if (prefabAnimal.Gender == Animal.AnimalGender.Female)
+            Animal.AnimalGender gender = definition.TryGetDeclaredGender(
+                out Animal.AnimalGender declaredGender)
+                ? declaredGender
+                : prefabAnimal.Gender;
+            if (gender == Animal.AnimalGender.Female)
             {
                 pair.female = definition;
             }
@@ -849,21 +890,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return null;
-    }
-
-    private static string GetAnimalSpeciesKey(string animalName)
-    {
-        string key = (animalName ?? string.Empty).Trim();
-        string[] suffixes = { " Female", " Male", "_Female", "_Male" };
-        for (int i = 0; i < suffixes.Length; i++)
-        {
-            if (key.EndsWith(suffixes[i], StringComparison.OrdinalIgnoreCase))
-            {
-                return key.Substring(0, key.Length - suffixes[i].Length).Trim();
-            }
-        }
-
-        return key;
     }
 
     private static Transform GetOrCreateAnimalRoot(Transform chunkTransform)
@@ -939,6 +965,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 randomState = source.randomState,
                 hasHealth = source.hasHealth,
                 currentHealth = source.currentHealth,
+                hasSaddle = source.hasSaddle,
                 corpseLootInitialized = source.corpseLootInitialized,
                 corpseRemainingItemIds = source.corpseRemainingItemIds != null
                     ? new List<int>(source.corpseRemainingItemIds)

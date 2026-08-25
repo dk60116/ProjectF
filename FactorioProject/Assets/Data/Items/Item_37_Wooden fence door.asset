@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_37_Wooden fence door
   m_EditorClassIdentifier: 
-  itemName: Wooden fence door
-  id: 59
+  itemName: Wooden Fence Door
+  id: 58
   mapObject: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
   portableMesh: {fileID: 4300000, guid: a0a021ee9c96c4f478b7465c27ac9ab4, type: 2}
   portableMat: {fileID: 2100000, guid: 9377881ef4c05c3418f3b5a5bf944caf, type: 2}

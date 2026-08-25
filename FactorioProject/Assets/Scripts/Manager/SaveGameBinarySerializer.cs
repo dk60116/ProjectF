@@ -352,6 +352,7 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.currentHealth);
         writer.Write(entry.corpseLootInitialized);
         WriteIntList(writer, entry.corpseRemainingItemIds);
+        writer.Write(entry.hasSaddle);
     }
 
     private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader, int version)
@@ -396,6 +397,11 @@ public static class SaveGameBinarySerializer
         {
             entry.corpseLootInitialized = reader.ReadBoolean();
             entry.corpseRemainingItemIds = ReadIntList(reader);
+        }
+
+        if (version >= 35)
+        {
+            entry.hasSaddle = reader.ReadBoolean();
         }
 
         return entry;
@@ -857,6 +863,7 @@ public static class SaveGameBinarySerializer
         writer.Write(player.nooseLeashedAnimalId);
         writer.Write(player.activeTorchItemId);
         writer.Write(player.activeTorchRemainingEnergy);
+        writer.Write(player.mountedAnimalId);
     }
 
     private static PlayerSaveData ReadPlayer(BinaryReader reader, int version)
@@ -895,6 +902,11 @@ public static class SaveGameBinarySerializer
         {
             player.activeTorchItemId = reader.ReadInt32();
             player.activeTorchRemainingEnergy = reader.ReadSingle();
+        }
+
+        if (version >= 36)
+        {
+            player.mountedAnimalId = reader.ReadInt64();
         }
 
         return player;
