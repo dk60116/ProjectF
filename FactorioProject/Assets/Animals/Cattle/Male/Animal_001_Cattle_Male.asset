@@ -19,7 +19,9 @@ MonoBehaviour:
   maxHerdSize: 6
   spawnWeight: 5
   maxHealth: 100
+  canRiding: 1
   riderHeight: 0.5
+  strength: 37
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
     minAmount: 1

@@ -98,6 +98,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool configured;
     private bool executionActive;
     private bool nooseLeashed;
+    private bool draftAttached;
     private Player mountedRider;
     private float scheduledTickAccumulator;
     private float scheduledRecoveryElapsedTime;
@@ -170,8 +171,9 @@ public sealed class AnimalAIController : MonoBehaviour
     public bool IsInteracted => terrainInstance != null && terrainInstance.HasInteracted;
     public bool IsExecuting => executionActive;
     public bool IsNooseLeashed => nooseLeashed;
+    public bool IsDraftAttached => draftAttached;
     public bool HasMountedRider => mountedRider != null;
-    private bool IsExternallyControlled => nooseLeashed || mountedRider != null;
+    private bool IsExternallyControlled => nooseLeashed || draftAttached || mountedRider != null;
     public float NooseMovementSpeed => configured && animal != null && animal.IsAlive
         ? GetEffectiveMoveSpeed()
         : 0f;
@@ -234,6 +236,11 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (configured && !draftAttached)
+        {
+            animal?.TryRestorePendingDraftHandcart();
+        }
+
         ApplyMountedRotation();
     }
 
@@ -294,6 +301,7 @@ public sealed class AnimalAIController : MonoBehaviour
         smoothedSeparation = Vector3.zero;
         crowdSnapshotValid = false;
         nooseLeashed = false;
+        draftAttached = false;
         mountedRider = null;
         waitingForStandUp = false;
         hasFleeThreat = false;
@@ -318,6 +326,7 @@ public sealed class AnimalAIController : MonoBehaviour
         ResetPresentation();
         AnimalAIWorld.Register(this);
         ApplyAnimation(0f);
+        animal?.TryRestorePendingDraftHandcart();
     }
 
     public bool QueueScheduledTick(float deltaTime, float interval)
@@ -564,6 +573,42 @@ public sealed class AnimalAIController : MonoBehaviour
         return true;
     }
 
+    public void SetDraftAttached(bool attached)
+    {
+        if (draftAttached == attached)
+        {
+            return;
+        }
+
+        draftAttached = attached;
+        currentState = AnimalAIState.Idle;
+        stateTimeRemaining = 0f;
+        hasTarget = false;
+        movingToActivity = false;
+        hasFleeThreat = false;
+        waitingForStandUp = false;
+        smoothedSeparation = Vector3.zero;
+        ResetNavigation();
+        ResetScheduledTick();
+        ResetPresentation();
+        InitializeSimulationPose();
+        if (attached)
+        {
+            executionActive = false;
+        }
+
+        ApplyAnimation(0f);
+    }
+
+    public void ApplyExternalControlledPose(Vector3 worldPosition, Quaternion worldRotation)
+    {
+        transform.SetPositionAndRotation(worldPosition, worldRotation);
+        simulationPosition = worldPosition;
+        simulationRotation = worldRotation;
+        simulationPoseInitialized = true;
+        ResetPresentation();
+    }
+
     public bool TryMoveMounted(
         Vector3 worldMoveDirection,
         bool runRequested,
@@ -599,6 +644,18 @@ public sealed class AnimalAIController : MonoBehaviour
         float movementSpeed = GetEffectiveMoveSpeed()
                               * inputMagnitude
                               * (isRunning ? MountedRunSpeedMultiplier : 1f);
+        if (draftAttached && animal.IsAttachedToHandcart)
+        {
+            bool moved = animal.TryMoveAttachedHandcart(
+                worldMoveDirection,
+                movementSpeed,
+                deltaTime,
+                mountedRider,
+                out float actualMoveSpeed);
+            ApplyAnimation(actualMoveSpeed, isRunning && moved);
+            return moved;
+        }
+
         Vector3 previousPosition = simulationPosition;
         if (!TryApplyPlayerPush(
                 previousPosition - worldMoveDirection,
@@ -702,6 +759,7 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         RestoreAnimalColliderLayers();
         nooseLeashed = false;
+        draftAttached = false;
         mountedRider = null;
         configured = false;
         executionActive = false;

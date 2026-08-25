@@ -1,6 +1,6 @@
 {
     "format": "ProjectF.AnimalData",
-    "version": 9,
+    "version": 11,
     "animals": [
         {
             "id": 0,
@@ -10,7 +10,9 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
-            "riderHeight": 0.699999988079071,
+            "canRiding": true,
+            "riderHeight": 0.47999998927116396,
+            "strength": 30.0,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -61,7 +63,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 77,
+                    "itemId": 78,
                     "itemName": "Beef",
                     "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
                     "minAmount": 1,
@@ -69,7 +71,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 58,
+                    "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
@@ -91,7 +93,9 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
+            "canRiding": true,
             "riderHeight": 0.5,
+            "strength": 37.0,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -142,7 +146,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 77,
+                    "itemId": 78,
                     "itemName": "Beef",
                     "itemAssetPath": "Assets/Data/Items/Item_48_Flatcar.asset",
                     "minAmount": 1,
@@ -150,7 +154,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 58,
+                    "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
@@ -172,7 +176,9 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
-            "riderHeight": 0.5,
+            "canRiding": true,
+            "riderHeight": 0.4000000059604645,
+            "strength": 22.0,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -223,7 +229,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 76,
+                    "itemId": 77,
                     "itemName": "Pork",
                     "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
                     "minAmount": 1,
@@ -231,7 +237,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 58,
+                    "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,
@@ -253,7 +259,9 @@
             "maxHerdSize": 6,
             "spawnWeight": 5,
             "maxHealth": 100.0,
-            "riderHeight": 0.5,
+            "canRiding": true,
+            "riderHeight": 0.30000001192092898,
+            "strength": 28.0,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -304,7 +312,7 @@
             },
             "dropItems": [
                 {
-                    "itemId": 76,
+                    "itemId": 77,
                     "itemName": "Pork",
                     "itemAssetPath": "Assets/Data/Items/Item_52_Wooden wheel.asset",
                     "minAmount": 1,
@@ -312,7 +320,7 @@
                     "dropChance": 1.0
                 },
                 {
-                    "itemId": 58,
+                    "itemId": 59,
                     "itemName": "Leather",
                     "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
                     "minAmount": 1,

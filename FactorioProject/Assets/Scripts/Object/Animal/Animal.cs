@@ -74,6 +74,10 @@ public class Animal : MonoBehaviour
     private bool saddleEquipped;
     private Player mountedRider;
     private AnimalAIController cachedAIController;
+    private Handcart attachedDraftHandcart;
+    private bool hasPendingDraftHandcartRestore;
+    private Vector2Int pendingDraftHandcartAnchorCoordinate;
+    private long pendingDraftHandcartPlacementSequence;
 
     public GameObject Eye;
     private GameObject eyeLeftGO;
@@ -117,11 +121,32 @@ public class Animal : MonoBehaviour
     public bool IsAlive => CurrentHealth > 0f && !deathHandled;
     public bool CanBeAttacked => IsAlive && DinoAge >= MinimumAttackAge;
     public bool IsSaddleEquipped => saddleEquipped;
-    public bool CanEquipSaddle => saddleObject != null
+    public Player MountedRider => mountedRider;
+    public Handcart AttachedDraftHandcart => attachedDraftHandcart != null
+        && attachedDraftHandcart.DraftAnimal == this
+            ? attachedDraftHandcart
+            : null;
+    public bool IsAttachedToHandcart => AttachedDraftHandcart != null;
+    public Transform MovementRoot
+    {
+        get
+        {
+            AnimalAIController controller = ResolveAIController();
+            return controller != null ? controller.transform : transform;
+        }
+    }
+    public Vector3 MovementRootPosition => MovementRoot.position;
+    public bool CanEquipSaddle => animalDefinition != null
+                                  && animalDefinition.CanBeRidden
+                                  && saddleObject != null
                                   && IsAlive
                                   && !saddleEquipped
                                   && DinoAge >= MinimumSaddleAge;
-    public bool CanBeMounted => saddleEquipped && IsAlive && mountedRider == null;
+    public bool CanBeMounted => animalDefinition != null
+                                && animalDefinition.CanBeRidden
+                                && saddleEquipped
+                                && IsAlive
+                                && mountedRider == null;
     public Transform SaddleMountPoint => saddleObject != null ? saddleObject.transform : null;
     public Vector3 RiderMountPosition
     {
@@ -187,6 +212,14 @@ public class Animal : MonoBehaviour
         deathHandled = false;
         wakeFromRestRequested = false;
         SetSaddleEquipped(restoredState != null && restoredState.hasSaddle);
+        hasPendingDraftHandcartRestore = restoredState != null
+                                         && restoredState.hasDraftHandcart;
+        pendingDraftHandcartAnchorCoordinate = restoredState != null
+            ? restoredState.draftHandcartAnchorCoordinate
+            : default;
+        pendingDraftHandcartPlacementSequence = restoredState != null
+            ? restoredState.draftHandcartPlacementSequence
+            : 0L;
         EnsureWorldHealthBar();
         if (currentHealth <= 0f)
         {
@@ -281,6 +314,19 @@ public class Animal : MonoBehaviour
         entry.hasHealth = true;
         entry.currentHealth = currentHealth;
         entry.hasSaddle = saddleEquipped;
+        Handcart handcart = AttachedDraftHandcart;
+        if (handcart != null && handcart.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+        {
+            entry.hasDraftHandcart = true;
+            entry.draftHandcartAnchorCoordinate = anchorCoordinate;
+            entry.draftHandcartPlacementSequence = handcart.RuntimePlacementSequence;
+        }
+        else
+        {
+            entry.hasDraftHandcart = hasPendingDraftHandcartRestore;
+            entry.draftHandcartAnchorCoordinate = pendingDraftHandcartAnchorCoordinate;
+            entry.draftHandcartPlacementSequence = pendingDraftHandcartPlacementSequence;
+        }
         entry.corpseLootInitialized = corpseLootInitialized;
         entry.corpseRemainingItemIds ??= new List<int>();
         entry.corpseRemainingItemIds.Clear();
@@ -350,6 +396,88 @@ public class Animal : MonoBehaviour
         TerrainGenerator.ResolveActive()?.ReleaseMountedAnimal(this);
     }
 
+    internal bool TrySetAttachedDraftHandcart(Handcart handcart)
+    {
+        Handcart currentHandcart = AttachedDraftHandcart;
+        if (handcart == null
+            || !IsAlive
+            || currentHandcart != null && currentHandcart != handcart)
+        {
+            return false;
+        }
+
+        attachedDraftHandcart = handcart;
+        hasPendingDraftHandcartRestore = false;
+        ResolveAIController()?.SetDraftAttached(true);
+        MarkTerrainInteraction();
+        return true;
+    }
+
+    internal void ClearAttachedDraftHandcart(Handcart handcart)
+    {
+        if (attachedDraftHandcart != handcart)
+        {
+            return;
+        }
+
+        attachedDraftHandcart = null;
+        hasPendingDraftHandcartRestore = false;
+        ResolveAIController()?.SetDraftAttached(false);
+        MarkTerrainInteraction();
+    }
+
+    internal bool TryMoveAttachedHandcart(
+        Vector3 worldMoveDirection,
+        float animalMoveSpeed,
+        float deltaTime,
+        Player animalRider,
+        out float actualMoveSpeed)
+    {
+        Handcart handcart = AttachedDraftHandcart;
+        if (handcart == null)
+        {
+            actualMoveSpeed = 0f;
+            return false;
+        }
+
+        return handcart.TryMovePulledByAnimal(
+            this,
+            worldMoveDirection,
+            animalMoveSpeed,
+            deltaTime,
+            animalRider,
+            out actualMoveSpeed);
+    }
+
+    internal void ApplyDraftPose(Vector3 worldPosition, Quaternion worldRotation)
+    {
+        AnimalAIController controller = ResolveAIController();
+        if (controller != null)
+        {
+            controller.ApplyExternalControlledPose(worldPosition, worldRotation);
+            return;
+        }
+
+        transform.SetPositionAndRotation(worldPosition, worldRotation);
+    }
+
+    internal bool TryRestorePendingDraftHandcart()
+    {
+        if (!hasPendingDraftHandcartRestore
+            || !IsAlive
+            || !Handcart.TryFindByPlacementRuntime(
+                pendingDraftHandcartAnchorCoordinate,
+                pendingDraftHandcartPlacementSequence,
+                out Handcart handcart)
+            || !handcart.TryAttachDraftAnimal(this))
+        {
+            return false;
+        }
+
+        hasPendingDraftHandcartRestore = false;
+        return true;
+    }
+
     private AnimalAIController ResolveAIController()
     {
         if (cachedAIController == null)
@@ -362,7 +490,10 @@ public class Animal : MonoBehaviour
 
     private void SetSaddleEquipped(bool equipped)
     {
-        saddleEquipped = equipped && saddleObject != null;
+        saddleEquipped = equipped
+                         && animalDefinition != null
+                         && animalDefinition.CanBeRidden
+                         && saddleObject != null;
         if (saddleObject != null && saddleObject.activeSelf != saddleEquipped)
         {
             saddleObject.SetActive(saddleEquipped);
@@ -535,6 +666,8 @@ public class Animal : MonoBehaviour
         }
 
         deathHandled = true;
+        hasPendingDraftHandcartRestore = false;
+        attachedDraftHandcart?.DetachDraftAnimal(this);
         AnimalAIController controller = GetComponentInParent<AnimalAIController>();
         if (controller != null)
         {
@@ -781,6 +914,12 @@ public class Animal : MonoBehaviour
     private void OnDisable()
     {
         ClearFocusVisuals();
+    }
+
+    private void OnDestroy()
+    {
+        hasPendingDraftHandcartRestore = false;
+        attachedDraftHandcart?.DetachDraftAnimal(this);
     }
 
     private void ClearFocusVisuals()

@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 36;
+    public const int CurrentVersion = 37;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -70,6 +70,9 @@ public sealed class AnimalSaveEntry
     public bool hasHealth;
     public float currentHealth;
     public bool hasSaddle;
+    public bool hasDraftHandcart;
+    public Vector2Int draftHandcartAnchorCoordinate;
+    public long draftHandcartPlacementSequence;
     public bool corpseLootInitialized;
     public List<int> corpseRemainingItemIds = new List<int>();
 }

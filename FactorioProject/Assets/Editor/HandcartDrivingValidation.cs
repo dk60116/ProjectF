@@ -19,6 +19,7 @@ public static class HandcartDrivingValidation
         GameObject obstacle = null;
         GameObject connectionRegistrationObstacle = null;
         GameObject pickupPlayerObject = null;
+        GameObject draftAnimalInstance = null;
         GameObject thirdConnectionInstance = null;
         GameObject fourthConnectionInstance = null;
         try
@@ -220,6 +221,45 @@ public static class HandcartDrivingValidation
             Require(
                 handcart.TryGetPlayerPoint(0, out Transform playerAnimationFacing),
                 "Handcart 플레이어 탑승 지점을 찾을 수 없습니다.");
+
+            AnimalDefinition draftAnimalDefinition = ResolveDraftAnimalDefinition();
+            Require(
+                draftAnimalDefinition != null && draftAnimalDefinition.AnimalPrefab != null,
+                "Handcart 견인 연결을 검증할 동물 프리팹을 찾지 못했습니다.");
+            draftAnimalInstance = UnityEngine.Object.Instantiate(draftAnimalDefinition.AnimalPrefab);
+            Animal draftAnimal = draftAnimalInstance.GetComponentInChildren<Animal>(true);
+            Require(draftAnimal != null, "견인 연결 검증용 동물에 Animal 컴포넌트가 없습니다.");
+            draftAnimal.ConfigureHealth(draftAnimalDefinition, null);
+            draftAnimal.SetAge(10f);
+            draftAnimal.MovementRoot.SetPositionAndRotation(
+                playerAnimationFacing.position,
+                handcart.transform.rotation);
+            Physics.SyncTransforms();
+            Require(
+                handcart.TryAttachDraftAnimal(draftAnimal),
+                "운전대 근처의 동물을 Handcart에 연결하지 못했습니다.");
+            Vector3 draftAnimalOffset = draftAnimal.GetWorldCenter() - handcart.transform.position;
+            draftAnimalOffset.y = 0f;
+            Require(
+                Vector3.Dot(draftAnimalOffset, handcart.transform.forward) > 0f,
+                "연결된 동물이 운전대 앞이 아니라 수레 뒤에 배치되었습니다.");
+            Vector3 draftHandleOffset = draftAnimal.GetWorldCenter()
+                                        - playerAnimationFacing.position;
+            draftHandleOffset.y = 0f;
+            float expectedDraftHandleDistance = draftAnimal.GetWorldRadius() * 0.5f + 0.1f;
+            Require(
+                Mathf.Abs(draftHandleOffset.magnitude - expectedDraftHandleDistance) <= 0.01f,
+                "연결된 동물과 Handcart 운전대 사이의 크기 비례 간격이 올바르지 않습니다.");
+            Require(
+                !handcart.CanPlayerDock(pickupPlayer),
+                "동물이 연결된 Handcart를 플레이어가 직접 운전할 수 있습니다.");
+            Require(
+                handcart.DetachDraftAnimal(draftAnimal)
+                && draftAnimal.AttachedDraftHandcart == null,
+                "Handcart와 동물의 견인 연결을 해제하지 못했습니다.");
+            UnityEngine.Object.DestroyImmediate(draftAnimalInstance);
+            draftAnimalInstance = null;
+
             pickupPlayer.transform.position = handcart.transform.position - handcart.transform.forward;
             Require(
                 !handcart.CanPlayerDock(pickupPlayer),
@@ -365,7 +405,29 @@ public static class HandcartDrivingValidation
             Require(
                 Handcart.CanConnectByPose(handcart, connectedHandcart),
                 "주행 후 그리드에서 벗어난 Handcart 주변의 새 Handcart를 연결 가능하게 판정하지 못했습니다.");
+            draftAnimalInstance = UnityEngine.Object.Instantiate(
+                draftAnimalDefinition.AnimalPrefab);
+            draftAnimal = draftAnimalInstance.GetComponentInChildren<Animal>(true);
+            Require(draftAnimal != null, "수레 연결 중 견인 상태 검증용 동물이 없습니다.");
+            draftAnimal.ConfigureHealth(draftAnimalDefinition, null);
+            draftAnimal.SetAge(10f);
+            draftAnimal.MovementRoot.SetPositionAndRotation(
+                playerAnimationFacing.position,
+                handcart.transform.rotation);
+            Physics.SyncTransforms();
+            Require(
+                handcart.TryAttachDraftAnimal(draftAnimal),
+                "수레 연결 전 동물 견인 상태를 구성하지 못했습니다.");
             Require(handcart.ConnectTo(connectedHandcart), "Handcart끼리 연결하지 못했습니다.");
+            Require(
+                connectedHandcart.DraftAnimal == draftAnimal
+                && draftAnimal.AttachedDraftHandcart == connectedHandcart,
+                "수레 연결 후 동물이 묶음의 최종 운전대 수레로 이전되지 않았습니다.");
+            Require(
+                connectedHandcart.DetachDraftAnimal(draftAnimal),
+                "수레 연결 후 이전된 동물을 해제하지 못했습니다.");
+            UnityEngine.Object.DestroyImmediate(draftAnimalInstance);
+            draftAnimalInstance = null;
             Require(
                 Vector3.Distance(connectedHandcart.transform.position, connectedStartPosition) < 0.01f,
                 "연결 시 새 Handcart가 기존 Handcart의 3차원 연결축 위치에 맞춰지지 않았습니다.");
@@ -491,8 +553,45 @@ public static class HandcartDrivingValidation
             Require(
                 Mathf.Approximately(
                     handcart.EffectiveVehicleMaxSpeed,
-                    handcart.VehicleMaxSpeed * connectedHandcart.VehicleLoadSpeedMultiplier),
-                "연결된 Handcart의 Vehicle mass가 최고 속도에 반영되지 않았습니다.");
+                    handcart.VehicleMaxSpeed
+                    * handcart.VehicleLoadSpeedMultiplier
+                    * connectedHandcart.VehicleLoadSpeedMultiplier),
+                "Handcart 묶음 전체의 Vehicle mass가 최고 속도에 반영되지 않았습니다.");
+            const float validationPlayerMoveSpeed = 3f;
+            Require(
+                Mathf.Approximately(
+                    connectedHandcart.ResolvePlayerDrivenMaxSpeed(validationPlayerMoveSpeed),
+                    validationPlayerMoveSpeed
+                    * handcart.VehicleLoadSpeedMultiplier
+                    * connectedHandcart.VehicleLoadSpeedMultiplier),
+                "Handcart가 플레이어 이동속도를 기준으로 묶음 전체 Weight 감속을 적용하지 않았습니다.");
+            Require(
+                connectedHandcart.ResolvePlayerDrivenMaxSpeed(validationPlayerMoveSpeed)
+                > connectedHandcart.VehicleMaxSpeed,
+                "Handcart 고유 최고속도가 플레이어 기반 이동속도를 제한하고 있습니다.");
+            const float strengthValidationBaseMultiplier = 0.8f;
+            Require(
+                Mathf.Approximately(
+                    Handcart.ResolveStrengthAdjustedLoadSpeedMultiplier(
+                        strengthValidationBaseMultiplier,
+                        0f),
+                    0.8f)
+                && Mathf.Approximately(
+                    Handcart.ResolveStrengthAdjustedLoadSpeedMultiplier(
+                        strengthValidationBaseMultiplier,
+                        50f),
+                    0.9f)
+                && Mathf.Approximately(
+                    Handcart.ResolveStrengthAdjustedLoadSpeedMultiplier(
+                        strengthValidationBaseMultiplier,
+                        100f),
+                    1f)
+                && Mathf.Approximately(
+                    Handcart.ResolveStrengthAdjustedLoadSpeedMultiplier(
+                        strengthValidationBaseMultiplier,
+                        -100f),
+                    0.6f),
+                "Animal Strength가 Handcart Mass 감속량에 올바르게 적용되지 않았습니다.");
 
             Vector3 initialConnectedOffset = connectedHandcart.transform.position - handcart.transform.position;
             Vector3 straightDriveDirection = connectedHandcart.transform.forward;
@@ -682,7 +781,7 @@ public static class HandcartDrivingValidation
                 "앞쪽에 연결된 Handcart가 장애물을 통과했습니다.");
             Require(connectedHandcart.CurrentVehicleSpeed <= 0.0001f, "연결 차량 충돌 후 운전 Handcart 속도가 초기화되지 않았습니다.");
 
-            Debug.Log("Handcart validation passed: ItemData stack capacity/InfoPanel 스택 표기/명시적 Item Point/근거리 회수 선택/Hand 회수/적재 상태 복원/플레이어 기준 애니메이션 방향/전진/조향/후진/좌우 바퀴 방향/단독 및 연결 차량 충돌/Handcart 최종 연결 등록 및 복원 자동 재연결/연결 묶음당 단일 HandleObject 및 운전대 끝 운전 제한/연결 해제 복원/블루프린트 연결 위치 및 각도 스냅/청크 휴면 및 운전 중 연결 유지/주행 후 연결 위치 및 각도 스냅/Vehicle mass 감속");
+            Debug.Log("Handcart validation passed: ItemData stack capacity/InfoPanel 스택 표기/명시적 Item Point/근거리 회수 선택/Hand 회수/적재 상태 복원/플레이어 기준 애니메이션 방향/전진/조향/후진/좌우 바퀴 방향/단독 및 연결 차량 충돌/Handcart 최종 연결 등록 및 복원 자동 재연결/연결 묶음당 단일 HandleObject 및 운전대 끝 운전 제한/연결 해제 복원/블루프린트 연결 위치 및 각도 스냅/청크 휴면 및 운전 중 연결 유지/주행 후 연결 위치 및 각도 스냅/플레이어 이동속도 기준 및 묶음 전체 Weight 감속/동물 운전대 연결 및 앞쪽 견인 배치");
         }
         finally
         {
@@ -701,6 +800,11 @@ public static class HandcartDrivingValidation
             if (pickupPlayerObject != null)
             {
                 UnityEngine.Object.DestroyImmediate(pickupPlayerObject);
+            }
+
+            if (draftAnimalInstance != null)
+            {
+                UnityEngine.Object.DestroyImmediate(draftAnimalInstance);
             }
 
             if (thirdConnectionInstance != null)
@@ -755,6 +859,22 @@ public static class HandcartDrivingValidation
         }
 
         return -1;
+    }
+
+    private static AnimalDefinition ResolveDraftAnimalDefinition()
+    {
+        string[] definitionGuids = AssetDatabase.FindAssets("t:AnimalDefinition");
+        for (int i = 0; i < definitionGuids.Length; i++)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(definitionGuids[i]);
+            AnimalDefinition definition = AssetDatabase.LoadAssetAtPath<AnimalDefinition>(path);
+            if (definition != null && definition.AnimalPrefab != null)
+            {
+                return definition;
+            }
+        }
+
+        return null;
     }
 
     private static void CleanupValidationPersistence()

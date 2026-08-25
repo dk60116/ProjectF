@@ -353,6 +353,10 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.corpseLootInitialized);
         WriteIntList(writer, entry.corpseRemainingItemIds);
         writer.Write(entry.hasSaddle);
+        writer.Write(entry.hasDraftHandcart);
+        writer.Write(entry.draftHandcartAnchorCoordinate.x);
+        writer.Write(entry.draftHandcartAnchorCoordinate.y);
+        writer.Write(entry.draftHandcartPlacementSequence);
     }
 
     private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader, int version)
@@ -402,6 +406,15 @@ public static class SaveGameBinarySerializer
         if (version >= 35)
         {
             entry.hasSaddle = reader.ReadBoolean();
+        }
+
+        if (version >= 37)
+        {
+            entry.hasDraftHandcart = reader.ReadBoolean();
+            entry.draftHandcartAnchorCoordinate = new Vector2Int(
+                reader.ReadInt32(),
+                reader.ReadInt32());
+            entry.draftHandcartPlacementSequence = reader.ReadInt64();
         }
 
         return entry;

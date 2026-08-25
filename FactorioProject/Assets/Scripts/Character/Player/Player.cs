@@ -540,7 +540,7 @@ public class Player : Character
 
     public void UpdateMountedVehicleAnimation(Vehicle vehicle)
     {
-        if (!(vehicle is Handcart))
+        if (!(vehicle is Handcart handcart))
         {
             ClearMountedVehicleAnimation();
             return;
@@ -568,8 +568,10 @@ public class Player : Character
 
         Transform animationFacing = BodyTransform != null ? BodyTransform : transform;
         float playerRelativeSignedSpeed = vehicle.ResolveSignedSpeedRelativeToFacing(animationFacing);
+        float playerMoveSpeed = Stat != null ? Stat.currentMoveSpeed : 0f;
         float normalizedSignedSpeed = Mathf.Clamp(
-            playerRelativeSignedSpeed / Mathf.Max(0.01f, vehicle.EffectiveVehicleMaxSpeed),
+            playerRelativeSignedSpeed
+            / Mathf.Max(0.01f, handcart.ResolvePlayerDrivenMaxSpeed(playerMoveSpeed)),
             -1f,
             1f);
         if (Mathf.Abs(normalizedSignedSpeed) <= 0.01f)

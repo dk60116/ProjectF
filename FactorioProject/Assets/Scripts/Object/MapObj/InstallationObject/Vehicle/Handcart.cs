@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItemCollectionStorage
 {
@@ -46,6 +47,16 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     private float connectionCenterDistance = 1f;
     [SerializeField, Min(0.01f)]
     private float connectionSnapMaxDistance = 0.9f;
+    [SerializeField, Min(0.1f)]
+    [Tooltip("동물 중심이 운전대에서 이 거리와 동물 반경을 합친 범위 안에 있으면 연결할 수 있습니다.")]
+    private float draftAnimalConnectionMaxDistance = 1.25f;
+    [FormerlySerializedAs("draftAnimalHandleGap")]
+    [SerializeField, Min(0f)]
+    [Tooltip("동물 크기 비례 간격에 추가로 더하는 거리입니다.")]
+    private float draftAnimalCenterOffset = 0.1f;
+    [SerializeField, Range(0f, 1f)]
+    [Tooltip("운전대 PlayerPoint와 동물 중심 사이에 적용할 동물 반경의 비율입니다.")]
+    private float draftAnimalRadiusClearanceRatio = 0.5f;
 
     [Header("Driving Collision")]
     [SerializeField]
@@ -69,6 +80,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     private readonly List<Handcart> connectionSourceGroupScratch = new List<Handcart>(8);
     private TerrainGenerator cachedTerrain;
     private bool hideHandleForConnectionPreview;
+    private Animal draftAnimal;
+    private bool draftAnimalDriveActive;
+    private Player draftAnimalRider;
 
     public int Capacity
     {
@@ -89,7 +103,28 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     public float ConnectionCenterDistance => Mathf.Max(MinimumConnectionDistance, connectionCenterDistance);
     public float ConnectionSnapMaxDistance => Mathf.Max(MinimumConnectionDistance, connectionSnapMaxDistance);
     public IReadOnlyCollection<Handcart> ConnectedHandcarts => connectedHandcarts;
+    public Animal DraftAnimal => draftAnimal != null && draftAnimal.IsAlive ? draftAnimal : null;
+    public bool HasDraftAnimal => DraftAnimal != null;
     public override float EffectiveVehicleMaxSpeed => VehicleMaxSpeed * ResolveConnectedLoadSpeedMultiplier();
+
+    public float ResolvePlayerDrivenMaxSpeed(float playerMoveSpeed)
+    {
+        return Mathf.Max(0f, playerMoveSpeed) * ResolveConnectedLoadSpeedMultiplier();
+    }
+
+    public static float ResolveStrengthAdjustedLoadSpeedMultiplier(
+        float baseLoadSpeedMultiplier,
+        float strength)
+    {
+        float normalizedBaseMultiplier = Mathf.Clamp01(baseLoadSpeedMultiplier);
+        float normalizedStrength = Mathf.Clamp(
+            strength,
+            AnimalDefinition.MinStrength,
+            AnimalDefinition.MaxStrength) * 0.01f;
+        float adjustedReduction = (1f - normalizedBaseMultiplier)
+                                  * (1f - normalizedStrength);
+        return Mathf.Clamp(1f - adjustedReduction, 0.01f, 1f);
+    }
 
     public int GetStackCapacityForItem(int itemId)
     {
@@ -140,12 +175,14 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
 
     private void OnDestroy()
     {
+        DetachDraftAnimal();
         ClearHandcartConnections();
         ActiveRuntimeHandcarts.Remove(this);
     }
 
     public override void PrepareForPool()
     {
+        DetachDraftAnimal();
         hideHandleForConnectionPreview = false;
         ClearHandcartConnections();
         ActiveRuntimeHandcarts.Remove(this);
@@ -156,8 +193,215 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
 
     protected override void OnPlacementRuntimeCleared()
     {
+        DetachDraftAnimal();
         ClearHandcartConnections();
         base.OnPlacementRuntimeCleared();
+    }
+
+    public static bool TryFindDraftConnectionCandidate(Animal animal, out Handcart result)
+    {
+        result = null;
+        if (animal == null || !animal.IsAlive || !animal.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        float bestSqrDistance = float.PositiveInfinity;
+        Vector3 animalCenter = animal.GetWorldCenter();
+        foreach (Handcart candidate in ActiveRuntimeHandcarts)
+        {
+            if (candidate == null
+                || !candidate.CanAttachDraftAnimal(animal)
+                || !candidate.TryGetPlayerPoint(0, out Transform handlePoint))
+            {
+                continue;
+            }
+
+            Vector3 offset = animalCenter - handlePoint.position;
+            offset.y = 0f;
+            float sqrDistance = offset.sqrMagnitude;
+            if (sqrDistance >= bestSqrDistance)
+            {
+                continue;
+            }
+
+            bestSqrDistance = sqrDistance;
+            result = candidate;
+        }
+
+        return result != null;
+    }
+
+    public static bool TryFindByPlacementRuntime(
+        Vector2Int anchorCoordinate,
+        long placementSequence,
+        out Handcart result)
+    {
+        foreach (Handcart candidate in ActiveRuntimeHandcarts)
+        {
+            if (candidate != null
+                && candidate.gameObject.activeInHierarchy
+                && candidate.RuntimePlacementSequence == placementSequence
+                && candidate.TryGetPlacementRuntime(out Vector2Int candidateAnchor, out _)
+                && candidateAnchor == anchorCoordinate)
+            {
+                result = candidate;
+                return true;
+            }
+        }
+
+        result = null;
+        return false;
+    }
+
+    public bool CanAttachDraftAnimal(Animal animal)
+    {
+        if (!CanOwnDraftAnimal(animal)
+            || !TryGetPlayerPoint(0, out Transform handlePoint))
+        {
+            return false;
+        }
+
+        Vector3 offset = animal.GetWorldCenter() - handlePoint.position;
+        offset.y = 0f;
+        float maxDistance = Mathf.Max(0.1f, draftAnimalConnectionMaxDistance)
+                            + animal.GetWorldRadius();
+        return offset.sqrMagnitude <= maxDistance * maxDistance;
+    }
+
+    public bool TryAttachDraftAnimal(Animal animal)
+    {
+        return TryAttachDraftAnimal(animal, true);
+    }
+
+    private bool TryAttachDraftAnimal(Animal animal, bool requireConnectionDistance)
+    {
+        if (!CanOwnDraftAnimal(animal)
+            || requireConnectionDistance && !CanAttachDraftAnimal(animal)
+            || !animal.TrySetAttachedDraftHandcart(this))
+        {
+            return false;
+        }
+
+        draftAnimal = animal;
+        ResetVehicleMotion();
+        SnapDraftAnimalToHandle();
+        Physics.SyncTransforms();
+        return true;
+    }
+
+    private bool CanOwnDraftAnimal(Animal animal)
+    {
+        return animal != null
+               && animal.IsAlive
+               && animal.gameObject.activeInHierarchy
+               && DraftAnimal == null
+               && animal.AttachedDraftHandcart == null
+               && gameObject.activeInHierarchy
+               && TryGetPlacementRuntime(out _, out _)
+               && IsConnectedGroupHandleOwner()
+               && TryGetPlayerPoint(0, out _);
+    }
+
+    public bool DetachDraftAnimal(Animal expectedAnimal = null)
+    {
+        Animal attachedAnimal = draftAnimal;
+        if (attachedAnimal == null)
+        {
+            draftAnimal = null;
+            draftAnimalDriveActive = false;
+            draftAnimalRider = null;
+            return false;
+        }
+
+        if (expectedAnimal != null && attachedAnimal != expectedAnimal)
+        {
+            return false;
+        }
+
+        draftAnimal = null;
+        draftAnimalDriveActive = false;
+        draftAnimalRider = null;
+        ResetVehicleMotion();
+        attachedAnimal.ClearAttachedDraftHandcart(this);
+        return true;
+    }
+
+    public bool TryMovePulledByAnimal(
+        Animal animal,
+        Vector3 worldMoveDirection,
+        float animalMoveSpeed,
+        float deltaTime,
+        Player animalRider,
+        out float actualMoveSpeed)
+    {
+        actualMoveSpeed = 0f;
+        if (animal == null
+            || animal != DraftAnimal
+            || !animal.IsAlive
+            || !IsConnectedGroupHandleOwner()
+            || deltaTime <= 0f)
+        {
+            return false;
+        }
+
+        Vector3 startPosition = transform.position;
+        draftAnimalDriveActive = true;
+        draftAnimalRider = animalRider;
+        try
+        {
+            HandleMountedInput(worldMoveDirection, animalMoveSpeed, deltaTime, null);
+        }
+        finally
+        {
+            draftAnimalDriveActive = false;
+            draftAnimalRider = null;
+        }
+
+        SnapDraftAnimalToHandle();
+        Vector3 moved = transform.position - startPosition;
+        moved.y = 0f;
+        actualMoveSpeed = moved.magnitude / Mathf.Max(0.0001f, deltaTime);
+        return actualMoveSpeed > MinimumMovementDistance;
+    }
+
+    private void SnapDraftAnimalToHandle()
+    {
+        Animal attachedAnimal = DraftAnimal;
+        if (attachedAnimal == null || !TryGetPlayerPoint(0, out Transform handlePoint))
+        {
+            return;
+        }
+
+        Vector3 forward = transform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= MinimumMovementDistance)
+        {
+            forward = Vector3.forward;
+        }
+        else
+        {
+            forward.Normalize();
+        }
+
+        Vector3 animalRootPosition = attachedAnimal.MovementRootPosition;
+        Vector3 rootToCenter = attachedAnimal.GetWorldCenter() - animalRootPosition;
+        float centerDistance = ResolveDraftAnimalCenterDistance(attachedAnimal);
+        Vector3 targetCenter = handlePoint.position + forward * centerDistance;
+        Vector3 targetRootPosition = targetCenter - rootToCenter;
+        targetRootPosition.y = animalRootPosition.y;
+        attachedAnimal.ApplyDraftPose(
+            targetRootPosition,
+            Quaternion.LookRotation(forward, Vector3.up));
+    }
+
+    private float ResolveDraftAnimalCenterDistance(Animal attachedAnimal)
+    {
+        float animalRadius = attachedAnimal != null
+            ? attachedAnimal.GetWorldRadius()
+            : 0f;
+        return animalRadius * Mathf.Clamp01(draftAnimalRadiusClearanceRatio)
+               + Mathf.Max(0f, draftAnimalCenterOffset);
     }
 
     public static void CollectActiveRuntimeHandcarts(ICollection<Handcart> results)
@@ -196,6 +440,20 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             return false;
         }
 
+        TryGetConnectedGroupDraftAnimal(
+            this,
+            connectionSourceGroupScratch,
+            out Animal draftAnimalToPreserve,
+            out _);
+        if (draftAnimalToPreserve == null)
+        {
+            TryGetConnectedGroupDraftAnimal(
+                other,
+                connectionAlignmentGroupScratch,
+                out draftAnimalToPreserve,
+                out _);
+        }
+
         if (!TryAlignConnectionTargetGroup(
                 alignmentTarget,
                 alignmentSource,
@@ -212,6 +470,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         if (changed)
         {
             RefreshConnectedGroupHandleObjects();
+            ReassignConnectedGroupDraftAnimal(draftAnimalToPreserve);
             RefreshConnectionAlignmentRuntimePlacements();
             Physics.SyncTransforms();
         }
@@ -229,6 +488,17 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     {
         CollectConnectedGroup(alignmentTarget, connectionAlignmentGroupScratch);
         CollectConnectedGroup(alignmentSource, connectionSourceGroupScratch);
+        Animal alignmentDraftAnimal = null;
+        for (int i = 0; i < connectionAlignmentGroupScratch.Count; i++)
+        {
+            Animal candidate = connectionAlignmentGroupScratch[i]?.DraftAnimal;
+            if (candidate != null)
+            {
+                alignmentDraftAnimal = candidate;
+                break;
+            }
+        }
+
         for (int i = 0; i < connectionAlignmentGroupScratch.Count; i++)
         {
             if (connectionSourceGroupScratch.Contains(connectionAlignmentGroupScratch[i]))
@@ -280,8 +550,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             if (handcart.IsDrivePoseBlocked(
                     targetPosition,
                     targetRotation,
-                    null,
-                    connectionAlignmentGroupScratch))
+                    alignmentDraftAnimal != null ? alignmentDraftAnimal.MountedRider : null,
+                    connectionAlignmentGroupScratch,
+                    alignmentDraftAnimal))
             {
                 return false;
             }
@@ -397,17 +668,26 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
 
     public void DisconnectFrom(Handcart other)
     {
-        if (other == null)
+        if (other == null || !connectedHandcarts.Contains(other))
         {
             return;
         }
 
+        TryGetConnectedGroupDraftAnimal(
+            this,
+            connectedGroupScratch,
+            out Animal draftAnimalToPreserve,
+            out Handcart draftAnimalCart);
         bool changed = connectedHandcarts.Remove(other);
         changed |= other.connectedHandcarts.Remove(this);
         if (changed)
         {
             RefreshConnectedGroupHandleObjects();
             other.RefreshConnectedGroupHandleObjects();
+            if (draftAnimalToPreserve != null && draftAnimalCart != null)
+            {
+                draftAnimalCart.ReassignConnectedGroupDraftAnimal(draftAnimalToPreserve);
+            }
         }
     }
 
@@ -436,14 +716,29 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
 
     public bool CanConnectTo(Handcart other)
     {
-        return other != null
-               && other != this
-               && !connectedHandcarts.Contains(other)
-               && gameObject.activeInHierarchy
-               && other.gameObject.activeInHierarchy
-               && TryGetPlacementRuntime(out _, out _)
-               && other.TryGetPlacementRuntime(out _, out _)
-               && !IsInSameConnectedGroup(other)
+        if (other == null
+            || other == this
+            || connectedHandcarts.Contains(other)
+            || !gameObject.activeInHierarchy
+            || !other.gameObject.activeInHierarchy
+            || !TryGetPlacementRuntime(out _, out _)
+            || !other.TryGetPlacementRuntime(out _, out _)
+            || IsInSameConnectedGroup(other))
+        {
+            return false;
+        }
+
+        bool thisGroupHasDraftAnimal = TryGetConnectedGroupDraftAnimal(
+            this,
+            connectionSourceGroupScratch,
+            out _,
+            out _);
+        bool otherGroupHasDraftAnimal = TryGetConnectedGroupDraftAnimal(
+            other,
+            connectionAlignmentGroupScratch,
+            out _,
+            out _);
+        return !(thisGroupHasDraftAnimal && otherGroupHasDraftAnimal)
                && TryResolveConnectionSnapPose(
                    this,
                    other,
@@ -453,6 +748,61 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                    out _,
                    out _,
                    out _);
+    }
+
+    private bool TryGetConnectedGroupDraftAnimal(
+        Handcart root,
+        List<Handcart> scratch,
+        out Animal animal,
+        out Handcart animalCart)
+    {
+        CollectConnectedGroup(root, scratch);
+        for (int i = 0; i < scratch.Count; i++)
+        {
+            Handcart candidateCart = scratch[i];
+            Animal candidateAnimal = candidateCart != null
+                ? candidateCart.DraftAnimal
+                : null;
+            if (candidateAnimal != null)
+            {
+                animal = candidateAnimal;
+                animalCart = candidateCart;
+                scratch.Clear();
+                return true;
+            }
+        }
+
+        scratch.Clear();
+        animal = null;
+        animalCart = null;
+        return false;
+    }
+
+    private void ReassignConnectedGroupDraftAnimal(Animal animal)
+    {
+        if (animal == null)
+        {
+            return;
+        }
+
+        CollectConnectedGroup();
+        Handcart handleOwner = ResolveConnectedGroupHandleOwner();
+        connectedGroupScratch.Clear();
+        Handcart currentOwner = animal.AttachedDraftHandcart;
+        if (handleOwner == null)
+        {
+            currentOwner?.DetachDraftAnimal(animal);
+            return;
+        }
+
+        if (currentOwner == handleOwner)
+        {
+            handleOwner.SnapDraftAnimalToHandle();
+            return;
+        }
+
+        currentOwner?.DetachDraftAnimal(animal);
+        handleOwner.TryAttachDraftAnimal(animal, false);
     }
 
     private bool IsInSameConnectedGroup(Handcart other)
@@ -1407,6 +1757,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     public override bool CanPlayerDock(Player targetPlayer)
     {
         return base.CanPlayerDock(targetPlayer)
+               && !HasDraftAnimal
                && IsConnectedGroupHandleOwner()
                && IsPlayerAtHandleEnd(targetPlayer);
     }
@@ -1482,6 +1833,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Player mountedPlayer)
     {
         if (!IsConnectedGroupHandleOwner()
+            || (HasDraftAnimal && !draftAnimalDriveActive)
             || (mountedPlayer != null && !TryClearPlayerHandsForDriving(mountedPlayer)))
         {
             ResetVehicleMotion();
@@ -1520,7 +1872,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                 currentForward.Normalize();
             }
 
-            bool driveInReverse = Vector3.Dot(currentForward, inputDirection) <= reverseInputDotThreshold;
+            bool driveInReverse = !draftAnimalDriveActive
+                                  && Vector3.Dot(currentForward, inputDirection)
+                                  <= reverseInputDotThreshold;
             Vector3 targetFacing = driveInReverse ? -inputDirection : inputDirection;
             Quaternion targetRotation = Quaternion.LookRotation(targetFacing, Vector3.up);
             Quaternion steeredRotation = Quaternion.RotateTowards(
@@ -1532,7 +1886,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                     startRotation,
                     currentPosition,
                     steeredRotation,
-                    mountedPlayer))
+                    mountedPlayer != null ? mountedPlayer : draftAnimalRider,
+                    draftAnimalDriveActive ? DraftAnimal : null))
             {
                 currentRotation = steeredRotation;
             }
@@ -1540,13 +1895,20 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             driveInput = (driveInReverse ? -1f : 1f) * inputMagnitude;
         }
 
-        float resolvedMaxSpeed = moveSpeed > MinimumMovementDistance
-            ? Mathf.Min(EffectiveVehicleMaxSpeed, moveSpeed)
-            : EffectiveVehicleMaxSpeed;
-        float signedSpeed = UpdateVehicleSignedSpeed(
-            driveInput,
-            normalizedDeltaTime,
-            resolvedMaxSpeed);
+        float resolvedMaxSpeed = ResolvePlayerDrivenMaxSpeed(moveSpeed);
+        float signedSpeed;
+        if (resolvedMaxSpeed <= MinimumMovementDistance)
+        {
+            ResetVehicleMotion();
+            signedSpeed = 0f;
+        }
+        else
+        {
+            signedSpeed = UpdateVehicleSignedSpeed(
+                driveInput,
+                normalizedDeltaTime,
+                resolvedMaxSpeed);
+        }
         float requestedDistance = signedSpeed * normalizedDeltaTime;
         float maxFrameDistance = movementSubstepDistance * maxMovementSubsteps;
         requestedDistance = Mathf.Clamp(requestedDistance, -maxFrameDistance, maxFrameDistance);
@@ -1556,7 +1918,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             startRotation,
             currentRotation,
             requestedDistance,
-            mountedPlayer,
+            mountedPlayer != null ? mountedPlayer : draftAnimalRider,
+            draftAnimalDriveActive ? DraftAnimal : null,
             out Vector3 resolvedPosition,
             out bool movementBlocked);
 
@@ -1591,6 +1954,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Quaternion rotation,
         float requestedDistance,
         Player mountedPlayer,
+        Animal ignoredDraftAnimal,
         out Vector3 resolvedPosition,
         out bool movementBlocked)
     {
@@ -1623,7 +1987,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                     startRotation,
                     candidatePosition,
                     rotation,
-                    mountedPlayer))
+                    mountedPlayer,
+                    ignoredDraftAnimal))
             {
                 movementBlocked = true;
                 break;
@@ -1640,7 +2005,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Vector3 worldPosition,
         Quaternion worldRotation,
         Player mountedPlayer,
-        IReadOnlyList<Handcart> ignoredHandcarts)
+        IReadOnlyList<Handcart> ignoredHandcarts,
+        Animal ignoredDraftAnimal = null)
     {
         ResolveDrivingCollisionBox(
             worldPosition,
@@ -1652,7 +2018,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                    halfExtents,
                    worldRotation,
                    mountedPlayer,
-                   ignoredHandcarts)
+                   ignoredHandcarts,
+                   ignoredDraftAnimal)
                || IsBlockedByWater(boxCenter, halfExtents, worldRotation);
     }
 
@@ -1661,7 +2028,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Vector3 halfExtents,
         Quaternion worldRotation,
         Player mountedPlayer,
-        IReadOnlyList<Handcart> ignoredHandcarts)
+        IReadOnlyList<Handcart> ignoredHandcarts,
+        Animal ignoredDraftAnimal)
     {
         if (obstacleLayers.value == 0)
         {
@@ -1682,6 +2050,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
 
         Transform playerRoot = mountedPlayer != null ? mountedPlayer.transform : null;
         Transform playerBody = mountedPlayer != null ? mountedPlayer.BodyTransform : null;
+        Transform draftAnimalRoot = ignoredDraftAnimal != null
+            ? ignoredDraftAnimal.MovementRoot
+            : null;
         for (int i = 0; i < overlapCount; i++)
         {
             Collider obstacle = obstacleBuffer[i];
@@ -1691,6 +2062,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                 || obstacle.transform.IsChildOf(transform)
                 || IsSameOrChildOf(obstacle.transform, playerRoot)
                 || IsSameOrChildOf(obstacle.transform, playerBody)
+                || IsSameOrChildOf(obstacle.transform, draftAnimalRoot)
                 || IsPartOfHandcartGroup(obstacle.transform, ignoredHandcarts))
             {
                 continue;
@@ -1707,7 +2079,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         Quaternion leaderStartRotation,
         Vector3 leaderTargetPosition,
         Quaternion leaderTargetRotation,
-        Player mountedPlayer)
+        Player mountedPlayer,
+        Animal ignoredDraftAnimal = null)
     {
         for (int i = 0; i < connectedGroupScratch.Count; i++)
         {
@@ -1729,10 +2102,74 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
                     targetPosition,
                     targetRotation,
                     mountedPlayer,
-                    connectedGroupScratch))
+                    connectedGroupScratch,
+                    ignoredDraftAnimal))
             {
                 return true;
             }
+        }
+
+        return ignoredDraftAnimal != null
+               && IsDraftAnimalPoseBlocked(
+                   leaderTargetPosition,
+                   leaderTargetRotation,
+                   mountedPlayer,
+                   ignoredDraftAnimal);
+    }
+
+    private bool IsDraftAnimalPoseBlocked(
+        Vector3 cartPosition,
+        Quaternion cartRotation,
+        Player mountedPlayer,
+        Animal attachedAnimal)
+    {
+        if (attachedAnimal == null || !TryGetPlayerPoint(0, out Transform handlePoint))
+        {
+            return false;
+        }
+
+        Vector3 handleLocalPosition = transform.InverseTransformPoint(handlePoint.position);
+        Vector3 targetHandlePosition = cartPosition + cartRotation * handleLocalPosition;
+        Vector3 forward = cartRotation * Vector3.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude <= MinimumMovementDistance)
+        {
+            return false;
+        }
+
+        forward.Normalize();
+        float animalRadius = attachedAnimal.GetWorldRadius();
+        Vector3 targetCenter = targetHandlePosition
+                               + forward * ResolveDraftAnimalCenterDistance(attachedAnimal);
+        targetCenter.y = attachedAnimal.GetWorldCenter().y;
+        int overlapCount = Physics.OverlapSphereNonAlloc(
+            targetCenter,
+            animalRadius,
+            obstacleBuffer,
+            obstacleLayers,
+            QueryTriggerInteraction.Ignore);
+        if (overlapCount >= obstacleBuffer.Length)
+        {
+            return true;
+        }
+
+        Transform playerRoot = mountedPlayer != null ? mountedPlayer.transform : null;
+        Transform playerBody = mountedPlayer != null ? mountedPlayer.BodyTransform : null;
+        Transform animalRoot = attachedAnimal.MovementRoot;
+        for (int i = 0; i < overlapCount; i++)
+        {
+            Collider obstacle = obstacleBuffer[i];
+            obstacleBuffer[i] = null;
+            if (obstacle == null
+                || IsSameOrChildOf(obstacle.transform, animalRoot)
+                || IsSameOrChildOf(obstacle.transform, playerRoot)
+                || IsSameOrChildOf(obstacle.transform, playerBody)
+                || IsPartOfHandcartGroup(obstacle.transform, connectedGroupScratch))
+            {
+                continue;
+            }
+
+            return true;
         }
 
         return false;
@@ -1842,13 +2279,26 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     private float ResolveConnectedLoadSpeedMultiplier()
     {
         CollectConnectedGroup();
+        float draftAnimalStrength = AnimalDefinition.DefaultStrength;
+        for (int i = 0; i < connectedGroupScratch.Count; i++)
+        {
+            Animal connectedDraftAnimal = connectedGroupScratch[i]?.DraftAnimal;
+            if (connectedDraftAnimal?.Definition != null)
+            {
+                draftAnimalStrength = connectedDraftAnimal.Definition.Strength;
+                break;
+            }
+        }
+
         float multiplier = 1f;
         for (int i = 0; i < connectedGroupScratch.Count; i++)
         {
             Handcart handcart = connectedGroupScratch[i];
-            if (handcart != null && handcart != this)
+            if (handcart != null)
             {
-                multiplier *= handcart.VehicleLoadSpeedMultiplier;
+                multiplier *= ResolveStrengthAdjustedLoadSpeedMultiplier(
+                    handcart.VehicleLoadSpeedMultiplier,
+                    draftAnimalStrength);
             }
         }
 

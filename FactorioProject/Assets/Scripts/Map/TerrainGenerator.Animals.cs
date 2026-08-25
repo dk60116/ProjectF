@@ -966,6 +966,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 hasHealth = source.hasHealth,
                 currentHealth = source.currentHealth,
                 hasSaddle = source.hasSaddle,
+                hasDraftHandcart = source.hasDraftHandcart,
+                draftHandcartAnchorCoordinate = source.draftHandcartAnchorCoordinate,
+                draftHandcartPlacementSequence = source.draftHandcartPlacementSequence,
                 corpseLootInitialized = source.corpseLootInitialized,
                 corpseRemainingItemIds = source.corpseRemainingItemIds != null
                     ? new List<int>(source.corpseRemainingItemIds)

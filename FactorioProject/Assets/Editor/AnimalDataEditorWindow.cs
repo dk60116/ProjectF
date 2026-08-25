@@ -27,7 +27,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private sealed class AnimalJsonFile
     {
         public string format = "ProjectF.AnimalData";
-        public int version = 9;
+        public int version = 11;
         public List<AnimalJsonEntry> animals = new List<AnimalJsonEntry>();
     }
 
@@ -52,7 +52,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int maxHerdSize = AnimalDefinition.DefaultMaxHerdSize;
         public int spawnWeight = AnimalDefinition.DefaultSpawnWeight;
         public float maxHealth = AnimalDefinition.DefaultMaxHealth;
+        public bool canRiding = true;
         public float riderHeight = AnimalDefinition.DefaultRiderHeight;
+        public float strength = AnimalDefinition.DefaultStrength;
         public AnimalAISettings aiSettings = new AnimalAISettings();
         public List<AnimalDropJsonEntry> dropItems = new List<AnimalDropJsonEntry>();
         public string hierarchyPath = string.Empty;
@@ -72,7 +74,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public int maxHerdSize;
         public int spawnWeight;
         public float maxHealth;
+        public bool canRiding;
         public float riderHeight;
+        public float strength;
         public AnimalAISettings aiSettings;
         public List<AnimalDropEntry> dropItems;
         public GameObject prefab;
@@ -95,7 +99,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             maxHerdSize = definition != null ? definition.MaxHerdSize : AnimalDefinition.DefaultMaxHerdSize;
             spawnWeight = definition != null ? definition.SpawnWeight : AnimalDefinition.DefaultSpawnWeight;
             maxHealth = definition != null ? definition.MaxHealth : AnimalDefinition.DefaultMaxHealth;
+            canRiding = definition == null || definition.CanBeRidden;
             riderHeight = definition != null ? definition.RiderHeight : AnimalDefinition.DefaultRiderHeight;
+            strength = definition != null ? definition.Strength : AnimalDefinition.DefaultStrength;
             aiSettings = definition != null && definition.AISettings != null
                 ? definition.AISettings.Clone()
                 : new AnimalAISettings();
@@ -270,6 +276,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         window.ReloadDefinitions(false);
         if (definition != null)
         {
+            ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
             window.selectedDefinitionInstanceId = definition.GetInstanceID();
             window.selectedObjectPath = string.Empty;
             window.ResetPreview();
@@ -573,6 +580,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             return;
         }
 
+        ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
         selectedObjectPath = node.path;
         selectedDefinitionInstanceId = 0;
         detailScroll = Vector2.zero;
@@ -617,6 +625,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         {
             if (!selected)
             {
+                ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
                 selectedDefinitionInstanceId = definition.GetInstanceID();
                 selectedObjectPath = string.Empty;
                 detailScroll = Vector2.zero;
@@ -716,6 +725,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         GUILayout.Space(8f);
         DrawObjectDropItems();
         GUILayout.Space(8f);
+        DrawObjectRidingSettings();
+        GUILayout.Space(8f);
         for (int i = 0; i < selectedObjectDefinitions.Count; i++)
         {
             AnimalDefinition definition = selectedObjectDefinitions[i];
@@ -756,6 +767,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         if (GUILayout.Button("Full Details", GUILayout.Width(90f), GUILayout.Height(24f)))
         {
+            ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
             selectedObjectPath = string.Empty;
             selectedDefinitionInstanceId = definition.GetInstanceID();
             detailScroll = Vector2.zero;
@@ -772,9 +784,17 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     "Rider Height",
                     "이 성별 변형의 Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
                 draft.riderHeight));
+        float nextStrength = EditorGUILayout.Slider(
+            new GUIContent(
+                "Strength",
+                "이 성별 변형의 수레 Mass 감속 저항입니다. -100은 감속 2배, 100은 감속 무시입니다."),
+            draft.strength,
+            AnimalDefinition.MinStrength,
+            AnimalDefinition.MaxStrength);
         if (EditorGUI.EndChangeCheck())
         {
             draft.riderHeight = nextRiderHeight;
+            draft.strength = nextStrength;
             draft.dirty = true;
         }
 
@@ -854,6 +874,52 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUILayout.HelpBox(
             "Age Weight를 중심으로 표준편차 2.0의 정규분포를 적용합니다. 나이와 무리 설정은 Female/Male에 함께 적용됩니다.",
             MessageType.Info);
+        EditorGUILayout.EndVertical();
+    }
+
+    private void DrawObjectRidingSettings()
+    {
+        if (selectedObjectDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        bool currentCanRiding = GetDraft(selectedObjectDefinitions[0]).canRiding;
+        bool hasMixedSettings = false;
+        for (int i = 1; i < selectedObjectDefinitions.Count; i++)
+        {
+            if (GetDraft(selectedObjectDefinitions[i]).canRiding != currentCanRiding)
+            {
+                hasMixedSettings = true;
+                break;
+            }
+        }
+
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Riding Settings", EditorStyles.boldLabel);
+        EditorGUI.showMixedValue = hasMixedSettings;
+        EditorGUI.BeginChangeCheck();
+        bool nextCanRiding = EditorGUILayout.Toggle(
+            new GUIContent(
+                "Can Riding",
+                "이 종의 Female/Male 모두에게 안장 장착과 탑승을 허용합니다."),
+            currentCanRiding);
+        bool settingsChanged = EditorGUI.EndChangeCheck();
+        EditorGUI.showMixedValue = false;
+
+        if (settingsChanged)
+        {
+            for (int i = 0; i < selectedObjectDefinitions.Count; i++)
+            {
+                AnimalDraft draft = GetDraft(selectedObjectDefinitions[i]);
+                draft.canRiding = nextCanRiding;
+                draft.dirty = true;
+            }
+        }
+
+        EditorGUILayout.LabelField(
+            "Female/Male 변형에 공통으로 저장됩니다.",
+            EditorStyles.miniLabel);
         EditorGUILayout.EndVertical();
     }
 
@@ -1139,6 +1205,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     "Rider Height",
                     "Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
                 draft.riderHeight));
+        float nextStrength = EditorGUILayout.Slider(
+            new GUIContent(
+                "Strength",
+                "수레 Mass 감속 효과를 줄이는 비율입니다. -100은 감속 2배, 100은 감속 무시입니다."),
+            draft.strength,
+            AnimalDefinition.MinStrength,
+            AnimalDefinition.MaxStrength);
         if (EditorGUI.EndChangeCheck())
         {
             bool prefabChanged = nextPrefab != draft.prefab;
@@ -1148,6 +1221,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             draft.adultIcon = nextAdultIcon;
             draft.childIcon = nextChildIcon;
             draft.riderHeight = nextRiderHeight;
+            draft.strength = nextStrength;
             draft.dirty = true;
             if (prefabChanged)
             {
@@ -1797,7 +1871,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 draft.maxHerdSize,
                 draft.spawnWeight,
                 draft.maxHealth,
+                draft.canRiding,
                 draft.riderHeight,
+                draft.strength,
                 draft.aiSettings,
                 draft.dropItems,
                 "Save Animal Data");
@@ -1938,7 +2014,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                         AnimalDefinition.DefaultMaxHerdSize,
                         AnimalDefinition.DefaultSpawnWeight,
                         AnimalDefinition.DefaultMaxHealth,
+                        true,
                         AnimalDefinition.DefaultRiderHeight,
+                        AnimalDefinition.DefaultStrength,
                         new AnimalAISettings(),
                         new List<AnimalDropEntry>(),
                         "Create Animal Definition");
@@ -1972,7 +2050,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     definition.MaxHerdSize,
                     definition.SpawnWeight,
                     definition.MaxHealth,
+                    definition.CanBeRidden,
                     definition.RiderHeight,
+                    definition.Strength,
                     definition.AISettings,
                     definition.DropItems,
                     "Rebuild Animal Definition");
@@ -2061,9 +2141,18 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             draft.maxHealth = file.version >= 5
                 ? Mathf.Max(1f, entry.maxHealth)
                 : AnimalDefinition.DefaultMaxHealth;
+            draft.canRiding = file.version >= 10
+                ? entry.canRiding
+                : true;
             draft.riderHeight = file.version >= 9
                 ? Mathf.Max(0f, entry.riderHeight)
                 : AnimalDefinition.DefaultRiderHeight;
+            draft.strength = file.version >= 11
+                ? Mathf.Clamp(
+                    entry.strength,
+                    AnimalDefinition.MinStrength,
+                    AnimalDefinition.MaxStrength)
+                : AnimalDefinition.DefaultStrength;
             if (file.version >= 4 && entry.aiSettings != null)
             {
                 draft.aiSettings = entry.aiSettings.Clone();
@@ -2126,7 +2215,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 maxHerdSize = definition.MaxHerdSize,
                 spawnWeight = definition.SpawnWeight,
                 maxHealth = definition.MaxHealth,
+                canRiding = definition.CanBeRidden,
                 riderHeight = definition.RiderHeight,
+                strength = definition.Strength,
                 aiSettings = definition.AISettings != null
                     ? definition.AISettings.Clone()
                     : new AnimalAISettings(),

@@ -82,6 +82,9 @@ public sealed class AnimalDefinition : ScriptableObject
     public const int DefaultSpawnWeight = DefaultMinHerdSize;
     public const float DefaultMaxHealth = 100f;
     public const float DefaultRiderHeight = 0.5f;
+    public const float MinStrength = -100f;
+    public const float MaxStrength = 100f;
+    public const float DefaultStrength = 0f;
 
     [SerializeField, Min(-1)] private int id = -1;
     [SerializeField] private string animalName = string.Empty;
@@ -90,9 +93,15 @@ public sealed class AnimalDefinition : ScriptableObject
     [SerializeField, Min(1)] private int maxHerdSize = DefaultMaxHerdSize;
     [SerializeField, Min(1)] private int spawnWeight = DefaultSpawnWeight;
     [SerializeField, Min(1f)] private float maxHealth = DefaultMaxHealth;
+    [SerializeField]
+    [Tooltip("이 종의 Female/Male 동물에게 안장 장착과 탑승을 허용합니다.")]
+    private bool canRiding = true;
     [SerializeField, Min(0f)]
     [Tooltip("Age 10 동물의 루트 위치를 기준으로 한 플레이어 탑승 높이입니다. 실제 높이는 BabyScale부터 성체 배율까지의 성장값에 맞춰 적용됩니다.")]
     private float riderHeight = DefaultRiderHeight;
+    [SerializeField, Range(MinStrength, MaxStrength)]
+    [Tooltip("수레 견인 시 Mass 감속 효과를 줄이는 비율입니다. 음수이면 감속 효과가 증가합니다.")]
+    private float strength = DefaultStrength;
     [SerializeField] private List<AnimalDropEntry> dropItems = new List<AnimalDropEntry>();
     [SerializeField] private GameObject animalPrefab;
     [SerializeField] private Sprite adultIcon;
@@ -106,7 +115,9 @@ public sealed class AnimalDefinition : ScriptableObject
     public int MaxHerdSize => maxHerdSize;
     public int SpawnWeight => spawnWeight;
     public float MaxHealth => Mathf.Max(1f, maxHealth);
+    public bool CanBeRidden => canRiding;
     public float RiderHeight => Mathf.Max(0f, riderHeight);
+    public float Strength => Mathf.Clamp(strength, MinStrength, MaxStrength);
     public IReadOnlyList<AnimalDropEntry> DropItems =>
         dropItems ??= new List<AnimalDropEntry>();
     public GameObject AnimalPrefab => animalPrefab;
@@ -205,6 +216,7 @@ public sealed class AnimalDefinition : ScriptableObject
         spawnWeight = Mathf.Clamp(spawnWeight, minHerdSize, maxHerdSize);
         maxHealth = Mathf.Max(1f, maxHealth);
         riderHeight = Mathf.Max(0f, riderHeight);
+        strength = Mathf.Clamp(strength, MinStrength, MaxStrength);
         dropItems ??= new List<AnimalDropEntry>();
         for (int i = 0; i < dropItems.Count; i++)
         {

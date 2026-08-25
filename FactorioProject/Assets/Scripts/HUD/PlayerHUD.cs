@@ -113,6 +113,9 @@ public partial class PlayerHUD : BagSlot
     private Animal currentSaddleInteractionAnimal;
     private Animal currentRideableInteractionAnimal;
     private Animal currentInteractionAnimal;
+    private Handcart currentDraftAnimalInteractionHandcart;
+    private Animal currentDraftAnimalInteractionAnimal;
+    private bool currentDraftAnimalInteractionDetaches;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
@@ -1881,6 +1884,8 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
+        Vehicle mountedVehicle = playerController != null ? playerController.MountedVehicle : null;
+        Animal mountedAnimal = playerController != null ? playerController.MountedAnimal : null;
         bool hasHeldNoose = TryResolveHeldNoose(currentPlayer, out ItemDefinition heldNoose);
         ItemDefinition heldLightItem = null;
         bool hasHeldLightItem = !hasHeldNoose
@@ -1888,28 +1893,30 @@ public partial class PlayerHUD : BagSlot
                                     currentPlayer,
                                     out heldLightItem);
         SetThrowInteractionButtonState(
-            hasHeldNoose
+            hasHeldNoose && !(mountedVehicle is Train) && !(mountedVehicle is Handcart)
                 ? heldNoose.icon
                 : (hasHeldLightItem ? heldLightItem.icon : null));
 
-        Vehicle mountedVehicle = playerController != null ? playerController.MountedVehicle : null;
-        SetTrainConnectionInteractionButtonState(mountedVehicle as SteamTrain);
         if (mountedVehicle != null)
         {
             ClearInteractionTargets();
+            SetTrainConnectionInteractionButtonState(mountedVehicle as SteamTrain);
             currentInteractionMapObject = mountedVehicle;
             SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(mountedVehicle, 1));
             return;
         }
 
-        Animal mountedAnimal = playerController != null ? playerController.MountedAnimal : null;
         if (mountedAnimal != null)
         {
             ClearInteractionTargets();
             currentRideableInteractionAnimal = mountedAnimal;
+            TryPrepareMountedAnimalDraftInteraction(mountedAnimal);
+            SetTrainConnectionInteractionButtonState(null);
             SetActiveInteractionButton(InteractionButton, ResolveSaddleInteractionIcon(1));
             return;
         }
+
+        SetTrainConnectionInteractionButtonState(null);
 
         if (TryActivateSaddleInteraction(currentPlayer, playerController))
         {
@@ -1958,6 +1965,29 @@ public partial class PlayerHUD : BagSlot
         }
 
         ClearContextInteractionButtonState();
+    }
+
+    private bool TryPrepareMountedAnimalDraftInteraction(Animal mountedAnimal)
+    {
+        if (mountedAnimal == null || !mountedAnimal.IsAlive)
+        {
+            return false;
+        }
+
+        Handcart targetHandcart = mountedAnimal.AttachedDraftHandcart;
+        bool detaches = targetHandcart != null;
+        if (!detaches
+            && !Handcart.TryFindDraftConnectionCandidate(
+                mountedAnimal,
+                out targetHandcart))
+        {
+            return false;
+        }
+
+        currentDraftAnimalInteractionAnimal = mountedAnimal;
+        currentDraftAnimalInteractionHandcart = targetHandcart;
+        currentDraftAnimalInteractionDetaches = detaches;
+        return true;
     }
 
     private bool TryActivateSaddleInteraction(
@@ -2289,6 +2319,9 @@ public partial class PlayerHUD : BagSlot
         currentSaddleInteractionAnimal = null;
         currentRideableInteractionAnimal = null;
         currentInteractionAnimal = null;
+        currentDraftAnimalInteractionHandcart = null;
+        currentDraftAnimalInteractionAnimal = null;
+        currentDraftAnimalInteractionDetaches = false;
         currentInteractionBoxObject = null;
         currentInteractionDoorObject = null;
         currentInteractionResource = null;
@@ -2339,12 +2372,18 @@ public partial class PlayerHUD : BagSlot
 
     private void SetTrainConnectionInteractionButtonState(SteamTrain steamTrain)
     {
-        bool canConnect = steamTrain != null
-                          && trainConnectInteractionIcon != null
-                          && steamTrain.TryGetTouchingUnconnectedTrain(out _);
-        bool canDisconnect = steamTrain != null
-                             && trainDisconnectInteractionIcon != null
-                             && steamTrain.TryGetConnectedTrain(out _);
+        bool hasDraftInteraction = currentDraftAnimalInteractionHandcart != null
+                                   && currentDraftAnimalInteractionAnimal != null;
+        bool canConnect = trainConnectInteractionIcon != null
+                          && (steamTrain != null
+                                  ? steamTrain.TryGetTouchingUnconnectedTrain(out _)
+                                  : hasDraftInteraction
+                                    && !currentDraftAnimalInteractionDetaches);
+        bool canDisconnect = trainDisconnectInteractionIcon != null
+                             && (steamTrain != null
+                                     ? steamTrain.TryGetConnectedTrain(out _)
+                                     : hasDraftInteraction
+                                       && currentDraftAnimalInteractionDetaches);
 
         SetParallelInteractionButtonState(
             TrainConnectInteractionButton,
@@ -3246,7 +3285,18 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        ResolveMountedSteamTrain()?.TryConnectTouchingTrain();
+        if (currentDraftAnimalInteractionHandcart != null
+            && currentDraftAnimalInteractionAnimal != null
+            && !currentDraftAnimalInteractionDetaches)
+        {
+            currentDraftAnimalInteractionHandcart.TryAttachDraftAnimal(
+                currentDraftAnimalInteractionAnimal);
+        }
+        else
+        {
+            ResolveMountedSteamTrain()?.TryConnectTouchingTrain();
+        }
+
         UpdateInteractionButtonState();
     }
 
@@ -3257,7 +3307,18 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        ResolveMountedSteamTrain()?.TryDisconnectConnectedTrain();
+        if (currentDraftAnimalInteractionHandcart != null
+            && currentDraftAnimalInteractionAnimal != null
+            && currentDraftAnimalInteractionDetaches)
+        {
+            currentDraftAnimalInteractionHandcart.DetachDraftAnimal(
+                currentDraftAnimalInteractionAnimal);
+        }
+        else
+        {
+            ResolveMountedSteamTrain()?.TryDisconnectConnectedTrain();
+        }
+
         UpdateInteractionButtonState();
     }
 
@@ -3502,6 +3563,7 @@ public partial class PlayerHUD : BagSlot
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
                                 || bucketWaterInteractionActive
+                                || currentDraftAnimalInteractionHandcart != null
                                 || currentSaddleInteractionAnimal != null
                                 || currentRideableInteractionAnimal != null
                                 || currentInteractionAnimal != null

@@ -4,6 +4,16 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
+internal static class ProjectFEditorGUIUtility
+{
+    public static void CommitAndReleaseKeyboardFocus()
+    {
+        GUI.FocusControl(null);
+        GUIUtility.keyboardControl = 0;
+        EditorGUIUtility.editingTextField = false;
+    }
+}
+
 internal enum AnimalValidationSeverity
 {
     Info,
@@ -166,7 +176,9 @@ internal static class AnimalDataEditorUtility
         int maxHerdSize,
         int spawnWeight,
         float maxHealth,
+        bool canRiding,
         float riderHeight,
+        float strength,
         AnimalAISettings aiSettings,
         IReadOnlyList<AnimalDropEntry> dropItems,
         string undoName)
@@ -197,7 +209,12 @@ internal static class AnimalDataEditorUtility
             normalizedMinHerdSize,
             normalizedMaxHerdSize);
         serializedDefinition.FindProperty("maxHealth").floatValue = Mathf.Max(1f, maxHealth);
+        serializedDefinition.FindProperty("canRiding").boolValue = canRiding;
         serializedDefinition.FindProperty("riderHeight").floatValue = Mathf.Max(0f, riderHeight);
+        serializedDefinition.FindProperty("strength").floatValue = Mathf.Clamp(
+            strength,
+            AnimalDefinition.MinStrength,
+            AnimalDefinition.MaxStrength);
         SerializedProperty dropItemsProperty = serializedDefinition.FindProperty("dropItems");
         if (dropItemsProperty != null)
         {

@@ -1427,6 +1427,7 @@ public class ItemDataEditorWindow : EditorWindow
                     return;
                 }
 
+                ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
                 bool additive = current.control || current.command;
                 if (current.shift)
                 {
@@ -1482,6 +1483,7 @@ public class ItemDataEditorWindow : EditorWindow
         ItemDefinition definition,
         List<ItemDefinition> definitions)
     {
+        ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
         selectedItemDefinitions.Clear();
         if (definition != null)
         {
@@ -1498,6 +1500,7 @@ public class ItemDataEditorWindow : EditorWindow
         ItemDefinition definition,
         List<ItemDefinition> definitions)
     {
+        ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
         if (selectedItemDefinitions.Contains(definition))
         {
             if (selectedItemDefinitions.Count <= 1)
@@ -1528,6 +1531,7 @@ public class ItemDataEditorWindow : EditorWindow
         bool additive,
         List<ItemDefinition> definitions)
     {
+        ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
         ItemDefinition anchor = rangeSelectionAnchor;
         if (anchor == null)
         {

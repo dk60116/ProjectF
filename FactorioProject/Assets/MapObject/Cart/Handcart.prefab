@@ -200,9 +200,9 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   vehicleAccelerationPerSecond: 2
-  vehicleMaxSpeed: 1.2
-  vehicleDecelerationPerSecond: 2.5
-  vehicleMass: 10
+  vehicleMaxSpeed: 1
+  vehicleDecelerationPerSecond: 3
+  vehicleMass: 20
   playerPoint:
   - {fileID: 473533616803250247}
   wheels:
@@ -230,6 +230,9 @@ MonoBehaviour:
   maxMovementSubsteps: 24
   connectionCenterDistance: 1
   connectionSnapMaxDistance: 0.9
+  draftAnimalConnectionMaxDistance: 1.25
+  draftAnimalCenterOffset: 0.1
+  draftAnimalRadiusClearanceRatio: 0.5
   drivingCollider: {fileID: 8817530847774380614}
   obstacleLayers:
     serializedVersion: 2

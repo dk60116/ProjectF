@@ -433,6 +433,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         GUI.Label(labelRect, content.text, EditorStyles.miniLabel);
         if (pressed)
         {
+            ProjectFEditorGUIUtility.CommitAndReleaseKeyboardFocus();
             selectedItemId = definition.id;
         }
     }
