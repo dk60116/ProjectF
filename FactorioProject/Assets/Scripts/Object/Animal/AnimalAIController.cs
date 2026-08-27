@@ -654,7 +654,11 @@ public sealed class AnimalAIController : MonoBehaviour
                 deltaTime,
                 mountedRider,
                 out float actualMoveSpeed);
-            ApplyAnimation(actualMoveSpeed, isRunning && moved);
+            float walkAnimationSpeedThreshold = GetEffectiveMoveSpeed() * inputMagnitude;
+            bool useRunAnimation = isRunning
+                                   && moved
+                                   && actualMoveSpeed > walkAnimationSpeedThreshold;
+            ApplyAnimation(actualMoveSpeed, useRunAnimation);
             return moved;
         }
 
