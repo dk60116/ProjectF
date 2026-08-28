@@ -33,6 +33,7 @@ public partial class PlayerHUD : BagSlot
     private const string NooseItemName = "Noose";
     private const string SaddleItemName = "Saddle";
     private const string TorchItemName = "Torch";
+    private const string PitchforkItemName = "Pitchfork";
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
     private float craftingIngredientRefreshTimer;
@@ -120,6 +121,7 @@ public partial class PlayerHUD : BagSlot
     private FenceDoor currentInteractionDoorObject;
     private Resource currentInteractionResource;
     private MapObject currentInteractionMapObject;
+    private bool pitchforkGroundInteractionActive;
     private Component currentObjectInfoTarget;
     private Component clickedObjectInfoTarget;
     private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
@@ -1918,6 +1920,26 @@ public partial class PlayerHUD : BagSlot
 
         SetTrainConnectionInteractionButtonState(null);
 
+        if (playerController != null
+            && playerController.TryGetSelectedPitchforkGroundBlock(out _)
+            && TryResolveHeldItem(currentPlayer, PitchforkItemName, out ItemDefinition heldPitchfork))
+        {
+            Sprite pitchforkInteractionIcon = heldPitchfork.interactionButtonList != null
+                                               && heldPitchfork.interactionButtonList.Count > 0
+                ? heldPitchfork.interactionButtonList[0]
+                : null;
+            if (pitchforkInteractionIcon == null)
+            {
+                ClearContextInteractionButtonState();
+                return;
+            }
+
+            ClearInteractionTargets();
+            pitchforkGroundInteractionActive = true;
+            SetActiveInteractionButton(InteractionButton, pitchforkInteractionIcon);
+            return;
+        }
+
         if (TryActivateSaddleInteraction(currentPlayer, playerController))
         {
             return;
@@ -2326,6 +2348,7 @@ public partial class PlayerHUD : BagSlot
         currentInteractionDoorObject = null;
         currentInteractionResource = null;
         currentInteractionMapObject = null;
+        pitchforkGroundInteractionActive = false;
     }
 
     private void SetActiveInteractionButton(InteractionButton activeButton, Sprite icon)
@@ -2543,6 +2566,16 @@ public partial class PlayerHUD : BagSlot
                         ? clickedPortableObject
                         : clickedMapObject;
                 BindObjectInfoPanel(clickedObjectInfoTarget, false);
+                return;
+            }
+
+            Player currentPlayer = GameManager.Instance != null
+                ? GameManager.Instance.Player
+                : null;
+            if (currentPlayer != null && currentPlayer.IsHoldingPitchfork)
+            {
+                ClearObjectInfoPanelState();
+                playerController?.TrySelectPitchforkGroundAtPointer(pointerPosition);
                 return;
             }
 
@@ -3368,6 +3401,12 @@ public partial class PlayerHUD : BagSlot
         }
 
         Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (pitchforkGroundInteractionActive)
+        {
+            UpdateInteractionButtonState();
+            return;
+        }
+
         if (bucketWaterInteractionActive)
         {
             HandleBucketWaterInteraction(currentPlayer);
@@ -3562,6 +3601,7 @@ public partial class PlayerHUD : BagSlot
             ? ResolveDoorInteractionButtonForUse()
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
+                                || pitchforkGroundInteractionActive
                                 || bucketWaterInteractionActive
                                 || currentDraftAnimalInteractionHandcart != null
                                 || currentSaddleInteractionAnimal != null

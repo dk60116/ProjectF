@@ -1,6 +1,6 @@
 {
     "format": "ProjectF.AnimalData",
-    "version": 13,
+    "version": 14,
     "animals": [
         {
             "id": 0,
@@ -9,17 +9,19 @@
             "minHerdSize": 2,
             "maxHerdSize": 6,
             "spawnWeight": 5,
-            "maxHealth": 100.0,
+            "maxHealth": 120.0,
             "canRiding": true,
             "riderHeight": 0.47999998927116396,
-            "strength": 30.0,
+            "strength": 45.0,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
-                "separationRadius": 1.25,
-                "separationWeight": 1.5,
+                "separationRadius": 1.0,
+                "separationWeight": 1.600000023841858,
                 "cohesionWeight": 0.6499999761581421,
-                "moveSpeed": 1.25,
-                "runSpeedRatio": 1.2000000476837159,
+                "moveSpeed": 0.699999988079071,
+                "runSpeedRatio": 1.5,
+                "accelerationPerSecond": 0.5,
+                "decelerationPerSecond": 1.0,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -117,17 +119,19 @@
             "minHerdSize": 2,
             "maxHerdSize": 6,
             "spawnWeight": 5,
-            "maxHealth": 100.0,
+            "maxHealth": 120.0,
             "canRiding": true,
             "riderHeight": 0.5,
             "strength": 37.0,
             "aiSettings": {
                 "herdAreaRadius": 15.0,
-                "separationRadius": 1.25,
-                "separationWeight": 1.5,
+                "separationRadius": 1.0,
+                "separationWeight": 1.600000023841858,
                 "cohesionWeight": 0.6499999761581421,
-                "moveSpeed": 1.25,
-                "runSpeedRatio": 1.2000000476837159,
+                "moveSpeed": 0.699999988079071,
+                "runSpeedRatio": 1.5,
+                "accelerationPerSecond": 0.5,
+                "decelerationPerSecond": 1.0,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -219,13 +223,233 @@
             "childIconAssetPath": "Assets/Animals/Cattle/Male/Cattle_Male_Child_Icon.png"
         },
         {
+            "id": 4,
+            "animalName": "Horse Female",
+            "spawnAge": 7,
+            "minHerdSize": 2,
+            "maxHerdSize": 6,
+            "spawnWeight": 2,
+            "maxHealth": 100.0,
+            "canRiding": true,
+            "riderHeight": 0.5,
+            "strength": 30.0,
+            "aiSettings": {
+                "herdAreaRadius": 30.0,
+                "separationRadius": 1.25,
+                "separationWeight": 1.5,
+                "cohesionWeight": 0.6499999761581421,
+                "moveSpeed": 0.8999999761581421,
+                "runSpeedRatio": 1.7999999523162842,
+                "accelerationPerSecond": 0.5,
+                "decelerationPerSecond": 1.0,
+                "turnSpeed": 220.0,
+                "obstacleProbeDistance": 1.5,
+                "arrivalDistance": 0.3499999940395355,
+                "fleeSafeDistance": 12.0,
+                "nearbyThreatRadius": 8.0,
+                "fleeSpeedMultiplier": 1.5,
+                "youngSpeedMultiplier": 0.800000011920929,
+                "maleSpeedMultiplier": 1.0499999523162842,
+                "femaleSpeedMultiplier": 1.0,
+                "youngWanderWeightMultiplier": 1.350000023841858,
+                "youngRestWeightMultiplier": 1.25,
+                "idleWeight": 2.0,
+                "lookAroundWeight": 2.0,
+                "wanderWeight": 4.0,
+                "grazeWeight": 3.0,
+                "drinkWeight": 1.0,
+                "restWeight": 1.5,
+                "idleDuration": {
+                    "x": 2.0,
+                    "y": 6.0
+                },
+                "lookAroundDuration": {
+                    "x": 2.0,
+                    "y": 5.0
+                },
+                "wanderDuration": {
+                    "x": 4.0,
+                    "y": 10.0
+                },
+                "grazeDuration": {
+                    "x": 4.0,
+                    "y": 8.0
+                },
+                "drinkDuration": {
+                    "x": 3.0,
+                    "y": 6.0
+                },
+                "restDuration": {
+                    "x": 6.0,
+                    "y": 14.0
+                }
+            },
+            "dropItems": [
+                {
+                    "itemId": 81,
+                    "itemName": "Horse meat",
+                    "itemAssetPath": "Assets/Data/Items/Item_92_Horse meat.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 81,
+                    "itemName": "Horse meat",
+                    "itemAssetPath": "Assets/Data/Items/Item_92_Horse meat.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 7,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 81,
+                    "itemName": "Horse meat",
+                    "itemAssetPath": "Assets/Data/Items/Item_92_Horse meat.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 10,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 59,
+                    "itemName": "Leather",
+                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                }
+            ],
+            "hierarchyPath": "Horse/Female",
+            "definitionAssetPath": "Assets/Animals/Horse/Female/Animal_004_Horse_Female.asset",
+            "prefabAssetPath": "Assets/AnimalObject/Horse/Horse_Female.prefab",
+            "adultIconAssetPath": "Assets/Animals/Horse/Female/Horse_Female_Icon.png",
+            "childIconAssetPath": "Assets/Animals/Horse/Female/Horse_Female_Child_Icon.png"
+        },
+        {
+            "id": 5,
+            "animalName": "Horse Male",
+            "spawnAge": 7,
+            "minHerdSize": 2,
+            "maxHerdSize": 6,
+            "spawnWeight": 2,
+            "maxHealth": 100.0,
+            "canRiding": true,
+            "riderHeight": 0.5,
+            "strength": 35.0,
+            "aiSettings": {
+                "herdAreaRadius": 30.0,
+                "separationRadius": 1.25,
+                "separationWeight": 1.5,
+                "cohesionWeight": 0.6499999761581421,
+                "moveSpeed": 0.8999999761581421,
+                "runSpeedRatio": 1.7999999523162842,
+                "accelerationPerSecond": 0.5,
+                "decelerationPerSecond": 1.0,
+                "turnSpeed": 220.0,
+                "obstacleProbeDistance": 1.5,
+                "arrivalDistance": 0.3499999940395355,
+                "fleeSafeDistance": 12.0,
+                "nearbyThreatRadius": 8.0,
+                "fleeSpeedMultiplier": 1.5,
+                "youngSpeedMultiplier": 0.800000011920929,
+                "maleSpeedMultiplier": 1.0499999523162842,
+                "femaleSpeedMultiplier": 1.0,
+                "youngWanderWeightMultiplier": 1.350000023841858,
+                "youngRestWeightMultiplier": 1.25,
+                "idleWeight": 2.0,
+                "lookAroundWeight": 2.0,
+                "wanderWeight": 4.0,
+                "grazeWeight": 3.0,
+                "drinkWeight": 1.0,
+                "restWeight": 1.5,
+                "idleDuration": {
+                    "x": 2.0,
+                    "y": 6.0
+                },
+                "lookAroundDuration": {
+                    "x": 2.0,
+                    "y": 5.0
+                },
+                "wanderDuration": {
+                    "x": 4.0,
+                    "y": 10.0
+                },
+                "grazeDuration": {
+                    "x": 4.0,
+                    "y": 8.0
+                },
+                "drinkDuration": {
+                    "x": 3.0,
+                    "y": 6.0
+                },
+                "restDuration": {
+                    "x": 6.0,
+                    "y": 14.0
+                }
+            },
+            "dropItems": [
+                {
+                    "itemId": 81,
+                    "itemName": "Horse meat",
+                    "itemAssetPath": "Assets/Data/Items/Item_92_Horse meat.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 81,
+                    "itemName": "Horse meat",
+                    "itemAssetPath": "Assets/Data/Items/Item_92_Horse meat.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 7,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 81,
+                    "itemName": "Horse meat",
+                    "itemAssetPath": "Assets/Data/Items/Item_92_Horse meat.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 10,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                },
+                {
+                    "itemId": 59,
+                    "itemName": "Leather",
+                    "itemAssetPath": "Assets/Data/Items/Item_50_Leather.asset",
+                    "amount": 1,
+                    "genderCondition": 0,
+                    "minimumAge": 1,
+                    "maximumAge": 10,
+                    "dropChance": 1.0
+                }
+            ],
+            "hierarchyPath": "Horse/Male",
+            "definitionAssetPath": "Assets/Animals/Horse/Male/Animal_005_Horse_Male.asset",
+            "prefabAssetPath": "Assets/AnimalObject/Horse/Horse_Male.prefab",
+            "adultIconAssetPath": "Assets/Animals/Horse/Male/Horse_Male_Icon.png",
+            "childIconAssetPath": "Assets/Animals/Horse/Male/Horse_Male_Child_Icon.png"
+        },
+        {
             "id": 2,
             "animalName": "Pig Female",
             "spawnAge": 7,
             "minHerdSize": 2,
             "maxHerdSize": 6,
             "spawnWeight": 5,
-            "maxHealth": 100.0,
+            "maxHealth": 80.0,
             "canRiding": true,
             "riderHeight": 0.4000000059604645,
             "strength": 22.0,
@@ -234,8 +458,10 @@
                 "separationRadius": 1.25,
                 "separationWeight": 1.2000000476837159,
                 "cohesionWeight": 0.6499999761581421,
-                "moveSpeed": 1.25,
-                "runSpeedRatio": 1.5,
+                "moveSpeed": 0.800000011920929,
+                "runSpeedRatio": 1.600000023841858,
+                "accelerationPerSecond": 0.5,
+                "decelerationPerSecond": 1.0,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,
@@ -333,7 +559,7 @@
             "minHerdSize": 2,
             "maxHerdSize": 6,
             "spawnWeight": 5,
-            "maxHealth": 100.0,
+            "maxHealth": 80.0,
             "canRiding": true,
             "riderHeight": 0.30000001192092898,
             "strength": 28.0,
@@ -342,8 +568,10 @@
                 "separationRadius": 1.25,
                 "separationWeight": 1.2000000476837159,
                 "cohesionWeight": 0.6499999761581421,
-                "moveSpeed": 1.25,
-                "runSpeedRatio": 1.5,
+                "moveSpeed": 0.800000011920929,
+                "runSpeedRatio": 1.600000023841858,
+                "accelerationPerSecond": 0.5,
+                "decelerationPerSecond": 1.0,
                 "turnSpeed": 220.0,
                 "obstacleProbeDistance": 1.5,
                 "arrivalDistance": 0.3499999940395355,

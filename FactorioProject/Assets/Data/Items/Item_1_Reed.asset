@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_1_Reed
   m_EditorClassIdentifier: 
   itemName: Reed
-  id: 9
+  id: 10
   mapObject: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
   portableMesh: {fileID: 4300000, guid: 0c2622a1a4ba51d41bca1072c81ca88a, type: 2}
   portableMat: {fileID: 2100000, guid: 5a00e9aab5c35e2488536bbe962012f8, type: 2}

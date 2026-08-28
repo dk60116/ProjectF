@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_3_Stone
   m_EditorClassIdentifier: 
   itemName: Stone
-  id: 11
+  id: 12
   mapObject: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: 885ae9d64f67da944a45c9ebcb8e21aa, type: 2}

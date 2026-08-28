@@ -614,7 +614,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Wooden Box
-  objId: 24
+  objId: 25
   itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

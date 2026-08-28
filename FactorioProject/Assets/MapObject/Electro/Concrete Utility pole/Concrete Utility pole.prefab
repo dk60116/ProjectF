@@ -110,7 +110,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Concrete Utility pole
-  objId: 37
+  objId: 38
   itemDefinition: {fileID: 11400000, guid: 8780f845ccb846a4197150948b3297b2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

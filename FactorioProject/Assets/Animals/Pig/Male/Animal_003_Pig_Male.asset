@@ -18,7 +18,7 @@ MonoBehaviour:
   minHerdSize: 2
   maxHerdSize: 6
   spawnWeight: 5
-  maxHealth: 100
+  maxHealth: 80
   canRiding: 1
   riderHeight: 0.3
   strength: 28
@@ -55,8 +55,10 @@ MonoBehaviour:
     separationRadius: 1.25
     separationWeight: 1.2
     cohesionWeight: 0.65
-    moveSpeed: 1.25
-    runSpeedRatio: 1.5
+    moveSpeed: 0.8
+    runSpeedRatio: 1.6
+    accelerationPerSecond: 0.5
+    decelerationPerSecond: 1
     turnSpeed: 220
     obstacleProbeDistance: 1.5
     arrivalDistance: 0.35

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_17_CooperPlate
   m_EditorClassIdentifier: 
   itemName: CooperPlate
-  id: 18
+  id: 19
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
   portableMat: {fileID: 2100000, guid: 0efa5e6334133404ea33edadb00bb5ae, type: 2}

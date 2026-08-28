@@ -16,6 +16,7 @@ public class Player : Character
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
     private const string TorchLightAnchorName = "_TorchLightAnchor";
+    private const string PitchforkItemName = "Pitchfork";
     private const float PlayerRootY = 0f;
     private const float TorchEnergyEpsilon = 0.0001f;
 
@@ -91,6 +92,8 @@ public class Player : Character
     [SerializeField]
     private GameObject pickaxeObject;
     [SerializeField]
+    private GameObject pitchforkObject;
+    [SerializeField]
     private GameObject torchObject;
 
     private PlayerController playerController;
@@ -106,10 +109,12 @@ public class Player : Character
         None,
         Knife,
         Axe,
-        Pickaxe
+        Pickaxe,
+        Pitchfork
     }
 
     private ToolEquipVisual activeToolEquipVisual;
+    private PortableObject hiddenHandPitchforkPortable;
     private bool torchEquipVisualActive;
 
     private void InitializeHandStack()
@@ -349,7 +354,12 @@ public class Player : Character
             DeactivateHeldItemLight();
         }
 
-        ToolEquipVisual nextToolEquip = ToolEquipVisual.None;
+        int heldPitchforkItemId = ResolveHeldPitchforkItemId();
+        ApplyHeldPitchforkPortableVisual(heldPitchforkItemId);
+
+        ToolEquipVisual nextToolEquip = heldPitchforkItemId >= 0
+            ? ToolEquipVisual.Pitchfork
+            : ToolEquipVisual.None;
         if (playerController != null && playerController.IsAnimalKnifeInteractionActive)
         {
             nextToolEquip = ToolEquipVisual.Knife;
@@ -390,7 +400,60 @@ public class Player : Character
         SetEquipObjectActive(knifeObject, nextEquip == ToolEquipVisual.Knife);
         SetEquipObjectActive(axeObject, nextEquip == ToolEquipVisual.Axe);
         SetEquipObjectActive(pickaxeObject, nextEquip == ToolEquipVisual.Pickaxe);
+        SetEquipObjectActive(pitchforkObject, nextEquip == ToolEquipVisual.Pitchfork);
         activeToolEquipVisual = nextEquip;
+    }
+
+    private int ResolveHeldPitchforkItemId()
+    {
+        EnsureHandBag();
+        if (handBag == null || handBag.GetSlotCount(0) <= 0)
+        {
+            return -1;
+        }
+
+        int heldItemId = handBag.GetSlotItemId(0);
+        return IsPitchforkDefinition(ResolveItemDefinition(heldItemId))
+            ? heldItemId
+            : -1;
+    }
+
+    public bool IsHoldingPitchfork => ResolveHeldPitchforkItemId() >= 0;
+
+    private void ApplyHeldPitchforkPortableVisual(int heldPitchforkItemId)
+    {
+        PortableObject nextHiddenPortable = null;
+        if (heldPitchforkItemId >= 0 && handStack != null)
+        {
+            for (int i = 0; i < handStack.Count; i++)
+            {
+                PortableObject portableObject = handStack[i];
+                if (portableObject != null
+                    && portableObject.ItemId == heldPitchforkItemId
+                    && portableObject.gameObject.activeSelf)
+                {
+                    nextHiddenPortable = portableObject;
+                    break;
+                }
+            }
+        }
+
+        if (hiddenHandPitchforkPortable != nextHiddenPortable)
+        {
+            if (hiddenHandPitchforkPortable != null
+                && hiddenHandPitchforkPortable.IsVisualRenderingSuppressed)
+            {
+                hiddenHandPitchforkPortable.SetVisualRenderingSuppressed(false);
+            }
+
+            hiddenHandPitchforkPortable = nextHiddenPortable;
+        }
+
+        if (hiddenHandPitchforkPortable != null
+            && !hiddenHandPitchforkPortable.IsVisualRenderingSuppressed)
+        {
+            hiddenHandPitchforkPortable.SetVisualRenderingSuppressed(true);
+        }
     }
 
     private void ApplyTorchEquipVisual(bool active, bool force = false)
@@ -460,6 +523,15 @@ public class Player : Character
                && string.Equals(
                    definition.itemName,
                    "Torch",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPitchforkDefinition(ItemDefinition definition)
+    {
+        return definition != null
+               && string.Equals(
+                   definition.itemName,
+                   PitchforkItemName,
                    StringComparison.OrdinalIgnoreCase);
     }
 
@@ -676,7 +748,7 @@ public class Player : Character
 
     public void UpdateCarryState()
     {
-        bool nextCarry = HasVisibleHandObject();
+        bool nextCarry = HasCarryAnimatedHandObject();
         if (nextCarry == isCarrying)
         {
             return;
@@ -692,7 +764,7 @@ public class Player : Character
     public bool IsCarrying => isCarrying;
     public bool PickAnimationStartedThisFrame { get; private set; }
 
-    private bool HasVisibleHandObject()
+    private bool HasCarryAnimatedHandObject()
     {
         EnsureHandBag();
         InitializeHandStack();
@@ -704,7 +776,10 @@ public class Player : Character
         for (int i = 0; i < handStack.Count; i++)
         {
             PortableObject portableObject = handStack[i];
-            if (portableObject != null && portableObject.gameObject.activeSelf)
+            if (portableObject != null
+                && portableObject.gameObject.activeSelf
+                && !portableObject.IsVisualRenderingSuppressed
+                && !IsPitchforkDefinition(ResolveItemDefinition(portableObject.ItemId)))
             {
                 return true;
             }

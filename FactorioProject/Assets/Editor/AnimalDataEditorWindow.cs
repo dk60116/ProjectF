@@ -9,6 +9,7 @@ using UnityEngine.Serialization;
 public sealed class AnimalDataEditorWindow : EditorWindow
 {
     private const float SidebarWidth = 280f;
+    private const float SpawnButtonWidth = 52f;
     private const float PreviewHeight = 320f;
     private const float ListRowHeight = 28f;
 
@@ -28,7 +29,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private sealed class AnimalJsonFile
     {
         public string format = "ProjectF.AnimalData";
-        public int version = 13;
+        public int version = 14;
         public List<AnimalJsonEntry> animals = new List<AnimalJsonEntry>();
     }
 
@@ -145,7 +146,6 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         private readonly int selectedOptionIndex;
         private readonly Action<int> selectionCallback;
         private Vector2 scrollPosition;
-        private GUIStyle itemNameStyle;
 
         public DropItemPopupContent(
             GUIContent[] options,
@@ -206,8 +206,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     rowRect.y,
                     rowRect.width - textOffset - 4f,
                     rowRect.height);
-                itemNameStyle ??= CreateWhiteTextStyle(EditorStyles.label);
-                GUI.Label(textRect, options[i].text, itemNameStyle);
+                GUI.Label(textRect, options[i].text);
 
                 if (currentEvent.type == EventType.MouseDown
                     && currentEvent.button == 0
@@ -245,9 +244,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private HierarchyNode hierarchyRoot = new HierarchyNode("Animals", string.Empty);
     private GUIContent[] dropItemOptions = { new GUIContent("None") };
-    private GUIStyle dropItemPopupStyle;
     private GUIStyle dropItemPopupWithIconStyle;
-    private GUIStyle dropItemNameStyle;
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedDefinitionInstanceId;
@@ -628,8 +625,18 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         bool selected = definition.GetInstanceID() == selectedDefinitionInstanceId;
         Rect rowRect = GUILayoutUtility.GetRect(1f, ListRowHeight, GUILayout.ExpandWidth(true));
         rowRect.xMin += depth * 14f;
+        Rect selectRect = new Rect(
+            rowRect.x,
+            rowRect.y,
+            Mathf.Max(1f, rowRect.width - SpawnButtonWidth - 4f),
+            rowRect.height);
+        Rect spawnRect = new Rect(
+            selectRect.xMax + 4f,
+            rowRect.y,
+            SpawnButtonWidth,
+            rowRect.height);
 
-        if (GUI.Toggle(rowRect, selected, GUIContent.none, "Button"))
+        if (GUI.Toggle(selectRect, selected, GUIContent.none, "Button"))
         {
             if (!selected)
             {
@@ -642,7 +649,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         Sprite icon = draft.adultIcon != null ? draft.adultIcon : draft.childIcon;
-        Rect iconRect = new Rect(rowRect.x + 4f, rowRect.y + 4f, 20f, 20f);
+        Rect iconRect = new Rect(selectRect.x + 4f, selectRect.y + 4f, 20f, 20f);
         if (icon != null)
         {
             DrawSprite(iconRect, icon);
@@ -650,8 +657,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
         string dirtyMarker = draft.dirty ? "* " : string.Empty;
         string displayName = string.IsNullOrWhiteSpace(draft.animalName) ? definition.name : draft.animalName;
-        Rect labelRect = new Rect(iconRect.xMax + 4f, rowRect.y, rowRect.xMax - iconRect.xMax - 8f, rowRect.height);
+        Rect labelRect = new Rect(
+            iconRect.xMax + 4f,
+            selectRect.y,
+            Mathf.Max(1f, selectRect.xMax - iconRect.xMax - 8f),
+            selectRect.height);
         GUI.Label(labelRect, $"{dirtyMarker}[{draft.id}] {displayName}", EditorStyles.miniLabel);
+        DrawSpawnNearPlayerButton(spawnRect, definition, draft);
     }
 
     private void DrawDetailPanel()
@@ -987,6 +999,12 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     "Run Speed Ratio",
                     "탑승 달리기 속도 비율입니다. 실제 달리기 속도는 Move Speed × 이 값입니다."),
                 current.RunSpeedRatio));
+        float accelerationPerSecond = Mathf.Max(
+            0.01f,
+            EditorGUILayout.FloatField("Acceleration / Second", current.AccelerationPerSecond));
+        float decelerationPerSecond = Mathf.Max(
+            0.01f,
+            EditorGUILayout.FloatField("Deceleration / Second", current.DecelerationPerSecond));
         float turnSpeed = Mathf.Max(0f, EditorGUILayout.FloatField("Turn Speed", current.TurnSpeed));
         float obstacleProbeDistance = Mathf.Max(
             0.1f,
@@ -1055,6 +1073,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             next.CohesionWeight = cohesionWeight;
             next.MoveSpeed = moveSpeed;
             next.RunSpeedRatio = runSpeedRatio;
+            next.AccelerationPerSecond = accelerationPerSecond;
+            next.DecelerationPerSecond = decelerationPerSecond;
             next.TurnSpeed = turnSpeed;
             next.ObstacleProbeDistance = obstacleProbeDistance;
             next.ArrivalDistance = arrivalDistance;
@@ -1207,6 +1227,57 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
     }
 
+    private static void DrawSpawnNearPlayerButton(
+        Rect buttonRect,
+        AnimalDefinition definition,
+        AnimalDraft draft)
+    {
+        bool hasUnsavedChanges = draft != null && draft.dirty;
+        bool hasPrefab = definition != null && definition.AnimalPrefab != null;
+        string tooltip = !EditorApplication.isPlaying
+            ? "플레이 모드에서만 사용할 수 있습니다."
+            : hasUnsavedChanges
+                ? "변경 사항을 Save한 후 소환할 수 있습니다."
+                : !hasPrefab
+                    ? "저장된 Animal Prefab이 필요합니다."
+                    : "선택한 동물을 플레이어 주변의 빈 지면에 한 마리 소환합니다.";
+
+        EditorGUI.BeginDisabledGroup(
+            !EditorApplication.isPlaying || hasUnsavedChanges || !hasPrefab);
+        if (GUI.Button(buttonRect, new GUIContent("Spawn", tooltip)))
+        {
+            SpawnAnimalNearPlayer(definition);
+        }
+        EditorGUI.EndDisabledGroup();
+    }
+
+    private static void SpawnAnimalNearPlayer(AnimalDefinition definition)
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            Debug.LogWarning("Animal Data: 활성 TerrainGenerator를 찾지 못해 동물을 소환하지 못했습니다.");
+            return;
+        }
+
+        if (!terrain.TrySpawnAnimalNearPlayer(definition, out Animal spawnedAnimal)
+            || spawnedAnimal == null)
+        {
+            Debug.LogWarning(
+                $"Animal Data: 플레이어 주변에서 '{definition.AnimalName}'을 소환할 빈 지면을 찾지 못했습니다.",
+                terrain);
+            return;
+        }
+
+        TerrainAnimalInstance instance = spawnedAnimal.GetComponentInParent<TerrainAnimalInstance>();
+        GameObject spawnedObject = instance != null ? instance.gameObject : spawnedAnimal.gameObject;
+        Selection.activeGameObject = spawnedObject;
+        EditorGUIUtility.PingObject(spawnedObject);
+        Debug.Log(
+            $"Animal Data: '{definition.AnimalName}'을 플레이어 주변에 소환했습니다.",
+            spawnedObject);
+    }
+
     private void DrawBasicFields(AnimalDraft draft)
     {
         EditorGUILayout.LabelField("Gender Variant", EditorStyles.boldLabel);
@@ -1355,9 +1426,11 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
             if (entry.ItemDefinition != null)
             {
-                EditorGUILayout.LabelField(
+                Rect itemNameRect = EditorGUILayout.GetControlRect();
+                GUI.Label(
+                    itemNameRect,
                     $"Item ID {entry.ItemDefinition.id} · {entry.ItemDefinition.itemName}",
-                    GetDropItemNameStyle());
+                    EditorStyles.whiteLabel);
             }
 
             EditorGUILayout.EndVertical();
@@ -1412,17 +1485,13 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             && currentOptionIndex <= dropItemDefinitions.Count
             ? dropItemDefinitions[currentOptionIndex - 1]?.icon
             : null;
-
         bool hasIcon = selectedIcon != null;
-        GUIStyle popupStyle = hasIcon
-            ? GetDropItemPopupWithIconStyle()
-            : GetDropItemPopupStyle();
         bool openDropdown = EditorGUI.DropdownButton(
                 popupRect,
-                GUIContent.none,
+                selectedContent,
                 FocusType.Keyboard,
-                popupStyle);
-        float textLeft = popupRect.x + 5f;
+                hasIcon ? GetDropItemPopupWithIconStyle() : EditorStyles.popup);
+
         if (hasIcon)
         {
             const float iconSize = 16f;
@@ -1432,15 +1501,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 iconSize,
                 iconSize);
             DrawSprite(iconRect, selectedIcon);
-            textLeft += iconSize + 5f;
         }
-
-        Rect textRect = new Rect(
-            textLeft,
-            popupRect.y,
-            Mathf.Max(0f, popupRect.xMax - textLeft - 18f),
-            popupRect.height);
-        GUI.Label(textRect, selectedContent.text, GetDropItemNameStyle());
 
         if (openDropdown)
         {
@@ -1458,51 +1519,19 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     {
         if (dropItemPopupWithIconStyle == null)
         {
-            dropItemPopupWithIconStyle = CreateWhiteTextStyle(EditorStyles.popup);
-            dropItemPopupWithIconStyle.padding.left = 23;
+            GUIStyle source = EditorStyles.popup;
+            RectOffset sourcePadding = source.padding;
+            dropItemPopupWithIconStyle = new GUIStyle(source)
+            {
+                padding = new RectOffset(
+                    sourcePadding.left + 20,
+                    sourcePadding.right,
+                    sourcePadding.top,
+                    sourcePadding.bottom)
+            };
         }
 
         return dropItemPopupWithIconStyle;
-    }
-
-    private GUIStyle GetDropItemPopupStyle()
-    {
-        dropItemPopupStyle ??= CreateWhiteTextStyle(EditorStyles.popup);
-        return dropItemPopupStyle;
-    }
-
-    private GUIStyle GetDropItemNameStyle()
-    {
-        if (dropItemNameStyle == null)
-        {
-            dropItemNameStyle = CreateWhiteTextStyle(EditorStyles.label);
-            dropItemNameStyle.alignment = TextAnchor.MiddleLeft;
-            dropItemNameStyle.clipping = TextClipping.Clip;
-        }
-
-        return dropItemNameStyle;
-    }
-
-    private static GUIStyle CreateWhiteTextStyle(GUIStyle source)
-    {
-        GUIStyle style = new GUIStyle(source);
-        SetTextColor(style.normal, Color.white);
-        SetTextColor(style.hover, Color.white);
-        SetTextColor(style.active, Color.white);
-        SetTextColor(style.focused, Color.white);
-        SetTextColor(style.onNormal, Color.white);
-        SetTextColor(style.onHover, Color.white);
-        SetTextColor(style.onActive, Color.white);
-        SetTextColor(style.onFocused, Color.white);
-        return style;
-    }
-
-    private static void SetTextColor(GUIStyleState state, Color color)
-    {
-        if (state != null)
-        {
-            state.textColor = color;
-        }
     }
 
     private void ApplyDropItemSelection(int entryIndex, int optionIndex)
@@ -2284,6 +2313,14 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 {
                     draft.aiSettings.RunSpeedRatio =
                         AnimalAISettings.DefaultRunSpeedRatio;
+                }
+
+                if (file.version < 14)
+                {
+                    draft.aiSettings.AccelerationPerSecond =
+                        AnimalAISettings.DefaultAccelerationPerSecond;
+                    draft.aiSettings.DecelerationPerSecond =
+                        AnimalAISettings.DefaultDecelerationPerSecond;
                 }
 
                 draft.aiSettings.Normalize();

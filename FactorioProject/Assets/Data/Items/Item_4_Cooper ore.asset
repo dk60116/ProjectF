@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_4_Cooper ore
   m_EditorClassIdentifier: 
   itemName: Cooper ore
-  id: 12
+  id: 13
   mapObject: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   portableMesh: {fileID: 4300000, guid: d4356a701862a7e409c79617cf6401c4, type: 2}
   portableMat: {fileID: 2100000, guid: 054b13814fa09424ba3aa24a6bf66f86, type: 2}

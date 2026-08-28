@@ -744,7 +744,7 @@ MonoBehaviour:
   animalDefinition: {fileID: 11400000, guid: df9ab2d3140500644a72c6cf38850a43, type: 2}
   animalGender: 1
   DinoAge: 10
-  BaseScale: 1
+  BaseScale: 0.75
   BabyScale: 0.5
   dinoRenderer: {fileID: 472043295556272473}
   Eye: {fileID: 4745744939561479610, guid: 0cfe501bbd658984d92e66c72726b900, type: 3}
@@ -754,7 +754,7 @@ MonoBehaviour:
   youngDinoRightEye: {fileID: 4724372046639147273}
   oldDinoLeftEye: {fileID: 8749070870692983263}
   oldDinoRightEye: {fileID: 2095901534566901923}
-  adultScale: {x: 0.75, y: 0.75, z: 0.75}
+  adultScale: {x: 1, y: 1, z: 1}
 --- !u!95 &8140499587254153732
 Animator:
   serializedVersion: 7
@@ -1111,11 +1111,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 3928026a9d23225418901b9f46d7f7ec, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.26
+      value: 0.262
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 3928026a9d23225418901b9f46d7f7ec, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.069
+      value: 0.088
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 3928026a9d23225418901b9f46d7f7ec, type: 3}
       propertyPath: m_LocalRotation.w

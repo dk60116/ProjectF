@@ -44,6 +44,10 @@ public sealed class AnimalAIController : MonoBehaviour
     private const float MountedMovementDirectionEpsilonSqr = 0.0000001f;
     private const float HealthRecoveryFractionPerSecond = 0.05f;
     private const float PostAggroHealthRecoveryDelay = 1f;
+    private const float SaddledFreeRoamRadiusMultiplier = 0.2f;
+    private const float SaddledFreeMovementWeightMultiplier = 0.15f;
+    private const float MinimumSaddledFreeRoamRadius = 2f;
+    private const float MaximumSaddledFreeRoamRadius = 6f;
 
     private static readonly float[] AvoidanceAngles =
     {
@@ -100,6 +104,9 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool nooseLeashed;
     private bool draftAttached;
     private Player mountedRider;
+    private float mountedCurrentSpeed;
+    private float mountedMaximumSpeed;
+    private Vector3 mountedMovementDirection;
     private float scheduledTickAccumulator;
     private float scheduledRecoveryElapsedTime;
     private float scheduledTickPhase;
@@ -149,6 +156,8 @@ public sealed class AnimalAIController : MonoBehaviour
     private int reachableFallbackTargetCount;
     private int stuckTargetAbandonCount;
     private int herdReturnSuppressionCount;
+    private Vector3 saddledFreeRoamCenter;
+    private bool saddledFreeRoamCenterInitialized;
 
     private static bool obstacleLayerMaskInitialized;
     private static int cachedObstacleLayerMask = Physics.AllLayers;
@@ -174,6 +183,9 @@ public sealed class AnimalAIController : MonoBehaviour
     public bool IsDraftAttached => draftAttached;
     public bool HasMountedRider => mountedRider != null;
     private bool IsExternallyControlled => nooseLeashed || draftAttached || mountedRider != null;
+    private bool IsSaddledFreeRoaming => animal != null
+                                          && animal.IsSaddleEquipped
+                                          && !IsExternallyControlled;
     public float NooseMovementSpeed => configured && animal != null && animal.IsAlive
         ? GetEffectiveMoveSpeed()
         : 0f;
@@ -303,6 +315,7 @@ public sealed class AnimalAIController : MonoBehaviour
         nooseLeashed = false;
         draftAttached = false;
         mountedRider = null;
+        ResetMountedMovement();
         waitingForStandUp = false;
         hasFleeThreat = false;
         postAggroHealthRecoveryDelayRemaining = -1f;
@@ -322,11 +335,31 @@ public sealed class AnimalAIController : MonoBehaviour
 
         PrepareLiveAnimalCollision();
         InitializeSimulationPose();
+        CaptureSaddledFreeRoamCenter();
+        if (IsSaddledFreeRoaming)
+        {
+            ResetToIdleBehavior();
+        }
+
         ResetScheduledTick();
         ResetPresentation();
         AnimalAIWorld.Register(this);
         ApplyAnimation(0f);
         animal?.TryRestorePendingDraftHandcart();
+    }
+
+    public void NotifySaddleEquipped()
+    {
+        CaptureSaddledFreeRoamCenter();
+        if (!configured || IsExternallyControlled)
+        {
+            return;
+        }
+
+        ResetToIdleBehavior();
+        ResetScheduledTick();
+        ResetPresentation();
+        ApplyAnimation(0f);
     }
 
     public bool QueueScheduledTick(float deltaTime, float interval)
@@ -478,6 +511,7 @@ public sealed class AnimalAIController : MonoBehaviour
             ResetScheduledTick();
             ResetPresentation();
             InitializeSimulationPose();
+            CaptureSaddledFreeRoamCenter();
             ApplyAnimation(0f);
             return true;
         }
@@ -523,6 +557,7 @@ public sealed class AnimalAIController : MonoBehaviour
             }
 
             mountedRider = null;
+            ResetMountedMovement();
             currentState = AnimalAIState.Idle;
             stateTimeRemaining = 0f;
             hasTarget = false;
@@ -533,6 +568,7 @@ public sealed class AnimalAIController : MonoBehaviour
             ResetScheduledTick();
             ResetPresentation();
             InitializeSimulationPose();
+            CaptureSaddledFreeRoamCenter();
             ApplyAnimation(0f);
             return true;
         }
@@ -548,6 +584,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         bool wasResting = currentState == AnimalAIState.Rest || waitingForStandUp;
         mountedRider = rider;
+        ResetMountedMovement();
         executionActive = false;
         currentState = AnimalAIState.Idle;
         stateTimeRemaining = 0f;
@@ -592,6 +629,11 @@ public sealed class AnimalAIController : MonoBehaviour
         ResetScheduledTick();
         ResetPresentation();
         InitializeSimulationPose();
+        if (!attached)
+        {
+            CaptureSaddledFreeRoamCenter();
+        }
+
         if (attached)
         {
             executionActive = false;
@@ -633,50 +675,84 @@ public sealed class AnimalAIController : MonoBehaviour
         worldMoveDirection.y = 0f;
         float rawInputMagnitude = worldMoveDirection.magnitude;
         float inputMagnitude = Mathf.Clamp01(rawInputMagnitude);
-        if (inputMagnitude <= 0.01f)
+        bool hasInput = inputMagnitude > 0.01f;
+        float effectiveWalkSpeed = GetEffectiveMoveSpeed();
+        if (hasInput)
         {
+            worldMoveDirection /= rawInputMagnitude;
+            mountedMovementDirection = worldMoveDirection;
+            mountedMaximumSpeed = effectiveWalkSpeed
+                                  * inputMagnitude
+                                  * (runRequested ? settings.RunSpeedRatio : 1f);
+        }
+
+        if (draftAttached && animal.IsAttachedToHandcart)
+        {
+            bool moved = animal.TryMoveAttachedHandcart(
+                hasInput ? worldMoveDirection : Vector3.zero,
+                mountedMaximumSpeed,
+                deltaTime,
+                mountedRider,
+                out float cartActualMoveSpeed);
+            bool useRunAnimation = moved
+                                   && cartActualMoveSpeed > effectiveWalkSpeed + 0.01f;
+            float referenceAnimationSpeed = useRunAnimation
+                ? Mathf.Max(effectiveWalkSpeed, mountedMaximumSpeed)
+                : effectiveWalkSpeed;
+            float locomotionPlaybackScale = referenceAnimationSpeed > 0.0001f
+                ? cartActualMoveSpeed / referenceAnimationSpeed
+                : 1f;
+            ApplyAnimation(
+                cartActualMoveSpeed,
+                useRunAnimation,
+                locomotionPlaybackScale);
+            if (!hasInput && !moved)
+            {
+                mountedMaximumSpeed = 0f;
+            }
+
+            return moved;
+        }
+
+        float targetSpeed = hasInput ? mountedMaximumSpeed : 0f;
+        float speedChangePerSecond = targetSpeed > mountedCurrentSpeed
+            ? settings.AccelerationPerSecond
+            : settings.DecelerationPerSecond;
+        mountedCurrentSpeed = Mathf.MoveTowards(
+            mountedCurrentSpeed,
+            targetSpeed,
+            speedChangePerSecond * deltaTime);
+        if (mountedCurrentSpeed <= 0.0001f
+            || mountedMovementDirection.sqrMagnitude
+               <= MountedMovementDirectionEpsilonSqr)
+        {
+            mountedCurrentSpeed = 0f;
+            if (!hasInput)
+            {
+                mountedMaximumSpeed = 0f;
+            }
+
             ApplyAnimation(0f);
             return false;
         }
 
-        worldMoveDirection /= rawInputMagnitude;
-        bool isRunning = runRequested;
-        // 탑승 이동에도 야생 이동과 동일한 나이/성별 보정 속도를 사용한다.
-        // RunSpeedRatio는 보정된 걷기 속도에 대한 달리기 비율이다.
-        float movementSpeed = GetEffectiveMoveSpeed()
-                              * inputMagnitude
-                              * (isRunning ? settings.RunSpeedRatio : 1f);
-        if (draftAttached && animal.IsAttachedToHandcart)
-        {
-            bool moved = animal.TryMoveAttachedHandcart(
-                worldMoveDirection,
-                movementSpeed,
-                deltaTime,
-                mountedRider,
-                out float actualMoveSpeed);
-            float walkAnimationSpeedThreshold = GetEffectiveMoveSpeed() * inputMagnitude;
-            bool useRunAnimation = isRunning
-                                   && moved
-                                   && actualMoveSpeed > walkAnimationSpeedThreshold;
-            ApplyAnimation(actualMoveSpeed, useRunAnimation);
-            return moved;
-        }
-
         Vector3 previousPosition = simulationPosition;
         if (!TryApplyPlayerPush(
-                previousPosition - worldMoveDirection,
-                worldMoveDirection,
-                movementSpeed * deltaTime))
+                previousPosition - mountedMovementDirection,
+                mountedMovementDirection,
+                mountedCurrentSpeed * deltaTime))
         {
+            mountedCurrentSpeed = 0f;
             ApplyAnimation(0f);
             return false;
         }
 
         Vector3 movedDirection = simulationPosition - previousPosition;
         movedDirection.y = 0f;
+        float actualMoveDistance = movedDirection.magnitude;
         if (movedDirection.sqrMagnitude > MountedMovementDirectionEpsilonSqr)
         {
-            movedDirection.Normalize();
+            movedDirection /= actualMoveDistance;
             Quaternion targetRotation = Quaternion.LookRotation(movedDirection, Vector3.up);
             float turnSpeed = settings != null ? settings.TurnSpeed : 360f;
             // Mounted movement is frame-driven, so capping delta time would slow
@@ -688,8 +764,28 @@ public sealed class AnimalAIController : MonoBehaviour
             ApplyMountedRotation();
         }
 
-        ApplyAnimation(movementSpeed, isRunning);
+        float actualMoveSpeed = actualMoveDistance / Mathf.Max(0.0001f, deltaTime);
+        bool useMountedRunAnimation = actualMoveSpeed > effectiveWalkSpeed + 0.01f;
+        float animationReferenceSpeed = useMountedRunAnimation
+            ? Mathf.Max(
+                effectiveWalkSpeed,
+                effectiveWalkSpeed * settings.RunSpeedRatio)
+            : effectiveWalkSpeed;
+        float animationPlaybackScale = animationReferenceSpeed > 0.0001f
+            ? actualMoveSpeed / animationReferenceSpeed
+            : 1f;
+        ApplyAnimation(
+            actualMoveSpeed,
+            useMountedRunAnimation,
+            animationPlaybackScale);
         return true;
+    }
+
+    private void ResetMountedMovement()
+    {
+        mountedCurrentSpeed = 0f;
+        mountedMaximumSpeed = 0f;
+        mountedMovementDirection = Vector3.zero;
     }
 
     private void ApplyMountedRotation()
@@ -779,6 +875,63 @@ public sealed class AnimalAIController : MonoBehaviour
         ResetNavigation();
 
         AnimalAIWorld.Unregister(this);
+    }
+
+    private void ResetToIdleBehavior()
+    {
+        currentState = AnimalAIState.Idle;
+        stateTimeRemaining = settings != null
+            ? RandomDuration(settings.IdleDuration)
+            : 0f;
+        hasTarget = false;
+        movingToActivity = false;
+        hasFleeThreat = false;
+        waitingForStandUp = false;
+        herdReturnTargetActive = false;
+        ResetNavigation();
+    }
+
+    private void CaptureSaddledFreeRoamCenter()
+    {
+        if (animal == null || !animal.IsSaddleEquipped)
+        {
+            saddledFreeRoamCenterInitialized = false;
+            return;
+        }
+
+        saddledFreeRoamCenter = simulationPoseInitialized
+            ? simulationPosition
+            : transform.position;
+        saddledFreeRoamCenter.y = transform.position.y;
+        saddledFreeRoamCenterInitialized = true;
+    }
+
+    private Vector3 GetRoamingAreaCenter()
+    {
+        if (!IsSaddledFreeRoaming)
+        {
+            return HerdAreaCenter;
+        }
+
+        if (!saddledFreeRoamCenterInitialized)
+        {
+            CaptureSaddledFreeRoamCenter();
+        }
+
+        return saddledFreeRoamCenter;
+    }
+
+    private float GetRoamingAreaRadius()
+    {
+        if (!IsSaddledFreeRoaming)
+        {
+            return HerdAreaRadius;
+        }
+
+        return Mathf.Clamp(
+            HerdAreaRadius * SaddledFreeRoamRadiusMultiplier,
+            MinimumSaddledFreeRoamRadius,
+            MaximumSaddledFreeRoamRadius);
     }
 
     private void ResetScheduledTick()
@@ -1271,6 +1424,14 @@ public sealed class AnimalAIController : MonoBehaviour
             return true;
         }
 
+        // 안장을 장착한 자유 상태에서는 물을 찾기 위해 제한된 생활 반경을
+        // 벗어나지 않는다. 반경 안에 물이 없으면 이번 행동을 건너뛴다.
+        if (IsSaddledFreeRoaming)
+        {
+            result = position;
+            return false;
+        }
+
         // Water is not guaranteed to exist inside a herd's roaming circle. Search
         // the connected walkable region around the animal so Drink remains a real
         // activity instead of repeatedly degrading to Idle.
@@ -1292,7 +1453,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool TryBeginHerdAreaReturn(bool requireLoadedGround)
     {
         Vector3 position = transform.position;
-        if (!IsOutsideHerdArea(position))
+        if (!IsOutsideRoamingArea(position))
         {
             herdReturnTargetActive = false;
             return false;
@@ -1303,7 +1464,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return false;
         }
 
-        if (!hasTarget || IsOutsideHerdArea(targetPosition))
+        if (!hasTarget || IsOutsideRoamingArea(targetPosition))
         {
             ResetNavigation();
             hasTarget = TryPrepareNearestHerdReturnTarget(
@@ -1347,7 +1508,7 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 position,
         bool requireLoadedGround)
     {
-        Vector3 areaCenter = HerdAreaCenter;
+        Vector3 areaCenter = GetRoamingAreaCenter();
         Vector3 areaOffset = position - areaCenter;
         areaOffset.y = 0f;
         if (areaOffset.sqrMagnitude <= 0.0001f)
@@ -1356,7 +1517,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         float inset = Mathf.Max(settings.ArrivalDistance * 2f, 0.5f);
-        float returnRadius = Mathf.Max(0f, HerdAreaRadius - inset);
+        float returnRadius = Mathf.Max(0f, GetRoamingAreaRadius() - inset);
         Vector3 returnTarget = areaCenter + areaOffset.normalized * returnRadius;
         returnTarget.y = position.y;
         if (!CanOccupyTerrain(returnTarget, requireLoadedGround))
@@ -1673,12 +1834,16 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         float normalizedAge = animal != null ? Mathf.Clamp01(animal.Age * 0.1f) : 1f;
         float youngFactor = 1f - normalizedAge;
+        float movementWeightMultiplier = IsSaddledFreeRoaming
+            ? SaddledFreeMovementWeightMultiplier
+            : 1f;
         float idle = settings.IdleWeight;
         float lookAround = settings.LookAroundWeight;
         float wander = settings.WanderWeight
-                       * Mathf.Lerp(1f, settings.YoungWanderWeightMultiplier, youngFactor);
-        float graze = settings.GrazeWeight;
-        float drink = settings.DrinkWeight;
+                       * Mathf.Lerp(1f, settings.YoungWanderWeightMultiplier, youngFactor)
+                       * movementWeightMultiplier;
+        float graze = settings.GrazeWeight * movementWeightMultiplier;
+        float drink = settings.DrinkWeight * movementWeightMultiplier;
         float rest = IsNightTime()
             ? settings.RestWeight
               * Mathf.Lerp(1f, settings.YoungRestWeightMultiplier, youngFactor)
@@ -1743,8 +1908,8 @@ public sealed class AnimalAIController : MonoBehaviour
         out Vector3 result)
     {
         TerrainGenerator terrain = TerrainGenerator.Active;
-        Vector3 center = HerdAreaCenter;
-        float radius = Mathf.Max(1f, HerdAreaRadius - settings.ArrivalDistance);
+        Vector3 center = GetRoamingAreaCenter();
+        float radius = Mathf.Max(1f, GetRoamingAreaRadius() - settings.ArrivalDistance);
         bool originIsWalkable = terrain == null
                                 || terrain.CanAnimalMoveTo(
                                     transform.position,
@@ -1847,8 +2012,8 @@ public sealed class AnimalAIController : MonoBehaviour
         int waypointCount = AnimalGridPathfinder.FindReachableTargetPath(
             terrain,
             transform.position,
-            HerdAreaCenter,
-            HerdAreaRadius,
+            GetRoamingAreaCenter(),
+            GetRoamingAreaRadius(),
             requireLoadedGround,
             requireWaterEdge,
             settings.ArrivalDistance * 2f,
@@ -1922,22 +2087,23 @@ public sealed class AnimalAIController : MonoBehaviour
         out Vector3 areaCenter,
         out float areaRadius)
     {
-        if (currentState == AnimalAIState.Drink
-            || IsOutsideHerdArea(transform.position))
+        if (!IsSaddledFreeRoaming
+            && (currentState == AnimalAIState.Drink
+                || IsOutsideRoamingArea(transform.position)))
         {
             GetExtendedNavigationArea(destination, out areaCenter, out areaRadius);
             return;
         }
 
-        areaCenter = HerdAreaCenter;
-        areaRadius = HerdAreaRadius;
+        areaCenter = GetRoamingAreaCenter();
+        areaRadius = GetRoamingAreaRadius();
     }
 
-    private bool IsOutsideHerdArea(Vector3 position)
+    private bool IsOutsideRoamingArea(Vector3 position)
     {
-        Vector3 areaOffset = position - HerdAreaCenter;
+        Vector3 areaOffset = position - GetRoamingAreaCenter();
         areaOffset.y = 0f;
-        float areaRadius = HerdAreaRadius;
+        float areaRadius = GetRoamingAreaRadius();
         return areaOffset.sqrMagnitude > areaRadius * areaRadius;
     }
 
@@ -2257,7 +2423,8 @@ public sealed class AnimalAIController : MonoBehaviour
         AnimalAIWorld world = escapingTerrain ? null : AnimalAIWorld.Instance;
         if (world != null)
         {
-            if (currentState != AnimalAIState.Drink
+            if (!IsSaddledFreeRoaming
+                && currentState != AnimalAIState.Drink
                 && world.TryGetHerdCenter(
                     HerdId,
                     out Vector3 currentHerdCenter))
@@ -2278,15 +2445,17 @@ public sealed class AnimalAIController : MonoBehaviour
             UpdateSmoothedSeparation(null, deltaTime);
         }
 
-        float areaRadius = HerdAreaRadius;
-        bool restrictToHerdArea = currentState != AnimalAIState.Drink;
-        bool startedOutsideHerdArea = false;
-        if (!escapingTerrain && restrictToHerdArea)
+        Vector3 roamingAreaCenter = GetRoamingAreaCenter();
+        float areaRadius = GetRoamingAreaRadius();
+        bool restrictToRoamingArea = currentState != AnimalAIState.Drink
+                                     || IsSaddledFreeRoaming;
+        bool startedOutsideRoamingArea = false;
+        if (!escapingTerrain && restrictToRoamingArea)
         {
-            Vector3 areaOffset = position - HerdAreaCenter;
+            Vector3 areaOffset = position - roamingAreaCenter;
             areaOffset.y = 0f;
-            startedOutsideHerdArea = areaOffset.sqrMagnitude > areaRadius * areaRadius;
-            if (startedOutsideHerdArea)
+            startedOutsideRoamingArea = areaOffset.sqrMagnitude > areaRadius * areaRadius;
+            if (startedOutsideRoamingArea)
             {
                 flockSteering += (-areaOffset.normalized) * 4f;
             }
@@ -2355,14 +2524,14 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 candidate = position + direction * (speed * deltaTime);
         candidate.y = position.y;
         if (!escapingTerrain
-            && restrictToHerdArea
-            && !startedOutsideHerdArea)
+            && restrictToRoamingArea
+            && !startedOutsideRoamingArea)
         {
-            Vector3 clampedOffset = candidate - HerdAreaCenter;
+            Vector3 clampedOffset = candidate - roamingAreaCenter;
             clampedOffset.y = 0f;
             if (clampedOffset.sqrMagnitude > areaRadius * areaRadius)
             {
-                Vector3 clamped = HerdAreaCenter + clampedOffset.normalized * areaRadius;
+                Vector3 clamped = roamingAreaCenter + clampedOffset.normalized * areaRadius;
                 candidate.x = clamped.x;
                 candidate.z = clamped.z;
                 if (!CanOccupyTerrain(candidate, useLiveCollision))
@@ -3002,7 +3171,10 @@ public sealed class AnimalAIController : MonoBehaviour
         return Mathf.Lerp(1f, configuredMultiplier, AgeGenderSpeedMultiplierInfluence);
     }
 
-    private void ApplyAnimation(float speed, bool isRunning = false)
+    private void ApplyAnimation(
+        float speed,
+        bool isRunning = false,
+        float locomotionPlaybackScale = 1f)
     {
         if (animal == null)
         {
@@ -3018,7 +3190,8 @@ public sealed class AnimalAIController : MonoBehaviour
             performingActivity && currentState == AnimalAIState.Rest && IsNightTime(),
             performingActivity && currentState == AnimalAIState.LookAround,
             currentState == AnimalAIState.Flee && resolvedSpeed > 0.01f,
-            isRunning);
+            isRunning,
+            locomotionPlaybackScale);
     }
 
     private static bool IsNightTime()

@@ -2374,6 +2374,12 @@ public partial class TerrainGenerator : MonoBehaviour
         return GetTileBiome(worldCoordinate) == TerrainBiome.Water;
     }
 
+    public bool IsFarmableGroundBiomeAt(Vector2Int worldCoordinate)
+    {
+        TerrainBiome biome = GetTileBiome(worldCoordinate);
+        return biome != TerrainBiome.Water && biome != TerrainBiome.Sand;
+    }
+
     public bool IsWaterSurfaceAtWorldPosition(Vector2 worldPosition, float[] weightBuffer = null)
     {
         return GetWaterSurfaceScoreAtWorldPosition(worldPosition, weightBuffer) > 0f;

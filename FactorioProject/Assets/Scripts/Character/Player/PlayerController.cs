@@ -101,6 +101,7 @@ public class PlayerController : MonoBehaviour
     private readonly HashSet<Block> currentSelectedFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> selectedFocusBlocks = new List<Block>();
     private readonly List<Block> selectedFocusRemovalBuffer = new List<Block>();
+    private Block selectedPitchforkGroundBlock;
     private readonly List<FocusMarkerGroup> focusMarkerGroups = new List<FocusMarkerGroup>();
     private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
@@ -290,6 +291,7 @@ public class PlayerController : MonoBehaviour
         hasPendingFacingDirection = false;
         pendingFacingDirection = Vector3.zero;
         ClearTemporaryDropFocus();
+        selectedPitchforkGroundBlock = null;
         SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
         SetMouseFocusedAnimal(null);
@@ -378,6 +380,7 @@ public class PlayerController : MonoBehaviour
 
     public void SetSelectedMapObjectFocus(MapObject mapObject)
     {
+        selectedPitchforkGroundBlock = null;
         selectedFocusBlocks.Clear();
         if (mapObject == null
             || !mapObject.gameObject.activeInHierarchy
@@ -395,6 +398,62 @@ public class PlayerController : MonoBehaviour
         }
 
         SetSelectedFocusedBlocks(selectedFocusBlocks);
+    }
+
+    public bool TrySelectPitchforkGroundAtPointer(Vector2 pointerPosition)
+    {
+        if (player == null || !player.IsHoldingPitchfork)
+        {
+            SetSelectedPitchforkGroundBlock(null);
+            return false;
+        }
+
+        Camera targetCamera = ResolveMouseFocusCamera();
+        if (targetCamera == null
+            || !TryGetPointerBlockFromGroundPlane(
+                targetCamera.ScreenPointToRay(pointerPosition),
+                out Block block)
+            || !CanFocusPitchforkGroundBlock(block))
+        {
+            SetSelectedPitchforkGroundBlock(null);
+            return false;
+        }
+
+        SetSelectedPitchforkGroundBlock(block);
+        return true;
+    }
+
+    public bool TryGetSelectedPitchforkGroundBlock(out Block block)
+    {
+        block = selectedPitchforkGroundBlock;
+        if (block != null
+            && player != null
+            && player.IsHoldingPitchfork
+            && CanFocusPitchforkGroundBlock(block))
+        {
+            return true;
+        }
+
+        SetSelectedPitchforkGroundBlock(null);
+        block = null;
+        return false;
+    }
+
+    private void SetSelectedPitchforkGroundBlock(Block block)
+    {
+        if (selectedPitchforkGroundBlock == block)
+        {
+            return;
+        }
+
+        selectedPitchforkGroundBlock = block;
+        selectedFocusBlocks.Clear();
+        if (block != null)
+        {
+            selectedFocusBlocks.Add(block);
+        }
+
+        SetSelectedFocusedBlocks(block != null ? selectedFocusBlocks : null);
     }
 
     private Block ResolveSelectedFocusFallbackBlock(MapObject mapObject)
@@ -4924,14 +4983,27 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector2 pointerPosition = Input.mousePosition;
-        if (IsPointerOverMouseFocusBlockingUi(pointerPosition)
-            || !TryResolveMouseFocusTargets(
+        if (IsPointerOverMouseFocusBlockingUi(pointerPosition))
+        {
+            SetMouseFocusedAnimal(null);
+            SetMouseFocusedPortableObject(null);
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        if (!TryResolveMouseFocusTargets(
                 pointerPosition,
                 out Animal animal,
                 out MapObject mapObject,
                 out PortableObject portableObject,
                 out Block fallbackBlock))
         {
+            if (player != null && player.IsHoldingPitchfork)
+            {
+                RefreshPitchforkGroundMouseFocus(pointerPosition);
+                return;
+            }
+
             SetMouseFocusedAnimal(null);
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
@@ -4961,6 +5033,49 @@ public class PlayerController : MonoBehaviour
         }
 
         SetMouseFocusedBlocks(mouseFocusBlocks, mapObject);
+    }
+
+    private void RefreshPitchforkGroundMouseFocus(Vector2 pointerPosition)
+    {
+        SetMouseFocusedAnimal(null);
+        SetMouseFocusedPortableObject(null);
+
+        Camera targetCamera = ResolveMouseFocusCamera();
+        if (targetCamera == null
+            || !TryGetPointerBlockFromGroundPlane(
+                targetCamera.ScreenPointToRay(pointerPosition),
+                out Block block)
+            || !CanFocusPitchforkGroundBlock(block))
+        {
+            SetMouseFocusedBlocks(null);
+            return;
+        }
+
+        mouseFocusBlocks.Clear();
+        mouseFocusBlocks.Add(block);
+        SetMouseFocusedBlocks(mouseFocusBlocks);
+    }
+
+    private bool CanFocusPitchforkGroundBlock(Block block)
+    {
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (block == null
+            || terrain == null
+            || block.Type != Block.BlockType.Ground
+            || !terrain.IsFarmableGroundBiomeAt(block.Coordinate)
+            || block.MapObject != null
+            || block.Resource != null
+            || block.HasDroppedFloorObjects)
+        {
+            return false;
+        }
+
+        nearbyRuntimeInstallationScratch.Clear();
+        bool hasInstallation = InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            block.Coordinate,
+            nearbyRuntimeInstallationScratch);
+        nearbyRuntimeInstallationScratch.Clear();
+        return !hasInstallation;
     }
 
     private void RefreshMouseAnimalFocus()

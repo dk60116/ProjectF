@@ -1,0 +1,84 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 830a5e91501b4bcb8a2fb184222106fd, type: 3}
+  m_Name: Animal_004_Horse_Female
+  m_EditorClassIdentifier: Assembly-CSharp::AnimalDefinition
+  id: 4
+  animalName: Horse Female
+  spawnAge: 7
+  minHerdSize: 2
+  maxHerdSize: 6
+  spawnWeight: 2
+  maxHealth: 100
+  canRiding: 1
+  riderHeight: 0.5
+  strength: 30
+  dropItems:
+  - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
+    amount: 1
+    genderCondition: 0
+    minimumAge: 1
+    maximumAge: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
+    amount: 1
+    genderCondition: 0
+    minimumAge: 7
+    maximumAge: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
+    amount: 1
+    genderCondition: 0
+    minimumAge: 10
+    maximumAge: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
+    amount: 1
+    genderCondition: 0
+    minimumAge: 1
+    maximumAge: 10
+    dropChance: 1
+  animalPrefab: {fileID: 8381314278645438875, guid: 55891e8943cf09a4aa43bcdeb6caf0d7, type: 3}
+  adultIcon: {fileID: 21300000, guid: a46d6e80710942b88c08bc31b7548b11, type: 3}
+  childIcon: {fileID: 21300000, guid: d0ceaf6f2978444eb938ca1fc692a24b, type: 3}
+  aiSettings:
+    herdAreaRadius: 30
+    separationRadius: 1.25
+    separationWeight: 1.5
+    cohesionWeight: 0.65
+    moveSpeed: 0.9
+    runSpeedRatio: 1.8
+    accelerationPerSecond: 0.5
+    decelerationPerSecond: 1
+    turnSpeed: 220
+    obstacleProbeDistance: 1.5
+    arrivalDistance: 0.35
+    fleeSafeDistance: 12
+    nearbyThreatRadius: 8
+    fleeSpeedMultiplier: 1.5
+    youngSpeedMultiplier: 0.8
+    maleSpeedMultiplier: 1.05
+    femaleSpeedMultiplier: 1
+    youngWanderWeightMultiplier: 1.35
+    youngRestWeightMultiplier: 1.25
+    idleWeight: 2
+    lookAroundWeight: 2
+    wanderWeight: 4
+    grazeWeight: 3
+    drinkWeight: 1
+    restWeight: 1.5
+    idleDuration: {x: 2, y: 6}
+    lookAroundDuration: {x: 2, y: 5}
+    wanderDuration: {x: 4, y: 10}
+    grazeDuration: {x: 4, y: 8}
+    drinkDuration: {x: 3, y: 6}
+    restDuration: {x: 6, y: 14}

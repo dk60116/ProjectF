@@ -8,6 +8,10 @@ using UnityEditor;
 public partial class TerrainGenerator : MonoBehaviour
 {
     private const float AnimalSpawnFrequencyScale = 0.01f;
+#if UNITY_EDITOR
+    private const int AnimalEditorSpawnMinimumRadius = 2;
+    private const int AnimalEditorSpawnMaximumRadius = 8;
+#endif
     private static readonly Vector2Int[] AnimalDrinkDirectionOffsets =
     {
         Vector2Int.up,
@@ -1077,7 +1081,7 @@ public partial class TerrainGenerator : MonoBehaviour
             Mathf.RoundToInt(playerPosition.x),
             Mathf.RoundToInt(playerPosition.z));
         int searchRadius = Mathf.Clamp(Mathf.CeilToInt(Mathf.Sqrt(targetCount) * 1.5f), 12, 90);
-        int stressSequence = ++animalStressTestSequence;
+        int stressSequence = ++animalHarnessSpawnSequence;
         DeterministicAnimalRandom random = new DeterministicAnimalRandom(
             seed ^ stressSequence * 7919,
             center);
@@ -1117,13 +1121,13 @@ public partial class TerrainGenerator : MonoBehaviour
                         herdSize = Mathf.Max(1, species.PreferredHerdSize);
                         herdMemberIndex = 0;
                         herdCenter = block.transform.position;
-                        herdId = BuildAnimalStressHerdId(stressSequence, created);
+                        herdId = BuildAnimalHarnessHerdId(stressSequence, created);
                     }
 
                     AnimalDefinition definition = ChooseGenderDefinition(species, ref random);
                     Transform chunkTransform = block.transform.parent;
                     Transform parent = GetOrCreateAnimalRoot(chunkTransform);
-                    long deterministicId = BuildAnimalStressId(stressSequence, created);
+                    long deterministicId = BuildAnimalHarnessId(stressSequence, created);
                     Animal animal = SpawnAnimalInstance(
                         definition,
                         deterministicId,
@@ -1152,6 +1156,90 @@ public partial class TerrainGenerator : MonoBehaviour
 
         return created;
     }
+
+#if UNITY_EDITOR
+    public bool TrySpawnAnimalNearPlayer(
+        AnimalDefinition definition,
+        out Animal spawnedAnimal)
+    {
+        spawnedAnimal = null;
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (!Application.isPlaying
+            || definition == null
+            || definition.AnimalPrefab == null
+            || player == null)
+        {
+            return false;
+        }
+
+        Vector2Int playerCoordinate = GetWorldBlockCoordinate(player.transform.position);
+        animalUsedCoordinatesScratch.Clear();
+        foreach (KeyValuePair<Vector2Int, Transform> pair in loadedChunks)
+        {
+            if (pair.Value != null)
+            {
+                CacheExistingAnimalCoordinates(pair.Value, animalUsedCoordinatesScratch);
+            }
+        }
+
+        int spawnSequence = ++animalHarnessSpawnSequence;
+        DeterministicAnimalRandom random = new DeterministicAnimalRandom(
+            seed ^ spawnSequence * 7919,
+            playerCoordinate);
+        try
+        {
+            for (int radius = AnimalEditorSpawnMinimumRadius;
+                 radius <= AnimalEditorSpawnMaximumRadius;
+                 radius++)
+            {
+                for (int z = -radius; z <= radius; z++)
+                {
+                    for (int x = -radius; x <= radius; x++)
+                    {
+                        if (Mathf.Abs(x) != radius && Mathf.Abs(z) != radius)
+                        {
+                            continue;
+                        }
+
+                        Vector2Int coordinate = playerCoordinate + new Vector2Int(x, z);
+                        if (animalUsedCoordinatesScratch.Contains(coordinate)
+                            || !TryGetLoadedBlock(coordinate, out Block block)
+                            || !CanSpawnAnimalOnBlock(block))
+                        {
+                            continue;
+                        }
+
+                        Transform chunkTransform = block.transform.parent;
+                        Transform parent = GetOrCreateAnimalRoot(chunkTransform);
+                        long herdId = BuildAnimalHarnessHerdId(spawnSequence, 0);
+                        spawnedAnimal = SpawnAnimalInstance(
+                            definition,
+                            BuildAnimalHarnessId(spawnSequence, 0),
+                            block.transform.position,
+                            Quaternion.Euler(0f, random.Value() * 360f, 0f),
+                            ChooseAnimalSpawnAge(definition, ref random),
+                            -1f,
+                            false,
+                            herdId,
+                            block.transform.position,
+                            definition.AISettings != null
+                                ? definition.AISettings.HerdAreaRadius
+                                : AnimalAISettings.DefaultHerdAreaRadius,
+                            null,
+                            parent);
+                        return spawnedAnimal != null;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            animalUsedCoordinatesScratch.Clear();
+        }
+
+        return false;
+    }
+#endif
 
     public int CreateAnimalCollisionStressTest(int requestedCount)
     {
@@ -1223,7 +1311,7 @@ public partial class TerrainGenerator : MonoBehaviour
         wall.transform.localScale = localScale;
     }
 
-    private int animalStressTestSequence;
+    private int animalHarnessSpawnSequence;
     private GameObject animalCollisionStressRoot;
 
     private long BuildAnimalHerdId(
@@ -1247,7 +1335,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private static long BuildAnimalStressHerdId(int sequence, int index)
+    private static long BuildAnimalHarnessHerdId(int sequence, int index)
     {
         unchecked
         {
@@ -1256,7 +1344,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private static long BuildAnimalStressId(int sequence, int index)
+    private static long BuildAnimalHarnessId(int sequence, int index)
     {
         unchecked
         {

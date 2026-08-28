@@ -18,10 +18,10 @@ MonoBehaviour:
   minHerdSize: 2
   maxHerdSize: 6
   spawnWeight: 5
-  maxHealth: 100
+  maxHealth: 120
   canRiding: 1
   riderHeight: 0.48
-  strength: 30
+  strength: 45
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
     amount: 1
@@ -52,11 +52,13 @@ MonoBehaviour:
   childIcon: {fileID: 21300000, guid: 6b16238b4b8331e4fae57a4eab66b8f6, type: 3}
   aiSettings:
     herdAreaRadius: 15
-    separationRadius: 1.25
-    separationWeight: 1.5
+    separationRadius: 1
+    separationWeight: 1.6
     cohesionWeight: 0.65
-    moveSpeed: 1.25
-    runSpeedRatio: 1.2
+    moveSpeed: 0.7
+    runSpeedRatio: 1.5
+    accelerationPerSecond: 0.7
+    decelerationPerSecond: 1
     turnSpeed: 220
     obstacleProbeDistance: 1.5
     arrivalDistance: 0.35

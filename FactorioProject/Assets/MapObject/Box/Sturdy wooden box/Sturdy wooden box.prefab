@@ -619,7 +619,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Sturdy wooden box
-  objId: 25
+  objId: 26
   itemDefinition: {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

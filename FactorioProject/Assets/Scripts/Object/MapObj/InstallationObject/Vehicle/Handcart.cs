@@ -250,7 +250,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         float bestSqrDistance = float.PositiveInfinity;
-        Vector3 animalCenter = animal.GetWorldCenter();
+        Vector3 animalCenter = animal.GetDraftAttachmentWorldCenter();
         foreach (Handcart candidate in ActiveRuntimeHandcarts)
         {
             if (candidate == null
@@ -305,10 +305,10 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             return false;
         }
 
-        Vector3 offset = animal.GetWorldCenter() - handlePoint.position;
+        Vector3 offset = animal.GetDraftAttachmentWorldCenter() - handlePoint.position;
         offset.y = 0f;
         float maxDistance = Mathf.Max(0.1f, draftAnimalConnectionMaxDistance)
-                            + animal.GetWorldRadius();
+                            + animal.GetDraftAttachmentWorldRadius();
         return offset.sqrMagnitude <= maxDistance * maxDistance;
     }
 
@@ -388,7 +388,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             return false;
         }
 
-        Vector3 startPosition = transform.position;
+        Vector3 animalStartPosition = animal.MovementRootPosition;
         draftAnimalDriveActive = true;
         draftAnimalRider = animalRider;
         try
@@ -402,7 +402,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         SnapDraftAnimalToHandle();
-        Vector3 moved = transform.position - startPosition;
+        // 회전 중에는 수레 중심보다 손잡이 앞의 동물이 더 긴 호를 이동한다.
+        // 동물 애니메이션에는 수레 중심이 아니라 실제 동물 루트 이동량을 전달한다.
+        Vector3 moved = animal.MovementRootPosition - animalStartPosition;
         moved.y = 0f;
         actualMoveSpeed = moved.magnitude / Mathf.Max(0.0001f, deltaTime);
         return actualMoveSpeed > MinimumMovementDistance;
@@ -428,7 +430,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         Vector3 animalRootPosition = attachedAnimal.MovementRootPosition;
-        Vector3 rootToCenter = attachedAnimal.GetWorldCenter() - animalRootPosition;
+        Vector3 rootToCenter = attachedAnimal.GetDraftAttachmentWorldCenter()
+                               - animalRootPosition;
         float centerDistance = ResolveDraftAnimalCenterDistance(attachedAnimal);
         Vector3 targetCenter = handlePoint.position + forward * centerDistance;
         Vector3 targetRootPosition = targetCenter - rootToCenter;
@@ -441,7 +444,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
     private float ResolveDraftAnimalCenterDistance(Animal attachedAnimal)
     {
         float animalRadius = attachedAnimal != null
-            ? attachedAnimal.GetWorldRadius()
+            ? attachedAnimal.GetDraftAttachmentWorldRadius()
             : 0f;
         return animalRadius * Mathf.Clamp01(draftAnimalRadiusClearanceRatio)
                + Mathf.Max(0f, draftAnimalCenterOffset);
@@ -2101,10 +2104,19 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
         else
         {
-            signedSpeed = UpdateVehicleSignedSpeed(
-                driveInput,
-                normalizedDeltaTime,
-                resolvedMaxSpeed);
+            Animal activeDraftAnimal = draftAnimalDriveActive ? DraftAnimal : null;
+            signedSpeed = activeDraftAnimal != null
+                ? UpdateVehicleSignedSpeed(
+                    driveInput,
+                    normalizedDeltaTime,
+                    resolvedMaxSpeed,
+                    activeDraftAnimal.MovementAccelerationPerSecond,
+                    activeDraftAnimal.MovementDecelerationPerSecond,
+                    false)
+                : UpdateVehicleSignedSpeed(
+                    driveInput,
+                    normalizedDeltaTime,
+                    resolvedMaxSpeed);
         }
         float requestedDistance = signedSpeed * normalizedDeltaTime;
         float maxFrameDistance = movementSubstepDistance * maxMovementSubsteps;
@@ -2387,10 +2399,10 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         forward.Normalize();
-        float animalRadius = attachedAnimal.GetWorldRadius();
+        float animalRadius = attachedAnimal.GetDraftAttachmentWorldRadius();
         Vector3 targetCenter = targetHandlePosition
                                + forward * ResolveDraftAnimalCenterDistance(attachedAnimal);
-        targetCenter.y = attachedAnimal.GetWorldCenter().y;
+        targetCenter.y = attachedAnimal.GetDraftAttachmentWorldCenter().y;
         int overlapCount = Physics.OverlapSphereNonAlloc(
             targetCenter,
             animalRadius,

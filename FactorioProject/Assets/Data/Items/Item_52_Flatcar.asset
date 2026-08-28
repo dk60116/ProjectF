@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_52_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Torch
-  id: 26
+  id: 27
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: a7343e579ca362944b1163ffbdc25937, type: 2}
   portableMat: {fileID: 2100000, guid: d74849f0c0fe2c24ebc5bb88e35bdc84, type: 2}

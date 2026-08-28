@@ -93,6 +93,22 @@ public class Vehicle : InstallationObject
 
     protected float UpdateVehicleSignedSpeed(float inputAxis, float deltaTime, float maxSpeed)
     {
+        return UpdateVehicleSignedSpeed(
+            inputAxis,
+            deltaTime,
+            maxSpeed,
+            VehicleAccelerationPerSecond,
+            VehicleDecelerationPerSecond);
+    }
+
+    protected float UpdateVehicleSignedSpeed(
+        float inputAxis,
+        float deltaTime,
+        float maxSpeed,
+        float accelerationPerSecond,
+        float decelerationPerSecond,
+        bool clampToMaxSpeed = true)
+    {
         float normalizedDeltaTime = Mathf.Max(0f, deltaTime);
         float normalizedInputAxis = Mathf.Clamp(inputAxis, -1f, 1f);
         bool hasInput = Mathf.Abs(normalizedInputAxis) > 0.001f;
@@ -101,9 +117,15 @@ public class Vehicle : InstallationObject
             ? normalizedInputAxis * resolvedMaxSpeed
             : 0f;
 
-        float speedChangePerSecond = hasInput
-            ? VehicleAccelerationPerSecond
-            : VehicleDecelerationPerSecond;
+        bool accelerating = hasInput
+                            && (Mathf.Abs(currentVehicleSignedSpeed) <= 0.0001f
+                                || Mathf.Sign(currentVehicleSignedSpeed)
+                                   == Mathf.Sign(targetSpeed)
+                                   && Mathf.Abs(targetSpeed)
+                                   > Mathf.Abs(currentVehicleSignedSpeed));
+        float speedChangePerSecond = accelerating
+            ? Mathf.Max(0.01f, accelerationPerSecond)
+            : Mathf.Max(0.01f, decelerationPerSecond);
 
         currentVehicleSignedSpeed = Mathf.MoveTowards(
             currentVehicleSignedSpeed,
@@ -114,7 +136,11 @@ public class Vehicle : InstallationObject
             currentVehicleSignedSpeed = 0f;
         }
 
-        ClampCurrentVehicleSignedSpeed(resolvedMaxSpeed);
+        if (clampToMaxSpeed)
+        {
+            ClampCurrentVehicleSignedSpeed(resolvedMaxSpeed);
+        }
+
         return currentVehicleSignedSpeed;
     }
 

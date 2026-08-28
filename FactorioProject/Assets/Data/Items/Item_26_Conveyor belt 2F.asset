@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_26_Conveyor belt 2F
   m_EditorClassIdentifier: 
   itemName: Conveyor belt 2F
-  id: 44
+  id: 45
   mapObject: {fileID: 4923497655988066394, guid: ad2b1061faaacad479734368ff5211cc, type: 3}
   portableMesh: {fileID: 4300000, guid: 0e8c3eb53f7fff043ad76a82eb556561, type: 2}
   portableMat: {fileID: 2100000, guid: 4371f8650831e56448c21e70444e24f1, type: 2}
