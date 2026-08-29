@@ -499,6 +499,64 @@ public partial class BlockStateStore : MonoBehaviour
         ResolveVirtualObjectWorld()?.UpsertInstallation(storedState, VirtualObjectResidency.Live, installationObject);
     }
 
+    public bool UpdateLiveInstallationWorldPose(InstallationObject installationObject)
+    {
+        if (installationObject == null
+            || !installationObject.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+        {
+            return false;
+        }
+
+        Vector2Int storageKey = anchorCoordinate;
+        if (!liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord)
+            || liveRecord == null
+            || liveRecord.installationObject != installationObject)
+        {
+            liveRecord = null;
+            foreach (KeyValuePair<Vector2Int, LiveInstallationRecord> pair in liveInstallationStates)
+            {
+                if (pair.Value != null && pair.Value.installationObject == installationObject)
+                {
+                    storageKey = pair.Key;
+                    liveRecord = pair.Value;
+                    break;
+                }
+            }
+        }
+
+        if (liveRecord?.state == null)
+        {
+            return false;
+        }
+
+        Vector3 worldPosition = installationObject.transform.position;
+        Quaternion worldRotation = installationObject.transform.rotation;
+        SetInstallationWorldPose(liveRecord.state, worldPosition, worldRotation);
+        if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState savedState)
+            && savedState != null
+            && savedState.placementSequence == installationObject.RuntimePlacementSequence)
+        {
+            SetInstallationWorldPose(savedState, worldPosition, worldRotation);
+        }
+
+        ResolveVirtualObjectWorld()?.UpdateLiveInstallationWorldPose(
+            storageKey,
+            installationObject,
+            worldPosition,
+            worldRotation);
+        return true;
+    }
+
+    private static void SetInstallationWorldPose(
+        InstallationSaveState state,
+        Vector3 worldPosition,
+        Quaternion worldRotation)
+    {
+        state.hasWorldPose = true;
+        state.worldPosition = worldPosition;
+        state.worldRotation = worldRotation;
+    }
+
     public bool TryGetInstallationState(Vector2Int storageKey, out InstallationSaveState state)
     {
         if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState savedState) && savedState != null)

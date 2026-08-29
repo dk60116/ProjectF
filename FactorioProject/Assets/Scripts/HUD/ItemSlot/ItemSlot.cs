@@ -48,6 +48,17 @@ public class ItemSlot : MonoBehaviour
 
     public void SetItemDisplay(int itemId, int itemCount, int maxItemCount, bool allowZeroCount, bool showCount)
     {
+        SetItemDisplay(itemId, itemCount, maxItemCount, allowZeroCount, showCount, null);
+    }
+
+    public void SetItemDisplay(
+        int itemId,
+        int itemCount,
+        int maxItemCount,
+        bool allowZeroCount,
+        bool showCount,
+        string displayNameOverride)
+    {
         ResolveReferences();
         id = itemId;
 
@@ -124,7 +135,9 @@ public class ItemSlot : MonoBehaviour
             icon.enabled = itemSet.icon != null;
         }
 
-        SetItemNameText(itemSet.name, true);
+        SetItemNameText(
+            string.IsNullOrWhiteSpace(displayNameOverride) ? itemSet.name : displayNameOverride,
+            true);
     }
 
     private static int ResolveDisplayMaxItemCount(int itemId, int maxItemCount)

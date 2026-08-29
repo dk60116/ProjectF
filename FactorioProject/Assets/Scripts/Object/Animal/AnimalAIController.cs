@@ -42,6 +42,8 @@ public sealed class AnimalAIController : MonoBehaviour
     private const float HerdReturnRetryDelay = 5f;
     private const float AgeGenderSpeedMultiplierInfluence = 1f / 3f;
     private const float MountedMovementDirectionEpsilonSqr = 0.0000001f;
+    private const float MountedRunTransitionMinimumMargin = 0.01f;
+    private const float MountedRunTransitionRelativeMargin = 0.03f;
     private const float HealthRecoveryFractionPerSecond = 0.05f;
     private const float PostAggroHealthRecoveryDelay = 1f;
     private const float SaddledFreeRoamRadiusMultiplier = 0.2f;
@@ -107,6 +109,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private float mountedCurrentSpeed;
     private float mountedMaximumSpeed;
     private Vector3 mountedMovementDirection;
+    private bool mountedRunAnimationActive;
     private float scheduledTickAccumulator;
     private float scheduledRecoveryElapsedTime;
     private float scheduledTickPhase;
@@ -521,6 +524,9 @@ public sealed class AnimalAIController : MonoBehaviour
             return false;
         }
 
+        // 올가미와 수레 견인은 동시에 동물을 제어할 수 없다. 결속이 확정되는
+        // 이 지점에서 해제하면 투척 명중과 세이브 복원 모두 같은 규칙을 따른다.
+        animal.DetachFromDraftHandcart();
         bool wasResting = currentState == AnimalAIState.Rest || waitingForStandUp;
         nooseLeashed = true;
         executionActive = false;
@@ -618,6 +624,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         draftAttached = attached;
+        ResetMountedMovement();
         currentState = AnimalAIState.Idle;
         stateTimeRemaining = 0f;
         hasTarget = false;
@@ -668,6 +675,7 @@ public sealed class AnimalAIController : MonoBehaviour
         EnsureSimulationPoseInitialized();
         if (WaitForStandUpBeforeMovement(true))
         {
+            mountedRunAnimationActive = false;
             ApplyAnimation(0f);
             return false;
         }
@@ -694,13 +702,11 @@ public sealed class AnimalAIController : MonoBehaviour
                 deltaTime,
                 mountedRider,
                 out float cartActualMoveSpeed);
-            bool useRunAnimation = moved
-                                   && cartActualMoveSpeed > effectiveWalkSpeed + 0.01f;
-            float referenceAnimationSpeed = useRunAnimation
-                ? Mathf.Max(effectiveWalkSpeed, mountedMaximumSpeed)
-                : effectiveWalkSpeed;
-            float locomotionPlaybackScale = referenceAnimationSpeed > 0.0001f
-                ? cartActualMoveSpeed / referenceAnimationSpeed
+            bool useRunAnimation = ResolveMountedRunAnimation(
+                moved ? cartActualMoveSpeed : 0f,
+                effectiveWalkSpeed);
+            float locomotionPlaybackScale = effectiveWalkSpeed > 0.0001f
+                ? cartActualMoveSpeed / effectiveWalkSpeed
                 : 1f;
             ApplyAnimation(
                 cartActualMoveSpeed,
@@ -732,6 +738,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 mountedMaximumSpeed = 0f;
             }
 
+            mountedRunAnimationActive = false;
             ApplyAnimation(0f);
             return false;
         }
@@ -743,6 +750,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 mountedCurrentSpeed * deltaTime))
         {
             mountedCurrentSpeed = 0f;
+            mountedRunAnimationActive = false;
             ApplyAnimation(0f);
             return false;
         }
@@ -765,14 +773,11 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         float actualMoveSpeed = actualMoveDistance / Mathf.Max(0.0001f, deltaTime);
-        bool useMountedRunAnimation = actualMoveSpeed > effectiveWalkSpeed + 0.01f;
-        float animationReferenceSpeed = useMountedRunAnimation
-            ? Mathf.Max(
-                effectiveWalkSpeed,
-                effectiveWalkSpeed * settings.RunSpeedRatio)
-            : effectiveWalkSpeed;
-        float animationPlaybackScale = animationReferenceSpeed > 0.0001f
-            ? actualMoveSpeed / animationReferenceSpeed
+        bool useMountedRunAnimation = ResolveMountedRunAnimation(
+            actualMoveSpeed,
+            effectiveWalkSpeed);
+        float animationPlaybackScale = effectiveWalkSpeed > 0.0001f
+            ? actualMoveSpeed / effectiveWalkSpeed
             : 1f;
         ApplyAnimation(
             actualMoveSpeed,
@@ -786,6 +791,26 @@ public sealed class AnimalAIController : MonoBehaviour
         mountedCurrentSpeed = 0f;
         mountedMaximumSpeed = 0f;
         mountedMovementDirection = Vector3.zero;
+        mountedRunAnimationActive = false;
+    }
+
+    private bool ResolveMountedRunAnimation(float actualMoveSpeed, float effectiveWalkSpeed)
+    {
+        float walkSpeed = Mathf.Max(0f, effectiveWalkSpeed);
+        if (actualMoveSpeed <= 0.01f || walkSpeed <= 0.0001f)
+        {
+            mountedRunAnimationActive = false;
+            return false;
+        }
+
+        float margin = Mathf.Max(
+            MountedRunTransitionMinimumMargin,
+            walkSpeed * MountedRunTransitionRelativeMargin);
+        float threshold = mountedRunAnimationActive
+            ? Mathf.Max(0f, walkSpeed - margin)
+            : walkSpeed + margin;
+        mountedRunAnimationActive = actualMoveSpeed > threshold;
+        return mountedRunAnimationActive;
     }
 
     private void ApplyMountedRotation()

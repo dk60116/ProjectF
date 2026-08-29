@@ -28,6 +28,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ApplyPrimaryBiomeToBaseBody(block);
+        RefreshFarmlandVisual(block);
     }
 
     private void ApplyPrimaryBiomeToBaseBody(Block block)

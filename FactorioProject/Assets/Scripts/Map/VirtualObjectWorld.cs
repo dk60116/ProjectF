@@ -245,6 +245,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
     private readonly Dictionary<Vector2Int, int> installationRecordByAnchor = new Dictionary<Vector2Int, int>();
     private int nextId = 1;
     private int version;
+    private int itemStackVersion;
 
     public static VirtualObjectWorld Current
     {
@@ -262,6 +263,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
 
     public int Count => recordsById.Count;
     public int Version => version;
+    public int ItemStackVersion => itemStackVersion;
 
     public static VirtualObjectWorld EnsureFor(GameObject host)
     {
@@ -456,6 +458,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         {
             recordsById[record.id.Value] = record;
             version++;
+            itemStackVersion++;
         }
         else
         {
@@ -536,6 +539,36 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         return record.id;
     }
 
+    public bool UpdateLiveInstallationWorldPose(
+        Vector2Int storageKey,
+        InstallationObject liveInstallation,
+        Vector3 worldPosition,
+        Quaternion worldRotation)
+    {
+        if (liveInstallation == null
+            || !installationRecordByAnchor.TryGetValue(storageKey, out int recordId)
+            || !recordsById.TryGetValue(recordId, out VirtualObjectRecord record)
+            || record == null
+            || record.liveInstanceId != liveInstallation.GetInstanceID())
+        {
+            return false;
+        }
+
+        record.worldPosition = worldPosition;
+        record.worldRotation = worldRotation;
+        if (record.installationState != null)
+        {
+            record.installationState.hasWorldPose = true;
+            record.installationState.worldPosition = worldPosition;
+            record.installationState.worldRotation = worldRotation;
+        }
+
+        // 이 버전은 VirtualItemStackRenderer의 전체 캐시 갱신 기준이다.
+        // 라이브 차량의 자세만 바뀐 경우에는 인덱스나 가상 아이템이
+        // 달라지지 않으므로 버전을 올리지 않는다.
+        return true;
+    }
+
     public void RemoveFloorItemStack(Vector2Int coordinate)
     {
         RemoveIndexedRecord(floorStackRecordByCoordinate, coordinate);
@@ -560,6 +593,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         installationRecordByAnchor.Clear();
         nextId = 1;
         version++;
+        itemStackVersion++;
     }
 
     private void Awake()
@@ -607,6 +641,10 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         recordsById[record.id.Value] = record;
         RegisterCoordinateMappings(record);
         version++;
+        if (record.kind == VirtualObjectKind.ItemStack)
+        {
+            itemStackVersion++;
+        }
     }
 
     private void ReplaceOccupiedCoordinates(VirtualObjectRecord record, Vector2Int coordinate)
@@ -663,6 +701,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
             return;
         }
 
+        bool removesItemStack = ReferenceEquals(index, floorStackRecordByCoordinate);
         index.Remove(key);
         if (recordsById.TryGetValue(recordId, out VirtualObjectRecord record) && record != null)
         {
@@ -675,6 +714,10 @@ public sealed class VirtualObjectWorld : MonoBehaviour
 
         recordsById.Remove(recordId);
         version++;
+        if (removesItemStack)
+        {
+            itemStackVersion++;
+        }
     }
 
     private void RemoveCoordinateMappings(VirtualObjectRecord record)

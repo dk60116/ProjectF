@@ -306,6 +306,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.installations, WriteInstallationEntry);
         WriteList(writer, map.conveyorItems, WriteConveyorBlockEntry);
         WriteList(writer, map.animals, WriteAnimalEntry);
+        WriteList(writer, map.farmlandCoordinates, WriteVector2Int);
     }
 
     private static MapSaveData ReadMap(
@@ -315,7 +316,7 @@ public static class SaveGameBinarySerializer
     {
         MapSaveData map = new MapSaveData
         {
-            resources = ReadList(reader, () => ReadResourceEntry(reader)),
+            resources = ReadList(reader, () => ReadResourceEntry(reader, version)),
             floorObjects = ReadList(reader, () => ReadFloorObjectEntry(reader)),
             installations = ReadList(reader, () => ReadInstallationEntry(reader, version, compatibilityMode)),
             conveyorItems = ReadList(reader, () => ReadConveyorBlockEntry(reader))
@@ -324,6 +325,11 @@ public static class SaveGameBinarySerializer
         if (version >= 22)
         {
             map.animals = ReadList(reader, () => ReadAnimalEntry(reader, version));
+        }
+
+        if (version >= 38)
+        {
+            map.farmlandCoordinates = ReadList(reader, () => ReadVector2Int(reader));
         }
 
         return map;
@@ -431,11 +437,13 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.state.initialResourceCount);
         writer.Write(entry.state.hasBodyYawStep);
         writer.Write(entry.state.bodyYawStep);
+        writer.Write(entry.state.hasGrowth);
+        writer.Write(entry.state.growth);
     }
 
-    private static ResourceSaveEntry ReadResourceEntry(BinaryReader reader)
+    private static ResourceSaveEntry ReadResourceEntry(BinaryReader reader, int version)
     {
-        return new ResourceSaveEntry
+        ResourceSaveEntry entry = new ResourceSaveEntry
         {
             coordinate = ReadVector2Int(reader),
             itemId = reader.ReadInt32(),
@@ -449,6 +457,14 @@ public static class SaveGameBinarySerializer
                 bodyYawStep = reader.ReadInt32()
             }
         };
+
+        if (version >= 39)
+        {
+            entry.state.hasGrowth = reader.ReadBoolean();
+            entry.state.growth = reader.ReadSingle();
+        }
+
+        return entry;
     }
 
     private static void WriteFloorObjectEntry(BinaryWriter writer, FloorObjectSaveEntry entry)

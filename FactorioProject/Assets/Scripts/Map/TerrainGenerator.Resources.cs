@@ -10,6 +10,10 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
+    private const float StartSafeZoneBoundaryNoiseScale = 0.31f;
+    private const float StartSafeZoneBoundaryVariation = 0.9f;
+    private static readonly Vector2 StartSafeZoneBoundaryNoiseOffset = new Vector2(283.7f, 619.3f);
+
     private bool TryGetResourcePrefab(Vector2Int worldCoordinate, out Resource prefab)
     {
         prefab = null;
@@ -369,6 +373,35 @@ public partial class TerrainGenerator : MonoBehaviour
         return 1;
     }
 
+    private float GetInitialTreeGrowth(Resource prefab, Vector2Int worldCoordinate)
+    {
+        ResourceDefinition definition = prefab != null ? prefab.Definition : null;
+        int minimumGrowth = definition != null
+            ? Mathf.Clamp(
+                definition.minimumGrowth,
+                ResourceDefinition.MinGrowth,
+                ResourceDefinition.MaxGrowth)
+            : ResourceDefinition.DefaultGrowth;
+        int maximumGrowth = definition != null
+            ? Mathf.Clamp(
+                definition.maximumGrowth,
+                minimumGrowth,
+                ResourceDefinition.MaxGrowth)
+            : minimumGrowth;
+        if (minimumGrowth >= maximumGrowth)
+        {
+            return minimumGrowth;
+        }
+
+        int prefabSalt = GetStableStringHash(prefab != null ? prefab.name : string.Empty);
+        float selection = Hash01(worldCoordinate.x, worldCoordinate.y, prefabSalt ^ 15727);
+        int growthRange = maximumGrowth - minimumGrowth + 1;
+        return minimumGrowth + Mathf.Clamp(
+            Mathf.FloorToInt(selection * growthRange),
+            0,
+            growthRange - 1);
+    }
+
     private int GetResourceBodyYawStep(Resource prefab, Vector2Int worldCoordinate)
     {
         if (IsOilResourcePrefab(prefab))
@@ -533,6 +566,14 @@ public partial class TerrainGenerator : MonoBehaviour
             hash = (hash * 31) + starterPatchHalfSize;
             hash = (hash * 31) + starterPatchDistanceFromCenter;
             hash = (hash * 31) + (treeResources != null ? treeResources.Count : 0);
+            if (treeResources != null)
+            {
+                for (int i = 0; i < treeResources.Count; i++)
+                {
+                    hash = (hash * 31) + (treeResources[i].useStarterPatch ? 1 : 0);
+                }
+            }
+
             return hash;
         }
     }
@@ -560,7 +601,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         for (int i = 0; i < treeResources.Count; i++)
         {
-            if (treeResources[i].Prefab != null)
+            if (treeResources[i].useStarterPatch && treeResources[i].Prefab != null)
             {
                 starterTreeCacheEntries.Add(treeResources[i]);
             }
@@ -1526,7 +1567,26 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool IsStartSafeZoneCoordinate(Vector2Int worldCoordinate)
     {
-        return Mathf.Abs(worldCoordinate.x) <= startSafeZoneRadius && Mathf.Abs(worldCoordinate.y) <= startSafeZoneRadius;
+        int radius = Mathf.Max(0, startSafeZoneRadius);
+        if (radius == 0)
+        {
+            return worldCoordinate == Vector2Int.zero;
+        }
+
+        float distance = worldCoordinate.magnitude;
+        float guaranteedClearRadius = Mathf.Max(1f, radius - 1f);
+        if (distance <= guaranteedClearRadius)
+        {
+            return true;
+        }
+
+        float boundaryNoise = SampleNoise(
+            worldCoordinate,
+            StartSafeZoneBoundaryNoiseScale,
+            StartSafeZoneBoundaryNoiseOffset);
+        float irregularRadius = radius
+                                + ((boundaryNoise - 0.5f) * 2f * StartSafeZoneBoundaryVariation);
+        return distance <= Mathf.Max(guaranteedClearRadius, irregularRadius);
     }
 
     private float SampleNoise(Vector2Int worldCoordinate, float scale, Vector2 offset)

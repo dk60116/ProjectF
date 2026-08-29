@@ -507,20 +507,18 @@ public class FreightCar : Train, IPlayerItemStorage
             return false;
         }
 
-        bool accepted = handOnly
-            ? player.TryAddToHand(itemId, out PortableObject storageTarget)
-            : PlayerItemStorageUtility.TryAddToPlayerStorage(
+        if (!PlayerItemStorageUtility.TryReservePlayerStorage(
                 player,
                 itemId,
                 preferredSlotIndex,
-                out storageTarget);
-        if (!accepted)
+                handOnly,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
 
         stack.RemoveAt(stack.Count - 1);
-        PlayerItemStorageUtility.MoveVisualToPlayerStorage(portableObject, storageTarget);
+        PlayerItemStorageUtility.MoveVisualToPlayerStorage(portableObject, reservation);
         NotifyRobotArmsAtRuntimeCoordinates();
         return true;
     }

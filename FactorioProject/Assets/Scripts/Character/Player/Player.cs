@@ -6,15 +6,19 @@ using UnityEngine.Serialization;
 public class Player : Character
 {
     private static readonly int PickHash = Animator.StringToHash("tPick");
+    private static readonly int DiggingHash = Animator.StringToHash("tDigging");
     private static readonly int ThrowHash = Animator.StringToHash("tThrow");
     private static readonly int CarryHash = Animator.StringToHash("fCarry");
     private static readonly int MoveAnimationSpeedHash = Animator.StringToHash("fMoveSpeed");
+    private static readonly int LocomotionBlendHash = Animator.StringToHash("fLocomotionBlend");
     private static readonly int HandcartMountedHash = Animator.StringToHash("bHandcartMounted");
     private static readonly int HandcartDirectionHash = Animator.StringToHash("fHandcartDirection");
     private static readonly int RidingHash = Animator.StringToHash("bRiding");
     private const string PickStateName = "Pick";
+    private const string DiggingStateName = "Digging";
     private const string IdleStateName = "Idle";
     private const string RunningStateName = "Running";
+    private const float LocomotionBlendDampTime = 0.12f;
     private const string TorchLightAnchorName = "_TorchLightAnchor";
     private const string PitchforkItemName = "Pitchfork";
     private const float PlayerRootY = 0f;
@@ -63,6 +67,8 @@ public class Player : Character
 
     private int pendingPickTriggerCount;
     private bool wasPickStateActiveLastFrame;
+    private bool pendingDiggingTrigger;
+    private bool wasDiggingStateActiveLastFrame;
     private bool handcartAnimationActive;
     private bool ridingAnimationActive;
 
@@ -570,6 +576,30 @@ public class Player : Character
         pendingPickTriggerCount = 0;
     }
 
+    public void QueueDiggingAnimation()
+    {
+        pendingDiggingTrigger = true;
+    }
+
+    public void CancelDiggingAnimation(bool shouldRun)
+    {
+        pendingDiggingTrigger = false;
+        DiggingAnimationStartedThisFrame = false;
+        DiggingAnimationFinishedThisFrame = false;
+        if (animator == null)
+        {
+            return;
+        }
+
+        animator.ResetTrigger(DiggingHash);
+        if (IsDiggingStateActive())
+        {
+            InterruptDiggingAnimation(shouldRun);
+        }
+
+        wasDiggingStateActiveLastFrame = false;
+    }
+
     public bool TriggerThrowAnimation()
     {
         if (animator == null)
@@ -583,6 +613,7 @@ public class Player : Character
         }
 
         ClearQueuedPickAnimations();
+        CancelDiggingAnimation(false);
         animator.SetBool(MoveHash, false);
         animator.ResetTrigger(PickHash);
         animator.ResetTrigger(ThrowHash);
@@ -593,6 +624,7 @@ public class Player : Character
     public void StopImmediateActions()
     {
         ClearQueuedPickAnimations();
+        CancelDiggingAnimation(false);
 
         if (animator == null)
         {
@@ -631,6 +663,7 @@ public class Player : Character
         if (!handcartAnimationActive)
         {
             ClearQueuedPickAnimations();
+            CancelDiggingAnimation(false);
             animator.ResetTrigger(PickHash);
             animator.ResetTrigger(ThrowHash);
             animator.SetBool(MoveHash, false);
@@ -696,6 +729,7 @@ public class Player : Character
         {
             ClearMountedVehicleAnimation();
             ClearQueuedPickAnimations();
+            CancelDiggingAnimation(false);
             animator.ResetTrigger(PickHash);
             animator.ResetTrigger(ThrowHash);
             animator.SetBool(MoveHash, false);
@@ -704,9 +738,11 @@ public class Player : Character
         animator.SetBool(RidingHash, active);
     }
 
-    public bool UpdateAnimationState(bool shouldRun, float movementAnimationSpeed = 1f)
+    public bool UpdateAnimationState(bool shouldRun, float locomotionBlend = 1f)
     {
         PickAnimationStartedThisFrame = false;
+        DiggingAnimationStartedThisFrame = false;
+        DiggingAnimationFinishedThisFrame = false;
         if (animator == null)
         {
             return false;
@@ -717,25 +753,49 @@ public class Player : Character
             return false;
         }
 
+        // 느린 이동은 Running 클립을 느리게 재생하지 않고 Walking과 블렌드한다.
+        animator.SetFloat(MoveAnimationSpeedHash, 1f);
         animator.SetFloat(
-            MoveAnimationSpeedHash,
-            Mathf.Max(0f, movementAnimationSpeed));
+            LocomotionBlendHash,
+            Mathf.Clamp01(locomotionBlend),
+            LocomotionBlendDampTime,
+            Time.deltaTime);
         bool isPickActive = IsPickStateActive();
+        bool isDiggingActive = IsDiggingStateActive();
         PickAnimationStartedThisFrame = isPickActive && !wasPickStateActiveLastFrame;
+        DiggingAnimationStartedThisFrame = isDiggingActive && !wasDiggingStateActiveLastFrame;
 
-        if (shouldRun && isPickActive)
+        if (shouldRun && (isPickActive || isDiggingActive))
         {
             PickAnimationStartedThisFrame = false;
-            InterruptPickAnimation(true);
+            DiggingAnimationStartedThisFrame = false;
+            if (isPickActive)
+            {
+                InterruptPickAnimation(true);
+            }
+
+            if (isDiggingActive)
+            {
+                InterruptDiggingAnimation(true);
+            }
+
             wasPickStateActiveLastFrame = false;
+            wasDiggingStateActiveLastFrame = false;
             animator.SetBool(MoveHash, true);
             return false;
         }
 
         bool finishedPickThisFrame = wasPickStateActiveLastFrame && !isPickActive;
-        animator.SetBool(MoveHash, shouldRun && !isPickActive);
+        DiggingAnimationFinishedThisFrame = wasDiggingStateActiveLastFrame && !isDiggingActive;
+        animator.SetBool(MoveHash, shouldRun && !isPickActive && !isDiggingActive);
 
-        if (pendingPickTriggerCount > 0 && !isPickActive)
+        if (pendingDiggingTrigger && !isPickActive && !isDiggingActive)
+        {
+            animator.ResetTrigger(DiggingHash);
+            animator.SetTrigger(DiggingHash);
+            pendingDiggingTrigger = false;
+        }
+        else if (pendingPickTriggerCount > 0 && !isPickActive && !isDiggingActive)
         {
             animator.ResetTrigger(PickHash);
             animator.SetTrigger(PickHash);
@@ -743,6 +803,7 @@ public class Player : Character
         }
 
         wasPickStateActiveLastFrame = IsPickStateActive();
+        wasDiggingStateActiveLastFrame = IsDiggingStateActive();
         return finishedPickThisFrame;
     }
 
@@ -763,6 +824,8 @@ public class Player : Character
 
     public bool IsCarrying => isCarrying;
     public bool PickAnimationStartedThisFrame { get; private set; }
+    public bool DiggingAnimationStartedThisFrame { get; private set; }
+    public bool DiggingAnimationFinishedThisFrame { get; private set; }
 
     private bool HasCarryAnimatedHandObject()
     {
@@ -1051,6 +1114,22 @@ public class Player : Character
         return animator.IsInTransition(0) && animator.GetNextAnimatorStateInfo(0).IsName(PickStateName);
     }
 
+    private bool IsDiggingStateActive()
+    {
+        if (animator == null)
+        {
+            return false;
+        }
+
+        if (animator.GetCurrentAnimatorStateInfo(0).IsName(DiggingStateName))
+        {
+            return true;
+        }
+
+        return animator.IsInTransition(0)
+               && animator.GetNextAnimatorStateInfo(0).IsName(DiggingStateName);
+    }
+
     private void InterruptPickAnimation(bool shouldRun)
     {
         if (animator == null)
@@ -1059,6 +1138,18 @@ public class Player : Character
         }
 
         animator.ResetTrigger(PickHash);
+        animator.Play(shouldRun ? RunningStateName : IdleStateName, 0, 0f);
+        animator.Update(0f);
+    }
+
+    private void InterruptDiggingAnimation(bool shouldRun)
+    {
+        if (animator == null)
+        {
+            return;
+        }
+
+        animator.ResetTrigger(DiggingHash);
         animator.Play(shouldRun ? RunningStateName : IdleStateName, 0, 0f);
         animator.Update(0f);
     }
@@ -1134,24 +1225,25 @@ public class Player : Character
 
     public bool TryAddToBagAnimated(int objectId, Vector3 sourceWorldPosition)
     {
-        if (!TryAddToBag(objectId, out PortableObject targetPortableObject))
+        if (!PlayerItemStorageUtility.TryReserveBag(
+                this,
+                objectId,
+                -1,
+                true,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
 
-        if (targetPortableObject == null)
-        {
-            return true;
-        }
-
-        PlayPortableMoveToBag(new PortableMoveData(
-            targetPortableObject,
-            null,
-            targetPortableObject,
+        PortableObject target = reservation.Target;
+        PlayerItemStorageUtility.CreateVisualAndMoveToPlayerStorage(
             objectId,
+            target,
             sourceWorldPosition,
-            targetPortableObject.transform.position,
-            0f));
+            target.transform.rotation,
+            target.transform.lossyScale,
+            reservation,
+            "PickupMove");
         return true;
     }
 
@@ -1609,8 +1701,18 @@ public class Player : Character
 
         for (int i = 0; i < movableHandCount; i++)
         {
-            if (!activeBag.TryAddObject(handItemId, out PortableObject bagTargetPortableObject))
+            if (!PlayerItemStorageUtility.TryReserveBag(
+                    activeBag,
+                    handItemId,
+                    -1,
+                    true,
+                    out PlayerItemStorageReservation reservation))
             {
+                for (int pendingIndex = 0; pendingIndex < pendingMoves.Count; pendingIndex++)
+                {
+                    pendingMoves[pendingIndex].reservation.Release();
+                }
+
                 return false;
             }
 
@@ -1620,17 +1722,12 @@ public class Player : Character
             Vector3 startPosition = sourcePortableObject != null
                 ? sourcePortableObject.transform.position
                 : (BodyTransform != null ? BodyTransform.position : transform.position);
-            Vector3 targetPosition = bagTargetPortableObject != null
-                ? bagTargetPortableObject.transform.position
-                : startPosition;
-
             pendingMoves.Add(new PortableMoveData(
                 sourcePortableObject,
                 sourcePortableObject,
-                bagTargetPortableObject,
+                reservation,
                 handItemId,
                 startPosition,
-                targetPosition,
                 i * Mathf.Max(0f, handToBagPortableMoveInterval)));
         }
 
@@ -1648,46 +1745,23 @@ public class Player : Character
 
     private void PlayPortableMoveToBag(PortableMoveData moveData)
     {
-        PortableObject template = moveData.template;
-        if (template == null)
-        {
-            return;
-        }
-
         Vector3 startPosition = ResolvePortableMoveStartPosition(moveData);
-        PortableObject movingPortableObject = Instantiate(template, startPosition, template.transform.rotation);
-        if (movingPortableObject == null)
-        {
-            return;
-        }
-
-        movingPortableObject.name = $"{template.name}_HandToBagMove";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = startPosition;
-        movingPortableObject.transform.localScale = template.transform.lossyScale;
-        if (!movingPortableObject.gameObject.activeSelf)
-        {
-            movingPortableObject.gameObject.SetActive(true);
-        }
-
-        if (!movingPortableObject.SetItem(moveData.itemId))
-        {
-            Destroy(movingPortableObject.gameObject);
-            return;
-        }
-
-        movingPortableObject.MoveTo(
-            () => ResolvePortableMoveTargetPosition(moveData),
+        PortableObject template = moveData.template != null
+            ? moveData.template
+            : moveData.reservation.Target;
+        PlayerItemStorageUtility.CreateVisualAndMoveToPlayerStorage(
+            moveData.itemId,
+            template,
+            startPosition,
+            template != null ? template.transform.rotation : Quaternion.identity,
+            template != null ? template.transform.lossyScale : Vector3.one,
+            moveData.reservation,
+            "HandToBagMove",
             moveData.delay,
             () => ResolvePortableMoveStartPosition(moveData),
-            () =>
-            {
-                if (movingPortableObject != null)
-                {
-                    Destroy(movingPortableObject.gameObject);
-                }
-            },
-            false);
+            null,
+            null,
+            true);
     }
 
     private static Vector3 ResolvePortableMoveStartPosition(PortableMoveData moveData)
@@ -1697,38 +1771,28 @@ public class Player : Character
             : moveData.startPosition;
     }
 
-    private static Vector3 ResolvePortableMoveTargetPosition(PortableMoveData moveData)
-    {
-        return moveData.targetPortableObject != null
-            ? moveData.targetPortableObject.transform.position
-            : moveData.targetPosition;
-    }
-
     private readonly struct PortableMoveData
     {
         public readonly PortableObject template;
         public readonly PortableObject sourcePortableObject;
-        public readonly PortableObject targetPortableObject;
+        public readonly PlayerItemStorageReservation reservation;
         public readonly int itemId;
         public readonly Vector3 startPosition;
-        public readonly Vector3 targetPosition;
         public readonly float delay;
 
         public PortableMoveData(
             PortableObject template,
             PortableObject sourcePortableObject,
-            PortableObject targetPortableObject,
+            PlayerItemStorageReservation reservation,
             int itemId,
             Vector3 startPosition,
-            Vector3 targetPosition,
             float delay)
         {
             this.template = template;
             this.sourcePortableObject = sourcePortableObject;
-            this.targetPortableObject = targetPortableObject;
+            this.reservation = reservation;
             this.itemId = itemId;
             this.startPosition = startPosition;
-            this.targetPosition = targetPosition;
             this.delay = delay;
         }
     }

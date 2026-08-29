@@ -1698,6 +1698,50 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    public void RefreshMovedInstallationRuntimeState(
+        InstallationObject installationObject,
+        Vector2Int previousAnchorCoordinate,
+        bool runtimePlacementChanged)
+    {
+        if (installationObject == null
+            || !installationObject.TryGetPlacementRuntime(out Vector2Int currentAnchorCoordinate, out _))
+        {
+            return;
+        }
+
+        if (previousAnchorCoordinate != currentAnchorCoordinate)
+        {
+            if (TryGetLoadedBlock(previousAnchorCoordinate, out Block previousBlock)
+                && previousBlock != null
+                && previousBlock.MapObject == installationObject)
+            {
+                previousBlock.SetMapObject(null);
+            }
+
+            if (TryGetLoadedBlock(currentAnchorCoordinate, out Block currentBlock)
+                && currentBlock != null
+                && (currentBlock.MapObject == null || currentBlock.MapObject == installationObject))
+            {
+                currentBlock.SetMapObject(installationObject);
+            }
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null || installationObject.ExcludeFromTerrainPersistence)
+        {
+            return;
+        }
+
+        if (runtimePlacementChanged)
+        {
+            SaveRuntimeInstallationState(installationObject);
+        }
+        else if (!resourceStateStore.UpdateLiveInstallationWorldPose(installationObject))
+        {
+            SaveRuntimeInstallationState(installationObject);
+        }
+    }
+
     public TerrainSaveData CaptureTerrainSaveState()
     {
         return new TerrainSaveData
@@ -1719,6 +1763,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         CaptureAnimalSaveStates(mapSaveData);
+        CaptureFarmlandSaveState(mapSaveData);
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         return mapSaveData;
     }
@@ -1749,6 +1794,7 @@ public partial class TerrainGenerator : MonoBehaviour
         InvalidateTerrainGenerationCaches();
         ClearPendingChunkGenerations();
         ClearLoadedChunks(false, true);
+        ApplyFarmlandSaveState(mapSaveData);
         ApplyAnimalSaveStates(mapSaveData);
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
@@ -2448,6 +2494,7 @@ public partial class TerrainGenerator : MonoBehaviour
         ClearPendingChunkGenerations();
         ClearLoadedChunks(false, true);
         ClearAnimalPersistentState();
+        ClearFarmlandPersistentState();
         resourceStateStore?.ClearStates();
 
         currentCenterChunk = GetCenterChunkCoordinate();

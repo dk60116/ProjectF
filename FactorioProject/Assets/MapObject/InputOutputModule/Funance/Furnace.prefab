@@ -4971,6 +4971,8 @@ MonoBehaviour:
     count: 1
   - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
     count: 1
+  - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
+    count: 1
   outputList:
   - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
     count: 2
@@ -4985,6 +4987,8 @@ MonoBehaviour:
   - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
     count: 1
   - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
+    count: 1
+  - itemDefinition: {fileID: 11400000, guid: 0e1d27a0f4c177c44985160c21333ad4, type: 2}
     count: 1
   output:
     itemDefinition: {fileID: 0}

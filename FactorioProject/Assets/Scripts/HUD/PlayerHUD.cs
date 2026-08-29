@@ -1880,7 +1880,8 @@ public partial class PlayerHUD : BagSlot
         PlayerController playerController = currentPlayer.GetComponent<PlayerController>();
         if (playerController != null
             && (playerController.IsResourceHarvestingActive
-                || playerController.IsAnimalKnifeInteractionActive))
+                || playerController.IsAnimalKnifeInteractionActive
+                || playerController.IsPitchforkDiggingActive))
         {
             ClearAllInteractionButtonState();
             return;
@@ -1981,7 +1982,7 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        if (TryActivateBucketWaterInteraction(currentPlayer, playerController))
+        if (TryActivateBucketFluidInteraction(currentPlayer, playerController))
         {
             return;
         }
@@ -2243,6 +2244,11 @@ public partial class PlayerHUD : BagSlot
         }
         else if (mapObject is Resource resource)
         {
+            if (resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil)
+            {
+                return false;
+            }
+
             icon = ResolveInteractionIcon(resource);
         }
         else
@@ -2337,7 +2343,8 @@ public partial class PlayerHUD : BagSlot
 
     private void ClearInteractionTargets()
     {
-        bucketWaterInteractionActive = false;
+        bucketFluidInteractionActive = false;
+        bucketOilInteractionSource = null;
         currentSaddleInteractionAnimal = null;
         currentRideableInteractionAnimal = null;
         currentInteractionAnimal = null;
@@ -3403,13 +3410,14 @@ public partial class PlayerHUD : BagSlot
         Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
         if (pitchforkGroundInteractionActive)
         {
+            ResolvePlayerController()?.RequestPitchforkDigging();
             UpdateInteractionButtonState();
             return;
         }
 
-        if (bucketWaterInteractionActive)
+        if (bucketFluidInteractionActive)
         {
-            HandleBucketWaterInteraction(currentPlayer);
+            HandleBucketFluidInteraction(currentPlayer);
             UpdateInteractionButtonState();
             return;
         }
@@ -3602,7 +3610,7 @@ public partial class PlayerHUD : BagSlot
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
                                 || pitchforkGroundInteractionActive
-                                || bucketWaterInteractionActive
+                                || bucketFluidInteractionActive
                                 || currentDraftAnimalInteractionHandcart != null
                                 || currentSaddleInteractionAnimal != null
                                 || currentRideableInteractionAnimal != null
@@ -4405,75 +4413,34 @@ public partial class PlayerHUD : BagSlot
                 break;
             }
 
-            if (!player.TryReserveHandObject(entry.itemId, out PortableObject handTarget))
+            if (!PlayerItemStorageUtility.TryReserveHand(
+                    player,
+                    entry.itemId,
+                    out PlayerItemStorageReservation reservation))
             {
                 break;
             }
 
-            AnimateCraftedPortableMove(
+            PortableObject handTarget = reservation.Target;
+            Transform startTransform = player.BodyTransform != null
+                ? player.BodyTransform
+                : player.transform;
+            PlayerItemStorageUtility.CreateVisualAndMoveToPlayerStorage(
                 entry.itemId,
                 handTarget,
                 startPosition,
+                handTarget.transform.rotation,
+                handTarget.transform.lossyScale,
+                reservation,
+                "CraftMove",
                 deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval),
-                () => player.CommitReservedHandObject(handTarget),
-                () => player.ReleaseReservedHandObject(handTarget));
+                () => startTransform != null ? startTransform.position : startPosition);
             entry.remainingOutputCount--;
             deliveredAny = true;
             deliveredIndex++;
         }
 
         return deliveredAny;
-    }
-
-    private void AnimateCraftedPortableMove(int itemId, PortableObject targetPortableObject, Vector3 startPosition, float delay, System.Action commitAction, System.Action releaseAction)
-    {
-        if (targetPortableObject == null)
-        {
-            return;
-        }
-
-        PortableObject movingPortableObject = Instantiate(targetPortableObject, startPosition, targetPortableObject.transform.rotation);
-        if (movingPortableObject == null)
-        {
-            releaseAction?.Invoke();
-            return;
-        }
-
-        movingPortableObject.name = $"{targetPortableObject.name}_CraftMove";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.localScale = targetPortableObject.transform.lossyScale;
-        if (!movingPortableObject.gameObject.activeSelf)
-        {
-            movingPortableObject.gameObject.SetActive(true);
-        }
-
-        if (!movingPortableObject.SetItem(itemId))
-        {
-            releaseAction?.Invoke();
-            Destroy(movingPortableObject.gameObject);
-            return;
-        }
-
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        Func<Vector3> startPositionProvider = null;
-        if (player != null)
-        {
-            Transform startTransform = player.BodyTransform != null ? player.BodyTransform : player.transform;
-            if (startTransform != null)
-            {
-                startPositionProvider = () => startTransform != null ? startTransform.position : startPosition;
-            }
-        }
-
-        movingPortableObject.MoveTo(targetPortableObject.transform, delay, startPositionProvider, () =>
-        {
-            commitAction?.Invoke();
-
-            if (movingPortableObject != null)
-            {
-                Destroy(movingPortableObject.gameObject);
-            }
-        }, false);
     }
 
     private void RefreshCraftingQueueSlots(bool forceIconRefresh)

@@ -41,7 +41,7 @@ public sealed class AnimalDefinitionEditor : Editor
             EditorGUILayout.FloatField(
                 new GUIContent(
                     "Rider Height",
-                    "Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
+                    "Growth 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
                 draftRiderHeight));
         float nextStrength = EditorGUILayout.Slider(
             new GUIContent(

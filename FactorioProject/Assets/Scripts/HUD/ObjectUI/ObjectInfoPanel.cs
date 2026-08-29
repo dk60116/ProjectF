@@ -302,12 +302,33 @@ public class ObjectInfoPanel : MonoBehaviour
 
         if (itemId >= 0)
         {
-            slot.SetItemDisplay(itemId, 1, 0, true);
+            string displayNameOverride = mapObject is Resource resource
+                ? ResolveResourceObjectName(resource)
+                : null;
+            slot.SetItemDisplay(itemId, 1, 0, true, true, displayNameOverride);
         }
         else
         {
             slot.Clear();
         }
+    }
+
+    private static string ResolveResourceObjectName(Resource resource)
+    {
+        if (resource == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(resource.ObjectName))
+        {
+            return resource.ObjectName.Trim();
+        }
+
+        string instanceName = resource.gameObject != null ? resource.gameObject.name : null;
+        return string.IsNullOrWhiteSpace(instanceName)
+            ? null
+            : instanceName.Replace("(Clone)", string.Empty).Trim();
     }
 
     private void SetFocusedInfoPanelAnimal(Animal animal)

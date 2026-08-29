@@ -39,7 +39,7 @@ public sealed class AnimalEditor : Editor
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Growth Preview", EditorStyles.boldLabel);
-        DrawEditableProperty("DinoAge", "Age");
+        DrawEditableProperty("DinoAge", "Growth");
         DrawUniformScaleProperty("adultScale", "Adult Scale");
         DrawEditableProperty("BaseScale", "Base Scale");
         DrawEditableProperty("BabyScale", "Baby Scale");
@@ -114,7 +114,7 @@ public sealed class AnimalEditor : Editor
 
         EditorGUI.BeginChangeCheck();
         float scale = EditorGUILayout.FloatField(
-            new GUIContent(label, "Age 10 기준으로 X, Y, Z에 동일하게 적용되는 모델 크기입니다."),
+            new GUIContent(label, "Growth 10 기준으로 X, Y, Z에 동일하게 적용되는 모델 크기입니다."),
             property.vector3Value.x);
         if (EditorGUI.EndChangeCheck())
         {

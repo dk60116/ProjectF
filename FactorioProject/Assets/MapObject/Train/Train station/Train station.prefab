@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Train station
-  objId: 87
+  objId: 88
   itemDefinition: {fileID: 11400000, guid: 2cbd885291664af429fdc0ef3784d40d, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

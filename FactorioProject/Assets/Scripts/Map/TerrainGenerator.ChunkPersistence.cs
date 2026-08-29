@@ -34,10 +34,18 @@ public partial class TerrainGenerator : MonoBehaviour
         if (resourceStateStore != null && resourceStateStore.TryGet(worldCoordinate, out Resource.ResourceSaveState savedState))
         {
             spawnedResource.ApplySavedState(savedState);
+            if (spawnedResource is ProjectF.MapObjects.Tree savedTree && !savedState.hasGrowth)
+            {
+                savedTree.SetGrowth(GetInitialTreeGrowth(prefab, worldCoordinate));
+            }
         }
         else
         {
             spawnedResource.InitializeRuntimeQuantity(GetInitialResourceCount(prefab, worldCoordinate));
+            if (spawnedResource is ProjectF.MapObjects.Tree spawnedTree)
+            {
+                spawnedTree.SetGrowth(GetInitialTreeGrowth(prefab, worldCoordinate));
+            }
         }
 
         // Oil is a grid-aligned liquid plane. Old resource state may contain a
@@ -57,9 +65,15 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (IsTreeResourcePrefab(prefab) || IsOilResourcePrefab(prefab))
+        if (IsOilResourcePrefab(prefab))
         {
             spawnedResource.ConfigureDynamicBodyScale(1f, 1f, 1);
+            return;
+        }
+
+        if (IsTreeResourcePrefab(prefab))
+        {
+            spawnedResource.ConfigureFixedBodyScale();
             return;
         }
 

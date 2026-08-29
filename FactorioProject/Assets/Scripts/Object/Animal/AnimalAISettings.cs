@@ -36,7 +36,7 @@ public sealed class AnimalAISettings
     [SerializeField, Min(0f)] private float nearbyThreatRadius = DefaultNearbyThreatRadius;
     [SerializeField, Min(0.1f)] private float fleeSpeedMultiplier = DefaultFleeSpeedMultiplier;
 
-    [Header("Age And Gender")]
+    [Header("Growth And Gender")]
     [SerializeField, Range(0.1f, 2f)] private float youngSpeedMultiplier = 0.8f;
     [SerializeField, Range(0.1f, 2f)] private float maleSpeedMultiplier = 1.05f;
     [SerializeField, Range(0.1f, 2f)] private float femaleSpeedMultiplier = 1f;

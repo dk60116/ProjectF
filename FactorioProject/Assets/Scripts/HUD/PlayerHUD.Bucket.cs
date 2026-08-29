@@ -2,9 +2,10 @@ using UnityEngine;
 
 public partial class PlayerHUD
 {
-    private bool bucketWaterInteractionActive;
+    private bool bucketFluidInteractionActive;
+    private Resource bucketOilInteractionSource;
 
-    private bool TryActivateBucketWaterInteraction(
+    private bool TryActivateBucketFluidInteraction(
         Player currentPlayer,
         PlayerController playerController)
     {
@@ -13,29 +14,40 @@ public partial class PlayerHUD
             : null;
         if (currentPlayer == null
             || playerController == null
-            || !playerController.IsNearWaterForPortableInteraction()
-            || !TryResolveHeldEmptyBucket(currentPlayer, out ItemDefinition emptyBucket)
-            || !Bucket.TryResolveWaterBucketDefinition(itemManager, out ItemDefinition waterBucket)
-            || !currentPlayer.CanConvertHeldItem(emptyBucket.id, waterBucket.id))
+            || !TryResolveHeldEmptyBucket(currentPlayer, out ItemDefinition emptyBucket))
         {
             return false;
         }
 
-        Sprite icon = waterBucket.icon != null
-            ? waterBucket.icon
-            : emptyBucket.icon;
+        playerController.TryFindNearestOilBucketFillSource(out Resource oilSource);
+        ItemDefinition filledBucket;
+        if (oilSource != null)
+        {
+            if (!Bucket.TryResolveOilBucketDefinition(itemManager, out filledBucket))
+            {
+                return false;
+            }
+        }
+        else if (!playerController.IsNearWaterForPortableInteraction()
+                 || !Bucket.TryResolveWaterBucketDefinition(itemManager, out filledBucket))
+        {
+            return false;
+        }
+
+        Sprite icon = emptyBucket.icon;
         if (icon == null || InteractionButton == null)
         {
             return false;
         }
 
         ClearInteractionTargets();
-        bucketWaterInteractionActive = true;
+        bucketFluidInteractionActive = true;
+        bucketOilInteractionSource = oilSource;
         SetActiveInteractionButton(InteractionButton, icon);
         return true;
     }
 
-    private void HandleBucketWaterInteraction(Player currentPlayer)
+    private void HandleBucketFluidInteraction(Player currentPlayer)
     {
         PlayerController playerController = currentPlayer != null
             ? currentPlayer.GetComponent<PlayerController>()
@@ -44,14 +56,39 @@ public partial class PlayerHUD
             ? GameManager.Instance.ItemManger
             : null;
         if (playerController == null
-            || !playerController.IsNearWaterForPortableInteraction()
-            || !TryResolveHeldEmptyBucket(currentPlayer, out ItemDefinition emptyBucket)
-            || !Bucket.TryResolveWaterBucketDefinition(itemManager, out ItemDefinition waterBucket))
+            || !TryResolveHeldEmptyBucket(currentPlayer, out ItemDefinition emptyBucket))
         {
             return;
         }
 
-        currentPlayer.TryConvertHeldItem(emptyBucket.id, waterBucket.id);
+        ItemDefinition filledBucket;
+        if (bucketOilInteractionSource != null)
+        {
+            if (!IsUsableOilInteractionSource(bucketOilInteractionSource, playerController)
+                || !Bucket.TryResolveOilBucketDefinition(itemManager, out filledBucket))
+            {
+                return;
+            }
+        }
+        else if (!playerController.IsNearWaterForPortableInteraction()
+                 || !Bucket.TryResolveWaterBucketDefinition(itemManager, out filledBucket))
+        {
+            return;
+        }
+
+        currentPlayer.TryConvertHeldItem(emptyBucket.id, filledBucket.id);
+    }
+
+    private static bool IsUsableOilInteractionSource(
+        Resource resource,
+        PlayerController playerController)
+    {
+        return resource != null
+               && resource.gameObject.activeInHierarchy
+               && resource.CanHarvest
+               && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil
+               && playerController != null
+               && playerController.IsWithinOilBucketFillRange(resource);
     }
 
     private static bool TryResolveHeldEmptyBucket(

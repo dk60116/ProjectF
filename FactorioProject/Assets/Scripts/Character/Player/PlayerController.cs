@@ -42,6 +42,7 @@ public class PlayerController : MonoBehaviour
     private const float NooseThrowHoldDuration = 0.12f;
     private const float NooseThrowReturnDuration = 0.4f;
     private const float NooseThrowArcHeight = 0.45f;
+    private const float PitchforkDiggingRange = 0.05f;
     private const float MountedAnimalRunJoystickThreshold = 0.85f;
     private const int AutomaticAnimalInteractionOverlapCapacity = 32;
     private const int InitialMouseFocusRaycastHitBufferSize = 32;
@@ -102,6 +103,8 @@ public class PlayerController : MonoBehaviour
     private readonly List<Block> selectedFocusBlocks = new List<Block>();
     private readonly List<Block> selectedFocusRemovalBuffer = new List<Block>();
     private Block selectedPitchforkGroundBlock;
+    private Block pitchforkDigTargetBlock;
+    private bool pitchforkDiggingQueued;
     private readonly List<FocusMarkerGroup> focusMarkerGroups = new List<FocusMarkerGroup>();
     private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
@@ -291,6 +294,7 @@ public class PlayerController : MonoBehaviour
         hasPendingFacingDirection = false;
         pendingFacingDirection = Vector3.zero;
         ClearTemporaryDropFocus();
+        CancelPitchforkDigging();
         selectedPitchforkGroundBlock = null;
         SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
@@ -380,6 +384,16 @@ public class PlayerController : MonoBehaviour
 
     public void SetSelectedMapObjectFocus(MapObject mapObject)
     {
+        if (mapObject == null && pitchforkDigTargetBlock != null)
+        {
+            return;
+        }
+
+        if (mapObject != null)
+        {
+            CancelPitchforkDigging();
+        }
+
         selectedPitchforkGroundBlock = null;
         selectedFocusBlocks.Clear();
         if (mapObject == null
@@ -439,11 +453,35 @@ public class PlayerController : MonoBehaviour
         return false;
     }
 
+    public bool RequestPitchforkDigging()
+    {
+        if (interactionPointSnapTarget != null
+            || player == null
+            || player.IsCarrying
+            || !TryGetSelectedPitchforkGroundBlock(out Block targetBlock))
+        {
+            return false;
+        }
+
+        CancelActiveResourceHarvest();
+        CancelAnimalKnifeInteraction();
+        pitchforkDigTargetBlock = targetBlock;
+        pitchforkDiggingQueued = false;
+        return true;
+    }
+
+    public bool IsPitchforkDiggingActive => pitchforkDigTargetBlock != null;
+
     private void SetSelectedPitchforkGroundBlock(Block block)
     {
         if (selectedPitchforkGroundBlock == block)
         {
             return;
+        }
+
+        if (pitchforkDigTargetBlock != null && pitchforkDigTargetBlock != block)
+        {
+            CancelPitchforkDigging();
         }
 
         selectedPitchforkGroundBlock = block;
@@ -1162,6 +1200,15 @@ public class PlayerController : MonoBehaviour
         }
 
         bool hasManualMovementInput = input.sqrMagnitude > 0.0001f;
+        if (pitchforkDigTargetBlock != null
+            && (isInteractionLocked
+                || isKeyboardMoveLocked
+                || interactionPointSnapTarget != null
+                || hasManualMovementInput))
+        {
+            CancelPitchforkDigging();
+        }
+
         if (isInteractionLocked
             || isKeyboardMoveLocked
             || interactionPointSnapTarget != null)
@@ -1191,6 +1238,17 @@ public class PlayerController : MonoBehaviour
             && TryGetAnimalKnifeApproachDirection(out Vector3 knifeApproachDirection))
         {
             moveDirection = knifeApproachDirection;
+        }
+
+        if (!hasManualMovementInput
+            && !isInteractionLocked
+            && !isKeyboardMoveLocked
+            && interactionPointSnapTarget == null
+            && currentKnifeTargetAnimal == null
+            && pitchforkDigTargetBlock != null
+            && TryGetPitchforkDiggingApproachDirection(out Vector3 pitchforkApproachDirection))
+        {
+            moveDirection = pitchforkApproachDirection;
         }
 
         bool hasMovement = moveDirection.sqrMagnitude > 0.0001f;
@@ -1268,7 +1326,8 @@ public class PlayerController : MonoBehaviour
 
         bool finishedPickThisFrame = player.UpdateAnimationState(
             hasMovement,
-            GetCurrentWalkAnimationSpeed());
+            GetCurrentLocomotionBlend(moveDirection));
+        ResolveCompletedPitchforkDigging();
         TryStartPendingAnimalKnifeAttack();
         if (animalKnifePickPending
             && animalKnifeAnimationStarted
@@ -2523,6 +2582,42 @@ public class PlayerController : MonoBehaviour
             return null;
         }
 
+        return FindNearestResourceInteractionTarget(false);
+    }
+
+    public bool TryFindNearestOilBucketFillSource(out Resource oilSource)
+    {
+        oilSource = FindNearestResourceInteractionTarget(true);
+        return oilSource != null;
+    }
+
+    public bool IsWithinOilBucketFillRange(Resource resource)
+    {
+        if (player == null
+            || resource == null
+            || !resource.gameObject.activeInHierarchy
+            || !resource.AllowsFocus
+            || !resource.CanHarvest
+            || resource.PlacementCategory != ResourceDefinition.PlacementCategory.Oil)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        float harvestRange = player.State.HarvestRange;
+        return GetResourceFocusSelectionDistanceSqr(resource, origin)
+               <= harvestRange * harvestRange;
+    }
+
+    private Resource FindNearestResourceInteractionTarget(bool oilOnly)
+    {
+        if (player == null)
+        {
+            return null;
+        }
+
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
         float harvestRange = player.State.HarvestRange;
         float maxDistanceSqr = harvestRange * harvestRange;
@@ -2539,10 +2634,13 @@ public class PlayerController : MonoBehaviour
         for (int i = 0; i < resources.Count; i++)
         {
             Resource resource = resources[i];
+            bool isOil = resource != null
+                         && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil;
             if (resource == null
                 || !resource.gameObject.activeInHierarchy
                 || !resource.AllowsFocus
-                || !resource.CanHarvest)
+                || !resource.CanHarvest
+                || isOil != oilOnly)
             {
                 continue;
             }
@@ -3357,20 +3455,22 @@ public class PlayerController : MonoBehaviour
             activeNooseThrowVisual.AttachedMovementSpeedLimit);
     }
 
-    private float GetCurrentWalkAnimationSpeed()
+    private float GetCurrentLocomotionBlend(Vector3 moveDirection)
     {
         if (player == null)
         {
             return 1f;
         }
 
-        float normalMoveSpeed = Mathf.Max(0f, player.Stat.currentMoveSpeed);
+        float normalMoveSpeed = Mathf.Max(0f, player.Stat.moveSpeed);
         if (normalMoveSpeed <= 0.0001f)
         {
             return 1f;
         }
 
-        return Mathf.Clamp01(GetCurrentOnFootMoveSpeed() / normalMoveSpeed);
+        float inputMagnitude = Mathf.Clamp01(moveDirection.magnitude);
+        float actualRequestedSpeed = GetCurrentOnFootMoveSpeed() * inputMagnitude;
+        return Mathf.Clamp01(actualRequestedSpeed / normalMoveSpeed);
     }
 
     public bool IsAnimalWithinKnifeInteractionRange(Animal animal)
@@ -5076,6 +5176,78 @@ public class PlayerController : MonoBehaviour
             nearbyRuntimeInstallationScratch);
         nearbyRuntimeInstallationScratch.Clear();
         return !hasInstallation;
+    }
+
+    private bool TryGetPitchforkDiggingApproachDirection(out Vector3 direction)
+    {
+        direction = Vector3.zero;
+        if (pitchforkDigTargetBlock == null
+            || player == null
+            || !player.IsHoldingPitchfork
+            || !CanFocusPitchforkGroundBlock(pitchforkDigTargetBlock))
+        {
+            CancelPitchforkDigging();
+            return false;
+        }
+
+        Vector3 targetPosition = pitchforkDigTargetBlock.transform.position;
+        Vector3 offset = targetPosition - transform.position;
+        offset.y = 0f;
+        float distance = offset.magnitude;
+        if (distance > PitchforkDiggingRange)
+        {
+            float moveSpeed = Mathf.Max(0.01f, GetCurrentOnFootMoveSpeed());
+            float maximumStep = moveSpeed * Mathf.Max(Time.deltaTime, Time.fixedDeltaTime);
+            float inputScale = Mathf.Clamp01((distance - PitchforkDiggingRange) / maximumStep);
+            direction = (offset / distance) * inputScale;
+            return true;
+        }
+
+        if (offset.sqrMagnitude > 0.0001f)
+        {
+            pendingFacingDirection = offset;
+            hasPendingFacingDirection = true;
+        }
+
+        if (!pitchforkDiggingQueued)
+        {
+            pitchforkDiggingQueued = true;
+            player.QueueDiggingAnimation();
+        }
+
+        return false;
+    }
+
+    private void ResolveCompletedPitchforkDigging()
+    {
+        if (pitchforkDigTargetBlock == null
+            || player == null
+            || !player.DiggingAnimationFinishedThisFrame)
+        {
+            return;
+        }
+
+        Block completedBlock = pitchforkDigTargetBlock;
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        bool completed = terrain != null
+                         && player.IsHoldingPitchfork
+                         && CanFocusPitchforkGroundBlock(completedBlock)
+                         && terrain.TryToggleFarmland(completedBlock);
+        CancelPitchforkDigging(false);
+        if (completed)
+        {
+            SetSelectedPitchforkGroundBlock(null);
+        }
+    }
+
+    private void CancelPitchforkDigging(bool interruptAnimation = true)
+    {
+        pitchforkDigTargetBlock = null;
+        pitchforkDiggingQueued = false;
+        if (interruptAnimation)
+        {
+            player?.CancelDiggingAnimation(false);
+        }
     }
 
     private void RefreshMouseAnimalFocus()

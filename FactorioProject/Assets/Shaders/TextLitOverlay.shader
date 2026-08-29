@@ -53,7 +53,7 @@ Shader "ProjectF/UI/Box SDF Lit Overlay"
 
         Cull [_CullMode]
         ZWrite Off
-        ZTest LEqual
+        ZTest Always
         Blend One OneMinusSrcAlpha
         ColorMask [_ColorMask]
 

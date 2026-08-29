@@ -99,6 +99,14 @@ public class ItemInfoDescription : MonoBehaviour
         Clear();
         int reserves = resource != null ? resource.RemainingHarvestOutputCount : 0;
         SetResourceReservesLine(0, reserves, UsesLiterResourceUnit(resource));
+        if (resource is ProjectF.MapObjects.Tree tree)
+        {
+            SetDefaultText(
+                1,
+                $"Growth: {tree.Growth.ToString("0.#", CultureInfo.InvariantCulture)}",
+                true);
+            SetDefaultSign(1, false, Color.white);
+        }
     }
 
     public void ShowAnimal(Animal animal)
@@ -113,7 +121,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultSign(0, false, Color.white);
         SetDefaultText(
             1,
-            $"Age: {animal.Age.ToString("0.#", CultureInfo.InvariantCulture)}",
+            $"Growth: {animal.Age.ToString("0.#", CultureInfo.InvariantCulture)}",
             true);
         SetDefaultSign(1, false, Color.white);
 

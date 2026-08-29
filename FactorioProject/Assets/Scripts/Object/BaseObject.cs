@@ -9,4 +9,6 @@ public class BaseObject : MonoBehaviour
     protected uint id;
     [SerializeField]
     protected string objectName;
+
+    public string ObjectName => objectName;
 }

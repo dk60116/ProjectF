@@ -3889,15 +3889,16 @@ public class InstallationPlacementController : MonoBehaviour
 
         Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
         PlayerBag inventoryBag = GetPlayerInventoryBag();
-        PortableObject targetPortableObject = null;
-        bool addedToInventory = player != null
-            ? player.TryAddToBag(itemId, out targetPortableObject)
-            : inventoryBag != null && inventoryBag.TryAddObject(itemId, out targetPortableObject);
-        if (addedToInventory)
+        if (PlayerItemStorageUtility.TryReserveBag(
+                inventoryBag,
+                itemId,
+                -1,
+                true,
+                out PlayerItemStorageReservation reservation))
         {
             PlayPackedPortableMoveToPlayerStorage(
                 itemId,
-                targetPortableObject,
+                reservation,
                 startPosition,
                 moveIndex * PackedPortableMoveInterval);
             moveIndex++;
@@ -3905,15 +3906,14 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (player == null || !player.TryAddToHand(itemId, out targetPortableObject))
+        if (!PlayerItemStorageUtility.TryReserveHand(player, itemId, out reservation))
         {
             return false;
         }
 
-        player.UpdateCarryState();
         PlayPackedPortableMoveToPlayerStorage(
             itemId,
-            targetPortableObject,
+            reservation,
             startPosition,
             moveIndex * PackedPortableMoveInterval);
         moveIndex++;
@@ -3923,52 +3923,27 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void PlayPackedPortableMoveToPlayerStorage(
         int itemId,
-        PortableObject targetPortableObject,
+        PlayerItemStorageReservation reservation,
         Vector3 startPosition,
         float delay)
     {
-        if (targetPortableObject == null || itemId < 0)
+        if (reservation == null || reservation.Target == null || itemId < 0)
         {
+            reservation?.Release();
             return;
         }
 
-        PortableObject movingPortableObject = Instantiate(
+        PortableObject targetPortableObject = reservation.Target;
+        PlayerItemStorageUtility.CreateVisualAndMoveToPlayerStorage(
+            itemId,
             targetPortableObject,
             startPosition,
-            targetPortableObject.transform.rotation);
-        if (movingPortableObject == null)
-        {
-            return;
-        }
-
-        movingPortableObject.name = $"{targetPortableObject.name}_PackedMove";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = startPosition;
-        movingPortableObject.transform.localScale = targetPortableObject.transform.lossyScale;
-        if (!movingPortableObject.gameObject.activeSelf)
-        {
-            movingPortableObject.gameObject.SetActive(true);
-        }
-
-        if (!movingPortableObject.SetItem(itemId))
-        {
-            Destroy(movingPortableObject.gameObject);
-            return;
-        }
-
-        Vector3 targetPosition = targetPortableObject.transform.position;
-        movingPortableObject.MoveTo(
-            () => targetPortableObject != null ? targetPortableObject.transform.position : targetPosition,
+            targetPortableObject.transform.rotation,
+            targetPortableObject.transform.lossyScale,
+            reservation,
+            "PackedMove",
             Mathf.Max(0f, delay),
-            () => startPosition,
-            () =>
-            {
-                if (movingPortableObject != null)
-                {
-                    Destroy(movingPortableObject.gameObject);
-                }
-            },
-            false);
+            () => startPosition);
     }
 
     private Vector3 ResolvePackedItemMoveStartPosition(PackedInstallationSession packedSession)

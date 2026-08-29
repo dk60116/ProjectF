@@ -56,6 +56,7 @@ public class PlayerCamera : MonoBehaviour
     private float freeCameraLookSensitivity = 2.4f;
 
     private Transform focusTarget;
+    private PlayerController playerController;
     private Camera cachedCamera;
     private float followDistance;
     private float targetFollowDistance;
@@ -64,7 +65,6 @@ public class PlayerCamera : MonoBehaviour
     private float orthographicZoomVelocity;
     private bool hasInitializedDistance;
     private bool hasInitializedOrthographicSize;
-    private bool hasInitializedBoxZoomVisibility;
     private bool freeCameraEnabled;
     private bool hasSavedFreeCameraProjection;
     private bool savedCameraOrthographic;
@@ -128,7 +128,6 @@ public class PlayerCamera : MonoBehaviour
             EnsureCameraCached();
             ApplyFreeCameraProjectionState();
             HandleFreeCameraInput();
-            RefreshBoxCountTextZoomVisibility();
             return;
         }
 
@@ -142,7 +141,7 @@ public class PlayerCamera : MonoBehaviour
             }
         }
 
-        Vector3 focusPoint = focusTarget.position + focusOffset;
+        Vector3 focusPoint = ResolveFollowFocusPosition();
 
         if (!hasInitializedDistance)
         {
@@ -162,8 +161,6 @@ public class PlayerCamera : MonoBehaviour
         EnsureOrthographicSizeInitialized();
         HandleZoomInput();
         UpdateZoom();
-        RefreshBoxCountTextZoomVisibility();
-
         transform.rotation = FixedRotation;
         transform.position = focusPoint - FixedForward * followDistance;
     }
@@ -284,6 +281,19 @@ public class PlayerCamera : MonoBehaviour
 
     private Vector3 ResolveDisplayLightingFocusPosition()
     {
+        return ResolveFollowFocusPosition();
+    }
+
+    private Vector3 ResolveFollowFocusPosition()
+    {
+        Animal mountedAnimal = playerController != null
+            ? playerController.MountedAnimal
+            : null;
+        if (mountedAnimal != null)
+        {
+            return mountedAnimal.RiderCameraFocusPosition + focusOffset;
+        }
+
         if (focusTarget != null)
         {
             return focusTarget.position + focusOffset;
@@ -304,6 +314,7 @@ public class PlayerCamera : MonoBehaviour
             Player player = GameManager.Instance.Player;
             target = player.transform;
             focusTarget = player.BodyTransform != null ? player.BodyTransform : player.transform;
+            playerController = player.GetComponent<PlayerController>();
         }
     }
 
@@ -397,28 +408,6 @@ public class PlayerCamera : MonoBehaviour
         }
 
         UpdateFollowDistance();
-    }
-
-    private void RefreshBoxCountTextZoomVisibility()
-    {
-        if (cachedCamera == null)
-        {
-            return;
-        }
-
-        float normalizedZoom = cachedCamera.orthographic
-            ? Mathf.InverseLerp(
-                Mathf.Max(0.1f, minOrthographicSize),
-                Mathf.Max(minOrthographicSize, maxOrthographicSize),
-                cachedCamera.orthographicSize)
-            : Mathf.InverseLerp(
-                Mathf.Max(0.1f, minFollowDistance),
-                Mathf.Max(minFollowDistance, maxFollowDistance),
-                followDistance);
-        BoxObject.RefreshCountTextZoomVisibility(
-            normalizedZoom,
-            !hasInitializedBoxZoomVisibility);
-        hasInitializedBoxZoomVisibility = true;
     }
 
     private void UpdateFollowDistance()

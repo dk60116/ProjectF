@@ -43,6 +43,8 @@ public class Resource : MapObject
         public int initialResourceCount;
         public bool hasBodyYawStep;
         public int bodyYawStep;
+        public bool hasGrowth;
+        public float growth;
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
@@ -89,6 +91,7 @@ public class Resource : MapObject
     private bool hasBodyYawStep;
     private int bodyYawStep;
     private int initialResourceCount;
+    private bool useDynamicBodyScale = true;
     private Block owningBlock;
     private bool activeResourceCoordinateRegistered;
     private Vector2Int activeResourceCoordinate;
@@ -107,6 +110,7 @@ public class Resource : MapObject
     public int GetCount => Mathf.Max(1, resourceStatus.getCount);
     public int RemainingHarvestOutputCount => Mathf.Max(0, ResourceCount * GetCount);
     public bool CanHarvest => ResourceCount > 0;
+    public ResourceDefinition Definition => definition;
     public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
         ? definition.placementCategory
         : ResourceDefinition.PlacementCategory.Ore;
@@ -176,7 +180,7 @@ public class Resource : MapObject
         UpdateBodyScale();
     }
 
-    private void OnEnable()
+    protected void OnEnable()
     {
         RefreshItemLight();
         CacheBodyTransform();
@@ -205,7 +209,7 @@ public class Resource : MapObject
         RegisterActiveResourceCoordinate();
     }
 
-    private void OnDisable()
+    protected void OnDisable()
     {
         SetBatchedRendering(false);
         UnregisterActiveResourceCoordinate();
@@ -219,7 +223,7 @@ public class Resource : MapObject
         owningBlock.SetMapObject(null);
     }
 
-    private void OnValidate()
+    protected void OnValidate()
     {
         CacheBodyTransform();
         ApplyDefinitionIfNeeded();
@@ -330,7 +334,7 @@ public class Resource : MapObject
 
     public ResourceSaveState CaptureState()
     {
-        return new ResourceSaveState
+        ResourceSaveState state = new ResourceSaveState
         {
             resourceCount = ResourceCount,
             maxGauge = MaxGauge,
@@ -339,6 +343,8 @@ public class Resource : MapObject
             hasBodyYawStep = hasBodyYawStep,
             bodyYawStep = NormalizeBodyYawStep(bodyYawStep)
         };
+        CaptureAdditionalSaveState(ref state);
+        return state;
     }
 
     public void ApplySavedState(ResourceSaveState state)
@@ -363,6 +369,7 @@ public class Resource : MapObject
             ApplyBodyYawStep(state.bodyYawStep);
         }
 
+        ApplyAdditionalSavedState(state);
         EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
         UpdateBodyScale();
@@ -383,10 +390,38 @@ public class Resource : MapObject
 
     public void ConfigureDynamicBodyScale(float minimumScaleRatio, float maximumScaleRatio, int maxResourceCountForScale)
     {
+        useDynamicBodyScale = true;
         minimumBodyScaleRatio = Mathf.Clamp01(minimumScaleRatio);
         maximumBodyScaleRatio = Mathf.Max(minimumBodyScaleRatio, maximumScaleRatio);
         dynamicScaleMaxResourceCount = Mathf.Max(1, maxResourceCountForScale);
         UpdateBodyScale();
+    }
+
+    public void ConfigureFixedBodyScale()
+    {
+        useDynamicBodyScale = false;
+        UpdateBodyScale();
+    }
+
+    protected float MinimumBodyScaleRatio => Mathf.Clamp01(minimumBodyScaleRatio);
+    protected float MaximumBodyScaleRatio => Mathf.Max(MinimumBodyScaleRatio, maximumBodyScaleRatio);
+
+    protected void RefreshBodyScale()
+    {
+        UpdateBodyScale();
+    }
+
+    protected virtual float GetAdditionalBodyScaleRatio()
+    {
+        return 1f;
+    }
+
+    protected virtual void CaptureAdditionalSaveState(ref ResourceSaveState state)
+    {
+    }
+
+    protected virtual void ApplyAdditionalSavedState(ResourceSaveState state)
+    {
     }
 
     public void ApplyBodyYawStep(int yawStep)
@@ -548,28 +583,26 @@ public class Resource : MapObject
             bool shouldHideOnComplete = hideAfterSequence && i == rewardCount - 1;
             Vector3 sourceWorldPosition = GetHarvestPortableStartWorldPosition();
 
-            if (TryResolveHarvestBagTarget(player, objectId, out PortableObject targetPortableObject) && targetPortableObject != null)
+            if (PlayerItemStorageUtility.TryReserveBag(
+                    player,
+                    objectId,
+                    -1,
+                    true,
+                    out PlayerItemStorageReservation reservation))
             {
                 spawnedCount++;
                 PortableObject harvestPortableVisual = CreateHarvestPortableVisual(objectId, sourceWorldPosition);
-                if (harvestPortableVisual == null)
-                {
-                    if (shouldHideOnComplete)
+                PlayerItemStorageUtility.MoveVisualToPlayerStorage(
+                    harvestPortableVisual,
+                    reservation,
+                    null,
+                    () =>
                     {
-                        gameObject.SetActive(false);
-                    }
-                }
-                else
-                {
-                    harvestPortableVisual.MoveTo(targetPortableObject.transform, () =>
-                    {
-                        ReleaseHarvestPortableVisual(harvestPortableVisual);
                         if (shouldHideOnComplete)
                         {
                             gameObject.SetActive(false);
                         }
                     });
-                }
             }
             else if (TryDropHarvestRewardToGround(player, objectId, sourceWorldPosition, shouldHideOnComplete))
             {
@@ -644,7 +677,7 @@ public class Resource : MapObject
 
         if (!visual.SetItem(objectId))
         {
-            ReleaseHarvestPortableVisual(visual);
+            PlayerItemStorageUtility.DestroyPortableObject(visual);
             return null;
         }
 
@@ -673,34 +706,6 @@ public class Resource : MapObject
         }
 
         return null;
-    }
-
-    private void ReleaseHarvestPortableVisual(PortableObject portableObject)
-    {
-        if (portableObject == null)
-        {
-            return;
-        }
-
-        if (Application.isPlaying)
-        {
-            Destroy(portableObject.gameObject);
-        }
-        else
-        {
-            DestroyImmediate(portableObject.gameObject);
-        }
-    }
-
-    private bool TryResolveHarvestBagTarget(Player player, int objectId, out PortableObject targetPortableObject)
-    {
-        targetPortableObject = null;
-        if (player != null && player.TryAddToBag(objectId, out targetPortableObject))
-        {
-            return targetPortableObject != null;
-        }
-
-        return false;
     }
 
     private bool TryDropHarvestRewardToGround(Player player, int objectId, Vector3 startWorldPosition, bool hideAfterSequence)
@@ -1190,12 +1195,17 @@ public class Resource : MapObject
         {
             scaleRatio = 0f;
         }
+        else if (!useDynamicBodyScale)
+        {
+            scaleRatio = 1f;
+        }
         else
         {
             float normalizedCount = Mathf.Clamp01((float)ResourceCount / Mathf.Max(1, dynamicScaleMaxResourceCount));
             scaleRatio = Mathf.Lerp(minimumBodyScaleRatio, maximumBodyScaleRatio, normalizedCount);
         }
 
+        scaleRatio *= Mathf.Max(0f, GetAdditionalBodyScaleRatio());
         bodyTransform.localScale = initialBodyLocalScale * scaleRatio;
         SyncExtraBodyRendererRootToBody();
         MarkBatchRenderDataDirty();
@@ -1774,7 +1784,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         batchesDirty = true;
     }
 
-    private void LateUpdate()
+    protected void LateUpdate()
     {
         if (registeredResources.Count <= 0)
         {

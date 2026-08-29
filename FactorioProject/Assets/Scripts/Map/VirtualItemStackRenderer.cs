@@ -39,13 +39,13 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
     private VirtualObjectWorld virtualWorld;
     private ItemManager itemManager;
     private Camera mainCamera;
-    private int cachedWorldVersion = -1;
+    private int cachedItemStackVersion = -1;
 
     public void Configure(VirtualObjectWorld world, ItemManager manager)
     {
         virtualWorld = world;
         itemManager = manager;
-        cachedWorldVersion = -1;
+        cachedItemStackVersion = -1;
     }
 
     private void Awake()
@@ -71,10 +71,10 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
             return;
         }
 
-        if (cachedWorldVersion != virtualWorld.Version)
+        if (cachedItemStackVersion != virtualWorld.ItemStackVersion)
         {
             RebuildBatches();
-            cachedWorldVersion = virtualWorld.Version;
+            cachedItemStackVersion = virtualWorld.ItemStackVersion;
         }
 
         RenderBatches();

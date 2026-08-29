@@ -28,6 +28,8 @@ public class Animal : MonoBehaviour
     private static readonly int StateHash = Animator.StringToHash("State");
     private static readonly int ResetHash = Animator.StringToHash("Reset");
     private static readonly int IdleStateHash = Animator.StringToHash("Idle");
+    private static readonly int WalkStateHash = Animator.StringToHash("Walk");
+    private static readonly int GalopStateHash = Animator.StringToHash("Galop");
     private static readonly int IdleStateFullPathHash =
         Animator.StringToHash("Base Layer.Idle");
     private static readonly int WalkStateFullPathHash =
@@ -56,7 +58,7 @@ public class Animal : MonoBehaviour
     [Header("Identity")]
     [SerializeField, HideInInspector] private AnimalDefinition animalDefinition;
     [SerializeField] private AnimalGender animalGender = AnimalGender.Male;
-    [Header("Age (0..10)")]
+    [Header("Growth (0..10)")]
     [SerializeField, Range(0f, 10f)] private float DinoAge = 10f;
     [Header("Scale")]
     [Tooltip("Multiplier applied to the animal's original adult scale.")]
@@ -81,8 +83,8 @@ public class Animal : MonoBehaviour
     private bool corpseHarvestStepPrepared;
     private bool saddleEquipped;
     private Player mountedRider;
-    private float riderMountRootLocalX;
-    private bool riderMountRootLocalXCached;
+    private Vector3 riderMountRootLocalPosition;
+    private bool riderMountRootLocalPositionCached;
     private AnimalAIController cachedAIController;
     private Handcart attachedDraftHandcart;
     private bool hasPendingDraftHandcartRestore;
@@ -99,6 +101,10 @@ public class Animal : MonoBehaviour
     private float lastAIAnimationSpeed;
     private float lastAIAnimationPlaybackScale = 1f;
     private int lastAIAnimationFlags;
+    private float walkAnimatorBaseSpeed = 1f;
+    private float runAnimatorBaseSpeed = 1f;
+    private bool walkAnimatorBaseSpeedCached;
+    private bool runAnimatorBaseSpeedCached;
     private bool detailedVisualsVisible = true;
     private bool detailedVisualsInitialized;
     [SerializeField] private Transform headBone;
@@ -109,7 +115,7 @@ public class Animal : MonoBehaviour
     [SerializeField] private Transform oldDinoLeftEye;
     [SerializeField] private Transform oldDinoRightEye;
 
-    [Tooltip("The model scale used when the animal reaches age 10.")]
+    [Tooltip("The model scale used when the animal reaches Growth 10.")]
     [SerializeField] private Vector3 adultScale;
     private bool growthInitialized;
 
@@ -178,22 +184,45 @@ public class Animal : MonoBehaviour
             }
 
             Transform movementRoot = MovementRoot;
-            Vector3 mountPosition = mountPoint.position;
-            if (movementRoot != null)
+            if (movementRoot == null)
             {
-                Vector3 saddleRootLocalPosition =
-                    movementRoot.InverseTransformPoint(mountPoint.position);
-                if (riderMountRootLocalXCached)
-                {
-                    saddleRootLocalPosition.x = riderMountRootLocalX;
-                }
-
-                // 좌우 흔들림은 억제하되 앞뒤 위치는 현재 안장의 동물 로컬 Z를 따른다.
-                mountPosition = movementRoot.TransformPoint(saddleRootLocalPosition);
+                return mountPoint.position;
             }
 
-            mountPosition.y = MovementRootPosition.y + RiderHeight;
-            return mountPosition;
+            Vector3 stableMountPosition = RiderCameraFocusPosition;
+            if (!riderMountRootLocalPositionCached)
+            {
+                Vector3 currentMountPosition = mountPoint.position;
+                currentMountPosition.y = stableMountPosition.y;
+                return currentMountPosition;
+            }
+
+            Vector3 currentRootLocalPosition =
+                movementRoot.InverseTransformPoint(mountPoint.position);
+            Vector3 animatedSaddleOffset = movementRoot.TransformVector(
+                currentRootLocalPosition - riderMountRootLocalPosition);
+            return stableMountPosition + animatedSaddleOffset;
+        }
+    }
+    public Vector3 RiderCameraFocusPosition
+    {
+        get
+        {
+            Transform movementRoot = MovementRoot;
+            Transform mountPoint = SaddleMountPoint;
+            if (movementRoot == null)
+            {
+                return mountPoint != null ? mountPoint.position : transform.position;
+            }
+
+            Vector3 stableRootLocalPosition = riderMountRootLocalPositionCached
+                ? riderMountRootLocalPosition
+                : mountPoint != null
+                    ? movementRoot.InverseTransformPoint(mountPoint.position)
+                    : Vector3.zero;
+            Vector3 focusPosition = movementRoot.TransformPoint(stableRootLocalPosition);
+            focusPosition.y = MovementRootPosition.y + RiderHeight;
+            return focusPosition;
         }
     }
     private float RiderHeight
@@ -398,10 +427,10 @@ public class Animal : MonoBehaviour
 
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         terrain?.PinMountedAnimal(this);
-        CacheRiderMountRootLocalX(mountPoint);
+        CacheRiderMountRootLocalPosition(mountPoint);
         if (!playerController.TrySnapBodyToAnimalMountPoint(mountPoint, this))
         {
-            riderMountRootLocalXCached = false;
+            riderMountRootLocalPositionCached = false;
             aiController.SetMountedRider(null);
             terrain?.ReleaseMountedAnimal(this);
             return false;
@@ -428,7 +457,7 @@ public class Animal : MonoBehaviour
         }
 
         mountedRider = null;
-        riderMountRootLocalXCached = false;
+        riderMountRootLocalPositionCached = false;
         ResolveAIController()?.SetMountedRider(null);
         TerrainGenerator.ResolveActive()?.ReleaseMountedAnimal(this);
     }
@@ -436,18 +465,36 @@ public class Animal : MonoBehaviour
     internal bool TrySetAttachedDraftHandcart(Handcart handcart)
     {
         Handcart currentHandcart = AttachedDraftHandcart;
+        AnimalAIController aiController = ResolveAIController();
         if (handcart == null
             || !IsAlive
-            || currentHandcart != null && currentHandcart != handcart)
+            || (aiController != null && aiController.IsNooseLeashed)
+            || (currentHandcart != null && currentHandcart != handcart))
         {
             return false;
         }
 
         attachedDraftHandcart = handcart;
         hasPendingDraftHandcartRestore = false;
-        ResolveAIController()?.SetDraftAttached(true);
+        aiController?.SetDraftAttached(true);
         MarkTerrainInteraction();
         return true;
+    }
+
+    internal void DetachFromDraftHandcart()
+    {
+        hasPendingDraftHandcartRestore = false;
+        Handcart handcart = attachedDraftHandcart;
+        if (handcart == null)
+        {
+            return;
+        }
+
+        if (!handcart.DetachDraftAnimal(this))
+        {
+            // 양쪽 참조가 이미 어긋난 경우에도 동물 측의 견인 상태는 남기지 않는다.
+            ClearAttachedDraftHandcart(handcart);
+        }
     }
 
     internal void ClearAttachedDraftHandcart(Handcart handcart)
@@ -655,17 +702,18 @@ public class Animal : MonoBehaviour
         return Mathf.Max(0.25f, Mathf.Max(extents.x, extents.z));
     }
 
-    private void CacheRiderMountRootLocalX(Transform mountPoint)
+    private void CacheRiderMountRootLocalPosition(Transform mountPoint)
     {
         Transform movementRoot = MovementRoot;
         if (mountPoint == null || movementRoot == null)
         {
-            riderMountRootLocalXCached = false;
+            riderMountRootLocalPositionCached = false;
             return;
         }
 
-        riderMountRootLocalX = movementRoot.InverseTransformPoint(mountPoint.position).x;
-        riderMountRootLocalXCached = true;
+        riderMountRootLocalPosition =
+            movementRoot.InverseTransformPoint(mountPoint.position);
+        riderMountRootLocalPositionCached = true;
     }
 
     internal Vector3 GetDraftAttachmentWorldCenter()
@@ -742,8 +790,7 @@ public class Animal : MonoBehaviour
         }
 
         deathHandled = true;
-        hasPendingDraftHandcartRestore = false;
-        attachedDraftHandcart?.DetachDraftAnimal(this);
+        DetachFromDraftHandcart();
         AnimalAIController controller = GetComponentInParent<AnimalAIController>();
         if (controller != null)
         {
@@ -992,8 +1039,7 @@ public class Animal : MonoBehaviour
 
     private void OnDestroy()
     {
-        hasPendingDraftHandcartRestore = false;
-        attachedDraftHandcart?.DetachDraftAnimal(this);
+        DetachFromDraftHandcart();
     }
 
     private void ClearFocusVisuals()
@@ -1168,8 +1214,14 @@ public class Animal : MonoBehaviour
         // 탑승 달리기도 도망과 동일한 애니메이터 파라미터와 State를 사용한다.
         bool useFleeRunAnimation = isFleeing || isRunning;
         bool isLocomoting = speed > 0.01f;
+        RefreshLocomotionAnimatorBaseSpeeds();
         float resolvedPlaybackScale = isLocomoting
-            ? Mathf.Clamp(locomotionPlaybackScale, 0.1f, 2f)
+            ? Mathf.Clamp(
+                ResolveLocomotionPlaybackScale(
+                    locomotionPlaybackScale,
+                    isRunning),
+                0.1f,
+                3f)
             : 1f;
         int animationFlags = (isEating ? 1 : 0)
                              | (isDrinking ? 2 : 0)
@@ -1212,6 +1264,64 @@ public class Animal : MonoBehaviour
                             ? 14
                             : 0;
         SwitchAnimation(legacyState);
+    }
+
+    private float ResolveLocomotionPlaybackScale(
+        float normalizedWalkSpeed,
+        bool usesMountedRunAnimation)
+    {
+        float playbackScale = Mathf.Max(0f, normalizedWalkSpeed);
+        if (!usesMountedRunAnimation)
+        {
+            return playbackScale;
+        }
+
+        if (!walkAnimatorBaseSpeedCached || !runAnimatorBaseSpeedCached)
+        {
+            return playbackScale
+                   / Mathf.Max(0.01f, AnimalAISettings.DefaultRunSpeedRatio);
+        }
+
+        return playbackScale
+               * walkAnimatorBaseSpeed
+               / Mathf.Max(0.01f, runAnimatorBaseSpeed);
+    }
+
+    private void RefreshLocomotionAnimatorBaseSpeeds()
+    {
+        if (anim == null
+            || !anim.isActiveAndEnabled
+            || !anim.isInitialized
+            || anim.layerCount <= 0)
+        {
+            return;
+        }
+
+        CacheLocomotionAnimatorBaseSpeed(anim.GetCurrentAnimatorStateInfo(0));
+        if (anim.IsInTransition(0))
+        {
+            CacheLocomotionAnimatorBaseSpeed(anim.GetNextAnimatorStateInfo(0));
+        }
+    }
+
+    private void CacheLocomotionAnimatorBaseSpeed(AnimatorStateInfo stateInfo)
+    {
+        float baseSpeed = Mathf.Abs(stateInfo.speed);
+        if (baseSpeed <= 0.0001f)
+        {
+            return;
+        }
+
+        if (stateInfo.shortNameHash == WalkStateHash)
+        {
+            walkAnimatorBaseSpeed = baseSpeed;
+            walkAnimatorBaseSpeedCached = true;
+        }
+        else if (stateInfo.shortNameHash == GalopStateHash)
+        {
+            runAnimatorBaseSpeed = baseSpeed;
+            runAnimatorBaseSpeedCached = true;
+        }
     }
 
     public void WakeFromRest()

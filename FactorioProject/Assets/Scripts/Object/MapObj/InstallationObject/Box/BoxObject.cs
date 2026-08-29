@@ -12,9 +12,6 @@ public class BoxObject : InputOutputModule
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private const float ClosedAngle = 0f;
     private const float OpenAngle = 120f;
-    private const float CountTextHideZoomThreshold = 0.95f;
-    private const float CountTextShowZoomThreshold = 0.9f;
-    private static bool countTextVisibleForZoom = true;
 
     [SerializeField]
     private Transform hinge;
@@ -113,29 +110,6 @@ public class BoxObject : InputOutputModule
                && referenceCount > 0;
     }
 
-    public static void RefreshCountTextZoomVisibility(float normalizedZoom, bool force = false)
-    {
-        normalizedZoom = Mathf.Clamp01(normalizedZoom);
-        bool shouldShow = countTextVisibleForZoom
-            ? normalizedZoom < CountTextHideZoomThreshold
-            : normalizedZoom <= CountTextShowZoomThreshold;
-        if (!force && shouldShow == countTextVisibleForZoom)
-        {
-            return;
-        }
-
-        countTextVisibleForZoom = shouldShow;
-        foreach (BoxObject boxObject in ActiveInstances)
-        {
-            if (boxObject == null)
-            {
-                continue;
-            }
-
-            boxObject.ApplyCountTextZoomVisibility(shouldShow);
-        }
-    }
-
     protected override void OnEnable()
     {
         base.OnEnable();
@@ -143,7 +117,7 @@ public class BoxObject : InputOutputModule
         globalMaxFocusActivationRadiusDirty = true;
         ApplyHingeRotation(false);
         RefreshBoxVisuals(true);
-        ApplyCountTextZoomVisibility(countTextVisibleForZoom, true);
+        ApplyCountTextVisibility(true);
     }
 
     protected override void OnDisable()
@@ -758,9 +732,13 @@ public class BoxObject : InputOutputModule
 
         if (TryGetSingleResolvedItemId(out int filteredItemId))
         {
-            ApplyItemIconSprite(ResolveItemIconSprite(filteredItemId), filteredItemId, force);
-            SetLockIconVisible(true, force);
-            return;
+            Sprite filteredItemSprite = ResolveItemIconSprite(filteredItemId);
+            if (filteredItemSprite != null)
+            {
+                ApplyItemIconSprite(filteredItemSprite, filteredItemId, force);
+                SetLockIconVisible(true, force);
+                return;
+            }
         }
 
         SetLockIconVisible(false, force);
@@ -900,7 +878,7 @@ public class BoxObject : InputOutputModule
             return;
         }
 
-        ApplyCountTextZoomVisibility(countTextVisibleForZoom);
+        ApplyCountTextVisibility();
 
         if (!force
             && cachedCountTextHasValue
@@ -917,9 +895,9 @@ public class BoxObject : InputOutputModule
         countText.text = cachedCountTextValue;
     }
 
-    private void ApplyCountTextZoomVisibility(bool visible, bool force = false)
+    private void ApplyCountTextVisibility(bool force = false)
     {
-        bool shouldShow = visible && !isOpen;
+        bool shouldShow = !isOpen;
         if (countText != null && (force || countText.enabled != shouldShow))
         {
             countText.enabled = shouldShow;
@@ -1164,7 +1142,14 @@ public class BoxObject : InputOutputModule
             return null;
         }
 
-        List<ItemDefinition> definitions = GameManager.Instance.ItemManger.ItemDefinitions;
+        ItemManager itemManager = GameManager.Instance.ItemManger;
+        if (itemManager.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet)
+            && itemSet.icon != null)
+        {
+            return itemSet.icon;
+        }
+
+        List<ItemDefinition> definitions = itemManager.ItemDefinitions;
         if (definitions == null)
         {
             return null;

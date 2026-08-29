@@ -118,6 +118,11 @@ public class TerrainGeneratorEditor : Editor
         {
             TerrainDataEditorWindow.ShowWindow();
         }
+
+        if (GUILayout.Button("Open Resource Data UI"))
+        {
+            ResourceDataEditorWindow.ShowWindow();
+        }
     }
 
     private void DrawSerializedProperties()

@@ -160,21 +160,28 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
             ? sourcePortableObject.transform.lossyScale
             : Vector3.one;
 
-        if (!player.TryAddToHand(itemId, out PortableObject targetPortableObject)
-            && !player.TryAddToBag(itemId, out targetPortableObject))
+        if (!PlayerItemStorageUtility.TryReserveHand(
+                player,
+                itemId,
+                out PlayerItemStorageReservation reservation)
+            && !PlayerItemStorageUtility.TryReserveBag(
+                player,
+                itemId,
+                -1,
+                true,
+                out reservation))
         {
             return false;
         }
 
         SetStoredManualItemId(-1, true);
-        player.UpdateCarryState();
         PlayManualMoveAnimation(
             itemId,
-            sourcePortableObject != null ? sourcePortableObject : targetPortableObject,
+            sourcePortableObject != null ? sourcePortableObject : reservation.Target,
             startPosition,
             startRotation,
             startScale,
-            targetPortableObject != null ? targetPortableObject.transform : null);
+            reservation);
         return true;
     }
 
@@ -252,24 +259,14 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
             return;
         }
 
-        PortableObject movingPortableObject = Instantiate(template, startPosition, startRotation);
+        PortableObject movingPortableObject = CreateManualMoveVisual(
+            itemId,
+            template,
+            startPosition,
+            startRotation,
+            startScale);
         if (movingPortableObject == null)
         {
-            return;
-        }
-
-        movingPortableObject.name = $"{template.name}_ManualMove";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = startPosition;
-        movingPortableObject.transform.localScale = startScale;
-        if (!movingPortableObject.gameObject.activeSelf)
-        {
-            movingPortableObject.gameObject.SetActive(true);
-        }
-
-        if (!movingPortableObject.SetItem(itemId))
-        {
-            Destroy(movingPortableObject.gameObject);
             return;
         }
 
@@ -285,6 +282,72 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
             false);
     }
 
+    private void PlayManualMoveAnimation(
+        int itemId,
+        PortableObject template,
+        Vector3 startPosition,
+        Quaternion startRotation,
+        Vector3 startScale,
+        PlayerItemStorageReservation reservation)
+    {
+        if (reservation == null || reservation.Target == null || template == null || !isActiveAndEnabled)
+        {
+            reservation?.Commit();
+            return;
+        }
+
+        PortableObject movingPortableObject = CreateManualMoveVisual(
+            itemId,
+            template,
+            startPosition,
+            startRotation,
+            startScale);
+        if (movingPortableObject == null)
+        {
+            reservation.Commit();
+            return;
+        }
+
+        CancelManualMoveAnimation();
+        manualMoveVisual = movingPortableObject;
+        SetManualVisualActive(false);
+        PlayerItemStorageUtility.MoveVisualToPlayerStorage(
+            movingPortableObject,
+            reservation,
+            ReleaseManualMoveVisual);
+    }
+
+    private static PortableObject CreateManualMoveVisual(
+        int itemId,
+        PortableObject template,
+        Vector3 startPosition,
+        Quaternion startRotation,
+        Vector3 startScale)
+    {
+        PortableObject movingPortableObject = Instantiate(template, startPosition, startRotation);
+        if (movingPortableObject == null)
+        {
+            return null;
+        }
+
+        movingPortableObject.name = $"{template.name}_ManualMove";
+        movingPortableObject.transform.SetParent(null, true);
+        movingPortableObject.transform.position = startPosition;
+        movingPortableObject.transform.localScale = startScale;
+        if (!movingPortableObject.gameObject.activeSelf)
+        {
+            movingPortableObject.gameObject.SetActive(true);
+        }
+
+        if (movingPortableObject.SetItem(itemId))
+        {
+            return movingPortableObject;
+        }
+
+        Destroy(movingPortableObject.gameObject);
+        return null;
+    }
+
     private void CompleteManualMoveAnimation(PortableObject movingPortableObject)
     {
         if (movingPortableObject != null)
@@ -292,42 +355,43 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
             movingPortableObject.MoveCancelled -= HandleManualMoveAnimationCancelled;
         }
 
-        if (manualMoveVisual != movingPortableObject)
-        {
-            DestroyManualMoveVisual(movingPortableObject);
-            return;
-        }
-
-        manualMoveVisual = null;
-        DestroyManualMoveVisual(movingPortableObject);
-        if (isActiveAndEnabled)
-        {
-            RefreshManualVisual();
-        }
+        ReleaseManualMoveVisual(movingPortableObject);
     }
 
     private void HandleManualMoveAnimationCancelled(PortableObject movingPortableObject)
     {
-        if (manualMoveVisual != movingPortableObject)
+        if (movingPortableObject != null)
         {
-            return;
+            movingPortableObject.MoveCancelled -= HandleManualMoveAnimationCancelled;
         }
 
-        movingPortableObject.MoveCancelled -= HandleManualMoveAnimationCancelled;
-        manualMoveVisual = null;
-        DestroyManualMoveVisual(movingPortableObject);
-        RefreshManualVisual();
+        ReleaseManualMoveVisual(movingPortableObject);
     }
 
     private void CancelManualMoveAnimation()
     {
         PortableObject movingPortableObject = manualMoveVisual;
-        manualMoveVisual = null;
         if (movingPortableObject != null)
         {
-            movingPortableObject.MoveCancelled -= HandleManualMoveAnimationCancelled;
             movingPortableObject.CancelMove();
-            DestroyManualMoveVisual(movingPortableObject);
+            if (manualMoveVisual == movingPortableObject)
+            {
+                ReleaseManualMoveVisual(movingPortableObject);
+            }
+        }
+    }
+
+    private void ReleaseManualMoveVisual(PortableObject movingPortableObject)
+    {
+        if (manualMoveVisual == movingPortableObject)
+        {
+            manualMoveVisual = null;
+        }
+
+        DestroyManualMoveVisual(movingPortableObject);
+        if (isActiveAndEnabled)
+        {
+            RefreshManualVisual();
         }
     }
 

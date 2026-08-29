@@ -802,7 +802,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             EditorGUILayout.FloatField(
                 new GUIContent(
                     "Rider Height",
-                    "이 성별 변형의 Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
+                    "이 성별 변형의 Growth 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
                 draft.riderHeight));
         float nextStrength = EditorGUILayout.Slider(
             new GUIContent(
@@ -854,7 +854,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUI.showMixedValue = hasMixedSettings;
         EditorGUI.BeginChangeCheck();
         int nextAge = EditorGUILayout.IntSlider(
-            new GUIContent("Age Weight", "소환 나이 정규분포의 중심입니다. 이 나이가 가장 자주 생성됩니다."),
+            new GUIContent("Growth Weight", "소환 성장도 정규분포의 중심입니다. 이 성장도가 가장 자주 생성됩니다."),
             currentAge,
             AnimalDefinition.MinSpawnAge,
             AnimalDefinition.MaxSpawnAge);
@@ -892,7 +892,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         DrawAgeDistributionGraph(nextAge);
 
         EditorGUILayout.HelpBox(
-            "Age Weight를 중심으로 표준편차 2.0의 정규분포를 적용합니다. 나이와 무리 설정은 Female/Male에 함께 적용됩니다.",
+            "Growth Weight를 중심으로 표준편차 2.0의 정규분포를 적용합니다. 성장도와 무리 설정은 Female/Male에 함께 적용됩니다.",
             MessageType.Info);
         EditorGUILayout.EndVertical();
     }
@@ -1026,20 +1026,20 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             EditorGUILayout.FloatField("Flee Speed Multiplier", current.FleeSpeedMultiplier));
 
         EditorGUILayout.Space(3f);
-        EditorGUILayout.LabelField("Age / Gender Multipliers", EditorStyles.miniBoldLabel);
+        EditorGUILayout.LabelField("Growth / Gender Multipliers", EditorStyles.miniBoldLabel);
         EditorGUILayout.LabelField(
             "속도 배율은 1.0에서 벗어난 효과의 1/3만 야생 이동과 탑승 이동에 적용됩니다.",
             EditorStyles.miniLabel);
         float youngSpeedMultiplier =
-            EditorGUILayout.Slider("Young Speed", current.YoungSpeedMultiplier, 0.1f, 2f);
+            EditorGUILayout.Slider("Low Growth Speed", current.YoungSpeedMultiplier, 0.1f, 2f);
         float maleSpeedMultiplier =
             EditorGUILayout.Slider("Male Speed", current.MaleSpeedMultiplier, 0.1f, 2f);
         float femaleSpeedMultiplier =
             EditorGUILayout.Slider("Female Speed", current.FemaleSpeedMultiplier, 0.1f, 2f);
         float youngWanderWeightMultiplier =
-            EditorGUILayout.Slider("Young Wander Weight", current.YoungWanderWeightMultiplier, 0.1f, 3f);
+            EditorGUILayout.Slider("Low Growth Wander Weight", current.YoungWanderWeightMultiplier, 0.1f, 3f);
         float youngRestWeightMultiplier =
-            EditorGUILayout.Slider("Young Rest Weight", current.YoungRestWeightMultiplier, 0.1f, 3f);
+            EditorGUILayout.Slider("Low Growth Rest Weight", current.YoungRestWeightMultiplier, 0.1f, 3f);
 
         EditorGUILayout.Space(3f);
         EditorGUILayout.LabelField("Behavior Weights", EditorStyles.miniBoldLabel);
@@ -1145,7 +1145,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(graphRect, new Color(0.09f, 0.09f, 0.09f, 1f));
         GUI.Label(
             new Rect(graphRect.x + 7f, graphRect.y + 4f, graphRect.width - 14f, 18f),
-            $"Spawn Age Distribution  (mean {preferredAge}, σ {AnimalDefinition.SpawnAgeStandardDeviation:0.0})",
+            $"Spawn Growth Distribution  (mean {preferredAge}, σ {AnimalDefinition.SpawnAgeStandardDeviation:0.0})",
             EditorStyles.miniBoldLabel);
 
         Rect plotRect = new Rect(
@@ -1293,7 +1293,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             EditorGUILayout.FloatField(
                 new GUIContent(
                     "Rider Height",
-                    "Age 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
+                    "Growth 10 동물 루트 기준 탑승 높이입니다. 실제 높이는 성장 배율에 맞춰 적용됩니다."),
                 draft.riderHeight));
         float nextStrength = EditorGUILayout.Slider(
             new GUIContent(
@@ -1400,12 +1400,12 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     new GUIContent("Gender", "Any는 성별에 관계없이 적용됩니다."),
                     entry.GenderCondition);
             int minimumAge = EditorGUILayout.IntSlider(
-                "Minimum Age",
+                "Minimum Growth",
                 entry.MinimumAge,
                 AnimalDefinition.MinSpawnAge,
                 AnimalDefinition.MaxSpawnAge);
             int maximumAge = EditorGUILayout.IntSlider(
-                "Maximum Age",
+                "Maximum Growth",
                 entry.MaximumAge,
                 minimumAge,
                 AnimalDefinition.MaxSpawnAge);
@@ -1467,7 +1467,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
 
         EditorGUILayout.HelpBox(
-            "성별과 나이 조건을 모두 만족한 항목만 확률 판정 후 고정 수량으로 지급됩니다.",
+            "성별과 성장도 조건을 모두 만족한 항목만 확률 판정 후 고정 수량으로 지급됩니다.",
             MessageType.Info);
         EditorGUILayout.EndVertical();
     }
@@ -1679,7 +1679,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     {
         EditorGUILayout.LabelField("3D Preview", EditorStyles.boldLabel);
         EditorGUILayout.BeginHorizontal();
-        float nextAge = EditorGUILayout.Slider("Age", previewAge, 0f, 10f);
+        float nextAge = EditorGUILayout.Slider("Growth", previewAge, 0f, 10f);
         if (!Mathf.Approximately(nextAge, previewAge))
         {
             previewAge = nextAge;

@@ -20,7 +20,8 @@ Shader "ProjectF/UI/Box Sprite Lit Overlay"
 
         Cull Off
         ZWrite Off
-        ZTest LEqual
+        // 상자 뚜껑과 같은 불투명 표면에 붙는 상태 표기이므로 깊이에 가려지지 않아야 한다.
+        ZTest Always
         Blend One OneMinusSrcAlpha
 
         Pass

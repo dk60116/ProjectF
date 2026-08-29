@@ -734,6 +734,18 @@ public class PlayerBag : MonoBehaviour
         return TryReserveObjectToFirstValidStack(objectId, false, out targetPortableObject);
     }
 
+    public bool TryReserveObjectToSlotOnly(
+        int slotIndex,
+        int objectId,
+        out PortableObject targetPortableObject)
+    {
+        EnsureInitialized();
+        targetPortableObject = null;
+        return slotIndex >= 0
+               && CanAddObject(slotIndex, objectId)
+               && TryReserveObjectToSlot(slotIndex, objectId, out targetPortableObject);
+    }
+
     public void CommitReservedObject(PortableObject targetPortableObject)
     {
         EnsureInitialized();

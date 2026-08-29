@@ -388,7 +388,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             return false;
         }
 
-        Vector3 animalStartPosition = animal.MovementRootPosition;
+        Vector3 cartStartPosition = transform.position;
         draftAnimalDriveActive = true;
         draftAnimalRider = animalRider;
         try
@@ -402,9 +402,10 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         SnapDraftAnimalToHandle();
-        // 회전 중에는 수레 중심보다 손잡이 앞의 동물이 더 긴 호를 이동한다.
-        // 동물 애니메이션에는 수레 중심이 아니라 실제 동물 루트 이동량을 전달한다.
-        Vector3 moved = animal.MovementRootPosition - animalStartPosition;
+        // 견인 속도의 권위는 수레 중심의 실제 이동 거리다. 손잡이 바깥쪽에 있는
+        // 동물의 원호 이동량을 사용하면 회전 각도에 따라 속도가 증감하여
+        // 동물과 수레의 보행 속도가 서로 달라 보인다.
+        Vector3 moved = transform.position - cartStartPosition;
         moved.y = 0f;
         actualMoveSpeed = moved.magnitude / Mathf.Max(0.0001f, deltaTime);
         return actualMoveSpeed > MinimumMovementDistance;
@@ -1505,14 +1506,12 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         int itemId = storedItemIds[cargoIndex];
-        bool accepted = handOnly
-            ? player.TryAddToHand(itemId, out PortableObject targetPortableObject)
-            : PlayerItemStorageUtility.TryAddToPlayerStorage(
+        if (!PlayerItemStorageUtility.TryReservePlayerStorage(
                 player,
                 itemId,
                 preferredSlotIndex,
-                out targetPortableObject);
-        if (!accepted)
+                handOnly,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
@@ -1526,7 +1525,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
             itemVisuals.RemoveAt(cargoIndex);
         }
 
-        PlayerItemStorageUtility.MoveVisualToPlayerStorage(sourceVisual, targetPortableObject);
+        PlayerItemStorageUtility.MoveVisualToPlayerStorage(sourceVisual, reservation);
         ReflowCargoVisuals(cargoIndex);
         SaveCargoState();
         return true;
@@ -2665,14 +2664,32 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
 
     private void RefreshRuntimePlacement(Vector3 worldPosition, Quaternion worldRotation)
     {
-        if (!RefreshSingleCellRuntimePlacement(
-                worldPosition,
-                ResolveQuarterTurns(worldRotation)))
+        bool hadRuntimePlacement = TryGetPlacementRuntime(
+            out Vector2Int previousAnchorCoordinate,
+            out _);
+        bool runtimePlacementChanged = RefreshSingleCellRuntimePlacement(
+            worldPosition,
+            ResolveQuarterTurns(worldRotation));
+        TerrainGenerator terrain = ResolveTerrain();
+        if (terrain == null)
         {
             return;
         }
 
-        ResolveTerrain()?.SaveRuntimeInstallationState(this);
+        if (!hadRuntimePlacement)
+        {
+            if (runtimePlacementChanged)
+            {
+                terrain.SaveRuntimeInstallationState(this);
+            }
+
+            return;
+        }
+
+        terrain.RefreshMovedInstallationRuntimeState(
+            this,
+            previousAnchorCoordinate,
+            runtimePlacementChanged);
     }
 
     private TerrainGenerator ResolveTerrain()

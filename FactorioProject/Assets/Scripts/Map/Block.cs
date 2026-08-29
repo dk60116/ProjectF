@@ -2266,7 +2266,11 @@ public class Block : BaseObject
             return false;
         }
 
-        if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, preferredSlotIndex, out PortableObject storageTarget, out bool addedToHand))
+        if (!TryReservePickupObjectToBagOrMatchingHand(
+                player,
+                itemId,
+                preferredSlotIndex,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
@@ -2275,10 +2279,7 @@ public class Block : BaseObject
         ClearConveyorItemAtLane(laneIndex);
         TerrainGenerator.Active?.NotifyConveyorItemRemovedFromBelt();
         WakeConveyorMoveAttemptsAround();
-        if (targetObject != null)
-        {
-            ReleasePickupObjectToStorage(targetObject, storageTarget, addedToHand);
-        }
+        MovePickupObjectToStorage(targetObject, reservation);
 
         return true;
     }
@@ -2337,7 +2338,10 @@ public class Block : BaseObject
             return false;
         }
 
-        if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+        if (!PlayerItemStorageUtility.TryReserveHand(
+                player,
+                itemId,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
@@ -2346,10 +2350,7 @@ public class Block : BaseObject
         ClearConveyorItemAtLane(laneIndex);
         TerrainGenerator.Active?.NotifyConveyorItemRemovedFromBelt();
         WakeConveyorMoveAttemptsAround();
-        if (targetObject != null)
-        {
-            ReleaseFloorObjectToHand(targetObject, handTarget);
-        }
+        MovePickupObjectToStorage(targetObject, reservation);
 
         return true;
     }
@@ -4718,7 +4719,11 @@ public class Block : BaseObject
                    out int itemId,
                    out _))
         {
-            if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, preferredSlotIndex, out PortableObject storageTarget, out bool addedToHand))
+            if (!TryReservePickupObjectToBagOrMatchingHand(
+                    player,
+                    itemId,
+                    preferredSlotIndex,
+                    out PlayerItemStorageReservation reservation))
             {
                 if (useInputAreaCenter)
                 {
@@ -4734,7 +4739,7 @@ public class Block : BaseObject
             }
 
             stack.RemoveAt(stack.Count - 1);
-            ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
+            MovePickupObjectToStorage(topObject, reservation);
             if (useInputAreaCenter)
             {
                 NotifyRuntimeItemStackChanged();
@@ -4845,7 +4850,10 @@ public class Block : BaseObject
                    out int itemId,
                    out _))
         {
-            if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+            if (!PlayerItemStorageUtility.TryReserveHand(
+                    player,
+                    itemId,
+                    out PlayerItemStorageReservation reservation))
             {
                 if (useInputAreaCenter)
                 {
@@ -4861,7 +4869,7 @@ public class Block : BaseObject
             }
 
             stack.RemoveAt(stack.Count - 1);
-            ReleaseFloorObjectToHand(topObject, handTarget);
+            MovePickupObjectToStorage(topObject, reservation);
             if (useInputAreaCenter)
             {
                 NotifyRuntimeItemStackChanged();
@@ -5387,17 +5395,20 @@ public class Block : BaseObject
                 if (itemId < 0)
                 {
                     stack.RemoveAt(objectIndex);
-                    ReleaseFloorObjectToHand(floorObject, null);
+                    ReleaseFloorObject(floorObject);
                     continue;
                 }
 
-                if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+                if (!PlayerItemStorageUtility.TryReserveHand(
+                        player,
+                        itemId,
+                        out PlayerItemStorageReservation reservation))
                 {
                     return transferred;
                 }
 
                 stack.RemoveAt(objectIndex);
-                ReleaseFloorObjectToHand(floorObject, handTarget);
+                MovePickupObjectToStorage(floorObject, reservation);
                 transferred++;
             }
         }
@@ -5416,18 +5427,21 @@ public class Block : BaseObject
             if (itemId < 0)
             {
                 inputAreaCenterStack.RemoveAt(objectIndex);
-                ReleaseFloorObjectToHand(floorObject, null);
+                ReleaseFloorObject(floorObject);
                 NotifyRuntimeItemStackChanged();
                 continue;
             }
 
-            if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+            if (!PlayerItemStorageUtility.TryReserveHand(
+                    player,
+                    itemId,
+                    out PlayerItemStorageReservation reservation))
             {
                 return transferred;
             }
 
             inputAreaCenterStack.RemoveAt(objectIndex);
-            ReleaseFloorObjectToHand(floorObject, handTarget);
+            MovePickupObjectToStorage(floorObject, reservation);
             NotifyRuntimeItemStackChanged();
             transferred++;
         }
@@ -6978,10 +6992,13 @@ public class Block : BaseObject
         return floorObjectPool != null;
     }
 
-    private bool TryAddPickupObjectToBagOrMatchingHand(Player player, int itemId, int preferredSlotIndex, out PortableObject targetPortableObject, out bool addedToHand)
+    private bool TryReservePickupObjectToBagOrMatchingHand(
+        Player player,
+        int itemId,
+        int preferredSlotIndex,
+        out PlayerItemStorageReservation reservation)
     {
-        targetPortableObject = null;
-        addedToHand = false;
+        reservation = null;
         if (player == null || itemId < 0)
         {
             return false;
@@ -6989,38 +7006,37 @@ public class Block : BaseObject
 
         if (preferredSlotIndex >= 0)
         {
-            if (player.TryAddToBagAtSlot(preferredSlotIndex, itemId, out targetPortableObject))
+            if (PlayerItemStorageUtility.TryReserveBag(
+                    player,
+                    itemId,
+                    preferredSlotIndex,
+                    false,
+                    out reservation))
             {
                 return true;
             }
 
-            if (player.HasMatchingHandStackSpace(itemId) && player.TryAddToHand(itemId, out targetPortableObject))
-            {
-                addedToHand = true;
-                return true;
-            }
-
-            return false;
+            return player.HasMatchingHandStackSpace(itemId)
+                   && PlayerItemStorageUtility.TryReserveHand(player, itemId, out reservation);
         }
 
-        if (player.HasMatchingHandStackSpace(itemId) && player.TryAddToHand(itemId, out targetPortableObject))
+        if (player.HasMatchingHandStackSpace(itemId)
+            && PlayerItemStorageUtility.TryReserveHand(player, itemId, out reservation))
         {
-            addedToHand = true;
             return true;
         }
 
-        return player.TryAddToBag(itemId, out targetPortableObject);
+        return PlayerItemStorageUtility.TryReserveBag(player, itemId, -1, true, out reservation);
     }
 
-    private void ReleasePickupObjectToStorage(PortableObject floorObject, PortableObject storageTarget, bool addedToHand)
+    private void MovePickupObjectToStorage(
+        PortableObject floorObject,
+        PlayerItemStorageReservation reservation)
     {
-        if (addedToHand)
-        {
-            ReleaseFloorObjectToHand(floorObject, storageTarget);
-            return;
-        }
-
-        ReleaseFloorObjectToBag(floorObject, storageTarget);
+        PlayerItemStorageUtility.MoveVisualToPlayerStorage(
+            floorObject,
+            reservation,
+            ReleaseFloorObject);
     }
 
     private PortableObject MaterializeConveyorObjectForTransfer(PortableObject portableObject, int itemId, int laneIndex)
@@ -7069,36 +7085,6 @@ public class Block : BaseObject
         return portableObject;
     }
 
-    private void ReleaseFloorObjectToBag(PortableObject floorObject, PortableObject bagTarget)
-    {
-        if (floorObject == null)
-        {
-            return;
-        }
-
-        DroppedItemPickupGate gate = floorObject.GetComponent<DroppedItemPickupGate>();
-        gate?.ClearGate();
-
-        if (!ResolveFloorObjectPool() || floorObjectPool == null)
-        {
-            floorObject.SetBatchedRendering(false);
-            floorObject.gameObject.SetActive(false);
-            return;
-        }
-
-        floorObject.SetBatchedRendering(false);
-        floorObject.transform.SetParent(null, true);
-
-        if (bagTarget != null)
-        {
-            floorObject.MoveTo(bagTarget.transform, () => floorObjectPool.Release(floorObject));
-        }
-        else
-        {
-            floorObjectPool.Release(floorObject);
-        }
-    }
-
     private void ReleaseFloorObject(PortableObject floorObject)
     {
         if (floorObject == null)
@@ -7130,36 +7116,6 @@ public class Block : BaseObject
 
         ReleaseFloorObject(portableObject);
         return false;
-    }
-
-    private void ReleaseFloorObjectToHand(PortableObject floorObject, PortableObject handTarget)
-    {
-        if (floorObject == null)
-        {
-            return;
-        }
-
-        DroppedItemPickupGate gate = floorObject.GetComponent<DroppedItemPickupGate>();
-        gate?.ClearGate();
-
-        if (!ResolveFloorObjectPool() || floorObjectPool == null)
-        {
-            floorObject.SetBatchedRendering(false);
-            floorObject.gameObject.SetActive(false);
-            return;
-        }
-
-        floorObject.SetBatchedRendering(false);
-        floorObject.transform.SetParent(null, true);
-
-        if (handTarget != null)
-        {
-            floorObject.MoveTo(handTarget.transform, () => floorObjectPool.Release(floorObject));
-        }
-        else
-        {
-            floorObjectPool.Release(floorObject);
-        }
     }
 
     private void ConfigureFloorObjectTransform(PortableObject portableObject, Transform anchor, int stackIndex)
@@ -13147,13 +13103,17 @@ public class Block : BaseObject
             return false;
         }
 
-        if (!TryAddPickupObjectToBagOrMatchingHand(player, itemId, preferredSlotIndex, out PortableObject storageTarget, out bool addedToHand))
+        if (!TryReservePickupObjectToBagOrMatchingHand(
+                player,
+                itemId,
+                preferredSlotIndex,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
-        ReleasePickupObjectToStorage(topObject, storageTarget, addedToHand);
+        MovePickupObjectToStorage(topObject, reservation);
         NotifyRuntimeItemStackChanged();
         return true;
     }
@@ -13276,13 +13236,16 @@ public class Block : BaseObject
             return false;
         }
 
-        if (!player.TryAddToHand(itemId, out PortableObject handTarget))
+        if (!PlayerItemStorageUtility.TryReserveHand(
+                player,
+                itemId,
+                out PlayerItemStorageReservation reservation))
         {
             return false;
         }
 
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
-        ReleaseFloorObjectToHand(topObject, handTarget);
+        MovePickupObjectToStorage(topObject, reservation);
         NotifyRuntimeItemStackChanged();
         return true;
     }
