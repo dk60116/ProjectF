@@ -12,6 +12,26 @@ internal static class ProjectFEditorGUIUtility
         GUIUtility.keyboardControl = 0;
         EditorGUIUtility.editingTextField = false;
     }
+
+    public static void DrawSprite(Rect targetRect, Sprite sprite)
+    {
+        if (sprite == null || sprite.texture == null)
+        {
+            return;
+        }
+
+        Rect textureRect = sprite.textureRect;
+        Texture2D texture = sprite.texture;
+        GUI.DrawTextureWithTexCoords(
+            targetRect,
+            texture,
+            new Rect(
+                textureRect.x / texture.width,
+                textureRect.y / texture.height,
+                textureRect.width / texture.width,
+                textureRect.height / texture.height),
+            true);
+    }
 }
 
 internal enum AnimalValidationSeverity

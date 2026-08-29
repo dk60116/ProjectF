@@ -134,117 +134,19 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         }
     }
 
-    private sealed class DropItemPopupContent : PopupWindowContent
-    {
-        private const float PopupWidth = 340f;
-        private const float MaximumPopupHeight = 420f;
-        private const float RowHeight = 24f;
-        private const float IconSize = 18f;
-
-        private readonly GUIContent[] options;
-        private readonly IReadOnlyList<ItemDefinition> itemDefinitions;
-        private readonly int selectedOptionIndex;
-        private readonly Action<int> selectionCallback;
-        private Vector2 scrollPosition;
-
-        public DropItemPopupContent(
-            GUIContent[] options,
-            IReadOnlyList<ItemDefinition> itemDefinitions,
-            int selectedOptionIndex,
-            Action<int> selectionCallback)
-        {
-            this.options = options;
-            this.itemDefinitions = itemDefinitions;
-            this.selectedOptionIndex = selectedOptionIndex;
-            this.selectionCallback = selectionCallback;
-        }
-
-        public override Vector2 GetWindowSize()
-        {
-            float contentHeight = options.Length * RowHeight + 4f;
-            return new Vector2(
-                PopupWidth,
-                Mathf.Min(MaximumPopupHeight, contentHeight));
-        }
-
-        public override void OnGUI(Rect rect)
-        {
-            Event currentEvent = Event.current;
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
-            for (int i = 0; i < options.Length; i++)
-            {
-                Rect rowRect = GUILayoutUtility.GetRect(
-                    0f,
-                    RowHeight,
-                    GUILayout.ExpandWidth(true));
-                bool isSelected = i == selectedOptionIndex;
-                bool isHovered = rowRect.Contains(currentEvent.mousePosition);
-                if (Event.current.type == EventType.Repaint
-                    && (isSelected || isHovered))
-                {
-                    Color backgroundColor = isSelected
-                        ? new Color(0.24f, 0.49f, 0.90f, 0.45f)
-                        : new Color(0.5f, 0.5f, 0.5f, 0.20f);
-                    EditorGUI.DrawRect(rowRect, backgroundColor);
-                }
-
-                Sprite icon = ResolveOptionIcon(i);
-                float textOffset = 7f;
-                if (icon != null)
-                {
-                    Rect iconRect = new Rect(
-                        rowRect.x + 5f,
-                        rowRect.y + (rowRect.height - IconSize) * 0.5f,
-                        IconSize,
-                        IconSize);
-                    DrawSprite(iconRect, icon);
-                    textOffset = IconSize + 10f;
-                }
-
-                Rect textRect = new Rect(
-                    rowRect.x + textOffset,
-                    rowRect.y,
-                    rowRect.width - textOffset - 4f,
-                    rowRect.height);
-                GUI.Label(textRect, options[i].text);
-
-                if (currentEvent.type == EventType.MouseDown
-                    && currentEvent.button == 0
-                    && rowRect.Contains(currentEvent.mousePosition))
-                {
-                    selectionCallback?.Invoke(i);
-                    editorWindow.Close();
-                    currentEvent.Use();
-                }
-            }
-
-            EditorGUILayout.EndScrollView();
-        }
-
-        private Sprite ResolveOptionIcon(int optionIndex)
-        {
-            return optionIndex > 0 && optionIndex <= itemDefinitions.Count
-                ? itemDefinitions[optionIndex - 1]?.icon
-                : null;
-        }
-    }
-
     private readonly List<AnimalDefinition> definitions = new List<AnimalDefinition>();
     private readonly Dictionary<int, AnimalDraft> drafts = new Dictionary<int, AnimalDraft>();
     private readonly HashSet<string> expandedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly List<AnimalValidationIssue> selectedIssues = new List<AnimalValidationIssue>();
     private readonly List<AnimalDefinition> selectedObjectDefinitions = new List<AnimalDefinition>();
-    private readonly List<ItemDefinition> dropItemDefinitions = new List<ItemDefinition>();
-    private readonly Dictionary<ItemDefinition, int> dropItemOptionIndices =
-        new Dictionary<ItemDefinition, int>();
+    private readonly ItemDefinitionDropdownGUI dropItemDropdown =
+        new ItemDefinitionDropdownGUI();
     private readonly Dictionary<AnimalDefinition, string> definitionAssetPaths =
         new Dictionary<AnimalDefinition, string>();
     private readonly Dictionary<string, UnityEngine.Object> folderAssetCache =
         new Dictionary<string, UnityEngine.Object>(StringComparer.OrdinalIgnoreCase);
 
     private HierarchyNode hierarchyRoot = new HierarchyNode("Animals", string.Empty);
-    private GUIContent[] dropItemOptions = { new GUIContent("None") };
-    private GUIStyle dropItemPopupWithIconStyle;
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private int selectedDefinitionInstanceId;
@@ -264,7 +166,6 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private bool previewPlaying;
     private bool projectReloadQueued;
     private double lastPreviewUpdateTime;
-    private int dropItemCatalogSignature = int.MinValue;
 
     [MenuItem("Window/ProjectF/Animal Data")]
     public static void ShowWindow()
@@ -652,7 +553,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         Rect iconRect = new Rect(selectRect.x + 4f, selectRect.y + 4f, 20f, 20f);
         if (icon != null)
         {
-            DrawSprite(iconRect, icon);
+            ProjectFEditorGUIUtility.DrawSprite(iconRect, icon);
         }
 
         string dirtyMarker = draft.dirty ? "* " : string.Empty;
@@ -775,7 +676,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(iconRect, new Color(0.1f, 0.1f, 0.1f));
         if (icon != null)
         {
-            DrawSprite(iconRect, icon);
+            ProjectFEditorGUIUtility.DrawSprite(iconRect, icon);
         }
 
         EditorGUILayout.BeginVertical();
@@ -1200,7 +1101,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUI.DrawRect(iconRect, new Color(0.1f, 0.1f, 0.1f));
         if (draft.adultIcon != null)
         {
-            DrawSprite(iconRect, draft.adultIcon);
+            ProjectFEditorGUIUtility.DrawSprite(iconRect, draft.adultIcon);
         }
 
         EditorGUILayout.BeginVertical();
@@ -1474,67 +1375,15 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private void DrawDropItemPopup(int entryIndex, AnimalDropEntry entry)
     {
-        Rect rowRect = EditorGUILayout.GetControlRect();
-        Rect popupRect = EditorGUI.PrefixLabel(rowRect, new GUIContent("Item"));
-        int currentOptionIndex = FindDropItemIndex(entry.ItemDefinition);
-        GUIContent selectedContent = currentOptionIndex >= 0
-            && currentOptionIndex < dropItemOptions.Length
-            ? dropItemOptions[currentOptionIndex]
-            : dropItemOptions[0];
-        Sprite selectedIcon = currentOptionIndex > 0
-            && currentOptionIndex <= dropItemDefinitions.Count
-            ? dropItemDefinitions[currentOptionIndex - 1]?.icon
-            : null;
-        bool hasIcon = selectedIcon != null;
-        bool openDropdown = EditorGUI.DropdownButton(
-                popupRect,
-                selectedContent,
-                FocusType.Keyboard,
-                hasIcon ? GetDropItemPopupWithIconStyle() : EditorStyles.popup);
-
-        if (hasIcon)
-        {
-            const float iconSize = 16f;
-            Rect iconRect = new Rect(
-                popupRect.x + 3f,
-                popupRect.y + (popupRect.height - iconSize) * 0.5f,
-                iconSize,
-                iconSize);
-            DrawSprite(iconRect, selectedIcon);
-        }
-
-        if (openDropdown)
-        {
-            PopupWindow.Show(
-                popupRect,
-                new DropItemPopupContent(
-                    dropItemOptions,
-                    dropItemDefinitions,
-                    currentOptionIndex,
-                    optionIndex => ApplyDropItemSelection(entryIndex, optionIndex)));
-        }
+        dropItemDropdown.Draw(
+            "Item",
+            entry.ItemDefinition,
+            selectedDefinition => ApplyDropItemSelection(entryIndex, selectedDefinition));
     }
 
-    private GUIStyle GetDropItemPopupWithIconStyle()
-    {
-        if (dropItemPopupWithIconStyle == null)
-        {
-            GUIStyle source = EditorStyles.popup;
-            RectOffset sourcePadding = source.padding;
-            dropItemPopupWithIconStyle = new GUIStyle(source)
-            {
-                padding = new RectOffset(
-                    sourcePadding.left + 20,
-                    sourcePadding.right,
-                    sourcePadding.top,
-                    sourcePadding.bottom)
-            };
-        }
-
-        return dropItemPopupWithIconStyle;
-    }
-
-    private void ApplyDropItemSelection(int entryIndex, int optionIndex)
+    private void ApplyDropItemSelection(
+        int entryIndex,
+        ItemDefinition selectedDefinition)
     {
         if (selectedObjectDefinitions.Count == 0)
         {
@@ -1548,10 +1397,6 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             return;
         }
 
-        ItemDefinition selectedDefinition = optionIndex > 0
-            && optionIndex <= dropItemDefinitions.Count
-            ? dropItemDefinitions[optionIndex - 1]
-            : null;
         AnimalDropEntry entry =
             firstDraft.dropItems[entryIndex] ??= new AnimalDropEntry();
         if (entry.ItemDefinition == selectedDefinition)
@@ -1616,63 +1461,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
 
     private bool RefreshDropItemOptions(bool force = true)
     {
-        List<ItemDefinition> latestDefinitions = LoadAllItemDefinitions();
-        int latestSignature =
-            ItemDataEditorWindow.DefinitionCatalog.ComputeSignature(
-                latestDefinitions);
-        if (!force && latestSignature == dropItemCatalogSignature)
-        {
-            return false;
-        }
-
-        dropItemCatalogSignature = latestSignature;
-        dropItemDefinitions.Clear();
-        dropItemDefinitions.AddRange(latestDefinitions);
-        dropItemOptionIndices.Clear();
-
-        dropItemOptions = new GUIContent[dropItemDefinitions.Count + 1];
-        dropItemOptions[0] = new GUIContent("None");
-        for (int i = 0; i < dropItemDefinitions.Count; i++)
-        {
-            ItemDefinition definition = dropItemDefinitions[i];
-            string itemName = !string.IsNullOrWhiteSpace(definition.itemName)
-                ? definition.itemName
-                : definition.name;
-            dropItemOptions[i + 1] = new GUIContent(
-                $"[{definition.id}] {itemName}");
-            dropItemOptionIndices[definition] = i + 1;
-        }
-
-        return true;
-    }
-
-    private static void DrawSprite(Rect targetRect, Sprite sprite)
-    {
-        if (sprite == null || sprite.texture == null)
-        {
-            return;
-        }
-
-        Rect textureRect = sprite.textureRect;
-        Texture2D texture = sprite.texture;
-        Rect textureCoordinates = new Rect(
-            textureRect.x / texture.width,
-            textureRect.y / texture.height,
-            textureRect.width / texture.width,
-            textureRect.height / texture.height);
-        GUI.DrawTextureWithTexCoords(
-            targetRect,
-            texture,
-            textureCoordinates,
-            true);
-    }
-
-    private int FindDropItemIndex(ItemDefinition definition)
-    {
-        return definition != null
-            && dropItemOptionIndices.TryGetValue(definition, out int optionIndex)
-                ? optionIndex
-                : 0;
+        return dropItemDropdown.Refresh(force);
     }
 
     private void DrawPreview(AnimalDraft draft)

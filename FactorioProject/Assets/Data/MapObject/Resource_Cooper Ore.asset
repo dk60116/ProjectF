@@ -13,9 +13,13 @@ MonoBehaviour:
   m_Name: Resource_Cooper Ore
   m_EditorClassIdentifier: 
   resourceName: Cooper Ore
+  resourceIcon: {fileID: 21300000, guid: 919343731cc42cd48be7ed54569d7834, type: 3}
   prefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   harvestMode: 1
   placementCategory: 0
+  minimumGrowth: 10
+  maximumGrowth: 10
+  dropItems: []
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

@@ -121,6 +121,10 @@ MonoBehaviour:
     displayName: New Folder
     expanded: 1
     anchorItemGuid: c0075e53760e0bc4e8a7625ac98e2167
+  - id: 0c39a611cba6493d8b18cb3c3dfa5f3c
+    displayName: Food
+    expanded: 1
+    anchorItemGuid: 0e1d27a0f4c177c44985160c21333ad4
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -312,3 +316,5 @@ MonoBehaviour:
     folderId: 061b1e1292114fabaa190654551cea7c
   - itemGuid: 0e1d27a0f4c177c44985160c21333ad4
     folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
+  - itemGuid: 0b21f1cf2a22a094e88ddb0300d635c2
+    folderId: 0c39a611cba6493d8b18cb3c3dfa5f3c

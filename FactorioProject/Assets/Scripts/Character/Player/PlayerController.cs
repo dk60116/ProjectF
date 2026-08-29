@@ -521,19 +521,6 @@ public class PlayerController : MonoBehaviour
     public Animal MountedAnimal => interactionPointSnapTarget != null ? interactionPointSnapAnimal : null;
     public bool IsMounted => interactionPointSnapTarget != null;
 
-    public bool IsNearWaterForPortableInteraction()
-    {
-        if (IsMounted || ResolveTerrainGenerator() == null)
-        {
-            return false;
-        }
-
-        Vector3 rootPosition = cachedRigidbody != null
-            ? cachedRigidbody.position
-            : transform.position;
-        return HasNearbyWaterBiome(GetPlayerCollisionCenterXZ(rootPosition));
-    }
-
     public bool IsMountedOnVehicle(Vehicle vehicle)
     {
         return vehicle != null
@@ -2585,30 +2572,76 @@ public class PlayerController : MonoBehaviour
         return FindNearestResourceInteractionTarget(false);
     }
 
-    public bool TryFindNearestOilBucketFillSource(out Resource oilSource)
+    public bool TryFindNearestBucketFluidSource(
+        out Block sourceBlock,
+        out Resource oilSource)
     {
-        oilSource = FindNearestResourceInteractionTarget(true);
-        return oilSource != null;
-    }
-
-    public bool IsWithinOilBucketFillRange(Resource resource)
-    {
-        if (player == null
-            || resource == null
-            || !resource.gameObject.activeInHierarchy
-            || !resource.AllowsFocus
-            || !resource.CanHarvest
-            || resource.PlacementCategory != ResourceDefinition.PlacementCategory.Oil)
+        sourceBlock = null;
+        oilSource = null;
+        if (player == null || IsMounted)
         {
             return false;
         }
 
-        Vector3 origin = player.BodyTransform != null
-            ? player.BodyTransform.position
+        oilSource = FindNearestResourceInteractionTarget(true);
+        if (oilSource != null)
+        {
+            sourceBlock = ResolveResourceOwningBlock(oilSource);
+            if (sourceBlock != null)
+            {
+                return true;
+            }
+
+            oilSource = null;
+        }
+
+        return TryFindNearestWaterInteractionBlock(out sourceBlock);
+    }
+
+    private bool TryFindNearestWaterInteractionBlock(out Block waterBlock)
+    {
+        waterBlock = null;
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector3 rootPosition = cachedRigidbody != null
+            ? cachedRigidbody.position
             : transform.position;
-        float harvestRange = player.State.HarvestRange;
-        return GetResourceFocusSelectionDistanceSqr(resource, origin)
-               <= harvestRange * harvestRange;
+        Vector2 center = GetPlayerCollisionCenterXZ(rootPosition);
+        Vector2Int centerCoordinate = new Vector2Int(
+            Mathf.RoundToInt(center.x),
+            Mathf.RoundToInt(center.y));
+        float nearestDistanceSqr = float.MaxValue;
+
+        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        {
+            for (int offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                if (!terrain.IsWaterBiomeAt(coordinate)
+                    || !terrain.TryGetLoadedBlock(coordinate, out Block block)
+                    || block == null)
+                {
+                    continue;
+                }
+
+                float deltaX = block.transform.position.x - center.x;
+                float deltaZ = block.transform.position.z - center.y;
+                float distanceSqr = deltaX * deltaX + deltaZ * deltaZ;
+                if (distanceSqr >= nearestDistanceSqr)
+                {
+                    continue;
+                }
+
+                nearestDistanceSqr = distanceSqr;
+                waterBlock = block;
+            }
+        }
+
+        return waterBlock != null;
     }
 
     private Resource FindNearestResourceInteractionTarget(bool oilOnly)
@@ -2792,6 +2825,12 @@ public class PlayerController : MonoBehaviour
                 standingAreaFocusBlock,
                 standingAreaOwnerModule,
                 combinedInteractionFocusBlocks);
+        }
+
+        if (player.IsHoldingEmptyBucket
+            && TryFindNearestBucketFluidSource(out Block bucketFluidBlock, out _))
+        {
+            AppendUniqueBlock(combinedInteractionFocusBlocks, bucketFluidBlock);
         }
 
         SetFocusedBlocks(combinedInteractionFocusBlocks);

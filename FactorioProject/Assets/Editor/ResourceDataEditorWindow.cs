@@ -21,6 +21,8 @@ public sealed class ResourceDataEditorWindow : EditorWindow
 
     private readonly List<ResourceDefinition> definitions = new List<ResourceDefinition>();
     private readonly List<ResourceDefinition> visibleDefinitions = new List<ResourceDefinition>();
+    private readonly ItemDefinitionDropdownGUI dropItemDropdown =
+        new ItemDefinitionDropdownGUI();
     private Vector2 listScroll;
     private Vector2 detailScroll;
     private string searchText = string.Empty;
@@ -60,6 +62,9 @@ public sealed class ResourceDataEditorWindow : EditorWindow
     private void OnEnable()
     {
         Undo.undoRedoPerformed += HandleUndoRedo;
+        ItemDataEditorWindow.DefinitionCatalog.Changed +=
+            HandleItemDefinitionCatalogChanged;
+        dropItemDropdown.Refresh();
         catalogDirty = true;
         EnsureCatalog();
         AdoptProjectSelection();
@@ -68,12 +73,15 @@ public sealed class ResourceDataEditorWindow : EditorWindow
     private void OnDisable()
     {
         Undo.undoRedoPerformed -= HandleUndoRedo;
+        ItemDataEditorWindow.DefinitionCatalog.Changed -=
+            HandleItemDefinitionCatalogChanged;
         CommitCurrentEdits();
         ClearSerializedObjectCaches();
     }
 
     private void OnFocus()
     {
+        dropItemDropdown.Refresh(false);
         AdoptProjectSelection();
         Repaint();
     }
@@ -87,6 +95,7 @@ public sealed class ResourceDataEditorWindow : EditorWindow
     private void OnProjectChange()
     {
         pendingSelectionPath = GetSelectedDefinitionPath();
+        dropItemDropdown.Refresh(false);
         catalogDirty = true;
         visibleDefinitionsDirty = true;
         Repaint();
@@ -98,6 +107,14 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         catalogDirty = true;
         visibleDefinitionsDirty = true;
         Repaint();
+    }
+
+    private void HandleItemDefinitionCatalogChanged()
+    {
+        if (dropItemDropdown.Refresh(false))
+        {
+            Repaint();
+        }
     }
 
     private void OnGUI()
@@ -134,7 +151,12 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         GUILayout.Label($"Resources ({visibleDefinitions.Count})", EditorStyles.boldLabel);
         GUILayout.FlexibleSpace();
 
-        if (GUILayout.Button("New", EditorStyles.miniButtonLeft, GUILayout.Width(42f)))
+        if (GUILayout.Button("Save", EditorStyles.miniButtonLeft, GUILayout.Width(44f)))
+        {
+            SaveCurrentAssets();
+        }
+
+        if (GUILayout.Button("New", EditorStyles.miniButtonMid, GUILayout.Width(42f)))
         {
             CreateDefinition();
             GUIUtility.ExitGUI();
@@ -218,7 +240,7 @@ public sealed class ResourceDataEditorWindow : EditorWindow
             rowRect.y + (ListRowHeight - ListIconSize) * 0.5f,
             ListIconSize,
             ListIconSize);
-        DrawPrefabIcon(iconRect, definition.prefab);
+        DrawResourceIcon(iconRect, definition);
 
         string displayName = GetDisplayName(definition);
         Rect nameRect = new Rect(
@@ -290,11 +312,6 @@ public sealed class ResourceDataEditorWindow : EditorWindow
             EditorGUIUtility.PingObject(selectedDefinition);
         }
 
-        if (GUILayout.Button("Save", GUILayout.Width(58f), GUILayout.Height(24f)))
-        {
-            SaveCurrentAssets();
-        }
-
         EditorGUILayout.EndHorizontal();
         GUILayout.Space(8f);
     }
@@ -315,6 +332,7 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         EditorGUI.BeginChangeCheck();
 
         DrawProperty(serializedDefinition, "resourceName", "Resource Name");
+        DrawProperty(serializedDefinition, "resourceIcon", "Resource Icon");
         DrawProperty(serializedDefinition, "prefab", "Resource Prefab");
         DrawProperty(serializedDefinition, "harvestMode", "Harvest Mode");
         DrawProperty(serializedDefinition, "placementCategory", "Placement Category");
@@ -353,6 +371,9 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         maxGauge.intValue = Mathf.Max(1, maxGauge.intValue);
         currentGauge.intValue = Mathf.Clamp(currentGauge.intValue, 0, maxGauge.intValue);
 
+        GUILayout.Space(8f);
+        DrawFarmingDropItemsSection(serializedDefinition);
+
         bool changed = EditorGUI.EndChangeCheck();
         serializedDefinition.ApplyModifiedProperties();
         if (changed)
@@ -367,6 +388,163 @@ public sealed class ResourceDataEditorWindow : EditorWindow
 
         EditorGUILayout.EndVertical();
         GUILayout.Space(6f);
+    }
+
+    private void DrawFarmingDropItemsSection(SerializedObject serializedDefinition)
+    {
+        SerializedProperty dropItems = serializedDefinition.FindProperty("dropItems");
+        if (dropItems == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.LabelField("Farming Drop Items", EditorStyles.miniBoldLabel);
+        int removeIndex = -1;
+        int moveFromIndex = -1;
+        int moveToIndex = -1;
+
+        for (int i = 0; i < dropItems.arraySize; i++)
+        {
+            SerializedProperty entry = dropItems.GetArrayElementAtIndex(i);
+            SerializedProperty itemDefinition = entry.FindPropertyRelative("itemDefinition");
+            SerializedProperty amount = entry.FindPropertyRelative("amount");
+            SerializedProperty minimumGrowth = entry.FindPropertyRelative("minimumGrowth");
+            SerializedProperty maximumGrowth = entry.FindPropertyRelative("maximumGrowth");
+            SerializedProperty dropChance = entry.FindPropertyRelative("dropChance");
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Entry {i + 1}", EditorStyles.miniBoldLabel);
+            GUILayout.FlexibleSpace();
+            using (new EditorGUI.DisabledScope(i <= 0))
+            {
+                if (GUILayout.Button("▲", EditorStyles.miniButtonLeft, GUILayout.Width(28f)))
+                {
+                    moveFromIndex = i;
+                    moveToIndex = i - 1;
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(i >= dropItems.arraySize - 1))
+            {
+                if (GUILayout.Button("▼", EditorStyles.miniButtonMid, GUILayout.Width(28f)))
+                {
+                    moveFromIndex = i;
+                    moveToIndex = i + 1;
+                }
+            }
+
+            if (GUILayout.Button("Remove", EditorStyles.miniButtonRight, GUILayout.Width(64f)))
+            {
+                removeIndex = i;
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            ItemDefinition currentItem =
+                itemDefinition.objectReferenceValue as ItemDefinition;
+            int entryIndex = i;
+            dropItemDropdown.Draw(
+                "Item",
+                currentItem,
+                selectedItem => ApplyDropItemSelection(entryIndex, selectedItem));
+
+            amount.intValue = Mathf.Max(
+                0,
+                EditorGUILayout.IntField("Amount", amount.intValue));
+            minimumGrowth.intValue = EditorGUILayout.IntSlider(
+                "Minimum Growth",
+                minimumGrowth.intValue,
+                ResourceDefinition.MinGrowth,
+                ResourceDefinition.MaxGrowth);
+            maximumGrowth.intValue = EditorGUILayout.IntSlider(
+                "Maximum Growth",
+                maximumGrowth.intValue,
+                minimumGrowth.intValue,
+                ResourceDefinition.MaxGrowth);
+            float chancePercent = EditorGUILayout.Slider(
+                "Drop Chance (%)",
+                Mathf.Clamp01(dropChance.floatValue) * 100f,
+                0f,
+                100f);
+            dropChance.floatValue = chancePercent * 0.01f;
+
+            if (currentItem != null)
+            {
+                Rect itemNameRect = EditorGUILayout.GetControlRect();
+                GUI.Label(
+                    itemNameRect,
+                    $"Item ID {currentItem.id} · {currentItem.itemName}",
+                    EditorStyles.whiteLabel);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        if (removeIndex >= 0)
+        {
+            dropItems.DeleteArrayElementAtIndex(removeIndex);
+        }
+        else if (moveFromIndex >= 0 && moveToIndex >= 0)
+        {
+            dropItems.MoveArrayElement(moveFromIndex, moveToIndex);
+        }
+
+        if (GUILayout.Button("Add Drop Item"))
+        {
+            int newIndex = dropItems.arraySize;
+            dropItems.InsertArrayElementAtIndex(newIndex);
+            SerializedProperty entry = dropItems.GetArrayElementAtIndex(newIndex);
+            entry.FindPropertyRelative("itemDefinition").objectReferenceValue = null;
+            entry.FindPropertyRelative("amount").intValue = 1;
+            entry.FindPropertyRelative("minimumGrowth").intValue =
+                ResourceDefinition.MinGrowth;
+            entry.FindPropertyRelative("maximumGrowth").intValue =
+                ResourceDefinition.MaxGrowth;
+            entry.FindPropertyRelative("dropChance").floatValue = 1f;
+        }
+
+        string growthDescription = selectedDefinition != null
+                                   && selectedDefinition.placementCategory
+                                   == ResourceDefinition.PlacementCategory.Tree
+            ? "Tree Growth 조건을 만족한 항목만"
+            : "Tree가 아닌 리소스는 Growth 10으로 판정하며, 조건을 만족한 항목만";
+        EditorGUILayout.HelpBox(
+            $"{growthDescription} 목록 순서대로 확률 판정 후 고정 수량으로 지급됩니다. "
+            + "목록이 비어 있으면 기존 에셋의 단일 출력 데이터를 사용합니다. "
+            + "광산·시추 기계의 단일 출력은 기존 Output 설정을 계속 사용합니다.",
+            MessageType.Info);
+    }
+
+    private void ApplyDropItemSelection(int entryIndex, ItemDefinition selectedItem)
+    {
+        if (selectedDefinition == null)
+        {
+            return;
+        }
+
+        SerializedObject serializedDefinition = new SerializedObject(selectedDefinition);
+        serializedDefinition.Update();
+        SerializedProperty dropItems = serializedDefinition.FindProperty("dropItems");
+        if (dropItems == null || entryIndex < 0 || entryIndex >= dropItems.arraySize)
+        {
+            return;
+        }
+
+        SerializedProperty itemDefinition = dropItems
+            .GetArrayElementAtIndex(entryIndex)
+            .FindPropertyRelative("itemDefinition");
+        if (itemDefinition.objectReferenceValue == selectedItem)
+        {
+            return;
+        }
+
+        Undo.RecordObject(selectedDefinition, "Set Resource Drop Item");
+        itemDefinition.objectReferenceValue = selectedItem;
+        serializedDefinition.ApplyModifiedProperties();
+        EditorUtility.SetDirty(selectedDefinition);
+        selectedDefinitionSerializedObject = serializedDefinition;
+        Repaint();
     }
 
     private void DrawValidationSection()
@@ -470,19 +648,11 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         GUILayout.Space(4f);
         EditorGUILayout.LabelField("Map Object", EditorStyles.miniBoldLabel);
         DrawProperty(serializedPrefab, "objectName", "Object Name");
-        DrawProperty(serializedPrefab, "itemDefinition", "Output Item Definition");
         DrawProperty(serializedPrefab, "mapStatus", "Map Size");
         DrawProperty(serializedPrefab, "multiFocusMode", "Multi Focus Mode");
 
         GUILayout.Space(4f);
         EditorGUILayout.LabelField("Harvest Presentation", EditorStyles.miniBoldLabel);
-        SerializedProperty resourceStatus = serializedPrefab.FindProperty("resourceStatus");
-        if (resourceStatus != null)
-        {
-            SerializedProperty outputItemName = resourceStatus.FindPropertyRelative("outputItemName");
-            EditorGUILayout.PropertyField(outputItemName, new GUIContent("Output Item Name"));
-        }
-
         DrawProperty(serializedPrefab, "workPerGaugeDot", "Work Per Gauge Dot");
         DrawProperty(serializedPrefab, "portableMoveInterval", "Portable Move Interval");
         DrawProperty(serializedPrefab, "focusOffset", "Focus Offset");
@@ -1015,20 +1185,75 @@ public sealed class ResourceDataEditorWindow : EditorWindow
             : string.Empty;
     }
 
-    private static void DrawPrefabIcon(Rect rect, Resource prefab)
+    private static void DrawResourceIcon(Rect rect, ResourceDefinition definition)
     {
         EditorGUI.DrawRect(rect, new Color(0.08f, 0.08f, 0.08f));
-        GUI.Box(rect, GUIContent.none);
-        if (prefab == null)
+        if (definition == null)
         {
             return;
         }
 
-        Texture icon = AssetPreview.GetMiniThumbnail(prefab.gameObject);
+        Sprite resourceIcon = definition.ResourceIcon;
+        if (resourceIcon != null && resourceIcon.texture != null)
+        {
+            Texture2D texture = resourceIcon.texture;
+            Rect textureRect = resourceIcon.textureRect;
+            Rect textureCoordinates = new Rect(
+                textureRect.x / texture.width,
+                textureRect.y / texture.height,
+                textureRect.width / texture.width,
+                textureRect.height / texture.height);
+            Color previousColor = GUI.color;
+            GUI.color = Color.white;
+            GUI.DrawTextureWithTexCoords(
+                GetAspectFitRect(rect, textureRect.width, textureRect.height),
+                texture,
+                textureCoordinates,
+                true);
+            GUI.color = previousColor;
+            return;
+        }
+
+        if (definition.prefab == null)
+        {
+            return;
+        }
+
+        Texture icon = AssetPreview.GetMiniThumbnail(definition.prefab.gameObject);
         if (icon != null)
         {
             GUI.DrawTexture(rect, icon, ScaleMode.ScaleToFit, true);
         }
+    }
+
+    private static Rect GetAspectFitRect(Rect targetRect, float sourceWidth, float sourceHeight)
+    {
+        if (targetRect.width <= 0f
+            || targetRect.height <= 0f
+            || sourceWidth <= 0f
+            || sourceHeight <= 0f)
+        {
+            return targetRect;
+        }
+
+        float sourceAspect = sourceWidth / sourceHeight;
+        float targetAspect = targetRect.width / targetRect.height;
+        if (sourceAspect > targetAspect)
+        {
+            float fittedHeight = targetRect.width / sourceAspect;
+            return new Rect(
+                targetRect.x,
+                targetRect.y + (targetRect.height - fittedHeight) * 0.5f,
+                targetRect.width,
+                fittedHeight);
+        }
+
+        float fittedWidth = targetRect.height * sourceAspect;
+        return new Rect(
+            targetRect.x + (targetRect.width - fittedWidth) * 0.5f,
+            targetRect.y,
+            fittedWidth,
+            targetRect.height);
     }
 
     private static Color GetCategoryColor(ResourceDefinition.PlacementCategory category)

@@ -293,19 +293,39 @@ public class ObjectInfoPanel : MonoBehaviour
     {
         ItemSlot slot = GetListItem(focusedObjectSlots, index);
         int itemId = mapObject != null ? mapObject.ResolveItemId() : -1;
-        bool visible = forceVisible || itemId >= 0;
+        Resource resource = mapObject as Resource;
+        Sprite resourceIcon = resource != null && resource.Definition != null
+            ? resource.Definition.ResourceIcon
+            : null;
+        bool visible = forceVisible || itemId >= 0 || resourceIcon != null;
         SetFocusedInfoPanelVisible(index, visible);
         if (slot == null)
         {
             return;
         }
 
+        if (resourceIcon != null)
+        {
+            slot.SetCustomDisplay(
+                itemId,
+                resourceIcon,
+                ResolveResourceObjectName(resource),
+                string.Empty);
+            return;
+        }
+
         if (itemId >= 0)
         {
-            string displayNameOverride = mapObject is Resource resource
+            string displayNameOverride = resource != null
                 ? ResolveResourceObjectName(resource)
                 : null;
-            slot.SetItemDisplay(itemId, 1, 0, true, true, displayNameOverride);
+            slot.SetItemDisplay(
+                itemId,
+                1,
+                0,
+                true,
+                true,
+                displayNameOverride);
         }
         else
         {

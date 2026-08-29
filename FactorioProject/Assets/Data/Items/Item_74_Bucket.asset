@@ -13,13 +13,14 @@ MonoBehaviour:
   m_Name: Item_74_Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Bucket
-  id: 92
+  id: 93
   mapObject: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
   portableMesh: {fileID: 4300000, guid: a8daed3521a70e44c93714f5f9b246c6, type: 2}
   portableMat: {fileID: 2100000, guid: 5e4d29ac17e2fc64eae3a00225731388, type: 2}
   icon: {fileID: 21300000, guid: a09a003f751c2a044854b9beee232c4f, type: 3}
   oneItem: 0
-  interactionButtonList: []
+  interactionButtonList:
+  - {fileID: 21300000, guid: a51f8e06432f403baf2da12a3fd90b85, type: 3}
   lightMode: 0
   lightRange: 6
   lightIntensityMultiplier: 1

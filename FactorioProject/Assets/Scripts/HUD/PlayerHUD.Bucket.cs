@@ -3,7 +3,6 @@ using UnityEngine;
 public partial class PlayerHUD
 {
     private bool bucketFluidInteractionActive;
-    private Resource bucketOilInteractionSource;
 
     private bool TryActivateBucketFluidInteraction(
         Player currentPlayer,
@@ -19,7 +18,11 @@ public partial class PlayerHUD
             return false;
         }
 
-        playerController.TryFindNearestOilBucketFillSource(out Resource oilSource);
+        if (!playerController.TryFindNearestBucketFluidSource(out _, out Resource oilSource))
+        {
+            return false;
+        }
+
         ItemDefinition filledBucket;
         if (oilSource != null)
         {
@@ -28,13 +31,12 @@ public partial class PlayerHUD
                 return false;
             }
         }
-        else if (!playerController.IsNearWaterForPortableInteraction()
-                 || !Bucket.TryResolveWaterBucketDefinition(itemManager, out filledBucket))
+        else if (!Bucket.TryResolveWaterBucketDefinition(itemManager, out filledBucket))
         {
             return false;
         }
 
-        Sprite icon = emptyBucket.icon;
+        Sprite icon = ResolveInteractionIcon(emptyBucket, 0, false);
         if (icon == null || InteractionButton == null)
         {
             return false;
@@ -42,7 +44,6 @@ public partial class PlayerHUD
 
         ClearInteractionTargets();
         bucketFluidInteractionActive = true;
-        bucketOilInteractionSource = oilSource;
         SetActiveInteractionButton(InteractionButton, icon);
         return true;
     }
@@ -61,34 +62,25 @@ public partial class PlayerHUD
             return;
         }
 
-        ItemDefinition filledBucket;
-        if (bucketOilInteractionSource != null)
+        if (!playerController.TryFindNearestBucketFluidSource(out _, out Resource oilSource))
         {
-            if (!IsUsableOilInteractionSource(bucketOilInteractionSource, playerController)
-                || !Bucket.TryResolveOilBucketDefinition(itemManager, out filledBucket))
+            return;
+        }
+
+        ItemDefinition filledBucket;
+        if (oilSource != null)
+        {
+            if (!Bucket.TryResolveOilBucketDefinition(itemManager, out filledBucket))
             {
                 return;
             }
         }
-        else if (!playerController.IsNearWaterForPortableInteraction()
-                 || !Bucket.TryResolveWaterBucketDefinition(itemManager, out filledBucket))
+        else if (!Bucket.TryResolveWaterBucketDefinition(itemManager, out filledBucket))
         {
             return;
         }
 
         currentPlayer.TryConvertHeldItem(emptyBucket.id, filledBucket.id);
-    }
-
-    private static bool IsUsableOilInteractionSource(
-        Resource resource,
-        PlayerController playerController)
-    {
-        return resource != null
-               && resource.gameObject.activeInHierarchy
-               && resource.CanHarvest
-               && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil
-               && playerController != null
-               && playerController.IsWithinOilBucketFillRange(resource);
     }
 
     private static bool TryResolveHeldEmptyBucket(

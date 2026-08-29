@@ -13,9 +13,13 @@ MonoBehaviour:
   m_Name: Resource_Oil
   m_EditorClassIdentifier: Assembly-CSharp::ResourceDefinition
   resourceName: Oil
+  resourceIcon: {fileID: 21300000, guid: 636111dedab44373b4ec11621b58c1d3, type: 3}
   prefab: {fileID: 5889860242806826768, guid: 49b74711fb3fda54cae8e732896a3353, type: 3}
-  harvestMode: 1
+  harvestMode: 4
   placementCategory: 1
+  minimumGrowth: 10
+  maximumGrowth: 10
+  dropItems: []
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

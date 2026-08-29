@@ -525,6 +525,7 @@ MonoBehaviour:
   minimumBodyScaleRatio: 0.3
   maximumBodyScaleRatio: 1
   dynamicScaleMaxResourceCount: 1
+  growth: 10
 --- !u!135 &1939977283726542213
 SphereCollider:
   m_ObjectHideFlags: 0

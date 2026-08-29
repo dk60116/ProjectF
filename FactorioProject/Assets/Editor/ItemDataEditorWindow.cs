@@ -104,6 +104,7 @@ public class ItemDataEditorWindow : EditorWindow
     private const float PlacementCenterGridCellSpacing = 4f;
     private const string ItemDefinitionAssetFolder = DefinitionCatalog.AssetFolder;
     private const string UiIconAtlasFolder = "Assets/Image/UI/Item";
+    private const string ResourceUiIconFolder = "Assets/Image/UI/Resource";
     private const string UiIconAtlasPath = UiIconAtlasFolder + "/ItemUIIcons.spriteatlas";
     private const string ItemRebuildProgressTitle = "Item Data Rebuild";
     private const string TrainStationItemGuid = "2cbd885291664af429fdc0ef3784d40d";
@@ -6346,10 +6347,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         List<ItemDefinition> definitions = GetDefinitions(itemManager);
-        List<UnityEngine.Object> iconSprites = CollectUiIconSprites(definitions);
-        if (iconSprites.Count == 0)
+        List<UnityEngine.Object> iconPackables = CollectUiIconPackables(definitions);
+        if (iconPackables.Count == 0)
         {
-            EditorUtility.DisplayDialog("Item Data", "Atlas에 넣을 UI 아이콘 Sprite가 없습니다.", "OK");
+            EditorUtility.DisplayDialog("Item Data", "Atlas에 넣을 UI 아이콘 Packable이 없습니다.", "OK");
             return;
         }
 
@@ -6364,7 +6365,7 @@ public class ItemDataEditorWindow : EditorWindow
             created = true;
         }
 
-        SyncSpriteAtlasPackables(atlas, iconSprites);
+        SyncSpriteAtlasPackables(atlas, iconPackables);
         ApplyUiIconAtlasSettings(atlas);
 
         EditorUtility.SetDirty(atlas);
@@ -6376,7 +6377,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         Selection.activeObject = atlas;
         EditorGUIUtility.PingObject(atlas);
-        ShowNotification(new GUIContent($"{(created ? "Created" : "Updated")} UI Icon Atlas ({iconSprites.Count})"));
+        ShowNotification(new GUIContent($"{(created ? "Created" : "Updated")} UI Icon Atlas ({iconPackables.Count} packables)"));
         Repaint();
     }
 
@@ -6403,57 +6404,96 @@ public class ItemDataEditorWindow : EditorWindow
         ShowNotification(new GUIContent("UI Icon Atlas selected."));
     }
 
-    private static List<UnityEngine.Object> CollectUiIconSprites(List<ItemDefinition> definitions)
+    private static List<UnityEngine.Object> CollectUiIconPackables(List<ItemDefinition> definitions)
     {
-        List<UnityEngine.Object> sprites = new List<UnityEngine.Object>();
-        HashSet<Sprite> visitedSprites = new HashSet<Sprite>();
-        if (definitions == null)
+        List<UnityEngine.Object> packables = new List<UnityEngine.Object>();
+        HashSet<UnityEngine.Object> visitedPackables = new HashSet<UnityEngine.Object>();
+        if (definitions != null)
         {
-            return sprites;
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition == null)
+                {
+                    continue;
+                }
+
+                AddUiIconSprite(definition.icon, packables, visitedPackables);
+
+                List<Sprite> interactionSprites = definition.interactionButtonList;
+                if (interactionSprites == null)
+                {
+                    continue;
+                }
+
+                for (int spriteIndex = 0; spriteIndex < interactionSprites.Count; spriteIndex++)
+                {
+                    AddUiIconSprite(interactionSprites[spriteIndex], packables, visitedPackables);
+                }
+            }
         }
 
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            AddUiIconSprite(definition.icon, sprites, visitedSprites);
-
-            List<Sprite> interactionSprites = definition.interactionButtonList;
-            if (interactionSprites == null)
-            {
-                continue;
-            }
-
-            for (int spriteIndex = 0; spriteIndex < interactionSprites.Count; spriteIndex++)
-            {
-                AddUiIconSprite(interactionSprites[spriteIndex], sprites, visitedSprites);
-            }
-        }
-
-        return sprites;
+        AddUiIconFolderPackable(UiIconAtlasFolder, packables, visitedPackables);
+        AddUiIconFolderPackable(ResourceUiIconFolder, packables, visitedPackables);
+        return packables;
     }
 
-    private static void AddUiIconSprite(Sprite sprite, List<UnityEngine.Object> sprites, HashSet<Sprite> visitedSprites)
+    private static void AddUiIconSprite(
+        Sprite sprite,
+        List<UnityEngine.Object> packables,
+        HashSet<UnityEngine.Object> visitedPackables)
     {
-        if (sprite == null || sprites == null || visitedSprites == null || !visitedSprites.Add(sprite))
+        if (sprite == null || packables == null || visitedPackables == null)
         {
             return;
         }
 
         string assetPath = AssetDatabase.GetAssetPath(sprite);
-        if (string.IsNullOrWhiteSpace(assetPath))
+        if (string.IsNullOrWhiteSpace(assetPath) || IsCoveredByUiIconFolder(assetPath))
         {
             return;
         }
 
-        sprites.Add(sprite);
+        if (visitedPackables.Add(sprite))
+        {
+            packables.Add(sprite);
+        }
     }
 
-    private static void SyncSpriteAtlasPackables(SpriteAtlas atlas, List<UnityEngine.Object> sprites)
+    private static void AddUiIconFolderPackable(
+        string folderPath,
+        List<UnityEngine.Object> packables,
+        HashSet<UnityEngine.Object> visitedPackables)
+    {
+        if (packables == null
+            || visitedPackables == null
+            || string.IsNullOrWhiteSpace(folderPath)
+            || !AssetDatabase.IsValidFolder(folderPath))
+        {
+            return;
+        }
+
+        DefaultAsset folder = AssetDatabase.LoadAssetAtPath<DefaultAsset>(folderPath);
+        if (folder != null && visitedPackables.Add(folder))
+        {
+            packables.Add(folder);
+        }
+    }
+
+    private static bool IsCoveredByUiIconFolder(string assetPath)
+    {
+        return IsAssetInsideFolder(assetPath, UiIconAtlasFolder)
+            || IsAssetInsideFolder(assetPath, ResourceUiIconFolder);
+    }
+
+    private static bool IsAssetInsideFolder(string assetPath, string folderPath)
+    {
+        return !string.IsNullOrWhiteSpace(assetPath)
+            && !string.IsNullOrWhiteSpace(folderPath)
+            && assetPath.StartsWith(folderPath + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void SyncSpriteAtlasPackables(SpriteAtlas atlas, List<UnityEngine.Object> packables)
     {
         if (atlas == null)
         {
@@ -6466,9 +6506,9 @@ public class ItemDataEditorWindow : EditorWindow
             SpriteAtlasExtensions.Remove(atlas, currentPackables);
         }
 
-        if (sprites != null && sprites.Count > 0)
+        if (packables != null && packables.Count > 0)
         {
-            SpriteAtlasExtensions.Add(atlas, sprites.ToArray());
+            SpriteAtlasExtensions.Add(atlas, packables.ToArray());
         }
     }
 

@@ -273,7 +273,7 @@ public class MiningMachine : InputOutputModule
             Resource resource = miningResourceCandidates[i];
             if (resource != null)
             {
-                reserves += resource.RemainingHarvestOutputCount;
+                reserves += resource.RemainingMachineHarvestOutputCount;
             }
         }
 

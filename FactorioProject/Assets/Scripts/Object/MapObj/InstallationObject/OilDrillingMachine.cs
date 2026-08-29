@@ -48,7 +48,7 @@ public class OilDrillingMachine : InputOutputModule
     public bool TryGetObjectInfoResourceReserves(out int reservesLiters)
     {
         reservesLiters = TryResolveOilResource(out Resource resource)
-            ? resource.RemainingHarvestOutputCount
+            ? resource.RemainingMachineHarvestOutputCount
             : 0;
         return true;
     }

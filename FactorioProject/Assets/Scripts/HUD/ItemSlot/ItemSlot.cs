@@ -59,6 +59,25 @@ public class ItemSlot : MonoBehaviour
         bool showCount,
         string displayNameOverride)
     {
+        SetItemDisplay(
+            itemId,
+            itemCount,
+            maxItemCount,
+            allowZeroCount,
+            showCount,
+            displayNameOverride,
+            null);
+    }
+
+    public void SetItemDisplay(
+        int itemId,
+        int itemCount,
+        int maxItemCount,
+        bool allowZeroCount,
+        bool showCount,
+        string displayNameOverride,
+        Sprite displayIconOverride)
+    {
         ResolveReferences();
         id = itemId;
 
@@ -131,8 +150,11 @@ public class ItemSlot : MonoBehaviour
 
         if (icon != null)
         {
-            icon.sprite = itemSet.icon;
-            icon.enabled = itemSet.icon != null;
+            Sprite displayIcon = displayIconOverride != null
+                ? displayIconOverride
+                : itemSet.icon;
+            icon.sprite = displayIcon;
+            icon.enabled = displayIcon != null;
         }
 
         SetItemNameText(
@@ -194,6 +216,8 @@ public class ItemSlot : MonoBehaviour
             {
                 icon.sprite = displayIcon;
             }
+
+            icon.preserveAspect = true;
 
             if (icon.enabled != hasIcon)
             {

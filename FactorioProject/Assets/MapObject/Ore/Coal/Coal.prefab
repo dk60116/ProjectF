@@ -140,7 +140,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 1
-  definition: {fileID: 11400000, guid: 261c163cbac37f741ba53b8eaf059547, type: 2}
+  definition: {fileID: 11400000, guid: fdf31214424f71241ada4684d49aa499, type: 2}
   resourceStatus:
     outputId: 11
     outputItemName: Coal

@@ -60,7 +60,7 @@ MonoBehaviour:
   multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
-  harvestMode: 1
+  harvestMode: 4
   definition: {fileID: 11400000, guid: 7075439788d745f4ca07ecd747733b20, type: 2}
   resourceStatus:
     outputId: 4

@@ -355,7 +355,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steam train
-  objId: 91
+  objId: 92
   itemDefinition: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

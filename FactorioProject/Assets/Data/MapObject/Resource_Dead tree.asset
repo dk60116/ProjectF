@@ -13,9 +13,13 @@ MonoBehaviour:
   m_Name: Resource_Dead tree
   m_EditorClassIdentifier: 
   resourceName: Dead tree
+  resourceIcon: {fileID: 21300000, guid: bd94e8dd13b44e0ead70e807a207cf9a, type: 3}
   prefab: {fileID: 7254935756546121798, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
   harvestMode: 2
   placementCategory: 2
+  minimumGrowth: 10
+  maximumGrowth: 10
+  dropItems: []
   defaultResourceCount: 1
   defaultGetCount: 4
   defaultMaxGauge: 10

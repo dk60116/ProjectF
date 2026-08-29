@@ -378,6 +378,7 @@ public class Player : Character
             {
                 Resource.HarvestMode.Logging => ToolEquipVisual.Axe,
                 Resource.HarvestMode.Cut => ToolEquipVisual.Knife,
+                Resource.HarvestMode.Cultivating => ToolEquipVisual.None,
                 _ => ToolEquipVisual.Pickaxe
             };
         }
@@ -425,6 +426,21 @@ public class Player : Character
     }
 
     public bool IsHoldingPitchfork => ResolveHeldPitchforkItemId() >= 0;
+
+    public bool IsHoldingEmptyBucket
+    {
+        get
+        {
+            EnsureHandBag();
+            if (handBag == null || handBag.GetSlotCount(0) <= 0)
+            {
+                return false;
+            }
+
+            return Bucket.IsEmptyBucketDefinition(
+                ResolveItemDefinition(handBag.GetSlotItemId(0)));
+        }
+    }
 
     private void ApplyHeldPitchforkPortableVisual(int heldPitchforkItemId)
     {

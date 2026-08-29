@@ -9,6 +9,12 @@ using UnityEditor;
 
 public class Resource : MapObject
 {
+    private struct HarvestReward
+    {
+        public int itemId;
+        public int amount;
+    }
+
     private const string ExtraBodyRendererRootName = "_ResourceBodyExtraRenderers";
     private const int BodyYawStepCount = 8;
     private const float BodyYawStepDegrees = 45f;
@@ -18,7 +24,8 @@ public class Resource : MapObject
         Auto,
         Mining,
         Logging,
-        Cut
+        Cut,
+        Cultivating
     }
 
     [Serializable]
@@ -83,6 +90,7 @@ public class Resource : MapObject
 
     private float accumulatedWork;
     private readonly Queue<int> reservedHarvestGaugeCosts = new Queue<int>();
+    private readonly List<HarvestReward> harvestRewardBuffer = new List<HarvestReward>(8);
     private int reservedHarvestGaugeCount;
     private Renderer cachedRenderer;
     private Transform bodyTransform;
@@ -108,7 +116,12 @@ public class Resource : MapObject
     public int MaxGauge => Mathf.Max(1, resourceStatus.maxGauge);
     public int ResourceCount => Mathf.Max(0, resourceStatus.resourceCount);
     public int GetCount => Mathf.Max(1, resourceStatus.getCount);
-    public int RemainingHarvestOutputCount => Mathf.Max(0, ResourceCount * GetCount);
+    public int RemainingHarvestOutputCount => Mathf.Max(
+        0,
+        ResourceCount * GetHarvestOutputCountPerResource());
+    public int RemainingMachineHarvestOutputCount => Mathf.Max(
+        0,
+        ResourceCount * GetCount);
     public bool CanHarvest => ResourceCount > 0;
     public ResourceDefinition Definition => definition;
     public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
@@ -443,10 +456,20 @@ public class Resource : MapObject
 
     public bool TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
     {
-        return TryPeekHarvestOutput(out outputItemId, out outputCount);
+        return TryPeekDefaultHarvestOutput(out outputItemId, out outputCount);
     }
 
     public bool TryPeekHarvestOutput(out int outputItemId, out int outputCount)
+    {
+        if (HasConfiguredDropItems())
+        {
+            return TryPeekConfiguredHarvestOutput(out outputItemId, out outputCount);
+        }
+
+        return TryPeekDefaultHarvestOutput(out outputItemId, out outputCount);
+    }
+
+    private bool TryPeekDefaultHarvestOutput(out int outputItemId, out int outputCount)
     {
         outputItemId = ResolveOutputItemId();
         outputCount = GetCount;
@@ -484,6 +507,12 @@ public class Resource : MapObject
         int depletedResourceCount = ConsumeGaugeDotsInternal(gaugeAmount, out bool resourceFullyDepleted);
         if (depletedResourceCount <= 0)
         {
+            return;
+        }
+
+        if (HasConfiguredDropItems())
+        {
+            PlayConfiguredHarvestDrops(depletedResourceCount, resourceFullyDepleted);
             return;
         }
 
@@ -550,6 +579,186 @@ public class Resource : MapObject
         EnsurePortableObjectPool(GetCount);
 
         StartCoroutine(PlayPickupSequenceRoutine(bagNum, objectId, GetCount, hideAfterSequence));
+    }
+
+    private void PlayConfiguredHarvestDrops(
+        int depletedResourceCount,
+        bool resourceFullyDepleted)
+    {
+        harvestRewardBuffer.Clear();
+        IReadOnlyList<ResourceDropEntry> dropItems = definition != null
+            ? definition.DropItems
+            : null;
+        float growth = ResolveDropGrowth();
+        int firstDepletionOrdinal = Mathf.Max(
+            0,
+            initialResourceCount - ResourceCount - depletedResourceCount);
+
+        for (int depletionIndex = 0;
+             dropItems != null && depletionIndex < depletedResourceCount;
+             depletionIndex++)
+        {
+            System.Random random = new System.Random(
+                BuildHarvestDropSeed(firstDepletionOrdinal + depletionIndex));
+            for (int entryIndex = 0; entryIndex < dropItems.Count; entryIndex++)
+            {
+                ResourceDropEntry entry = dropItems[entryIndex];
+                ItemDefinition itemDefinition = entry?.ItemDefinition;
+                if (itemDefinition == null
+                    || itemDefinition.id < 0
+                    || entry.Amount <= 0
+                    || !entry.Matches(growth)
+                    || random.NextDouble() >= entry.DropChance)
+                {
+                    continue;
+                }
+
+                harvestRewardBuffer.Add(new HarvestReward
+                {
+                    itemId = itemDefinition.id,
+                    amount = entry.Amount
+                });
+            }
+        }
+
+        if (harvestRewardBuffer.Count == 0)
+        {
+            if (resourceFullyDepleted)
+            {
+                HideBodyPresentation();
+                gameObject.SetActive(false);
+            }
+
+            return;
+        }
+
+        HarvestReward[] rewards = harvestRewardBuffer.ToArray();
+        harvestRewardBuffer.Clear();
+        if (resourceFullyDepleted)
+        {
+            HideBodyPresentation();
+        }
+
+        StartCoroutine(
+            PlayConfiguredHarvestDropsRoutine(
+                rewards,
+                resourceFullyDepleted));
+    }
+
+    private IEnumerator PlayConfiguredHarvestDropsRoutine(
+        IReadOnlyList<HarvestReward> rewards,
+        bool hideAfterSequence)
+    {
+        for (int i = 0; rewards != null && i < rewards.Count; i++)
+        {
+            HarvestReward reward = rewards[i];
+            if (reward.itemId < 0 || reward.amount <= 0)
+            {
+                continue;
+            }
+
+            yield return PlayPickupSequenceRoutine(
+                0,
+                reward.itemId,
+                reward.amount,
+                hideAfterSequence && i == rewards.Count - 1);
+        }
+    }
+
+    private bool HasConfiguredDropItems()
+    {
+        return definition != null
+               && definition.DropItems != null
+               && definition.DropItems.Count > 0;
+    }
+
+    private bool TryPeekConfiguredHarvestOutput(
+        out int outputItemId,
+        out int outputCount)
+    {
+        outputItemId = -1;
+        outputCount = 0;
+        if (!CanHarvest || definition == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<ResourceDropEntry> dropItems = definition.DropItems;
+        float growth = ResolveDropGrowth();
+        for (int i = 0; dropItems != null && i < dropItems.Count; i++)
+        {
+            ResourceDropEntry entry = dropItems[i];
+            ItemDefinition itemDefinition = entry?.ItemDefinition;
+            if (itemDefinition == null
+                || itemDefinition.id < 0
+                || entry.Amount <= 0
+                || entry.DropChance <= 0f
+                || !entry.Matches(growth))
+            {
+                continue;
+            }
+
+            outputItemId = itemDefinition.id;
+            outputCount = entry.Amount;
+            return true;
+        }
+
+        return false;
+    }
+
+    private int GetHarvestOutputCountPerResource()
+    {
+        if (!HasConfiguredDropItems())
+        {
+            return GetCount;
+        }
+
+        int count = 0;
+        float growth = ResolveDropGrowth();
+        IReadOnlyList<ResourceDropEntry> dropItems = definition.DropItems;
+        for (int i = 0; i < dropItems.Count; i++)
+        {
+            ResourceDropEntry entry = dropItems[i];
+            if (entry?.ItemDefinition != null
+                && entry.ItemDefinition.id >= 0
+                && entry.DropChance > 0f
+                && entry.Matches(growth))
+            {
+                count += entry.Amount;
+            }
+        }
+
+        return count;
+    }
+
+    private float ResolveDropGrowth()
+    {
+        return this is ProjectF.MapObjects.Tree tree
+            ? tree.Growth
+            : ResourceDefinition.MaxGrowth;
+    }
+
+    private int BuildHarvestDropSeed(int depletionOrdinal)
+    {
+        Vector2Int coordinate = owningBlock != null
+            ? owningBlock.Coordinate
+            : new Vector2Int(
+                Mathf.RoundToInt(transform.position.x),
+                Mathf.RoundToInt(transform.position.z));
+        unchecked
+        {
+            int seed = 23;
+            seed = seed * 397 ^ coordinate.x;
+            seed = seed * 397 ^ coordinate.y;
+            seed = seed * 397 ^ depletionOrdinal;
+            string definitionName = definition != null ? definition.name : objectName;
+            for (int i = 0; !string.IsNullOrEmpty(definitionName) && i < definitionName.Length; i++)
+            {
+                seed = seed * 31 + definitionName[i];
+            }
+
+            return seed;
+        }
     }
 
     private IEnumerator PlayPickupSequenceRoutine(int bagNum, int objectId, int rewardCount, bool hideAfterSequence)

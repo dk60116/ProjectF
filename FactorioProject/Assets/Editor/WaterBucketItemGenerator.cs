@@ -275,7 +275,9 @@ internal static class WaterBucketItemGenerator
     {
         target.portableMesh = source.portableMesh;
         target.portableMat = source.portableMat;
-        target.interactionButtonList = new List<Sprite>();
+        target.interactionButtonList = source.interactionButtonList != null
+            ? new List<Sprite>(source.interactionButtonList)
+            : new List<Sprite>();
         target.lightMode = source.lightMode;
         target.lightRange = source.lightRange;
         target.lightIntensityMultiplier = source.lightIntensityMultiplier;

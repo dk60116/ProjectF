@@ -13,9 +13,18 @@ MonoBehaviour:
   m_Name: Resource_Apple tree
   m_EditorClassIdentifier: 
   resourceName: Apple tree
+  resourceIcon: {fileID: 21300000, guid: 5c0ba1bc74fe4ae3ac5e652c8f6f123e, type: 3}
   prefab: {fileID: 5596077993400562758, guid: 337c834a65decfa4b8addc73e0c54ee6, type: 3}
   harvestMode: 2
   placementCategory: 2
+  minimumGrowth: 10
+  maximumGrowth: 10
+  dropItems:
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 0
+    maximumGrowth: 10
+    dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 4
   defaultMaxGauge: 10

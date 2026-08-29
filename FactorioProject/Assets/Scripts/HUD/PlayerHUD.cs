@@ -1969,6 +1969,11 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
+        if (TryActivateBucketFluidInteraction(currentPlayer, playerController))
+        {
+            return;
+        }
+
         if (TryGetClickedObjectInfoFocusedMapObject(out MapObject selectedMapObject)
             && CanDisplayClickedMapObjectInteraction(selectedMapObject, playerController)
             && TryActivateMapObjectInteraction(selectedMapObject))
@@ -1978,11 +1983,6 @@ public partial class PlayerHUD : BagSlot
 
         if (playerController != null
             && TryActivateNearestAutomaticMapObjectInteraction(playerController))
-        {
-            return;
-        }
-
-        if (TryActivateBucketFluidInteraction(currentPlayer, playerController))
         {
             return;
         }
@@ -2344,7 +2344,6 @@ public partial class PlayerHUD : BagSlot
     private void ClearInteractionTargets()
     {
         bucketFluidInteractionActive = false;
-        bucketOilInteractionSource = null;
         currentSaddleInteractionAnimal = null;
         currentRideableInteractionAnimal = null;
         currentInteractionAnimal = null;
