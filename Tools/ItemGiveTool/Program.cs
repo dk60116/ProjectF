@@ -60,6 +60,8 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showRailLineCheckBox = new CheckBox();
     private readonly CheckBox showDirectionsCheckBox = new CheckBox();
     private readonly CheckBox freeCameraCheckBox = new CheckBox();
+    private readonly CheckBox freeElectroEnergyCheckBox = new CheckBox();
+    private readonly CheckBox freeBucketCheckBox = new CheckBox();
     private readonly CheckBox showAnimalHerdAreasCheckBox = new CheckBox();
     private readonly CheckBox animalAIPausedCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
@@ -525,6 +527,20 @@ internal sealed class EditorToolForm : Form
                 freeCameraCheckBox.Checked,
                 "FreeCamera");
 
+        StyleDebugCheckBox(freeElectroEnergyCheckBox, "Free Electro Energy");
+        freeElectroEnergyCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "freeElectroEnergy",
+                freeElectroEnergyCheckBox.Checked,
+                "Free Electro Energy");
+
+        StyleDebugCheckBox(freeBucketCheckBox, "Free Bucket");
+        freeBucketCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "freeBucket",
+                freeBucketCheckBox.Checked,
+                "Free Bucket");
+
         StyleDebugCheckBox(showAnimalHerdAreasCheckBox, "Show Animal Herd Area");
         showAnimalHerdAreasCheckBox.CheckedChanged += async (_, _) =>
             await SendDebugToggleAsync(
@@ -547,6 +563,8 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(showRailLineCheckBox);
         debugTogglePanel.Controls.Add(showDirectionsCheckBox);
         debugTogglePanel.Controls.Add(freeCameraCheckBox);
+        debugTogglePanel.Controls.Add(freeElectroEnergyCheckBox);
+        debugTogglePanel.Controls.Add(freeBucketCheckBox);
         debugTogglePanel.Controls.Add(showAnimalHerdAreasCheckBox);
         debugTogglePanel.Controls.Add(animalAIPausedCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 6);
@@ -1263,6 +1281,16 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(freeCameraCheckBox, freeCamera);
         }
 
+        if (TryReadProtocolBool(response, "freeElectroEnergy", out bool freeElectroEnergy))
+        {
+            ApplyRuntimeCheckBoxState(freeElectroEnergyCheckBox, freeElectroEnergy);
+        }
+
+        if (TryReadProtocolBool(response, "freeBucket", out bool freeBucket))
+        {
+            ApplyRuntimeCheckBoxState(freeBucketCheckBox, freeBucket);
+        }
+
         if (TryReadProtocolBool(response, "showAnimalHerdAreas", out bool showAnimalHerdAreas))
         {
             ApplyRuntimeCheckBoxState(showAnimalHerdAreasCheckBox, showAnimalHerdAreas);
@@ -1661,6 +1689,8 @@ internal sealed class EditorToolForm : Form
         showRailLineCheckBox.Enabled = !busy;
         showDirectionsCheckBox.Enabled = !busy;
         freeCameraCheckBox.Enabled = !busy;
+        freeElectroEnergyCheckBox.Enabled = !busy;
+        freeBucketCheckBox.Enabled = !busy;
         showAnimalHerdAreasCheckBox.Enabled = !busy;
         animalAIPausedCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;

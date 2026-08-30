@@ -142,6 +142,18 @@ public static class SaveGameItemIdRemapper
             }
         }
 
+        if (map.plantedResources != null)
+        {
+            for (int i = 0; i < map.plantedResources.Count; i++)
+            {
+                PlantedResourceSaveEntry entry = map.plantedResources[i];
+                if (entry != null)
+                {
+                    entry.seedItemId = RemapItemId(entry.seedItemId, itemIdMap);
+                }
+            }
+        }
+
         if (map.conveyorItems != null)
         {
             for (int i = 0; i < map.conveyorItems.Count; i++)

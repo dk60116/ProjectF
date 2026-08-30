@@ -4,8 +4,9 @@ using UnityEngine.Rendering;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
-    private const string FarmlandVisualName = "FarmlandSurface";
+    internal const string FarmlandVisualName = "FarmlandSurface";
     private const float FarmlandSurfaceOffset = 0.008f;
+    private const float FarmlandVisualHalfExtent = 1f;
     private static readonly Vector2Int[] FarmlandNeighborDirections =
     {
         Vector2Int.left,
@@ -18,6 +19,8 @@ public partial class TerrainGenerator : MonoBehaviour
         new Vector2Int(1, 1)
     };
     private readonly HashSet<Vector2Int> farmlandCoordinates = new HashSet<Vector2Int>();
+    private readonly Dictionary<Vector2Int, int> plantedSeedItemIds =
+        new Dictionary<Vector2Int, int>();
     private Mesh farmlandVisualMesh;
     private Material farmlandVisualMaterial;
     private MaterialPropertyBlock farmlandVisualPropertyBlock;
@@ -27,19 +30,125 @@ public partial class TerrainGenerator : MonoBehaviour
         return farmlandCoordinates.Contains(coordinate);
     }
 
+    public bool CanPlantSeed(Block block, ItemDefinition seedDefinition)
+    {
+        Resource resource = block != null ? block.Resource : null;
+        return block != null
+               && block.Type == Block.BlockType.Ground
+               && farmlandCoordinates.Contains(block.Coordinate)
+               && block.MapObject == null
+               && (resource == null || !resource.gameObject.activeInHierarchy)
+               && !block.HasDroppedFloorObjects
+               && ItemDefinition.IsPlantableSeedDefinition(seedDefinition);
+    }
+
+    public bool TryPlantSeed(Block block, ItemDefinition seedDefinition)
+    {
+        if (!CanPlantSeed(block, seedDefinition))
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        resourceStateStore?.RemoveResource(block.Coordinate);
+        Resource depletedResource = block.Resource;
+        if (depletedResource != null && !depletedResource.gameObject.activeInHierarchy)
+        {
+            Destroy(depletedResource.gameObject);
+        }
+
+        plantedSeedItemIds[block.Coordinate] = seedDefinition.id;
+        Resource spawnedResource = SpawnResourceOnBlock(
+            block,
+            seedDefinition.seedTargetResource.prefab,
+            block.Coordinate);
+        if (spawnedResource == null)
+        {
+            plantedSeedItemIds.Remove(block.Coordinate);
+            return false;
+        }
+
+        InitializePlantedResourceGrowth(spawnedResource, true);
+        resourceStateStore?.Save(block.Coordinate, spawnedResource);
+        return true;
+    }
+
+    private bool TrySpawnPlantedResourceOnBlock(Block block, Vector2Int coordinate)
+    {
+        if (!plantedSeedItemIds.TryGetValue(coordinate, out int seedItemId))
+        {
+            return false;
+        }
+
+        if (!farmlandCoordinates.Contains(coordinate)
+            || !TryResolvePlantedSeedDefinition(seedItemId, out ItemDefinition seedDefinition))
+        {
+            plantedSeedItemIds.Remove(coordinate);
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        bool hasSavedState = resourceStateStore != null
+                             && resourceStateStore.TryGet(coordinate, out _);
+        Resource spawnedResource = SpawnResourceOnBlock(
+            block,
+            seedDefinition.seedTargetResource.prefab,
+            coordinate);
+        if (spawnedResource != null)
+        {
+            InitializePlantedResourceGrowth(
+                spawnedResource,
+                !hasSavedState);
+        }
+
+        // 고갈된 리소스도 같은 좌표에 자연 생성 리소스가 덮어쓰지 않도록
+        // 심은 좌표를 처리된 것으로 간주한다.
+        return true;
+    }
+
+    private static bool TryResolvePlantedSeedDefinition(
+        int seedItemId,
+        out ItemDefinition seedDefinition)
+    {
+        seedDefinition = null;
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return itemManager != null
+               && itemManager.TryGetItemDefinitionById(seedItemId, out seedDefinition)
+               && ItemDefinition.IsPlantableSeedDefinition(seedDefinition);
+    }
+
+    private static void InitializePlantedResourceGrowth(
+        Resource resource,
+        bool initializeGrowth)
+    {
+        if (initializeGrowth && resource is ProjectF.MapObjects.Tree tree)
+        {
+            tree.SetGrowth(ResourceDefinition.MinGrowth);
+        }
+    }
+
     public bool TryToggleFarmland(Block block)
     {
+        Resource resource = block != null ? block.Resource : null;
         if (block == null
             || block.Type != Block.BlockType.Ground
             || !IsFarmableGroundBiomeAt(block.Coordinate)
             || block.MapObject != null
-            || block.Resource != null
+            || (resource != null && resource.gameObject.activeInHierarchy)
             || block.HasDroppedFloorObjects)
         {
             return false;
         }
 
-        if (!farmlandCoordinates.Remove(block.Coordinate))
+        if (farmlandCoordinates.Remove(block.Coordinate))
+        {
+            plantedSeedItemIds.Remove(block.Coordinate);
+            EnsureResourceStateStore();
+            resourceStateStore?.RemoveResource(block.Coordinate);
+        }
+        else
         {
             farmlandCoordinates.Add(block.Coordinate);
         }
@@ -125,7 +234,15 @@ public partial class TerrainGenerator : MonoBehaviour
         List<Vector3> vertices = new List<Vector3>(4);
         List<Vector2> uvs = new List<Vector2>(4);
         List<int> triangles = new List<int>(6);
-        AddFarmlandQuad(vertices, uvs, triangles, -0.5f, 0.5f, -0.5f, 0.5f, 0f);
+        AddFarmlandQuad(
+            vertices,
+            uvs,
+            triangles,
+            -FarmlandVisualHalfExtent,
+            FarmlandVisualHalfExtent,
+            -FarmlandVisualHalfExtent,
+            FarmlandVisualHalfExtent,
+            0f);
 
         farmlandVisualMesh = new Mesh
         {
@@ -251,11 +368,23 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             mapSaveData.farmlandCoordinates.Add(coordinate);
         }
+
+        mapSaveData.plantedResources ??= new List<PlantedResourceSaveEntry>();
+        mapSaveData.plantedResources.Clear();
+        foreach (KeyValuePair<Vector2Int, int> pair in plantedSeedItemIds)
+        {
+            mapSaveData.plantedResources.Add(new PlantedResourceSaveEntry
+            {
+                coordinate = pair.Key,
+                seedItemId = pair.Value
+            });
+        }
     }
 
     private void ApplyFarmlandSaveState(MapSaveData mapSaveData)
     {
         farmlandCoordinates.Clear();
+        plantedSeedItemIds.Clear();
         if (mapSaveData?.farmlandCoordinates == null)
         {
             return;
@@ -269,10 +398,27 @@ public partial class TerrainGenerator : MonoBehaviour
                 farmlandCoordinates.Add(coordinate);
             }
         }
+
+        if (mapSaveData.plantedResources == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < mapSaveData.plantedResources.Count; i++)
+        {
+            PlantedResourceSaveEntry entry = mapSaveData.plantedResources[i];
+            if (entry != null
+                && entry.seedItemId >= 0
+                && farmlandCoordinates.Contains(entry.coordinate))
+            {
+                plantedSeedItemIds[entry.coordinate] = entry.seedItemId;
+            }
+        }
     }
 
     private void ClearFarmlandPersistentState()
     {
         farmlandCoordinates.Clear();
+        plantedSeedItemIds.Clear();
     }
 }

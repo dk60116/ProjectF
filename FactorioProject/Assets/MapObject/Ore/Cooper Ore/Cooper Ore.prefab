@@ -192,7 +192,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 1
-  definition: {fileID: 11400000, guid: abc5d6c4fd694cb418213d11994844d1, type: 2}
+  definition: {fileID: 11400000, guid: c9546edd42f989e428ca195419f91d28, type: 2}
   resourceStatus:
     outputId: 13
     outputItemName: Cooper Ore

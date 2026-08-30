@@ -121,7 +121,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   id: 0
-  objectName: 
+  objectName: Pine tree
   objId: 7
   itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
   portableObj: {fileID: 0}
@@ -150,6 +150,9 @@ MonoBehaviour:
   maximumBodyScaleRatio: 1
   dynamicScaleMaxResourceCount: 1
   growth: 10
+  growthWaterLiters: 0
+  growthFertilizerAmount: 0
+  growthElapsedSeconds: 0
 --- !u!135 &1939977283726542213
 SphereCollider:
   m_ObjectHideFlags: 0

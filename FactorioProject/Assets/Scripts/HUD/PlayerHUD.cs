@@ -233,6 +233,7 @@ public partial class PlayerHUD : BagSlot
             boundInteractionButton = null;
             boundDoorInteractionButton = null;
             boundThrowInteractionButton = null;
+            boundEatInteractionButton = null;
             boundTrainConnectInteractionButton = null;
             boundTrainDisconnectInteractionButton = null;
         }
@@ -241,6 +242,7 @@ public partial class PlayerHUD : BagSlot
         ResolveInteractionButton();
         ResolveDoorInteractionButton();
         ResolveThrowInteractionButton();
+        ResolveEatInteractionButton();
         ResolveTrainConnectionInteractionButtons();
         ResolveItemFilterButton();
         ResolveItemFilterUI();
@@ -1881,7 +1883,8 @@ public partial class PlayerHUD : BagSlot
         if (playerController != null
             && (playerController.IsResourceHarvestingActive
                 || playerController.IsAnimalKnifeInteractionActive
-                || playerController.IsPitchforkDiggingActive))
+                || playerController.IsPitchforkDiggingActive
+                || playerController.IsSeedPlantingActive))
         {
             ClearAllInteractionButtonState();
             return;
@@ -1899,6 +1902,7 @@ public partial class PlayerHUD : BagSlot
             hasHeldNoose && !(mountedVehicle is Train) && !(mountedVehicle is Handcart)
                 ? heldNoose.icon
                 : (hasHeldLightItem ? heldLightItem.icon : null));
+        SetEatInteractionButtonState(currentPlayer);
 
         if (mountedVehicle != null)
         {
@@ -1921,6 +1925,11 @@ public partial class PlayerHUD : BagSlot
 
         SetTrainConnectionInteractionButtonState(null);
 
+        if (TryActivateSeedGroundInteraction(currentPlayer, playerController))
+        {
+            return;
+        }
+
         if (playerController != null
             && playerController.TryGetSelectedPitchforkGroundBlock(out _)
             && TryResolveHeldItem(currentPlayer, PitchforkItemName, out ItemDefinition heldPitchfork))
@@ -1938,6 +1947,11 @@ public partial class PlayerHUD : BagSlot
             ClearInteractionTargets();
             pitchforkGroundInteractionActive = true;
             SetActiveInteractionButton(InteractionButton, pitchforkInteractionIcon);
+            return;
+        }
+
+        if (TryActivatePlantGrowthInteraction(currentPlayer, playerController))
+        {
             return;
         }
 
@@ -2323,6 +2337,7 @@ public partial class PlayerHUD : BagSlot
     {
         ClearContextInteractionButtonState();
         HideInteractionButton(ThrowInteractionButton);
+        HideInteractionButton(EatInteractionButton);
         UpdateInteractionButtonLayout();
     }
 
@@ -2344,6 +2359,8 @@ public partial class PlayerHUD : BagSlot
     private void ClearInteractionTargets()
     {
         bucketFluidInteractionActive = false;
+        plantGrowthInteractionType = PlantGrowthInteractionType.None;
+        currentPlantGrowthTarget = null;
         currentSaddleInteractionAnimal = null;
         currentRideableInteractionAnimal = null;
         currentInteractionAnimal = null;
@@ -2355,6 +2372,8 @@ public partial class PlayerHUD : BagSlot
         currentInteractionResource = null;
         currentInteractionMapObject = null;
         pitchforkGroundInteractionActive = false;
+        seedGroundInteractionActive = false;
+        currentSeedGroundDefinition = null;
     }
 
     private void SetActiveInteractionButton(InteractionButton activeButton, Sprite icon)
@@ -2451,6 +2470,7 @@ public partial class PlayerHUD : BagSlot
         ResetParallelInteractionButtonPosition(TrainConnectInteractionButton);
         ResetParallelInteractionButtonPosition(TrainDisconnectInteractionButton);
         ResetParallelInteractionButtonPosition(ThrowInteractionButton);
+        ResetParallelInteractionButtonPosition(EatInteractionButton);
 
         InteractionButton contextButton = IsInteractionButtonVisible(DoorInteractionButton)
             ? DoorInteractionButton
@@ -2475,6 +2495,11 @@ public partial class PlayerHUD : BagSlot
             ref previousWidth);
         PositionParallelInteractionButton(
             ThrowInteractionButton,
+            contextButton.transform.parent,
+            ref previousRect,
+            ref previousWidth);
+        PositionParallelInteractionButton(
+            EatInteractionButton,
             contextButton.transform.parent,
             ref previousRect,
             ref previousWidth);
@@ -2578,6 +2603,16 @@ public partial class PlayerHUD : BagSlot
             Player currentPlayer = GameManager.Instance != null
                 ? GameManager.Instance.Player
                 : null;
+            if (TryResolveHeldItem(currentPlayer, out ItemDefinition heldDefinition)
+                && ItemDefinition.IsPlantableSeedDefinition(heldDefinition))
+            {
+                ClearObjectInfoPanelState();
+                playerController?.TrySelectSeedGroundAtPointer(
+                    pointerPosition,
+                    heldDefinition);
+                return;
+            }
+
             if (currentPlayer != null && currentPlayer.IsHoldingPitchfork)
             {
                 ClearObjectInfoPanelState();
@@ -3407,6 +3442,13 @@ public partial class PlayerHUD : BagSlot
         }
 
         Player currentPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (seedGroundInteractionActive)
+        {
+            ResolvePlayerController()?.RequestSeedPlanting(currentSeedGroundDefinition);
+            UpdateInteractionButtonState();
+            return;
+        }
+
         if (pitchforkGroundInteractionActive)
         {
             ResolvePlayerController()?.RequestPitchforkDigging();
@@ -3417,6 +3459,13 @@ public partial class PlayerHUD : BagSlot
         if (bucketFluidInteractionActive)
         {
             HandleBucketFluidInteraction(currentPlayer);
+            UpdateInteractionButtonState();
+            return;
+        }
+
+        if (plantGrowthInteractionType != PlantGrowthInteractionType.None)
+        {
+            HandlePlantGrowthInteraction(currentPlayer);
             UpdateInteractionButtonState();
             return;
         }
@@ -3609,7 +3658,9 @@ public partial class PlayerHUD : BagSlot
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
                                 || pitchforkGroundInteractionActive
+                                || seedGroundInteractionActive
                                 || bucketFluidInteractionActive
+                                || plantGrowthInteractionType != PlantGrowthInteractionType.None
                                 || currentDraftAnimalInteractionHandcart != null
                                 || currentSaddleInteractionAnimal != null
                                 || currentRideableInteractionAnimal != null
@@ -3628,6 +3679,12 @@ public partial class PlayerHUD : BagSlot
             && IsInteractionButtonVisible(ThrowInteractionButton))
         {
             HandleThrowInteractionButtonClicked();
+            return;
+        }
+
+        if (IsInteractionButtonVisible(EatInteractionButton))
+        {
+            HandleEatInteractionButtonClicked();
         }
     }
 
@@ -4030,6 +4087,7 @@ public partial class PlayerHUD : BagSlot
         return IsPointerOverInteractionButtonArea(InteractionButton, pointerPosition)
                || IsPointerOverInteractionButtonArea(DoorInteractionButton, pointerPosition)
                || IsPointerOverInteractionButtonArea(ThrowInteractionButton, pointerPosition)
+               || IsPointerOverInteractionButtonArea(EatInteractionButton, pointerPosition)
                || IsPointerOverInteractionButtonArea(TrainConnectInteractionButton, pointerPosition)
                || IsPointerOverInteractionButtonArea(TrainDisconnectInteractionButton, pointerPosition);
     }

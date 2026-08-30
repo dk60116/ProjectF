@@ -10,18 +10,18 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
-    private void SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
+    private Resource SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
     {
         if (block == null || prefab == null)
         {
-            return;
+            return null;
         }
 
         EnsureResourceStateStore();
         if (resourceStateStore != null && resourceStateStore.IsDepleted(worldCoordinate))
         {
             block.SetMapObject(null);
-            return;
+            return null;
         }
 
         Resource spawnedResource = Instantiate(prefab, block.transform);
@@ -56,6 +56,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         block.SetMapObject(spawnedResource);
+        return spawnedResource;
     }
 
     private void ApplyResourceScaleProfile(Resource spawnedResource, Resource prefab)

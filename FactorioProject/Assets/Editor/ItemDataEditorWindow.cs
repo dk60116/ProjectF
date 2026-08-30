@@ -195,6 +195,10 @@ public class ItemDataEditorWindow : EditorWindow
     private GUIContent[] cachedParentInputOutputModuleItemOptionContents = Array.Empty<GUIContent>();
     private readonly Dictionary<int, int> cachedParentInputOutputModuleItemOptionIndexes = new Dictionary<int, int>();
     private int cachedParentInputOutputModuleItemOptionsVersion = -1;
+    private ResourceDefinition[] cachedSeedTargetResourceOptions = Array.Empty<ResourceDefinition>();
+    private GUIContent[] cachedSeedTargetResourceOptionContents = Array.Empty<GUIContent>();
+    private readonly Dictionary<int, int> cachedSeedTargetResourceOptionIndexes = new Dictionary<int, int>();
+    private int cachedSeedTargetResourceOptionsVersion = -1;
     private int cachedCraftingTreeIngredientSummaryVersion = -1;
     private readonly Dictionary<int, string> inputOutputTargetKeyCache = new Dictionary<int, string>();
     private readonly Dictionary<string, SerializedProperty> cachedSelectedDefinitionProperties =
@@ -380,7 +384,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 11;
+        public int version = 12;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -422,6 +426,12 @@ public class ItemDataEditorWindow : EditorWindow
         public string energyType;
         public int energyTypeValue = -1;
         public int energyAmount;
+        public bool hasEatReward;
+        public InputOutputJsonEntry eatRewardItem;
+        public float eatRewardChancePercent;
+        public bool hasSeedSettings;
+        public bool isSeed;
+        public string seedTargetResourceAssetPath;
         public string useEnergyType;
         public int useEnergyTypeValue = -1;
         public float useEnergyAmount;
@@ -625,6 +635,10 @@ public class ItemDataEditorWindow : EditorWindow
         cachedParentInputOutputModuleItemOptionContents = Array.Empty<GUIContent>();
         cachedParentInputOutputModuleItemOptionIndexes.Clear();
         cachedParentInputOutputModuleItemOptionsVersion = -1;
+        cachedSeedTargetResourceOptions = Array.Empty<ResourceDefinition>();
+        cachedSeedTargetResourceOptionContents = Array.Empty<GUIContent>();
+        cachedSeedTargetResourceOptionIndexes.Clear();
+        cachedSeedTargetResourceOptionsVersion = -1;
         cachedCraftingTreeIngredientSummaries.Clear();
         cachedCraftingTreeIngredientSummaryVersion = -1;
     }
@@ -3184,6 +3198,14 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "energyType");
         SerializedProperty energyAmountProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "energyAmount");
+        SerializedProperty eatRewardItemProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "eatRewardItem");
+        SerializedProperty eatRewardChancePercentProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "eatRewardChancePercent");
+        SerializedProperty isSeedProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "isSeed");
+        SerializedProperty seedTargetResourceProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "seedTargetResource");
         SerializedProperty useEnergyTypeProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "useEnergyType");
         SerializedProperty useEnergyAmountProperty =
@@ -3283,6 +3305,29 @@ public class ItemDataEditorWindow : EditorWindow
             DrawMultiClampedLongProperty(capacityProperty, new GUIContent("Capacity"), 1L);
         }
 
+        if (isSeedProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Farming", EditorStyles.boldLabel);
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(
+                isSeedProperty,
+                new GUIContent("Seed", "체크하면 밭에 심을 수 있는 씨앗 아이템으로 사용합니다."));
+            bool seedStateChanged = EditorGUI.EndChangeCheck();
+            if (seedStateChanged
+                && !isSeedProperty.hasMultipleDifferentValues
+                && !isSeedProperty.boolValue
+                && seedTargetResourceProperty != null)
+            {
+                seedTargetResourceProperty.objectReferenceValue = null;
+            }
+
+            if (!isSeedProperty.hasMultipleDifferentValues && isSeedProperty.boolValue)
+            {
+                DrawSeedTargetResourceField(seedTargetResourceProperty);
+            }
+        }
+
         if (storesFluidProperty != null
             || fluidDisplayColorProperty != null
             || (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreOilDrillingMachines()))
@@ -3365,6 +3410,22 @@ public class ItemDataEditorWindow : EditorWindow
                     energyAmountProperty,
                     new GUIContent("Energy Amount"),
                     0L);
+            }
+
+            if (!energyTypeProperty.hasMultipleDifferentValues
+                && ItemDefinition.IsFoodEnergyType(
+                    (ItemDefinition.EnergyType)energyTypeProperty.enumValueIndex))
+            {
+                DrawMultiPropertyField(
+                    eatRewardItemProperty,
+                    new GUIContent(
+                        "Eat Reward Item",
+                        "이 음식을 먹었을 때 확률적으로 획득하는 아이템입니다."));
+                DrawMultiPropertyField(
+                    eatRewardChancePercentProperty,
+                    new GUIContent(
+                        "Eat Reward Chance (%)",
+                        "음식 1개를 먹을 때 보상 아이템을 획득할 확률입니다."));
             }
         }
 
@@ -3638,6 +3699,10 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty undergroundPipeMaxDistanceProperty = GetSelectedDefinitionProperty(serializedObject, "undergroundPipeMaxDistance");
         SerializedProperty energyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "energyType");
         SerializedProperty energyAmountProperty = GetSelectedDefinitionProperty(serializedObject, "energyAmount");
+        SerializedProperty eatRewardItemProperty = GetSelectedDefinitionProperty(serializedObject, "eatRewardItem");
+        SerializedProperty eatRewardChancePercentProperty = GetSelectedDefinitionProperty(serializedObject, "eatRewardChancePercent");
+        SerializedProperty isSeedProperty = GetSelectedDefinitionProperty(serializedObject, "isSeed");
+        SerializedProperty seedTargetResourceProperty = GetSelectedDefinitionProperty(serializedObject, "seedTargetResource");
         SerializedProperty useEnergyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyType");
         SerializedProperty useEnergyAmountProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyAmount");
         SerializedProperty completeEnergyProperty = GetSelectedDefinitionProperty(serializedObject, "completeEnergy");
@@ -3756,6 +3821,22 @@ public class ItemDataEditorWindow : EditorWindow
 
             EditorGUILayout.PropertyField(capacityProperty, new GUIContent("Capacity"));
         }
+        if (isSeedProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Farming", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(
+                isSeedProperty,
+                new GUIContent("Seed", "체크하면 밭에 심을 수 있는 씨앗 아이템으로 사용합니다."));
+            if (isSeedProperty.boolValue)
+            {
+                DrawSeedTargetResourceField(seedTargetResourceProperty);
+            }
+            else if (seedTargetResourceProperty != null)
+            {
+                seedTargetResourceProperty.objectReferenceValue = null;
+            }
+        }
         if (storesFluidProperty != null
             || fluidDisplayColorProperty != null
             || (fluidOutputLitersPerSecondProperty != null && definition.mapObject is OilDrillingMachine))
@@ -3848,6 +3929,20 @@ public class ItemDataEditorWindow : EditorWindow
             else if (energyAmountProperty != null)
             {
                 EditorGUILayout.PropertyField(energyAmountProperty, new GUIContent("Energy Amount"));
+            }
+
+            if (ItemDefinition.IsFoodEnergyType(energyType))
+            {
+                EditorGUILayout.PropertyField(
+                    eatRewardItemProperty,
+                    new GUIContent(
+                        "Eat Reward Item",
+                        "이 음식을 먹었을 때 확률적으로 획득하는 아이템입니다."));
+                EditorGUILayout.PropertyField(
+                    eatRewardChancePercentProperty,
+                    new GUIContent(
+                        "Eat Reward Chance (%)",
+                        "음식 1개를 먹을 때 보상 아이템을 획득할 확률입니다."));
             }
         }
 
@@ -6002,6 +6097,108 @@ public class ItemDataEditorWindow : EditorWindow
         cachedParentInputOutputModuleItemOptionsVersion = definitionsCacheVersion;
     }
 
+    private void DrawSeedTargetResourceField(SerializedProperty targetResourceProperty)
+    {
+        if (targetResourceProperty == null)
+        {
+            return;
+        }
+
+        EnsureSeedTargetResourceOptionCache();
+        ResourceDefinition currentDefinition =
+            targetResourceProperty.objectReferenceValue as ResourceDefinition;
+        int currentIndex = currentDefinition != null
+                           && cachedSeedTargetResourceOptionIndexes.TryGetValue(
+                               currentDefinition.GetInstanceID(),
+                               out int resolvedIndex)
+            ? resolvedIndex
+            : 0;
+
+        bool previousMixedValue = EditorGUI.showMixedValue;
+        EditorGUI.showMixedValue = targetResourceProperty.hasMultipleDifferentValues;
+        EditorGUI.BeginChangeCheck();
+        int nextIndex = EditorGUILayout.Popup(
+            new GUIContent(
+                "Target Resource",
+                "씨앗을 밭에 심었을 때 생성할 ResourceDefinition입니다."),
+            currentIndex,
+            cachedSeedTargetResourceOptionContents);
+        bool selectionChanged = EditorGUI.EndChangeCheck();
+        EditorGUI.showMixedValue = previousMixedValue;
+
+        ResourceDefinition nextDefinition =
+            nextIndex > 0 && nextIndex < cachedSeedTargetResourceOptions.Length
+                ? cachedSeedTargetResourceOptions[nextIndex]
+                : null;
+        if (selectionChanged && nextDefinition != currentDefinition)
+        {
+            targetResourceProperty.objectReferenceValue = nextDefinition;
+            currentDefinition = nextDefinition;
+        }
+
+        if (currentDefinition != null && currentDefinition.prefab == null)
+        {
+            EditorGUILayout.HelpBox(
+                "선택한 ResourceDefinition에 Prefab이 없어 게임에서 심을 수 없습니다.",
+                MessageType.Warning);
+        }
+    }
+
+    private void EnsureSeedTargetResourceOptionCache()
+    {
+        if (cachedSeedTargetResourceOptionsVersion == definitionsCacheVersion)
+        {
+            return;
+        }
+
+        string[] resourceGuids = AssetDatabase.FindAssets("t:ResourceDefinition");
+        List<ResourceDefinition> definitions = new List<ResourceDefinition>(resourceGuids.Length);
+        for (int i = 0; i < resourceGuids.Length; i++)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(resourceGuids[i]);
+            ResourceDefinition definition =
+                AssetDatabase.LoadAssetAtPath<ResourceDefinition>(assetPath);
+            if (definition != null)
+            {
+                definitions.Add(definition);
+            }
+        }
+
+        definitions.Sort((left, right) => string.Compare(
+            GetResourceDefinitionDisplayName(left),
+            GetResourceDefinitionDisplayName(right),
+            StringComparison.OrdinalIgnoreCase));
+
+        cachedSeedTargetResourceOptions = new ResourceDefinition[definitions.Count + 1];
+        cachedSeedTargetResourceOptionContents = new GUIContent[definitions.Count + 1];
+        cachedSeedTargetResourceOptionContents[0] = new GUIContent("(None)");
+        cachedSeedTargetResourceOptionIndexes.Clear();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ResourceDefinition definition = definitions[i];
+            int optionIndex = i + 1;
+            cachedSeedTargetResourceOptions[optionIndex] = definition;
+            cachedSeedTargetResourceOptionContents[optionIndex] = new GUIContent(
+                GetResourceDefinitionDisplayName(definition),
+                AssetDatabase.GetAssetPath(definition));
+            cachedSeedTargetResourceOptionIndexes[definition.GetInstanceID()] = optionIndex;
+        }
+
+        cachedSeedTargetResourceOptionsVersion = definitionsCacheVersion;
+    }
+
+    private static string GetResourceDefinitionDisplayName(ResourceDefinition definition)
+    {
+        if (definition == null)
+        {
+            return "(None)";
+        }
+
+        return string.IsNullOrWhiteSpace(definition.resourceName)
+            ? definition.name
+            : definition.resourceName.Trim();
+    }
+
     private static ItemDefinition[] BuildInputOutputDefinitionOptions(List<ItemDefinition> definitions)
     {
         int optionCount = definitions != null ? definitions.Count : 0;
@@ -6921,6 +7118,14 @@ public class ItemDataEditorWindow : EditorWindow
             energyType = definition.energyType.ToString(),
             energyTypeValue = (int)definition.energyType,
             energyAmount = Mathf.Max(0, definition.energyAmount),
+            hasEatReward = true,
+            eatRewardItem = BuildDefinitionReferenceJsonEntry(definition.eatRewardItem),
+            eatRewardChancePercent = Mathf.Clamp(definition.eatRewardChancePercent, 0f, 100f),
+            hasSeedSettings = true,
+            isSeed = definition.isSeed,
+            seedTargetResourceAssetPath = definition.isSeed && definition.seedTargetResource != null
+                ? AssetDatabase.GetAssetPath(definition.seedTargetResource)
+                : string.Empty,
             useEnergyType = definition.useEnergyType.ToString(),
             useEnergyTypeValue = (int)definition.useEnergyType,
             useEnergyAmount = Mathf.Max(0f, definition.useEnergyAmount),
@@ -7195,6 +7400,18 @@ public class ItemDataEditorWindow : EditorWindow
         }
         definition.energyType = ParseEnergyType(entry.energyType, entry.energyTypeValue, definition.energyType);
         definition.energyAmount = definition.energyType == ItemDefinition.EnergyType.None ? 0 : Mathf.Max(0, entry.energyAmount);
+        if (entry.hasEatReward)
+        {
+            definition.eatRewardItem = ResolveDefinitionReference(definitions, entry.eatRewardItem);
+            definition.eatRewardChancePercent = Mathf.Clamp(entry.eatRewardChancePercent, 0f, 100f);
+        }
+        if (entry.hasSeedSettings)
+        {
+            definition.isSeed = entry.isSeed;
+            definition.seedTargetResource = entry.isSeed
+                ? LoadAssetAtPath<ResourceDefinition>(entry.seedTargetResourceAssetPath)
+                : null;
+        }
         definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
         definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.useEnergyAmount);
         definition.completeEnergy = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.completeEnergy);

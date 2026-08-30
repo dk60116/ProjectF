@@ -52,6 +52,10 @@ public class GameManager : MonoBehaviour
     private bool freeCamera;
     [SerializeField]
     private bool freeTrain;
+    [SerializeField, InspectorName("Free Electro Energy")]
+    private bool freeElectroEnergy;
+    [SerializeField, InspectorName("Free Bucket")]
+    private bool freeBucket;
     [SerializeField]
     private bool mapObjectTickProfilingEnabled;
     [SerializeField, Min(1)]
@@ -80,6 +84,8 @@ public class GameManager : MonoBehaviour
     private bool lastRuntimeShowBeltDirections;
     private bool freeCameraRuntimeStateInitialized;
     private bool lastRuntimeFreeCamera;
+    private bool freeElectroEnergyRuntimeStateInitialized;
+    private bool lastRuntimeFreeElectroEnergy;
     private bool mapObjectTickProfilingRuntimeStateInitialized;
     private bool lastRuntimeMapObjectTickProfilingEnabled;
     private RailLineDebugRenderer railLineDebugRenderer;
@@ -149,6 +155,7 @@ public class GameManager : MonoBehaviour
         SyncRailLineRuntimeVisibility();
         SyncBeltDirectionRuntimeVisibility();
         SyncFreeCameraRuntimeState();
+        SyncFreeElectroEnergyRuntimeState();
         SyncMapObjectTickProfilingRuntimeState();
     }
 
@@ -165,6 +172,7 @@ public class GameManager : MonoBehaviour
             SyncRailLineRuntimeVisibility(true);
             SyncBeltDirectionRuntimeVisibility(true);
             SyncFreeCameraRuntimeState(true);
+            SyncFreeElectroEnergyRuntimeState(true);
             SyncMapObjectTickProfilingRuntimeState(true);
             animalHerdDebugRenderer?.SetVisible(showAnimalHerdAreas);
         }
@@ -208,6 +216,8 @@ public class GameManager : MonoBehaviour
     public bool ShowBeltDirections => ShowDirections;
     public bool FreeCamera => freeCamera;
     public bool FreeTrain => freeTrain;
+    public bool FreeElectroEnergy => freeElectroEnergy;
+    public bool FreeBucket => freeBucket;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
     public float AnimalAIActiveRadius => Mathf.Max(1f, animalAIActiveRadius);
@@ -327,6 +337,22 @@ public class GameManager : MonoBehaviour
     public void SetFreeTrain(bool enabled)
     {
         freeTrain = enabled;
+    }
+
+    public void SetFreeElectroEnergy(bool enabled)
+    {
+        if (freeElectroEnergy == enabled)
+        {
+            return;
+        }
+
+        freeElectroEnergy = enabled;
+        SyncFreeElectroEnergyRuntimeState(true);
+    }
+
+    public void SetFreeBucket(bool enabled)
+    {
+        freeBucket = enabled;
     }
 
     public void SetMapObjectTickProfilingEnabled(bool enabled)
@@ -558,6 +584,25 @@ public class GameManager : MonoBehaviour
         freeCameraRuntimeStateInitialized = true;
         lastRuntimeFreeCamera = freeCamera;
         playerCamera.SetFreeCameraEnabled(freeCamera);
+    }
+
+    private void SyncFreeElectroEnergyRuntimeState(bool force = false)
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!force
+            && freeElectroEnergyRuntimeStateInitialized
+            && lastRuntimeFreeElectroEnergy == freeElectroEnergy)
+        {
+            return;
+        }
+
+        freeElectroEnergyRuntimeStateInitialized = true;
+        lastRuntimeFreeElectroEnergy = freeElectroEnergy;
+        UtilityPole.NotifyFreeElectroEnergyChanged();
     }
 
     private void SyncMapObjectTickProfilingRuntimeState(bool force = false)
@@ -2678,6 +2723,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildSeedExtraTokens(terrain),
             BuildFreeCameraExtraTokens(GameManager.Instance),
             BuildFreeTrainExtraTokens(GameManager.Instance),
+            BuildFreeElectroEnergyExtraTokens(GameManager.Instance),
+            BuildFreeBucketExtraTokens(GameManager.Instance),
             BuildAnimalAIExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance),
             BuildPlayerSpeedExtraTokens(),
@@ -2726,6 +2773,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return gameManager != null
             ? $"freeTrain={(gameManager.FreeTrain ? 1 : 0)}"
             : "freeTrain=0";
+    }
+
+    private static string BuildFreeElectroEnergyExtraTokens(GameManager gameManager)
+    {
+        return gameManager != null
+            ? $"freeElectroEnergy={(gameManager.FreeElectroEnergy ? 1 : 0)}"
+            : "freeElectroEnergy=0";
+    }
+
+    private static string BuildFreeBucketExtraTokens(GameManager gameManager)
+    {
+        return gameManager != null
+            ? $"freeBucket={(gameManager.FreeBucket ? 1 : 0)}"
+            : "freeBucket=0";
     }
 
     private static string BuildMapObjectTickProfilingExtraTokens(GameManager gameManager)
@@ -4472,6 +4533,38 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 0,
                 $"freeTrain={(value ? 1 : 0)}",
                 BuildFreeTrainExtraTokens(gameManager));
+        }
+
+        if (string.Equals(toggleName, "freeElectroEnergy", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "freeElectricEnergy", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "freeElectricity", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "freeEnergy", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetFreeElectroEnergy(value);
+            return ToolResult.Success(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $"freeElectroEnergy={(value ? 1 : 0)}",
+                BuildFreeElectroEnergyExtraTokens(gameManager));
+        }
+
+        if (string.Equals(toggleName, "freeBucket", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toggleName, "infiniteBucket", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetFreeBucket(value);
+            return ToolResult.Success(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                $"freeBucket={(value ? 1 : 0)}",
+                BuildFreeBucketExtraTokens(gameManager));
         }
 
         if (string.Equals(toggleName, "mapObjectTickProfiling", StringComparison.OrdinalIgnoreCase)

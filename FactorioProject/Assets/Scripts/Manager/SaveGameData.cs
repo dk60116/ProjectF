@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 39;
+    public const int CurrentVersion = 41;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -47,6 +47,15 @@ public sealed class MapSaveData
     public List<ConveyorItemBlockSaveEntry> conveyorItems = new List<ConveyorItemBlockSaveEntry>();
     public List<AnimalSaveEntry> animals = new List<AnimalSaveEntry>();
     public List<Vector2Int> farmlandCoordinates = new List<Vector2Int>();
+    public List<PlantedResourceSaveEntry> plantedResources =
+        new List<PlantedResourceSaveEntry>();
+}
+
+[Serializable]
+public sealed class PlantedResourceSaveEntry
+{
+    public Vector2Int coordinate;
+    public int seedItemId = -1;
 }
 
 [Serializable]

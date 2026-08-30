@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_48_Flatcar
   m_EditorClassIdentifier: 
   itemName: Beef steak
-  id: 82
+  id: 83
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
   portableMat: {fileID: 2100000, guid: 0804dd1f3fe5f3f4bb07d25f01714c32, type: 2}
@@ -40,6 +40,10 @@ MonoBehaviour:
   undergroundPipeMaxDistance: 5
   energyType: 0
   energyAmount: 0
+  eatRewardItem: {fileID: 0}
+  eatRewardChancePercent: 0
+  isSeed: 0
+  seedTargetResource: {fileID: 0}
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

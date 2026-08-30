@@ -19,6 +19,9 @@ MonoBehaviour:
   placementCategory: 1
   minimumGrowth: 10
   maximumGrowth: 10
+  totalGrowthWaterLiters: 0
+  totalGrowthFertilizerAmount: 0
+  growthDurationPerLevelSeconds: 0
   dropItems: []
   defaultResourceCount: 1
   defaultGetCount: 1

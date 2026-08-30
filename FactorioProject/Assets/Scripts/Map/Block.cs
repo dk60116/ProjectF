@@ -6967,6 +6967,16 @@ public class Block : BaseObject
             return true;
         }
 
+        if (mapObject is ProjectF.MapObjects.Tree growingTree
+            && growingTree != null
+            && growingTree.gameObject != null
+            && growingTree.gameObject.activeInHierarchy
+            && growingTree.ResourceCount > 0
+            && growingTree.CanGrowAnotherLevel)
+        {
+            return true;
+        }
+
         return InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
                || InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
                || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate);

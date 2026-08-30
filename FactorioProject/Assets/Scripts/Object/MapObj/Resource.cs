@@ -52,6 +52,10 @@ public class Resource : MapObject
         public int bodyYawStep;
         public bool hasGrowth;
         public float growth;
+        public bool hasPlantGrowthState;
+        public float growthWaterLiters;
+        public float growthFertilizerAmount;
+        public float growthElapsedSeconds;
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
@@ -122,7 +126,7 @@ public class Resource : MapObject
     public int RemainingMachineHarvestOutputCount => Mathf.Max(
         0,
         ResourceCount * GetCount);
-    public bool CanHarvest => ResourceCount > 0;
+    public bool CanHarvest => ResourceCount > 0 && HasHarvestableOutputAtCurrentState();
     public ResourceDefinition Definition => definition;
     public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
         ? definition.placementCategory
@@ -496,6 +500,7 @@ public class Resource : MapObject
         if (resourceFullyDepleted)
         {
             HideBodyPresentation();
+            gameObject.SetActive(false);
         }
 
         outputCount *= depletedResourceCount;
@@ -670,6 +675,21 @@ public class Resource : MapObject
         return definition != null
                && definition.DropItems != null
                && definition.DropItems.Count > 0;
+    }
+
+    private bool HasHarvestableOutputAtCurrentState()
+    {
+        if (!(this is ProjectF.MapObjects.Tree))
+        {
+            return true;
+        }
+
+        if (HasConfiguredDropItems())
+        {
+            return GetHarvestOutputCountPerResource() > 0;
+        }
+
+        return ResolveOutputItemId() >= 0 && GetCount > 0;
     }
 
     private bool TryPeekConfiguredHarvestOutput(
@@ -1572,12 +1592,18 @@ public class Resource : MapObject
         if (owningBlock == block)
         {
             RegisterActiveResourceCoordinate();
+            OnOwningBlockChanged(block);
             return;
         }
 
         UnregisterActiveResourceCoordinate();
         owningBlock = block;
         RegisterActiveResourceCoordinate();
+        OnOwningBlockChanged(block);
+    }
+
+    protected virtual void OnOwningBlockChanged(Block block)
+    {
     }
 
     public static bool TryCollectActiveResourcesInCoordinateRange(
@@ -1796,6 +1822,8 @@ public class Resource : MapObject
         return useBatchedRendering
                && bodyPresentationVisible
                && gameObject.activeInHierarchy
+               && meshFilter != null
+               && meshFilter.gameObject.activeInHierarchy
                && supportsBatchedRendering
                && mesh != null
                && HasAnyBatchMaterial(materials);
@@ -1940,7 +1968,7 @@ public class Resource : MapObject
         }
     }
 
-    private void MarkBatchRenderDataDirty()
+    protected void MarkBatchRenderDataDirty()
     {
         if (useBatchedRendering)
         {

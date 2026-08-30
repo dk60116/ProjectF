@@ -1293,19 +1293,37 @@ public class PlayerBag : MonoBehaviour
         }
 
         int occupiedCount = Mathf.Clamp(currentStack[index], 0, stack.stack.Count);
-        if (occupiedCount <= 0)
+        int existingItemId = -1;
+        if (occupiedCount > 0)
         {
-            int visualPreservedItemId = GetVisualPreservedItemId(index);
-            if (visualPreservedItemId >= 0)
-            {
-                return visualPreservedItemId == objectId;
-            }
-
-            return true;
+            PortableObject bottomObject = GetBottomObject(stack);
+            existingItemId = bottomObject != null ? bottomObject.ItemId : -1;
+        }
+        else
+        {
+            existingItemId = GetVisualPreservedItemId(index);
         }
 
-        PortableObject bottomObject = GetBottomObject(stack);
-        return bottomObject != null && bottomObject.ItemId == objectId;
+        if (existingItemId >= 0 && existingItemId != objectId)
+        {
+            return false;
+        }
+
+        // Animated pickups reserve an inactive object before the logical stack count
+        // changes. Treat those reservations as stack contents so a second item type
+        // cannot mistake the slot for an empty stack during the move animation.
+        for (int i = 0; i < stack.stack.Count; i++)
+        {
+            PortableObject portableObject = stack.stack[i];
+            if (portableObject != null
+                && reservedObjects.Contains(portableObject)
+                && portableObject.ItemId != objectId)
+            {
+                return false;
+            }
+        }
+
+        return occupiedCount <= 0 || existingItemId == objectId;
     }
 
     private int FindStackIndexForObject(int objectId, bool requireExistingItems)

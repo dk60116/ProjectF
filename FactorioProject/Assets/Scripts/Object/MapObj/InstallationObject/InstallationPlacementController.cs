@@ -7212,6 +7212,12 @@ public class InstallationPlacementController : MonoBehaviour
 
         int quarterTurns = GetPreviewAreaQuarterTurns(preview);
         MapObject footprintSource = ResolveInstallPreviewPlacementSource(preview);
+        if (ConfigureLoggingMachineHarvestMarkers(preview, footprintSource, anchorCoordinate, quarterTurns))
+        {
+            RememberInstallPreviewVisualSyncState(preview, true, anchorCoordinate, quarterTurns);
+            return;
+        }
+
         if (ConfigureRobotArmInstallDirectionMarkers(preview, footprintSource, anchorCoordinate, quarterTurns))
         {
             RememberInstallPreviewVisualSyncState(preview, true, anchorCoordinate, quarterTurns);
@@ -7522,6 +7528,49 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool ConfigureLoggingMachineHarvestMarkers(
+        MapObject mapObject,
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns)
+    {
+        if (!TryGetLoggingMachine(mapObject, out LoggingMachine loggingMachine)
+            && !TryGetLoggingMachine(footprintSource, out loggingMachine))
+        {
+            return false;
+        }
+
+        Sprite markerIcon = loggingMachine.HarvestMarkerIcon;
+        if (markerIcon == null
+            && TryGetLoggingMachine(footprintSource, out LoggingMachine sourceLoggingMachine))
+        {
+            markerIcon = sourceLoggingMachine.HarvestMarkerIcon;
+        }
+
+        if (markerIcon == null)
+        {
+            ClearInputOutputMarkers(mapObject);
+            return true;
+        }
+
+        areaMarkerRequestScratch.Clear();
+        for (int directionIndex = 0;
+             directionIndex < LoggingMachine.HarvestDirectionCount;
+             directionIndex++)
+        {
+            Vector2Int markerCoordinate = LoggingMachine.GetHarvestCoordinate(
+                anchorCoordinate,
+                quarterTurns,
+                directionIndex);
+            areaMarkerRequestScratch.Add(new AreaMarkerSpawnRequest(
+                GetAreaMarkerWorldPosition(markerCoordinate),
+                markerIcon));
+        }
+
+        ConfigureAreaMarkers(mapObject, areaMarkerRequestScratch, true);
+        return true;
+    }
+
     private bool ConfigureTrainStationRailMarkers(
         MapObject mapObject,
         MapObject footprintSource,
@@ -7684,25 +7733,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool TryGetTrainStation(MapObject mapObject, out Trainstation station)
     {
-        station = mapObject as Trainstation;
-        if (station != null)
-        {
-            return true;
-        }
-
-        if (mapObject == null)
-        {
-            return false;
-        }
-
-        station = mapObject.GetComponent<Trainstation>();
-        if (station != null)
-        {
-            return true;
-        }
-
-        station = mapObject.GetComponentInChildren<Trainstation>(true);
-        return station != null;
+        return TryGetMapObjectComponent(mapObject, out station);
     }
 
     private void ConfigureInstalledInputOutputEnergyAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -19915,8 +19946,21 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool TryGetRobotArm(MapObject mapObject, out RobotArm robotArm)
     {
-        robotArm = mapObject as RobotArm;
-        if (robotArm != null)
+        return TryGetMapObjectComponent(mapObject, out robotArm);
+    }
+
+    private static bool TryGetLoggingMachine(
+        MapObject mapObject,
+        out LoggingMachine loggingMachine)
+    {
+        return TryGetMapObjectComponent(mapObject, out loggingMachine);
+    }
+
+    private static bool TryGetMapObjectComponent<T>(MapObject mapObject, out T component)
+        where T : Component
+    {
+        component = mapObject as T;
+        if (component != null)
         {
             return true;
         }
@@ -19926,14 +19970,14 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        robotArm = mapObject.GetComponent<RobotArm>();
-        if (robotArm != null)
+        component = mapObject.GetComponent<T>();
+        if (component != null)
         {
             return true;
         }
 
-        robotArm = mapObject.GetComponentInChildren<RobotArm>(true);
-        return robotArm != null;
+        component = mapObject.GetComponentInChildren<T>(true);
+        return component != null;
     }
 
     private static bool TryGetRobotArmFlowDirection(MapObject mapObject, out Vector2Int flowDirection)

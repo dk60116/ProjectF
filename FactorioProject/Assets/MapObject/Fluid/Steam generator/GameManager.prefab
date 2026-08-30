@@ -1053,4 +1053,5 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 5e897bd260b82084fb272c968673a461, type: 2}
   - {fileID: 11400000, guid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2, type: 2}
   - {fileID: 11400000, guid: 3bdd8115056e76d4a878ff2231e3340c, type: 2}
+  - {fileID: 11400000, guid: a2d64ede116b3754d97a23cc6bf0cfa1, type: 2}
   autoMigrateDefinitions: 1

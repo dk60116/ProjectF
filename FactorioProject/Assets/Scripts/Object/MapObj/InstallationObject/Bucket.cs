@@ -216,6 +216,33 @@ public class Bucket : InstallationObject,
                && NameMatches(definition, OilBucketItemName);
     }
 
+    public static bool IsFilledBucketDefinition(ItemDefinition definition)
+    {
+        return IsWaterBucketDefinition(definition)
+               || IsOilBucketDefinition(definition);
+    }
+
+    public static bool ShouldPreserveFilledBucketOnConversion(
+        ItemManager itemManager,
+        int sourceItemId,
+        int targetItemId)
+    {
+        GameManager gameManager = GameManager.Instance;
+        if (gameManager == null || !gameManager.FreeBucket || itemManager == null)
+        {
+            return false;
+        }
+
+        ItemDefinition sourceDefinition = ItemDefinitionLookup.ResolveById(
+            itemManager.ItemDefinitions,
+            sourceItemId);
+        ItemDefinition targetDefinition = ItemDefinitionLookup.ResolveById(
+            itemManager.ItemDefinitions,
+            targetItemId);
+        return IsFilledBucketDefinition(sourceDefinition)
+               && IsEmptyBucketDefinition(targetDefinition);
+    }
+
     public static int ResolveContainedFluidItemId(ItemDefinition definition)
     {
         if (IsWaterBucketDefinition(definition))
@@ -229,6 +256,23 @@ public class Bucket : InstallationObject,
         }
 
         return -1;
+    }
+
+    public static float ResolveContainedFluidLiters(ItemDefinition definition)
+    {
+        return IsFilledBucketDefinition(definition)
+            ? definition.BucketFillDurationSeconds * PipeFillReferenceLitersPerSecond
+            : 0f;
+    }
+
+    public static bool TryResolveEmptyBucketDefinition(
+        ItemManager itemManager,
+        out ItemDefinition emptyBucketDefinition)
+    {
+        return TryResolveBucketDefinition(
+            itemManager,
+            EmptyBucketItemName,
+            out emptyBucketDefinition);
     }
 
     public static bool TryResolveWaterBucketDefinition(

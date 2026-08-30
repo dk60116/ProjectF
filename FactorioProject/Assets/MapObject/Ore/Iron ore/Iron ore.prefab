@@ -192,7 +192,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 1
-  definition: {fileID: 11400000, guid: 6a0778f55af03994a8d8400ed270cda4, type: 2}
+  definition: {fileID: 11400000, guid: a7fe507a2867b9c4d98f99fe1a3f4e24, type: 2}
   resourceStatus:
     outputId: 14
     outputItemName: Iron ore

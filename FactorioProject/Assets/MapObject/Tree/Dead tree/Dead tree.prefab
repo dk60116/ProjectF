@@ -76,6 +76,9 @@ MonoBehaviour:
   maximumBodyScaleRatio: 1
   dynamicScaleMaxResourceCount: 1
   growth: 10
+  growthWaterLiters: 0
+  growthFertilizerAmount: 0
+  growthElapsedSeconds: 0
 --- !u!135 &3741323503197639045
 SphereCollider:
   m_ObjectHideFlags: 0

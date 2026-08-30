@@ -17,12 +17,40 @@ MonoBehaviour:
   prefab: {fileID: 5596077993400562758, guid: 337c834a65decfa4b8addc73e0c54ee6, type: 3}
   harvestMode: 2
   placementCategory: 2
-  minimumGrowth: 10
+  minimumGrowth: 0
   maximumGrowth: 10
+  totalGrowthWaterLiters: 550
+  totalGrowthFertilizerAmount: 200
+  growthDurationPerLevelSeconds: 10
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     amount: 1
-    minimumGrowth: 0
+    minimumGrowth: 4
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 5
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 6
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
+    amount: 1
+    minimumGrowth: 8
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
+    amount: 1
+    minimumGrowth: 9
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
+    amount: 1
+    minimumGrowth: 10
     maximumGrowth: 10
     dropChance: 1
   defaultResourceCount: 1

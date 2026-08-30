@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_91_Saddle
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Saddle
-  id: 61
+  id: 62
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: c8fd7c05f6824f7429a7c672dd292812, type: 2}
   portableMat: {fileID: 2100000, guid: b19822df2b08ccd4a82bb54e86ae6ccb, type: 2}
@@ -40,6 +40,10 @@ MonoBehaviour:
   undergroundPipeMaxDistance: 5
   energyType: 0
   energyAmount: 0
+  eatRewardItem: {fileID: 0}
+  eatRewardChancePercent: 0
+  isSeed: 0
+  seedTargetResource: {fileID: 0}
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

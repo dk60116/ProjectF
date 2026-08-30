@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_52_Steam train
   m_EditorClassIdentifier: 
   itemName: Steam train
-  id: 92
+  id: 95
   mapObject: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
@@ -40,6 +40,10 @@ MonoBehaviour:
   undergroundPipeMaxDistance: 5
   energyType: 0
   energyAmount: 0
+  eatRewardItem: {fileID: 0}
+  eatRewardChancePercent: 0
+  isSeed: 0
+  seedTargetResource: {fileID: 0}
   useEnergyType: 1
   useEnergyAmount: 1.8
   completeEnergy: 0

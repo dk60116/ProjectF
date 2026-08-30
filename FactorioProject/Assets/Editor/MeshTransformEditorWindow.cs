@@ -219,18 +219,7 @@ public class MeshTransformEditorWindow : EditorWindow
 
             if (GUILayout.Button("Reset Transform"))
             {
-                positionOffset = Vector3.zero;
-                pivotPosition = Vector3.zero;
-                rotationEuler = Vector3.zero;
-                scale = Vector3.one;
-                mirrorAcrossX = false;
-                mirrorAcrossY = false;
-                mirrorAcrossZ = false;
-                xSourceSide = MeshSymmetrySide.Negative;
-                ySourceSide = MeshSymmetrySide.Positive;
-                zSourceSide = MeshSymmetrySide.Negative;
-                symmetryProcessingError = string.Empty;
-                previewDirty = true;
+                ResetTransformInputs();
             }
         }
 
@@ -250,6 +239,25 @@ public class MeshTransformEditorWindow : EditorWindow
             EditorGUILayout.LabelField("Bounds Center", bounds.center.ToString("F3"));
             EditorGUILayout.LabelField("Bounds Size", bounds.size.ToString("F3"));
         }
+    }
+
+    private void ResetTransformInputs()
+    {
+        positionOffset = Vector3.zero;
+        pivotPosition = Vector3.zero;
+        rotationEuler = Vector3.zero;
+        scale = Vector3.one;
+        mirrorAcrossX = false;
+        mirrorAcrossY = false;
+        mirrorAcrossZ = false;
+        xSourceSide = MeshSymmetrySide.Negative;
+        ySourceSide = MeshSymmetrySide.Positive;
+        zSourceSide = MeshSymmetrySide.Negative;
+        pivotDragMode = PivotDragMode.None;
+        symmetryProcessingError = string.Empty;
+        sourceInfoDirty = true;
+        previewDirty = true;
+        Repaint();
     }
 
     private void DrawTransformSection()
@@ -839,7 +847,7 @@ public class MeshTransformEditorWindow : EditorWindow
 
         EditorGUIUtility.PingObject(newMesh);
         Selection.activeObject = newMesh;
-        previewDirty = true;
+        ResetTransformInputs();
     }
 
     private void CreateTransformedModelFbxAsset()
@@ -884,7 +892,7 @@ public class MeshTransformEditorWindow : EditorWindow
                 Selection.activeObject = exportedObject;
             }
 
-            previewDirty = true;
+            ResetTransformInputs();
         }
     }
 
@@ -934,7 +942,7 @@ public class MeshTransformEditorWindow : EditorWindow
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         EditorGUIUtility.PingObject(sourceMesh);
-        previewDirty = true;
+        ResetTransformInputs();
     }
 
     private bool CanSaveToSource(string sourcePath, out string message)
@@ -1045,7 +1053,7 @@ public class MeshTransformEditorWindow : EditorWindow
             File.WriteAllText(absolutePath, BuildObjText(transformedMesh), Encoding.UTF8);
             AssetDatabase.ImportAsset(sourcePath, ImportAssetOptions.ForceUpdate);
             AssetDatabase.Refresh();
-            previewDirty = true;
+            ResetTransformInputs();
         }
         finally
         {
@@ -1083,7 +1091,7 @@ public class MeshTransformEditorWindow : EditorWindow
             {
                 AssetDatabase.ImportAsset(sourcePath, ImportAssetOptions.ForceUpdate);
                 AssetDatabase.Refresh();
-                previewDirty = true;
+                ResetTransformInputs();
             }
 
             return;
@@ -1128,7 +1136,7 @@ public class MeshTransformEditorWindow : EditorWindow
 
             AssetDatabase.ImportAsset(sourcePath, ImportAssetOptions.ForceUpdate);
             AssetDatabase.Refresh();
-            previewDirty = true;
+            ResetTransformInputs();
         }
         finally
         {
@@ -1183,8 +1191,16 @@ public class MeshTransformEditorWindow : EditorWindow
                     ShowSymmetryProcessingError();
                     return false;
                 }
-                Matrix4x4 meshToRoot = GetTransformToRoot(tempRoot.transform, meshFilter.transform);
-                if (!ApplyTransformInRootSpace(transformedMesh, meshToRoot, false, true))
+                // Single Mesh mode previews and edits in mesh-local space. Whole-model mode uses FBX root space.
+                bool useModelRootSpace = targetMesh == null;
+                bool transformed = useModelRootSpace
+                    ? ApplyTransformInRootSpace(
+                        transformedMesh,
+                        GetTransformToRoot(tempRoot.transform, meshFilter.transform),
+                        false,
+                        true)
+                    : ApplyTransform(transformedMesh, false, true);
+                if (!transformed)
                 {
                     ShowSymmetryProcessingError();
                     return false;

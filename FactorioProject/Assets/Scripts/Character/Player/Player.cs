@@ -1572,6 +1572,14 @@ public class Player : Character
             return false;
         }
 
+        if (Bucket.ShouldPreserveFilledBucketOnConversion(
+                itemManager,
+                sourceItemId,
+                targetItemId))
+        {
+            return true;
+        }
+
         if (handCount == 1)
         {
             return handBag.GetSlotCapacityForItem(0, targetItemId) >= 1;
@@ -1586,6 +1594,17 @@ public class Player : Character
         if (!CanConvertHeldItem(sourceItemId, targetItemId))
         {
             return false;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        if (Bucket.ShouldPreserveFilledBucketOnConversion(
+                itemManager,
+                sourceItemId,
+                targetItemId))
+        {
+            return true;
         }
 
         int handCount = handBag.GetSlotCount(0);

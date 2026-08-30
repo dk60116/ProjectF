@@ -307,6 +307,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.conveyorItems, WriteConveyorBlockEntry);
         WriteList(writer, map.animals, WriteAnimalEntry);
         WriteList(writer, map.farmlandCoordinates, WriteVector2Int);
+        WriteList(writer, map.plantedResources, WritePlantedResourceEntry);
     }
 
     private static MapSaveData ReadMap(
@@ -332,7 +333,30 @@ public static class SaveGameBinarySerializer
             map.farmlandCoordinates = ReadList(reader, () => ReadVector2Int(reader));
         }
 
+        if (version >= 40)
+        {
+            map.plantedResources = ReadList(reader, () => ReadPlantedResourceEntry(reader));
+        }
+
         return map;
+    }
+
+    private static void WritePlantedResourceEntry(
+        BinaryWriter writer,
+        PlantedResourceSaveEntry entry)
+    {
+        entry ??= new PlantedResourceSaveEntry();
+        WriteVector2Int(writer, entry.coordinate);
+        writer.Write(entry.seedItemId);
+    }
+
+    private static PlantedResourceSaveEntry ReadPlantedResourceEntry(BinaryReader reader)
+    {
+        return new PlantedResourceSaveEntry
+        {
+            coordinate = ReadVector2Int(reader),
+            seedItemId = reader.ReadInt32()
+        };
     }
 
     private static void WriteAnimalEntry(BinaryWriter writer, AnimalSaveEntry entry)
@@ -439,6 +463,10 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.state.bodyYawStep);
         writer.Write(entry.state.hasGrowth);
         writer.Write(entry.state.growth);
+        writer.Write(entry.state.hasPlantGrowthState);
+        writer.Write(entry.state.growthWaterLiters);
+        writer.Write(entry.state.growthFertilizerAmount);
+        writer.Write(entry.state.growthElapsedSeconds);
     }
 
     private static ResourceSaveEntry ReadResourceEntry(BinaryReader reader, int version)
@@ -462,6 +490,14 @@ public static class SaveGameBinarySerializer
         {
             entry.state.hasGrowth = reader.ReadBoolean();
             entry.state.growth = reader.ReadSingle();
+        }
+
+        if (version >= 41)
+        {
+            entry.state.hasPlantGrowthState = reader.ReadBoolean();
+            entry.state.growthWaterLiters = reader.ReadSingle();
+            entry.state.growthFertilizerAmount = reader.ReadSingle();
+            entry.state.growthElapsedSeconds = reader.ReadSingle();
         }
 
         return entry;

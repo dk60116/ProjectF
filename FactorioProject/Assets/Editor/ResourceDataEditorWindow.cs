@@ -337,14 +337,24 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         DrawProperty(serializedDefinition, "harvestMode", "Harvest Mode");
         DrawProperty(serializedDefinition, "placementCategory", "Placement Category");
 
-        if (selectedDefinition.placementCategory == ResourceDefinition.PlacementCategory.Tree)
+        SerializedProperty placementCategory = serializedDefinition.FindProperty(
+            "placementCategory");
+        bool isPlantResource = placementCategory != null
+                               && placementCategory.enumValueIndex
+                               == (int)ResourceDefinition.PlacementCategory.Tree;
+        if (isPlantResource)
         {
-            GUILayout.Space(4f);
-            EditorGUILayout.LabelField("Growth", EditorStyles.miniBoldLabel);
+            GUILayout.Space(8f);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Plant Growth Settings", EditorStyles.boldLabel);
             SerializedProperty minimumGrowth = serializedDefinition.FindProperty("minimumGrowth");
             SerializedProperty maximumGrowth = serializedDefinition.FindProperty("maximumGrowth");
-            EditorGUILayout.PropertyField(minimumGrowth, new GUIContent("Minimum Growth"));
-            EditorGUILayout.PropertyField(maximumGrowth, new GUIContent("Maximum Growth"));
+            EditorGUILayout.PropertyField(
+                minimumGrowth,
+                new GUIContent("Minimum Spawn Growth"));
+            EditorGUILayout.PropertyField(
+                maximumGrowth,
+                new GUIContent("Maximum Spawn Growth"));
             minimumGrowth.intValue = Mathf.Clamp(
                 minimumGrowth.intValue,
                 ResourceDefinition.MinGrowth,
@@ -353,6 +363,10 @@ public sealed class ResourceDataEditorWindow : EditorWindow
                 maximumGrowth.intValue,
                 minimumGrowth.intValue,
                 ResourceDefinition.MaxGrowth);
+
+            GUILayout.Space(4f);
+            DrawPlantGrowthRequirements(serializedDefinition);
+            EditorGUILayout.EndVertical();
         }
 
         GUILayout.Space(4f);
@@ -388,6 +402,58 @@ public sealed class ResourceDataEditorWindow : EditorWindow
 
         EditorGUILayout.EndVertical();
         GUILayout.Space(6f);
+    }
+
+    private static void DrawPlantGrowthRequirements(SerializedObject serializedDefinition)
+    {
+        SerializedProperty totalWater = serializedDefinition.FindProperty(
+            "totalGrowthWaterLiters");
+        SerializedProperty totalFertilizer = serializedDefinition.FindProperty(
+            "totalGrowthFertilizerAmount");
+        SerializedProperty durationPerLevel = serializedDefinition.FindProperty(
+            "growthDurationPerLevelSeconds");
+
+        EditorGUILayout.LabelField("Growth Requirements", EditorStyles.miniBoldLabel);
+        EditorGUILayout.PropertyField(totalWater, new GUIContent("Total Water (L)"));
+        EditorGUILayout.PropertyField(totalFertilizer, new GUIContent("Total Fertilizer"));
+        EditorGUILayout.PropertyField(
+            durationPerLevel,
+            new GUIContent("Growth Time per Level (sec)"));
+
+        totalWater.floatValue = Mathf.Max(0f, totalWater.floatValue);
+        totalFertilizer.floatValue = Mathf.Max(0f, totalFertilizer.floatValue);
+        durationPerLevel.floatValue = Mathf.Max(0f, durationPerLevel.floatValue);
+
+        EditorGUILayout.HelpBox(
+            $"Each Growth level takes {durationPerLevel.floatValue:0.###} seconds after its requirements are met.\n"
+            + "Water and fertilizer are distributed automatically using increasing 1:2:...:10 weights. "
+            + "Fertilizer input is not implemented yet; only its data and growth requirement are active.",
+            MessageType.Info);
+        if (durationPerLevel.floatValue <= 0f
+            && (totalWater.floatValue > 0f || totalFertilizer.floatValue > 0f))
+        {
+            EditorGUILayout.HelpBox(
+                "A plant cannot grow while Growth Time per Level is 0.",
+                MessageType.Warning);
+        }
+
+        EditorGUI.indentLevel++;
+        for (int targetGrowth = ResourceDefinition.MinGrowth + 1;
+             targetGrowth <= ResourceDefinition.MaxGrowth;
+             targetGrowth++)
+        {
+            float water = ResourceDefinition.CalculateGrowthRequirement(
+                totalWater.floatValue,
+                targetGrowth);
+            float fertilizer = ResourceDefinition.CalculateGrowthRequirement(
+                totalFertilizer.floatValue,
+                targetGrowth);
+            EditorGUILayout.LabelField(
+                $"Growth {targetGrowth - 1} → {targetGrowth}",
+                $"Water {water:0.###} L / Fertilizer {fertilizer:0.###}");
+        }
+
+        EditorGUI.indentLevel--;
     }
 
     private void DrawFarmingDropItemsSection(SerializedObject serializedDefinition)

@@ -19,7 +19,30 @@ MonoBehaviour:
   placementCategory: 2
   minimumGrowth: 10
   maximumGrowth: 10
-  dropItems: []
+  totalGrowthWaterLiters: 500
+  totalGrowthFertilizerAmount: 0
+  growthDurationPerLevelSeconds: 10
+  dropItems:
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 4
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 6
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 8
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+    amount: 1
+    minimumGrowth: 10
+    maximumGrowth: 10
+    dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 4
   defaultMaxGauge: 10

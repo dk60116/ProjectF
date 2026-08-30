@@ -32,6 +32,28 @@ public class GameManagerEditor : Editor
                 ToggleRuntimeBool(gameManager, gameManager.FreeCamera, value => gameManager.SetFreeCamera(value), "Toggle Free Camera");
             }
 
+            if (GUILayout.Button(gameManager.FreeElectroEnergy
+                    ? "Disable Free Electro Energy"
+                    : "Enable Free Electro Energy"))
+            {
+                ToggleRuntimeBool(
+                    gameManager,
+                    gameManager.FreeElectroEnergy,
+                    value => gameManager.SetFreeElectroEnergy(value),
+                    "Toggle Free Electro Energy");
+            }
+
+            if (GUILayout.Button(gameManager.FreeBucket
+                    ? "Disable Free Bucket"
+                    : "Enable Free Bucket"))
+            {
+                ToggleRuntimeBool(
+                    gameManager,
+                    gameManager.FreeBucket,
+                    value => gameManager.SetFreeBucket(value),
+                    "Toggle Free Bucket");
+            }
+
             DrawWorldTimeControls(gameManager);
         }
     }

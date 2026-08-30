@@ -1,0 +1,50 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
+  m_Name: Item_96_Apple seed
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  itemName: Apple seed
+  id: 86
+  mapObject: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: 918cfc7cf328437ea6dfda82e63f3c00, type: 2}
+  portableMat: {fileID: 2100000, guid: d11d2428fcf248069658e1b40616ce36, type: 2}
+  icon: {fileID: 21300000, guid: c9e5105f6c694243a52e222846e2df4a, type: 3}
+  oneItem: 0
+  interactionButtonList: []
+  lightMode: 0
+  lightRange: 6
+  lightIntensityMultiplier: 1
+  size: 0
+  itemFilter: 0
+  ignoreFilter: 0
+  isManual: 0
+  manualTargetItem: {fileID: 0}
+  upgradeable: 1
+  capacity: 10
+  storesFluid: 0
+  fluidStorageLiters: 0
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
+  fluidOutputLitersPerSecond: 1
+  bucketFillDurationSeconds: 10
+  undergroundPipeMaxDistance: 5
+  energyType: 5
+  energyAmount: 100
+  eatRewardItem: {fileID: 0}
+  eatRewardChancePercent: 0
+  isSeed: 1
+  seedTargetResource: {fileID: 11400000, guid: 7d9b36e16cb24e89a5c1924bb615df31, type: 2}
+  useEnergyType: 0
+  useEnergyAmount: 0
+  completeEnergy: 0
+  utilityPoleConnectionRadius: 6
+  utilityPoleSupplyRadius: 3
+  craftingDurationSeconds: 5

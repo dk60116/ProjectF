@@ -348,6 +348,11 @@ public class UtilityPole : InstallationObject
             return false;
         }
 
+        if (IsFreeElectroEnergyEnabled())
+        {
+            return true;
+        }
+
         EnsureNetworksEvaluated();
         ElectricNetwork network = ResolveBestNetworkForConsumer(consumer);
         return network != null && network.HasPowerSource && network.ProductionWatts > EnergyEpsilon;
@@ -363,6 +368,12 @@ public class UtilityPole : InstallationObject
         if (!TryGetElectricPowerRequirement(consumer, out requiredWatts))
         {
             return false;
+        }
+
+        if (IsFreeElectroEnergyEnabled())
+        {
+            suppliedWatts = requiredWatts;
+            return true;
         }
 
         EnsureNetworksEvaluated();
@@ -405,6 +416,12 @@ public class UtilityPole : InstallationObject
             return false;
         }
 
+        if (IsFreeElectroEnergyEnabled())
+        {
+            consumedEnergy = requestedEnergy;
+            return true;
+        }
+
         float requestedWatts = deltaTime > EnergyEpsilon ? requestedEnergy / deltaTime : 0f;
         if (requestedWatts <= EnergyEpsilon && TryGetElectricPowerRequirement(consumer, out float configuredWatts))
         {
@@ -429,6 +446,12 @@ public class UtilityPole : InstallationObject
         if (consumer == null)
         {
             return false;
+        }
+
+        if (IsFreeElectroEnergyEnabled())
+        {
+            supplyRatio = 1f;
+            return true;
         }
 
         EnsureNetworksEvaluated();
@@ -562,6 +585,17 @@ public class UtilityPole : InstallationObject
         networksDirty = true;
         networkRuntimeEvaluatedFrame = -1;
         connectionLineVisualsDirty = true;
+    }
+
+    public static void NotifyFreeElectroEnergyChanged()
+    {
+        networkRuntimeEvaluatedFrame = -1;
+        InputOutputModule.WakeElectricRuntimeModules();
+    }
+
+    private static bool IsFreeElectroEnergyEnabled()
+    {
+        return GameManager.Instance != null && GameManager.Instance.FreeElectroEnergy;
     }
 
     private static void HandleInstallationPlacementRuntimeChanged(InstallationObject installationObject)
@@ -2853,6 +2887,11 @@ public class UtilityPole : InstallationObject
             return robotArm.TryGetElectricPowerRequirement(out wattsPerSecond);
         }
 
+        if (consumer is LoggingMachine loggingMachine)
+        {
+            return loggingMachine.TryGetElectricPowerRequirement(out wattsPerSecond);
+        }
+
         ItemDefinition definition = ResolveElectricConsumerDefinition(consumer);
         float electricUseWatts = ItemDefinition.ResolveElectricUseWatts(definition);
         if (electricUseWatts <= EnergyEpsilon)
@@ -2882,6 +2921,11 @@ public class UtilityPole : InstallationObject
             return robotArm.TryGetElectricPowerDemand(out wattsPerSecond);
         }
 
+        if (consumer is LoggingMachine loggingMachine)
+        {
+            return loggingMachine.TryGetElectricPowerDemand(out wattsPerSecond);
+        }
+
         if (consumer is LightObject lightObject)
         {
             return lightObject.TryGetElectricPowerDemand(out wattsPerSecond);
@@ -2894,6 +2938,7 @@ public class UtilityPole : InstallationObject
     {
         return consumer is InputOutputModule
                || consumer is RobotArm
+               || consumer is LoggingMachine
                || consumer is LightObject;
     }
 

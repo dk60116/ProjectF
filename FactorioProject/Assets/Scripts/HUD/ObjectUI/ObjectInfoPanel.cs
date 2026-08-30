@@ -189,6 +189,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is LoggingMachine loggingMachine)
+        {
+            ShowLoggingMachineInfo(loggingMachine, underlyingResource);
+            return;
+        }
+
         if (mapObject is UtilityPole utilityPole)
         {
             ShowUtilityPoleInfo(utilityPole, underlyingResource);
@@ -612,6 +618,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowRobotArm(robotArm, underlyingResource);
+    }
+
+    private void ShowLoggingMachineInfo(LoggingMachine loggingMachine, Resource underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowLoggingMachine(loggingMachine, underlyingResource);
     }
 
     private void ShowUtilityPoleInfo(UtilityPole utilityPole, Resource underlyingResource)

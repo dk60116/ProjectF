@@ -19,6 +19,9 @@ MonoBehaviour:
   placementCategory: 0
   minimumGrowth: 10
   maximumGrowth: 10
+  totalGrowthWaterLiters: 0
+  totalGrowthFertilizerAmount: 0
+  growthDurationPerLevelSeconds: 0
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
     amount: 1

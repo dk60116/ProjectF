@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [Serializable]
 public sealed class ResourceDropEntry
@@ -79,6 +80,9 @@ public class ResourceDefinition : ScriptableObject
     public const int MinGrowth = 0;
     public const int MaxGrowth = 10;
     public const int DefaultGrowth = MaxGrowth;
+    public const int GrowthStageCount = MaxGrowth - MinGrowth;
+    private const float GrowthRequirementWeightSum =
+        GrowthStageCount * (GrowthStageCount + 1) * 0.5f;
 
     public enum PlacementCategory
     {
@@ -94,6 +98,16 @@ public class ResourceDefinition : ScriptableObject
     public PlacementCategory placementCategory = PlacementCategory.Ore;
     [Range(MinGrowth, MaxGrowth)] public int minimumGrowth = DefaultGrowth;
     [Range(MinGrowth, MaxGrowth)] public int maximumGrowth = DefaultGrowth;
+    [SerializeField, Min(0f)]
+    [Tooltip("Total water used while growing from Growth 0 to 10, in liters.")]
+    private float totalGrowthWaterLiters;
+    [SerializeField, Min(0f)]
+    [Tooltip("Total fertilizer used while growing from Growth 0 to 10.")]
+    private float totalGrowthFertilizerAmount;
+    [FormerlySerializedAs("totalGrowthDurationSeconds")]
+    [SerializeField, Min(0f)]
+    [Tooltip("Fixed time in seconds required to advance by one Growth level after water and fertilizer requirements are met.")]
+    private float growthDurationPerLevelSeconds;
     [SerializeField] private List<ResourceDropEntry> dropItems =
         new List<ResourceDropEntry>();
     public int defaultResourceCount = 1;
@@ -103,6 +117,42 @@ public class ResourceDefinition : ScriptableObject
     public IReadOnlyList<ResourceDropEntry> DropItems =>
         dropItems ??= new List<ResourceDropEntry>();
     public Sprite ResourceIcon => resourceIcon;
+    public float TotalGrowthWaterLiters => Mathf.Max(0f, totalGrowthWaterLiters);
+    public float TotalGrowthFertilizerAmount => Mathf.Max(0f, totalGrowthFertilizerAmount);
+    public float GrowthDurationPerLevelSeconds => Mathf.Max(
+        0f,
+        growthDurationPerLevelSeconds);
+    public bool HasGrowthSchedule => GrowthDurationPerLevelSeconds > 0f;
+
+    public float GetGrowthWaterRequirement(int targetGrowthLevel)
+    {
+        return CalculateGrowthRequirement(
+            TotalGrowthWaterLiters,
+            targetGrowthLevel);
+    }
+
+    public float GetGrowthFertilizerRequirement(int targetGrowthLevel)
+    {
+        return CalculateGrowthRequirement(
+            TotalGrowthFertilizerAmount,
+            targetGrowthLevel);
+    }
+
+    public static float CalculateGrowthRequirement(
+        float totalAmount,
+        int targetGrowthLevel)
+    {
+        if (totalAmount <= 0f || GrowthRequirementWeightSum <= 0f)
+        {
+            return 0f;
+        }
+
+        int stageWeight = Mathf.Clamp(
+            targetGrowthLevel - MinGrowth,
+            1,
+            GrowthStageCount);
+        return totalAmount * stageWeight / GrowthRequirementWeightSum;
+    }
 
 #if UNITY_EDITOR
     private void OnValidate()
@@ -113,6 +163,9 @@ public class ResourceDefinition : ScriptableObject
         defaultGetCount = Mathf.Max(1, defaultGetCount);
         defaultMaxGauge = Mathf.Max(1, defaultMaxGauge);
         defaultCurrentGauge = Mathf.Clamp(defaultCurrentGauge, 0, defaultMaxGauge);
+        totalGrowthWaterLiters = Mathf.Max(0f, totalGrowthWaterLiters);
+        totalGrowthFertilizerAmount = Mathf.Max(0f, totalGrowthFertilizerAmount);
+        growthDurationPerLevelSeconds = Mathf.Max(0f, growthDurationPerLevelSeconds);
         dropItems ??= new List<ResourceDropEntry>();
         for (int i = 0; i < dropItems.Count; i++)
         {

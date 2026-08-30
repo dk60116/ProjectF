@@ -11,7 +11,15 @@ public class ItemDefinition : ScriptableObject
     private const float KilowattsToWatts = 1000f;
     private const float DefaultItemLightRange = 6f;
 
-    public enum EnergyType { None, Burn, Electricity }
+    public enum EnergyType
+    {
+        None = 0,
+        Burn = 1,
+        Electricity = 2,
+        CarnivoreFood = 3,
+        HerbivoreFood = 4,
+        Fertilizer = 5
+    }
 
     public enum ItemLightMode
     {
@@ -64,6 +72,15 @@ public class ItemDefinition : ScriptableObject
     public EnergyType energyType = EnergyType.None;
     [Min(0)]
     public int energyAmount = 0;
+    [Tooltip("이 음식을 먹었을 때 확률적으로 획득하는 아이템입니다.")]
+    public ItemDefinition eatRewardItem;
+    [Range(0f, 100f)]
+    [Tooltip("음식 1개를 먹었을 때 Eat Reward Item을 획득할 확률(%)입니다.")]
+    public float eatRewardChancePercent;
+    [Tooltip("체크하면 이 아이템을 밭에 심을 수 있는 씨앗으로 사용합니다.")]
+    public bool isSeed;
+    [Tooltip("씨앗을 밭에 심었을 때 생성할 리소스입니다.")]
+    public ResourceDefinition seedTargetResource;
     public EnergyType useEnergyType = EnergyType.None;
     [Min(0f)]
     public float useEnergyAmount = 0f;
@@ -119,6 +136,43 @@ public class ItemDefinition : ScriptableObject
         return ResolveStackCapacity(definition, defaultCapacity);
     }
 
+    public static bool IsFoodEnergyType(EnergyType energyType)
+    {
+        return energyType == EnergyType.CarnivoreFood
+               || energyType == EnergyType.HerbivoreFood;
+    }
+
+    public static bool IsFoodEnergyItemDefinition(ItemDefinition definition)
+    {
+        return definition != null && IsFoodEnergyType(definition.energyType);
+    }
+
+    public static bool IsFertilizerEnergyItemDefinition(ItemDefinition definition)
+    {
+        return definition != null
+               && definition.energyType == EnergyType.Fertilizer
+               && definition.energyAmount > 0;
+    }
+
+    public static bool IsPlantableSeedDefinition(ItemDefinition definition)
+    {
+        return definition != null
+               && definition.isSeed
+               && definition.seedTargetResource != null
+               && definition.seedTargetResource.prefab != null;
+    }
+
+    public bool TryGetEatReward(out ItemDefinition rewardDefinition, out float chancePercent)
+    {
+        rewardDefinition = eatRewardItem;
+        chancePercent = Mathf.Clamp(eatRewardChancePercent, 0f, 100f);
+        return IsFoodEnergyItemDefinition(this)
+               && rewardDefinition != null
+               && rewardDefinition != this
+               && rewardDefinition.id >= 0
+               && chancePercent > 0f;
+    }
+
     public static float ResolveCompleteEnergyAmount(ItemDefinition definition)
     {
         if (definition == null || definition.useEnergyType == EnergyType.None)
@@ -165,6 +219,18 @@ public class ItemDefinition : ScriptableObject
         {
             manualTargetItem = null;
         }
+
+        if (eatRewardItem == this)
+        {
+            eatRewardItem = null;
+        }
+
+        if (!isSeed)
+        {
+            seedTargetResource = null;
+        }
+
+        eatRewardChancePercent = Mathf.Clamp(eatRewardChancePercent, 0f, 100f);
 
         if (craftingDurationSeconds <= 0f)
         {

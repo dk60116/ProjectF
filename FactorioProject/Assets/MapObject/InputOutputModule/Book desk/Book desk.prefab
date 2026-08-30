@@ -81,7 +81,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Desk
   id: 0
   objectName: Book desk
-  objId: 77
+  objId: 78
   itemDefinition: {fileID: 11400000, guid: 9b769dd46a0b9fe4f91ace461114fcd2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

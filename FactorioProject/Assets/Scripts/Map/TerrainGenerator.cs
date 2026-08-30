@@ -2805,7 +2805,10 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
 
                 ApplyBlockBiomeVisuals(block, visualData);
-                if (TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab)
+                bool spawnedPlantedResource =
+                    TrySpawnPlantedResourceOnBlock(block, worldCoordinate);
+                if (!spawnedPlantedResource
+                    && TryGetResourcePrefab(worldCoordinate, out Resource resourcePrefab)
                     && CanSpawnResourceAtGeneratedCoordinate(worldCoordinate, resourcePrefab))
                 {
                     SpawnResourceOnBlock(block, resourcePrefab, worldCoordinate);

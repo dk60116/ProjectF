@@ -50,6 +50,7 @@ public class ItemInfoDescription : MonoBehaviour
     private readonly List<int> defaultItemOriginalSiblingIndices = new List<int>();
     private int defaultStatusLineIndex;
     private bool defaultItemSiblingIndicesCaptured;
+    private LoggingMachine liveGaugeLoggingMachine;
     private RobotArm liveGaugeRobotArm;
     private UtilityPole liveGaugeUtilityPole;
     private LightObject liveGaugeLightObject;
@@ -246,6 +247,25 @@ public class ItemInfoDescription : MonoBehaviour
         bool energyUseDisplayed = robotArm.TryGetElectricPowerRequirement(out float wattsPerSecond)
             && SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity, wattsPerSecond, -1);
         SetDefaultItemSlot(energyUseDisplayed ? 1 : 0, robotArm.HeldItemId, true);
+    }
+
+    public void ShowLoggingMachine(LoggingMachine loggingMachine, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        liveGaugeLoggingMachine = loggingMachine;
+        RefreshLoggingMachineInfo(loggingMachine);
+
+        bool energyUseDisplayed = loggingMachine != null
+            && loggingMachine.TryGetElectricPowerRequirement(out float wattsPerSecond)
+            && SetEnergyUseRateDefaultItemSlot(
+                0,
+                ItemDefinition.EnergyType.Electricity,
+                wattsPerSecond,
+                -1);
+        if (!energyUseDisplayed)
+        {
+            SetDefaultItemSlot(0, -1, false);
+        }
     }
 
     public void ShowUtilityPole(UtilityPole utilityPole, Resource underlyingResource = null)
@@ -672,6 +692,7 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void ClearLiveGaugeSource()
     {
+        liveGaugeLoggingMachine = null;
         liveGaugeRobotArm = null;
         liveGaugeUtilityPole = null;
         liveGaugeLightObject = null;
@@ -689,6 +710,12 @@ public class ItemInfoDescription : MonoBehaviour
         if (liveGaugeModule != null && liveGaugeModule.gameObject.activeInHierarchy)
         {
             RefreshInputOutputModuleGaugeTargets(liveGaugeModule);
+            return;
+        }
+
+        if (liveGaugeLoggingMachine != null && liveGaugeLoggingMachine.gameObject.activeInHierarchy)
+        {
+            RefreshLoggingMachineInfo(liveGaugeLoggingMachine);
             return;
         }
 
@@ -731,6 +758,21 @@ public class ItemInfoDescription : MonoBehaviour
             SetDefaultStatus(statusText, isWorking, isWarning);
             TrySetElectricPowerGauge(energyGauge, energyFill, energyText, liveGaugeRobotArm);
         }
+    }
+
+    private void RefreshLoggingMachineInfo(LoggingMachine loggingMachine)
+    {
+        if (loggingMachine == null)
+        {
+            return;
+        }
+
+        loggingMachine.GetObjectInfoStatus(
+            out string statusText,
+            out bool isWorking,
+            out bool isWarning);
+        SetDefaultStatus(statusText, isWorking, isWarning);
+        TrySetElectricPowerGauge(energyGauge, energyFill, energyText, loggingMachine);
     }
 
     private void RefreshLightObjectInfo(LightObject lightObject)
@@ -1892,6 +1934,12 @@ public class ItemInfoDescription : MonoBehaviour
                 return "Electricity";
             case ItemDefinition.EnergyType.Burn:
                 return "Burn Energy";
+            case ItemDefinition.EnergyType.CarnivoreFood:
+                return "Carnivore Food";
+            case ItemDefinition.EnergyType.HerbivoreFood:
+                return "Herbivore Food";
+            case ItemDefinition.EnergyType.Fertilizer:
+                return "Fertilizer Energy";
             default:
                 return "Energy";
         }

@@ -4,7 +4,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [RequireComponent(typeof(Player))]
-public class PlayerController : MonoBehaviour
+public partial class PlayerController : MonoBehaviour
 {
     private const int Belt2FDefaultFootprintWidth = 1;
     private const int Belt2FDefaultFootprintLength = 3;
@@ -296,6 +296,8 @@ public class PlayerController : MonoBehaviour
         ClearTemporaryDropFocus();
         CancelPitchforkDigging();
         selectedPitchforkGroundBlock = null;
+        CancelSeedPlanting();
+        selectedSeedGroundBlock = null;
         SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
         SetMouseFocusedAnimal(null);
@@ -384,7 +386,8 @@ public class PlayerController : MonoBehaviour
 
     public void SetSelectedMapObjectFocus(MapObject mapObject)
     {
-        if (mapObject == null && pitchforkDigTargetBlock != null)
+        if (mapObject == null
+            && (pitchforkDigTargetBlock != null || seedPlantTargetBlock != null))
         {
             return;
         }
@@ -392,9 +395,11 @@ public class PlayerController : MonoBehaviour
         if (mapObject != null)
         {
             CancelPitchforkDigging();
+            CancelSeedPlanting();
         }
 
         selectedPitchforkGroundBlock = null;
+        selectedSeedGroundBlock = null;
         selectedFocusBlocks.Clear();
         if (mapObject == null
             || !mapObject.gameObject.activeInHierarchy
@@ -482,6 +487,13 @@ public class PlayerController : MonoBehaviour
         if (pitchforkDigTargetBlock != null && pitchforkDigTargetBlock != block)
         {
             CancelPitchforkDigging();
+        }
+
+        if (block != null)
+        {
+            CancelSeedPlanting();
+            selectedSeedGroundBlock = null;
+            selectedSeedDefinition = null;
         }
 
         selectedPitchforkGroundBlock = block;
@@ -1196,6 +1208,15 @@ public class PlayerController : MonoBehaviour
             CancelPitchforkDigging();
         }
 
+        if (seedPlantTargetBlock != null
+            && (isInteractionLocked
+                || isKeyboardMoveLocked
+                || interactionPointSnapTarget != null
+                || hasManualMovementInput))
+        {
+            CancelSeedPlanting();
+        }
+
         if (isInteractionLocked
             || isKeyboardMoveLocked
             || interactionPointSnapTarget != null)
@@ -1236,6 +1257,18 @@ public class PlayerController : MonoBehaviour
             && TryGetPitchforkDiggingApproachDirection(out Vector3 pitchforkApproachDirection))
         {
             moveDirection = pitchforkApproachDirection;
+        }
+
+        if (!hasManualMovementInput
+            && !isInteractionLocked
+            && !isKeyboardMoveLocked
+            && interactionPointSnapTarget == null
+            && currentKnifeTargetAnimal == null
+            && pitchforkDigTargetBlock == null
+            && seedPlantTargetBlock != null
+            && TryGetSeedPlantingApproachDirection(out Vector3 seedPlantApproachDirection))
+        {
+            moveDirection = seedPlantApproachDirection;
         }
 
         bool hasMovement = moveDirection.sqrMagnitude > 0.0001f;
@@ -1315,6 +1348,7 @@ public class PlayerController : MonoBehaviour
             hasMovement,
             GetCurrentLocomotionBlend(moveDirection));
         ResolveCompletedPitchforkDigging();
+        ResolveCompletedSeedPlanting();
         TryStartPendingAnimalKnifeAttack();
         if (animalKnifePickPending
             && animalKnifeAnimationStarted
@@ -2827,10 +2861,22 @@ public class PlayerController : MonoBehaviour
                 combinedInteractionFocusBlocks);
         }
 
+        if (TryGetStandingSeedGroundBlock(out Block standingSeedGroundBlock, out _))
+        {
+            AppendUniqueBlock(combinedInteractionFocusBlocks, standingSeedGroundBlock);
+        }
+
         if (player.IsHoldingEmptyBucket
             && TryFindNearestBucketFluidSource(out Block bucketFluidBlock, out _))
         {
             AppendUniqueBlock(combinedInteractionFocusBlocks, bucketFluidBlock);
+        }
+
+        if (TryFindNearestPlantWateringTarget(
+                out Block plantWateringBlock,
+                out _))
+        {
+            AppendUniqueBlock(combinedInteractionFocusBlocks, plantWateringBlock);
         }
 
         SetFocusedBlocks(combinedInteractionFocusBlocks);
@@ -5143,6 +5189,12 @@ public class PlayerController : MonoBehaviour
                 return;
             }
 
+            if (TryResolveHeldSeedDefinition(out _))
+            {
+                RefreshSeedGroundMouseFocus(pointerPosition);
+                return;
+            }
+
             SetMouseFocusedAnimal(null);
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
@@ -5198,23 +5250,10 @@ public class PlayerController : MonoBehaviour
     private bool CanFocusPitchforkGroundBlock(Block block)
     {
         TerrainGenerator terrain = ResolveTerrainGenerator();
-        if (block == null
-            || terrain == null
-            || block.Type != Block.BlockType.Ground
-            || !terrain.IsFarmableGroundBiomeAt(block.Coordinate)
-            || block.MapObject != null
-            || block.Resource != null
-            || block.HasDroppedFloorObjects)
-        {
-            return false;
-        }
-
-        nearbyRuntimeInstallationScratch.Clear();
-        bool hasInstallation = InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-            block.Coordinate,
-            nearbyRuntimeInstallationScratch);
-        nearbyRuntimeInstallationScratch.Clear();
-        return !hasInstallation;
+        return block != null
+               && terrain != null
+               && terrain.IsFarmableGroundBiomeAt(block.Coordinate)
+               && IsClearGroundActionBlock(block);
     }
 
     private bool TryGetPitchforkDiggingApproachDirection(out Vector3 direction)

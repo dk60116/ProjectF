@@ -328,6 +328,13 @@ public partial class BlockStateStore : MonoBehaviour
         ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, itemId, state);
     }
 
+    public void RemoveResource(Vector2Int worldCoordinate)
+    {
+        savedStates.Remove(worldCoordinate);
+        savedResourceItemIds.Remove(worldCoordinate);
+        ResolveVirtualObjectWorld()?.RemoveResource(worldCoordinate);
+    }
+
     public void SaveFloorObjects(Vector2Int worldCoordinate, Block block, VirtualObjectResidency residency)
     {
         if (block == null)

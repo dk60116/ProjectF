@@ -72,7 +72,7 @@ MonoBehaviour:
   - id: 719b89eaec88471098afae6081a59668
     displayName: Machine
     expanded: 1
-    anchorItemGuid: fde3e14d2afafaf4a9603cedda8d94d6
+    anchorItemGuid: 09ddda540280b014fadbf0bbfc3394d7
   - id: 9e4995f6600f4c04ad51a59b2550be3b
     displayName: Wooden building
     expanded: 1
@@ -97,6 +97,10 @@ MonoBehaviour:
     displayName: Meet
     expanded: 1
     anchorItemGuid: 9807425657e17b14387ed43757f8bbbb
+  - id: 0c39a611cba6493d8b18cb3c3dfa5f3c
+    displayName: Food
+    expanded: 1
+    anchorItemGuid: a49bdf81c3424dfa9a1ae44a787e40ce
   - id: c46f2864503448c084f910219612a1ce
     displayName: Car
     expanded: 1
@@ -121,10 +125,14 @@ MonoBehaviour:
     displayName: New Folder
     expanded: 1
     anchorItemGuid: c0075e53760e0bc4e8a7625ac98e2167
-  - id: 0c39a611cba6493d8b18cb3c3dfa5f3c
-    displayName: Food
+  - id: ad364d8d416344a58de79b3411a95650
+    displayName: Seed
     expanded: 1
-    anchorItemGuid: 0e1d27a0f4c177c44985160c21333ad4
+    anchorItemGuid: a2d64ede116b3754d97a23cc6bf0cfa1
+  - id: 7fb122de610a4516b8853a54b74e65f0
+    displayName: Farm
+    expanded: 1
+    anchorItemGuid: a49bdf81c3424dfa9a1ae44a787e40ce
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -318,3 +326,9 @@ MonoBehaviour:
     folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
   - itemGuid: 0b21f1cf2a22a094e88ddb0300d635c2
     folderId: 0c39a611cba6493d8b18cb3c3dfa5f3c
+  - itemGuid: a49bdf81c3424dfa9a1ae44a787e40ce
+    folderId: ad364d8d416344a58de79b3411a95650
+  - itemGuid: a2d64ede116b3754d97a23cc6bf0cfa1
+    folderId: 7fb122de610a4516b8853a54b74e65f0
+  - itemGuid: 355b51bd6602a584481abc0b5a11aae8
+    folderId: 719b89eaec88471098afae6081a59668
