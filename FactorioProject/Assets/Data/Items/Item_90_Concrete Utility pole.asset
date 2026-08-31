@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_90_Concrete Utility pole
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Concrete Utility pole
-  id: 38
+  id: 37
   mapObject: {fileID: 2570451748998091923, guid: db1c88c08b1b0f24a9ffca7c01daac56, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}

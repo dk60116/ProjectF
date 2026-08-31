@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_99_Pine cone
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pine cone
-  id: 99
+  id: 87
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 00e315507a984ce4b9483daa07491361, type: 2}
   portableMat: {fileID: 2100000, guid: 7d5742b5754fb3e498873f7811b4d89a, type: 2}
@@ -40,8 +40,8 @@ MonoBehaviour:
   energyAmount: 0
   eatRewardItem: {fileID: 0}
   eatRewardChancePercent: 0
-  isSeed: 0
-  seedTargetResource: {fileID: 0}
+  isSeed: 1
+  seedTargetResource: {fileID: 11400000, guid: f01734a3267e50745b36764f463c62d7, type: 2}
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

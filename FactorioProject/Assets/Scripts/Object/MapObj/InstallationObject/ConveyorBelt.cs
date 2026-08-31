@@ -10,7 +10,7 @@ public class ConveyorBelt : InstallationObject
         out ConveyorBelt conveyorBelt,
         out Quaternion rotation);
 
-    private const float UvLengthReferenceAspect = 1.4285714f;
+    private const float BeltTopUvRepeatsPerWorldUnit = 1f;
     private const string EndStartObjectName = "End_S";
     private const string EndEndObjectName = "End_E";
     private const string SeamStartObjectName = "Seam_S";
@@ -78,7 +78,7 @@ public class ConveyorBelt : InstallationObject
     private struct BeltTopRenderInfo
     {
         public MeshRenderer Renderer;
-        public float CenterZ;
+        public float PathPosition;
         public float UvLengthScale;
         public float UvLengthOffset;
     }
@@ -439,7 +439,7 @@ public class ConveyorBelt : InstallationObject
 
             int subMeshCount = Mathf.Max(1, renderMesh.subMeshCount);
             int entryCount = Mathf.Max(materialCount, subMeshCount);
-            float uvScrollY = hasUvScroll ? -ConveyorSpeed * 0.75f : 0f;
+            float uvScrollY = hasUvScroll ? CalculateBeltTopUvScrollY() : 0f;
             float uvLengthScale = 1f;
             float uvLengthOffset = 0f;
             if (hasUvScroll)
@@ -1355,7 +1355,7 @@ public class ConveyorBelt : InstallationObject
             TryAddBeltTopRenderInfo(cachedRenderers[i]);
         }
 
-        beltTopRenderInfos.Sort(CompareBeltTopCenterZ);
+        beltTopRenderInfos.Sort(CompareBeltTopPathPosition);
 
         float uvLengthOffset = 0f;
         for (int i = 0; i < beltTopRenderInfos.Count; i++)
@@ -1376,7 +1376,7 @@ public class ConveyorBelt : InstallationObject
             RefreshBeltTopRenderInfo();
         }
 
-        float targetUvScrollY = -ConveyorSpeed * 0.75f;
+        float targetUvScrollY = CalculateBeltTopUvScrollY();
         beltTopPropertyBlock ??= new MaterialPropertyBlock();
 
         for (int i = 0; i < beltTopRenderInfos.Count; i++)
@@ -1407,7 +1407,9 @@ public class ConveyorBelt : InstallationObject
         beltTopRenderInfos.Add(new BeltTopRenderInfo
         {
             Renderer = renderer,
-            CenterZ = transform.InverseTransformPoint(renderer.transform.position).z,
+            PathPosition = Vector3.Dot(
+                transform.InverseTransformPoint(renderer.transform.position),
+                FacingDirectionToVector(localInputDirection)),
             UvLengthScale = CalculateBeltTopUvLengthScale(renderer),
             UvLengthOffset = 0f
         });
@@ -1428,18 +1430,39 @@ public class ConveyorBelt : InstallationObject
         return false;
     }
 
-    private static int CompareBeltTopCenterZ(BeltTopRenderInfo left, BeltTopRenderInfo right)
+    private static int CompareBeltTopPathPosition(BeltTopRenderInfo left, BeltTopRenderInfo right)
     {
-        return left.CenterZ.CompareTo(right.CenterZ);
+        int positionCompare = left.PathPosition.CompareTo(right.PathPosition);
+        if (positionCompare != 0)
+        {
+            return positionCompare;
+        }
+
+        int leftRendererId = left.Renderer != null ? left.Renderer.GetInstanceID() : int.MinValue;
+        int rightRendererId = right.Renderer != null ? right.Renderer.GetInstanceID() : int.MinValue;
+        return leftRendererId.CompareTo(rightRendererId);
     }
 
     private static float CalculateBeltTopUvLengthScale(MeshRenderer renderer)
     {
+        MeshFilter meshFilter = renderer != null ? renderer.GetComponent<MeshFilter>() : null;
+        Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+        if (mesh == null)
+        {
+            return 1f;
+        }
+
         Matrix4x4 matrix = renderer.localToWorldMatrix;
-        Vector3 widthAxis = new Vector3(matrix.m00, matrix.m10, matrix.m20);
         Vector3 lengthAxis = new Vector3(matrix.m02, matrix.m12, matrix.m22);
-        float currentAspect = lengthAxis.magnitude / Mathf.Max(widthAxis.magnitude, 0.0001f);
-        return Mathf.Max(currentAspect / UvLengthReferenceAspect, 0.0001f);
+        float worldLength = mesh.bounds.size.z * lengthAxis.magnitude;
+        return Mathf.Max(worldLength * BeltTopUvRepeatsPerWorldUnit, 0.0001f);
+    }
+
+    private float CalculateBeltTopUvScrollY()
+    {
+        // BeltTop UV 0..1 spans one world-unit belt segment, so visual travel must
+        // use the same world speed as the items carried by the conveyor.
+        return -ConveyorSpeed * BeltTopUvRepeatsPerWorldUnit;
     }
 
     private static bool TryCreateDedicatedBeltTopMatrix(

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_88_Manual - Super computer
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Super computer
-  id: 77
+  id: 78
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 78105cfbd61d3bd45b380a81f342b96c, type: 2}
   portableMat: {fileID: 2100000, guid: 149d334d02f47fc479e5c3d0b2191c58, type: 2}

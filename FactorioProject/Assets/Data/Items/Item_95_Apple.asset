@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_95_Apple
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Apple
-  id: 85
+  id: 86
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 434de757c51bdc24cbcb70f46dfb3ed8, type: 2}
   portableMat: {fileID: 2100000, guid: 7fe3185deb167d64ebb2c78aba95f25f, type: 2}

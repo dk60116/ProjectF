@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_19_Nail
   m_EditorClassIdentifier: 
   itemName: Nail
-  id: 32
+  id: 30
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 2e0e9e1573ee1714182b19fbe1b8ff62, type: 2}
   portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}

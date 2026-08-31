@@ -9,7 +9,7 @@ Shader "Custom/ConveyorBeltScroll"
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
         _UVScrollX("UV Scroll X", Float) = 0
-        _UVScrollY("UV Scroll Y", Float) = -0.75
+        _UVScrollY("UV Scroll Y", Float) = -0.5
         _FlowBlend("Flow Blend", Range(0,1)) = 1
         _CornerFlowMode("Corner Flow Mode", Float) = 0
         _CornerCenter("Corner Center (TopLeft UV)", Vector) = (0,0,0,0)

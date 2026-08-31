@@ -81,7 +81,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Electric mining machine
-  objId: 47
+  objId: 46
   itemDefinition: {fileID: 11400000, guid: b9735abb8886622408d77bb1f9a1f4c3, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

@@ -3,19 +3,17 @@ Shader "Custom/ConveyorBeltCornerFlow"
     Properties
     {
         [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
+        _StraightBeltMap("Straight Belt Map", 2D) = "white" {}
         _AlphaMask("Alpha Mask", 2D) = "white" {}
         _PathUvMap("Path UV Map", 2D) = "black" {}
-        _RemapUvMap("Remap UV Map", 2D) = "black" {}
         [MainColor] _BaseColor("Base Color", Color) = (1,1,1,1)
-        _PathBaseColor("Path Base Color", Color) = (0.26,0.26,0.29,1)
-        _PathHighlightColor("Path Highlight Color", Color) = (0.62,0.62,0.66,1)
         _ShadowColor("Shadow Color", Color) = (0.7,0.7,0.75,1)
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
-        _UVScrollY("UV Scroll Y", Float) = -0.75
+        _UVScrollY("UV Scroll Y", Float) = -0.5
         _CornerRotationSteps("Corner Rotation Steps", Float) = 3
-        _FlowRepeat("Flow Repeat", Float) = 3
-        _PathEdgeDarken("Path Edge Darken", Range(0,1)) = 0.22
+        _FlowRepeat("Flow Repeat", Float) = 1
+        _PathWidthRange("Path Width Range", Vector) = (0.114,0.71,0,0)
         _AlphaMaskClip("Alpha Mask Clip", Range(0,1)) = 0.5
 
         _Surface("__surface", Float) = 0.0
@@ -128,25 +126,23 @@ Shader "Custom/ConveyorBeltCornerFlow"
 
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
+            TEXTURE2D(_StraightBeltMap);
+            SAMPLER(sampler_StraightBeltMap);
             TEXTURE2D(_AlphaMask);
             SAMPLER(sampler_AlphaMask);
             TEXTURE2D(_PathUvMap);
             SAMPLER(sampler_PathUvMap);
-            TEXTURE2D(_RemapUvMap);
-            SAMPLER(sampler_RemapUvMap);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
-                float4 _PathBaseColor;
-                float4 _PathHighlightColor;
                 float4 _ShadowColor;
+                float4 _PathWidthRange;
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
                 float _UVScrollY;
                 float _CornerRotationSteps;
                 float _FlowRepeat;
-                half _PathEdgeDarken;
                 half _AlphaMaskClip;
                 half _Surface;
                 half _BlueprintPreview;
@@ -300,14 +296,16 @@ Shader "Custom/ConveyorBeltCornerFlow"
                 float widthCoord = saturate(pathSample.r);
                 float alongCoord = saturate(pathSample.g);
 
-                float alongFlow = frac(alongCoord * max(_FlowRepeat, 0.001) + _UVScrollY * _Time.y);
-                float widthCenter = abs(widthCoord * 2.0 - 1.0);
-                float2 remapLookupUv = float2(widthCoord, 1.0 - alongFlow);
-                half4 remapSample = SAMPLE_TEXTURE2D(_RemapUvMap, sampler_RemapUvMap, remapLookupUv);
-                float2 movingBaseUv = remapSample.rg;
-                half4 flowSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, movingBaseUv) * _BaseColor;
-                half edgeShade = lerp(1.0h, 1.0h - _PathEdgeDarken, widthCenter);
-                half3 pathColor = flowSample.rgb * edgeShade;
+                // PathUV encodes the visible annulus in a subrange of R. Normalize it before
+                // sampling the straight texture so both rails keep the same width at each join.
+                float pathWidthSpan = max(_PathWidthRange.y - _PathWidthRange.x, 0.001);
+                float normalizedWidth = saturate((widthCoord - _PathWidthRange.x) / pathWidthSpan);
+                // PathUV's G channel already follows the conveyor's input-to-output direction.
+                float pathProgress = alongCoord;
+                float alongFlow = frac(pathProgress * max(_FlowRepeat, 0.001) + _UVScrollY * _Time.y);
+                float2 flowUv = float2(normalizedWidth, alongFlow);
+                half4 flowSample = SAMPLE_TEXTURE2D(_StraightBeltMap, sampler_StraightBeltMap, flowUv) * _BaseColor;
+                half3 pathColor = flowSample.rgb;
 
                 half3 baseColor = lerp(frameSample.rgb, pathColor, pathMask);
                 half alpha = lerp(frameSample.a, flowSample.a, pathMask) * alphaMaskValue;

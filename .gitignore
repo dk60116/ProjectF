@@ -10,6 +10,8 @@
 [Rr]ecordings/
 FactorioProject/Assets/_Recovery/
 FactorioProject/Assets/_Recovery.meta
+.codex-unity-belt-probe/
+CodexUnityBeltProbe/
 
 # Visual Studio / Rider
 .vs/

@@ -31,7 +31,7 @@ Material:
     m_Floats:
     - _Cull: 0
     - _UVScrollX: 0
-    - _UVScrollY: -0.75
+    - _UVScrollY: -0.5
     - _UvLengthOffset: 0
     - _UvLengthScale: 1
     m_Colors:

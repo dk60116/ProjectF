@@ -278,7 +278,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Bucket
   id: 0
   objectName: Oil Bucket
-  objId: 98
+  objId: 100
   itemDefinition: {fileID: 11400000, guid: 639f657a2950b1444bd7dbb5bee0719a, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
