@@ -27,7 +27,8 @@ namespace ProjectF.EditorTools.MeshSplit
             bool hasUv0,
             bool hasUv1,
             bool hasColors,
-            Bounds bounds)
+            Bounds bounds,
+            int[] triangleGroupColorKeys = null)
         {
             SourceName = sourceName;
             Vertices = vertices;
@@ -46,6 +47,9 @@ namespace ProjectF.EditorTools.MeshSplit
             HasUv1 = hasUv1;
             HasColors = hasColors;
             Bounds = bounds;
+            TriangleGroupColorKeys = triangleGroupColorKeys != null && triangleGroupColorKeys.Length == TriangleCount
+                ? triangleGroupColorKeys
+                : Array.Empty<int>();
         }
 
         public string SourceName { get; }
@@ -65,6 +69,7 @@ namespace ProjectF.EditorTools.MeshSplit
         public bool HasUv1 { get; }
         public bool HasColors { get; }
         public Bounds Bounds { get; }
+        public int[] TriangleGroupColorKeys { get; }
         public int TriangleCount => Triangles != null ? Triangles.Length / 3 : 0;
     }
 
@@ -86,20 +91,29 @@ namespace ProjectF.EditorTools.MeshSplit
 
     internal static class MeshSplitUtility
     {
+        private const int MissingGroupColorKey = -1;
+
         private readonly struct SourceEntry
         {
-            public SourceEntry(Mesh mesh, Matrix4x4 meshToRoot, Material[] materials, int connectivityId)
+            public SourceEntry(
+                Mesh mesh,
+                Matrix4x4 meshToRoot,
+                Material[] materials,
+                int connectivityId,
+                int groupColorKey = MissingGroupColorKey)
             {
                 Mesh = mesh;
                 MeshToRoot = meshToRoot;
                 Materials = materials;
                 ConnectivityId = connectivityId;
+                GroupColorKey = groupColorKey;
             }
 
             public Mesh Mesh { get; }
             public Matrix4x4 MeshToRoot { get; }
             public Material[] Materials { get; }
             public int ConnectivityId { get; }
+            public int GroupColorKey { get; }
         }
 
         private readonly struct EdgeKey : IEquatable<EdgeKey>
@@ -216,6 +230,7 @@ namespace ProjectF.EditorTools.MeshSplit
             List<int> vertexConnectivityIds = new List<int>();
             List<int> triangles = new List<int>();
             List<int> triangleMaterialIndices = new List<int>();
+            List<int> triangleGroupColorKeys = new List<int>();
             List<Material> materials = new List<Material>();
             Dictionary<Material, int> materialIndices = new Dictionary<Material, int>();
             int nullMaterialIndex = -1;
@@ -255,6 +270,7 @@ namespace ProjectF.EditorTools.MeshSplit
                             vertexConnectivityIds,
                             triangles,
                             triangleMaterialIndices,
+                            triangleGroupColorKeys,
                             materials,
                             materialIndices,
                             ref nullMaterialIndex,
@@ -299,7 +315,82 @@ namespace ProjectF.EditorTools.MeshSplit
                 allUv0Valid,
                 allUv1Valid,
                 allColorsValid,
-                bounds);
+                bounds,
+                triangleGroupColorKeys.ToArray());
+            return true;
+        }
+
+        public static bool TryGetImportedGroupColor(
+            MeshSplitSourceData data,
+            int[] triangleGroups,
+            int groupIndex,
+            out Color color)
+        {
+            color = default;
+            if (data == null
+                || triangleGroups == null
+                || triangleGroups.Length != data.TriangleCount
+                || data.TriangleGroupColorKeys.Length != data.TriangleCount)
+            {
+                return false;
+            }
+
+            int colorKey = MissingGroupColorKey;
+            for (int triangleIndex = 0; triangleIndex < triangleGroups.Length; triangleIndex++)
+            {
+                if (triangleGroups[triangleIndex] != groupIndex)
+                {
+                    continue;
+                }
+
+                int candidateColorKey = data.TriangleGroupColorKeys[triangleIndex];
+                if (candidateColorKey == MissingGroupColorKey)
+                {
+                    continue;
+                }
+
+                if (colorKey != MissingGroupColorKey && colorKey != candidateColorKey)
+                {
+                    return false;
+                }
+
+                colorKey = candidateColorKey;
+            }
+
+            if (colorKey == MissingGroupColorKey)
+            {
+                return false;
+            }
+
+            color = new Color32(
+                (byte)((colorKey >> 16) & 0xFF),
+                (byte)((colorKey >> 8) & 0xFF),
+                (byte)(colorKey & 0xFF),
+                255);
+            return true;
+        }
+
+        public static bool TryParseExportedGroupColor(string value, out Color32 color)
+        {
+            color = default;
+            const int hexLength = 6;
+            if (string.IsNullOrEmpty(value)
+                || value.Length <= hexLength
+                || value[value.Length - hexLength - 1] != '_'
+                || value.IndexOf("Group_", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            int startIndex = value.Length - hexLength;
+            if (!TryParseHexByte(value, startIndex, out byte red)
+                || !TryParseHexByte(value, startIndex + 2, out byte green)
+                || !TryParseHexByte(value, startIndex + 4, out byte blue))
+            {
+                return false;
+            }
+
+            color = new Color32(red, green, blue, 255);
             return true;
         }
 
@@ -651,7 +742,8 @@ namespace ProjectF.EditorTools.MeshSplit
                     mesh,
                     root.worldToLocalMatrix * filter.transform.localToWorldMatrix,
                     renderer != null ? renderer.sharedMaterials : Array.Empty<Material>(),
-                    connectivityId++));
+                    connectivityId++,
+                    ResolveExportedGroupColorKey(mesh.name, filter.gameObject.name)));
             }
 
             SkinnedMeshRenderer[] skinnedRenderers = rootObject.GetComponentsInChildren<SkinnedMeshRenderer>(true);
@@ -668,8 +760,58 @@ namespace ProjectF.EditorTools.MeshSplit
                     mesh,
                     root.worldToLocalMatrix * renderer.transform.localToWorldMatrix,
                     renderer.sharedMaterials,
-                    connectivityId++));
+                    connectivityId++,
+                    ResolveExportedGroupColorKey(mesh.name, renderer.gameObject.name)));
             }
+        }
+
+        private static int ResolveExportedGroupColorKey(string meshName, string objectName)
+        {
+            if (!TryParseExportedGroupColor(meshName, out Color32 color)
+                && !TryParseExportedGroupColor(objectName, out color))
+            {
+                return MissingGroupColorKey;
+            }
+
+            return (color.r << 16) | (color.g << 8) | color.b;
+        }
+
+        private static bool TryParseHexByte(string value, int startIndex, out byte result)
+        {
+            result = 0;
+            if (startIndex < 0 || startIndex + 1 >= value.Length
+                || !TryParseHexDigit(value[startIndex], out int high)
+                || !TryParseHexDigit(value[startIndex + 1], out int low))
+            {
+                return false;
+            }
+
+            result = (byte)((high << 4) | low);
+            return true;
+        }
+
+        private static bool TryParseHexDigit(char value, out int result)
+        {
+            if (value >= '0' && value <= '9')
+            {
+                result = value - '0';
+                return true;
+            }
+
+            if (value >= 'A' && value <= 'F')
+            {
+                result = value - 'A' + 10;
+                return true;
+            }
+
+            if (value >= 'a' && value <= 'f')
+            {
+                result = value - 'a' + 10;
+                return true;
+            }
+
+            result = 0;
+            return false;
         }
 
         private static bool IsSameMeshAsset(Mesh first, Mesh second)
@@ -705,6 +847,7 @@ namespace ProjectF.EditorTools.MeshSplit
             List<int> vertexConnectivityIds,
             List<int> triangles,
             List<int> triangleMaterialIndices,
+            List<int> triangleGroupColorKeys,
             List<Material> materials,
             Dictionary<Material, int> materialIndices,
             ref int nullMaterialIndex,
@@ -808,6 +951,7 @@ namespace ProjectF.EditorTools.MeshSplit
 
                     triangles.Add(c);
                     triangleMaterialIndices.Add(materialIndex);
+                    triangleGroupColorKeys.Add(entry.GroupColorKey);
                 }
             }
 

@@ -13,7 +13,7 @@ Shader "Custom/ConveyorBeltCornerFlow"
         _UVScrollY("UV Scroll Y", Float) = -0.5
         _CornerRotationSteps("Corner Rotation Steps", Float) = 3
         _FlowRepeat("Flow Repeat", Float) = 1
-        _PathWidthRange("Path Width Range", Vector) = (0.114,0.71,0,0)
+        _PathWidthRange("Path Width Range", Vector) = (0,1,0,0)
         _AlphaMaskClip("Alpha Mask Clip", Range(0,1)) = 0.5
 
         _Surface("__surface", Float) = 0.0
@@ -296,8 +296,8 @@ Shader "Custom/ConveyorBeltCornerFlow"
                 float widthCoord = saturate(pathSample.r);
                 float alongCoord = saturate(pathSample.g);
 
-                // PathUV encodes the visible annulus in a subrange of R. Normalize it before
-                // sampling the straight texture so both rails keep the same width at each join.
+                // PathUV encodes the visible annulus from inner edge 0 to outer edge 1.
+                // Keep the range configurable for compatibility with diagnostic textures.
                 float pathWidthSpan = max(_PathWidthRange.y - _PathWidthRange.x, 0.001);
                 float normalizedWidth = saturate((widthCoord - _PathWidthRange.x) / pathWidthSpan);
                 // PathUV's G channel already follows the conveyor's input-to-output direction.

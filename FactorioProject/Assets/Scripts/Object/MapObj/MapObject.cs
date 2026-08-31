@@ -74,15 +74,33 @@ public class MapObject : PropObj
         }
 
         EnsureItemFilterMaskCapacity(Mathf.Max(totalItemCount, itemId + 1), true);
+        return IsItemAllowedByFilterMask(itemId, true, itemFilterMaskWords);
+    }
 
-        int wordIndex = itemId >> 6;
-        if (wordIndex < 0 || wordIndex >= itemFilterMaskWords.Count)
+    public static bool IsItemAllowedByFilterMask(
+        int itemId,
+        bool filterMaskInitialized,
+        IReadOnlyList<ulong> filterMaskWords)
+    {
+        if (itemId < 0)
+        {
+            return false;
+        }
+
+        if (!filterMaskInitialized)
         {
             return true;
         }
 
+        int wordIndex = itemId >> 6;
+        if (filterMaskWords == null || wordIndex < 0 || wordIndex >= filterMaskWords.Count)
+        {
+            // Existing filter masks allow item IDs added after the mask was saved.
+            return true;
+        }
+
         ulong bitMask = 1UL << (itemId & 63);
-        return (itemFilterMaskWords[wordIndex] & bitMask) != 0UL;
+        return (filterMaskWords[wordIndex] & bitMask) != 0UL;
     }
 
     public void SetItemFilterEnabled(int itemId, int totalItemCount, bool enabled)

@@ -15,6 +15,8 @@ public static class PipeFluidCompatibilityValidation
     private const string WaterPumpPrefabPath = "Assets/MapObject/Fluid/Water pump/Water pump.prefab";
     private const string OilDrillingMachinePrefabPath =
         "Assets/MapObject/InputOutputModule/Oil drilling machine/Oil drilling machine.prefab";
+    private const string ElectricOilDrillingMachinePrefabPath =
+        "Assets/MapObject/Electric Oil machine/Electric Oil machine.prefab";
     private const string SteamTrainPrefabPath = "Assets/MapObject/Train/Steam train/Steam train.prefab";
     private const string FluidTankPrefabPath = "Assets/MapObject/Fluid/Fluid tank/Fluid tank.prefab";
     private const int WaterFluidItemId = 1;
@@ -444,6 +446,13 @@ public static class PipeFluidCompatibilityValidation
             OilFluidItemId,
             WaterFluidItemId,
             "Oil drilling machine");
+        ValidateFixtureOutputIdentity(
+            report,
+            result,
+            ElectricOilDrillingMachinePrefabPath,
+            OilFluidItemId,
+            WaterFluidItemId,
+            "Electric Oil machine");
         ValidateFixtureMethodCall(
             report,
             result,

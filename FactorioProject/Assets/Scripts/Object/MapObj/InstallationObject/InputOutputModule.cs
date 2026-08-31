@@ -4768,6 +4768,11 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
+        if (!RuntimeCenterStorageAcceptsItem(coordinate, itemId, block, useSavedCenterStack))
+        {
+            return false;
+        }
+
         if (useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
@@ -4779,6 +4784,44 @@ public class InputOutputModule : InstallationObject,
         return block != null
                && block.Type == Block.BlockType.Ground
                && block.CanAddInputAreaCenterObjects(count, itemId);
+    }
+
+    private bool RuntimeCenterStorageAcceptsItem(
+        Vector2Int coordinate,
+        int itemId,
+        Block block,
+        bool useSavedCenterStack)
+    {
+        if (block != null && block.MapObject is BoxObject loadedBox)
+        {
+            return loadedBox.AcceptsItem(itemId);
+        }
+
+        if (!useSavedCenterStack)
+        {
+            return true;
+        }
+
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        if (stateStore == null
+            || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
+            || !stateStore.TryGetInstallationState(
+                anchorCoordinate,
+                out BlockStateStore.InstallationSaveState installationState))
+        {
+            return true;
+        }
+
+        ItemDefinition installedDefinition = ResolveItemDefinition(installationState.itemId);
+        if (installedDefinition == null || !(installedDefinition.mapObject is BoxObject))
+        {
+            return true;
+        }
+
+        return MapObject.IsItemAllowedByFilterMask(
+            itemId,
+            installationState.itemFilterMaskInitialized,
+            installationState.itemFilterMaskWords);
     }
 
     private int GetRuntimeAreaObjectCount(IReadOnlyList<Vector2Int> coordinates, int itemId = -1)

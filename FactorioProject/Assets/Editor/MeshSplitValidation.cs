@@ -17,8 +17,9 @@ namespace ProjectF.EditorTools.MeshSplit
             ValidateDifferentMeshFiltersStayDisconnected();
             ValidateWireframeEdgeWelding();
             ValidateSameColorMergeAndDifferentColorSplit();
+            ValidateExportedGroupColorRestoration();
             ValidateObjExport();
-            Debug.Log("Mesh Split validation passed: island detection, MeshFilter isolation, wireframe welding, same-color merge, different-color split, and OBJ export.");
+            Debug.Log("Mesh Split validation passed: island detection, MeshFilter isolation, wireframe welding, color merge/split, overwrite color restoration, and OBJ export.");
         }
 
         public static void RunFromCommandLine()
@@ -168,6 +169,38 @@ namespace ProjectF.EditorTools.MeshSplit
             }
         }
 
+        private static void ValidateExportedGroupColorRestoration()
+        {
+            Assert(
+                MeshSplitUtility.TryParseExportedGroupColor(
+                    "MeshSplitValidation_Group_01_1A2b3C",
+                    out Color32 parsedColor),
+                "내보낸 Mesh 이름에서 색상 코드를 읽지 못했습니다.");
+            Assert(
+                parsedColor.Equals(new Color32(0x1A, 0x2B, 0x3C, 0xFF)),
+                "내보낸 Mesh 이름의 색상 코드가 잘못 해석됐습니다.");
+            Assert(
+                !MeshSplitUtility.TryParseExportedGroupColor("Unrelated_1A2B3C", out _),
+                "Mesh Split 출력이 아닌 이름을 색상 그룹으로 잘못 인식했습니다.");
+
+            int firstColorKey = (0x1A << 16) | (0x2B << 8) | 0x3C;
+            int secondColorKey = (0xD4 << 16) | (0xE5 << 8) | 0xF6;
+            MeshSplitSourceData data = CreateThreeTriangleSource(
+                new[] { 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+                new[] { firstColorKey, firstColorKey, secondColorKey });
+            int[][] adjacency = MeshSplitUtility.BuildTriangleAdjacency(data, WeldTolerance);
+            int[] groups = MeshSplitUtility.BuildConnectedComponentGroups(adjacency, out int componentCount);
+            Assert(componentCount == 2, "색상 복원 검증용 아일랜드 생성에 실패했습니다.");
+            Assert(
+                MeshSplitUtility.TryGetImportedGroupColor(data, groups, groups[0], out Color firstColor)
+                && ((Color32)firstColor).Equals(new Color32(0x1A, 0x2B, 0x3C, 0xFF)),
+                "첫 번째 Overwrite 색 그룹이 복원되지 않았습니다.");
+            Assert(
+                MeshSplitUtility.TryGetImportedGroupColor(data, groups, groups[2], out Color secondColor)
+                && ((Color32)secondColor).Equals(new Color32(0xD4, 0xE5, 0xF6, 0xFF)),
+                "두 번째 Overwrite 색 그룹이 복원되지 않았습니다.");
+        }
+
         private static int CountOccurrences(string value, string token)
         {
             int count = 0;
@@ -181,7 +214,9 @@ namespace ProjectF.EditorTools.MeshSplit
             return count;
         }
 
-        private static MeshSplitSourceData CreateThreeTriangleSource(int[] connectivityIds)
+        private static MeshSplitSourceData CreateThreeTriangleSource(
+            int[] connectivityIds,
+            int[] triangleGroupColorKeys = null)
         {
             Vector3[] vertices =
             {
@@ -195,10 +230,18 @@ namespace ProjectF.EditorTools.MeshSplit
                 new Vector3(4f, 0f, 0f),
                 new Vector3(3f, 1f, 0f)
             };
-            return CreateSource(vertices, new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, connectivityIds);
+            return CreateSource(
+                vertices,
+                new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 },
+                connectivityIds,
+                triangleGroupColorKeys);
         }
 
-        private static MeshSplitSourceData CreateSource(Vector3[] vertices, int[] triangles, int[] connectivityIds)
+        private static MeshSplitSourceData CreateSource(
+            Vector3[] vertices,
+            int[] triangles,
+            int[] connectivityIds,
+            int[] triangleGroupColorKeys = null)
         {
             Vector3[] normals = new Vector3[vertices.Length];
             Vector4[] tangents = new Vector4[vertices.Length];
@@ -234,7 +277,8 @@ namespace ProjectF.EditorTools.MeshSplit
                 true,
                 true,
                 true,
-                bounds);
+                bounds,
+                triangleGroupColorKeys);
         }
 
         private static void DestroyOutputs(List<MeshSplitOutput> outputs)

@@ -11,10 +11,27 @@ public class OilDrillingMachine : InputOutputModule
     private ItemDefinition oilDefinition;
     [SerializeField, Min(0)]
     private int fallbackOilItemId = DefaultOilItemId;
+    [SerializeField]
+    private Transform pumpjackBeam;
+    [SerializeField]
+    private Transform pumpjackCrank;
+    [SerializeField]
+    private Transform pumpjackRod;
+    [SerializeField, Min(0.01f)]
+    private float pumpjackCyclesPerSecond = 0.35f;
+    [SerializeField, Min(0f)]
+    private float pumpjackBeamSwingDegrees = 7f;
+    [SerializeField, Min(0f)]
+    private float pumpjackRodStroke = 0.08f;
 
     private float productionProgressLiters;
     private Resource cachedOilResource;
     private bool isExtracting;
+    private bool hasPumpjackVisual;
+    private float pumpjackPhase;
+    private Quaternion pumpjackBeamBaseRotation;
+    private Quaternion pumpjackCrankBaseRotation;
+    private Vector3 pumpjackRodBasePosition;
 
     public float OilLitersPerSecond
     {
@@ -70,6 +87,7 @@ public class OilDrillingMachine : InputOutputModule
 
     public override void PrepareForPool()
     {
+        RestorePumpjackVisual();
         productionProgressLiters = 0f;
         cachedOilResource = null;
         isExtracting = false;
@@ -93,6 +111,7 @@ public class OilDrillingMachine : InputOutputModule
     {
         base.OnEnable();
         isExtracting = false;
+        CapturePumpjackVisual();
         ApplyAnimatorPlayback(false);
     }
 
@@ -100,6 +119,7 @@ public class OilDrillingMachine : InputOutputModule
     {
         isExtracting = false;
         cachedOilResource = null;
+        RestorePumpjackVisual();
         base.OnDisable();
         ApplyAnimatorPlayback(false);
     }
@@ -110,6 +130,38 @@ public class OilDrillingMachine : InputOutputModule
         productionProgressLiters = 0f;
         cachedOilResource = null;
         isExtracting = false;
+        RestorePumpjackVisual();
+    }
+
+    private void LateUpdate()
+    {
+        if (!Application.isPlaying || !isExtracting || !hasPumpjackVisual)
+        {
+            return;
+        }
+
+        float playbackSpeed = Mathf.Max(0f, OperationalAnimationSpeedRatio);
+        pumpjackPhase = Mathf.Repeat(
+            pumpjackPhase + Time.deltaTime * pumpjackCyclesPerSecond * playbackSpeed * Mathf.PI * 2f,
+            Mathf.PI * 2f);
+        float stroke = Mathf.Sin(pumpjackPhase);
+
+        if (pumpjackBeam != null)
+        {
+            pumpjackBeam.localRotation = pumpjackBeamBaseRotation
+                * Quaternion.AngleAxis(stroke * pumpjackBeamSwingDegrees, Vector3.forward);
+        }
+
+        if (pumpjackCrank != null)
+        {
+            pumpjackCrank.localRotation = pumpjackCrankBaseRotation
+                * Quaternion.AngleAxis(pumpjackPhase * Mathf.Rad2Deg, Vector3.forward);
+        }
+
+        if (pumpjackRod != null)
+        {
+            pumpjackRod.localPosition = pumpjackRodBasePosition + Vector3.up * (stroke * pumpjackRodStroke);
+        }
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
@@ -327,5 +379,50 @@ public class OilDrillingMachine : InputOutputModule
         {
             targetAnimator.speed = isWorking ? Mathf.Max(0f, OperationalAnimationSpeedRatio) : 0f;
         }
+    }
+
+    private void CapturePumpjackVisual()
+    {
+        hasPumpjackVisual = pumpjackBeam != null || pumpjackCrank != null || pumpjackRod != null;
+        pumpjackPhase = 0f;
+        if (pumpjackBeam != null)
+        {
+            pumpjackBeamBaseRotation = pumpjackBeam.localRotation;
+        }
+
+        if (pumpjackCrank != null)
+        {
+            pumpjackCrankBaseRotation = pumpjackCrank.localRotation;
+        }
+
+        if (pumpjackRod != null)
+        {
+            pumpjackRodBasePosition = pumpjackRod.localPosition;
+        }
+    }
+
+    private void RestorePumpjackVisual()
+    {
+        if (!hasPumpjackVisual)
+        {
+            return;
+        }
+
+        if (pumpjackBeam != null)
+        {
+            pumpjackBeam.localRotation = pumpjackBeamBaseRotation;
+        }
+
+        if (pumpjackCrank != null)
+        {
+            pumpjackCrank.localRotation = pumpjackCrankBaseRotation;
+        }
+
+        if (pumpjackRod != null)
+        {
+            pumpjackRod.localPosition = pumpjackRodBasePosition;
+        }
+
+        pumpjackPhase = 0f;
     }
 }

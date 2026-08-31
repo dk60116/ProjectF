@@ -91,6 +91,7 @@ namespace ProjectF.EditorTools.MeshSplit
         private int[] paintStrokeBefore;
         private bool paintStrokeChanged;
         private int movingVisualGroupIndex = -1;
+        private bool colorPickMode;
 
         [MenuItem("Window/ProjectF/Mesh Split")]
         [MenuItem("Tools/MapObject/Mesh Split")]
@@ -267,6 +268,23 @@ namespace ProjectF.EditorTools.MeshSplit
         private void DrawBrushSection()
         {
             EditorGUILayout.LabelField("Brush", EditorStyles.boldLabel);
+            using (new EditorGUI.DisabledScope(sourceData == null || groups.Count == 0))
+            {
+                GUIContent pickColorContent = new GUIContent(
+                    "Pick Color",
+                    "Click a vertex or face in the preview to select its color group.");
+                bool nextColorPickMode = GUILayout.Toggle(colorPickMode, pickColorContent, "Button");
+                if (nextColorPickMode != colorPickMode)
+                {
+                    colorPickMode = nextColorPickMode;
+                    hasBrushPreview = false;
+                    statusMessage = colorPickMode
+                        ? "미리보기의 버텍스나 면을 클릭하면 해당 색 그룹을 선택합니다."
+                        : "색 선택 모드를 해제했습니다.";
+                    Repaint();
+                }
+            }
+
             brushRadius = EditorGUILayout.Slider("Radius (px)", brushRadius, MinBrushRadius, MaxBrushRadius);
             EditorGUI.BeginChangeCheck();
             bool nextShowWireframe = EditorGUILayout.Toggle("Show Wireframe", showWireframe);
@@ -289,7 +307,7 @@ namespace ProjectF.EditorTools.MeshSplit
             }
 
             EditorGUILayout.HelpBox(
-                "좌클릭/드래그: 선택 색 칠하기\nShift+좌클릭: 연결된 아일랜드 전체 칠하기\nCtrl+좌클릭 드래그: 클릭한 그룹을 시각적으로만 이동\n우클릭 드래그: 회전 · 휠클릭 드래그: 이동 · 휠: 확대/축소",
+                "Pick Color → 좌클릭: 클릭한 버텍스/면의 색 선택\n좌클릭/드래그: 선택 색 칠하기\nShift+좌클릭: 연결된 아일랜드 전체 칠하기\nCtrl+좌클릭 드래그: 클릭한 그룹을 시각적으로만 이동\n우클릭 드래그: 회전 · 휠클릭 드래그: 이동 · 휠: 확대/축소",
                 MessageType.None);
         }
 
@@ -386,6 +404,7 @@ namespace ProjectF.EditorTools.MeshSplit
             visualGroupOffsets.Clear();
             activeGroupIndex = 0;
             movingVisualGroupIndex = -1;
+            colorPickMode = false;
             ClearHistory();
             DestroyPreviewMesh();
             DestroyWireframeMesh();
@@ -412,10 +431,17 @@ namespace ProjectF.EditorTools.MeshSplit
             brushVisitStamps = new int[sourceData.TriangleCount];
             for (int groupIndex = 0; groupIndex < islandCount; groupIndex++)
             {
+                Color groupColor = MeshSplitUtility.TryGetImportedGroupColor(
+                    sourceData,
+                    triangleGroups,
+                    groupIndex,
+                    out Color importedColor)
+                    ? importedColor
+                    : GenerateGroupColor(groupIndex);
                 groups.Add(new GroupDefinition
                 {
                     name = $"Group {groupIndex + 1:00}",
-                    color = GenerateGroupColor(groupIndex)
+                    color = groupColor
                 });
             }
 
@@ -772,7 +798,11 @@ namespace ProjectF.EditorTools.MeshSplit
 
             int controlId = GUIUtility.GetControlID("MeshSplitPreview".GetHashCode(), FocusType.Passive, previewRect);
             bool inside = previewRect.Contains(current.mousePosition);
-            if (inside && current.control)
+            if (inside && colorPickMode)
+            {
+                EditorGUIUtility.AddCursorRect(previewRect, MouseCursor.ArrowPlus);
+            }
+            else if (inside && current.control)
             {
                 EditorGUIUtility.AddCursorRect(previewRect, MouseCursor.MoveArrow);
             }
@@ -800,6 +830,14 @@ namespace ProjectF.EditorTools.MeshSplit
 
             if (inside && current.type == EventType.MouseDown)
             {
+                if (current.button == 0 && colorPickMode)
+                {
+                    TryPickColorAtMousePosition(previewRect, current.mousePosition);
+                    current.Use();
+                    Repaint();
+                    return;
+                }
+
                 GUIUtility.hotControl = controlId;
                 if (current.button == 0)
                 {
@@ -877,7 +915,7 @@ namespace ProjectF.EditorTools.MeshSplit
         private void UpdateBrushPreview(Rect previewRect, Vector2 mousePosition)
         {
             hasBrushPreview = false;
-            if (Event.current != null && Event.current.control)
+            if (colorPickMode || (Event.current != null && Event.current.control))
             {
                 return;
             }
@@ -894,6 +932,34 @@ namespace ProjectF.EditorTools.MeshSplit
 
             brushPreviewPosition = mousePosition;
             hasBrushPreview = true;
+        }
+
+        private bool TryPickColorAtMousePosition(Rect previewRect, Vector2 mousePosition)
+        {
+            if (sourceData == null
+                || groups.Count == 0
+                || !TryBuildPreviewRay(previewRect, mousePosition, out Ray ray)
+                || !TryRaycastSource(ray, out int hitTriangleIndex)
+                || hitTriangleIndex < 0
+                || hitTriangleIndex >= triangleGroups.Length)
+            {
+                statusMessage = "색을 선택할 메쉬 버텍스나 면을 찾지 못했습니다.";
+                return false;
+            }
+
+            int pickedGroupIndex = triangleGroups[hitTriangleIndex];
+            if (pickedGroupIndex < 0 || pickedGroupIndex >= groups.Count)
+            {
+                statusMessage = "클릭한 메쉬에 유효한 색 그룹이 없습니다.";
+                return false;
+            }
+
+            activeGroupIndex = pickedGroupIndex;
+            colorPickMode = false;
+            hasBrushPreview = false;
+            statusMessage = $"{groups[pickedGroupIndex].name} 색을 선택했습니다.";
+            EditorUtility.SetDirty(this);
+            return true;
         }
 
         private void PaintAtMousePosition(Rect previewRect, Vector2 mousePosition, bool fillIsland)
@@ -1372,8 +1438,9 @@ namespace ProjectF.EditorTools.MeshSplit
                     ExportToFile(format, absoluteTargetPath, outputs, safeName);
                 }
 
-                AssetDatabase.Refresh();
-                AssetDatabase.ImportAsset(targetAssetPath, ImportAssetOptions.ForceUpdate);
+                AssetDatabase.ImportAsset(
+                    targetAssetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
                 Object exportedAsset = AssetDatabase.LoadMainAssetAtPath(targetAssetPath);
                 if (exportedAsset != null)
                 {
@@ -1381,7 +1448,7 @@ namespace ProjectF.EditorTools.MeshSplit
                     EditorGUIUtility.PingObject(exportedAsset);
                     if (overwrite)
                     {
-                        sourceAsset = exportedAsset;
+                        LoadSource(exportedAsset);
                     }
                 }
 

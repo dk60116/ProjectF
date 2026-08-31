@@ -60,7 +60,7 @@ MonoBehaviour:
   - id: 7f82e0373dbd406ba0fd649748577b61
     displayName: Mining
     expanded: 1
-    anchorItemGuid: 347029aa316390a4982b64441c83789c
+    anchorItemGuid: a42f84aea6bbe46419a3777181e987a1
   - id: abe4f914cb684037afb8c746f6debe44
     displayName: Water & Steam
     expanded: 1
@@ -336,3 +336,5 @@ MonoBehaviour:
     folderId: abe4f914cb684037afb8c746f6debe44
   - itemGuid: 0fff3b18f5681864380d5935d5e1cd08
     folderId: abe4f914cb684037afb8c746f6debe44
+  - itemGuid: f73deaa4f06e2164a9a37afae9ef1854
+    folderId: 7f82e0373dbd406ba0fd649748577b61

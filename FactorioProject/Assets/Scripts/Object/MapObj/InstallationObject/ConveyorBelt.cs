@@ -11,10 +11,12 @@ public class ConveyorBelt : InstallationObject
         out Quaternion rotation);
 
     private const float BeltTopUvRepeatsPerWorldUnit = 1f;
+    private const float BeltTopUvPhaseEpsilon = 0.0001f;
     private const string EndStartObjectName = "End_S";
     private const string EndEndObjectName = "End_E";
     private const string SeamStartObjectName = "Seam_S";
     private const string SeamEndObjectName = "Seam_E";
+    private const string SeamTopObjectName = "BeltTop_Seam";
     protected static readonly int[] ObjectInfoMainLaneIndices = { 0, 2 };
     protected static readonly int[] ObjectInfoBridgeLaneIndices = { 1, 3 };
     private static readonly Vector2Int[] EndpointRefreshDirections =
@@ -1074,13 +1076,26 @@ public class ConveyorBelt : InstallationObject
 
     private static bool SetEndpointVisualActive(GameObject targetObject, bool isActive)
     {
-        if (targetObject == null || targetObject.activeSelf == isActive)
+        if (targetObject == null)
         {
             return false;
         }
 
-        targetObject.SetActive(isActive);
-        return true;
+        bool changed = false;
+        if (targetObject.activeSelf != isActive)
+        {
+            targetObject.SetActive(isActive);
+            changed = true;
+        }
+
+        Transform seamTop = targetObject.transform.Find(SeamTopObjectName);
+        if (seamTop != null && seamTop.gameObject.activeSelf != isActive)
+        {
+            seamTop.gameObject.SetActive(isActive);
+            changed = true;
+        }
+
+        return changed;
     }
 
     private void CacheBeltTopTransformState()
@@ -1125,6 +1140,14 @@ public class ConveyorBelt : InstallationObject
         if (beltTopTransformStates.Count == 0)
         {
             return false;
+        }
+
+        // Corner tops are masked square planes. Scaling one toward an endpoint
+        // distorts the entire arc, so their dedicated seam meshes cover joins.
+        if (IsCornerVariant)
+        {
+            startSeam = false;
+            endSeam = false;
         }
 
         int topCount = beltTopTransformStates.Count;
@@ -1361,7 +1384,9 @@ public class ConveyorBelt : InstallationObject
         for (int i = 0; i < beltTopRenderInfos.Count; i++)
         {
             BeltTopRenderInfo info = beltTopRenderInfos[i];
-            info.UvLengthOffset = uvLengthOffset;
+            info.UvLengthOffset = TryCalculateWorldAlignedBeltTopUvOffset(info, out float worldAlignedOffset)
+                ? worldAlignedOffset
+                : uvLengthOffset;
             beltTopRenderInfos[i] = info;
             uvLengthOffset += info.UvLengthScale;
         }
@@ -1456,6 +1481,47 @@ public class ConveyorBelt : InstallationObject
         Vector3 lengthAxis = new Vector3(matrix.m02, matrix.m12, matrix.m22);
         float worldLength = mesh.bounds.size.z * lengthAxis.magnitude;
         return Mathf.Max(worldLength * BeltTopUvRepeatsPerWorldUnit, 0.0001f);
+    }
+
+    private bool TryCalculateWorldAlignedBeltTopUvOffset(
+        BeltTopRenderInfo info,
+        out float uvLengthOffset)
+    {
+        uvLengthOffset = 0f;
+        if (IsCornerVariant
+            || this is ConvayorBelt2F
+            || info.Renderer == null
+            || !TryGetOutputDirection(transform.rotation, out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        MeshFilter meshFilter = info.Renderer.GetComponent<MeshFilter>();
+        Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+        if (mesh == null)
+        {
+            return false;
+        }
+
+        Vector3 flowDirection = new Vector3(outputDirection.x, 0f, outputDirection.y);
+        Vector3 worldCenter = info.Renderer.transform.TransformPoint(mesh.bounds.center);
+        // Endpoint seams stretch and shift individual top meshes. Anchoring the
+        // phase to the actual world-space center keeps adjacent flat belts continuous.
+        float worldCenterPhase =
+            Vector3.Dot(worldCenter, flowDirection) * BeltTopUvRepeatsPerWorldUnit;
+        float unwrappedOffset = worldCenterPhase
+                                + BeltTopUvRepeatsPerWorldUnit * 0.5f
+                                - info.UvLengthScale * 0.5f;
+        // Whole UV periods render identically; wrapping preserves virtual batching.
+        uvLengthOffset = Mathf.Repeat(unwrappedOffset, 1f);
+        if (uvLengthOffset <= BeltTopUvPhaseEpsilon
+            || uvLengthOffset >= 1f - BeltTopUvPhaseEpsilon)
+        {
+            uvLengthOffset = 0f;
+        }
+
+        return true;
     }
 
     private float CalculateBeltTopUvScrollY()

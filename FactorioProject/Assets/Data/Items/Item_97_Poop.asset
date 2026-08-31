@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_97_Poop
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Poop
-  id: 89
+  id: 90
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 8ebf4c72920ea22409dac867a1258551, type: 2}
   portableMat: {fileID: 2100000, guid: d37503b3ce65473b8feea27bb4ee9cb2, type: 2}

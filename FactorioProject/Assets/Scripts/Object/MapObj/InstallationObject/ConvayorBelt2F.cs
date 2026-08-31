@@ -219,10 +219,15 @@ public class ConvayorBelt2F : ConveyorBelt
         RefreshPathMetrics();
         Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
         float pitchDegrees = ResolvePathItemPitch(GetPathCoordinate(localPosition));
-        Quaternion localPitchRotation = pathUsesLocalX
-            ? Quaternion.Euler(0f, 0f, -pitchDegrees)
-            : Quaternion.Euler(pitchDegrees, 0f, 0f);
-        return transform.rotation * localPitchRotation;
+        if (Mathf.Abs(pitchDegrees) <= PathSlopeRotationEpsilon)
+        {
+            return Quaternion.identity;
+        }
+
+        Vector3 localTiltAxis = pathUsesLocalX ? Vector3.forward : Vector3.right;
+        float tiltDegrees = pathUsesLocalX ? -pitchDegrees : pitchDegrees;
+        Vector3 worldTiltAxis = transform.TransformDirection(localTiltAxis);
+        return Quaternion.AngleAxis(tiltDegrees, worldTiltAxis);
     }
 
     public bool IsUpperPathWorldPosition(Vector3 worldPosition)

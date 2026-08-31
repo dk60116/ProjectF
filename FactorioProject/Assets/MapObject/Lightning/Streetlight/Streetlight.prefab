@@ -193,7 +193,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LightObject
   id: 0
   objectName: Streetlight
-  objId: 54
+  objId: 55
   itemDefinition: {fileID: 11400000, guid: f26efb1d776a4df469e75c19a5a1181b, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
