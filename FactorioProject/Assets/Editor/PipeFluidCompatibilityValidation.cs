@@ -621,11 +621,16 @@ public static class PipeFluidCompatibilityValidation
                 typeof(float).MakeByRefType()
             },
             null);
-        MethodInfo runtimePipeSourceMethod = typeof(InputOutputModule).GetMethod(
-            "TryGetRuntimePipeSourceAtCoordinate",
+        MethodInfo runtimeFluidOutputInfoMethod = typeof(InputOutputModule).GetMethod(
+            "TryGetFluidOutputInfoAtRuntimeGridCoordinate",
             BindingFlags.Static | BindingFlags.Public,
             null,
-            new[] { typeof(Vector2Int), typeof(Pump).MakeByRefType() },
+            new[]
+            {
+                typeof(Vector2Int),
+                typeof(int).MakeByRefType(),
+                typeof(float).MakeByRefType()
+            },
             null);
         MethodInfo runtimePipeSourceCandidateMethod = typeof(InputOutputModule).GetMethod(
             "TryGetRuntimePipeSourceAtCoordinate",
@@ -763,8 +768,8 @@ public static class PipeFluidCompatibilityValidation
             report,
             result,
             pipeSourceFluidMethod,
-            runtimePipeSourceMethod,
-            "pipe fluid identity reads pumps only through the registered runtime pipe source");
+            runtimeFluidOutputInfoMethod,
+            "pipe fluid identity reads configured outputs even while their machines are idle");
         ValidateFixtureMethodCall(
             report,
             result,

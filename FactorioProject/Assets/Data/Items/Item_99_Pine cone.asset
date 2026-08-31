@@ -10,14 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_82_Manual - Underground Pipe
+  m_Name: Item_99_Pine cone
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
-  itemName: Manual - Underground Pipe
-  id: 65
+  itemName: Pine cone
+  id: 99
   mapObject: {fileID: 0}
-  portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
-  portableMat: {fileID: 2100000, guid: 54a1aebe4cd51d347b8d3ec31cae9d3a, type: 2}
-  icon: {fileID: 21300000, guid: 3cb3d9ad3a6e5da42b94c4d17446da9a, type: 3}
+  portableMesh: {fileID: 4300000, guid: 00e315507a984ce4b9483daa07491361, type: 2}
+  portableMat: {fileID: 2100000, guid: 7d5742b5754fb3e498873f7811b4d89a, type: 2}
+  icon: {fileID: 21300000, guid: cdf221a6c1684933a51d8163af389c16, type: 3}
   oneItem: 0
   interactionButtonList: []
   lightMode: 0
@@ -26,8 +26,8 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 0
-  isManual: 1
-  manualTargetItem: {fileID: 11400000, guid: 0fff3b18f5681864380d5935d5e1cd08, type: 2}
+  isManual: 0
+  manualTargetItem: {fileID: 0}
   upgradeable: 1
   capacity: 10
   storesFluid: 0

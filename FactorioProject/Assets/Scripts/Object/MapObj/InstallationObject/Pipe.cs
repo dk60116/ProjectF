@@ -603,19 +603,16 @@ public class Pipe : InstallationObject
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
 
-        // A pump is a source only on its registered pipe-output cell. Looking up
-        // the MapObject occupying this coordinate would also match the pump body
-        // and its input side, making any pipe that merely faces the pump display
-        // the pump's fluid.
-        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump pump)
-            && pump != null
-            && pump.gameObject.activeInHierarchy
-            && pump.TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
-            && outputItemId >= 0
-            && litersPerSecond > 0.0001f)
+        // A configured fluid output establishes network identity even while its
+        // machine is idle. The runtime output lookup is coordinate-specific, so
+        // machine bodies and input cells cannot leak that identity into a pipe.
+        if (InputOutputModule.TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+                coordinate,
+                out int outputItemId,
+                out temperatureCelsius)
+            && outputItemId >= 0)
         {
             fluidItemId = outputItemId;
-            temperatureCelsius = pump.GetStoredFluidTemperatureCelsius(outputItemId);
             return true;
         }
 

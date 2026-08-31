@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -11,15 +12,29 @@ public class FilterSelectUI : MonoBehaviour
     [SerializeField]
     private Button allBtuuon, noneButton;
 
+    [SerializeField]
+    private Sprite loggingGrowthHandleSprite;
+
     private readonly List<ItemDefinition> visibleDefinitions = new List<ItemDefinition>();
+    private readonly List<ResourceDefinition> visibleTreeDefinitions = new List<ResourceDefinition>();
     private MapObject boundTarget;
     private TerrainGenerator cachedTerrainGenerator;
+    private GameObject loggingGrowthControl;
+    private Slider loggingGrowthSlider;
+    private TextMeshProUGUI loggingGrowthLabel;
+    private TextMeshProUGUI loggingGrowthValueLabel;
+    private bool bulkButtonLayoutCached;
+    private Vector2 originalAllButtonPosition;
+    private Vector2 originalAllButtonSize;
+    private Vector2 originalNoneButtonPosition;
+    private Vector2 originalNoneButtonSize;
 
     private void Awake()
     {
         EnsureSlotList();
         ResolveButtons();
         BindButtons();
+        EnsureLoggingGrowthControl();
         HideEmptySlots();
     }
 
@@ -27,6 +42,7 @@ public class FilterSelectUI : MonoBehaviour
     {
         ResolveButtons();
         BindButtons();
+        EnsureLoggingGrowthControl();
         Refresh();
     }
 
@@ -135,6 +151,13 @@ public class FilterSelectUI : MonoBehaviour
     private void BuildVisibleDefinitions()
     {
         visibleDefinitions.Clear();
+        visibleTreeDefinitions.Clear();
+
+        if (boundTarget is LoggingMachine)
+        {
+            ResolveTerrainGenerator()?.CollectLoggingTreeDefinitions(visibleTreeDefinitions);
+            return;
+        }
 
         if (GameManager.Instance == null || GameManager.Instance.ItemManger == null)
         {
@@ -185,6 +208,17 @@ public class FilterSelectUI : MonoBehaviour
             return;
         }
 
+        if (boundTarget is LoggingMachine loggingMachine)
+        {
+            ApplyLoggingDefinitionsToSlots(loggingMachine);
+            ApplyLoggingHeaderLayout(true);
+            RefreshLoggingGrowthControl(loggingMachine);
+            return;
+        }
+
+        ApplyLoggingHeaderLayout(false);
+        SetLoggingGrowthControlVisible(false);
+
         int filterBitCount = GetFilterBitCount();
         bool isProductionTargetFilter = TryResolveProductionMachine(boundTarget, out ProductionMachine productionMachine);
 
@@ -209,6 +243,45 @@ public class FilterSelectUI : MonoBehaviour
                     : boundTarget == null || boundTarget.IsItemFilterEnabled(definition.id, filterBitCount);
                 int itemId = definition.id;
                 slot.SetFilterItem(itemId, isChecked, isOn => HandleSlotToggleChanged(itemId, isOn));
+            }
+            else
+            {
+                slot.ClearFilterItem();
+                if (slot.gameObject.activeSelf)
+                {
+                    slot.gameObject.SetActive(false);
+                }
+            }
+        }
+    }
+
+    private void ApplyLoggingDefinitionsToSlots(LoggingMachine loggingMachine)
+    {
+        for (int i = 0; i < slotList.Count; i++)
+        {
+            ItemFilterSlot slot = slotList[i];
+            if (slot == null)
+            {
+                continue;
+            }
+
+            if (i < visibleTreeDefinitions.Count)
+            {
+                ResourceDefinition definition = visibleTreeDefinitions[i];
+                if (!slot.gameObject.activeSelf)
+                {
+                    slot.gameObject.SetActive(true);
+                }
+
+                ResourceDefinition capturedDefinition = definition;
+                string displayName = !string.IsNullOrWhiteSpace(definition.resourceName)
+                    ? definition.resourceName
+                    : definition.name;
+                slot.SetCustomFilterItem(
+                    definition.ResourceIcon,
+                    displayName,
+                    loggingMachine.IsTreeTypeEnabled(definition),
+                    isOn => HandleLoggingTreeToggleChanged(capturedDefinition, isOn));
             }
             else
             {
@@ -366,6 +439,18 @@ public class FilterSelectUI : MonoBehaviour
         Refresh();
     }
 
+    private void HandleLoggingTreeToggleChanged(ResourceDefinition definition, bool isOn)
+    {
+        if (!(ResolveCurrentTarget() is LoggingMachine loggingMachine))
+        {
+            return;
+        }
+
+        loggingMachine.SetTreeTypeEnabled(definition, visibleTreeDefinitions, isOn);
+        PersistTargetFilterState(loggingMachine);
+        Refresh();
+    }
+
     private int GetFilterBitCount()
     {
         int maxItemId = -1;
@@ -443,6 +528,14 @@ public class FilterSelectUI : MonoBehaviour
         MapObject target = ResolveCurrentTarget();
         if (target == null)
         {
+            return;
+        }
+
+        if (target is LoggingMachine loggingMachine)
+        {
+            loggingMachine.SetAllTreeTypes(visibleTreeDefinitions, isEnabled);
+            PersistTargetFilterState(loggingMachine);
+            Refresh();
             return;
         }
 
@@ -661,6 +754,349 @@ public class FilterSelectUI : MonoBehaviour
         }
 
         return Mathf.Max(GetFilterBitCount(), maxItemId + 1);
+    }
+
+    private TerrainGenerator ResolveTerrainGenerator()
+    {
+        if (cachedTerrainGenerator == null)
+        {
+            cachedTerrainGenerator = TerrainGenerator.ResolveActive();
+        }
+
+        return cachedTerrainGenerator;
+    }
+
+    private void EnsureLoggingGrowthControl()
+    {
+        if (loggingGrowthControl != null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI styleSource = GetComponentInChildren<TextMeshProUGUI>(true);
+        Sprite woodFrameSprite = ResolveBulkButtonSprite();
+        loggingGrowthControl = new GameObject(
+            "Logging Minimum Growth",
+            typeof(RectTransform),
+            typeof(CanvasRenderer));
+        RectTransform root = loggingGrowthControl.GetComponent<RectTransform>();
+        root.SetParent(transform, false);
+        root.anchorMin = new Vector2(1f, 1f);
+        root.anchorMax = new Vector2(1f, 1f);
+        root.pivot = new Vector2(1f, 1f);
+        root.anchoredPosition = new Vector2(-28f, -26f);
+        root.sizeDelta = new Vector2(552f, 68f);
+
+        GameObject labelObject = new GameObject(
+            "Label",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(TextMeshProUGUI));
+        RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.SetParent(root, false);
+        labelRect.anchorMin = new Vector2(0f, 0f);
+        labelRect.anchorMax = new Vector2(0.31f, 1f);
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+        loggingGrowthLabel = labelObject.GetComponent<TextMeshProUGUI>();
+        loggingGrowthLabel.fontSize = styleSource != null
+            ? Mathf.Min(styleSource.fontSize, 21f)
+            : 21f;
+        loggingGrowthLabel.color = styleSource != null ? styleSource.color : Color.white;
+        loggingGrowthLabel.alignment = TextAlignmentOptions.MidlineRight;
+        loggingGrowthLabel.raycastTarget = false;
+        if (styleSource != null)
+        {
+            loggingGrowthLabel.font = styleSource.font;
+            loggingGrowthLabel.fontSharedMaterial = styleSource.fontSharedMaterial;
+        }
+
+        RectTransform valueBadge = CreateSliderImage(
+            "Value Badge",
+            root,
+            Color.white,
+            new Vector2(0.325f, 0.13f),
+            new Vector2(0.415f, 0.87f),
+            woodFrameSprite,
+            Image.Type.Sliced);
+        valueBadge.offsetMin = new Vector2(2f, 0f);
+        valueBadge.offsetMax = new Vector2(-2f, 0f);
+        loggingGrowthValueLabel = CreateSliderText(
+            "Value",
+            valueBadge,
+            styleSource,
+            23f,
+            TextAlignmentOptions.Center);
+
+        GameObject sliderObject = new GameObject(
+            "Slider",
+            typeof(RectTransform),
+            typeof(Slider));
+        RectTransform sliderRect = sliderObject.GetComponent<RectTransform>();
+        sliderRect.SetParent(root, false);
+        sliderRect.anchorMin = new Vector2(0.44f, 0f);
+        sliderRect.anchorMax = new Vector2(1f, 1f);
+        sliderRect.offsetMin = Vector2.zero;
+        sliderRect.offsetMax = Vector2.zero;
+
+        RectTransform background = CreateSliderImage(
+            "Background",
+            sliderRect,
+            Color.white,
+            new Vector2(0f, 0.2f),
+            new Vector2(1f, 0.8f),
+            woodFrameSprite,
+            Image.Type.Sliced);
+        RectTransform track = CreateSliderImage(
+            "Track",
+            sliderRect,
+            new Color(0.16f, 0.065f, 0.025f, 0.96f),
+            new Vector2(0f, 0.37f),
+            new Vector2(1f, 0.63f));
+        track.offsetMin = new Vector2(13f, 0f);
+        track.offsetMax = new Vector2(-13f, 0f);
+        RectTransform fillArea = CreateSliderContainer(
+            "Fill Area",
+            sliderRect,
+            new Vector2(0f, 0.39f),
+            new Vector2(1f, 0.61f),
+            15f);
+        RectTransform fill = CreateSliderImage(
+            "Fill",
+            fillArea,
+            new Color(0.95f, 0.57f, 0.16f, 1f),
+            Vector2.zero,
+            Vector2.one);
+        CreateSliderTicks(fillArea);
+        RectTransform handleArea = CreateSliderContainer(
+            "Handle Slide Area",
+            sliderRect,
+            Vector2.zero,
+            Vector2.one,
+            17f);
+        RectTransform handle = CreateSliderImage(
+            "Handle",
+            handleArea,
+            Color.white,
+            new Vector2(0f, 0.13f),
+            new Vector2(0f, 0.87f),
+            loggingGrowthHandleSprite != null
+                ? loggingGrowthHandleSprite
+                : woodFrameSprite,
+            loggingGrowthHandleSprite != null
+                ? Image.Type.Simple
+                : Image.Type.Sliced);
+        handle.sizeDelta = new Vector2(34f, 0f);
+
+        loggingGrowthSlider = sliderObject.GetComponent<Slider>();
+        loggingGrowthSlider.minValue = ResourceDefinition.MinGrowth;
+        loggingGrowthSlider.maxValue = ResourceDefinition.MaxGrowth;
+        loggingGrowthSlider.wholeNumbers = true;
+        loggingGrowthSlider.direction = Slider.Direction.LeftToRight;
+        loggingGrowthSlider.fillRect = fill;
+        loggingGrowthSlider.handleRect = handle;
+        loggingGrowthSlider.targetGraphic = handle.GetComponent<Image>();
+        loggingGrowthSlider.onValueChanged.AddListener(HandleLoggingGrowthChanged);
+        background.SetAsFirstSibling();
+        SetLoggingGrowthControlVisible(false);
+    }
+
+    private static RectTransform CreateSliderContainer(
+        string objectName,
+        RectTransform parent,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        float horizontalInset)
+    {
+        GameObject gameObject = new GameObject(objectName, typeof(RectTransform));
+        RectTransform rect = gameObject.GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.offsetMin = new Vector2(horizontalInset, 0f);
+        rect.offsetMax = new Vector2(-horizontalInset, 0f);
+        return rect;
+    }
+
+    private static RectTransform CreateSliderImage(
+        string objectName,
+        RectTransform parent,
+        Color color,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Sprite sprite = null,
+        Image.Type imageType = Image.Type.Simple)
+    {
+        GameObject gameObject = new GameObject(
+            objectName,
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image));
+        RectTransform rect = gameObject.GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        Image image = gameObject.GetComponent<Image>();
+        image.color = color;
+        image.sprite = sprite;
+        image.type = sprite != null ? imageType : Image.Type.Simple;
+        image.pixelsPerUnitMultiplier = sprite != null ? 5f : 1f;
+        return rect;
+    }
+
+    private static TextMeshProUGUI CreateSliderText(
+        string objectName,
+        RectTransform parent,
+        TextMeshProUGUI styleSource,
+        float fontSize,
+        TextAlignmentOptions alignment)
+    {
+        GameObject gameObject = new GameObject(
+            objectName,
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(TextMeshProUGUI));
+        RectTransform rect = gameObject.GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI text = gameObject.GetComponent<TextMeshProUGUI>();
+        text.fontSize = fontSize;
+        text.alignment = alignment;
+        text.color = styleSource != null ? styleSource.color : Color.white;
+        text.raycastTarget = false;
+        if (styleSource != null)
+        {
+            text.font = styleSource.font;
+            text.fontSharedMaterial = styleSource.fontSharedMaterial;
+        }
+
+        return text;
+    }
+
+    private static void CreateSliderTicks(RectTransform trackRect)
+    {
+        for (int i = ResourceDefinition.MinGrowth; i <= ResourceDefinition.MaxGrowth; i++)
+        {
+            float normalized = (i - ResourceDefinition.MinGrowth)
+                               / (float)(ResourceDefinition.MaxGrowth - ResourceDefinition.MinGrowth);
+            RectTransform tick = CreateSliderImage(
+                $"Tick {i}",
+                trackRect,
+                new Color(1f, 0.82f, 0.47f, i % 5 == 0 ? 0.9f : 0.5f),
+                new Vector2(normalized, 0.05f),
+                new Vector2(normalized, 0.95f));
+            tick.anchoredPosition = Vector2.zero;
+            tick.sizeDelta = new Vector2(i % 5 == 0 ? 2f : 1f, 0f);
+            tick.GetComponent<Image>().raycastTarget = false;
+        }
+    }
+
+    private Sprite ResolveBulkButtonSprite()
+    {
+        Image buttonImage = allBtuuon != null
+            ? allBtuuon.targetGraphic as Image
+            : null;
+        if (buttonImage == null && noneButton != null)
+        {
+            buttonImage = noneButton.targetGraphic as Image;
+        }
+
+        return buttonImage != null ? buttonImage.sprite : null;
+    }
+
+    private void ApplyLoggingHeaderLayout(bool loggingLayout)
+    {
+        RectTransform allRect = allBtuuon != null
+            ? allBtuuon.transform as RectTransform
+            : null;
+        RectTransform noneRect = noneButton != null
+            ? noneButton.transform as RectTransform
+            : null;
+        if (!bulkButtonLayoutCached)
+        {
+            if (allRect != null)
+            {
+                originalAllButtonPosition = allRect.anchoredPosition;
+                originalAllButtonSize = allRect.sizeDelta;
+            }
+
+            if (noneRect != null)
+            {
+                originalNoneButtonPosition = noneRect.anchoredPosition;
+                originalNoneButtonSize = noneRect.sizeDelta;
+            }
+
+            bulkButtonLayoutCached = true;
+        }
+
+        if (allRect != null)
+        {
+            allRect.anchoredPosition = loggingLayout
+                ? new Vector2(34f, -32f)
+                : originalAllButtonPosition;
+            allRect.sizeDelta = loggingLayout
+                ? new Vector2(104f, 56f)
+                : originalAllButtonSize;
+        }
+
+        if (noneRect != null)
+        {
+            noneRect.anchoredPosition = loggingLayout
+                ? new Vector2(152f, -32f)
+                : originalNoneButtonPosition;
+            noneRect.sizeDelta = loggingLayout
+                ? new Vector2(104f, 56f)
+                : originalNoneButtonSize;
+        }
+    }
+
+    private void RefreshLoggingGrowthControl(LoggingMachine loggingMachine)
+    {
+        EnsureLoggingGrowthControl();
+        SetLoggingGrowthControlVisible(true);
+        int growth = loggingMachine != null
+            ? loggingMachine.MinimumGrowth
+            : ResourceDefinition.MinGrowth;
+        if (loggingGrowthSlider != null)
+        {
+            loggingGrowthSlider.SetValueWithoutNotify(growth);
+        }
+
+        if (loggingGrowthLabel != null)
+        {
+            loggingGrowthLabel.text = "MINIMUM GROWTH";
+        }
+
+        if (loggingGrowthValueLabel != null)
+        {
+            loggingGrowthValueLabel.text = growth.ToString();
+        }
+    }
+
+    private void SetLoggingGrowthControlVisible(bool visible)
+    {
+        if (loggingGrowthControl != null && loggingGrowthControl.activeSelf != visible)
+        {
+            loggingGrowthControl.SetActive(visible);
+        }
+    }
+
+    private void HandleLoggingGrowthChanged(float value)
+    {
+        if (!(ResolveCurrentTarget() is LoggingMachine loggingMachine))
+        {
+            return;
+        }
+
+        loggingMachine.SetMinimumGrowth(Mathf.RoundToInt(value));
+        PersistTargetFilterState(loggingMachine);
+        RefreshLoggingGrowthControl(loggingMachine);
     }
 
     private Button FindButtonByNames(params string[] names)

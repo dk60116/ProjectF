@@ -402,6 +402,33 @@ public partial class TerrainGenerator : MonoBehaviour
             growthRange - 1);
     }
 
+    public void CollectLoggingTreeDefinitions(List<ResourceDefinition> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        if (treeResources == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < treeResources.Count; i++)
+        {
+            ResourceDefinition definition = treeResources[i].definition;
+            if (definition == null
+                || definition.harvestMode != Resource.HarvestMode.Logging
+                || results.Contains(definition))
+            {
+                continue;
+            }
+
+            results.Add(definition);
+        }
+    }
+
     private int GetResourceBodyYawStep(Resource prefab, Vector2Int worldCoordinate)
     {
         if (IsOilResourcePrefab(prefab))

@@ -3,6 +3,7 @@ using System.Globalization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using PlantResource = ProjectF.MapObjects.Tree;
 
 public class ItemInfoDescription : MonoBehaviour
 {
@@ -14,7 +15,11 @@ public class ItemInfoDescription : MonoBehaviour
     private const string ElectricityItemName = "Electricity";
     private const float GaugeFillLerpSpeed = 12f;
     private const float GaugeFillSnapThreshold = 0.0025f;
+    private const float PlantInfoRefreshIntervalSeconds = 0.2f;
+    private const float PlantGrowthRequirementEpsilon = 0.0001f;
     private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
+    private static readonly Color PlantFertilizerGaugeFillColor = new Color(0.16f, 0.82f, 0.28f, 1f);
+    private static readonly Color PlantGrowthGaugeFillColor = Color.white;
     private static readonly Color ElectricGaugeFillColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color BurnEnergyGaugeFillColor = new Color(1f, 0.42f, 0.08f, 1f);
     private static readonly Color HealthGaugeFillColor = new Color(0.78f, 0.12f, 0.1f, 1f);
@@ -50,6 +55,8 @@ public class ItemInfoDescription : MonoBehaviour
     private readonly List<int> defaultItemOriginalSiblingIndices = new List<int>();
     private int defaultStatusLineIndex;
     private bool defaultItemSiblingIndicesCaptured;
+    private float nextPlantInfoRefreshTime;
+    private PlantResource liveGaugePlant;
     private LoggingMachine liveGaugeLoggingMachine;
     private RobotArm liveGaugeRobotArm;
     private UtilityPole liveGaugeUtilityPole;
@@ -98,16 +105,16 @@ public class ItemInfoDescription : MonoBehaviour
     public void ShowResourceReserves(Resource resource)
     {
         Clear();
+        if (resource is PlantResource plant)
+        {
+            liveGaugePlant = plant;
+            RefreshPlantResourceInfo(plant);
+            nextPlantInfoRefreshTime = Time.unscaledTime + PlantInfoRefreshIntervalSeconds;
+            return;
+        }
+
         int reserves = resource != null ? resource.RemainingHarvestOutputCount : 0;
         SetResourceReservesLine(0, reserves, UsesLiterResourceUnit(resource));
-        if (resource is ProjectF.MapObjects.Tree tree)
-        {
-            SetDefaultText(
-                1,
-                $"Growth: {tree.Growth.ToString("0.#", CultureInfo.InvariantCulture)}",
-                true);
-            SetDefaultSign(1, false, Color.white);
-        }
     }
 
     public void ShowAnimal(Animal animal)
@@ -692,6 +699,8 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void ClearLiveGaugeSource()
     {
+        nextPlantInfoRefreshTime = 0f;
+        liveGaugePlant = null;
         liveGaugeLoggingMachine = null;
         liveGaugeRobotArm = null;
         liveGaugeUtilityPole = null;
@@ -704,6 +713,18 @@ public class ItemInfoDescription : MonoBehaviour
     {
         if (!Application.isPlaying || !gameObject.activeInHierarchy)
         {
+            return;
+        }
+
+        if (liveGaugePlant != null && liveGaugePlant.gameObject.activeInHierarchy)
+        {
+            float now = Time.unscaledTime;
+            if (now >= nextPlantInfoRefreshTime)
+            {
+                nextPlantInfoRefreshTime = now + PlantInfoRefreshIntervalSeconds;
+                RefreshPlantResourceInfo(liveGaugePlant);
+            }
+
             return;
         }
 
@@ -758,6 +779,110 @@ public class ItemInfoDescription : MonoBehaviour
             SetDefaultStatus(statusText, isWorking, isWarning);
             TrySetElectricPowerGauge(energyGauge, energyFill, energyText, liveGaugeRobotArm);
         }
+    }
+
+    private void RefreshPlantResourceInfo(PlantResource plant)
+    {
+        if (plant == null)
+        {
+            return;
+        }
+
+        SetResourceReservesLine(0, plant.RemainingHarvestOutputCount, UsesLiterResourceUnit(plant));
+        SetDefaultText(
+            1,
+            $"Growth: {plant.Growth.ToString("0.#", CultureInfo.InvariantCulture)}",
+            true);
+        SetDefaultSign(1, false, Color.white);
+
+        ResourceDefinition definition = plant.Definition;
+        bool showGrowthGauges = definition != null
+                                && definition.HasGrowthSchedule
+                                && plant.CanGrowAnotherLevel
+                                && plant.ResourceCount > 0;
+        if (!showGrowthGauges)
+        {
+            HidePlantGrowthGauges();
+            return;
+        }
+
+        if (!plant.AreCurrentGrowthRequirementsMet)
+        {
+            SetPlantGrowthRequirementGauge(
+                energyGauge,
+                energyFill,
+                energyText,
+                "Water",
+                plant.CurrentGrowthWaterLiters,
+                plant.RequiredGrowthWaterLiters,
+                FluidGaugeFillColor,
+                " L");
+            SetPlantGrowthRequirementGauge(
+                workGauge,
+                workFill,
+                workText,
+                "Fertilizer",
+                plant.CurrentGrowthFertilizerAmount,
+                plant.RequiredGrowthFertilizerAmount,
+                PlantFertilizerGaugeFillColor,
+                string.Empty);
+            SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            return;
+        }
+
+        SetGauge(energyGauge, energyFill, energyText, false, 0f, Color.white, 0f, 0f);
+        SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        float growthDuration = definition.GrowthDurationPerLevelSeconds;
+        float elapsedSeconds = Mathf.Clamp(plant.GrowthElapsedSeconds, 0f, growthDuration);
+        SetGauge(
+            defaultGauge,
+            defaultFill,
+            defaultGaugeText,
+            true,
+            growthDuration > PlantGrowthRequirementEpsilon
+                ? elapsedSeconds / growthDuration
+                : 0f,
+            PlantGrowthGaugeFillColor,
+            elapsedSeconds,
+            growthDuration,
+            true,
+            $"Time: {FormatGaugeNumber(elapsedSeconds, true)} s / {FormatGaugeNumber(growthDuration, true)} s");
+    }
+
+    private static void SetPlantGrowthRequirementGauge(
+        GameObject root,
+        Image fill,
+        TextMeshProUGUI text,
+        string label,
+        float currentAmount,
+        float requiredAmount,
+        Color fillColor,
+        string unitSuffix)
+    {
+        float clampedRequiredAmount = Mathf.Max(0f, requiredAmount);
+        float clampedCurrentAmount = Mathf.Clamp(currentAmount, 0f, clampedRequiredAmount);
+        float fillAmount = clampedRequiredAmount > PlantGrowthRequirementEpsilon
+            ? clampedCurrentAmount / clampedRequiredAmount
+            : 1f;
+        SetGauge(
+            root,
+            fill,
+            text,
+            true,
+            fillAmount,
+            fillColor,
+            clampedCurrentAmount,
+            clampedRequiredAmount,
+            true,
+            $"{label}: {FormatGaugeNumber(clampedCurrentAmount, true)}{unitSuffix} / "
+            + $"{FormatGaugeNumber(clampedRequiredAmount, true)}{unitSuffix}");
+    }
+
+    private void HidePlantGrowthGauges()
+    {
+        SetGauge(energyGauge, energyFill, energyText, false, 0f, Color.white, 0f, 0f);
+        SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
     }
 
     private void RefreshLoggingMachineInfo(LoggingMachine loggingMachine)

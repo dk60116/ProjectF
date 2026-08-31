@@ -17,7 +17,7 @@ MonoBehaviour:
   prefab: {fileID: 5596077993400562758, guid: 337c834a65decfa4b8addc73e0c54ee6, type: 3}
   harvestMode: 2
   placementCategory: 2
-  minimumGrowth: 0
+  minimumGrowth: 10
   maximumGrowth: 10
   totalGrowthWaterLiters: 550
   totalGrowthFertilizerAmount: 200

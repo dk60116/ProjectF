@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class LoggingMachine : InstallationObject,
@@ -28,6 +30,12 @@ public class LoggingMachine : InstallationObject,
     private float hingeRotationDegreesPerSecond = 180f;
     [SerializeField, Min(0f)]
     private float emptyDirectionHoldSeconds = 0.25f;
+    [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
+    private int minimumGrowth = ResourceDefinition.MinGrowth;
+    [SerializeField, HideInInspector]
+    private bool treeFilterInitialized;
+    [SerializeField, HideInInspector]
+    private List<string> enabledTreeDefinitionKeys = new List<string>();
 
     private Resource activeTree;
     private Quaternion hingeBaseLocalRotation = Quaternion.identity;
@@ -46,6 +54,124 @@ public class LoggingMachine : InstallationObject,
     public bool IsWorkingForItemLight => isWorking;
     public Sprite HarvestMarkerIcon => harvestMarkerIcon;
     public static int HarvestDirectionCount => LocalHarvestDirections.Length;
+    public int MinimumGrowth => Mathf.Clamp(
+        minimumGrowth,
+        ResourceDefinition.MinGrowth,
+        ResourceDefinition.MaxGrowth);
+    public bool IsTreeFilterInitialized => treeFilterInitialized;
+
+    public bool IsTreeTypeEnabled(ResourceDefinition definition)
+    {
+        if (definition == null)
+        {
+            return false;
+        }
+
+        return !treeFilterInitialized
+               || ContainsTreeDefinitionKey(BuildTreeDefinitionKey(definition));
+    }
+
+    public void SetTreeTypeEnabled(
+        ResourceDefinition definition,
+        IReadOnlyList<ResourceDefinition> availableDefinitions,
+        bool enabled)
+    {
+        if (definition == null)
+        {
+            return;
+        }
+
+        EnsureTreeFilterInitialized(availableDefinitions);
+        string key = BuildTreeDefinitionKey(definition);
+        int existingIndex = IndexOfTreeDefinitionKey(key);
+        if (enabled && existingIndex < 0)
+        {
+            enabledTreeDefinitionKeys.Add(key);
+        }
+        else if (!enabled && existingIndex >= 0)
+        {
+            enabledTreeDefinitionKeys.RemoveAt(existingIndex);
+        }
+
+        InvalidateFilteredTarget();
+    }
+
+    public void SetAllTreeTypes(
+        IReadOnlyList<ResourceDefinition> availableDefinitions,
+        bool enabled)
+    {
+        treeFilterInitialized = true;
+        enabledTreeDefinitionKeys ??= new List<string>();
+        enabledTreeDefinitionKeys.Clear();
+        if (enabled && availableDefinitions != null)
+        {
+            for (int i = 0; i < availableDefinitions.Count; i++)
+            {
+                ResourceDefinition definition = availableDefinitions[i];
+                if (definition == null)
+                {
+                    continue;
+                }
+
+                string key = BuildTreeDefinitionKey(definition);
+                if (!ContainsTreeDefinitionKey(key))
+                {
+                    enabledTreeDefinitionKeys.Add(key);
+                }
+            }
+        }
+
+        InvalidateFilteredTarget();
+    }
+
+    public void SetMinimumGrowth(int value)
+    {
+        int clampedValue = Mathf.Clamp(
+            value,
+            ResourceDefinition.MinGrowth,
+            ResourceDefinition.MaxGrowth);
+        if (minimumGrowth == clampedValue)
+        {
+            return;
+        }
+
+        minimumGrowth = clampedValue;
+        InvalidateFilteredTarget();
+    }
+
+    public List<string> CaptureEnabledTreeDefinitionKeys()
+    {
+        return enabledTreeDefinitionKeys != null
+            ? new List<string>(enabledTreeDefinitionKeys)
+            : new List<string>();
+    }
+
+    public void ApplyTreeFilterState(
+        bool initialized,
+        IReadOnlyList<string> enabledDefinitionKeys,
+        int savedMinimumGrowth)
+    {
+        treeFilterInitialized = initialized;
+        minimumGrowth = Mathf.Clamp(
+            savedMinimumGrowth,
+            ResourceDefinition.MinGrowth,
+            ResourceDefinition.MaxGrowth);
+        enabledTreeDefinitionKeys ??= new List<string>();
+        enabledTreeDefinitionKeys.Clear();
+        if (enabledDefinitionKeys != null)
+        {
+            for (int i = 0; i < enabledDefinitionKeys.Count; i++)
+            {
+                string key = enabledDefinitionKeys[i];
+                if (!string.IsNullOrEmpty(key) && !ContainsTreeDefinitionKey(key))
+                {
+                    enabledTreeDefinitionKeys.Add(key);
+                }
+            }
+        }
+
+        InvalidateFilteredTarget();
+    }
 
     public static Vector2Int GetHarvestCoordinate(
         Vector2Int anchorCoordinate,
@@ -368,12 +494,99 @@ public class LoggingMachine : InstallationObject,
         return IsHarvestableTree(tree);
     }
 
-    private static bool IsHarvestableTree(Resource resource)
+    private bool IsHarvestableTree(Resource resource)
     {
-        return resource != null
-               && resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
-               && resource.CanHarvest
-               && resource.gameObject.activeInHierarchy;
+        if (resource == null
+            || resource.ResolvedHarvestMode != Resource.HarvestMode.Logging
+            || !resource.CanHarvest
+            || !resource.gameObject.activeInHierarchy
+            || !IsTreeTypeEnabled(resource.Definition))
+        {
+            return false;
+        }
+
+        float growth = resource is ProjectF.MapObjects.Tree tree
+            ? tree.Growth
+            : ResourceDefinition.MaxGrowth;
+        return growth >= MinimumGrowth;
+    }
+
+    private void EnsureTreeFilterInitialized(IReadOnlyList<ResourceDefinition> availableDefinitions)
+    {
+        if (treeFilterInitialized)
+        {
+            enabledTreeDefinitionKeys ??= new List<string>();
+            return;
+        }
+
+        treeFilterInitialized = true;
+        enabledTreeDefinitionKeys ??= new List<string>();
+        enabledTreeDefinitionKeys.Clear();
+        if (availableDefinitions == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < availableDefinitions.Count; i++)
+        {
+            ResourceDefinition definition = availableDefinitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            string key = BuildTreeDefinitionKey(definition);
+            if (!ContainsTreeDefinitionKey(key))
+            {
+                enabledTreeDefinitionKeys.Add(key);
+            }
+        }
+    }
+
+    private void InvalidateFilteredTarget()
+    {
+        activeTree = null;
+        consumedWorkEnergy = 0f;
+        hasElectricDemand = HasAnyAdjacentTree();
+        if (!hasElectricDemand)
+        {
+            SetWorking(false);
+        }
+    }
+
+    private bool ContainsTreeDefinitionKey(string key)
+    {
+        return IndexOfTreeDefinitionKey(key) >= 0;
+    }
+
+    private int IndexOfTreeDefinitionKey(string key)
+    {
+        if (string.IsNullOrEmpty(key) || enabledTreeDefinitionKeys == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < enabledTreeDefinitionKeys.Count; i++)
+        {
+            if (string.Equals(enabledTreeDefinitionKeys[i], key, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string BuildTreeDefinitionKey(ResourceDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        return !string.IsNullOrEmpty(definition.name)
+            ? definition.name
+            : (definition.resourceName ?? string.Empty);
     }
 
     private void UpdateHingeRotation(float deltaTime)
@@ -489,6 +702,10 @@ public class LoggingMachine : InstallationObject,
         base.OnValidate();
         hingeRotationDegreesPerSecond = Mathf.Max(1f, hingeRotationDegreesPerSecond);
         emptyDirectionHoldSeconds = Mathf.Max(0f, emptyDirectionHoldSeconds);
+        minimumGrowth = Mathf.Clamp(
+            minimumGrowth,
+            ResourceDefinition.MinGrowth,
+            ResourceDefinition.MaxGrowth);
         if (hinge == null)
         {
             hinge = transform.Find("Body/Floor/Hinge");

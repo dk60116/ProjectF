@@ -22,6 +22,17 @@ public class ItemFilterSlot : ItemSlot
         BindToggle(isChecked, onToggleChanged);
     }
 
+    public void SetCustomFilterItem(
+        Sprite displayIcon,
+        string displayName,
+        bool isChecked,
+        UnityAction<bool> onToggleChanged)
+    {
+        SetCustomDisplay(displayIcon, displayName, string.Empty);
+        HideCountLabel();
+        BindToggle(isChecked, onToggleChanged);
+    }
+
     public void ClearFilterItem()
     {
         Clear();

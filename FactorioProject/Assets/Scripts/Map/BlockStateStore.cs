@@ -26,6 +26,9 @@ public partial class BlockStateStore : MonoBehaviour
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
+        public bool loggingTreeFilterInitialized;
+        public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
+        public int loggingMinimumGrowth = ResourceDefinition.MinGrowth;
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
@@ -77,6 +80,10 @@ public partial class BlockStateStore : MonoBehaviour
                 boxIsOpen = boxIsOpen,
                 itemFilterMaskInitialized = itemFilterMaskInitialized,
                 itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>()),
+                loggingTreeFilterInitialized = loggingTreeFilterInitialized,
+                loggingEnabledTreeDefinitionKeys = new List<string>(
+                    loggingEnabledTreeDefinitionKeys ?? new List<string>()),
+                loggingMinimumGrowth = loggingMinimumGrowth,
                 storedFluidLiters = storedFluidLiters,
                 storedFluidItemId = storedFluidItemId,
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
@@ -1167,6 +1174,12 @@ public partial class BlockStateStore : MonoBehaviour
 
         state.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         state.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
+        if (installationObject is LoggingMachine loggingMachine)
+        {
+            state.loggingTreeFilterInitialized = loggingMachine.IsTreeFilterInitialized;
+            state.loggingEnabledTreeDefinitionKeys = loggingMachine.CaptureEnabledTreeDefinitionKeys();
+            state.loggingMinimumGrowth = loggingMachine.MinimumGrowth;
+        }
         state.storedFluidLiters = installationObject.StoredFluidLiters;
         state.storedFluidItemId = installationObject.StoredFluidItemId;
         state.storedFluidTemperatureCelsius = installationObject.GetStoredFluidTemperatureCelsius(state.storedFluidItemId);

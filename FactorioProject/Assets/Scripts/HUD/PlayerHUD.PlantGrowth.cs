@@ -143,8 +143,24 @@ public partial class PlayerHUD
         if (targetTree == null
             || fertilizer == null
             || handBag == null
-            || handBag.GetSlotItemId(0) != fertilizer.id
-            || !handBag.TryRemoveOneAtSlot(0, out int consumedItemId, false))
+            || handBag.GetSlotItemId(0) != fertilizer.id)
+        {
+            return;
+        }
+
+        PortableObject sourcePortableObject = handBag.GetTopObject(0);
+        Vector3 startPosition = sourcePortableObject != null
+            ? sourcePortableObject.transform.position
+            : currentPlayer.BodyTransform != null
+                ? currentPlayer.BodyTransform.position
+                : currentPlayer.transform.position;
+        Quaternion startRotation = sourcePortableObject != null
+            ? sourcePortableObject.transform.rotation
+            : Quaternion.identity;
+        Vector3 startScale = sourcePortableObject != null
+            ? sourcePortableObject.transform.lossyScale
+            : Vector3.one;
+        if (!handBag.TryRemoveOneAtSlot(0, out int consumedItemId, false))
         {
             return;
         }
@@ -157,7 +173,59 @@ public partial class PlayerHUD
             return;
         }
 
+        PlayFertilizerPortableAnimation(
+            sourcePortableObject,
+            consumedItemId,
+            startPosition,
+            startRotation,
+            startScale,
+            targetTree.transform);
         UpdateHandItemGauge();
+    }
+
+    private static void PlayFertilizerPortableAnimation(
+        PortableObject template,
+        int itemId,
+        Vector3 startPosition,
+        Quaternion startRotation,
+        Vector3 startScale,
+        Transform target)
+    {
+        if (template == null || itemId < 0 || target == null)
+        {
+            return;
+        }
+
+        PortableObject movingPortableObject = Instantiate(
+            template,
+            startPosition,
+            startRotation);
+        if (movingPortableObject == null)
+        {
+            return;
+        }
+
+        movingPortableObject.name = $"{template.name}_FertilizerMove";
+        movingPortableObject.transform.SetParent(null, true);
+        movingPortableObject.transform.position = startPosition;
+        movingPortableObject.transform.localScale = startScale;
+        if (!movingPortableObject.gameObject.activeSelf)
+        {
+            movingPortableObject.gameObject.SetActive(true);
+        }
+
+        if (!movingPortableObject.SetItem(itemId))
+        {
+            PlayerItemStorageUtility.DestroyPortableObject(movingPortableObject);
+            return;
+        }
+
+        movingPortableObject.MoveTo(
+            target,
+            0f,
+            null,
+            () => PlayerItemStorageUtility.DestroyPortableObject(movingPortableObject),
+            false);
     }
 
     private static void RestoreConsumedPlantGrowthItem(

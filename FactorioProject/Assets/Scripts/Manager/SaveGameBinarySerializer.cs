@@ -606,6 +606,9 @@ public static class SaveGameBinarySerializer
         writer.Write(state.storedInstallationItemId);
         WriteIntList(writer, state.storedInstallationItemIds);
         writer.Write(state.pipeConnectionMask);
+        writer.Write(state.loggingTreeFilterInitialized);
+        WriteStringList(writer, state.loggingEnabledTreeDefinitionKeys);
+        writer.Write(state.loggingMinimumGrowth);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -733,6 +736,12 @@ public static class SaveGameBinarySerializer
         if (version >= 34)
         {
             state.pipeConnectionMask = reader.ReadInt32();
+        }
+        if (version >= 42)
+        {
+            state.loggingTreeFilterInitialized = reader.ReadBoolean();
+            state.loggingEnabledTreeDefinitionKeys = ReadStringList(reader);
+            state.loggingMinimumGrowth = reader.ReadInt32();
         }
 
         return state;
@@ -1158,6 +1167,16 @@ public static class SaveGameBinarySerializer
     private static List<int> ReadIntList(BinaryReader reader)
     {
         return ReadList(reader, () => reader.ReadInt32());
+    }
+
+    private static void WriteStringList(BinaryWriter writer, List<string> values)
+    {
+        WriteList(writer, values, (binaryWriter, value) => binaryWriter.Write(value ?? string.Empty));
+    }
+
+    private static List<string> ReadStringList(BinaryReader reader)
+    {
+        return ReadList(reader, () => reader.ReadString());
     }
 
     private static void WriteUlongList(BinaryWriter writer, List<ulong> values)

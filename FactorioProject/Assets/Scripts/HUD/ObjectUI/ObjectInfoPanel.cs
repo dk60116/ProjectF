@@ -80,9 +80,9 @@ public class ObjectInfoPanel : MonoBehaviour
             ? ResolveUnderlyingResource(mapObject)
             : null;
         RefreshFocusedInfoPanels(boundTarget, underlyingResource);
-        if (boundTarget is RailHandcar)
+        if (boundTarget is RailHandcar || boundTarget is ProjectF.MapObjects.Tree)
         {
-            // Rail gauges and fluid values are updated by ItemInfoDescription itself.
+            // Live values and gauges are updated by ItemInfoDescription itself.
             return;
         }
 

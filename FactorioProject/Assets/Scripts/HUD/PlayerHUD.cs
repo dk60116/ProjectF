@@ -2938,11 +2938,27 @@ public partial class PlayerHUD : BagSlot
             ItemFilterButton.gameObject.SetActive(isVisible);
         }
 
-        if (!isVisible && IsItemFilterButtonPanelActive())
+        if (!isVisible
+            && IsItemFilterButtonPanelActive()
+            && !IsLoggingMachineInteractionFilterActive())
         {
             HideItemFilterButtonPanelsImmediate();
             itemFilterUiOpenedFrame = -1;
         }
+    }
+
+    private bool IsLoggingMachineInteractionFilterActive()
+    {
+        if (itemFilterUI == null
+            || !itemFilterUI.gameObject.activeSelf
+            || !itemFilterUI.TryGetBoundTarget(out MapObject boundTarget)
+            || !(boundTarget is LoggingMachine boundLoggingMachine)
+            || !TryResolveLoggingMachine(currentInteractionMapObject, out LoggingMachine focusedLoggingMachine))
+        {
+            return false;
+        }
+
+        return boundLoggingMachine == focusedLoggingMachine;
     }
 
     private static Sprite ResolveInteractionIcon(BoxObject boxObject)
@@ -3536,6 +3552,21 @@ public partial class PlayerHUD : BagSlot
 
         if (currentInteractionMapObject != null)
         {
+            if (TryResolveLoggingMachine(currentInteractionMapObject, out LoggingMachine loggingMachine))
+            {
+                PlayerController playerController = currentPlayer != null
+                    ? currentPlayer.GetComponent<PlayerController>()
+                    : null;
+                if (playerController != null
+                    && playerController.IsWithinInteractionRange(loggingMachine))
+                {
+                    ShowLoggingMachineFilter(loggingMachine);
+                }
+
+                UpdateInteractionButtonState();
+                return;
+            }
+
             if (currentInteractionMapObject is IPlayerMapObjectInteraction playerInteraction)
             {
                 PlayerController playerController = currentPlayer != null
@@ -3592,6 +3623,34 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
+    private void ShowLoggingMachineFilter(LoggingMachine loggingMachine)
+    {
+        if (loggingMachine == null)
+        {
+            return;
+        }
+
+        ResolveItemFilterUI();
+        if (itemFilterUI == null)
+        {
+            return;
+        }
+
+        if (itemFilterUI.gameObject.activeSelf
+            && itemFilterUI.TryGetBoundTarget(out MapObject boundTarget)
+            && boundTarget == loggingMachine)
+        {
+            itemFilterUI.gameObject.SetActive(false);
+            itemFilterUiOpenedFrame = -1;
+            return;
+        }
+
+        HideFilterPanelsImmediate();
+        itemFilterUI.Bind(loggingMachine);
+        itemFilterUI.gameObject.SetActive(true);
+        itemFilterUiOpenedFrame = Time.frameCount;
+    }
+
     private void ShowTrainStationFilter(Trainstation trainStation)
     {
         if (trainStation == null)
@@ -3640,6 +3699,35 @@ public partial class PlayerHUD : BagSlot
         }
 
         return trainStation != null && trainStation.gameObject.activeInHierarchy;
+    }
+
+    private static bool TryResolveLoggingMachine(
+        MapObject mapObject,
+        out LoggingMachine loggingMachine)
+    {
+        loggingMachine = mapObject as LoggingMachine;
+        if (loggingMachine != null)
+        {
+            return loggingMachine.gameObject.activeInHierarchy;
+        }
+
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        loggingMachine = mapObject.GetComponent<LoggingMachine>();
+        if (loggingMachine == null)
+        {
+            loggingMachine = mapObject.GetComponentInParent<LoggingMachine>();
+        }
+
+        if (loggingMachine == null)
+        {
+            loggingMachine = mapObject.GetComponentInChildren<LoggingMachine>(true);
+        }
+
+        return loggingMachine != null && loggingMachine.gameObject.activeInHierarchy;
     }
 
     private void HandleInteractionButtonKeyboardInput()

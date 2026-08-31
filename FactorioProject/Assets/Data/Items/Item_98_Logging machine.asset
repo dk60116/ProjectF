@@ -19,7 +19,8 @@ MonoBehaviour:
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: a9f2f7c458e1fe14490ad9890f98ef72, type: 3}
   oneItem: 0
-  interactionButtonList: []
+  interactionButtonList:
+  - {fileID: 21300000, guid: 9a5f9007774453d4790b24975971f175, type: 3}
   lightMode: 0
   lightRange: 6
   lightIntensityMultiplier: 1

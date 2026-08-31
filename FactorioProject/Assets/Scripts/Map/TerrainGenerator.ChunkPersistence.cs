@@ -1243,6 +1243,13 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
+        if (restoredInstallation is LoggingMachine restoredLoggingMachine)
+        {
+            restoredLoggingMachine.ApplyTreeFilterState(
+                savedState.loggingTreeFilterInitialized,
+                savedState.loggingEnabledTreeDefinitionKeys,
+                savedState.loggingMinimumGrowth);
+        }
         restoredInstallation.SetStoredFluid(
             savedState.storedFluidItemId,
             savedState.storedFluidLiters,

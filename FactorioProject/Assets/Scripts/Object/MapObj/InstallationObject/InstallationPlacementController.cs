@@ -422,6 +422,9 @@ public class InstallationPlacementController : MonoBehaviour
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
+        public bool loggingTreeFilterInitialized;
+        public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
+        public int loggingMinimumGrowth = ResourceDefinition.MinGrowth;
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
@@ -4222,6 +4225,11 @@ public class InstallationPlacementController : MonoBehaviour
 
         editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
+        CaptureLoggingMachineFilterState(
+            installationObject,
+            out editSession.loggingTreeFilterInitialized,
+            editSession.loggingEnabledTreeDefinitionKeys,
+            out editSession.loggingMinimumGrowth);
         editSession.storedFluidLiters = installationObject.StoredFluidLiters;
         editSession.storedFluidItemId = installationObject.StoredFluidItemId;
         editSession.storedFluidTemperatureCelsius =
@@ -4238,6 +4246,46 @@ public class InstallationPlacementController : MonoBehaviour
         CaptureAttachedAreaBoxes(editSession);
         CaptureInstallationBlockStates(editSession);
         return true;
+    }
+
+    private static void CaptureLoggingMachineFilterState(
+        MapObject source,
+        out bool initialized,
+        List<string> enabledDefinitionKeys,
+        out int minimumGrowth)
+    {
+        initialized = false;
+        minimumGrowth = ResourceDefinition.MinGrowth;
+        enabledDefinitionKeys?.Clear();
+        if (!(source is LoggingMachine loggingMachine))
+        {
+            return;
+        }
+
+        initialized = loggingMachine.IsTreeFilterInitialized;
+        minimumGrowth = loggingMachine.MinimumGrowth;
+        if (enabledDefinitionKeys == null)
+        {
+            return;
+        }
+
+        List<string> capturedKeys = loggingMachine.CaptureEnabledTreeDefinitionKeys();
+        enabledDefinitionKeys.AddRange(capturedKeys);
+    }
+
+    private static void ApplyLoggingMachineFilterState(
+        MapObject target,
+        bool initialized,
+        IReadOnlyList<string> enabledDefinitionKeys,
+        int minimumGrowth)
+    {
+        if (target is LoggingMachine loggingMachine)
+        {
+            loggingMachine.ApplyTreeFilterState(
+                initialized,
+                enabledDefinitionKeys,
+                minimumGrowth);
+        }
     }
 
     private List<Vector2Int> GetInstallationEditStateCoordinates(
@@ -5415,6 +5463,11 @@ public class InstallationPlacementController : MonoBehaviour
             restoredObject.ApplyItemFilterMask(
                 editSession.itemFilterMaskWords,
                 editSession.itemFilterMaskInitialized);
+            ApplyLoggingMachineFilterState(
+                restoredObject,
+                editSession.loggingTreeFilterInitialized,
+                editSession.loggingEnabledTreeDefinitionKeys,
+                editSession.loggingMinimumGrowth);
             if (restoredObject is InstallationObject restoredInstallationObject)
             {
                 restoredInstallationObject.SetStoredFluid(
@@ -5699,6 +5752,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         replacementObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
+        ApplyLoggingMachineFilterState(
+            replacementObject,
+            editSession.loggingTreeFilterInitialized,
+            editSession.loggingEnabledTreeDefinitionKeys,
+            editSession.loggingMinimumGrowth);
         if (replacementObject is InstallationObject replacementInstallation)
         {
             replacementInstallation.SetStoredFluid(
@@ -31967,6 +32025,12 @@ public class InstallationPlacementController : MonoBehaviour
                 : null;
         List<ulong> itemFilterMaskWords = currentObject.CaptureItemFilterMaskWords();
         bool itemFilterMaskInitialized = currentObject.IsItemFilterMaskInitialized;
+        List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
+        CaptureLoggingMachineFilterState(
+            currentObject,
+            out bool loggingTreeFilterInitialized,
+            loggingEnabledTreeDefinitionKeys,
+            out int loggingMinimumGrowth);
         int storedFluidItemId = currentObject.StoredFluidItemId;
         float storedFluidLiters = currentObject.StoredFluidLiters;
         float storedFluidTemperatureCelsius = currentObject.GetStoredFluidTemperatureCelsius(
@@ -32035,6 +32099,11 @@ public class InstallationPlacementController : MonoBehaviour
         replacementInstallation.ApplyItemFilterMask(
             itemFilterMaskWords,
             itemFilterMaskInitialized);
+        ApplyLoggingMachineFilterState(
+            replacementInstallation,
+            loggingTreeFilterInitialized,
+            loggingEnabledTreeDefinitionKeys,
+            loggingMinimumGrowth);
         replacementInstallation.SetStoredFluid(
             storedFluidItemId,
             storedFluidLiters,
@@ -38163,7 +38232,9 @@ public class InstallationPlacementController : MonoBehaviour
             return null;
         }
 
-        if (occupyingObject is Resource resource && !resource.CanHarvest)
+        // Growing plants can be physically present before their current growth stage has
+        // any harvest output. Only depleted resources stop occupying their map block.
+        if (occupyingObject is Resource resource && resource.ResourceCount <= 0)
         {
             block.SetMapObject(null);
             return null;
