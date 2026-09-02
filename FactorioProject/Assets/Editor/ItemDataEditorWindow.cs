@@ -123,7 +123,8 @@ public class ItemDataEditorWindow : EditorWindow
         "Always",
         "Toggle",
         "Night Only",
-        "Working"
+        "Working",
+        "Hand Toggle"
     };
     private static readonly RectGridPaletteEntry[] RectGridPaletteEntries =
     {

@@ -27,7 +27,9 @@ public class ItemDefinition : ScriptableObject
         Always,
         Toggle,
         NightOnly,
-        Working
+        Working,
+        [InspectorName("Hand Toggle")]
+        HandToggle
     }
 
     public string itemName;
@@ -177,6 +179,16 @@ public class ItemDefinition : ScriptableObject
                && definition.isSeed
                && definition.seedTargetResource != null
                && definition.seedTargetResource.prefab != null;
+    }
+
+    public static bool IsHandToggleLightDefinition(ItemDefinition definition)
+    {
+        return definition != null && definition.lightMode == ItemLightMode.HandToggle;
+    }
+
+    public static bool IsToggleLightMode(ItemLightMode mode)
+    {
+        return mode == ItemLightMode.Toggle || mode == ItemLightMode.HandToggle;
     }
 
     public bool TryGetEatReward(out ItemDefinition rewardDefinition, out float chancePercent)

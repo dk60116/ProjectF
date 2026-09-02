@@ -8,14 +8,20 @@ public static class AnimalScreenSpaceOutline
 {
     private static Renderer hoveredRenderer;
     private static Renderer focusedRenderer;
+    private static Renderer pickupRenderer;
 
     public static Renderer ActiveRenderer
     {
         get
         {
             focusedRenderer = ResolveActive(focusedRenderer);
+            pickupRenderer = ResolveActive(pickupRenderer);
             hoveredRenderer = ResolveActive(hoveredRenderer);
-            return focusedRenderer != null ? focusedRenderer : hoveredRenderer;
+            return pickupRenderer != null
+                ? pickupRenderer
+                : focusedRenderer != null
+                    ? focusedRenderer
+                    : hoveredRenderer;
         }
     }
 
@@ -42,6 +48,19 @@ public static class AnimalScreenSpaceOutline
         if (focusedRenderer == renderer)
         {
             focusedRenderer = null;
+        }
+    }
+
+    public static void ShowPickup(Renderer renderer)
+    {
+        pickupRenderer = renderer;
+    }
+
+    public static void HidePickup(Renderer renderer)
+    {
+        if (pickupRenderer == renderer)
+        {
+            pickupRenderer = null;
         }
     }
 

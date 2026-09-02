@@ -296,7 +296,7 @@ public sealed class ItemLightController : MonoBehaviour
 
     public bool Toggle()
     {
-        if (lightMode != ItemDefinition.ItemLightMode.Toggle)
+        if (!ItemDefinition.IsToggleLightMode(lightMode))
         {
             return false;
         }
@@ -474,6 +474,7 @@ public sealed class ItemLightController : MonoBehaviour
         {
             ItemDefinition.ItemLightMode.Always => true,
             ItemDefinition.ItemLightMode.Toggle => toggled,
+            ItemDefinition.ItemLightMode.HandToggle => toggled,
             ItemDefinition.ItemLightMode.NightOnly =>
                 WorldTimeService.Active != null && !WorldTimeService.Active.IsDay,
             ItemDefinition.ItemLightMode.Working => working,

@@ -32,7 +32,6 @@ public partial class PlayerHUD : BagSlot
     private const float CraftingAccessRefreshInterval = 0.2f;
     private const string NooseItemName = "Noose";
     private const string SaddleItemName = "Saddle";
-    private const string TorchItemName = "Torch";
     private const string PitchforkItemName = "Pitchfork";
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
     private bool craftingQueueDirty;
@@ -124,6 +123,7 @@ public partial class PlayerHUD : BagSlot
     private bool pitchforkGroundInteractionActive;
     private Component currentObjectInfoTarget;
     private Component clickedObjectInfoTarget;
+    private Block clickedObjectInfoFallbackBlock;
     private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
     private UtilityPole currentObjectInfoSupplyRangePole;
     private Component lastYellowObjectInfoFocusTarget;
@@ -2589,13 +2589,17 @@ public partial class PlayerHUD : BagSlot
                     pointerPosition,
                     out Animal clickedAnimal,
                     out MapObject clickedMapObject,
-                    out PortableObject clickedPortableObject))
+                    out PortableObject clickedPortableObject,
+                    out Block clickedFallbackBlock))
             {
                 clickedObjectInfoTarget = clickedAnimal != null
                     ? clickedAnimal
                     : clickedPortableObject != null
                         ? clickedPortableObject
                         : clickedMapObject;
+                clickedObjectInfoFallbackBlock = clickedMapObject != null
+                    ? clickedFallbackBlock
+                    : null;
                 BindObjectInfoPanel(clickedObjectInfoTarget, false);
                 return;
             }
@@ -2829,6 +2833,7 @@ public partial class PlayerHUD : BagSlot
         SetFocusedTargetOutline(currentObjectInfoTarget, false);
         currentObjectInfoTarget = null;
         clickedObjectInfoTarget = null;
+        clickedObjectInfoFallbackBlock = null;
         currentObjectInfoOpenedByYellowFocus = false;
         nextObjectInfoPanelRefreshTime = 0f;
         if (objectInfoPanel != null)
@@ -3079,11 +3084,7 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        return itemDefinition.lightMode == ItemDefinition.ItemLightMode.Toggle
-               || string.Equals(
-                   itemDefinition.itemName,
-                   TorchItemName,
-                   StringComparison.OrdinalIgnoreCase);
+        return ItemDefinition.IsHandToggleLightDefinition(itemDefinition);
     }
 
     private static bool TryResolveHeldItem(
@@ -3980,9 +3981,17 @@ public partial class PlayerHUD : BagSlot
         return focusedMapObject != null;
     }
 
-    private bool TryGetClickedObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    public bool TryGetClickedObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    {
+        return TryGetClickedObjectInfoFocusedMapObject(out focusedMapObject, out _);
+    }
+
+    public bool TryGetClickedObjectInfoFocusedMapObject(
+        out MapObject focusedMapObject,
+        out Block focusedBlock)
     {
         focusedMapObject = null;
+        focusedBlock = null;
         if (!TryGetObjectInfoFocusedMapObject(out MapObject currentTarget)
             || !ReferenceEquals(clickedObjectInfoTarget, currentTarget))
         {
@@ -3990,6 +3999,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         focusedMapObject = currentTarget;
+        focusedBlock = clickedObjectInfoFallbackBlock;
         return true;
     }
 

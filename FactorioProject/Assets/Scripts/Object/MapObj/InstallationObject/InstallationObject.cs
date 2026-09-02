@@ -92,6 +92,18 @@ public interface IPlayerItemStorage
         out int previewPickupCount);
 }
 
+public interface IPlayerItemStoragePortablePreview
+{
+    bool TryPreviewPickupItems(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject);
+}
+
 public class InstallationObject : MapObject
 {
     protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;

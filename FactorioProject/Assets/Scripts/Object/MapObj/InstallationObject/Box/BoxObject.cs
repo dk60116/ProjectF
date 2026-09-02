@@ -218,8 +218,28 @@ public class BoxObject : InputOutputModule
 
     public bool TryPreviewContainedObjectPickup(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
     {
+        return TryPreviewContainedObjectPickup(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount,
+            out _);
+    }
+
+    public bool TryPreviewContainedObjectPickup(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject)
+    {
         previewItemId = -1;
         previewPickupCount = 0;
+        previewPortableObject = null;
         if (!isOpen || player == null || pickupRadius <= 0f)
         {
             return false;
@@ -236,7 +256,8 @@ public class BoxObject : InputOutputModule
             pickupRadius,
             preferredItemId,
             out previewItemId,
-            out previewPickupCount);
+            out previewPickupCount,
+            out previewPortableObject);
     }
 
     public bool TryTakeOneContainedObject(out int takenItemId, bool requireOpen = false)

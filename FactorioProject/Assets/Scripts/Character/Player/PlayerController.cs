@@ -3417,12 +3417,27 @@ public partial class PlayerController : MonoBehaviour
         out MapObject focusedMapObject,
         out PortableObject focusedPortableObject)
     {
+        return TryResolvePointerFocusTarget(
+            pointerPosition,
+            out focusedAnimal,
+            out focusedMapObject,
+            out focusedPortableObject,
+            out _);
+    }
+
+    public bool TryResolvePointerFocusTarget(
+        Vector2 pointerPosition,
+        out Animal focusedAnimal,
+        out MapObject focusedMapObject,
+        out PortableObject focusedPortableObject,
+        out Block focusedBlock)
+    {
         return TryResolveMouseFocusTargets(
                    pointerPosition,
                    out focusedAnimal,
                    out focusedMapObject,
                    out focusedPortableObject,
-                   out _)
+                   out focusedBlock)
                && (focusedAnimal != null
                    || focusedMapObject != null
                    || focusedPortableObject != null);

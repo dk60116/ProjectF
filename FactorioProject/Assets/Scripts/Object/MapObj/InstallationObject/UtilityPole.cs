@@ -31,6 +31,9 @@ public class UtilityPole : InstallationObject
     private static readonly List<PoleConnection> poleConnections = new List<PoleConnection>();
     private static readonly List<PoleConnection> previewPoleConnections = new List<PoleConnection>();
     private static readonly List<UtilityPole> visualPoleScratch = new List<UtilityPole>();
+    private static readonly HashSet<UtilityPole> screenRangePoles = new HashSet<UtilityPole>();
+    private static readonly HashSet<UtilityPole> screenRangePoleScratch = new HashSet<UtilityPole>();
+    private static readonly Plane[] rangeVisualFrustumPlanes = new Plane[6];
     private static readonly List<LineRenderer> previewConsumerLineRenderers = new List<LineRenderer>();
     private static readonly Dictionary<UtilityPole, PreviewPoleRuntime> previewPoleRuntimes =
         new Dictionary<UtilityPole, PreviewPoleRuntime>();
@@ -54,7 +57,9 @@ public class UtilityPole : InstallationObject
     private static int usedPreviewConsumerLineRendererCount;
     private static WorkableObjectRangeVisual sharedSupplyRangeVisual;
     private static WorkableObjectRangeVisual sharedConnectionRangeVisual;
-    private static bool installOrEditUtilityPoleSelectionRangeVisualsRequested;
+    private static bool installOrEditSupplyRangeVisualsRequested;
+    private static bool installOrEditConnectionRangeVisualsRequested;
+    private static bool screenRangePolesInitialized;
     private static Material sharedLineMaterial;
     private static Transform connectionLineRoot;
 
@@ -279,14 +284,60 @@ public class UtilityPole : InstallationObject
         RefreshConnectionLineRenderersIfDirty();
     }
 
-    public static void SetInstallOrEditUtilityPoleSelectionRangeVisualsRequested(bool requested)
+    public static void SetInstallOrEditRangeVisualsRequested(
+        bool supplyRangeRequested,
+        bool connectionRangeRequested)
     {
-        if (installOrEditUtilityPoleSelectionRangeVisualsRequested == requested)
+        bool nextConnectionRangeRequested = supplyRangeRequested && connectionRangeRequested;
+        if (installOrEditSupplyRangeVisualsRequested == supplyRangeRequested
+            && installOrEditConnectionRangeVisualsRequested == nextConnectionRangeRequested)
         {
             return;
         }
 
-        installOrEditUtilityPoleSelectionRangeVisualsRequested = requested;
+        installOrEditSupplyRangeVisualsRequested = supplyRangeRequested;
+        installOrEditConnectionRangeVisualsRequested = nextConnectionRangeRequested;
+        screenRangePolesInitialized = false;
+        screenRangePoles.Clear();
+        screenRangePoleScratch.Clear();
+        RefreshAllRangeVisuals();
+    }
+
+    public static bool InstallOrEditRangeVisualsRequested =>
+        installOrEditSupplyRangeVisualsRequested || installOrEditConnectionRangeVisualsRequested;
+
+    public static void RefreshScreenRangeVisuals(Camera targetCamera)
+    {
+        if (!InstallOrEditRangeVisualsRequested
+            || !IsInstallOrEditModeActive()
+            || targetCamera == null)
+        {
+            return;
+        }
+
+        GeometryUtility.CalculateFrustumPlanes(targetCamera, rangeVisualFrustumPlanes);
+        screenRangePoleScratch.Clear();
+        foreach (UtilityPole pole in activePoles)
+        {
+            if (pole == null
+                || !IsValidPlacedPole(pole)
+                || !pole.TryGetSupplyRangeBounds(out Bounds rangeBounds)
+                || !GeometryUtility.TestPlanesAABB(rangeVisualFrustumPlanes, rangeBounds))
+            {
+                continue;
+            }
+
+            screenRangePoleScratch.Add(pole);
+        }
+
+        if (screenRangePolesInitialized && screenRangePoles.SetEquals(screenRangePoleScratch))
+        {
+            return;
+        }
+
+        screenRangePoles.Clear();
+        screenRangePoles.UnionWith(screenRangePoleScratch);
+        screenRangePolesInitialized = true;
         RefreshAllRangeVisuals();
     }
 
@@ -729,8 +780,6 @@ public class UtilityPole : InstallationObject
         {
             networkRuntimeEvaluatedFrame = -1;
             RefreshNetworkRuntimeValues(true);
-            suppliedConsumerNetworks.Clear();
-            RegisterSuppliedConsumerNetworks();
             InputOutputModule.WakeElectricRuntimeModules();
         }
 
@@ -1805,7 +1854,7 @@ public class UtilityPole : InstallationObject
 
         List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
         HashSet<UtilityPole> appendedPoles = new HashSet<UtilityPole>();
-        if (ShouldShowInstallOrEditUtilityPoleRangeVisuals())
+        if (ShouldShowInstallOrEditSupplyRangeVisuals())
         {
             AppendSupplyRangeVisualRequests(activePoles, false, requests, appendedPoles);
         }
@@ -1840,7 +1889,7 @@ public class UtilityPole : InstallationObject
 
         List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
         HashSet<UtilityPole> appendedPoles = new HashSet<UtilityPole>();
-        if (ShouldShowInstallOrEditUtilityPoleRangeVisuals())
+        if (ShouldShowInstallOrEditConnectionRangeVisuals())
         {
             AppendConnectionRangeVisualRequests(activePoles, false, requests, appendedPoles);
         }
@@ -1970,6 +2019,12 @@ public class UtilityPole : InstallationObject
                 continue;
             }
 
+            if (!requireSelectedRequest
+                && (!screenRangePolesInitialized || !screenRangePoles.Contains(pole)))
+            {
+                continue;
+            }
+
             if (!appendedPoles.Add(pole))
             {
                 continue;
@@ -1991,16 +2046,25 @@ public class UtilityPole : InstallationObject
         }
     }
 
-    private static bool ShouldShowInstallOrEditUtilityPoleRangeVisuals()
+    private static bool ShouldShowInstallOrEditSupplyRangeVisuals()
     {
-        if (!installOrEditUtilityPoleSelectionRangeVisualsRequested)
+        return installOrEditSupplyRangeVisualsRequested && IsInstallOrEditModeActive();
+    }
+
+    private static bool ShouldShowInstallOrEditConnectionRangeVisuals()
+    {
+        return installOrEditConnectionRangeVisualsRequested && IsInstallOrEditModeActive();
+    }
+
+    private static bool IsInstallOrEditModeActive()
+    {
+        GameManager gameManager = GameManager.Instance;
+        if (gameManager == null)
         {
             return false;
         }
 
-        GameManager gameManager = GameManager.Instance;
-        return gameManager != null
-               && (gameManager.InstallationPlacementActive || gameManager.MapEditActive);
+        return gameManager.InstallationPlacementActive || gameManager.MapEditActive;
     }
 
     private static void EnsurePoleConnectionsEvaluated()
@@ -2651,7 +2715,6 @@ public class UtilityPole : InstallationObject
         }
 
         RefreshNetworkRuntimeValues(true);
-        RegisterSuppliedConsumerNetworks();
         InputOutputModule.WakeElectricRuntimeModules();
     }
 
@@ -2779,6 +2842,11 @@ public class UtilityPole : InstallationObject
         {
             RefreshNetworkRuntimeValues(networks[i]);
         }
+
+        // 발전기 가동 상태와 수요량은 매 프레임 달라질 수 있다. 소비자가 여러 전력망의
+        // 공급 범위에 걸친 경우에도 현재 공급률이 가장 높은 망을 사용하도록 런타임 값과
+        // 소비자 매핑을 같은 시점에 갱신한다.
+        RefreshSuppliedConsumerNetworks();
     }
 
     private static void RefreshNetworkRuntimeValues(ElectricNetwork network)
@@ -2881,8 +2949,9 @@ public class UtilityPole : InstallationObject
                && configuredGeneratorWatts > EnergyEpsilon;
     }
 
-    private static void RegisterSuppliedConsumerNetworks()
+    private static void RefreshSuppliedConsumerNetworks()
     {
+        suppliedConsumerNetworks.Clear();
         for (int i = 0; i < networks.Count; i++)
         {
             ElectricNetwork network = networks[i];

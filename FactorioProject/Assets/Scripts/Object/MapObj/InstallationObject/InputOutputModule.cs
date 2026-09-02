@@ -5945,7 +5945,8 @@ public class InputOutputModule : InstallationObject,
 
     protected virtual bool ShouldShowWorldEnergyGauge(ItemDefinition installedDefinition)
     {
-        return RequiresOperationalEnergy(installedDefinition);
+        return RequiresOperationalEnergy(installedDefinition)
+               && installedDefinition.useEnergyType != ItemDefinition.EnergyType.Electricity;
     }
 
     private bool ShouldShowGaugeByAreaMarkerVisibility()

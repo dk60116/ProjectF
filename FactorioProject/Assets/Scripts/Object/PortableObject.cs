@@ -38,6 +38,7 @@ public class PortableObject : MonoBehaviour
     private bool isMovingToTarget;
     private bool hoverOutlineVisible;
     private bool focusedOutlineVisible;
+    private bool pickupOutlineVisible;
     private bool restoreBatchedRenderingAfterOutline;
     private List<PortableObject> focusStack;
     private PortableObject focusOutlineOwner;
@@ -775,6 +776,32 @@ public class PortableObject : MonoBehaviour
         }
     }
 
+    public void SetPickupOutline(bool visible)
+    {
+        if (pickupOutlineVisible == visible)
+        {
+            return;
+        }
+
+        ResolveBodyRenderer();
+        if (bodyRenderer == null)
+        {
+            return;
+        }
+
+        pickupOutlineVisible = visible;
+        if (visible)
+        {
+            AcquireFocusStackOutlineMembers();
+            AnimalScreenSpaceOutline.ShowPickup(bodyRenderer);
+        }
+        else
+        {
+            AnimalScreenSpaceOutline.HidePickup(bodyRenderer);
+            RefreshFocusStackOutlineRendering();
+        }
+    }
+
     public int CopyOutlineMaskRenderers(Renderer[] destination)
     {
         if (destination == null || destination.Length == 0)
@@ -819,8 +846,9 @@ public class PortableObject : MonoBehaviour
         return count;
     }
 
-    private bool HasOwnOutlineRequest => hoverOutlineVisible || focusedOutlineVisible;
+    private bool HasOwnOutlineRequest => hoverOutlineVisible || focusedOutlineVisible || pickupOutlineVisible;
     private bool HasActiveOutlineRequest => HasOwnOutlineRequest || focusOutlineOwner != null;
+    public bool HasActiveOutline => HasActiveOutlineRequest;
 
     private void RefreshFocusStackOutlineRendering()
     {
@@ -941,10 +969,12 @@ public class PortableObject : MonoBehaviour
         {
             AnimalScreenSpaceOutline.HideHovered(bodyRenderer);
             AnimalScreenSpaceOutline.HideFocused(bodyRenderer);
+            AnimalScreenSpaceOutline.HidePickup(bodyRenderer);
         }
 
         hoverOutlineVisible = false;
         focusedOutlineVisible = false;
+        pickupOutlineVisible = false;
         ReleaseFocusStackOutlineMembers(restoreBatchedRendering);
         PortableObject remainingOwner = focusOutlineOwner;
         if (remainingOwner != null)

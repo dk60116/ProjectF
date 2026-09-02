@@ -676,6 +676,11 @@ public class InstallationPlacementController : MonoBehaviour
             ResolveInstallButtons();
             RefreshInstallButton();
             RefreshMapEditButtonState();
+            if (UtilityPole.InstallOrEditRangeVisualsRequested)
+            {
+                UtilityPole.RefreshScreenRangeVisuals(ResolveInstallPreviewCamera());
+            }
+
             if (TryHandleModeCancelInput())
             {
                 return;
@@ -867,7 +872,7 @@ public class InstallationPlacementController : MonoBehaviour
     private void OnDisable()
     {
         WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
-        UtilityPole.SetInstallOrEditUtilityPoleSelectionRangeVisualsRequested(false);
+        UtilityPole.SetInstallOrEditRangeVisualsRequested(false, false);
         Sprinkler.SetInstallOrEditRangeVisualsRequested(false);
         UtilityPole.ClearBlueprintPreviews();
         ClearEditableInstallationSelection();
@@ -890,7 +895,7 @@ public class InstallationPlacementController : MonoBehaviour
     private void OnDestroy()
     {
         WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
-        UtilityPole.SetInstallOrEditUtilityPoleSelectionRangeVisualsRequested(false);
+        UtilityPole.SetInstallOrEditRangeVisualsRequested(false, false);
         Sprinkler.SetInstallOrEditRangeVisualsRequested(false);
         UtilityPole.ClearBlueprintPreviews();
         UnbindInstallButtons();
@@ -2725,21 +2730,59 @@ public class InstallationPlacementController : MonoBehaviour
         return mapEditModeActive && ResolveWorkableObject(selectedEditableInstallation) != null;
     }
 
-    private bool ShouldRequestInstallOrEditUtilityPoleRangeVisuals()
+    private bool ShouldRequestInstallOrEditUtilityPoleSupplyRangeVisuals()
     {
         GameManager gameManager = GameManager.Instance;
         bool installationModeActive = gameManager != null && gameManager.InstallationPlacementActive;
-        if (installationModeActive && activeInstallDefinition != null && ResolveUtilityPole(activeInstallDefinition.mapObject) != null)
+        if (installationModeActive
+            && activeInstallDefinition != null
+            && IsUtilityPoleOrElectricFacility(activeInstallDefinition.mapObject, activeInstallDefinition))
         {
             return true;
         }
 
-        if ((installationModeActive || mapEditModeActive) && ResolveUtilityPole(activeInstallPreview) != null)
+        if ((installationModeActive || mapEditModeActive)
+            && IsUtilityPoleOrElectricFacility(activeInstallPreview, null))
+        {
+            return true;
+        }
+
+        return mapEditModeActive
+               && IsUtilityPoleOrElectricFacility(selectedEditableInstallation, null);
+    }
+
+    private bool ShouldRequestInstallOrEditUtilityPoleConnectionRangeVisuals()
+    {
+        GameManager gameManager = GameManager.Instance;
+        bool installationModeActive = gameManager != null && gameManager.InstallationPlacementActive;
+        if (installationModeActive
+            && activeInstallDefinition != null
+            && ResolveUtilityPole(activeInstallDefinition.mapObject) != null)
+        {
+            return true;
+        }
+
+        if ((installationModeActive || mapEditModeActive)
+            && ResolveUtilityPole(activeInstallPreview) != null)
         {
             return true;
         }
 
         return mapEditModeActive && ResolveUtilityPole(selectedEditableInstallation) != null;
+    }
+
+    private bool IsUtilityPoleOrElectricFacility(
+        MapObject mapObject,
+        ItemDefinition knownDefinition)
+    {
+        if (ResolveUtilityPole(mapObject) != null)
+        {
+            return true;
+        }
+
+        ItemDefinition definition = knownDefinition ?? ResolveItemDefinition(mapObject);
+        return definition != null
+               && definition.useEnergyType == ItemDefinition.EnergyType.Electricity;
     }
 
     private bool ShouldRequestInstallOrEditSprinklerRangeVisuals()
@@ -2765,8 +2808,9 @@ public class InstallationPlacementController : MonoBehaviour
     {
         WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(
             ShouldRequestInstallOrEditWorkableRangeVisuals());
-        UtilityPole.SetInstallOrEditUtilityPoleSelectionRangeVisualsRequested(
-            ShouldRequestInstallOrEditUtilityPoleRangeVisuals());
+        UtilityPole.SetInstallOrEditRangeVisualsRequested(
+            ShouldRequestInstallOrEditUtilityPoleSupplyRangeVisuals(),
+            ShouldRequestInstallOrEditUtilityPoleConnectionRangeVisuals());
         Sprinkler.SetInstallOrEditRangeVisualsRequested(
             ShouldRequestInstallOrEditSprinklerRangeVisuals());
     }
@@ -2851,7 +2895,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         CleanupInstallPreviewReferences();
         bool forceWorkablePreviewRangesVisible = ShouldRequestInstallOrEditWorkableRangeVisuals();
-        bool forceUtilityPolePreviewRangesVisible = ShouldRequestInstallOrEditUtilityPoleRangeVisuals();
+        bool forceUtilityPolePreviewRangesVisible = ShouldRequestInstallOrEditUtilityPoleSupplyRangeVisuals();
         bool forceSprinklerPreviewRangesVisible = ShouldRequestInstallOrEditSprinklerRangeVisuals();
         for (int i = 0; i < installPreviewInstances.Count; i++)
         {

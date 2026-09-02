@@ -158,6 +158,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
+    public PortableObject HeldPortableObject => heldItemId >= 0 ? handItem : null;
     public bool CanTakeHeldItemFromSlot => CanTakeHeldItemFromSlotInternal();
     public Vector3 HeldItemWorldPosition => GetHandWorldPosition();
     public bool IsRuntimeSleeping => runtimeSleeping;

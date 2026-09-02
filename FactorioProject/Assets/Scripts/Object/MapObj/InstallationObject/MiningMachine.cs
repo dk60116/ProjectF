@@ -83,17 +83,6 @@ public class MiningMachine : InputOutputModule
         BeginActiveCraft(-1, outputItemId, outputCount, installedDefinition);
     }
 
-    protected override bool ShouldShowWorldEnergyGauge(ItemDefinition installedDefinition)
-    {
-        if (installedDefinition != null
-            && installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
-        {
-            return false;
-        }
-
-        return base.ShouldShowWorldEnergyGauge(installedDefinition);
-    }
-
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;

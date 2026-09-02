@@ -246,7 +246,7 @@ public class Player : Character
         bool usesTorchEquip = IsTorchDefinition(itemDefinition);
         if (itemDefinition == null
             || itemDefinition.id < 0
-            || (!usesTorchEquip && itemDefinition.lightMode != ItemDefinition.ItemLightMode.Toggle))
+            || !ItemDefinition.IsHandToggleLightDefinition(itemDefinition))
         {
             return false;
         }
@@ -1152,7 +1152,8 @@ public class Player : Character
         ItemDefinition definition = ResolveItemDefinition(itemId);
         float energyCapacity = ItemDefinition.ResolveCompleteEnergyAmount(definition);
         float energyRate = ItemDefinition.ResolveUseEnergyRatePerSecond(definition);
-        if (!IsTorchDefinition(definition)
+        if (!ItemDefinition.IsHandToggleLightDefinition(definition)
+            || !IsTorchDefinition(definition)
             || !IsValidTorchEnergy(remainingEnergy)
             || !IsValidTorchEnergy(energyCapacity)
             || !IsValidTorchEnergy(energyRate))

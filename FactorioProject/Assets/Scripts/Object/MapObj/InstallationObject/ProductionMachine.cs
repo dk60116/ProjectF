@@ -480,6 +480,9 @@ public class ProductionMachine : InputOutputModule
                 continue;
             }
 
+            // The icon sits just above an animated machine surface. Dynamic occlusion can
+            // incorrectly discard this thin renderer at distant camera zoom levels.
+            display.allowOcclusionWhenDynamic = false;
             display.sprite = targetIcon;
             display.enabled = targetIcon != null;
         }

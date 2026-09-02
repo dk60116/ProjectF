@@ -2375,8 +2375,28 @@ public class Block : BaseObject
 
     public bool TryPreviewPickupConveyorObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
     {
+        return TryPreviewPickupConveyorObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount,
+            out _);
+    }
+
+    public bool TryPreviewPickupConveyorObjects(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject)
+    {
         previewItemId = -1;
         previewPickupCount = 0;
+        previewPortableObject = null;
         if (player == null || pickupRadius <= 0f)
         {
             return false;
@@ -2420,7 +2440,13 @@ public class Block : BaseObject
             }
         }
 
-        return previewPickupCount > 0;
+        if (previewPickupCount <= 0)
+        {
+            return false;
+        }
+
+        previewPortableObject = MaterializeConveyorObjectForPickupPreview(previewItemId, laneIndex);
+        return true;
     }
 
     private bool TryPickupSingleConveyorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId)
@@ -3050,6 +3076,11 @@ public class Block : BaseObject
             else
             {
                 ApplyConveyorObjectRenderingMode(portableObject);
+            }
+
+            if (portableObject != null && portableObject.HasActiveOutline)
+            {
+                continue;
             }
 
             Vector3 position = GetConveyorItemVisualWorldPosition(laneIndex, portableObject);
@@ -5054,8 +5085,28 @@ public class Block : BaseObject
 
     public bool TryPreviewPickupFloorObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
     {
+        return TryPreviewPickupFloorObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount,
+            out _);
+    }
+
+    public bool TryPreviewPickupFloorObjects(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject)
+    {
         previewItemId = -1;
         previewPickupCount = 0;
+        previewPortableObject = null;
         if (player == null || pickupRadius <= 0f)
         {
             return false;
@@ -5069,13 +5120,22 @@ public class Block : BaseObject
             pickupRadius,
             preferredItemId,
             out previewItemId,
-            out previewPickupCount);
+            out previewPickupCount,
+            out previewPortableObject);
     }
 
-    private bool TryPreviewPickupFloorStackObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
+    private bool TryPreviewPickupFloorStackObjects(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject)
     {
         previewItemId = -1;
         previewPickupCount = 0;
+        previewPortableObject = null;
         if (player == null || pickupRadius <= 0f)
         {
             return false;
@@ -5092,7 +5152,7 @@ public class Block : BaseObject
                 out _,
                 out _,
                 out List<PortableObject> stack,
-                out _,
+                out PortableObject topObject,
                 out int itemId,
                 out float distanceSqr))
         {
@@ -5107,6 +5167,7 @@ public class Block : BaseObject
 
         previewItemId = itemId;
         previewPickupCount = stackPickupCount;
+        previewPortableObject = topObject;
         return true;
     }
 
@@ -7393,6 +7454,27 @@ public class Block : BaseObject
         return portableObject;
     }
 
+    private PortableObject MaterializeConveyorObjectForPickupPreview(int itemId, int laneIndex)
+    {
+        PortableObject portableObject = MaterializeConveyorObjectForTransfer(
+            GetConveyorPortableObjectAtLane(laneIndex),
+            itemId,
+            laneIndex);
+        if (portableObject == null)
+        {
+            return null;
+        }
+
+        if (conveyorStack[laneIndex] != portableObject)
+        {
+            conveyorStack[laneIndex] = portableObject;
+            MarkConveyorItemVisualDirty();
+            TerrainGenerator.Active?.MarkConveyorLineCacheDirty();
+        }
+
+        return portableObject;
+    }
+
     private void ReleaseFloorObject(PortableObject floorObject)
     {
         if (floorObject == null)
@@ -8781,6 +8863,21 @@ public class Block : BaseObject
             return;
         }
 
+        if (portableObject.HasActiveOutline)
+        {
+            if (!portableObject.CachedGameObject.activeSelf)
+            {
+                portableObject.SetCachedActive(true);
+            }
+
+            if (portableObject.IsVisualRenderingSuppressed)
+            {
+                portableObject.SetVisualRenderingSuppressed(false);
+            }
+
+            return;
+        }
+
         if (ShouldUseVirtualConveyorItemRendering())
         {
             if (!portableObject.IsVisualRenderingSuppressed)
@@ -8821,6 +8918,21 @@ public class Block : BaseObject
             return;
         }
 
+        if (portableObject.HasActiveOutline)
+        {
+            if (!portableObject.CachedGameObject.activeSelf)
+            {
+                portableObject.SetCachedActive(true);
+            }
+
+            if (portableObject.IsVisualRenderingSuppressed)
+            {
+                portableObject.SetVisualRenderingSuppressed(false);
+            }
+
+            return;
+        }
+
         if (!portableObject.IsVisualRenderingSuppressed)
         {
             portableObject.SetVisualRenderingSuppressed(true);
@@ -8853,6 +8965,7 @@ public class Block : BaseObject
     {
         if (portableObject == null
             || portableObject.IsMovingToTarget
+            || portableObject.HasActiveOutline
             || !ShouldUseVirtualConveyorItemRendering()
             || !IsValidConveyorLaneIndex(laneIndex)
             || GetConveyorPortableObjectAtLane(laneIndex) != portableObject
@@ -13293,8 +13406,28 @@ public class Block : BaseObject
 
     public bool TryPreviewPickupInputAreaCenterObjects(Player player, Vector3 playerPosition, float pickupRadius, int preferredItemId, out int previewItemId, out int previewPickupCount)
     {
+        return TryPreviewPickupInputAreaCenterObjects(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount,
+            out _);
+    }
+
+    public bool TryPreviewPickupInputAreaCenterObjects(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject)
+    {
         previewItemId = -1;
         previewPickupCount = 0;
+        previewPortableObject = null;
         if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
         {
             return false;
@@ -13349,6 +13482,7 @@ public class Block : BaseObject
 
         previewItemId = itemId;
         previewPickupCount = CountManualPickupStackObjectsFromTop(inputAreaCenterStack, itemId, distanceSqr, pickupRadiusSqr);
+        previewPortableObject = topObject;
         return previewPickupCount > 0;
     }
 

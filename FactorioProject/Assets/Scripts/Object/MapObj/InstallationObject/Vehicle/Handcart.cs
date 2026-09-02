@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItemCollectionStorage
+public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortablePreview, IPersistentInstallationItemCollectionStorage
 {
     private const int DefaultStackCapacity = 10;
     private const float MinimumMovementDistance = 0.0001f;
@@ -1539,8 +1539,28 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         out int previewItemId,
         out int previewPickupCount)
     {
+        return TryPreviewPickupItems(
+            player,
+            playerPosition,
+            pickupRange,
+            preferredItemId,
+            out previewItemId,
+            out previewPickupCount,
+            out _);
+    }
+
+    public bool TryPreviewPickupItems(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRange,
+        int preferredItemId,
+        out int previewItemId,
+        out int previewPickupCount,
+        out PortableObject previewPortableObject)
+    {
         previewItemId = -1;
         previewPickupCount = 0;
+        previewPortableObject = null;
         if (player == null || pickupRange <= 0f)
         {
             return false;
@@ -1557,6 +1577,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPersistentInstallationItem
         }
 
         previewItemId = storedItemIds[cargoIndex];
+        previewPortableObject = cargoIndex < itemVisuals.Count ? itemVisuals[cargoIndex] : null;
         for (int i = 0; i < storedItemIds.Count; i++)
         {
             if (storedItemIds[i] == previewItemId)
