@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: M_Knife_P
-  m_Shader: {fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}
+  m_Shader: {fileID: 4800000, guid: 2e827c8c74aa43a084b5b71af6db2df4, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -16,15 +16,22 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2000
-  stringTagMap:
-    RenderType: Opaque
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
   disabledShaderPasses:
   - MOTIONVECTORS
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - Texture2D_662AC62F:
+        m_Texture: {fileID: 2800000, guid: e0e8561a19db1b841b346944d8b13461, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - Texture2D_CC12F70E:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _BaseMap:
         m_Texture: {fileID: 2800000, guid: e62d8b8430d94c44d9d29d370b1440f6, type: 3}
         m_Scale: {x: 1, y: 1}
@@ -83,16 +90,40 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - BOOLEAN_537AC313: 0
+    - BOOLEAN_765B4C2: 0
+    - BOOLEAN_A060AF44: 0
+    - BOOLEAN_EC1EAD31: 0
+    - Boolean_2918AA79: 1
+    - Vector1_20DB7652: 0.2
+    - Vector1_301E02E2: 200
+    - Vector1_31894ABB: 0.006
+    - Vector1_45F25267: 3
+    - Vector1_7AF1AC78: 0.95
+    - Vector1_854A7D8C: 0.9
+    - Vector1_9C73072A: 0.8
+    - Vector1_B9CC1720: 0.03
+    - Vector1_E71BB35E: 1
     - _AddPrecomputedVelocity: 0
     - _AlphaClip: 0
     - _AlphaToMask: 0
+    - _BlackCutoutThreshold: 0.02
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
+    - _BlueprintAlpha: 0.95
+    - _BlueprintBrightness: 1.8
+    - _BlueprintContrast: 2.65
+    - _BlueprintMinBrightness: 0.42
+    - _BlueprintPreview: 0
+    - _BlueprintRimPower: 2.2
+    - _BlueprintRimStrength: 0.8
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _Cull: 2
     - _Cutoff: 0.5
+    - _DepthOffsetFactor: -1
+    - _DepthOffsetUnits: -1
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
@@ -104,22 +135,45 @@ Material:
     - _Metallic: 0.08
     - _OcclusionStrength: 1
     - _Parallax: 0.005
+    - _QueueControl: 0
     - _QueueOffset: 0
     - _ReceiveShadows: 1
+    - _ShadeSmoothness: 0.05
+    - _ShadeThreshold: 0.5
     - _Smoothness: 0.22
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
+    - _SpecularIntensity: 0.5
+    - _SpecularPower: 32
+    - _SpecularSmoothness: 0.05
+    - _SpecularThreshold: 0.5
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
+    - _UseBlackCutout: 0
+    - _UseSpecular: 0
+    - _VertexNormalOffset: 0
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1
+    - _ZTest: 4
     - _ZWrite: 1
     m_Colors:
+    - Color_1139F668: {r: 0, g: 0.6439421, b: 0.9921569, a: 0.8156863}
+    - Color_198818EE: {r: 0.341151, g: 0.5477178, b: 0.9245283, a: 0.9647059}
+    - Color_626750DD: {r: 2, g: 2, b: 2, a: 1}
+    - Color_77A2EDE9: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    - Vector2_1E1B6943: {r: 1, g: 5, b: 0, a: 0}
+    - Vector2_D06E76BC: {r: 0.1, g: 0.05, b: 0, a: 0}
+    - Vector2_D26C9C89: {r: 1, g: 0, b: 0, a: 0}
+    - Vector2_F678228C: {r: 0.5, g: 0.5, b: 0, a: 0}
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _BlueprintRimColor: {r: 0.03, g: 0.11999995, b: 0.52, a: 1}
+    - _BlueprintTint: {r: 0.45, g: 0.95, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _ShadowColor: {r: 0.7, g: 0.7, b: 0.75, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
+    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
 --- !u!114 &1172799945773207574

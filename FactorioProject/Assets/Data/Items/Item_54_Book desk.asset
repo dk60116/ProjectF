@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_54_Book desk
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Book desk
-  id: 80
+  id: 83
   mapObject: {fileID: 2696065824665056805, guid: 27727148c8ab1b546aa4e1dd6f389261, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

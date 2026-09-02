@@ -87,6 +87,33 @@ namespace ProjectF.MapObjects
                                                         >= RequiredGrowthFertilizerAmount;
         public float ManagedUpdateTickIntervalSeconds => GrowthTickIntervalSeconds;
 
+        public bool TryGetMachineAppleDrop(out int itemId, out int itemCount)
+        {
+            itemId = -1;
+            itemCount = 0;
+            IReadOnlyList<ResourceDropEntry> dropItems = Definition != null
+                ? Definition.DropItems
+                : null;
+            for (int i = 0; dropItems != null && i < dropItems.Count; i++)
+            {
+                ItemDefinition itemDefinition = dropItems[i]?.ItemDefinition;
+                if (itemDefinition == null
+                    || !string.Equals(
+                        itemDefinition.itemName,
+                        AppleItemName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                itemId = itemDefinition.id;
+                itemCount = RollNextConfiguredHarvestDropCount(itemId);
+                return itemId >= 0 && itemCount > 0;
+            }
+
+            return false;
+        }
+
         public void SetGrowth(float value)
         {
             float clampedGrowth = Mathf.Clamp(
@@ -128,33 +155,23 @@ namespace ProjectF.MapObjects
             return true;
         }
 
-        public bool TryAddGrowthFertilizer(float amount, out float acceptedAmount)
+        public void RefreshFarmlandFertilizerConsumption()
         {
-            acceptedAmount = 0f;
-            if (amount <= 0f || !CanAcceptGrowthFertilizer)
-            {
-                return false;
-            }
-
-            float remainingAmount = RequiredGrowthFertilizerAmount
-                                    - CurrentGrowthFertilizerAmount;
-            if (remainingAmount <= GrowthRequirementEpsilon)
-            {
-                return false;
-            }
-
-            acceptedAmount = Mathf.Min(amount, remainingAmount);
-            growthFertilizerAmount = CurrentGrowthFertilizerAmount + acceptedAmount;
             RefreshGrowthTickRegistration();
             RefreshGrowthWorldGauge();
-            return acceptedAmount > GrowthRequirementEpsilon;
         }
 
         public void ManagedUpdateTick(float deltaTime)
         {
-            if (!CanAdvanceGrowthTimer())
+            if (!HasGrowthTimerRequirements())
             {
                 RefreshGrowthTickRegistration();
+                return;
+            }
+
+            WorldTimeService worldTime = WorldTimeService.Active;
+            if (worldTime == null || !worldTime.IsDay)
+            {
                 return;
             }
 
@@ -451,6 +468,10 @@ namespace ProjectF.MapObjects
             state.growthWaterLiters = StoredGrowthWaterLiters;
             state.growthFertilizerAmount = StoredGrowthFertilizerAmount;
             state.growthElapsedSeconds = GrowthElapsedSeconds;
+            state.hasBackgroundGrowthTimestamp = true;
+            state.backgroundGrowthDaylightSeconds = WorldTimeService.Active != null
+                ? WorldTimeService.Active.PlantGrowthDaylightSeconds
+                : 0d;
         }
 
         protected override void ApplyAdditionalSavedState(ResourceSaveState state)
@@ -480,7 +501,7 @@ namespace ProjectF.MapObjects
             RefreshGrowthTickRegistration();
         }
 
-        private bool CanAdvanceGrowthTimer()
+        private bool HasGrowthTimerRequirements()
         {
             if (!CanGrowAnotherLevel
                 || Definition == null
@@ -538,7 +559,8 @@ namespace ProjectF.MapObjects
                 return;
             }
 
-            if (CanAdvanceGrowthTimer())
+            TryConsumeAvailableFarmlandFertilizer();
+            if (HasGrowthTimerRequirements())
             {
                 MapObjectTickManager.RegisterUpdateTick(this);
             }
@@ -546,6 +568,39 @@ namespace ProjectF.MapObjects
             {
                 MapObjectTickManager.UnregisterUpdateTick(this);
             }
+        }
+
+        private bool TryConsumeAvailableFarmlandFertilizer()
+        {
+            if (!CanAcceptGrowthFertilizer)
+            {
+                return false;
+            }
+
+            Block owningBlock = OwningBlock;
+            TerrainGenerator terrainGenerator = TerrainGenerator.ResolveActive();
+            if (owningBlock == null
+                || terrainGenerator == null
+                || !terrainGenerator.IsFarmlandAt(owningBlock.Coordinate))
+            {
+                return false;
+            }
+
+            float requestedAmount = RequiredGrowthFertilizerAmount
+                                    - CurrentGrowthFertilizerAmount;
+            if (!terrainGenerator.TryConsumeFarmlandFertilizer(
+                    owningBlock.Coordinate,
+                    requestedAmount,
+                    out float consumedAmount)
+                || consumedAmount <= GrowthRequirementEpsilon)
+            {
+                return false;
+            }
+
+            growthFertilizerAmount = Mathf.Min(
+                RequiredGrowthFertilizerAmount,
+                CurrentGrowthFertilizerAmount + consumedAmount);
+            return true;
         }
 
         private void ResetCurrentGrowthStageProgress()

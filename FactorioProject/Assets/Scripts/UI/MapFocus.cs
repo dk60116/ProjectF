@@ -1,9 +1,14 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class MapFocus : MonoBehaviour
 {
     private const string OverlayShaderName = "Custom/MapFocusOverlay";
     private const int AreaLineCount = 4;
+    private const int ShapeDirectionLeft = 1;
+    private const int ShapeDirectionRight = 2;
+    private const int ShapeDirectionDown = 4;
+    private const int ShapeDirectionUp = 8;
     private const float SingleMarkerCornerVisibleLengthRatio = 131f / 512f;
     public static readonly Color DefaultFocusColor = new Color(1f, 0.86f, 0f, 0.45f);
     public static readonly Color MouseFocusColor = new Color(1f, 1f, 1f, 0.22f);
@@ -20,11 +25,33 @@ public class MapFocus : MonoBehaviour
 
     private static Material overlayMaterial;
     private static Material lineMaterial;
+
+    private readonly struct BoundaryRun
+    {
+        public readonly int axis;
+        public readonly int start;
+        public readonly int end;
+
+        public BoundaryRun(int axis, int start, int end)
+        {
+            this.axis = axis;
+            this.start = start;
+            this.end = end;
+        }
+    }
+
     private bool hasDefaultTransform;
     private Vector3 defaultLocalPosition;
     private Quaternion defaultLocalRotation;
     private Vector3 defaultLocalScale;
     private LineRenderer[] areaLines;
+    private readonly HashSet<Vector2Int> shapeCoordinates = new HashSet<Vector2Int>();
+    private readonly List<BoundaryRun> horizontalShapeRuns = new List<BoundaryRun>(32);
+    private readonly List<BoundaryRun> verticalShapeRuns = new List<BoundaryRun>(32);
+    private readonly Dictionary<Vector2Int, int> shapeCornerDirections =
+        new Dictionary<Vector2Int, int>(32);
+    private readonly List<LineRenderer> shapeLines = new List<LineRenderer>(16);
+    private int visibleShapeLineCount;
 
     private void Awake()
     {
@@ -45,6 +72,7 @@ public class MapFocus : MonoBehaviour
     public void SetVisible(bool isVisible, Color color)
     {
         HideAreaLines();
+        HideShapeLines();
         ResetTransformToDefault();
         ApplyVisibility(isVisible, color, true);
     }
@@ -52,6 +80,7 @@ public class MapFocus : MonoBehaviour
     public void SetAreaVisible(bool isVisible, Color color, Vector3 worldCenter, Vector2 worldSize)
     {
         CacheDefaultTransform();
+        HideShapeLines();
         if (isVisible)
         {
             ResetTransformToDefault();
@@ -66,6 +95,26 @@ public class MapFocus : MonoBehaviour
             ResetTransformToDefault();
             ApplyVisibility(false, color, true);
         }
+    }
+
+    public void SetGridShapeVisible(
+        bool isVisible,
+        Color color,
+        IReadOnlyList<Vector2Int> worldCoordinates)
+    {
+        CacheDefaultTransform();
+        HideAreaLines();
+        if (!isVisible || worldCoordinates == null || worldCoordinates.Count <= 0)
+        {
+            HideShapeLines();
+            ResetTransformToDefault();
+            ApplyVisibility(false, color, true);
+            return;
+        }
+
+        ResetTransformToDefault();
+        ApplyVisibility(true, color, false);
+        UpdateGridShapeLines(worldCoordinates);
     }
 
     private void ApplyVisibility(bool isVisible, Color color, bool showSprite)
@@ -99,21 +148,232 @@ public class MapFocus : MonoBehaviour
         areaLines = new LineRenderer[AreaLineCount];
         for (int i = 0; i < areaLines.Length; i++)
         {
-            GameObject lineObject = new GameObject($"AreaCornerLine_{i}");
-            lineObject.transform.SetParent(transform, false);
-            LineRenderer line = lineObject.AddComponent<LineRenderer>();
-            line.useWorldSpace = true;
-            line.positionCount = 3;
-            line.textureMode = LineTextureMode.Stretch;
-            line.alignment = LineAlignment.View;
-            line.numCapVertices = 0;
-            line.numCornerVertices = 0;
-            line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            line.receiveShadows = false;
-            line.sortingOrder = 5001;
-            line.sharedMaterial = GetLineMaterial();
-            areaLines[i] = line;
+            areaLines[i] = CreateLineRenderer($"AreaCornerLine_{i}", 3);
         }
+    }
+
+    private void UpdateGridShapeLines(IReadOnlyList<Vector2Int> worldCoordinates)
+    {
+        shapeCoordinates.Clear();
+        horizontalShapeRuns.Clear();
+        verticalShapeRuns.Clear();
+        shapeCornerDirections.Clear();
+        for (int i = 0; i < worldCoordinates.Count; i++)
+        {
+            shapeCoordinates.Add(worldCoordinates[i]);
+        }
+
+        foreach (Vector2Int coordinate in shapeCoordinates)
+        {
+            int centerX = coordinate.x * 2;
+            int centerZ = coordinate.y * 2;
+            if (!shapeCoordinates.Contains(coordinate + Vector2Int.down))
+            {
+                horizontalShapeRuns.Add(new BoundaryRun(centerZ - 1, centerX - 1, centerX + 1));
+            }
+
+            if (!shapeCoordinates.Contains(coordinate + Vector2Int.up))
+            {
+                horizontalShapeRuns.Add(new BoundaryRun(centerZ + 1, centerX - 1, centerX + 1));
+            }
+
+            if (!shapeCoordinates.Contains(coordinate + Vector2Int.left))
+            {
+                verticalShapeRuns.Add(new BoundaryRun(centerX - 1, centerZ - 1, centerZ + 1));
+            }
+
+            if (!shapeCoordinates.Contains(coordinate + Vector2Int.right))
+            {
+                verticalShapeRuns.Add(new BoundaryRun(centerX + 1, centerZ - 1, centerZ + 1));
+            }
+        }
+
+        CollectShapeCornerDirections(horizontalShapeRuns, true);
+        CollectShapeCornerDirections(verticalShapeRuns, false);
+        visibleShapeLineCount = 0;
+        float worldY = transform.parent != null
+            ? transform.parent.TransformPoint(defaultLocalPosition).y
+            : transform.position.y;
+        float cornerLength = ResolveMatchedCornerCenterlineLength(
+            Mathf.Max(0f, areaLineWidth * 0.5f));
+        foreach (KeyValuePair<Vector2Int, int> pair in shapeCornerDirections)
+        {
+            int directions = pair.Value;
+            bool hasHorizontalDirection =
+                (directions & (ShapeDirectionLeft | ShapeDirectionRight)) != 0;
+            bool hasVerticalDirection =
+                (directions & (ShapeDirectionDown | ShapeDirectionUp)) != 0;
+            if (!hasHorizontalDirection || !hasVerticalDirection)
+            {
+                continue;
+            }
+
+            SetShapeCornerLine(
+                visibleShapeLineCount++,
+                pair.Key,
+                directions,
+                cornerLength,
+                worldY);
+        }
+
+        SetShapeLinesVisibleCount(visibleShapeLineCount);
+    }
+
+    private void CollectShapeCornerDirections(
+        List<BoundaryRun> runs,
+        bool horizontal)
+    {
+        if (runs == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            BoundaryRun run = runs[i];
+            if (horizontal)
+            {
+                AddShapeCornerDirection(
+                    new Vector2Int(run.start, run.axis),
+                    ShapeDirectionRight);
+                AddShapeCornerDirection(
+                    new Vector2Int(run.end, run.axis),
+                    ShapeDirectionLeft);
+                continue;
+            }
+
+            AddShapeCornerDirection(
+                new Vector2Int(run.axis, run.start),
+                ShapeDirectionUp);
+            AddShapeCornerDirection(
+                new Vector2Int(run.axis, run.end),
+                ShapeDirectionDown);
+        }
+    }
+
+    private void AddShapeCornerDirection(Vector2Int vertex, int direction)
+    {
+        shapeCornerDirections.TryGetValue(vertex, out int directions);
+        shapeCornerDirections[vertex] = directions | direction;
+    }
+
+    private void SetShapeCornerLine(
+        int index,
+        Vector2Int doubledVertex,
+        int directions,
+        float cornerLength,
+        float worldY)
+    {
+        LineRenderer line = GetOrCreateShapeLine(index);
+        if (line == null)
+        {
+            return;
+        }
+
+        ConfigureLineAppearance(line);
+        int directionCount = CountShapeDirections(directions);
+        int positionCount = directionCount * 2 - 1;
+        if (line.positionCount != positionCount)
+        {
+            line.positionCount = positionCount;
+        }
+
+        Vector3 corner = new Vector3(
+            doubledVertex.x * 0.5f,
+            worldY,
+            doubledVertex.y * 0.5f);
+        int positionIndex = 0;
+        for (int direction = ShapeDirectionLeft;
+             direction <= ShapeDirectionUp;
+             direction <<= 1)
+        {
+            if ((directions & direction) == 0)
+            {
+                continue;
+            }
+
+            if (positionIndex > 0)
+            {
+                line.SetPosition(positionIndex++, corner);
+            }
+
+            line.SetPosition(
+                positionIndex++,
+                corner + GetShapeDirectionOffset(direction, cornerLength));
+        }
+    }
+
+    private static int CountShapeDirections(int directions)
+    {
+        int count = 0;
+        for (int direction = ShapeDirectionLeft;
+             direction <= ShapeDirectionUp;
+             direction <<= 1)
+        {
+            if ((directions & direction) != 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static Vector3 GetShapeDirectionOffset(int direction, float length)
+    {
+        switch (direction)
+        {
+            case ShapeDirectionLeft:
+                return Vector3.left * length;
+            case ShapeDirectionRight:
+                return Vector3.right * length;
+            case ShapeDirectionDown:
+                return Vector3.back * length;
+            default:
+                return Vector3.forward * length;
+        }
+    }
+
+    private LineRenderer GetOrCreateShapeLine(int index)
+    {
+        while (shapeLines.Count <= index)
+        {
+            shapeLines.Add(CreateLineRenderer($"ShapeBoundaryLine_{shapeLines.Count}", 2));
+        }
+
+        return shapeLines[index];
+    }
+
+    private LineRenderer CreateLineRenderer(string objectName, int positionCount)
+    {
+        GameObject lineObject = new GameObject(objectName);
+        lineObject.transform.SetParent(transform, false);
+        LineRenderer line = lineObject.AddComponent<LineRenderer>();
+        line.useWorldSpace = true;
+        line.positionCount = positionCount;
+        line.textureMode = LineTextureMode.Stretch;
+        line.alignment = LineAlignment.View;
+        line.numCapVertices = 0;
+        line.numCornerVertices = 0;
+        line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        line.receiveShadows = false;
+        line.sortingOrder = 5001;
+        line.sharedMaterial = GetLineMaterial();
+        return line;
+    }
+
+    private void ConfigureLineAppearance(LineRenderer line)
+    {
+        if (line == null)
+        {
+            return;
+        }
+
+        line.sharedMaterial = GetLineMaterial();
+        line.startWidth = areaLineWidth;
+        line.endWidth = areaLineWidth;
+        line.startColor = focusColor;
+        line.endColor = focusColor;
     }
 
     private void UpdateAreaLines(Vector3 worldCenter, Vector2 worldSize)
@@ -228,11 +488,7 @@ public class MapFocus : MonoBehaviour
             return;
         }
 
-        line.sharedMaterial = GetLineMaterial();
-        line.startWidth = areaLineWidth;
-        line.endWidth = areaLineWidth;
-        line.startColor = focusColor;
-        line.endColor = focusColor;
+        ConfigureLineAppearance(line);
         if (line.positionCount != 3)
         {
             line.positionCount = 3;
@@ -270,6 +526,32 @@ public class MapFocus : MonoBehaviour
     private void HideAreaLines()
     {
         SetAreaLinesVisible(false);
+    }
+
+    private void SetShapeLinesVisibleCount(int visibleCount)
+    {
+        for (int i = 0; i < shapeLines.Count; i++)
+        {
+            LineRenderer line = shapeLines[i];
+            if (line == null)
+            {
+                continue;
+            }
+
+            bool isVisible = i < visibleCount;
+            if (line.gameObject.activeSelf != isVisible)
+            {
+                line.gameObject.SetActive(isVisible);
+            }
+
+            line.enabled = isVisible;
+        }
+    }
+
+    private void HideShapeLines()
+    {
+        visibleShapeLineCount = 0;
+        SetShapeLinesVisibleCount(0);
     }
 
     private static Material GetLineMaterial()

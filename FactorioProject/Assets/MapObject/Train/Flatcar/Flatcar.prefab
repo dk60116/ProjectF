@@ -177,7 +177,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Flatcar
-  objId: 96
+  objId: 99
   itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -249,7 +249,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.5, y: 1, z: 0.8}
+  m_Size: {x: 0.6, y: 1, z: 1.15}
   m_Center: {x: 0, y: 0.5, z: 0}
 --- !u!1 &6699640077954963872
 GameObject:
@@ -368,7 +368,7 @@ Transform:
   m_GameObject: {fileID: 8427335179590875495}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.258, z: -0.0111}
+  m_LocalPosition: {x: 0, y: 0.258, z: 0.003}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

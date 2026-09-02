@@ -145,17 +145,17 @@ public class AreaMarker : MonoBehaviour
 
     public void ResetVisuals()
     {
-        if (icon == null)
+        CaptureOriginalRendererState();
+        if (icon != null)
         {
-            return;
+            CaptureOriginalIconColor();
+            CaptureOriginalIconLocalRotation();
+            icon.sprite = null;
+            icon.transform.localRotation = originalIconLocalRotation;
+            PreserveOriginalIconAlpha();
+            icon.enabled = false;
         }
 
-        CaptureOriginalIconColor();
-        CaptureOriginalIconLocalRotation();
-        icon.sprite = null;
-        icon.transform.localRotation = originalIconLocalRotation;
-        PreserveOriginalIconAlpha();
-        icon.enabled = false;
         currentIconSprite = null;
         currentIconRotationZ = 0f;
         currentIconInitialized = true;
@@ -163,6 +163,7 @@ public class AreaMarker : MonoBehaviour
         currentRenderOnTopInitialized = false;
         ResetRendererSorting();
         SetRenderOnTop(false);
+        ResetRendererPropertyBlocks();
     }
 
     private void CaptureOriginalIconColor()
@@ -237,6 +238,24 @@ public class AreaMarker : MonoBehaviour
             if (spriteRenderer != null)
             {
                 spriteRenderer.sortingOrder = originalSortingOrders[i];
+            }
+        }
+    }
+
+    private void ResetRendererPropertyBlocks()
+    {
+        CaptureOriginalRendererState();
+        if (capturedSpriteRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < capturedSpriteRenderers.Length; i++)
+        {
+            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
+            if (spriteRenderer != null)
+            {
+                spriteRenderer.SetPropertyBlock(null);
             }
         }
     }

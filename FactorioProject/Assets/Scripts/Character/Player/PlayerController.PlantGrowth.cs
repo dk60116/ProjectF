@@ -9,23 +9,11 @@ public partial class PlayerController
         out PlantResource targetTree)
     {
         return TryFindNearestPlantGrowthTarget(
-            false,
-            out targetBlock,
-            out targetTree);
-    }
-
-    public bool TryFindNearestPlantFertilizingTarget(
-        out Block targetBlock,
-        out PlantResource targetTree)
-    {
-        return TryFindNearestPlantGrowthTarget(
-            true,
             out targetBlock,
             out targetTree);
     }
 
     private bool TryFindNearestPlantGrowthTarget(
-        bool fertilizer,
         out Block targetBlock,
         out PlantResource targetTree)
     {
@@ -33,9 +21,7 @@ public partial class PlayerController
         targetTree = null;
         if (player == null
             || IsMounted
-            || (fertilizer
-                ? !TryResolveHeldFertilizer(out _)
-                : !TryResolveHeldWaterBucket(out _)))
+            || !TryResolveHeldWaterBucket(out _))
         {
             return false;
         }
@@ -60,9 +46,7 @@ public partial class PlayerController
         {
             if (!(resources[i] is PlantResource tree)
                 || !tree.gameObject.activeInHierarchy
-                || (fertilizer
-                    ? !tree.CanAcceptGrowthFertilizer
-                    : !tree.CanAcceptGrowthWater))
+                || !tree.CanAcceptGrowthWater)
             {
                 continue;
             }
@@ -99,12 +83,6 @@ public partial class PlayerController
     {
         return TryResolveHeldPlantGrowthItem(out waterBucket)
                && Bucket.IsWaterBucketDefinition(waterBucket);
-    }
-
-    private bool TryResolveHeldFertilizer(out ItemDefinition fertilizer)
-    {
-        return TryResolveHeldPlantGrowthItem(out fertilizer)
-               && ItemDefinition.IsFertilizerEnergyItemDefinition(fertilizer);
     }
 
     private bool TryResolveHeldPlantGrowthItem(out ItemDefinition heldDefinition)

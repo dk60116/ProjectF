@@ -349,14 +349,19 @@ public class BoxObject : InputOutputModule
 
     public bool CanPutOneContainedObject(int itemId)
     {
-        if (itemId < 0 || !AcceptsItem(itemId))
+        return CanPutContainedObjects(itemId, 1);
+    }
+
+    public bool CanPutContainedObjects(int itemId, int count)
+    {
+        if (itemId < 0 || count <= 0 || !AcceptsItem(itemId))
         {
             return false;
         }
 
         return TryGetContentBlock(out Block contentBlock)
                && contentBlock != null
-               && contentBlock.CanAddInputAreaCenterObjects(1, itemId);
+               && contentBlock.CanAddInputAreaCenterObjects(count, itemId);
     }
 
     public bool TryPutOneContainedObjectInstant(int itemId, out PortableObject targetPortableObject)
@@ -380,6 +385,21 @@ public class BoxObject : InputOutputModule
         }
 
         return IsItemFilterEnabled(itemId, ResolveFilterBitCount(itemId));
+    }
+
+    public void EnsureClosedFilterIconVisible()
+    {
+        if (isOpen
+            || itemIcon == null
+            || !TryGetSingleFilteredItemId(out int filteredItemId)
+            || (itemIcon.enabled
+                && itemIcon.sprite != null
+                && cachedDisplayedItemId == filteredItemId))
+        {
+            return;
+        }
+
+        TryApplyFilteredItemIcon(filteredItemId, true);
     }
 
     public void ToggleOpenState()
@@ -730,15 +750,9 @@ public class BoxObject : InputOutputModule
             return;
         }
 
-        if (TryGetSingleResolvedItemId(out int filteredItemId))
+        if (TryApplySingleResolvedItemIcon(force))
         {
-            Sprite filteredItemSprite = ResolveItemIconSprite(filteredItemId);
-            if (filteredItemSprite != null)
-            {
-                ApplyItemIconSprite(filteredItemSprite, filteredItemId, force);
-                SetLockIconVisible(true, force);
-                return;
-            }
+            return;
         }
 
         SetLockIconVisible(false, force);
@@ -758,6 +772,25 @@ public class BoxObject : InputOutputModule
         }
 
         ApplyItemIconSprite(ResolveItemIconSprite(itemId), itemId, force);
+    }
+
+    private bool TryApplySingleResolvedItemIcon(bool force)
+    {
+        return TryGetSingleResolvedItemId(out int filteredItemId)
+               && TryApplyFilteredItemIcon(filteredItemId, force);
+    }
+
+    private bool TryApplyFilteredItemIcon(int filteredItemId, bool force)
+    {
+        Sprite filteredItemSprite = ResolveItemIconSprite(filteredItemId);
+        if (filteredItemSprite == null)
+        {
+            return false;
+        }
+
+        ApplyItemIconSprite(filteredItemSprite, filteredItemId, force);
+        SetLockIconVisible(true, force);
+        return true;
     }
 
     private void SyncCountText(bool force = false)

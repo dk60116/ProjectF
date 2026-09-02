@@ -28,7 +28,7 @@ public partial class BlockStateStore : MonoBehaviour
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public bool loggingTreeFilterInitialized;
         public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
-        public int loggingMinimumGrowth = ResourceDefinition.MinGrowth;
+        public int loggingMinimumGrowth = LoggingMachine.DefaultMinimumGrowth;
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;

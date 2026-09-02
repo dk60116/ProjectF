@@ -7,8 +7,191 @@ public partial class PlayerController
     private Block seedPlantTargetBlock;
     private ItemDefinition seedPlantDefinition;
     private bool seedPlantingQueued;
+    private readonly System.Collections.Generic.List<Vector2Int> connectedFarmlandFocusCoordinates =
+        new System.Collections.Generic.List<Vector2Int>(32);
 
     public bool IsSeedPlantingActive => seedPlantTargetBlock != null;
+
+    private bool HasGroundActionFocusSelectionOrTarget()
+    {
+        return selectedPitchforkGroundBlock != null
+               || pitchforkDigTargetBlock != null
+               || selectedSeedGroundBlock != null
+               || seedPlantTargetBlock != null;
+    }
+
+    public bool TryResolvePointerFarmlandBlock(
+        Vector2 pointerPosition,
+        out Block farmlandBlock)
+    {
+        farmlandBlock = null;
+        Camera targetCamera = ResolveMouseFocusCamera();
+        return targetCamera != null
+               && TryGetPointerBlockFromGroundPlane(
+                   targetCamera.ScreenPointToRay(pointerPosition),
+                   out farmlandBlock)
+               && IsFarmlandFocusBlock(farmlandBlock);
+    }
+
+    public bool TryGetFocusedFarmlandBlock(out Block farmlandBlock)
+    {
+        farmlandBlock = null;
+        if (player == null || currentFocusedBlocks.Count <= 0)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        float nearestDistanceSqr = float.MaxValue;
+        foreach (Block block in currentFocusedBlocks)
+        {
+            if (!IsFarmlandFocusBlock(block))
+            {
+                continue;
+            }
+
+            Vector3 offset = block.transform.position - origin;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            farmlandBlock = block;
+        }
+
+        return farmlandBlock != null;
+    }
+
+    public void SetSelectedFarmlandFocus(Block farmlandBlock)
+    {
+        if (farmlandBlock == null
+            && HasGroundActionFocusSelectionOrTarget())
+        {
+            return;
+        }
+
+        if (farmlandBlock != null)
+        {
+            CancelPitchforkDigging();
+            CancelSeedPlanting();
+        }
+
+        selectedPitchforkGroundBlock = null;
+        selectedSeedGroundBlock = null;
+        selectedSeedDefinition = null;
+        selectedFocusBlocks.Clear();
+        bool hasFarmlandFocusGroup = IsFarmlandFocusBlock(farmlandBlock)
+                                     && AppendConnectedFarmlandFocusBlocks(
+                                         farmlandBlock,
+                                         selectedFocusBlocks,
+                                         currentSelectionFarmlandFocusGroup);
+
+        SetSelectedFocusedBlocks(
+            selectedFocusBlocks.Count > 0 ? selectedFocusBlocks : null,
+            hasFarmlandFocusGroup);
+    }
+
+    private bool AppendConnectedFarmlandFocusBlocks(
+        Block farmlandBlock,
+        System.Collections.Generic.List<Block> results,
+        System.Collections.Generic.HashSet<Block> focusGroup)
+    {
+        focusGroup?.Clear();
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (farmlandBlock == null
+            || results == null
+            || focusGroup == null
+            || terrain == null
+            || !terrain.TryCollectConnectedFarmlandCoordinates(
+                farmlandBlock.Coordinate,
+                connectedFarmlandFocusCoordinates))
+        {
+            connectedFarmlandFocusCoordinates.Clear();
+            return false;
+        }
+
+        for (int i = 0; i < connectedFarmlandFocusCoordinates.Count; i++)
+        {
+            if (!terrain.TryGetLoadedBlock(
+                    connectedFarmlandFocusCoordinates[i],
+                    out Block connectedBlock)
+                || connectedBlock == null)
+            {
+                continue;
+            }
+
+            AppendUniqueBlock(results, connectedBlock);
+            focusGroup.Add(connectedBlock);
+        }
+
+        connectedFarmlandFocusCoordinates.Clear();
+        return focusGroup.Count > 0;
+    }
+
+    private bool TryFindNearestFarmlandFocusBlock(out Block farmlandBlock)
+    {
+        farmlandBlock = null;
+        if (player == null || player.IsCarrying)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        float range = Mathf.Max(0f, player.State.HarvestRange);
+        float rangeSqr = range * range;
+        int coordinateRadius = Mathf.CeilToInt(range) + 1;
+        Vector2Int center = new Vector2Int(
+            Mathf.RoundToInt(origin.x),
+            Mathf.RoundToInt(origin.z));
+        float nearestDistanceSqr = float.MaxValue;
+        for (int y = -coordinateRadius; y <= coordinateRadius; y++)
+        {
+            for (int x = -coordinateRadius; x <= coordinateRadius; x++)
+            {
+                Vector2Int coordinate = center + new Vector2Int(x, y);
+                if (!terrain.TryGetLoadedBlock(coordinate, out Block block)
+                    || !IsFarmlandFocusBlock(block))
+                {
+                    continue;
+                }
+
+                Vector3 offset = block.transform.position - origin;
+                offset.y = 0f;
+                float distanceSqr = offset.sqrMagnitude;
+                if (distanceSqr > rangeSqr || distanceSqr >= nearestDistanceSqr)
+                {
+                    continue;
+                }
+
+                nearestDistanceSqr = distanceSqr;
+                farmlandBlock = block;
+            }
+        }
+
+        return farmlandBlock != null;
+    }
+
+    private bool IsFarmlandFocusBlock(Block block)
+    {
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        return block != null
+               && block.gameObject.activeInHierarchy
+               && terrain != null
+               && terrain.IsFarmlandAt(block.Coordinate);
+    }
 
     public bool TrySelectSeedGroundAtPointer(
         Vector2 pointerPosition,
@@ -230,6 +413,7 @@ public partial class PlayerController
         if (!seedPlantingQueued)
         {
             seedPlantingQueued = true;
+            player.SetSeedPlantingEquipVisual(true);
             player.QueueDiggingAnimation();
         }
 
@@ -332,6 +516,7 @@ public partial class PlayerController
         seedPlantTargetBlock = null;
         seedPlantDefinition = null;
         seedPlantingQueued = false;
+        player?.SetSeedPlantingEquipVisual(false);
         if (interruptAnimation && wasActive)
         {
             player?.CancelDiggingAnimation(false);

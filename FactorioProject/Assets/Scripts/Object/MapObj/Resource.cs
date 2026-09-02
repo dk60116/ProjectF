@@ -56,6 +56,10 @@ public class Resource : MapObject
         public float growthWaterLiters;
         public float growthFertilizerAmount;
         public float growthElapsedSeconds;
+        [NonSerialized]
+        public bool hasBackgroundGrowthTimestamp;
+        [NonSerialized]
+        public double backgroundGrowthDaylightSeconds;
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
@@ -743,6 +747,41 @@ public class Resource : MapObject
                 && entry.ItemDefinition.id >= 0
                 && entry.DropChance > 0f
                 && entry.Matches(growth))
+            {
+                count += entry.Amount;
+            }
+        }
+
+        return count;
+    }
+
+    protected int RollNextConfiguredHarvestDropCount(int targetItemId)
+    {
+        if (targetItemId < 0 || !CanHarvest || !HasConfiguredDropItems())
+        {
+            return 0;
+        }
+
+        int depletionOrdinal = Mathf.Max(0, initialResourceCount - ResourceCount);
+        System.Random random = new System.Random(BuildHarvestDropSeed(depletionOrdinal));
+        float growth = ResolveDropGrowth();
+        int count = 0;
+        IReadOnlyList<ResourceDropEntry> dropItems = definition.DropItems;
+        for (int i = 0; i < dropItems.Count; i++)
+        {
+            ResourceDropEntry entry = dropItems[i];
+            ItemDefinition itemDefinition = entry?.ItemDefinition;
+            if (itemDefinition == null
+                || itemDefinition.id < 0
+                || entry.Amount <= 0
+                || entry.DropChance <= 0f
+                || !entry.Matches(growth))
+            {
+                continue;
+            }
+
+            bool dropped = random.NextDouble() < entry.DropChance;
+            if (dropped && itemDefinition.id == targetItemId)
             {
                 count += entry.Amount;
             }

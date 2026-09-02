@@ -130,7 +130,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Anvil
-  objId: 16
+  objId: 17
   itemDefinition: {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

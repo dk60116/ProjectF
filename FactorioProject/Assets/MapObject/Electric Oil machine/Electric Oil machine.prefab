@@ -1062,7 +1062,7 @@ Transform:
   m_GameObject: {fileID: 4876283009803800256}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.021, y: 1.267, z: 0.34999996}
+  m_LocalPosition: {x: 0.573, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1100,8 +1100,8 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 5537218506491376683}
   - {fileID: 1843339149107173585}
+  - {fileID: 5537218506491376683}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &8277338630082605383
@@ -1118,7 +1118,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::OilDrillingMachine
   id: 0
   objectName: Electric Oil machine
-  objId: 48
+  objId: 49
   itemDefinition: {fileID: 11400000, guid: f73deaa4f06e2164a9a37afae9ef1854, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -1212,7 +1212,7 @@ Animator:
   m_GameObject: {fileID: 5824118724912299156}
   m_Enabled: 1
   m_Avatar: {fileID: 0}
-  m_Controller: {fileID: 9100000, guid: a852d5d9344681646bfe40a7c5e7f39b, type: 2}
+  m_Controller: {fileID: 22100000, guid: 82ba9972cdc7af74f923d6d00d6a0d2f, type: 2}
   m_CullingMode: 0
   m_UpdateMode: 0
   m_ApplyRootMotion: 0
@@ -1724,7 +1724,7 @@ Transform:
   m_GameObject: {fileID: 9104579771830563285}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -0, y: -0.887, z: -0.013}
+  m_LocalPosition: {x: -0, y: -0.887, z: 0.001}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

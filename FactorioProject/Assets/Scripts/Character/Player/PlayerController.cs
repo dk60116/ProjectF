@@ -100,6 +100,8 @@ public partial class PlayerController : MonoBehaviour
     private readonly List<Block> mouseFocusBlocks = new List<Block>();
     private readonly List<Block> mouseFocusRemovalBuffer = new List<Block>();
     private readonly HashSet<Block> currentSelectedFocusedBlocks = new HashSet<Block>();
+    private readonly HashSet<Block> currentInteractionFarmlandFocusGroup = new HashSet<Block>();
+    private readonly HashSet<Block> currentSelectionFarmlandFocusGroup = new HashSet<Block>();
     private readonly List<Block> selectedFocusBlocks = new List<Block>();
     private readonly List<Block> selectedFocusRemovalBuffer = new List<Block>();
     private Block selectedPitchforkGroundBlock;
@@ -121,6 +123,12 @@ public partial class PlayerController : MonoBehaviour
     private readonly HashSet<WorkableObject> currentSelectedWorkableRangeObjects = new HashSet<WorkableObject>();
     private readonly HashSet<WorkableObject> nextSelectedWorkableRangeObjects = new HashSet<WorkableObject>();
     private readonly List<WorkableObject> selectedWorkableRangeRemovalBuffer = new List<WorkableObject>();
+    private readonly HashSet<Sprinkler> currentFocusedSprinklerRangeObjects = new HashSet<Sprinkler>();
+    private readonly HashSet<Sprinkler> nextFocusedSprinklerRangeObjects = new HashSet<Sprinkler>();
+    private readonly List<Sprinkler> focusedSprinklerRangeRemovalBuffer = new List<Sprinkler>();
+    private readonly HashSet<Sprinkler> currentInRangeSprinklerRangeObjects = new HashSet<Sprinkler>();
+    private readonly HashSet<Sprinkler> nextInRangeSprinklerRangeObjects = new HashSet<Sprinkler>();
+    private readonly List<Sprinkler> inRangeSprinklerRangeRemovalBuffer = new List<Sprinkler>();
     private readonly List<Block> singleFocusedBlockBuffer = new List<Block>(1);
     private readonly List<Block> mountedPinnedFocusBlocks = new List<Block>();
     private readonly List<Block> focusRemovalBuffer = new List<Block>();
@@ -172,11 +180,15 @@ public partial class PlayerController : MonoBehaviour
     private sealed class FocusMarkerGroup
     {
         public MapObject mapObject;
+        public bool isFarmlandGroup;
         public Block markerBlock;
         public int count;
         private Vector2Int markerCoordinate;
         private Vector3 minWorldPosition;
         private Vector3 maxWorldPosition;
+        private readonly List<Vector2Int> coordinates = new List<Vector2Int>();
+
+        public IReadOnlyList<Vector2Int> Coordinates => coordinates;
 
         public Vector3 Center => new Vector3(
             (minWorldPosition.x + maxWorldPosition.x) * 0.5f,
@@ -190,8 +202,10 @@ public partial class PlayerController : MonoBehaviour
         public void Reset(MapObject targetMapObject, Block block)
         {
             mapObject = targetMapObject;
+            isFarmlandGroup = false;
             markerBlock = block;
             count = 0;
+            coordinates.Clear();
             markerCoordinate = block != null ? block.Coordinate : Vector2Int.zero;
             if (block != null)
             {
@@ -200,6 +214,12 @@ public partial class PlayerController : MonoBehaviour
                 maxWorldPosition = position;
                 Add(block);
             }
+        }
+
+        public void ResetFarmland(Block block)
+        {
+            Reset(null, block);
+            isFarmlandGroup = true;
         }
 
         public void Add(Block block)
@@ -211,6 +231,7 @@ public partial class PlayerController : MonoBehaviour
 
             count++;
             Vector2Int coordinate = block.Coordinate;
+            coordinates.Add(coordinate);
             if (markerBlock == null
                 || coordinate.x < markerCoordinate.x
                 || (coordinate.x == markerCoordinate.x && coordinate.y < markerCoordinate.y))
@@ -317,6 +338,7 @@ public partial class PlayerController : MonoBehaviour
         mountedPinnedFocusFallbackBlock = null;
         mouseFocusRefreshFrame = -1;
         UpdateSelectedWorkableRangeVisuals(null);
+        UpdateInRangeSprinklerRangeVisuals(null);
         singleFocusedBlockBuffer.Clear();
         CancelAnimalKnifeInteraction();
         CancelNooseThrow();
@@ -387,7 +409,7 @@ public partial class PlayerController : MonoBehaviour
     public void SetSelectedMapObjectFocus(MapObject mapObject)
     {
         if (mapObject == null
-            && (pitchforkDigTargetBlock != null || seedPlantTargetBlock != null))
+            && HasGroundActionFocusSelectionOrTarget())
         {
             return;
         }
@@ -2806,6 +2828,7 @@ public partial class PlayerController : MonoBehaviour
         standaloneInteractionAreaFocusBlock = null;
         if (MountedVehicle != null)
         {
+            UpdateInRangeSprinklerRangeVisuals(null);
             RefreshMountedPinnedInteractionFocus();
             return;
         }
@@ -2839,6 +2862,13 @@ public partial class PlayerController : MonoBehaviour
 
         FindNearbyWorkableBlocks(nearbyWorkableFocusBlocks);
         UpdateSelectedWorkableRangeVisuals(nearbyWorkableRangeObjects);
+        Vector3 playerRangeOrigin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        Sprinkler.CollectActiveSprinklersContainingWorldPosition(
+            playerRangeOrigin,
+            nextInRangeSprinklerRangeObjects);
+        UpdateInRangeSprinklerRangeVisuals(nextInRangeSprinklerRangeObjects);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyWorkableFocusBlocks);
 
         FindNearbyBoxBlocks(nearbyBoxFocusBlocks);
@@ -2879,7 +2909,21 @@ public partial class PlayerController : MonoBehaviour
             AppendUniqueBlock(combinedInteractionFocusBlocks, plantWateringBlock);
         }
 
-        SetFocusedBlocks(combinedInteractionFocusBlocks);
+        bool hasFarmlandFocusGroup = false;
+        if (combinedInteractionFocusBlocks.Count == 0
+            && TryFindNearestFarmlandFocusBlock(out Block farmlandFocusBlock))
+        {
+            hasFarmlandFocusGroup = AppendConnectedFarmlandFocusBlocks(
+                farmlandFocusBlock,
+                combinedInteractionFocusBlocks,
+                currentInteractionFarmlandFocusGroup);
+            if (!hasFarmlandFocusGroup)
+            {
+                AppendUniqueBlock(combinedInteractionFocusBlocks, farmlandFocusBlock);
+            }
+        }
+
+        SetFocusedBlocks(combinedInteractionFocusBlocks, hasFarmlandFocusGroup);
     }
 
     private void RefreshMountedPinnedInteractionFocus()
@@ -5952,8 +5996,16 @@ public partial class PlayerController : MonoBehaviour
         SetFocusedBlocks(singleFocusedBlockBuffer);
     }
 
-    private void SetFocusedBlocks(List<Block> nextBlocks)
+    private void SetFocusedBlocks(
+        List<Block> nextBlocks,
+        bool preserveFarmlandFocusGroup = false)
     {
+        if (!preserveFarmlandFocusGroup)
+        {
+            currentInteractionFarmlandFocusGroup.Clear();
+        }
+
+        UpdateFocusedSprinklerRangeVisuals(nextBlocks);
         focusRemovalBuffer.Clear();
 
         foreach (Block currentBlock in currentFocusedBlocks)
@@ -5998,8 +6050,15 @@ public partial class PlayerController : MonoBehaviour
         RefreshTemporaryDropFocusVisibility();
     }
 
-    private void SetSelectedFocusedBlocks(List<Block> nextBlocks)
+    private void SetSelectedFocusedBlocks(
+        List<Block> nextBlocks,
+        bool preserveFarmlandFocusGroup = false)
     {
+        if (!preserveFarmlandFocusGroup)
+        {
+            currentSelectionFarmlandFocusGroup.Clear();
+        }
+
         selectedFocusRemovalBuffer.Clear();
         foreach (Block currentBlock in currentSelectedFocusedBlocks)
         {
@@ -6074,6 +6133,27 @@ public partial class PlayerController : MonoBehaviour
                 continue;
             }
 
+            HashSet<Block> farmlandFocusGroup = focusKind == FocusMarkerKind.Interaction
+                ? currentInteractionFarmlandFocusGroup
+                : focusKind == FocusMarkerKind.Selection
+                    ? currentSelectionFarmlandFocusGroup
+                    : null;
+            if (farmlandFocusGroup != null && farmlandFocusGroup.Contains(block))
+            {
+                FocusMarkerGroup farmlandGroup = GetFarmlandFocusMarkerGroup();
+                if (farmlandGroup == null)
+                {
+                    farmlandGroup = GetNextFocusMarkerGroup();
+                    farmlandGroup.ResetFarmland(block);
+                }
+                else
+                {
+                    farmlandGroup.Add(block);
+                }
+
+                continue;
+            }
+
             MapObject focusedMapObject = ResolveInteractionFocusTarget(block);
             if (focusedMapObject == null)
             {
@@ -6104,6 +6184,14 @@ public partial class PlayerController : MonoBehaviour
             if (group.count <= 1)
             {
                 SetBlockFocusVisible(group.markerBlock, focusKind, true);
+            }
+            else if (group.isFarmlandGroup)
+            {
+                SetBlockFocusShapeVisible(
+                    group.markerBlock,
+                    focusKind,
+                    true,
+                    group.Coordinates);
             }
             else
             {
@@ -6140,6 +6228,20 @@ public partial class PlayerController : MonoBehaviour
         {
             FocusMarkerGroup group = focusMarkerGroups[i];
             if (group != null && group.mapObject == mapObject)
+            {
+                return group;
+            }
+        }
+
+        return null;
+    }
+
+    private FocusMarkerGroup GetFarmlandFocusMarkerGroup()
+    {
+        for (int i = 0; i < focusMarkerGroupCount; i++)
+        {
+            FocusMarkerGroup group = focusMarkerGroups[i];
+            if (group != null && group.isFarmlandGroup)
             {
                 return group;
             }
@@ -6195,6 +6297,31 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
+    private static void SetBlockFocusShapeVisible(
+        Block block,
+        FocusMarkerKind focusKind,
+        bool isVisible,
+        IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        switch (focusKind)
+        {
+            case FocusMarkerKind.Mouse:
+                block.SetMouseFocusShapeVisible(isVisible, coordinates);
+                break;
+            case FocusMarkerKind.Selection:
+                block.SetSelectionFocusShapeVisible(isVisible, coordinates);
+                break;
+            default:
+                block.SetFocusShapeVisible(isVisible, coordinates);
+                break;
+        }
+    }
+
     private void UpdateSelectedWorkableRangeVisuals(IReadOnlyList<WorkableObject> nextObjects)
     {
         nextSelectedWorkableRangeObjects.Clear();
@@ -6243,6 +6370,120 @@ public partial class PlayerController : MonoBehaviour
 
             workableObject.SetSelectedRangeVisualRequested(true);
         }
+    }
+
+    private void UpdateFocusedSprinklerRangeVisuals(IReadOnlyList<Block> nextBlocks)
+    {
+        nextFocusedSprinklerRangeObjects.Clear();
+        if (nextBlocks != null)
+        {
+            for (int i = 0; i < nextBlocks.Count; i++)
+            {
+                Sprinkler sprinkler = ResolveFocusedSprinkler(nextBlocks[i]);
+                if (sprinkler != null)
+                {
+                    nextFocusedSprinklerRangeObjects.Add(sprinkler);
+                }
+            }
+        }
+
+        focusedSprinklerRangeRemovalBuffer.Clear();
+        foreach (Sprinkler sprinkler in currentFocusedSprinklerRangeObjects)
+        {
+            if (sprinkler != null && nextFocusedSprinklerRangeObjects.Contains(sprinkler))
+            {
+                continue;
+            }
+
+            focusedSprinklerRangeRemovalBuffer.Add(sprinkler);
+        }
+
+        for (int i = 0; i < focusedSprinklerRangeRemovalBuffer.Count; i++)
+        {
+            Sprinkler sprinkler = focusedSprinklerRangeRemovalBuffer[i];
+            currentFocusedSprinklerRangeObjects.Remove(sprinkler);
+            if (sprinkler != null)
+            {
+                sprinkler.SetFocusedRangeVisualRequested(false);
+            }
+        }
+
+        foreach (Sprinkler sprinkler in nextFocusedSprinklerRangeObjects)
+        {
+            if (sprinkler == null || !currentFocusedSprinklerRangeObjects.Add(sprinkler))
+            {
+                continue;
+            }
+
+            sprinkler.SetFocusedRangeVisualRequested(true);
+        }
+    }
+
+    private void UpdateInRangeSprinklerRangeVisuals(HashSet<Sprinkler> nextObjects)
+    {
+        inRangeSprinklerRangeRemovalBuffer.Clear();
+        foreach (Sprinkler sprinkler in currentInRangeSprinklerRangeObjects)
+        {
+            if (sprinkler != null && nextObjects != null && nextObjects.Contains(sprinkler))
+            {
+                continue;
+            }
+
+            inRangeSprinklerRangeRemovalBuffer.Add(sprinkler);
+        }
+
+        for (int i = 0; i < inRangeSprinklerRangeRemovalBuffer.Count; i++)
+        {
+            Sprinkler sprinkler = inRangeSprinklerRangeRemovalBuffer[i];
+            currentInRangeSprinklerRangeObjects.Remove(sprinkler);
+            if (sprinkler != null)
+            {
+                sprinkler.SetInRangeVisualRequested(false);
+            }
+        }
+
+        if (nextObjects == null)
+        {
+            nextInRangeSprinklerRangeObjects.Clear();
+            return;
+        }
+
+        foreach (Sprinkler sprinkler in nextObjects)
+        {
+            if (sprinkler == null)
+            {
+                continue;
+            }
+
+            currentInRangeSprinklerRangeObjects.Add(sprinkler);
+            sprinkler.SetInRangeVisualRequested(true);
+        }
+    }
+
+    private static Sprinkler ResolveFocusedSprinkler(Block block)
+    {
+        if (block == null)
+        {
+            return null;
+        }
+
+        if (block.MapObject is Sprinkler sprinkler)
+        {
+            return sprinkler;
+        }
+
+        if (InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(block.Coordinate, out InputOutputModule gridModule)
+            && gridModule is Sprinkler gridSprinkler)
+        {
+            return gridSprinkler;
+        }
+
+        return InputOutputModule.TryGetModuleAtRuntimeAreaCoordinate(
+                   block.Coordinate,
+                   out InputOutputModule areaModule)
+               && areaModule is Sprinkler areaSprinkler
+            ? areaSprinkler
+            : null;
     }
 
     private static bool ContainsFocusedBlock(List<Block> blocks, Block target)

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_40_Steel plate
   m_EditorClassIdentifier: 
   itemName: Steel plate
-  id: 21
+  id: 22
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
   portableMat: {fileID: 2100000, guid: a2f041064ed95e54f8543f5af9d0fac3, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

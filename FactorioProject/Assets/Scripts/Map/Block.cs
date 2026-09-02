@@ -99,12 +99,18 @@ public class Block : BaseObject
     private bool interactionFocusUsesArea;
     private bool mouseFocusUsesArea;
     private bool selectionFocusUsesArea;
+    private bool interactionFocusUsesShape;
+    private bool mouseFocusUsesShape;
+    private bool selectionFocusUsesShape;
     private Vector3 interactionFocusAreaCenter;
     private Vector2 interactionFocusAreaSize = Vector2.one;
     private Vector3 mouseFocusAreaCenter;
     private Vector2 mouseFocusAreaSize = Vector2.one;
     private Vector3 selectionFocusAreaCenter;
     private Vector2 selectionFocusAreaSize = Vector2.one;
+    private readonly List<Vector2Int> interactionFocusShapeCoordinates = new List<Vector2Int>();
+    private readonly List<Vector2Int> mouseFocusShapeCoordinates = new List<Vector2Int>();
+    private readonly List<Vector2Int> selectionFocusShapeCoordinates = new List<Vector2Int>();
 
     private readonly List<List<PortableObject>> floorStacks = new List<List<PortableObject>>();
     private readonly List<PortableObject> inputAreaCenterStack = new List<PortableObject>();
@@ -725,7 +731,12 @@ public class Block : BaseObject
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
-        if (BlocksFloorObjectStacking()
+        if (TryAbsorbFarmlandFertilizer(objectId))
+        {
+            return true;
+        }
+
+        if (BlocksFloorObjectStacking(objectId)
             || objectId < 0)
         {
             return false;
@@ -1205,7 +1216,7 @@ public class Block : BaseObject
             return true;
         }
 
-        if (BlocksFloorObjectStacking())
+        if (BlocksFloorObjectStacking(itemId))
         {
             return false;
         }
@@ -1384,7 +1395,19 @@ public class Block : BaseObject
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
-        if (BlocksFloorObjectStacking())
+        if (TryAbsorbFarmlandFertilizer(objectId))
+        {
+            PlayAbsorbedFarmlandFertilizerAnimation(
+                objectId,
+                startWorldPosition,
+                delay,
+                startWorldPositionProvider,
+                onComplete,
+                out targetPortableObject);
+            return true;
+        }
+
+        if (BlocksFloorObjectStacking(objectId))
         {
             return false;
         }
@@ -1444,6 +1467,118 @@ public class Block : BaseObject
 
         targetPortableObject = portableObject;
         return true;
+    }
+
+    public bool TryTakeSettledFloorObject(
+        Predicate<int> itemFilter,
+        out int takenItemId)
+    {
+        takenItemId = -1;
+        EnsureFloorObjectsInitialized();
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            while (stack != null && stack.Count > 0)
+            {
+                PortableObject portableObject = stack[stack.Count - 1];
+                if (portableObject == null)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                    continue;
+                }
+
+                int itemId = portableObject.ItemId;
+                if (itemId < 0)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                    ReleaseFloorObject(portableObject);
+                    continue;
+                }
+
+                DroppedItemPickupGate gate =
+                    portableObject.GetComponent<DroppedItemPickupGate>();
+                if ((itemFilter != null && !itemFilter(itemId))
+                    || gate != null
+                    && !gate.CanManualPickup(0f, float.MaxValue))
+                {
+                    break;
+                }
+
+                stack.RemoveAt(stack.Count - 1);
+                ReleaseFloorObject(portableObject);
+                NotifyRuntimeItemStackChanged();
+                takenItemId = itemId;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryAbsorbFarmlandFertilizer(int itemId)
+    {
+        return TryResolveOwningTerrainGenerator(out TerrainGenerator terrain)
+               && terrain.TryAbsorbDroppedFarmlandFertilizer(coordinate, itemId);
+    }
+
+    private void PlayAbsorbedFarmlandFertilizerAnimation(
+        int itemId,
+        Vector3 startWorldPosition,
+        float delay,
+        Func<Vector3> startWorldPositionProvider,
+        Action onComplete,
+        out PortableObject targetPortableObject)
+    {
+        targetPortableObject = null;
+        Transform anchor = ResolveFloorObjectDropAnchor();
+        if (anchor == null
+            || !ResolveFloorObjectPool()
+            || floorObjectPool == null)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
+        PortableObject portableObject = floorObjectPool.Get(floorObjectPrefab);
+        if (portableObject == null
+            || !TryInitializePooledPortableObject(portableObject, itemId))
+        {
+            if (portableObject != null)
+            {
+                ReleaseFloorObject(portableObject);
+            }
+
+            onComplete?.Invoke();
+            return;
+        }
+
+        portableObject.SetBatchedRendering(false);
+        portableObject.transform.SetParent(anchor, true);
+        portableObject.transform.position = startWorldPositionProvider != null
+            ? startWorldPositionProvider()
+            : startWorldPosition;
+        portableObject.transform.rotation = Quaternion.identity;
+        portableObject.transform.localScale = Vector3.one;
+        portableObject.gameObject.SetActive(true);
+        Vector3 finalWorldPosition = anchor.position;
+        portableObject.MoveTo(
+            () => anchor != null ? anchor.position : finalWorldPosition,
+            delay,
+            startWorldPositionProvider,
+            () =>
+            {
+                if (portableObject != null)
+                {
+                    ReleaseFloorObject(portableObject);
+                }
+
+                onComplete?.Invoke();
+            },
+            false,
+            true,
+            PortableObject.MoveToDuration,
+            false);
+        targetPortableObject = portableObject;
     }
 
     private bool TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
@@ -3464,6 +3599,8 @@ public class Block : BaseObject
 
         interactionFocusVisible = isVisible;
         interactionFocusUsesArea = false;
+        interactionFocusUsesShape = false;
+        interactionFocusShapeCoordinates.Clear();
         interactionFocusAreaSize = Vector2.one;
         RefreshFocusMarker();
     }
@@ -3477,10 +3614,30 @@ public class Block : BaseObject
 
         interactionFocusVisible = isVisible;
         interactionFocusUsesArea = isVisible;
+        interactionFocusUsesShape = false;
+        interactionFocusShapeCoordinates.Clear();
         interactionFocusAreaCenter = worldCenter;
         interactionFocusAreaSize = new Vector2(
             Mathf.Max(0.01f, worldSize.x),
             Mathf.Max(0.01f, worldSize.y));
+        RefreshFocusMarker();
+    }
+
+    public void SetFocusShapeVisible(
+        bool isVisible,
+        IReadOnlyList<Vector2Int> worldCoordinates)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        interactionFocusVisible = isVisible;
+        interactionFocusUsesArea = false;
+        interactionFocusUsesShape = isVisible
+                                    && CopyFocusShapeCoordinates(
+                                        worldCoordinates,
+                                        interactionFocusShapeCoordinates);
         RefreshFocusMarker();
     }
 
@@ -3493,6 +3650,8 @@ public class Block : BaseObject
 
         mouseFocusVisible = isVisible;
         mouseFocusUsesArea = false;
+        mouseFocusUsesShape = false;
+        mouseFocusShapeCoordinates.Clear();
         mouseFocusAreaSize = Vector2.one;
         RefreshFocusMarker();
     }
@@ -3506,10 +3665,30 @@ public class Block : BaseObject
 
         mouseFocusVisible = isVisible;
         mouseFocusUsesArea = isVisible;
+        mouseFocusUsesShape = false;
+        mouseFocusShapeCoordinates.Clear();
         mouseFocusAreaCenter = worldCenter;
         mouseFocusAreaSize = new Vector2(
             Mathf.Max(0.01f, worldSize.x),
             Mathf.Max(0.01f, worldSize.y));
+        RefreshFocusMarker();
+    }
+
+    public void SetMouseFocusShapeVisible(
+        bool isVisible,
+        IReadOnlyList<Vector2Int> worldCoordinates)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        mouseFocusVisible = isVisible;
+        mouseFocusUsesArea = false;
+        mouseFocusUsesShape = isVisible
+                              && CopyFocusShapeCoordinates(
+                                  worldCoordinates,
+                                  mouseFocusShapeCoordinates);
         RefreshFocusMarker();
     }
 
@@ -3533,6 +3712,8 @@ public class Block : BaseObject
 
         selectionFocusVisible = isVisible;
         selectionFocusUsesArea = false;
+        selectionFocusUsesShape = false;
+        selectionFocusShapeCoordinates.Clear();
         RefreshFocusMarker();
     }
 
@@ -3545,11 +3726,49 @@ public class Block : BaseObject
 
         selectionFocusVisible = isVisible;
         selectionFocusUsesArea = isVisible;
+        selectionFocusUsesShape = false;
+        selectionFocusShapeCoordinates.Clear();
         selectionFocusAreaCenter = worldCenter;
         selectionFocusAreaSize = new Vector2(
             Mathf.Max(0.01f, worldSize.x),
             Mathf.Max(0.01f, worldSize.y));
         RefreshFocusMarker();
+    }
+
+    public void SetSelectionFocusShapeVisible(
+        bool isVisible,
+        IReadOnlyList<Vector2Int> worldCoordinates)
+    {
+        if (this == null)
+        {
+            return;
+        }
+
+        selectionFocusVisible = isVisible;
+        selectionFocusUsesArea = false;
+        selectionFocusUsesShape = isVisible
+                                  && CopyFocusShapeCoordinates(
+                                      worldCoordinates,
+                                      selectionFocusShapeCoordinates);
+        RefreshFocusMarker();
+    }
+
+    private static bool CopyFocusShapeCoordinates(
+        IReadOnlyList<Vector2Int> source,
+        List<Vector2Int> destination)
+    {
+        destination.Clear();
+        if (source == null || source.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            destination.Add(source[i]);
+        }
+
+        return destination.Count > 0;
     }
 
     private void RefreshFocusMarker()
@@ -3573,7 +3792,14 @@ public class Block : BaseObject
             : (mouseFocusVisible ? MapFocus.MouseFocusColor : MapFocus.DefaultFocusColor);
         if (selectionFocusVisible)
         {
-            if (selectionFocusUsesArea)
+            if (selectionFocusUsesShape)
+            {
+                focus.SetGridShapeVisible(
+                    true,
+                    focusColor,
+                    selectionFocusShapeCoordinates);
+            }
+            else if (selectionFocusUsesArea)
             {
                 focus.SetAreaVisible(true, focusColor, selectionFocusAreaCenter, selectionFocusAreaSize);
             }
@@ -3587,7 +3813,14 @@ public class Block : BaseObject
 
         if (mouseFocusVisible)
         {
-            if (mouseFocusUsesArea)
+            if (mouseFocusUsesShape)
+            {
+                focus.SetGridShapeVisible(
+                    true,
+                    focusColor,
+                    mouseFocusShapeCoordinates);
+            }
+            else if (mouseFocusUsesArea)
             {
                 focus.SetAreaVisible(true, focusColor, mouseFocusAreaCenter, mouseFocusAreaSize);
             }
@@ -3599,7 +3832,14 @@ public class Block : BaseObject
             return;
         }
 
-        if (interactionFocusVisible && interactionFocusUsesArea)
+        if (interactionFocusVisible && interactionFocusUsesShape)
+        {
+            focus.SetGridShapeVisible(
+                true,
+                focusColor,
+                interactionFocusShapeCoordinates);
+        }
+        else if (interactionFocusVisible && interactionFocusUsesArea)
         {
             focus.SetAreaVisible(true, focusColor, interactionFocusAreaCenter, interactionFocusAreaSize);
         }
@@ -6880,7 +7120,7 @@ public class Block : BaseObject
     {
         EnsureFloorObjectsInitialized();
 
-        if (BlocksFloorObjectStacking())
+        if (BlocksFloorObjectStacking(itemId))
         {
             return 0;
         }
@@ -6957,7 +7197,7 @@ public class Block : BaseObject
         return null;
     }
 
-    private bool BlocksFloorObjectStacking()
+    private bool BlocksFloorObjectStacking(int itemId = -1)
     {
         if (mapObject is InstallationObject installationObject
             && installationObject != null
@@ -6972,7 +7212,8 @@ public class Block : BaseObject
             && growingTree.gameObject != null
             && growingTree.gameObject.activeInHierarchy
             && growingTree.ResourceCount > 0
-            && growingTree.CanGrowAnotherLevel)
+            && growingTree.CanGrowAnotherLevel
+            && !IsFarmlandFertilizerItem(itemId))
         {
             return true;
         }
@@ -6980,6 +7221,13 @@ public class Block : BaseObject
         return InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
                || InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
                || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate);
+    }
+
+    private bool IsFarmlandFertilizerItem(int itemId)
+    {
+        return itemId >= 0
+               && TryResolveOwningTerrainGenerator(out TerrainGenerator terrain)
+               && terrain.IsFarmlandFertilizerItemAt(coordinate, itemId);
     }
 
     private bool ResolveFloorObjectPool()

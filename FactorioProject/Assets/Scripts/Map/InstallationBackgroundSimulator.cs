@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class InstallationBackgroundSimulator : MonoBehaviour
+public partial class InstallationBackgroundSimulator : MonoBehaviour
 {
     [SerializeField, Min(1)]
     private int maxCraftIterationsPerSimulation = 256;
@@ -76,6 +76,29 @@ public class InstallationBackgroundSimulator : MonoBehaviour
         {
             installationState.lastBackgroundSimulationTicks = nowTicks;
             stateStore.UpdateInstallationState(installationState);
+            return;
+        }
+
+        if (TrySimulateSavedSeedPlanter(
+                stateStore,
+                installationState,
+                installedDefinition,
+                templateModule,
+                elapsedSeconds,
+                nowTicks))
+        {
+            return;
+        }
+
+        if (TrySimulateSavedFluidUtility(
+                stateStore,
+                installationState,
+                installedDefinition,
+                templateModule,
+                elapsedSeconds,
+                nowTicks,
+                maxIterationsOverride))
+        {
             return;
         }
 
@@ -698,6 +721,38 @@ public class InstallationBackgroundSimulator : MonoBehaviour
             return mutate
                 ? TryAddSavedBoxItem(stateStore, dropCoordinate, boxState, boxDefinition, itemId)
                 : CanAddSavedBoxItem(stateStore, dropCoordinate, boxState, boxDefinition, itemId);
+        }
+
+        TerrainGenerator terrainGenerator = TerrainGenerator.ResolveActive();
+        if (terrainGenerator != null
+            && terrainGenerator.IsFarmlandFertilizerItemAt(dropCoordinate, itemId)
+            && !stateStore.TryGetInstallationAnchorAtCoordinate(dropCoordinate, out _))
+        {
+            if (mutate
+                && terrainGenerator.TryAbsorbDroppedFarmlandFertilizer(
+                    dropCoordinate,
+                    itemId))
+            {
+                return true;
+            }
+
+            int floorCapacity = ItemDefinition.ResolveStackCapacity(
+                ResolveItemDefinition(itemId),
+                10);
+            return mutate
+                ? stateStore.TryAddSavedFloorItems(
+                    dropCoordinate,
+                    itemId,
+                    1,
+                    floorCapacity)
+                : terrainGenerator.CanAbsorbDroppedFarmlandFertilizer(
+                      dropCoordinate,
+                      itemId)
+                  || stateStore.CanAddSavedFloorItems(
+                      dropCoordinate,
+                      itemId,
+                      1,
+                      floorCapacity);
         }
 
         Vector3 referenceWorldPosition = GetSavedCoordinateWorldPosition(dropCoordinate);

@@ -42,8 +42,21 @@ public class Train : Vehicle
     public float ConnectionSnapMaxDistance => Mathf.Max(MinConnectionDistance, trainConnectionSnapMaxDistance);
     public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
+    public bool HasPlacedRailSample => currentRail != null;
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
     public static ulong ConnectionGraphRevision => connectionGraphRevision;
+
+    public static float ResolveConnectionCenterDistance(Train first, Train second)
+    {
+        if (first == null || second == null)
+        {
+            return MinConnectionDistance;
+        }
+
+        return Mathf.Max(
+            MinConnectionDistance,
+            (first.ConnectionCenterDistance + second.ConnectionCenterDistance) * 0.5f);
+    }
 
     public void RotateTrainWheelsByDistance(float signedDistance)
     {
@@ -193,9 +206,14 @@ public class Train : Vehicle
 
     protected override void OnPlacementRuntimeCleared()
     {
+        ClearPlacedRailSample();
+        base.OnPlacementRuntimeCleared();
+    }
+
+    public void ClearPlacedRailSample()
+    {
         ClearTrainConnections();
         ClearCurrentRailSample();
-        base.OnPlacementRuntimeCleared();
     }
 
     private void ClearCurrentRailSample()
@@ -374,7 +392,7 @@ public class Train : Vehicle
             return DefaultConnectionFallbackDistance;
         }
 
-        float centerDistance = (first.ConnectionCenterDistance + second.ConnectionCenterDistance) * 0.5f;
+        float centerDistance = ResolveConnectionCenterDistance(first, second);
         float snapDistance = Mathf.Max(first.ConnectionSnapMaxDistance, second.ConnectionSnapMaxDistance);
         return Mathf.Max(MinConnectionDistance, centerDistance + snapDistance);
     }

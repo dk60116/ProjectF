@@ -16,8 +16,6 @@ public class Pump : InputOutputModule
 
     [SerializeField]
     private InstallationFacingDirection localPipeConnectionDirection = InstallationFacingDirection.PositiveZ;
-    [SerializeField, Min(0f)]
-    private float waterLitersPerSecond = 1f;
     [SerializeField]
     private ItemDefinition waterDefinition;
     [SerializeField, Min(0)]
@@ -30,7 +28,16 @@ public class Pump : InputOutputModule
     private readonly List<InstallationObject> fluidStorageBodySearchScratch = new List<InstallationObject>(4);
 
     public InstallationFacingDirection LocalPipeConnectionDirection => localPipeConnectionDirection;
-    public float WaterLitersPerSecond => Mathf.Max(0f, waterLitersPerSecond);
+    public float WaterLitersPerSecond
+    {
+        get
+        {
+            ItemDefinition installedDefinition = ResolveInstalledDefinition();
+            return installedDefinition != null
+                ? installedDefinition.FluidOutputLitersPerSecond
+                : 0f;
+        }
+    }
 
     public bool TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
     {
@@ -211,7 +218,9 @@ public class Pump : InputOutputModule
                 false,
                 out InstallationObject fluidStorage);
 
-            if (!hasFluidStorageBody && hasPipe)
+            // A pump output can overlap a machine's PipeInput area directly.
+            // Resolve that area even when no standalone Pipe occupies this coordinate.
+            if (!hasFluidStorageBody)
             {
                 TryResolveFluidStorageAtCoordinate(
                     coordinate,
@@ -624,7 +633,6 @@ public class Pump : InputOutputModule
     protected override void OnValidate()
     {
         base.OnValidate();
-        waterLitersPerSecond = Mathf.Max(0f, waterLitersPerSecond);
         fallbackWaterItemId = Mathf.Max(0, fallbackWaterItemId);
     }
 #endif

@@ -57,6 +57,7 @@ public sealed class WorldTimeService : MonoBehaviour
     private float lightTransitionMinutes = DefaultLightTransitionMinutes;
 
     private double elapsedGameSeconds;
+    private double elapsedPlantGrowthDaylightSeconds;
     private float worldTimeScale = 1f;
     private bool paused;
     private bool lightingDefaultsCaptured;
@@ -74,6 +75,7 @@ public sealed class WorldTimeService : MonoBehaviour
         MinutesPerHour - 1);
     public float NormalizedDayTime => (float)(SecondsOfDay / GameSecondsPerDay);
     public bool IsDay => IsDayAtSeconds(SecondsOfDay);
+    public double PlantGrowthDaylightSeconds => Math.Max(0d, elapsedPlantGrowthDaylightSeconds);
     public float DaylightFactor => ResolveDaylightFactor(SecondsOfDay, lightTransitionMinutes);
     public bool Paused => paused;
     public float TimeScale => worldTimeScale;
@@ -155,6 +157,11 @@ public sealed class WorldTimeService : MonoBehaviour
     {
         if (!paused && worldTimeScale > 0f && Time.unscaledDeltaTime > 0f)
         {
+            if (IsDay && Time.deltaTime > 0f)
+            {
+                elapsedPlantGrowthDaylightSeconds += Time.deltaTime;
+            }
+
             double gameSecondsPerRealSecond = GameSecondsPerDay / RealSecondsPerDay;
             AdvanceGameSeconds(
                 Time.unscaledDeltaTime * gameSecondsPerRealSecond * worldTimeScale,
@@ -169,6 +176,7 @@ public sealed class WorldTimeService : MonoBehaviour
     {
         int previousSeason = SeasonIndex;
         elapsedGameSeconds = DefaultStartHour * GameSecondsPerHour;
+        elapsedPlantGrowthDaylightSeconds = 0d;
         worldTimeScale = 1f;
         paused = false;
         ApplyEnvironment();
@@ -279,6 +287,7 @@ public sealed class WorldTimeService : MonoBehaviour
         int normalizedDay = Mathf.Max(1, state.dayIndex);
         double normalizedSeconds = NormalizeSecondsOfDay(state.secondsOfDay);
         elapsedGameSeconds = ((normalizedDay - 1d) * GameSecondsPerDay) + normalizedSeconds;
+        elapsedPlantGrowthDaylightSeconds = 0d;
         worldTimeScale = 1f;
         paused = false;
         ApplyEnvironment();

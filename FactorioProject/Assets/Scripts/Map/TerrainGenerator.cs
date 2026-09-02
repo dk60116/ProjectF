@@ -23,6 +23,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float BackgroundInstallationSimulationInterval = 0.05f;
     private const int BackgroundInstallationSimulationMaxPerTick = 64;
     private const int BackgroundInstallationSimulationIterationsPerTick = 32;
+    private const float SavedWorldSimulationInterval = 1f;
+    private const int SavedWorldSimulationIterationsPerTick = 64;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
     public const float GeneratedOilSurfaceLocalY = -0.15f;
@@ -886,6 +888,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private int activeConveyorSafetyScanIndex;
     private float nextBackgroundConveyorSimulationTime;
     private float nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
+    private float nextSavedWorldSimulationTime;
     private readonly Queue<Vector2Int> backgroundInstallationSimulationQueue = new Queue<Vector2Int>(64);
     private readonly HashSet<Vector2Int> queuedBackgroundInstallationAnchors = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> backgroundInstallationWakeScratch = new List<Vector2Int>(16);
@@ -1083,6 +1086,16 @@ public partial class TerrainGenerator : MonoBehaviour
             using (SimulateSavedInstallationMarker.Auto())
             {
                 TickBackgroundInstallations();
+            }
+        }
+
+        TickFarmlandFertilizerAbsorption();
+
+        if (Time.time >= nextSavedWorldSimulationTime)
+        {
+            using (SimulateSavedInstallationMarker.Auto())
+            {
+                TickSavedWorldSimulation();
             }
         }
 
@@ -1330,6 +1343,13 @@ public partial class TerrainGenerator : MonoBehaviour
             : float.PositiveInfinity;
     }
 
+    private void TickSavedWorldSimulation()
+    {
+        nextSavedWorldSimulationTime = Time.time + SavedWorldSimulationInterval;
+        ResolveInstallationBackgroundSimulator().SimulateSavedWorld(
+            SavedWorldSimulationIterationsPerTick);
+    }
+
     private void QueueSavedInstallationsNearBackgroundConveyorChanges()
     {
         QueueSavedInstallationsNearCoordinates(backgroundConveyorOccupancyChangedCoordinates);
@@ -1489,6 +1509,7 @@ public partial class TerrainGenerator : MonoBehaviour
         queuedBackgroundInstallationAnchors.Clear();
         backgroundInstallationWakeScratch.Clear();
         nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
+        nextSavedWorldSimulationTime = 0f;
         virtualizedFloorObjectCoordinates.Clear();
         virtualizedConveyorItemCoordinates.Clear();
         ResetAuthoritativeConveyorItemTotal();
@@ -3052,6 +3073,7 @@ public partial class TerrainGenerator : MonoBehaviour
         queuedBackgroundInstallationAnchors.Clear();
         backgroundInstallationWakeScratch.Clear();
         nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
+        nextSavedWorldSimulationTime = 0f;
         virtualizedFloorObjectCoordinates.Clear();
         virtualizedConveyorItemCoordinates.Clear();
         ResetAuthoritativeConveyorItemTotal();

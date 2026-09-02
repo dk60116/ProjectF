@@ -1015,6 +1015,7 @@ MonoBehaviour:
   - {fileID: 1631217548817240518}
   - {fileID: 9073071635766039324}
   infoLine: {fileID: 1064145486167609344}
+  farmlandIcon: {fileID: 21300000, guid: a30db75f8f6149c5a719db2eb59f4c20, type: 3}
   stackCountText: {fileID: 910000000000000004}
 --- !u!114 &484856671892556344
 MonoBehaviour:

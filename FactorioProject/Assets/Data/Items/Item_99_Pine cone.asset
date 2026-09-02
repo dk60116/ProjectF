@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_99_Pine cone
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pine cone
-  id: 88
+  id: 91
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 00e315507a984ce4b9483daa07491361, type: 2}
   portableMat: {fileID: 2100000, guid: 7d5742b5754fb3e498873f7811b4d89a, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

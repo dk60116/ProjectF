@@ -18,6 +18,8 @@ public class ObjectInfoPanel : MonoBehaviour
     [SerializeField]
     private ItemInfoDescription infoLine;
     [SerializeField]
+    private Sprite farmlandIcon;
+    [SerializeField]
     private TextMeshProUGUI stackCountText;
 
     private Component boundTarget;
@@ -44,7 +46,8 @@ public class ObjectInfoPanel : MonoBehaviour
         ResolveReferences();
         if (!(target is MapObject)
             && !(target is Animal)
-            && !(target is PortableObject))
+            && !(target is PortableObject)
+            && !(target is Block farmlandBlock && IsFarmlandBlock(farmlandBlock)))
         {
             Clear();
             return;
@@ -143,6 +146,12 @@ public class ObjectInfoPanel : MonoBehaviour
         if (target is PortableObject)
         {
             CloseInfoLine();
+            return;
+        }
+
+        if (target is Block farmlandBlock)
+        {
+            ShowFarmlandInfo(farmlandBlock);
             return;
         }
 
@@ -263,6 +272,14 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (target is Block farmlandBlock)
+        {
+            SetFocusedInfoPanelFarmland();
+            focusedPanelTarget = farmlandBlock;
+            focusedPanelUnderlyingResource = null;
+            return;
+        }
+
         MapObject mapObject = target as MapObject;
         if (mapObject == null)
         {
@@ -377,6 +394,26 @@ public class ObjectInfoPanel : MonoBehaviour
             ? definition.AnimalName
             : (animal != null ? animal.gameObject.name.Replace("(Clone)", string.Empty).Trim() : string.Empty);
         slot.SetCustomDisplay(icon, displayName, string.Empty);
+    }
+
+    private void SetFocusedInfoPanelFarmland()
+    {
+        bool hasIcon = farmlandIcon != null;
+        SetFocusedInfoPanelVisible(0, hasIcon);
+        ItemSlot slot = GetListItem(focusedObjectSlots, 0);
+        if (slot == null)
+        {
+            return;
+        }
+
+        if (hasIcon)
+        {
+            slot.SetCustomDisplay(farmlandIcon, "Farmland", string.Empty);
+        }
+        else
+        {
+            slot.Clear();
+        }
     }
 
     private void SetFocusedInfoPanelPortableObject(PortableObject portableObject)
@@ -543,6 +580,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowResourceReserves(resource);
+    }
+
+    private void ShowFarmlandInfo(Block farmlandBlock)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowFarmland(farmlandBlock);
     }
 
     private void ShowBoxObjectInfo(BoxObject boxObject, Resource underlyingResource)
@@ -767,6 +819,14 @@ public class ObjectInfoPanel : MonoBehaviour
         return TryGetUnderlyingResource(parentBlock, mapObject, out Resource parentResource)
             ? parentResource
             : null;
+    }
+
+    private static bool IsFarmlandBlock(Block block)
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        return block != null
+               && terrain != null
+               && terrain.IsFarmlandAt(block.Coordinate);
     }
 
     private static bool TryGetUnderlyingResource(Block block, MapObject displayedObject, out Resource resource)

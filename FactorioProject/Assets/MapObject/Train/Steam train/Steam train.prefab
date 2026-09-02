@@ -355,7 +355,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steam train
-  objId: 98
+  objId: 101
   itemDefinition: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -437,7 +437,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.5, y: 1, z: 1}
+  m_Size: {x: 0.6, y: 1, z: 1.25}
   m_Center: {x: 0, y: 0.5, z: 0}
 --- !u!1 &7232643558336046477
 GameObject:

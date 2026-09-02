@@ -418,11 +418,12 @@ public partial class TerrainGenerator : MonoBehaviour
         return bestBlock;
     }
 
-    private static bool IsValidDropBlock(Block block, int itemId, int itemCount)
+    private bool IsValidDropBlock(Block block, int itemId, int itemCount)
     {
         return block != null
                && block.Type == Block.BlockType.Ground
-               && block.CanAddFloorObjects(itemCount, itemId);
+               && (CanAbsorbDroppedFarmlandFertilizer(block.Coordinate, itemId)
+                   || block.CanAddFloorObjects(itemCount, itemId));
     }
 
     private bool TryResolveFocusedGroundBoxDropBlock(
@@ -1183,7 +1184,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 savedState);
             if (!restoredTrainRailSample)
             {
-                placementController.InitializePlacedTrainRailSample(restoredInstallation, savedState.anchorCoordinate);
+                placementController.ClearPlacedTrainRailSample(restoredInstallation);
             }
         }
 

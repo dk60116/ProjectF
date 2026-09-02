@@ -460,6 +460,14 @@ public class RailHandcar : Train
     public override void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
     {
         RecordRailMoveFailure(string.Empty);
+        if (!HasPlacedRailSample)
+        {
+            RecordRailMoveFailure("NoPlacedRailSample");
+            ClearLockedBranchRail();
+            ResetVehicleMotion();
+            return;
+        }
+
         BeginCurrentMovementLoadTracking();
         Vector2 inputVector = new Vector2(worldMoveDirection.x, worldMoveDirection.z);
         float inputMagnitude = Mathf.Clamp01(inputVector.magnitude);
@@ -3923,7 +3931,7 @@ public class RailHandcar : Train
 
         if (first.Train != null && second.Train != null)
         {
-            return (first.Train.ConnectionCenterDistance + second.Train.ConnectionCenterDistance) * 0.5f;
+            return Train.ResolveConnectionCenterDistance(first.Train, second.Train);
         }
 
         return 0.05f;
@@ -5377,14 +5385,7 @@ public class RailHandcar : Train
 
     private static float ResolveDesiredConsistPairSpacing(Train first, Train second)
     {
-        if (first == null || second == null)
-        {
-            return 0.05f;
-        }
-
-        return Mathf.Max(
-            0.05f,
-            (first.ConnectionCenterDistance + second.ConnectionCenterDistance) * 0.5f);
+        return Train.ResolveConnectionCenterDistance(first, second);
     }
 
     private void RememberConsistPathOrder(Vector2 travelDirection)

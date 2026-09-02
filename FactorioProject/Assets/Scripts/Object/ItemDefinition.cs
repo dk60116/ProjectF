@@ -61,7 +61,7 @@ public class ItemDefinition : ScriptableObject
     public float fluidStorageLiters = 0f;
     public Color fluidDisplayColor = Color.white;
     [Min(0f)]
-    [Tooltip("Oil drilling machine 등 유체 생산 설치물의 초당 출력량(L/s)입니다.")]
+    [Tooltip("Water Pump, Oil drilling machine 등 유체 생산 설치물의 초당 출력량(L/s)입니다.")]
     public float fluidOutputLitersPerSecond = 1f;
     [Min(0.1f)]
     [Tooltip("빈 Bucket을 물이 나오는 Pipe 출구에 설치했을 때 Water Bucket이 될 때까지의 시간(초)입니다.")]
@@ -90,6 +90,23 @@ public class ItemDefinition : ScriptableObject
     public int utilityPoleConnectionRadius = 6;
     [Min(0)]
     public int utilityPoleSupplyRadius = 3;
+    [Header("Sprinkler")]
+    [Min(0)]
+    [Tooltip("Sprinkler가 물을 분사하는 반경(칸)입니다.")]
+    public int sprinklerRangeRadius = 3;
+    [Min(0.001f)]
+    [Tooltip("Sprinkler가 한 번 분사할 때 범위의 각 칸마다 소비하는 물(L)입니다.")]
+    public float sprinklerWaterLitersPerCell = 0.25f;
+    [Min(0.1f)]
+    [Tooltip("Sprinkler의 분사 주기(초)입니다.")]
+    public float sprinklerSprayIntervalSeconds = 2f;
+    [Min(0f)]
+    [Tooltip("Sprinkler 작동 중 노즐의 초당 회전 각도입니다.")]
+    public float sprinklerNozzleRotationDegreesPerSecond = 180f;
+    [Header("Seed Planter")]
+    [Min(0.1f)]
+    [Tooltip("Seed Planter가 씨앗 하나를 심는 데 걸리는 시간(초)입니다.")]
+    public float seedPlanterPlantDurationSeconds = 2f;
     [SerializeField, Min(0.01f)]
     private float craftingDurationSeconds = DefaultCraftingDurationSeconds;
 
@@ -248,6 +265,10 @@ public class ItemDefinition : ScriptableObject
 
         utilityPoleConnectionRadius = Mathf.Max(0, utilityPoleConnectionRadius);
         utilityPoleSupplyRadius = Mathf.Max(0, utilityPoleSupplyRadius);
+        sprinklerRangeRadius = Mathf.Max(0, sprinklerRangeRadius);
+        sprinklerWaterLitersPerCell = Mathf.Max(0.001f, sprinklerWaterLitersPerCell);
+        sprinklerSprayIntervalSeconds = Mathf.Max(0.1f, sprinklerSprayIntervalSeconds);
+        sprinklerNozzleRotationDegreesPerSecond = Mathf.Max(0f, sprinklerNozzleRotationDegreesPerSecond);
         undergroundPipeMaxDistance = Mathf.Max(2, undergroundPipeMaxDistance);
         lightRange = Mathf.Max(0.1f, lightRange);
         lightIntensityMultiplier = Mathf.Max(0.01f, lightIntensityMultiplier);

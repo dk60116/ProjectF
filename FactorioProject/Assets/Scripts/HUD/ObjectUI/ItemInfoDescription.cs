@@ -117,6 +117,36 @@ public class ItemInfoDescription : MonoBehaviour
         SetResourceReservesLine(0, reserves, UsesLiterResourceUnit(resource));
     }
 
+    public void ShowFarmland(Block farmlandBlock)
+    {
+        Clear();
+        if (!TryGetFarmlandFertilizerStatus(
+                farmlandBlock,
+                out float storedEnergy,
+                out float capacity,
+                out int connectedTileCount))
+        {
+            return;
+        }
+
+        SetDefaultText(0, $"Connected farmland: {connectedTileCount}", true);
+        SetDefaultSign(0, false, Color.white);
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            capacity > PlantGrowthRequirementEpsilon
+                ? storedEnergy / capacity
+                : 0f,
+            PlantFertilizerGaugeFillColor,
+            storedEnergy,
+            capacity,
+            true,
+            $"Fertilizer energy: {FormatGaugeNumber(storedEnergy, true)} / "
+            + FormatGaugeNumber(capacity, true));
+    }
+
     public void ShowAnimal(Animal animal)
     {
         Clear();
@@ -382,6 +412,18 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         liveGaugeModule = module;
+        if (module is SeedPlanter seedPlanter)
+        {
+            RefreshSeedPlanterInfo(seedPlanter);
+            return;
+        }
+
+        if (module is Sprinkler sprinkler)
+        {
+            RefreshSprinklerInfo(sprinkler);
+            return;
+        }
+
         Pump pump = module as Pump;
         bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
         if (pump != null)
@@ -794,6 +836,24 @@ public class ItemInfoDescription : MonoBehaviour
             $"Growth: {plant.Growth.ToString("0.#", CultureInfo.InvariantCulture)}",
             true);
         SetDefaultSign(1, false, Color.white);
+        if (TryGetFarmlandFertilizerStatus(
+                plant.OwningBlock,
+                out float fieldStoredEnergy,
+                out float fieldCapacity,
+                out _))
+        {
+            SetDefaultText(
+                2,
+                $"Field fertilizer: {FormatGaugeNumber(fieldStoredEnergy, true)} / "
+                + FormatGaugeNumber(fieldCapacity, true),
+                true);
+            SetDefaultSign(2, false, Color.white);
+        }
+        else
+        {
+            SetDefaultText(2, string.Empty, false);
+            SetDefaultSign(2, false, Color.white);
+        }
 
         ResourceDefinition definition = plant.Definition;
         bool showGrowthGauges = definition != null
@@ -919,6 +979,18 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        if (module is SeedPlanter seedPlanter)
+        {
+            RefreshSeedPlanterInfo(seedPlanter);
+            return;
+        }
+
+        if (module is Sprinkler sprinkler)
+        {
+            RefreshSprinklerInfo(sprinkler);
+            return;
+        }
+
         bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
         if (module is OilDrillingMachine oilDrillingMachine)
         {
@@ -989,6 +1061,74 @@ public class ItemInfoDescription : MonoBehaviour
             true);
 
         SetWorkProgressGauge(workGauge, workFill, workText, module);
+    }
+
+    private void RefreshSprinklerInfo(Sprinkler sprinkler)
+    {
+        if (sprinkler == null)
+        {
+            return;
+        }
+
+        sprinkler.GetObjectInfoStatus(
+            out string statusText,
+            out bool isWatering,
+            out bool isWarning);
+        SetDefaultStatus(statusText, isWatering, isWarning);
+        SetDefaultText(
+            defaultStatusLineIndex + 1,
+            $"Targets: {sprinkler.CurrentWateringTargetCount}",
+            true);
+        SetDefaultSign(defaultStatusLineIndex + 1, false, Color.white);
+        SetFluidStorageGauge(energyGauge, energyFill, energyText, sprinkler);
+        SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
+        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+        SetFluidStorageDefaultItemSlot(0, sprinkler);
+    }
+
+    private void RefreshSeedPlanterInfo(SeedPlanter seedPlanter)
+    {
+        if (seedPlanter == null)
+        {
+            return;
+        }
+
+        seedPlanter.GetObjectInfoStatus(
+            out string statusText,
+            out bool isPlanting,
+            out bool isWarning);
+        SetDefaultStatus(statusText, isPlanting, isWarning);
+        if (seedPlanter.IsErrorState)
+        {
+            SetDefaultSign(defaultStatusLineIndex, true, StoppedSignColor);
+        }
+
+        SetDefaultText(
+            defaultStatusLineIndex + 1,
+            $"Seeds: {seedPlanter.CurrentSeedCount}",
+            true);
+        SetDefaultSign(defaultStatusLineIndex + 1, false, Color.white);
+        TrySetElectricPowerGauge(energyGauge, energyFill, energyText, seedPlanter);
+        SetGauge(
+            workGauge,
+            workFill,
+            workText,
+            true,
+            seedPlanter.PlantProgress01,
+            new Color(0.18f, 1f, 0.25f, 1f),
+            seedPlanter.PlantElapsedSeconds,
+            seedPlanter.PlantDurationSeconds,
+            true);
+        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+        SetEnergyUseRateDefaultItemSlot(0, seedPlanter, -1);
+        SetItemSlot(
+            inputItem,
+            inputItemSlot,
+            seedPlanter.CurrentSeedItemId,
+            seedPlanter.CurrentSeedCount,
+            seedPlanter.RuntimeAreaMaxObjects,
+            true,
+            true);
     }
 
     private void SetRailHandcarSpeedGauge(RailHandcar railHandcar)
@@ -1104,6 +1244,25 @@ public class ItemInfoDescription : MonoBehaviour
     {
         return resource != null
                && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil;
+    }
+
+    private static bool TryGetFarmlandFertilizerStatus(
+        Block farmlandBlock,
+        out float storedEnergy,
+        out float capacity,
+        out int connectedTileCount)
+    {
+        storedEnergy = 0f;
+        capacity = 0f;
+        connectedTileCount = 0;
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        return farmlandBlock != null
+               && terrain != null
+               && terrain.TryGetFarmlandFertilizerNetworkStatus(
+                   farmlandBlock.Coordinate,
+                   out storedEnergy,
+                   out capacity,
+                   out connectedTileCount);
     }
 
     private void SetPumpOutputRateDefaultItemSlot(int index, Pump pump)

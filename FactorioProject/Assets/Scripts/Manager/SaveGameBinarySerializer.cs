@@ -308,6 +308,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.animals, WriteAnimalEntry);
         WriteList(writer, map.farmlandCoordinates, WriteVector2Int);
         WriteList(writer, map.plantedResources, WritePlantedResourceEntry);
+        WriteList(writer, map.farmlandFertilizer, WriteFarmlandFertilizerEntry);
     }
 
     private static MapSaveData ReadMap(
@@ -338,7 +339,33 @@ public static class SaveGameBinarySerializer
             map.plantedResources = ReadList(reader, () => ReadPlantedResourceEntry(reader));
         }
 
+        if (version >= 43)
+        {
+            map.farmlandFertilizer = ReadList(
+                reader,
+                () => ReadFarmlandFertilizerEntry(reader));
+        }
+
         return map;
+    }
+
+    private static void WriteFarmlandFertilizerEntry(
+        BinaryWriter writer,
+        FarmlandFertilizerSaveEntry entry)
+    {
+        entry ??= new FarmlandFertilizerSaveEntry();
+        WriteVector2Int(writer, entry.coordinate);
+        writer.Write(Mathf.Max(0f, entry.fertilizerEnergy));
+    }
+
+    private static FarmlandFertilizerSaveEntry ReadFarmlandFertilizerEntry(
+        BinaryReader reader)
+    {
+        return new FarmlandFertilizerSaveEntry
+        {
+            coordinate = ReadVector2Int(reader),
+            fertilizerEnergy = Mathf.Max(0f, reader.ReadSingle())
+        };
     }
 
     private static void WritePlantedResourceEntry(
@@ -772,6 +799,10 @@ public static class SaveGameBinarySerializer
         writer.Write(state.boilerWaterTemperatureCelsius);
         writer.Write(state.boilerSteamLiterAccumulator);
         writer.Write(state.oilDrillingProgressLiters);
+        WriteVector2IntList(writer, state.pipeInputCoordinates);
+        writer.Write(state.sprinklerSprayElapsedSeconds);
+        writer.Write(state.seedPlanterPlantElapsedSeconds);
+        writer.Write(state.seedPlanterHadOperationalPower);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -808,6 +839,14 @@ public static class SaveGameBinarySerializer
         if (version >= 33)
         {
             state.oilDrillingProgressLiters = reader.ReadSingle();
+        }
+
+        if (version >= 44)
+        {
+            state.pipeInputCoordinates = ReadVector2IntList(reader);
+            state.sprinklerSprayElapsedSeconds = reader.ReadSingle();
+            state.seedPlanterPlantElapsedSeconds = reader.ReadSingle();
+            state.seedPlanterHadOperationalPower = reader.ReadBoolean();
         }
 
         return state;

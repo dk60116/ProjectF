@@ -139,7 +139,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 51
+  objId: 52
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -216,7 +216,6 @@ MonoBehaviour:
   activeOutputItemId: -1
   activeOutputCount: 0
   localPipeConnectionDirection: 0
-  waterLitersPerSecond: 5
   waterDefinition: {fileID: 11400000, guid: 440d4476f9093b44e948d784c15c0d81, type: 2}
   fallbackWaterItemId: 1
 --- !u!65 &5015275567764226445

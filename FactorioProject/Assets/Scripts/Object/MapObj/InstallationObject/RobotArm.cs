@@ -1755,6 +1755,19 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             return true;
         }
 
+        if (IsFarmlandFertilizerDropTarget(
+                terrainGenerator,
+                dropBlock,
+                dropCoordinate,
+                itemId))
+        {
+            return dropBlock.TryAddFloorObjectAnimated(
+                itemId,
+                dropStartWorldPosition,
+                0f,
+                out _);
+        }
+
         if (HasBlockingDropMapObject(dropBlock))
         {
             return false;
@@ -1818,11 +1831,24 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
     private bool CanPlaceHeldItem(Block dropBlock, Vector2Int dropCoordinate)
     {
         int itemId = heldItemId;
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
         Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
         if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
             && freightCar.CanAddItem(itemId, dropReferenceWorldPosition))
         {
             return true;
+        }
+
+        if (IsFarmlandFertilizerDropTarget(
+                terrainGenerator,
+                dropBlock,
+                dropCoordinate,
+                itemId))
+        {
+            return terrainGenerator.CanAbsorbDroppedFarmlandFertilizer(
+                       dropCoordinate,
+                       itemId)
+                   || dropBlock.CanAddFloorObjects(1, itemId);
         }
 
         if (HasBlockingDropMapObject(dropBlock))
@@ -1856,6 +1882,40 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
         if (stateStore == null)
         {
             return false;
+        }
+
+        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
+        if (IsSavedFarmlandFertilizerDropTarget(
+                terrainGenerator,
+                stateStore,
+                dropCoordinate,
+                itemId))
+        {
+            if (mutate
+                && terrainGenerator.TryAbsorbDroppedFarmlandFertilizer(
+                    dropCoordinate,
+                    itemId))
+            {
+                return true;
+            }
+
+            int floorCapacity = ItemDefinition.ResolveStackCapacity(
+                InputOutputModule.ResolveItemDefinition(itemId),
+                10);
+            return mutate
+                ? stateStore.TryAddSavedFloorItems(
+                    dropCoordinate,
+                    itemId,
+                    1,
+                    floorCapacity)
+                : terrainGenerator.CanAbsorbDroppedFarmlandFertilizer(
+                      dropCoordinate,
+                      itemId)
+                  || stateStore.CanAddSavedFloorItems(
+                      dropCoordinate,
+                      itemId,
+                      1,
+                      floorCapacity);
         }
 
         Vector3 referenceWorldPosition = GetSavedCoordinateWorldPosition(dropCoordinate);
@@ -2069,6 +2129,35 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
         return CoordinateAcceptsInputAreaObject(coordinate)
                || dropBlock.MapObject == null
                || IsOreMapObject(dropBlock.MapObject);
+    }
+
+    private static bool IsFarmlandFertilizerDropTarget(
+        TerrainGenerator terrainGenerator,
+        Block dropBlock,
+        Vector2Int coordinate,
+        int itemId)
+    {
+        if (terrainGenerator == null
+            || dropBlock == null
+            || !terrainGenerator.IsFarmlandFertilizerItemAt(coordinate, itemId))
+        {
+            return false;
+        }
+
+        MapObject mapObject = dropBlock.MapObject;
+        return mapObject == null || mapObject is Resource;
+    }
+
+    private static bool IsSavedFarmlandFertilizerDropTarget(
+        TerrainGenerator terrainGenerator,
+        BlockStateStore stateStore,
+        Vector2Int coordinate,
+        int itemId)
+    {
+        return terrainGenerator != null
+               && stateStore != null
+               && terrainGenerator.IsFarmlandFertilizerItemAt(coordinate, itemId)
+               && !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out _);
     }
 
     private static bool CanPlaceSavedSingleLineDrop(BlockStateStore stateStore, Vector2Int coordinate)

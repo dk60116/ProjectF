@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_100_Circular Saw
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Circular Saw
-  id: 34
+  id: 35
   mapObject: {fileID: 0}
   portableMesh: {fileID: 0}
   portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

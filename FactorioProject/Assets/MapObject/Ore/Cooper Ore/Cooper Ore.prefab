@@ -180,7 +180,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Cooper ore
-  objId: 13
+  objId: 14
   itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -194,7 +194,7 @@ MonoBehaviour:
   harvestMode: 1
   definition: {fileID: 11400000, guid: c9546edd42f989e428ca195419f91d28, type: 2}
   resourceStatus:
-    outputId: 13
+    outputId: 14
     outputItemName: Cooper Ore
     resourceCount: 1
     getCount: 1

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_9_Woodplank
   m_EditorClassIdentifier: 
   itemName: Woodplank
-  id: 17
+  id: 18
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 0f806f9f95c32154992d249d20b44837, type: 2}
   portableMat: {fileID: 2100000, guid: 0f45ec8088ab2b84ba32cd0e27b8271a, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 2

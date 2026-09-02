@@ -401,6 +401,9 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     private static readonly int MainTexShaderId = Shader.PropertyToID("_MainTex");
     private static readonly Color RangeFillColor = new Color(0.05f, 1f, 0.05f, 0.1f);
+    private const float RangeAlphaMultiplier = 0.5f;
+    private const float NightRangeAlphaMultiplier = 0.35f;
+    private const float DaylightFactorRefreshThreshold = 0.01f;
     private const int RangeAlphaTextureSize = 256;
     private const float RangeCenterTransparentRadius = 0.8f;
     private static Mesh sharedRangeQuadMesh;
@@ -410,6 +413,7 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
     private MeshRenderer meshRenderer;
     private MaterialPropertyBlock propertyBlock;
     private Texture2D rangeAlphaTexture;
+    private Color configuredFillColor = RangeFillColor;
     private bool[] rangeInsideScratch;
     private float[] rangeBoundaryDistanceScratch;
     private Color[] rangePixelScratch;
@@ -418,6 +422,21 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
     private int cachedRangeRequestCount;
     private Bounds cachedRangeBounds;
     private float cachedRangeYPosition;
+    private float lastAppliedDaylightFactor = -1f;
+    private bool hasConfiguredFillColor;
+
+    private void OnEnable()
+    {
+        WorldTimeService.GlobalTimeStateChanged -= HandleGlobalTimeStateChanged;
+        WorldTimeService.GlobalTimeStateChanged += HandleGlobalTimeStateChanged;
+        ApplyRendererProperties(ResolveCurrentDaylightFactor(), true);
+    }
+
+    private void OnDisable()
+    {
+        WorldTimeService.GlobalTimeStateChanged -= HandleGlobalTimeStateChanged;
+        lastAppliedDaylightFactor = -1f;
+    }
 
     public void Configure(IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
     {
@@ -471,13 +490,45 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
             1f,
             Mathf.Max(0.01f, bounds.size.z));
 
+        configuredFillColor = fillColor;
+        hasConfiguredFillColor = true;
+        ApplyRendererProperties(ResolveCurrentDaylightFactor(), true);
+    }
+
+    private void HandleGlobalTimeStateChanged(
+        float normalizedDayTime,
+        float daylightFactor,
+        bool isDay)
+    {
+        ApplyRendererProperties(daylightFactor, false);
+    }
+
+    private void ApplyRendererProperties(float daylightFactor, bool force)
+    {
+        if (!hasConfiguredFillColor || meshRenderer == null || rangeAlphaTexture == null)
+        {
+            return;
+        }
+
+        float clampedDaylightFactor = Mathf.Clamp01(daylightFactor);
+        if (!force
+            && Mathf.Abs(lastAppliedDaylightFactor - clampedDaylightFactor)
+            < DaylightFactorRefreshThreshold)
+        {
+            return;
+        }
+
         propertyBlock ??= new MaterialPropertyBlock();
         propertyBlock.Clear();
-        propertyBlock.SetColor(BaseColorShaderId, fillColor);
-        propertyBlock.SetColor(ColorShaderId, fillColor);
+        Color displayFillColor = ResolveDisplayFillColor(
+            configuredFillColor,
+            clampedDaylightFactor);
+        propertyBlock.SetColor(BaseColorShaderId, displayFillColor);
+        propertyBlock.SetColor(ColorShaderId, displayFillColor);
         propertyBlock.SetTexture(BaseMapShaderId, rangeAlphaTexture);
         propertyBlock.SetTexture(MainTexShaderId, rangeAlphaTexture);
         meshRenderer.SetPropertyBlock(propertyBlock);
+        lastAppliedDaylightFactor = clampedDaylightFactor;
     }
 
     private void EnsureComponents()
@@ -847,7 +898,9 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         if (sharedRangeMaterial.HasProperty(BaseColorShaderId))
         {
-            sharedRangeMaterial.SetColor(BaseColorShaderId, RangeFillColor);
+            sharedRangeMaterial.SetColor(
+                BaseColorShaderId,
+                ResolveDisplayFillColor(RangeFillColor, ResolveCurrentDaylightFactor()));
         }
 
         if (sharedRangeMaterial.HasProperty(BaseMapShaderId))
@@ -857,7 +910,9 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         if (sharedRangeMaterial.HasProperty(ColorShaderId))
         {
-            sharedRangeMaterial.SetColor(ColorShaderId, RangeFillColor);
+            sharedRangeMaterial.SetColor(
+                ColorShaderId,
+                ResolveDisplayFillColor(RangeFillColor, ResolveCurrentDaylightFactor()));
         }
 
         if (sharedRangeMaterial.HasProperty(MainTexShaderId))
@@ -897,5 +952,24 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
 
         sharedRangeMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         return sharedRangeMaterial;
+    }
+
+    private static float ResolveCurrentDaylightFactor()
+    {
+        return WorldTimeService.Active != null
+            ? WorldTimeService.Active.DaylightFactor
+            : 1f;
+    }
+
+    private static Color ResolveDisplayFillColor(Color fillColor, float daylightFactor)
+    {
+        fillColor.a = Mathf.Clamp01(fillColor.a * RangeAlphaMultiplier);
+        float timeOfDayAlphaMultiplier = Mathf.Lerp(
+            NightRangeAlphaMultiplier,
+            1f,
+            Mathf.Clamp01(daylightFactor));
+        fillColor.a *= timeOfDayAlphaMultiplier;
+
+        return fillColor;
     }
 }

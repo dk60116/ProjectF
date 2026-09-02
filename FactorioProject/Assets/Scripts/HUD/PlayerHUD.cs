@@ -126,7 +126,7 @@ public partial class PlayerHUD : BagSlot
     private Component clickedObjectInfoTarget;
     private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
     private UtilityPole currentObjectInfoSupplyRangePole;
-    private MapObject lastYellowObjectInfoFocusTarget;
+    private Component lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
     private float nextObjectInfoPanelRefreshTime;
     private int lastObservedHandItemId = -2;
@@ -2603,20 +2603,50 @@ public partial class PlayerHUD : BagSlot
             Player currentPlayer = GameManager.Instance != null
                 ? GameManager.Instance.Player
                 : null;
+            Block clickedFarmlandBlock = null;
+            bool hasClickedFarmland = playerController != null
+                                      && playerController.TryResolvePointerFarmlandBlock(
+                                          pointerPosition,
+                                          out clickedFarmlandBlock);
             if (TryResolveHeldItem(currentPlayer, out ItemDefinition heldDefinition)
                 && ItemDefinition.IsPlantableSeedDefinition(heldDefinition))
             {
-                ClearObjectInfoPanelState();
                 playerController?.TrySelectSeedGroundAtPointer(
                     pointerPosition,
                     heldDefinition);
+                if (hasClickedFarmland)
+                {
+                    clickedObjectInfoTarget = clickedFarmlandBlock;
+                    BindObjectInfoPanel(clickedFarmlandBlock, false);
+                }
+                else
+                {
+                    ClearObjectInfoPanelState();
+                }
+
                 return;
             }
 
             if (currentPlayer != null && currentPlayer.IsHoldingPitchfork)
             {
-                ClearObjectInfoPanelState();
                 playerController?.TrySelectPitchforkGroundAtPointer(pointerPosition);
+                if (hasClickedFarmland)
+                {
+                    clickedObjectInfoTarget = clickedFarmlandBlock;
+                    BindObjectInfoPanel(clickedFarmlandBlock, false);
+                }
+                else
+                {
+                    ClearObjectInfoPanelState();
+                }
+
+                return;
+            }
+
+            if (hasClickedFarmland)
+            {
+                clickedObjectInfoTarget = clickedFarmlandBlock;
+                BindObjectInfoPanel(clickedFarmlandBlock, false);
                 return;
             }
 
@@ -2663,17 +2693,29 @@ public partial class PlayerHUD : BagSlot
         }
 
         PlayerController playerController = ResolvePlayerController();
-        if (playerController != null
-            && playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
+        Component focusedTarget = null;
+        if (playerController != null)
         {
-            if (lastYellowObjectInfoFocusTarget == focusedMapObject)
+            if (playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
+            {
+                focusedTarget = focusedMapObject;
+            }
+            else if (playerController.TryGetFocusedFarmlandBlock(out Block focusedFarmlandBlock))
+            {
+                focusedTarget = focusedFarmlandBlock;
+            }
+        }
+
+        if (focusedTarget != null)
+        {
+            if (lastYellowObjectInfoFocusTarget == focusedTarget)
             {
                 return false;
             }
 
-            lastYellowObjectInfoFocusTarget = focusedMapObject;
+            lastYellowObjectInfoFocusTarget = focusedTarget;
             clickedObjectInfoTarget = null;
-            BindObjectInfoPanel(focusedMapObject, true);
+            BindObjectInfoPanel(focusedTarget, true);
             return true;
         }
 
@@ -2753,7 +2795,7 @@ public partial class PlayerHUD : BagSlot
         nextObjectInfoPanelRefreshTime = Time.unscaledTime;
         SetObjectInfoSupplyRangeVisual(target as MapObject, !openedByYellowFocus);
         SetObjectInfoAreaMarkerVisibility(target as MapObject, !openedByYellowFocus);
-        SetObjectInfoSelectionFocus(target as MapObject, !openedByYellowFocus);
+        SetObjectInfoSelectionFocus(target, !openedByYellowFocus);
         upgradeButton?.Bind(
             target as MapObject,
             !openedByYellowFocus,
@@ -2799,9 +2841,37 @@ public partial class PlayerHUD : BagSlot
         TrainFilter.MarkRouteSelectionDirty();
     }
 
-    private void SetObjectInfoSelectionFocus(MapObject target, bool requested)
+    private void SetObjectInfoSelectionFocus(Component target, bool requested)
     {
-        ResolvePlayerController()?.SetSelectedMapObjectFocus(requested ? target : null);
+        PlayerController playerController = ResolvePlayerController();
+        if (playerController == null)
+        {
+            return;
+        }
+
+        if (requested && target is Block farmlandBlock)
+        {
+            Player currentPlayer = GameManager.Instance != null
+                ? GameManager.Instance.Player
+                : null;
+            bool groundToolControlsSelection = currentPlayer != null
+                                               && (currentPlayer.IsHoldingPitchfork
+                                                   || TryResolveHeldItem(
+                                                       currentPlayer,
+                                                       out ItemDefinition heldDefinition)
+                                                   && ItemDefinition.IsPlantableSeedDefinition(
+                                                       heldDefinition));
+            if (groundToolControlsSelection)
+            {
+                return;
+            }
+
+            playerController.SetSelectedFarmlandFocus(farmlandBlock);
+            return;
+        }
+
+        playerController.SetSelectedMapObjectFocus(
+            requested ? target as MapObject : null);
     }
 
     private void SetObjectInfoAreaMarkerVisibility(MapObject target, bool requested)

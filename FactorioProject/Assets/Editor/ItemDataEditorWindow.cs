@@ -384,7 +384,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 12;
+        public int version = 13;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -438,6 +438,11 @@ public class ItemDataEditorWindow : EditorWindow
         public float completeEnergy;
         public int utilityPoleConnectionRadius = -1;
         public int utilityPoleSupplyRadius = -1;
+        public int sprinklerRangeRadius = -1;
+        public float sprinklerWaterLitersPerCell = -1f;
+        public float sprinklerSprayIntervalSeconds = -1f;
+        public float sprinklerNozzleRotationDegreesPerSecond = -1f;
+        public float seedPlanterPlantDurationSeconds = -1f;
         public int mapSizeX = -1;
         public int mapSizeY = -1;
         public int placementCenterX = -1;
@@ -449,7 +454,6 @@ public class ItemDataEditorWindow : EditorWindow
         public float vehicleDecelerationPerSecond = -1f;
         public float vehicleMaxSpeed = -1f;
         public float vehicleMass = -1f;
-        public float waterLitersPerSecond = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
         public string mapFilter;
@@ -3216,6 +3220,16 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "utilityPoleConnectionRadius");
         SerializedProperty utilityPoleSupplyRadiusProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "utilityPoleSupplyRadius");
+        SerializedProperty sprinklerRangeRadiusProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "sprinklerRangeRadius");
+        SerializedProperty sprinklerWaterLitersPerCellProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "sprinklerWaterLitersPerCell");
+        SerializedProperty sprinklerSprayIntervalSecondsProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "sprinklerSprayIntervalSeconds");
+        SerializedProperty sprinklerNozzleRotationDegreesPerSecondProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "sprinklerNozzleRotationDegreesPerSecond");
+        SerializedProperty seedPlanterPlantDurationSecondsProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "seedPlanterPlantDurationSeconds");
         SerializedProperty craftingDurationSecondsProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "craftingDurationSeconds");
 
@@ -3330,7 +3344,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (storesFluidProperty != null
             || fluidDisplayColorProperty != null
-            || (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreOilDrillingMachines()))
+            || (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreFluidOutputMachines()))
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
@@ -3374,11 +3388,11 @@ public class ItemDataEditorWindow : EditorWindow
                     0.1f);
             }
 
-            if (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreOilDrillingMachines())
+            if (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreFluidOutputMachines())
             {
                 DrawMultiClampedFloatProperty(
                     fluidOutputLitersPerSecondProperty,
-                    new GUIContent("Output Rate (L/s)", "시추기의 초당 Oil 출력량입니다."),
+                    new GUIContent("Output Rate (L/s)", "유체 생산 설비의 초당 출력량입니다."),
                     0f);
             }
         }
@@ -3483,6 +3497,38 @@ public class ItemDataEditorWindow : EditorWindow
                 utilityPoleSupplyRadiusProperty,
                 new GUIContent("Supply Radius"),
                 0L);
+        }
+
+        if (AllSelectedDefinitionsAreSprinklers())
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Sprinkler", EditorStyles.boldLabel);
+            DrawMultiClampedLongProperty(
+                sprinklerRangeRadiusProperty,
+                new GUIContent("Range Radius", "물을 분사하는 반경(칸)입니다."),
+                0L);
+            DrawMultiClampedFloatProperty(
+                sprinklerWaterLitersPerCellProperty,
+                new GUIContent("Water Per Cell (L)", "한 번 분사할 때 범위의 각 칸마다 소비하는 물입니다."),
+                0.001f);
+            DrawMultiClampedFloatProperty(
+                sprinklerSprayIntervalSecondsProperty,
+                new GUIContent("Spray Interval (sec)"),
+                0.1f);
+            DrawMultiClampedFloatProperty(
+                sprinklerNozzleRotationDegreesPerSecondProperty,
+                new GUIContent("Nozzle Rotation (deg/sec)"),
+                0f);
+        }
+
+        if (AllSelectedDefinitionsAreSeedPlanters())
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Seed Planter", EditorStyles.boldLabel);
+            DrawMultiClampedFloatProperty(
+                seedPlanterPlantDurationSecondsProperty,
+                new GUIContent("Plant Duration (sec)"),
+                0.1f);
         }
 
         if (!serializedObject.ApplyModifiedProperties())
@@ -3645,7 +3691,7 @@ public class ItemDataEditorWindow : EditorWindow
         return true;
     }
 
-    private bool AllSelectedDefinitionsAreOilDrillingMachines()
+    private bool AllSelectedDefinitionsAreFluidOutputMachines()
     {
         if (selectedItemDefinitionsInOrder.Count <= 0)
         {
@@ -3654,7 +3700,49 @@ public class ItemDataEditorWindow : EditorWindow
 
         for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
         {
-            if (!(selectedItemDefinitionsInOrder[i].mapObject is OilDrillingMachine))
+            if (!IsFluidOutputMachine(selectedItemDefinitionsInOrder[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsFluidOutputMachine(ItemDefinition definition)
+    {
+        return definition != null
+               && (definition.mapObject is OilDrillingMachine || definition.mapObject is Pump);
+    }
+
+    private bool AllSelectedDefinitionsAreSprinklers()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!(selectedItemDefinitionsInOrder[i].mapObject is Sprinkler))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool AllSelectedDefinitionsAreSeedPlanters()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!(selectedItemDefinitionsInOrder[i].mapObject is SeedPlanter))
             {
                 return false;
             }
@@ -3708,6 +3796,11 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty completeEnergyProperty = GetSelectedDefinitionProperty(serializedObject, "completeEnergy");
         SerializedProperty utilityPoleConnectionRadiusProperty = GetSelectedDefinitionProperty(serializedObject, "utilityPoleConnectionRadius");
         SerializedProperty utilityPoleSupplyRadiusProperty = GetSelectedDefinitionProperty(serializedObject, "utilityPoleSupplyRadius");
+        SerializedProperty sprinklerRangeRadiusProperty = GetSelectedDefinitionProperty(serializedObject, "sprinklerRangeRadius");
+        SerializedProperty sprinklerWaterLitersPerCellProperty = GetSelectedDefinitionProperty(serializedObject, "sprinklerWaterLitersPerCell");
+        SerializedProperty sprinklerSprayIntervalSecondsProperty = GetSelectedDefinitionProperty(serializedObject, "sprinklerSprayIntervalSeconds");
+        SerializedProperty sprinklerNozzleRotationDegreesPerSecondProperty = GetSelectedDefinitionProperty(serializedObject, "sprinklerNozzleRotationDegreesPerSecond");
+        SerializedProperty seedPlanterPlantDurationSecondsProperty = GetSelectedDefinitionProperty(serializedObject, "seedPlanterPlantDurationSeconds");
         SerializedProperty craftingDurationSecondsProperty = GetSelectedDefinitionProperty(serializedObject, "craftingDurationSeconds");
 
         EditorGUILayout.Space(4f);
@@ -3839,7 +3932,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
         if (storesFluidProperty != null
             || fluidDisplayColorProperty != null
-            || (fluidOutputLitersPerSecondProperty != null && definition.mapObject is OilDrillingMachine))
+            || (fluidOutputLitersPerSecondProperty != null && IsFluidOutputMachine(definition)))
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
@@ -3878,14 +3971,14 @@ public class ItemDataEditorWindow : EditorWindow
                         "Pipe 출구에서 빈 Bucket이 Water Bucket으로 완전히 차는 시간입니다."));
             }
 
-            if (fluidOutputLitersPerSecondProperty != null && definition.mapObject is OilDrillingMachine)
+            if (fluidOutputLitersPerSecondProperty != null && IsFluidOutputMachine(definition))
             {
                 fluidOutputLitersPerSecondProperty.floatValue = Mathf.Max(
                     0f,
                     fluidOutputLitersPerSecondProperty.floatValue);
                 EditorGUILayout.PropertyField(
                     fluidOutputLitersPerSecondProperty,
-                    new GUIContent("Output Rate (L/s)", "시추기의 초당 Oil 출력량입니다."));
+                    new GUIContent("Output Rate (L/s)", "유체 생산 설비의 초당 출력량입니다."));
             }
         }
         if (definition.mapObject is UndergroundPipe && undergroundPipeMaxDistanceProperty != null)
@@ -4002,6 +4095,46 @@ public class ItemDataEditorWindow : EditorWindow
                     utilityPoleSupplyRadiusProperty,
                     new GUIContent("Supply Radius"));
             }
+        }
+
+        if (definition.mapObject is Sprinkler)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Sprinkler", EditorStyles.boldLabel);
+            sprinklerRangeRadiusProperty.intValue = Mathf.Max(0, sprinklerRangeRadiusProperty.intValue);
+            sprinklerWaterLitersPerCellProperty.floatValue = Mathf.Max(
+                0.001f,
+                sprinklerWaterLitersPerCellProperty.floatValue);
+            sprinklerSprayIntervalSecondsProperty.floatValue = Mathf.Max(
+                0.1f,
+                sprinklerSprayIntervalSecondsProperty.floatValue);
+            sprinklerNozzleRotationDegreesPerSecondProperty.floatValue = Mathf.Max(
+                0f,
+                sprinklerNozzleRotationDegreesPerSecondProperty.floatValue);
+            EditorGUILayout.PropertyField(
+                sprinklerRangeRadiusProperty,
+                new GUIContent("Range Radius", "물을 분사하는 반경(칸)입니다."));
+            EditorGUILayout.PropertyField(
+                sprinklerWaterLitersPerCellProperty,
+                new GUIContent("Water Per Cell (L)", "한 번 분사할 때 범위의 각 칸마다 소비하는 물입니다."));
+            EditorGUILayout.PropertyField(
+                sprinklerSprayIntervalSecondsProperty,
+                new GUIContent("Spray Interval (sec)"));
+            EditorGUILayout.PropertyField(
+                sprinklerNozzleRotationDegreesPerSecondProperty,
+                new GUIContent("Nozzle Rotation (deg/sec)"));
+        }
+
+        if (definition.mapObject is SeedPlanter && seedPlanterPlantDurationSecondsProperty != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Seed Planter", EditorStyles.boldLabel);
+            seedPlanterPlantDurationSecondsProperty.floatValue = Mathf.Max(
+                0.1f,
+                seedPlanterPlantDurationSecondsProperty.floatValue);
+            EditorGUILayout.PropertyField(
+                seedPlanterPlantDurationSecondsProperty,
+                new GUIContent("Plant Duration (sec)"));
         }
 
         if (serializedObject.ApplyModifiedProperties())
@@ -4351,11 +4484,6 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (mapObject is Pump)
-        {
-            DrawPumpFields(mapObjectSerializedObject);
-        }
-
         if (mapObject is Vehicle)
         {
             DrawVehicleFields(mapObjectSerializedObject, ShouldExposeVehicleStats(mapObject));
@@ -4430,25 +4558,6 @@ public class ItemDataEditorWindow : EditorWindow
 
             Repaint();
         }
-    }
-
-    private static void DrawPumpFields(SerializedObject mapObjectSerializedObject)
-    {
-        if (mapObjectSerializedObject == null)
-        {
-            return;
-        }
-
-        SerializedProperty waterLitersPerSecondProperty = mapObjectSerializedObject.FindProperty("waterLitersPerSecond");
-        if (waterLitersPerSecondProperty == null)
-        {
-            return;
-        }
-
-        EditorGUILayout.Space(4f);
-        EditorGUILayout.LabelField("Pump", EditorStyles.miniBoldLabel);
-        waterLitersPerSecondProperty.floatValue = Mathf.Max(0f, waterLitersPerSecondProperty.floatValue);
-        EditorGUILayout.PropertyField(waterLitersPerSecondProperty, new GUIContent("Water Liters / s"));
     }
 
     private static void DrawVehicleFields(
@@ -7103,7 +7212,7 @@ public class ItemDataEditorWindow : EditorWindow
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             storesFluid = definition.storesFluid,
             fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
-            fluidOutputLitersPerSecond = definition.mapObject is OilDrillingMachine
+            fluidOutputLitersPerSecond = IsFluidOutputMachine(definition)
                 ? definition.FluidOutputLitersPerSecond
                 : -1f,
             undergroundPipeMaxDistance = definition.mapObject is UndergroundPipe
@@ -7135,7 +7244,22 @@ public class ItemDataEditorWindow : EditorWindow
                 : -1,
             utilityPoleSupplyRadius = definition.mapObject is UtilityPole
                 ? Mathf.Max(0, definition.utilityPoleSupplyRadius)
-                : -1
+                : -1,
+            sprinklerRangeRadius = definition.mapObject is Sprinkler
+                ? Mathf.Max(0, definition.sprinklerRangeRadius)
+                : -1,
+            sprinklerWaterLitersPerCell = definition.mapObject is Sprinkler
+                ? Mathf.Max(0.001f, definition.sprinklerWaterLitersPerCell)
+                : -1f,
+            sprinklerSprayIntervalSeconds = definition.mapObject is Sprinkler
+                ? Mathf.Max(0.1f, definition.sprinklerSprayIntervalSeconds)
+                : -1f,
+            sprinklerNozzleRotationDegreesPerSecond = definition.mapObject is Sprinkler
+                ? Mathf.Max(0f, definition.sprinklerNozzleRotationDegreesPerSecond)
+                : -1f,
+            seedPlanterPlantDurationSeconds = definition.mapObject is SeedPlanter
+                ? SeedPlanter.ResolvePlantDuration(definition)
+                : -1f
         };
 
         if (definition.interactionButtonList != null && definition.interactionButtonList.Count > 0)
@@ -7178,11 +7302,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (conveyorBelt != null)
             {
                 entry.conveyorSpeed = conveyorBelt.ConveyorSpeed;
-            }
-
-            if (definition.mapObject is Pump pump)
-            {
-                entry.waterLitersPerSecond = pump.WaterLitersPerSecond;
             }
 
             if (ShouldExposeVehicleStats(definition.mapObject) && definition.mapObject is Vehicle vehicle)
@@ -7425,6 +7544,35 @@ public class ItemDataEditorWindow : EditorWindow
             definition.utilityPoleSupplyRadius = Mathf.Max(0, entry.utilityPoleSupplyRadius);
         }
 
+        if (entry.sprinklerRangeRadius >= 0)
+        {
+            definition.sprinklerRangeRadius = Mathf.Max(0, entry.sprinklerRangeRadius);
+        }
+
+        if (entry.sprinklerWaterLitersPerCell > 0f)
+        {
+            definition.sprinklerWaterLitersPerCell = Mathf.Max(0.001f, entry.sprinklerWaterLitersPerCell);
+        }
+
+        if (entry.sprinklerSprayIntervalSeconds > 0f)
+        {
+            definition.sprinklerSprayIntervalSeconds = Mathf.Max(0.1f, entry.sprinklerSprayIntervalSeconds);
+        }
+
+        if (entry.sprinklerNozzleRotationDegreesPerSecond >= 0f)
+        {
+            definition.sprinklerNozzleRotationDegreesPerSecond = Mathf.Max(
+                0f,
+                entry.sprinklerNozzleRotationDegreesPerSecond);
+        }
+
+        if (entry.seedPlanterPlantDurationSeconds > 0f)
+        {
+            definition.seedPlanterPlantDurationSeconds = Mathf.Max(
+                0.1f,
+                entry.seedPlanterPlantDurationSeconds);
+        }
+
         Mesh portableMesh = LoadAssetAtPath<Mesh>(entry.portableMeshAssetPath);
         if (portableMesh != null)
         {
@@ -7615,15 +7763,6 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 conveyorSpeedProperty.floatValue = Mathf.Max(0f, entry.conveyorSpeed);
                 shouldSyncConveyorVariantSpeed = true;
-            }
-        }
-
-        if (entry.waterLitersPerSecond >= 0f && mapObject is Pump)
-        {
-            SerializedProperty waterLitersPerSecondProperty = serializedMapObject.FindProperty("waterLitersPerSecond");
-            if (waterLitersPerSecondProperty != null)
-            {
-                waterLitersPerSecondProperty.floatValue = Mathf.Max(0f, entry.waterLitersPerSecond);
             }
         }
 

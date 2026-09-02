@@ -807,7 +807,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::OilDrillingMachine
   id: 0
   objectName: Oil drilling machine
-  objId: 47
+  objId: 48
   itemDefinition: {fileID: 11400000, guid: d4d9ce93c017a2e4d8c5891bb4f4e91c, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -894,6 +894,12 @@ MonoBehaviour:
   activeOutputCount: 0
   oilDefinition: {fileID: 11400000, guid: b7f6e746e5fdf2f43a58e92c85c78479, type: 2}
   fallbackOilItemId: 4
+  pumpjackBeam: {fileID: 0}
+  pumpjackCrank: {fileID: 0}
+  pumpjackRod: {fileID: 0}
+  pumpjackCyclesPerSecond: 0.35
+  pumpjackBeamSwingDegrees: 7
+  pumpjackRodStroke: 0.08
 --- !u!65 &6475116247361044339
 BoxCollider:
   m_ObjectHideFlags: 0

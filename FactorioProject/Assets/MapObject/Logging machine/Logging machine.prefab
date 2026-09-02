@@ -231,7 +231,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LoggingMachine
   id: 0
   objectName: Logging machine
-  objId: 59
+  objId: 61
   itemDefinition: {fileID: 11400000, guid: 355b51bd6602a584481abc0b5a11aae8, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -261,7 +261,7 @@ MonoBehaviour:
   hinge: {fileID: 3627313124481702799}
   hingeRotationDegreesPerSecond: 180
   emptyDirectionHoldSeconds: 0.25
-  minimumGrowth: 0
+  minimumGrowth: 10
   treeFilterInitialized: 0
   enabledTreeDefinitionKeys: []
 --- !u!135 &986190605775310727

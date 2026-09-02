@@ -19,9 +19,9 @@ MonoBehaviour:
   placementCategory: 2
   minimumGrowth: 10
   maximumGrowth: 10
-  totalGrowthWaterLiters: 550
+  totalGrowthWaterLiters: 260
   totalGrowthFertilizerAmount: 200
-  growthDurationPerLevelSeconds: 10
+  growthDurationPerLevelSeconds: 7
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
     amount: 1

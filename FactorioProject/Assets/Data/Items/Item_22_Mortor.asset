@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_22_Mortor
   m_EditorClassIdentifier: 
   itemName: Mortor
-  id: 33
+  id: 34
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9586cb29a055bf546a2af7d7e3224302, type: 2}
   portableMat: {fileID: 2100000, guid: bef0d89290a73a64d97713298c4dd1a0, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

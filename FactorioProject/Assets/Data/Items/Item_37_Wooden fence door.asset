@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_37_Wooden fence door
   m_EditorClassIdentifier: 
   itemName: Wooden Fence Door
-  id: 62
+  id: 65
   mapObject: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
   portableMesh: {fileID: 4300000, guid: a0a021ee9c96c4f478b7465c27ac9ab4, type: 2}
   portableMat: {fileID: 2100000, guid: 9377881ef4c05c3418f3b5a5bf944caf, type: 2}
@@ -49,4 +49,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

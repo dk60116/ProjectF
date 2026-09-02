@@ -173,6 +173,9 @@ public class InputOutputModule : InstallationObject,
         public float boilerWaterTemperatureCelsius;
         public float boilerSteamLiterAccumulator;
         public float oilDrillingProgressLiters;
+        public float sprinklerSprayElapsedSeconds;
+        public float seedPlanterPlantElapsedSeconds;
+        public bool seedPlanterHadOperationalPower;
 
         public PersistentState Clone()
         {
@@ -195,7 +198,10 @@ public class InputOutputModule : InstallationObject,
                 activeOutputCount = activeOutputCount,
                 boilerWaterTemperatureCelsius = boilerWaterTemperatureCelsius,
                 boilerSteamLiterAccumulator = boilerSteamLiterAccumulator,
-                oilDrillingProgressLiters = oilDrillingProgressLiters
+                oilDrillingProgressLiters = oilDrillingProgressLiters,
+                sprinklerSprayElapsedSeconds = sprinklerSprayElapsedSeconds,
+                seedPlanterPlantElapsedSeconds = seedPlanterPlantElapsedSeconds,
+                seedPlanterHadOperationalPower = seedPlanterHadOperationalPower
             };
         }
     }
@@ -1984,7 +1990,7 @@ public class InputOutputModule : InstallationObject,
         targetStorages.Add(storage);
     }
 
-    private int ResolvePreferredFluidInputItemId()
+    protected virtual int ResolvePreferredFluidInputItemId()
     {
         int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
@@ -3058,7 +3064,7 @@ public class InputOutputModule : InstallationObject,
         return RequiresElectricOperationalEnergy(ResolveInstalledDefinition());
     }
 
-    public bool TryGetElectricPowerDemand(out float wattsPerSecond)
+    public virtual bool TryGetElectricPowerDemand(out float wattsPerSecond)
     {
         wattsPerSecond = 0f;
         if (!hasActiveCraft || waitingForOutput)
@@ -4794,7 +4800,13 @@ public class InputOutputModule : InstallationObject,
     {
         if (block != null && block.MapObject is BoxObject loadedBox)
         {
-            return loadedBox.AcceptsItem(itemId);
+            bool acceptsItem = loadedBox.AcceptsItem(itemId);
+            if (!acceptsItem)
+            {
+                loadedBox.EnsureClosedFilterIconVisible();
+            }
+
+            return acceptsItem;
         }
 
         if (!useSavedCenterStack)
@@ -5917,6 +5929,11 @@ public class InputOutputModule : InstallationObject,
 
     protected bool IsWorkAnimatorStateActive => lastWorkAnimatorState;
 
+    protected virtual float ResolveWorkAnimationSpeedMultiplier()
+    {
+        return 1f;
+    }
+
     protected void RefreshWorkAnimatorState(bool force = false)
     {
         SetWorkAnimatorState(ShouldPlayWorkAnimation(), force);
@@ -5932,7 +5949,9 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        targetAnimator.speed = isWorking ? OperationalAnimationSpeedRatio : 1f;
+        targetAnimator.speed = isWorking
+            ? OperationalAnimationSpeedRatio * Mathf.Max(0f, ResolveWorkAnimationSpeedMultiplier())
+            : 1f;
         if (!HasWorkAnimatorBoolParameter(targetAnimator))
         {
             workAnimatorStateInitialized = false;

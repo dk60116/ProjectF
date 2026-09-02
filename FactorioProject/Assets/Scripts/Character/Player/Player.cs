@@ -100,6 +100,8 @@ public class Player : Character
     [SerializeField]
     private GameObject pitchforkObject;
     [SerializeField]
+    private GameObject shovelObject;
+    [SerializeField]
     private GameObject torchObject;
 
     private PlayerController playerController;
@@ -116,11 +118,14 @@ public class Player : Character
         Knife,
         Axe,
         Pickaxe,
-        Pitchfork
+        Pitchfork,
+        Shovel
     }
 
     private ToolEquipVisual activeToolEquipVisual;
     private PortableObject hiddenHandPitchforkPortable;
+    private readonly List<PortableObject> hiddenHandSeedPortables = new List<PortableObject>();
+    private bool seedPlantingEquipVisualActive;
     private bool torchEquipVisualActive;
 
     private void InitializeHandStack()
@@ -363,10 +368,12 @@ public class Player : Character
         int heldPitchforkItemId = ResolveHeldPitchforkItemId();
         ApplyHeldPitchforkPortableVisual(heldPitchforkItemId);
 
-        ToolEquipVisual nextToolEquip = heldPitchforkItemId >= 0
-            ? ToolEquipVisual.Pitchfork
-            : ToolEquipVisual.None;
-        if (playerController != null && playerController.IsAnimalKnifeInteractionActive)
+        ToolEquipVisual nextToolEquip = ToolEquipVisual.None;
+        if (seedPlantingEquipVisualActive)
+        {
+            nextToolEquip = ToolEquipVisual.Shovel;
+        }
+        else if (playerController != null && playerController.IsAnimalKnifeInteractionActive)
         {
             nextToolEquip = ToolEquipVisual.Knife;
         }
@@ -381,6 +388,10 @@ public class Player : Character
                 Resource.HarvestMode.Cultivating => ToolEquipVisual.None,
                 _ => ToolEquipVisual.Pickaxe
             };
+        }
+        else if (heldPitchforkItemId >= 0)
+        {
+            nextToolEquip = ToolEquipVisual.Pitchfork;
         }
 
         ApplyToolEquipVisual(nextToolEquip);
@@ -408,7 +419,67 @@ public class Player : Character
         SetEquipObjectActive(axeObject, nextEquip == ToolEquipVisual.Axe);
         SetEquipObjectActive(pickaxeObject, nextEquip == ToolEquipVisual.Pickaxe);
         SetEquipObjectActive(pitchforkObject, nextEquip == ToolEquipVisual.Pitchfork);
+        SetEquipObjectActive(shovelObject, nextEquip == ToolEquipVisual.Shovel);
         activeToolEquipVisual = nextEquip;
+    }
+
+    public void SetSeedPlantingEquipVisual(bool active)
+    {
+        if (seedPlantingEquipVisualActive == active)
+        {
+            return;
+        }
+
+        seedPlantingEquipVisualActive = active;
+        if (active)
+        {
+            SuppressActiveHandPortablesForSeedPlanting();
+        }
+        else
+        {
+            RestoreSeedPlantingHandPortables();
+        }
+
+        RefreshEquipVisual();
+        UpdateCarryState();
+    }
+
+    private void SuppressActiveHandPortablesForSeedPlanting()
+    {
+        InitializeHandStack();
+        hiddenHandSeedPortables.Clear();
+        if (handStack == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < handStack.Count; i++)
+        {
+            PortableObject portableObject = handStack[i];
+            if (portableObject == null
+                || !portableObject.gameObject.activeSelf
+                || portableObject.IsVisualRenderingSuppressed)
+            {
+                continue;
+            }
+
+            portableObject.SetVisualRenderingSuppressed(true);
+            hiddenHandSeedPortables.Add(portableObject);
+        }
+    }
+
+    private void RestoreSeedPlantingHandPortables()
+    {
+        for (int i = 0; i < hiddenHandSeedPortables.Count; i++)
+        {
+            PortableObject portableObject = hiddenHandSeedPortables[i];
+            if (portableObject != null && portableObject.IsVisualRenderingSuppressed)
+            {
+                portableObject.SetVisualRenderingSuppressed(false);
+            }
+        }
+
+        hiddenHandSeedPortables.Clear();
     }
 
     private int ResolveHeldPitchforkItemId()

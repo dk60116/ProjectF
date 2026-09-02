@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::UndergroundPipe
   id: 0
   objectName: Underground Pipe
-  objId: 50
+  objId: 51
   itemDefinition: {fileID: 11400000, guid: 0fff3b18f5681864380d5935d5e1cd08, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

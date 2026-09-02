@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_71_Manual - Electric mining machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Electric mining machine
-  id: 74
+  id: 77
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
   portableMat: {fileID: 2100000, guid: 5d311cdaab5cd1a4db0ee6bfcfaa4694, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

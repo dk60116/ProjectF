@@ -146,6 +146,46 @@ public partial class BlockStateStore
         return true;
     }
 
+    public bool CanAddSavedFloorItems(
+        Vector2Int worldCoordinate,
+        int itemId,
+        int count,
+        int capacity)
+    {
+        return CanAddSavedFloorItems(
+            LoadSavedFloorAreaInventory(worldCoordinate),
+            itemId,
+            count,
+            capacity);
+    }
+
+    public bool TryAddSavedFloorItems(
+        Vector2Int worldCoordinate,
+        int itemId,
+        int count,
+        int capacity)
+    {
+        if (count <= 0)
+        {
+            return true;
+        }
+
+        SavedFloorAreaInventory inventory = LoadSavedFloorAreaInventory(worldCoordinate);
+        if (!CanAddSavedFloorItems(inventory, itemId, count, capacity))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            inventory.floorItems.Add(itemId);
+        }
+
+        SaveSavedFloorAreaInventory(worldCoordinate, inventory);
+        NotifySavedFloorAreaStackChanged(worldCoordinate);
+        return true;
+    }
+
     public bool TryPeekSavedCenterTopItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId)
     {
         itemId = GetSavedCenterTopItemId(worldCoordinate);
@@ -296,6 +336,29 @@ public partial class BlockStateStore
 
         int stackCapacity = ResolveSavedCenterStackCapacity(itemId, capacity);
         return stackCapacity - inventory.centerItems.Count >= count;
+    }
+
+    private static bool CanAddSavedFloorItems(
+        SavedFloorAreaInventory inventory,
+        int itemId,
+        int count,
+        int capacity)
+    {
+        if (inventory == null || itemId < 0 || count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < inventory.floorItems.Count; i++)
+        {
+            if (inventory.floorItems[i] != itemId)
+            {
+                return false;
+            }
+        }
+
+        int stackCapacity = ResolveSavedCenterStackCapacity(itemId, capacity);
+        return stackCapacity - inventory.floorItems.Count >= count;
     }
 
     private static int ResolveSavedCenterStackCapacity(int itemId, int defaultCapacity)

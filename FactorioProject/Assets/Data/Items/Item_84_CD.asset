@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_84_CD
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: CD
-  id: 78
+  id: 81
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 78105cfbd61d3bd45b380a81f342b96c, type: 2}
   portableMat: {fileID: 2100000, guid: 9d4600e0b1e42dc4ab55dea75152ff6b, type: 2}
@@ -47,4 +47,9 @@ MonoBehaviour:
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
+  sprinklerRangeRadius: 3
+  sprinklerWaterLitersPerCell: 0.25
+  sprinklerSprayIntervalSeconds: 2
+  sprinklerNozzleRotationDegreesPerSecond: 180
+  seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 25
