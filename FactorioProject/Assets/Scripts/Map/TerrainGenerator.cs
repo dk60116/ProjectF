@@ -655,10 +655,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private readonly Dictionary<Vector2Int, Transform> loadedChunks = new Dictionary<Vector2Int, Transform>();
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
-    private readonly Dictionary<Renderer, bool> renderersHiddenByPlayerRange = new Dictionary<Renderer, bool>();
+    private readonly PlayerRangeRendererCullingIndex playerRangeRendererIndex =
+        new PlayerRangeRendererCullingIndex();
     private readonly List<Renderer> terrainRendererScratch = new List<Renderer>(256);
     private readonly HashSet<Renderer> terrainRendererScanSet = new HashSet<Renderer>();
-    private readonly List<Renderer> terrainRendererCleanupScratch = new List<Renderer>();
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
@@ -830,7 +830,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private BlockPool blockPool;
     private InstallationObjectPool installationObjectPool;
     private PortableItemRenderer portableItemRenderer;
-    private ResourceBatchRenderer resourceBatchRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private TerrainChunkStreamingScheduler chunkStreamingScheduler;
 
@@ -1101,10 +1100,7 @@ public partial class TerrainGenerator : MonoBehaviour
         currentPlayerRenderCenter = renderCenter;
         hasPlayerRenderCenter = true;
         appliedPlayerRenderRadius = renderRadius;
-        RefreshAllTerrainRendererVisibility();
-        portableItemRenderer?.MarkDirty();
-        resourceBatchRenderer ??= GetComponent<ResourceBatchRenderer>();
-        resourceBatchRenderer?.MarkDirty();
+        playerRangeRendererIndex.SetRange(renderCenter, renderRadius);
     }
 
     private void EnsurePlayerRenderCenter()
@@ -1116,6 +1112,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
         currentPlayerRenderCenter = GetTrackingBlockCoordinate();
         hasPlayerRenderCenter = true;
+        appliedPlayerRenderRadius = PlayerRenderRadius;
+        playerRangeRendererIndex.SetRange(currentPlayerRenderCenter, appliedPlayerRenderRadius);
     }
 
     private Vector2Int GetTrackingBlockCoordinate()
@@ -1141,30 +1139,10 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             terrainRendererScanSet.Add(targetRenderer);
-            ApplyPlayerRangeVisibility(targetRenderer);
+            playerRangeRendererIndex.Register(targetRenderer);
         }
 
-        terrainRendererCleanupScratch.Clear();
-        foreach (KeyValuePair<Renderer, bool> pair in renderersHiddenByPlayerRange)
-        {
-            Renderer targetRenderer = pair.Key;
-            if (targetRenderer != null && terrainRendererScanSet.Contains(targetRenderer))
-            {
-                continue;
-            }
-
-            if (targetRenderer != null)
-            {
-                targetRenderer.forceRenderingOff = pair.Value;
-            }
-
-            terrainRendererCleanupScratch.Add(targetRenderer);
-        }
-
-        for (int i = 0; i < terrainRendererCleanupScratch.Count; i++)
-        {
-            renderersHiddenByPlayerRange.Remove(terrainRendererCleanupScratch[i]);
-        }
+        playerRangeRendererIndex.RemoveMissing(terrainRendererScanSet);
     }
 
     private void RefreshTerrainRendererVisibility(Transform hierarchyRoot)
@@ -1182,63 +1160,24 @@ public partial class TerrainGenerator : MonoBehaviour
             Renderer targetRenderer = terrainRendererScratch[i];
             if (targetRenderer != null && targetRenderer.gameObject.activeInHierarchy)
             {
-                ApplyPlayerRangeVisibility(targetRenderer);
+                playerRangeRendererIndex.Register(targetRenderer);
             }
         }
     }
 
-    private void ApplyPlayerRangeVisibility(Renderer targetRenderer)
+    public bool DoesWorldBoundsIntersectPlayerRenderRange(Bounds bounds)
     {
-        bool shouldRender = DoesRendererIntersectPlayerRenderRange(targetRenderer);
-        if (shouldRender)
-        {
-            if (renderersHiddenByPlayerRange.TryGetValue(targetRenderer, out bool previousForceRenderingOff))
-            {
-                targetRenderer.forceRenderingOff = previousForceRenderingOff;
-                renderersHiddenByPlayerRange.Remove(targetRenderer);
-            }
-
-            return;
-        }
-
-        if (!renderersHiddenByPlayerRange.ContainsKey(targetRenderer))
-        {
-            renderersHiddenByPlayerRange.Add(targetRenderer, targetRenderer.forceRenderingOff);
-        }
-
-        targetRenderer.forceRenderingOff = true;
-    }
-
-    private bool DoesRendererIntersectPlayerRenderRange(Renderer targetRenderer)
-    {
-        Bounds bounds = targetRenderer.bounds;
-        float range = PlayerRenderRadius + 0.5f;
-        float minX = currentPlayerRenderCenter.x - range;
-        float maxX = currentPlayerRenderCenter.x + range;
-        float minZ = currentPlayerRenderCenter.y - range;
-        float maxZ = currentPlayerRenderCenter.y + range;
-        return bounds.max.x >= minX
-               && bounds.min.x <= maxX
-               && bounds.max.z >= minZ
-               && bounds.min.z <= maxZ;
+        EnsurePlayerRenderCenter();
+        return playerRangeRendererIndex.Intersects(bounds);
     }
 
     private void RestorePlayerRangeRendererVisibility(Transform hierarchyRoot = null)
     {
         if (hierarchyRoot == null)
         {
-            foreach (KeyValuePair<Renderer, bool> pair in renderersHiddenByPlayerRange)
-            {
-                if (pair.Key != null)
-                {
-                    pair.Key.forceRenderingOff = pair.Value;
-                }
-            }
-
-            renderersHiddenByPlayerRange.Clear();
+            playerRangeRendererIndex.Clear(true);
             terrainRendererScratch.Clear();
             terrainRendererScanSet.Clear();
-            terrainRendererCleanupScratch.Clear();
             hasPlayerRenderCenter = false;
             appliedPlayerRenderRadius = -1;
             return;
@@ -1249,12 +1188,7 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < terrainRendererScratch.Count; i++)
         {
             Renderer targetRenderer = terrainRendererScratch[i];
-            if (targetRenderer != null
-                && renderersHiddenByPlayerRange.TryGetValue(targetRenderer, out bool previousForceRenderingOff))
-            {
-                targetRenderer.forceRenderingOff = previousForceRenderingOff;
-                renderersHiddenByPlayerRange.Remove(targetRenderer);
-            }
+            playerRangeRendererIndex.Unregister(targetRenderer, true);
         }
     }
 
@@ -1595,7 +1529,6 @@ public partial class TerrainGenerator : MonoBehaviour
         ApplyLoadedConveyorItemSaveStates(mapSaveData);
         RefreshLoadedRuntimeRegistrations();
         RefreshLoadedRuntimeVisibility();
-        RefreshTrackedRenderVisibilityIfNeeded();
         RefreshAllTerrainRendererVisibility();
     }
 
@@ -2435,6 +2368,7 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             SaveChunkResourceStates(existingChunk);
             ForgetAnimalRuntimeIds(existingChunk);
+            RestorePlayerRangeRendererVisibility(existingChunk);
             RemoveChunkBlocksFromLookup(existingChunk);
             ReleaseChunkBlocksToPool(existingChunk);
             DestroyChunkObject(existingChunk.gameObject);

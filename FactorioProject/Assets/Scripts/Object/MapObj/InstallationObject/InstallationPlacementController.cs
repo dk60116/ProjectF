@@ -4524,8 +4524,15 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            bool isOriginalOccupiedCoordinate = CoordinateListContains(
+                editSession.originalOccupiedCoordinates,
+                stateCoordinate);
             List<int> blockState = block.CaptureFloorObjectState();
-            if (!CoordinateListContains(editSession.originalOccupiedCoordinates, stateCoordinate))
+            if (isOriginalOccupiedCoordinate && editSession.originalInstallation is BoxObject)
+            {
+                blockState = FilterInternalObjectState(blockState);
+            }
+            else if (!isOriginalOccupiedCoordinate)
             {
                 if (block.MapObject is BoxObject)
                 {
@@ -4815,11 +4822,13 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            bool preservesEditedBoxFloorObjects = isOriginalOccupiedCoordinate
+                                                   && editSession.originalInstallation is BoxObject;
             IReadOnlyList<int> detachedFloorState = preserveConveyorItemsOnGround
                 ? block.CaptureFloorObjectStateWithDroppedConveyorObjects()
-                : !isOriginalOccupiedCoordinate
+                : !isOriginalOccupiedCoordinate || preservesEditedBoxFloorObjects
                     ? CaptureExternalFloorObjectState(block)
-                : null;
+                    : null;
 
             if (block.MapObject == editSession.originalInstallation || IsAttachedAreaBox(editSession, block.MapObject))
             {
@@ -5593,8 +5602,11 @@ public class InstallationPlacementController : MonoBehaviour
                 if (editSession.editsUndergroundPipeEndpoint
                     || ShouldBindInstalledObjectToBlock(block, anchorCoordinate, footprintSource, quarterTurns))
                 {
+                    List<int> preservedFloorState = AllowsPlacementOverDroppedFloorObjects(footprintSource)
+                        ? CaptureExternalFloorObjectState(block)
+                        : null;
                     block.SetMapObject(restoredObject);
-                    block.ApplyFloorObjectState(null);
+                    block.ApplyFloorObjectState(preservedFloorState);
                 }
             }
         }
@@ -5772,6 +5784,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource = editSession.definition != null && editSession.definition.mapObject != null
             ? editSession.definition.mapObject
             : editSession.originalInstallation;
+        bool preservesDroppedFloorObjects = AllowsPlacementOverDroppedFloorObjects(footprintSource);
         List<Vector2Int> newOccupiedCoordinates = GetInstalledObjectBlockingCoordinates(
             newAnchorCoordinate,
             footprintSource,
@@ -5787,8 +5800,11 @@ public class InstallationPlacementController : MonoBehaviour
 
             Vector2Int worldOffset = coordinate - newAnchorCoordinate;
             Vector2Int canonicalOffset = RotateFootprintOffset(worldOffset, -newQuarterTurns);
-            bool preserveExternalFloorObjects = !CoordinateListContains(newOccupiedCoordinates, coordinate);
-            if (preserveExternalFloorObjects && block.MapObject is BoxObject)
+            bool preserveExternalFloorObjects = preservesDroppedFloorObjects
+                                                || !CoordinateListContains(newOccupiedCoordinates, coordinate);
+            if (!preservesDroppedFloorObjects
+                && preserveExternalFloorObjects
+                && block.MapObject is BoxObject)
             {
                 continue;
             }
@@ -22678,13 +22694,15 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        MapObject footprintSource = activeInstallDefinition.mapObject;
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain == null || terrain.HasDroppedFloorObjectsAt(block.Coordinate))
+        if (terrain == null
+            || (!AllowsPlacementOverDroppedFloorObjects(footprintSource)
+                && terrain.HasDroppedFloorObjectsAt(block.Coordinate)))
         {
             return false;
         }
 
-        MapObject footprintSource = activeInstallDefinition.mapObject;
         if (useFastBoilerGridCheck)
         {
             return CanPlaceBoilerFromGridCoordinateFast(block, footprintSource);
@@ -23033,6 +23051,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         bool checkedAnyPlacement = false;
+        bool blocksDroppedFloorObjects = !AllowsPlacementOverDroppedFloorObjects(footprintSource);
         for (int i = 0; i < placements.Count; i++)
         {
             InputOutputModule.RectGridBlockPlacement placement = placements[i];
@@ -23051,7 +23070,7 @@ public class InstallationPlacementController : MonoBehaviour
             Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
             if (!terrain.TryGetLoadedBlock(coordinate, out Block footprintBlock)
                 || footprintBlock == null
-                || terrain.HasDroppedFloorObjectsAt(coordinate))
+                || (blocksDroppedFloorObjects && terrain.HasDroppedFloorObjectsAt(coordinate)))
             {
                 return false;
             }
@@ -27874,6 +27893,11 @@ public class InstallationPlacementController : MonoBehaviour
         return definition != null && TryResolveBoxObject(definition.mapObject, out _);
     }
 
+    private static bool AllowsPlacementOverDroppedFloorObjects(MapObject mapObject)
+    {
+        return TryResolveBoxObject(mapObject, out _);
+    }
+
     private static bool IsFreightCarLoadInstallDefinition(ItemDefinition definition)
     {
         return definition != null
@@ -32521,6 +32545,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        bool blocksDroppedFloorObjects = !AllowsPlacementOverDroppedFloorObjects(footprintSource);
         List<Vector2Int> occupiedCoordinates = GetPlacementValidationCoordinates(
             anchorCoordinate,
             footprintSource,
@@ -32533,7 +32558,7 @@ public class InstallationPlacementController : MonoBehaviour
                 return false;
             }
 
-            if (terrain.HasDroppedFloorObjectsAt(coordinate))
+            if (blocksDroppedFloorObjects && terrain.HasDroppedFloorObjectsAt(coordinate))
             {
                 return false;
             }

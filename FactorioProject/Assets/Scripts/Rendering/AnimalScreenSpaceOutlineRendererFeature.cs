@@ -151,6 +151,7 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
         private static readonly int MaskTexelSizeId = Shader.PropertyToID("_AnimalOutlineMask_TexelSize");
         private static readonly int OutlineColorId = Shader.PropertyToID("_OutlineColor");
         private static readonly int OutlineWidthId = Shader.PropertyToID("_OutlineWidthPixels");
+        private static readonly int MaskObjectValueId = Shader.PropertyToID("_OutlineMaskObjectValue");
         private static readonly ProfilingSampler ProfilingSampler = new ProfilingSampler("Animal Screen-Space Outline");
 
         private readonly Material maskMaterial;
@@ -166,6 +167,7 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
             public Material material;
             public Renderer[] renderers;
             public int rendererCount;
+            public bool distinguishRenderers;
         }
 
         private sealed class CompositePassData
@@ -211,6 +213,9 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 return;
             }
 
+            bool distinguishMaskRenderers = maskRendererCount > 1
+                                            && targetRenderer.GetComponentInParent<PortableObject>() != null;
+
             Bounds maskBounds = maskRenderers[0].bounds;
             for (int rendererIndex = 1; rendererIndex < maskRendererCount; rendererIndex++)
             {
@@ -238,6 +243,7 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 passData.material = maskMaterial;
                 passData.renderers = maskRenderers;
                 passData.rendererCount = maskRendererCount;
+                passData.distinguishRenderers = distinguishMaskRenderers;
 
                 // Only the animal pixels are written. Declaring WriteAll lets RenderGraph
                 // discard the clear and can leave the previous frame's mask behind.
@@ -250,6 +256,11 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                     for (int rendererIndex = 0; rendererIndex < data.rendererCount; rendererIndex++)
                     {
                         Renderer maskRenderer = data.renderers[rendererIndex];
+                        // A binary union only outlines the outside of a stack. Alternating mask
+                        // values keep touching portable objects distinguishable in the composite.
+                        context.cmd.SetGlobalFloat(
+                            MaskObjectValueId,
+                            data.distinguishRenderers && (rendererIndex & 1) == 0 ? 0.35f : 1f);
                         int subMeshCount = ResolveSubMeshCount(maskRenderer);
                         for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
                         {

@@ -60,7 +60,9 @@ Shader "Hidden/ProjectF/AnimalScreenSpaceOutlineComposite"
                     _AnimalOutlineMask,
                     sampler_AnimalOutlineMask,
                     input.uv).r;
-                float dilatedMask = originalMask;
+                float originalPresence = step(0.01, originalMask);
+                float dilatedPresence = originalPresence;
+                float internalEdge = 0;
                 float outerRadius = _OutlineWidthPixels + 0.5;
 
                 UNITY_UNROLL
@@ -80,11 +82,20 @@ Shader "Hidden/ProjectF/AnimalScreenSpaceOutlineComposite"
                             sampler_AnimalOutlineMask,
                             input.uv + float2(x, y) * _AnimalOutlineMask_TexelSize.xy).r;
                         float edgeCoverage = saturate(outerRadius - distancePixels);
-                        dilatedMask = max(dilatedMask, sampleMask * edgeCoverage);
+                        float samplePresence = step(0.01, sampleMask);
+                        dilatedPresence = max(dilatedPresence, samplePresence * edgeCoverage);
+                        if (originalPresence > 0 && samplePresence > 0)
+                        {
+                            // Stack members use alternating mask values so their shared edges
+                            // remain visible instead of collapsing into one combined silhouette.
+                            float objectBoundary = step(0.2, abs(sampleMask - originalMask));
+                            internalEdge = max(internalEdge, objectBoundary * edgeCoverage);
+                        }
                     }
                 }
 
-                float outlineAlpha = saturate(dilatedMask - originalMask) * _OutlineColor.a;
+                float outerEdge = saturate(dilatedPresence - originalPresence);
+                float outlineAlpha = max(outerEdge, internalEdge) * _OutlineColor.a;
                 return half4(_OutlineColor.rgb, outlineAlpha);
             }
             ENDHLSL

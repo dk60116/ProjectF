@@ -26,6 +26,8 @@ Shader "Hidden/ProjectF/AnimalScreenSpaceOutlineMask"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
+            float _OutlineMaskObjectValue;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -49,7 +51,7 @@ Shader "Hidden/ProjectF/AnimalScreenSpaceOutlineMask"
 
             half4 frag(Varyings input) : SV_Target
             {
-                return half4(1, 0, 0, 1);
+                return half4(_OutlineMaskObjectValue, 0, 0, 1);
             }
             ENDHLSL
         }

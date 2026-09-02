@@ -2015,6 +2015,7 @@ public class Resource : MapObject
 public class ResourceBatchRenderer : MonoBehaviour
 {
     private const int MaxInstancesPerDraw = 1023;
+    private const float GlobalBatchCellSizeMultiplier = 4f;
 
     [SerializeField, Min(1f)]
     private float batchCellSize = 8f;
@@ -2123,13 +2124,6 @@ public class ResourceBatchRenderer : MonoBehaviour
                     continue;
                 }
 
-                terrainGenerator ??= GetComponent<TerrainGenerator>();
-                if (terrainGenerator != null
-                    && !terrainGenerator.IsWorldPositionWithinPlayerRenderRange(worldPosition))
-                {
-                    continue;
-                }
-
                 int materialCount = materials != null ? materials.Length : 0;
                 if (materialCount <= 0)
                 {
@@ -2189,9 +2183,19 @@ public class ResourceBatchRenderer : MonoBehaviour
             return;
         }
 
-        int cellX = useGlobalBatch ? 0 : Mathf.FloorToInt(worldPosition.x / batchCellSize);
-        int cellZ = useGlobalBatch ? 0 : Mathf.FloorToInt(worldPosition.z / batchCellSize);
-        BatchKey key = new BatchKey(mesh, material, subMeshIndex, layer, shadowCastingMode, receiveShadows, cellX, cellZ);
+        float effectiveBatchCellSize = ResolveBatchCellSize(useGlobalBatch);
+        int cellX = Mathf.FloorToInt(worldPosition.x / effectiveBatchCellSize);
+        int cellZ = Mathf.FloorToInt(worldPosition.z / effectiveBatchCellSize);
+        BatchKey key = new BatchKey(
+            mesh,
+            material,
+            subMeshIndex,
+            layer,
+            shadowCastingMode,
+            receiveShadows,
+            cellX,
+            cellZ,
+            useGlobalBatch);
         if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices))
         {
             matrices = new List<Matrix4x4>(16);
@@ -2216,6 +2220,20 @@ public class ResourceBatchRenderer : MonoBehaviour
                 continue;
             }
 
+            terrainGenerator ??= GetComponent<TerrainGenerator>();
+            float effectiveBatchCellSize = ResolveBatchCellSize(key.UseGlobalBatch);
+            if (terrainGenerator != null
+                && !terrainGenerator.DoesWorldBoundsIntersectPlayerRenderRange(
+                    new Bounds(
+                        new Vector3(
+                            (key.CellX + 0.5f) * effectiveBatchCellSize,
+                            0f,
+                            (key.CellZ + 0.5f) * effectiveBatchCellSize),
+                        new Vector3(effectiveBatchCellSize, 0f, effectiveBatchCellSize))))
+            {
+                continue;
+            }
+
             RenderParams renderParams = new RenderParams(key.Material)
             {
                 layer = key.Layer,
@@ -2235,6 +2253,14 @@ public class ResourceBatchRenderer : MonoBehaviour
         }
     }
 
+    private float ResolveBatchCellSize(bool useGlobalBatch)
+    {
+        float normalizedBatchCellSize = Mathf.Max(1f, batchCellSize);
+        return useGlobalBatch
+            ? normalizedBatchCellSize * GlobalBatchCellSizeMultiplier
+            : normalizedBatchCellSize;
+    }
+
     private readonly struct BatchKey
     {
         public readonly Mesh Mesh;
@@ -2245,6 +2271,7 @@ public class ResourceBatchRenderer : MonoBehaviour
         public readonly bool ReceiveShadows;
         public readonly int CellX;
         public readonly int CellZ;
+        public readonly bool UseGlobalBatch;
 
         public BatchKey(
             Mesh mesh,
@@ -2254,7 +2281,8 @@ public class ResourceBatchRenderer : MonoBehaviour
             ShadowCastingMode shadowCastingMode,
             bool receiveShadows,
             int cellX,
-            int cellZ)
+            int cellZ,
+            bool useGlobalBatch)
         {
             Mesh = mesh;
             Material = material;
@@ -2264,6 +2292,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             ReceiveShadows = receiveShadows;
             CellX = cellX;
             CellZ = cellZ;
+            UseGlobalBatch = useGlobalBatch;
         }
 
         public override int GetHashCode()
@@ -2276,6 +2305,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
             hash = (hash * 397) ^ CellX;
             hash = (hash * 397) ^ CellZ;
+            hash = (hash * 397) ^ (UseGlobalBatch ? 1 : 0);
             return hash;
         }
 
@@ -2293,7 +2323,8 @@ public class ResourceBatchRenderer : MonoBehaviour
                    && ShadowCastingMode == other.ShadowCastingMode
                    && ReceiveShadows == other.ReceiveShadows
                    && CellX == other.CellX
-                   && CellZ == other.CellZ;
+                   && CellZ == other.CellZ
+                   && UseGlobalBatch == other.UseGlobalBatch;
         }
     }
 }

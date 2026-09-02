@@ -397,12 +397,6 @@ public sealed class PortableItemRenderer : MonoBehaviour
                 continue;
             }
 
-            if (terrainGenerator != null
-                && !terrainGenerator.IsWorldPositionWithinPlayerRenderRange(worldPosition))
-            {
-                continue;
-            }
-
             if (material != null && !material.enableInstancing)
             {
                 material.enableInstancing = true;
@@ -436,7 +430,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RenderPortableObjectBatches()
     {
-        portableObjectBatches.RenderBatches(mainCamera);
+        portableObjectBatches.RenderBatches(mainCamera, terrainGenerator);
     }
 
     private void RenderVirtualConveyorItems()
